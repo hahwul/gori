@@ -24,13 +24,15 @@ gori mcp --install-grok          # Grok
 
 | 플래그 | 클라이언트 | 작성되는 설정 |
 |------|--------|----------------|
-| `--install-claude` | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 
 각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 JSON이 아니라 TOML `[mcp_servers.gori]` 테이블을 사용합니다. 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
+
+플랫폼마다 위치가 달라지는 건 Claude Desktop뿐입니다. Electron의 앱 데이터 디렉터리를 따라 macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)에 씁니다. gori가 이 변수를 읽으므로 Nix나 home-manager처럼 값을 옮겨 둔 세션도 따라갑니다. Flatpak 빌드는 예외로, 샌드박스 안쪽의 값을 읽기 때문에 출력된 파일을 `~/.var/app/<app-id>/config/Claude/`로 직접 복사해야 합니다.
 
 직접 연결하고 싶다면? 서버는 그저 stdio 위의 `gori mcp` 명령입니다. 추가 인자 없이 이 명령을 MCP 클라이언트에 가리키기만 하면 됩니다.
 

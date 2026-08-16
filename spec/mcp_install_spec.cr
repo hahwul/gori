@@ -20,10 +20,58 @@ describe Gori::MCP::Install do
         File.join(ENV["HOME"], ".gemini", "antigravity-cli", "mcp_config.json"))
     end
 
+    it "maps claude to the platform's Claude Desktop config" do
+      Gori::MCP::Install.config_path("claude").should eq(
+        Gori::MCP::Install.claude_desktop_path(ENV["HOME"]))
+    end
+
     it "raises on unknown targets" do
       expect_raises(ArgumentError, /Unknown install target/) do
         Gori::MCP::Install.config_path("nope")
       end
+    end
+  end
+
+  describe ".claude_desktop_path" do
+    # Every branch is asserted from every host: the Linux path was wrong for as long as it
+    # was the `{% else %}` a Mac build could never run, so a spec that only checks the
+    # native platform reproduces the bug rather than catching it.
+    home = "/home/u"
+
+    it "uses the macOS application-support directory on darwin" do
+      Gori::MCP::Install.claude_desktop_path(home, :darwin, xdg_config_home: "/xdg", appdata: "C:/AppData")
+        .should eq("/home/u/Library/Application Support/Claude/claude_desktop_config.json")
+    end
+
+    it "uses %APPDATA% on windows, falling back to AppData/Roaming" do
+      Gori::MCP::Install.claude_desktop_path(home, :windows, appdata: "C:/Users/u/AppData/Roaming")
+        .should eq("C:/Users/u/AppData/Roaming/Claude/claude_desktop_config.json")
+      Gori::MCP::Install.claude_desktop_path(home, :windows, appdata: nil)
+        .should eq("/home/u/AppData/Roaming/Claude/claude_desktop_config.json")
+      Gori::MCP::Install.claude_desktop_path(home, :windows, appdata: "")
+        .should eq("/home/u/AppData/Roaming/Claude/claude_desktop_config.json")
+    end
+
+    it "uses ~/.config on linux when XDG_CONFIG_HOME is unset" do
+      Gori::MCP::Install.claude_desktop_path(home, :linux, xdg_config_home: nil)
+        .should eq("/home/u/.config/Claude/claude_desktop_config.json")
+    end
+
+    it "honors XDG_CONFIG_HOME on linux" do
+      # Whatever the shell that launches both gori and the desktop app carries — Nix,
+      # home-manager and per-user distro setups all move this. (NOT Flatpak: that value
+      # only exists inside the sandbox, where a host-side install never runs.)
+      Gori::MCP::Install.claude_desktop_path(home, :linux, xdg_config_home: "/home/u/cfg")
+        .should eq("/home/u/cfg/Claude/claude_desktop_config.json")
+    end
+
+    it "ignores an empty or relative XDG_CONFIG_HOME on linux" do
+      # The basedir spec says a relative value must be ignored; honoring one would write
+      # the install under whatever directory the user happened to run gori from.
+      Gori::MCP::Install.claude_desktop_path(home, :linux, xdg_config_home: "")
+        .should eq("/home/u/.config/Claude/claude_desktop_config.json")
+      Gori::MCP::Install.claude_desktop_path(home, :linux, xdg_config_home: ".config")
+        .should eq("/home/u/.config/Claude/claude_desktop_config.json")
     end
   end
 
@@ -141,6 +189,35 @@ describe Gori::MCP::Install do
           entry["args"].as_a.map(&.as_s).should eq(["mcp", "--project=demo", "--read-only"])
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+        end
+      end
+    end
+
+    it "creates the Claude Desktop directory wherever this platform puts it" do
+      # Nothing about the tree exists beforehand — on Linux that means gori has to create
+      # $XDG_CONFIG_HOME/Claude, a directory only the fixed path names.
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-desktop-#{Random::Secure.hex(4)}")
+        Dir.mkdir_p(home)
+        old_home = ENV["HOME"]?
+        old_xdg = ENV["XDG_CONFIG_HOME"]?
+        old_appdata = ENV["APPDATA"]?
+        ENV["HOME"] = home
+        # BOTH of the vars that can steer the path off $HOME, kept inside the temp tree:
+        # this spec calls the real `install`, so whichever branch the host takes must land
+        # in the sandbox. A Windows host reads APPDATA and would otherwise have merged an
+        # entry into the developer's own %APPDATA%\Claude\claude_desktop_config.json.
+        ENV["XDG_CONFIG_HOME"] = File.join(home, ".config")
+        ENV["APPDATA"] = File.join(home, "AppData", "Roaming")
+        begin
+          path = Gori::MCP::Install.install("claude", exe_path: "/opt/gori")
+          path.should eq(Gori::MCP::Install.claude_desktop_path(home))
+          path.should start_with(home)
+          JSON.parse(File.read(path))["mcpServers"]["gori"]["command"].as_s.should eq("/opt/gori")
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_xdg ? (ENV["XDG_CONFIG_HOME"] = old_xdg) : ENV.delete("XDG_CONFIG_HOME")
+          old_appdata ? (ENV["APPDATA"] = old_appdata) : ENV.delete("APPDATA")
         end
       end
     end

@@ -20,6 +20,28 @@ module Gori
         end
       end
 
+      # Which platform's convention a config path follows. Only Claude Desktop needs it —
+      # every other client keys off `$HOME` and is identical on all three. Kept as a
+      # PARAMETER rather than read from a compile-time flag down where the path is built,
+      # because that is what makes each branch reachable from a spec on any host: the
+      # macOS path stayed wrong on Linux for exactly as long as it was the `{% else %}`
+      # no Mac could execute. (Distinct from Verb::OsProfile, which picks keymaps.)
+      enum Platform
+        Darwin
+        Linux
+        Windows
+      end
+
+      # The platform this binary was built for (Crystal's Windows flag is :win32).
+      NATIVE_PLATFORM =
+        {% if flag?(:darwin) %}
+          Platform::Darwin
+        {% elsif flag?(:win32) %}
+          Platform::Windows
+        {% else %}
+          Platform::Linux
+        {% end %}
+
       # Returns the absolute config path for *target* (`agy`, `codex`, `claude`,
       # `claude-code`, `grok`). Raises on unknown targets.
       def self.config_path(target : String) : String
@@ -33,12 +55,7 @@ module Gori
           codex_home = ENV["CODEX_HOME"]?.presence || File.join(home, ".codex")
           File.join(codex_home, "config.toml")
         when "claude"
-          {% if flag?(:win32) %}
-            appdata = ENV["APPDATA"]? || File.join(home, "AppData", "Roaming")
-            File.join(appdata, "Claude", "claude_desktop_config.json")
-          {% else %}
-            File.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-          {% end %}
+          claude_desktop_path(home)
         when "claude-code"
           File.join(home, ".claude.json")
         when "grok"
@@ -47,6 +64,41 @@ module Gori
         else
           raise ArgumentError.new("Unknown install target: #{target}")
         end
+      end
+
+      # Claude Desktop's config file, per platform. ELECTRON picks this directory, not
+      # Anthropic: the app writes `app.getPath("userData")/claude_desktop_config.json`,
+      # which is `~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on
+      # Windows — and on Linux `$XDG_CONFIG_HOME/Claude`, defaulting to `~/.config/Claude`.
+      #
+      # Reading the variable is the whole point of the Linux branch: the desktop app has no
+      # official Linux build, so what people run is a repackaged one (deb/rpm/AppImage,
+      # Nix), and Nix/home-manager setups do relocate XDG_CONFIG_HOME for the session that
+      # launches both the app and gori. Writing to the wrong one of these is the worst kind
+      # of failure this installer has — the file lands, gori prints "installed" with a real
+      # path, and the client that never reads that path shows no gori tools at all.
+      #
+      # A FLATPAK build is the case no env read can reach: its XDG_CONFIG_HOME is set
+      # inside the sandbox (`~/.var/app/<id>/config`), and gori runs on the host, which
+      # cannot tell the sandbox exists. It gets the honest answer — `~/.config/Claude` and
+      # the printed path — plus a docs line telling the user to copy that file in.
+      def self.claude_desktop_path(home : String, platform : Platform = NATIVE_PLATFORM,
+                                   xdg_config_home : String? = ENV["XDG_CONFIG_HOME"]?,
+                                   appdata : String? = ENV["APPDATA"]?) : String
+        base =
+          case platform
+          in Platform::Darwin
+            File.join(home, "Library", "Application Support")
+          in Platform::Windows
+            appdata.presence || File.join(home, "AppData", "Roaming")
+          in Platform::Linux
+            # A relative XDG_CONFIG_HOME is invalid per the basedir spec and MUST be
+            # ignored; honoring one would resolve the install against gori's working
+            # directory, which is wherever the user happened to be standing.
+            xdg = xdg_config_home.presence
+            xdg && xdg.starts_with?('/') ? xdg : File.join(home, ".config")
+          end
+        File.join(base, "Claude", "claude_desktop_config.json")
       end
 
       def self.toml_target?(target : String) : Bool

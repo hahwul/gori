@@ -63,11 +63,15 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 
 | 플래그 | 클라이언트 | 작성되는 설정 |
 |------|--------|----------------|
-| `--install-claude` | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+
+Claude Desktop을 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 그대로 따라갑니다.
+
+예외는 **Flatpak** Claude Desktop입니다. 이 빌드는 샌드박스 안쪽의 `XDG_CONFIG_HOME`(`~/.var/app/<app-id>/config/Claude/`)을 읽는데, 호스트 셸에서 실행되는 gori는 그 값을 볼 수 없습니다. 이 경우 gori는 `~/.config/Claude/claude_desktop_config.json`에 쓰고 그 경로를 출력하니, 파일을 샌드박스 디렉터리로 직접 복사하세요. 설치 명령은 항상 실제로 쓴 파일을 출력하므로, 그 줄을 사용 중인 빌드가 읽는 위치와 맞춰 보세요.
 
 ```bash
 gori mcp --install-claude-code
