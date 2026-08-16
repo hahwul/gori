@@ -96,6 +96,7 @@ module Gori::Tui
       when :issues                                          then 5 + 2
       when :discover                                        then 5 + 2
       when :comparer                                        then 5 + 2
+      when :authorize                                       then 5 + 3 # three chords — see render_authorize_full
       when :miner                                           then 5 + 2
       when :miner_results                                   then running ? 2 : 4
       when :sequencer                                       then 5 + 2
@@ -136,6 +137,7 @@ module Gori::Tui
       when :issues            then "no issues yet"
       when :discover          then "no runs yet"
       when :comparer          then "nothing to compare"
+      when :authorize         then "no requests queued"
       when :miner             then "no mining session"
       when :miner_results     then running ? "mining…" : "no run yet"
       when :sequencer         then "no sequencer session"
@@ -164,6 +166,7 @@ module Gori::Tui
       when :issues            then render_issues_full(screen, rect, headline)
       when :discover          then render_discover_full(screen, rect, headline)
       when :comparer          then render_comparer_full(screen, rect, headline)
+      when :authorize         then render_authorize_full(screen, rect, headline)
       when :miner             then render_miner_full(screen, rect, headline)
       when :miner_results     then render_miner_results_full(screen, rect, headline, running)
       when :sequencer         then render_sequencer_full(screen, rect, headline)
@@ -201,6 +204,8 @@ module Gori::Tui
                 medium_discover(headline)
               when :comparer
                 medium_comparer(headline)
+              when :authorize
+                medium_authorize(headline)
               when :miner
                 medium_miner(headline)
               when :miner_results
@@ -251,6 +256,8 @@ module Gori::Tui
                "space → Discover here · ^R run"
              when :comparer
                "a pick A · b pick B"
+             when :authorize
+               "space → Send to Authorize · i identities"
              when :miner
                "space → Mine parameters · ^R run"
              when :miner_results
@@ -550,6 +557,27 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " b ", "pick flow B", bullet: "▸ ")
     end
 
+    # THREE chord lines, where the sibling cards take two (hence `5 + 3` in `full_inner_h`).
+    # Getting a request into the queue and running it are steps the rest of the app implies;
+    # choosing who to replay as is the one this tab invented, and a card that omitted it would
+    # leave an operator on the two built-in identities with no sign there was a third thing to
+    # press.
+    private def render_authorize_full(screen : Screen, rect : Rect, headline : String) : Nil
+      desc = "Replay one request as several identities and diff the answers."
+      inner, ix, iw = begin_card(screen, rect, :authorize, headline, "AUTHORIZE", full_inner_h(:authorize), Screen.display_width(desc))
+      y = inner.y
+
+      draw_wrapped_message(screen, ix, y, iw, desc)
+      y += 2
+      screen.text(ix, y, "one request ──► many identities", Theme.muted, Theme.bg, width: iw)
+      y += 2
+      Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
+      y += 1
+      y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Send to Authorize\" on a flow", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " i ", "who to replay as", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "replay what has not run", bullet: "▸ ")
+    end
+
     private def render_miner_full(screen : Screen, rect : Rect, headline : String) : Nil
       desc = "Find undocumented parameters a target takes."
       inner, ix, iw = begin_card(screen, rect, :miner, headline, "MINER", full_inner_h(:miner), Screen.display_width(desc))
@@ -795,6 +823,10 @@ module Gori::Tui
 
     private def medium_comparer(headline) : Array(String)
       [headline, "A ──► diff ◄── B", "a pick flow A · b pick flow B"]
+    end
+
+    private def medium_authorize(headline) : Array(String)
+      [headline, "one request ──► many identities", "space → Send to Authorize · i identities"]
     end
 
     private def medium_miner(headline) : Array(String)

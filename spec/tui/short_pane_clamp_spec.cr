@@ -165,7 +165,7 @@ describe TrafficEmptyState do
   # already-granted full tier, so it is the art gate — not the card gate — that decides whether
   # those extra rows fit; sweeping one fixed width never exercises `FULL_MIN_W` or a figure's
   # own `min_w`, and the art path adds a second reason a renderer can outgrow its rect.
-  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :discover, :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast] %}
+  {% for variant in [:history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :discover, :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast, :authorize] %}
     it "never draws {{ variant.id }} below its rect, at any size the gate admits" do
       (8..26).each do |h|
         [30, 40, 42, 43, 46, 50, 60, 100].each do |w|
@@ -184,7 +184,7 @@ describe TrafficEmptyState do
   # …and nothing may run off the RIGHT edge either. A figure is centred on its ink extent, so a
   # block wider than the pane would paint past `rect.right` — where `Screen`'s bounds check
   # silently drops it in the app but a narrower rect inside a wider backend makes it visible.
-  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :sequencer, :oast] %}
+  {% for variant in [:history, :fuzzer_results, :notes, :project_desc, :project_scope, :project_overrides, :project_env, :sequencer, :oast, :authorize] %}
     it "never draws {{ variant.id }} past its right edge" do
       (8..26).each do |h|
         [42, 46, 50, 60].each do |w|
@@ -256,6 +256,38 @@ describe TrafficEmptyState do
       TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 80, h),
         variant: variant, listen: {"127.0.0.1", 8080})
       b.contains?(title).should be_true, "#{variant} fell out of its full card at 80x#{h}"
+    end
+  end
+
+  # MEASURED on an 80x24: the Authorize body is a plain framed pane — no sub-tab strip, no
+  # filter bar, no column header — so it keeps 16 rows, and its card (10 interior + 2 borders
+  # + the headline row) plus a 3-row figure and the gap needs 15. One row of chrome added
+  # above this pane costs the figure, and this is where that shows up rather than in a
+  # screenshot nobody takes.
+  it "draws the Authorize card AND its figure in the 16 rows an 80x24 leaves that pane" do
+    b = MemoryBackend.new(80, 16)
+    TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 80, 16), variant: :authorize)
+    b.contains?("AUTHORIZE").should be_true, "the card fell out at 80x16"
+    b.contains?("──>").should be_true, "the figure fell out at 80x16"
+    b.contains?("no requests queued").should be_true
+  end
+
+  # The figure is opportunistic and the card is not: a pane one row short of seating both
+  # keeps the card and loses the art, in that order.
+  it "keeps the Authorize card and drops only the figure as the pane shrinks" do
+    b = MemoryBackend.new(80, 12)
+    TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 80, 12), variant: :authorize)
+    b.contains?("AUTHORIZE").should be_true
+    b.contains?("──>").should be_false, "the figure survived into a pane too short for it"
+  end
+
+  # Every tier names the identity step. It is the one thing about this tab nothing else in the
+  # app implies, and the medium/minimal fallbacks are what a small terminal actually sees.
+  it "names the identities key in the card, the medium tier and the minimal tier" do
+    {16, 8, 4}.each do |h|
+      b = MemoryBackend.new(60, h)
+      TrafficEmptyState.render(Screen.new(b), Rect.new(0, 0, 60, h), variant: :authorize)
+      b.contains?("identities").should be_true, "no identities hint at 60x#{h}"
     end
   end
 end

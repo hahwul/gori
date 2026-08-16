@@ -3,6 +3,7 @@ require "./geometry"
 require "./theme"
 require "./fmt"
 require "./url"
+require "./traffic_empty_state"
 require "../authorize/engine"
 require "../repeater/message_lines"
 require "../store/models"
@@ -296,17 +297,11 @@ module Gori::Tui
       render_detail(screen, rect.x, divider_y + 1, rect.right, rect.bottom, focused)
     end
 
+    # The shared onboarding card (figure + card, degrading to lines on a short pane), the same
+    # surface every other empty tab shows — rather than three hand-centred sentences, which is
+    # what this drew before and what every other tab stopped drawing.
     private def render_empty(screen : Screen, rect : Rect) : Nil
-      cy = rect.y + rect.h // 2 - 1
-      lines = {
-        "No requests loaded.",
-        "Mark one or more flows in History and Send to Authorize,",
-        "then replay them all under each identity to check access control.",
-      }
-      lines.each_with_index do |ln, i|
-        x = rect.x + {(rect.w - ln.size) // 2, 0}.max
-        screen.text(x, cy + i, ln, i == 0 ? Theme.text : Theme.muted, Theme.bg)
-      end
+      TrafficEmptyState.render(screen, rect, variant: :authorize)
     end
 
     # "5 requests (2 pending) · identities: as-captured, anonymous" — the pending count is what

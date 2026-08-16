@@ -254,6 +254,20 @@ module Gori::Tui
       "╰──────┴──────╯",
     ])
 
+    # ONE request leaving under three identities, with the bottom one lit. The lit slot is
+    # not "the last identity" — it is the FINDING: the low-privilege session that came back
+    # with what the baseline saw. The tab's subject is that row, so it takes the SOLID tier
+    # while the request and the two enforced identities stay secondary mass.
+    #
+    # Reads against its neighbours by outline rather than by fill: HISTORY is three boxes in
+    # a row and COMPARER is one box split in two, where this is one box fanning out to three
+    # free-standing slots.
+    AUTHORIZE = Block.new([
+      "╭────╮ ──> ▓▓",
+      "│ ▓▓ │ ──> ▓▓",
+      "╰────╯ ──> ██",
+    ])
+
     # A wordlist over a sieve, with the two names that got through lit below it. Both slots sit
     # squarely under a name in the row above (cols 3 and 12) — one of them used to straddle the
     # divider at col 11, which put the pair on two different sub-grids and cost the row its
@@ -314,6 +328,7 @@ module Gori::Tui
       :project_env       => PROJECT_ENV,
       :discover          => DISCOVER,
       :comparer          => COMPARER,
+      :authorize         => AUTHORIZE,
       :miner             => MINER,
       :miner_results     => MINER_RESULTS,
       :sequencer         => SEQUENCER,
