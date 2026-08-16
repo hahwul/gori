@@ -88,19 +88,40 @@ module Gori
       end
     end
 
+    # How long a freshly-spawned browser has to stay alive before the launch counts as
+    # a success. `Process.new` only proves the *exec* worked; a browser that refuses to
+    # start (a Chromium whose sandbox can't get a user namespace, a Windows .exe handed a
+    # Linux `--user-data-dir`) exec's fine and is gone milliseconds later — every such
+    # death lands well inside this window. Spent inside the key handler, so it is a
+    # visible pause on the picker: deliberate, since a wrong "opened" costs the operator
+    # a debugging session and this costs 0.4s.
+    SPAWN_GRACE = 400.milliseconds
+
+    # Cap on the browser's stderr we hold on to. Enough for the line that explains a
+    # refusal, bounded because a LIVE Chromium narrates crashpad warnings for as long as
+    # it runs and this buffer outlives the grace window.
+    private STDERR_CAP = 4096
+
     # Launch `found` pre-trusted; returns a one-line status for the UI. Raises only
     # on a hard spawn failure. Creates the profile dir (and, for Firefox, writes
     # prefs + imports the CA) as a side effect.
+    #
+    # The status reports whether the browser is actually UP, not merely spawned: it used
+    # to say "opened" the instant exec returned, so a browser that died on the spot was
+    # announced as a success with its explanation discarded along with its stderr (#700).
     def self.launch(found : Found, spec : LaunchSpec) : String
       profile = File.join(spec.profile_root, found.id)
       Dir.mkdir_p(profile)
-      case found.kind
-      in Kind::Chromium
-        spawn_detached(found.path, chromium_args(profile, spec))
-        "opened #{found.name} — CA trusted, proxy → #{spec.dial_authority}"
-      in Kind::Firefox
-        note = setup_firefox_profile(profile, spec)
-        spawn_detached(found.path, firefox_args(profile))
+      # Firefox's profile has to be written BEFORE it is spawned — hence the setup call
+      # sitting here, in the branch that also picks its args.
+      args, note =
+        case found.kind
+        in Kind::Chromium then {chromium_args(profile, spec), "CA trusted, proxy → #{spec.dial_authority}"}
+        in Kind::Firefox  then {firefox_args(profile), setup_firefox_profile(profile, spec)}
+        end
+      if failure = spawn_detached(found.path, args)
+        "#{found.name} quit right after starting — #{failure}"
+      else
         "opened #{found.name} — #{note}"
       end
     end
@@ -185,12 +206,65 @@ module Gori
 
     # Start the browser without it touching gori's terminal, and reap it on a
     # detached fiber so a closed browser never becomes a zombie or blocks the UI.
-    private def self.spawn_detached(path : String, args : Array(String)) : Nil
+    #
+    # Returns nil once the browser is up, or the reason it isn't. stderr is piped rather
+    # than closed: closing it threw away the browser's own account of why it quit, which
+    # is the one thing that could explain a failed launch to the operator (#700).
+    private def self.spawn_detached(path : String, args : Array(String)) : String?
+      reader, writer = IO.pipe
       process = Process.new(path, args,
         input: Process::Redirect::Close,
         output: Process::Redirect::Close,
-        error: Process::Redirect::Close)
-      spawn { process.wait rescue nil }
+        error: writer)
+      writer.close # our copy; the child holds the only remaining one, so EOF means it died
+      stderr = drain_stderr(reader)
+      sleep SPAWN_GRACE
+      unless process.terminated?
+        spawn { process.wait rescue nil }
+        return nil
+      end
+      status = process.wait
+      # Exiting 0 inside the grace window is a LAUNCHER handing off, not a failure: the
+      # `firefox` and packaged-Chrome entry points hand the URL to an already-running
+      # instance and return. Only a non-zero exit is a browser that refused to start.
+      return nil if status.success?
+      # EOF may never come — a Chromium zygote can outlive its parent still holding the
+      # write end — so take what has been read by now rather than block the UI on it.
+      select
+      when text = stderr.receive
+        failure_reason(text, status)
+      when timeout(200.milliseconds)
+        failure_reason("", status)
+      end
+    end
+
+    # Read the child's stderr to EOF on its own fiber, keeping at most STDERR_CAP bytes.
+    # Draining is not optional: stop reading and a chatty browser fills the pipe and
+    # blocks on its own logging. Past the cap we keep reading and discard.
+    private def self.drain_stderr(reader : IO::FileDescriptor) : Channel(String)
+      done = Channel(String).new(1) # buffered: nobody receives on the success path
+      spawn do
+        buf = Bytes.new(1024)
+        text = IO::Memory.new
+        begin
+          while (n = reader.read(buf)) > 0
+            text.write(buf[0, n]) if text.bytesize < STDERR_CAP
+          end
+        rescue
+          # pipe torn down with the process — whatever we already have is all there is
+        ensure
+          reader.close rescue nil
+          done.send(text.to_s) rescue nil
+        end
+      end
+      done
+    end
+
+    # The toast for a browser that quit on the spot: its own first words if it left any,
+    # and always the exit code — which is what a bug report needs when stderr was silent.
+    private def self.failure_reason(stderr : String, status : Process::Status) : String
+      line = stderr.each_line.map(&.strip).find { |l| !l.empty? }
+      line ? "#{line[0, 160]} (exit #{status.exit_code})" : "exit #{status.exit_code}"
     end
 
     # Resolve a candidate location to an existing executable path, or nil.

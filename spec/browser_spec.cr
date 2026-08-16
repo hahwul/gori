@@ -114,6 +114,53 @@ describe Gori::Browser do
     end
   end
 
+  # #700: "open browser" reported success the instant exec returned, so a browser that
+  # refused to start (WSL sandbox, a Windows .exe handed a Linux profile path) was
+  # announced as "opened" — and its stderr, the only account of why, was closed outright.
+  describe ".launch" do
+    root = File.join(Dir.tempdir, "gori-browser-launch-spec-#{Process.pid}")
+    bin = ->(name : String, body : String) do
+      Dir.mkdir_p(root)
+      path = File.join(root, name)
+      File.write(path, "#!/bin/sh\n#{body}\n")
+      File.chmod(path, 0o755)
+      Gori::Browser::Found.new("chromium", "Chromium", Gori::Browser::Kind::Chromium, path)
+    end
+    spec = Gori::Browser::LaunchSpec.new(
+      proxy_host: "127.0.0.1", proxy_port: 8070,
+      ca_cert_path: "/tmp/root.crt.pem", spki_sha256: "PIN123=",
+      profile_root: root)
+
+    after_all { FileUtils.rm_rf(root) }
+
+    it "reports the browser's own words when it quits on the spot" do
+      status = Gori::Browser.launch(bin.call("dies", "echo 'Failed to move to new namespace' >&2; exit 1"), spec)
+      status.should_not contain("opened")
+      status.should contain("quit right after starting")
+      status.should contain("Failed to move to new namespace")
+      status.should contain("exit 1")
+    end
+
+    it "still reports the exit code when the browser dies silently" do
+      status = Gori::Browser.launch(bin.call("mute", "exit 3"), spec)
+      status.should contain("quit right after starting")
+      status.should contain("exit 3")
+    end
+
+    it "reports success once the browser survives the grace window" do
+      status = Gori::Browser.launch(bin.call("lives", "sleep 30"), spec)
+      status.should contain("opened Chromium")
+      status.should contain("proxy → 127.0.0.1:8070")
+    end
+
+    # `firefox` and the packaged-Chrome wrappers hand off to a running instance and
+    # return 0. That is a launch, not a failure — calling it one would trade #700's
+    # false success for an equally wrong false failure.
+    it "treats a launcher that hands off and exits 0 as opened" do
+      Gori::Browser.launch(bin.call("handoff", "exit 0"), spec).should contain("opened Chromium")
+    end
+  end
+
   it "registers browser.open as a visible palette verb" do
     r = Gori::Verb::Registry.new
     Gori::Verbs.register_core(r)
