@@ -33,6 +33,7 @@ module Gori
       Probe         # the Probe scan-issue list has focus
       ProbeDetail   # a Probe issue's detail is open
       ProbeRules    # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)
+      Authorize     # the Authorize (access-control / multi-identity) tab has focus
       Intercept     # the Intercept queue tab has focus
       Rewriter      # the Rewriter (Match & Replace rules) tab has focus
       Colormarker   # the Colormarker (History row-colour rules) tab has focus

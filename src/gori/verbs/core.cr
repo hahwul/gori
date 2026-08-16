@@ -303,7 +303,7 @@ module Gori
         :project => "Project", :target => "Target", :history => "History", :intercept => "Intercept",
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :oast => "OAST",
         :sequencer => "Sequencer", :decoder => "Decoder", :jwt => "JWT", :comparer => "Comparer",
-        :probe => "Probe", :issues => "Issues", :notes => "Notes",
+        :probe => "Probe", :authorize => "Authorize", :issues => "Issues", :notes => "Notes",
         :rewriter => "Rewriter", :colormarker => "Colormarker",
       }.each do |tab, label|
         r.register Verb::Definition.new(

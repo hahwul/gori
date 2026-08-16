@@ -1,3 +1,4 @@
+require "./context/authorize"
 require "./context/comparer"
 require "./context/decoder"
 require "./context/discover"

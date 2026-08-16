@@ -32,13 +32,14 @@ describe "Chrome.reconcile" do
     out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # inserted visible
   end
 
-  it "slots a newly-added catalog tab at its catalog-relative position (Probe left of Issues)" do
+  it "slots a newly-added catalog tab at its catalog-relative position (Probe left of Authorize)" do
     # An older config saved before Probe existed: the catalog order minus :probe. Reconcile
-    # must place Probe where the catalog puts it (immediately left of Issues), not at the end.
+    # must place Probe where the catalog puts it (immediately left of its catalog neighbour,
+    # Authorize), not at the end.
     prefs = Chrome::TABS.reject { |(s, _)| s == :probe }
       .map { |(s, _)| {s.to_s, !Chrome::DEFAULT_HIDDEN.includes?(s)} }
     order = Chrome.reconcile(prefs).map(&.first)
-    order.index(:probe).not_nil!.should eq(order.index(:issues).not_nil! - 1)
+    order.index(:probe).not_nil!.should eq(order.index(:authorize).not_nil! - 1)
     order.index(:probe).not_nil!.should be > order.index(:comparer).not_nil!
   end
 
@@ -90,11 +91,12 @@ describe "Chrome.visible_tabs" do
 end
 
 describe "Chrome.hidden_tabs" do
-  it "returns the tabs hidden from the bar (Miner + Sequencer + JWT + Colormarker by default) on empty prefs" do
+  it "returns the tabs hidden from the bar (Miner + Sequencer + JWT + Colormarker + Authorize by default) on empty prefs" do
     hid = Chrome.hidden_tabs([] of {String, Bool}).map(&.first)
     # Colormarker joins them: it is a niche display lens, and a fresh install should not
-    # spend a tab slot on a list that is empty until someone writes a colour rule.
-    hid.should eq([:miner, :sequencer, :jwt, :colormarker]) # the default-hidden tabs, in catalog order
+    # spend a tab slot on a list that is empty until someone writes a colour rule. Authorize
+    # is the same kind of specialised workbench (seeded on demand), so it starts hidden too.
+    hid.should eq([:miner, :sequencer, :jwt, :colormarker, :authorize]) # the default-hidden tabs, in catalog order
   end
 
   it "excludes the active tab even when its stored visibility is false (it's force-shown)" do

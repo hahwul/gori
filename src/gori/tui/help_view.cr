@@ -290,6 +290,7 @@ module Gori::Tui
       :sitemap     => "OTHER TABS",
       :issues      => "OTHER TABS",
       :probe       => "OTHER TABS",
+      :authorize   => "OTHER TABS",
       :notes       => "OTHER TABS",
       :project     => "OTHER TABS",
       :intercept   => "OTHER TABS",

@@ -726,6 +726,7 @@ module Gori
       register_miner(r)
       register_sequencer(r)
       register_comparer(r)
+      register_authorize(r)
       register_decoder(r)
       register_jwt(r)
       register_rewriter(r)

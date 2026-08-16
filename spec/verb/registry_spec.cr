@@ -993,6 +993,46 @@ private class FakeContext < ExecContext
     @calls << :open_browser_picker
   end
 
+  def authorize_seed_selected : Nil
+    @calls << :authorize_seed_selected
+  end
+
+  def authorize_seed_sitemap : Nil
+    @calls << :authorize_seed_sitemap
+  end
+
+  def authorize_run : Nil
+    @calls << :authorize_run
+  end
+
+  def authorize_run_all : Nil
+    @calls << :authorize_run_all
+  end
+
+  def authorize_run_one : Nil
+    @calls << :authorize_run_one
+  end
+
+  def authorize_stop : Nil
+    @calls << :authorize_stop
+  end
+
+  def authorize_remove : Nil
+    @calls << :authorize_remove
+  end
+
+  def authorize_clear : Nil
+    @calls << :authorize_clear
+  end
+
+  def authorize_has_target? : Bool
+    false
+  end
+
+  def authorize_running? : Bool
+    false
+  end
+
   def comparer_pick(slot : Symbol) : Nil
     @calls << :comparer_pick
   end

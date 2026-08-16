@@ -1010,6 +1010,46 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:open_browser_picker)
   end
 
+  def authorize_seed_selected : Nil
+    rec(:authorize_seed_selected)
+  end
+
+  def authorize_seed_sitemap : Nil
+    rec(:authorize_seed_sitemap)
+  end
+
+  def authorize_run : Nil
+    rec(:authorize_run)
+  end
+
+  def authorize_run_all : Nil
+    rec(:authorize_run_all)
+  end
+
+  def authorize_run_one : Nil
+    rec(:authorize_run_one)
+  end
+
+  def authorize_stop : Nil
+    rec(:authorize_stop)
+  end
+
+  def authorize_remove : Nil
+    rec(:authorize_remove)
+  end
+
+  def authorize_clear : Nil
+    rec(:authorize_clear)
+  end
+
+  def authorize_has_target? : Bool
+    false
+  end
+
+  def authorize_running? : Bool
+    false
+  end
+
   def comparer_pick(slot : Symbol) : Nil
     rec(:comparer_pick, slot)
   end

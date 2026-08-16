@@ -30,6 +30,7 @@ require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
 require "./controllers/rewriter_controller"
 require "./controllers/colormarker_controller"
+require "./controllers/authorize_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./repeater_view"
@@ -95,6 +96,7 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+require "./runner/authorize"
 require "./runner/colormarker"
 require "./runner/comparer"
 require "./runner/decoder"
@@ -311,6 +313,7 @@ module Gori::Tui
         JwtController.new(self),
         RewriterController.new(self),
         ColormarkerController.new(self),
+        AuthorizeController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -383,6 +386,10 @@ module Gori::Tui
 
     private def comparer_controller : ComparerController
       @tabs[:comparer].as(ComparerController)
+    end
+
+    private def authorize_controller : AuthorizeController
+      @tabs[:authorize].as(AuthorizeController)
     end
 
     private def decoder_controller : DecoderController
@@ -505,6 +512,7 @@ module Gori::Tui
             dirty = true if oast_controller.drain_events
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
+            dirty = true if authorize_controller.drain_events
             if (rev = @session.interceptor.revision) != last_rev
               last_rev = rev
               dirty = true
