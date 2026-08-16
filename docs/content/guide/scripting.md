@@ -101,6 +101,7 @@ See [Session bindings](/guide/proxy/#session-bindings) for how extract rules def
 | Replay and diff a request | `repeater`, `compare` |
 | Sweep payloads or hunt hidden params | `fuzz`, `mine` |
 | Crawl and brute-force endpoints | `discover`, `sitemap` |
+| Test access control across identities | `authorize` |
 | Scan and triage | `probe`, `issues`, `notes` |
 | Pure compute, no project needed | `decoder`, `jwt`, `cookie` |
 | Manage projects, scope, env, rules | `project`, `rewriter`, `colormarker` |

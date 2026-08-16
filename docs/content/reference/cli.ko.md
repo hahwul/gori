@@ -64,6 +64,7 @@ gori run <subcommand> [verb] [options]
 | `fuzz [<flow-id>]` | Intruder 스타일 퍼저 |
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
 | `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
+| `authorize [<flow-id>…]` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 (접근 제어 결함) |
 | `probe [QL]` | 패시브 보안 스캔 (요청 없음) |
 | `probe issues` · `dismiss` · `promote` · `delete` | 저장된 Probe 발견 항목 트리아지 |
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
@@ -103,7 +104,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | 서브커맨드 | `--format json` | `--format jsonl` |
 |-----------|-----------------|------------------|
 | `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭 — 출력 동일 |
-| `fuzz`, `mine`, `discover` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `fuzz`, `mine`, `discover`, `authorize` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
 
 | 종료 코드 | 의미 |
 |-----------|------|
@@ -331,6 +332,38 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어(상태 기반 토큰을 위해 concurrency는 1 유지) |
 | `--bind-from=FLOW-ID` | 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 세션 바인딩을 채우게 합니다 |
 | `--format` | `text`, `json`, `jsonl`, 또는 `markdown`(TUI의 Export가 쓰는 리포트) |
+
+### run authorize {#run-authorize}
+
+선택한 플로우를 아이덴티티마다 재전송합니다. 아이덴티티는 관리자 세션, 저권한 사용자, 익명 클라이언트를 대신하는 헤더 오버레이이며, 각 응답을 기준선과 비교합니다. 기준선이 받은 것을 그대로 받는 아이덴티티가 있다면 접근 제어 우회일 가능성이 높습니다. [Authorize 탭](/ko/guide/authorize/)의 헤드리스 버전입니다.
+
+```bash
+gori run authorize 12 13
+gori run authorize --query 'host:acme.test method:GET' --identities identities.json
+```
+
+| Option | Description |
+|--------|-------------|
+| `<flow-id>…`, `--flow=ID` | 재전송할 캡처 플로우(지정한 순서대로, 반복 가능) |
+| `-q`, `--query=QL` | QL 쿼리에 매칭되는 플로우도 재전송(id 뒤에 이어 붙습니다) |
+| `-n`, `--limit=N` | `--query`가 기여할 수 있는 최대 플로우 수(기본값 50). 한 행이 *아이덴티티 수만큼*의 요청이 됩니다 |
+| `--identities=FILE` | 아이덴티티 집합 JSON(`-`=stdin). 기본값은 프로젝트에 저장된 집합 |
+| `--unsafe-methods` | `POST`/`PUT`/`PATCH`/`DELETE`도 재전송 — 아이덴티티마다 부수 효과가 다시 실행됩니다 |
+| `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스와 exclude는 그대로 적용) |
+| `--timeout=SEC`, `-k`/`--insecure-upstream` | 요청당 연결 + 유휴 타임아웃, 업스트림 TLS 검증 생략 |
+| `--project`, `--db` | 읽을 프로젝트 |
+| `--format` | `text`(기본), `json`(마지막에 배열 하나), `jsonl`(스트리밍) |
+
+`--identities`로 파일을 지정하지 않으면 아이덴티티는 프로젝트, 즉 TUI Authorize 탭의 목록에서 옵니다.
+
+```json
+[{"name": "anonymous", "remove": ["Cookie", "Authorization"]},
+ {"name": "low-priv",  "set": [{"name": "Cookie", "value": "session=…"}]}]
+```
+
+`set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요하며, 그렇지 않으면 비교할 것이 없습니다.
+
+의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
 
 ### run probe {#run-probe}
 

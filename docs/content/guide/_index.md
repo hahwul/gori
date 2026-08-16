@@ -20,6 +20,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[JWT](/guide/jwt/)**: decode, re-sign, and attack JSON Web Tokens.
 - **[Sequencer](/guide/sequencer/)**: grade the randomness of session and CSRF tokens.
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
+- **[Authorize](/guide/authorize/)**: replay a request under several identities to find broken access control.
 
 **Automation** — the same engines without a terminal in front of them:
 
@@ -51,9 +52,11 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **JWT** | Decode, re-sign, and attack JSON Web Tokens (hidden by default) |
 | **Comparer** | Side-by-side diff of two flows |
 | **Rewriter** | Match & Replace rules that rewrite traffic in flight |
+| **Colormarker** | Row-colour rules for History, by query (hidden by default) |
 | **Probe** | Passive & light-touch active security scanner |
+| **Authorize** | Replay a request under several identities to find broken access control (hidden by default) |
 | **Issues** | Triage results by severity and status |
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Some tabs are hidden on a fresh install (Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Miner, Sequencer, JWT, Colormarker, Authorize) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

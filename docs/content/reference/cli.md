@@ -64,6 +64,7 @@ gori run <subcommand> [verb] [options]
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
 | `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
+| `authorize [<flow-id>…]` | Replay captured flows under several identities and judge each response against a baseline (broken access control) |
 | `probe [QL]` | Passive security scan (no requests) |
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
@@ -103,14 +104,14 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
 | `capture`, `history` | One JSON object per line | Alias for `json` — same output |
-| `fuzz`, `mine`, `discover` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `fuzz`, `mine`, `discover`, `authorize` | Buffered; one JSON array at the end | One object per line, as each result lands |
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success |
 | `1` | Error — a failed send, an unreadable project, a mutation that could not be applied |
 | `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
-| `130` | Interrupted by SIGINT/SIGTERM — `fuzz`, `mine`, `discover` and `sequence` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM — `fuzz`, `mine`, `discover`, `sequence` and `authorize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 
@@ -332,6 +333,38 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control (concurrency stays 1 for stateful tokens) |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$NAME` session bindings for the rest of the run |
 | `--format` | `text`, `json`, `jsonl`, or `markdown` (the report the TUI's Export writes) |
+
+### run authorize
+
+Replay each selected flow under every identity — a header overlay standing in for an admin session, a low-privilege user, an anonymous client — and judge each response against the baseline's. An identity served what the baseline was served is a likely access-control bypass. The headless equivalent of the [Authorize tab](/guide/authorize/).
+
+```bash
+gori run authorize 12 13
+gori run authorize --query 'host:acme.test method:GET' --identities identities.json
+```
+
+| Option | Description |
+|--------|-------------|
+| `<flow-id>…`, `--flow=ID` | Captured flows to replay, in the order given (repeatable) |
+| `-q`, `--query=QL` | Also replay every flow matching this QL query, appended after the ids |
+| `-n`, `--limit=N` | Max flows `--query` may contribute (default 50) — every row becomes one request *per identity* |
+| `--identities=FILE` | Identity set as JSON (`-` = stdin); default: the project's saved set |
+| `--unsafe-methods` | Also replay `POST`/`PUT`/`PATCH`/`DELETE` — each identity re-runs the side effect |
+| `--allow-unscoped` | Send even when the target is outside the project scope (sandbox and excludes still apply) |
+| `--timeout=SEC`, `-k`/`--insecure-upstream` | Per-request connect + idle timeout; skip upstream TLS verification |
+| `--project`, `--db` | Project to read |
+| `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
+
+Identities come from the project — the TUI Authorize tab's list — unless `--identities` names a file:
+
+```json
+[{"name": "anonymous", "remove": ["Cookie", "Authorization"]},
+ {"name": "low-priv",  "set": [{"name": "Cookie", "value": "session=…"}]}]
+```
+
+`set` upserts headers, `remove` strips them, and the request as captured is the baseline unless an entry carries `"baseline": true`. At least one identity besides the baseline is required, or there is nothing to compare.
+
+Flows that cannot be replayed meaningfully are listed on STDERR before anything is sent, each with its reason (`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). A selection where every flow was skipped is refused rather than run. If every send was refused before the socket, the run exits `1` and says so instead of reporting a clean result — a run that sent nothing is not evidence that access control works.
 
 ### run probe
 

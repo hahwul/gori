@@ -101,6 +101,7 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 | 요청 재전송과 비교 | `repeater`, `compare` |
 | 페이로드 스윕, 숨은 파라미터 탐색 | `fuzz`, `mine` |
 | 엔드포인트 크롤링·브루트포스 | `discover`, `sitemap` |
+| 아이덴티티별 접근 제어 시험 | `authorize` |
 | 스캔과 트리아지 | `probe`, `issues`, `notes` |
 | 프로젝트 없이 순수 계산 | `decoder`, `jwt`, `cookie` |
 | 프로젝트·스코프·env·규칙 관리 | `project`, `rewriter`, `colormarker` |

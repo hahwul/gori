@@ -20,6 +20,7 @@ gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적�
 - **[JWT](/ko/guide/jwt/)**: JSON Web Token을 디코드, 재서명, 공격합니다.
 - **[Sequencer](/ko/guide/sequencer/)**: 세션·CSRF 토큰의 무작위성을 평가합니다.
 - **[OAST](/ko/guide/oast/)**: 아웃오브밴드 콜백을 잡아 블라인드 취약점을 확인합니다.
+- **[Authorize](/ko/guide/authorize/)**: 하나의 요청을 여러 아이덴티티로 재전송해 접근 제어 결함을 찾습니다.
 
 **자동화** — 같은 엔진을 터미널 없이 돌리는 길:
 
@@ -51,9 +52,11 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | **JWT** | JSON Web Token 디코드, 재서명, 공격 (기본 숨김) |
 | **Comparer** | 두 플로우를 나란히 놓고 비교 |
 | **Rewriter** | 오가는 트래픽을 그 자리에서 재작성하는 Match & Replace 규칙 |
+| **Colormarker** | 쿼리로 History 행 색을 칠하는 규칙 (기본 숨김) |
 | **Probe** | 패시브 및 light-touch 액티브 보안 스캐너 |
+| **Authorize** | 요청을 여러 아이덴티티로 재전송해 접근 제어 결함 탐지 (기본 숨김) |
 | **Issues** | 심각도와 상태로 결과 트리아지 |
 | **Notes** | 프로젝트별 마크다운 노트 |
 | **Help** | 키 바인딩과 링크 |
 
-일부 탭(Miner, Sequencer, JWT)은 탭 바를 깔끔하게 유지하려고 새 설치에서 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트, 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 언제든 다시 표시할 수 있습니다. 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`), **scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.
+일부 탭(Miner, Sequencer, JWT, Colormarker, Authorize)은 탭 바를 깔끔하게 유지하려고 새 설치에서 숨겨져 있습니다. 탭 바의 `⋯` 메뉴, 커맨드 팔레트, 또는 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs**에서 언제든 다시 표시할 수 있습니다. 탭은 아니지만 전역적으로 작동하는 렌즈들도 있습니다. **capture**(`c`), **intercept**(`i`), **scope 렌즈**(`s`)는 어디서든 토글할 수 있습니다.

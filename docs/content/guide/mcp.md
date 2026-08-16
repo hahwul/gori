@@ -146,13 +146,14 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
+| `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline — broken access control. Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`nothing_sent`) and a flat, never-paged `bypasses` list |
 | `discover_start` / `discover_stop` | Spider and brute-force endpoints (poll with `discover_status` / `discover_results`) |
 | `oast_start` / `oast_stop` | Register an OAST payload and poll for callbacks (read the hits with `oast_poll`) |
 | `list_jobs` / `get_job` / `stop_job` | Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | Release a held message byte-exact, release it with edited wire bytes, or drop it |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | Arm or disarm the catch, set its condition query, and choose which leg it holds |
 
-> Action tools are capped for safety: fuzz, mine, sequence, and discover jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
+> Action tools are capped for safety: fuzz, mine, sequence, discover, and authorize jobs are limited in total requests, concurrency, and stored results. An authorize run's cap counts `flows × identities`, and a selection over it is refused up front rather than truncated into a run that would report "enforced" for flows it never sent. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
 
 ## Live Intercept
 
