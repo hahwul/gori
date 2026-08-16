@@ -256,6 +256,33 @@ describe AuthorizeView do
     end
   end
 
+  # Passive replay can be on and yet do nothing — most often because the project has no
+  # scope include rule. The status line that says so is transient and the operator is usually
+  # in a browser, so the tab itself has to carry the answer.
+  describe "the passive note" do
+    it "replaces the empty state's headline while passive is on" do
+      v = AuthorizeView.new
+      b = MemoryBackend.new(100, 30)
+      v.render(Screen.new(b), Rect.new(0, 0, 100, 30), true)
+      b.contains?("no requests queued").should be_true
+
+      v.passive_note = "passive replay on — add a scope include rule to replay anything"
+      b2 = MemoryBackend.new(100, 30)
+      v.render(Screen.new(b2), Rect.new(0, 0, 100, 30), true)
+      b2.contains?("add a scope include rule").should be_true
+      b2.contains?("no requests queued").should be_false
+    end
+
+    it "goes back to the plain headline when passive is switched off" do
+      v = AuthorizeView.new
+      v.passive_note = "passive replay on — waiting for authenticated GETs"
+      v.passive_note = nil
+      b = MemoryBackend.new(100, 30)
+      v.render(Screen.new(b), Rect.new(0, 0, 100, 30), true)
+      b.contains?("no requests queued").should be_true
+    end
+  end
+
   describe "queue editing" do
     it "removes the cursor entry and clamps the cursor" do
       v = AuthorizeView.new

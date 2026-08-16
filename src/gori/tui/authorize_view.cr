@@ -82,6 +82,10 @@ module Gori::Tui
     # produced under, so a result from an older set counts as PENDING again — see
     # `pending_entries`.
     getter identity_rev : Int32
+    # Replaces the empty state's headline while passive replay is on. The status line that
+    # announces the mode is transient and the operator is usually in a browser when it
+    # matters, so the tab itself has to be able to answer "why is nothing happening".
+    property passive_note : String?
 
     # Replace the identity set. Bumps `identity_rev`, which is what makes every result already
     # on screen count as pending again: those verdicts were produced under the OLD set, and
@@ -97,6 +101,7 @@ module Gori::Tui
       @entries = [] of Entry
       @identities = AuthorizeView.default_identities
       @identity_rev = 0
+      @passive_note = nil.as(String?)
       @next_id = 0
       @sel = 0  # master (request) cursor
       @tsel = 0 # identity sub-cursor within the selected request
@@ -301,7 +306,7 @@ module Gori::Tui
     # surface every other empty tab shows — rather than three hand-centred sentences, which is
     # what this drew before and what every other tab stopped drawing.
     private def render_empty(screen : Screen, rect : Rect) : Nil
-      TrafficEmptyState.render(screen, rect, variant: :authorize)
+      TrafficEmptyState.render(screen, rect, variant: :authorize, title: @passive_note)
     end
 
     # "5 requests (2 pending) · identities: as-captured, anonymous" — the pending count is what

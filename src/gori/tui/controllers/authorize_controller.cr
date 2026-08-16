@@ -138,8 +138,21 @@ module Gori::Tui
       @passive = !@passive
       if @passive
         start_passive_watcher
-        @host.status("authorize: passive replay ON — authenticated GETs will be replayed as they are captured")
+        # Say it HERE, at the keypress, not later when a flow happens to be skipped. With no
+        # scope include rule the allowlist refuses every host, so passive can never do
+        # anything — and the operator is browsing in another window by the time the per-host
+        # notice fires, if they are looking at gori at all. "Nothing happened" is the one
+        # outcome this mode must never leave unexplained.
+        if @host.session.scope.include_count.zero?
+          @host.status("authorize: passive replay ON, but this project has no scope include rule — " \
+                       "nothing is replayed until you add one (Project → Scope)")
+          @view.passive_note = "passive replay on — add a scope include rule to replay anything"
+        else
+          @host.status("authorize: passive replay ON — in-scope authenticated GETs will be replayed as they are captured")
+          @view.passive_note = "passive replay on — waiting for authenticated GETs"
+        end
       else
+        @view.passive_note = nil
         # The watcher fiber stays parked on the channel; it re-checks the flag per event, so
         # turning passive off stops the work without needing to kill (and later re-spawn) it.
         @host.status("authorize: passive replay off")
