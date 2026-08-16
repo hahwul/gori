@@ -10,6 +10,7 @@ require "../probe"
 require "../probe_query"
 require "./preview_split"
 require "./issue_presentation"
+require "./viewport"
 
 module Gori::Tui
   # The Probe tab: a passive/active scan-issue list (already grouped by code+host at the
@@ -825,14 +826,11 @@ module Gori::Tui
       end
     end
 
+    # `@issues` is the filtered findings list the draw loop walks. A filter or a dismiss
+    # SHRINKS it under a stale @scroll, which is what the tail clamp catches — without it
+    # the pane showed a trailing sliver. See `Viewport.clamp_scroll`.
     private def ensure_visible(h : Int32) : Nil
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      # Clamp to the current list size: a filter/dismiss that SHRINKS @issues can leave
-      # @scroll pointing past the (now shorter) end, so the draw loop breaks after one row
-      # and the pane shows only a trailing sliver. Pull it back to the last full page.
-      @scroll = @scroll.clamp(0, {@issues.size - h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @issues.size)
     end
   end
 end

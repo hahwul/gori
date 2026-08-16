@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./viewport"
 require "../settings"
 
 module Gori::Tui
@@ -889,10 +890,10 @@ module Gori::Tui
       return if names.empty?
       sel = names.index(@values[0]) || 0
       vp = {box.h - 6, 1}.max # interior list rows (box.h == vp + 6 — see overlay_box)
-      # Scroll-follow: clamp to a valid window, then nudge to keep `sel` visible.
-      @theme_scroll = @theme_scroll.clamp(0, {names.size - vp, 0}.max)
-      @theme_scroll = sel if sel < @theme_scroll
-      @theme_scroll = sel - vp + 1 if sel >= @theme_scroll + vp
+      # Scroll-follow over `names`, the list the row loop below walks. Twin of the Setup
+      # wizard's theme list — see there for why the clamp-then-follow order this replaced
+      # lands on the same offset.
+      @theme_scroll = Viewport.scroll_to_show(sel, @theme_scroll, vp, names.size)
 
       list_top = box.y + 2
       vp.times do |row|

@@ -9,6 +9,7 @@ require "../store"
 require "../ql"
 require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
+require "./viewport"
 
 module Gori::Tui
   # The Sitemap tab: a host → path tree built from captured flows. The tree is literal —
@@ -1351,16 +1352,11 @@ module Gori::Tui
       end
     end
 
+    # `total` is `visible_rows.size` — the FLATTENED tree the caller already has in hand and
+    # the draw loop walks, not the node count. reload's `prev_scroll.clamp(0, rows.size-1)`
+    # can leave @scroll above (total - h) after the tree shrinks; see `Viewport.clamp_scroll`.
     private def ensure_visible(total : Int32, h : Int32) : Nil
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      # Never scroll past what fits: reload's `prev_scroll.clamp(0, rows.size-1)` can
-      # leave @scroll above (total - h) after the tree shrinks, stranding rows off the
-      # top with blank space below. Pull it back when the list underfills (mirrors
-      # HistoryView#ensure_visible).
-      @scroll = {@scroll, {total - h, 0}.max}.min
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, total)
     end
   end
 end

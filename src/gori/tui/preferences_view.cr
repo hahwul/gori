@@ -3,6 +3,7 @@ require "./settings_view"
 require "./frame"
 require "./chrome"
 require "./overlay"
+require "./viewport"
 
 module Gori::Tui
   # The unified Preferences modal — ONE grouped settings surface reachable everywhere:
@@ -441,13 +442,10 @@ module Gori::Tui
     end
 
     # Keep the focused row inside the content viewport (scroll follows focus).
+    # `group_height` is the row extent `render_group` lays out (and the number it feeds the
+    # scroll gauge), and `focus_row_offset` is the focused row's index within it.
     private def ensure_scroll(content : Rect) : Nil
-      total = group_height
-      vis = {content.h, 1}.max
-      top = focus_row_offset
-      @scroll = top if top < @scroll
-      @scroll = top - vis + 1 if top >= @scroll + vis
-      @scroll = @scroll.clamp(0, {total - vis, 0}.max)
+      @scroll = Viewport.scroll_to_show(focus_row_offset, @scroll, {content.h, 1}.max, group_height)
     end
 
     # --- catalog / geometry helpers ---

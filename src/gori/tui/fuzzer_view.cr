@@ -14,6 +14,7 @@ require "./fmt"
 require "./spark"
 require "./chain_pane"
 require "./chain_overlay"
+require "./viewport"
 require "../store"
 require "../fuzz"
 require "../proxy/h2/grpc"
@@ -2371,11 +2372,12 @@ module Gori::Tui
         # Only re-anchor scroll to the cursor when it's actually on a set row; on a tail
         # row (Add/Mode/Advanced/Run) current_set_index is nil, and defaulting it to 0
         # would snap a scrolled list back to the top on every render.
-        if idx = current_set_index
-          @cfg_scroll = idx if idx < @cfg_scroll
-          @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
-        end
-        @cfg_scroll = @cfg_scroll.clamp(0, {@sets.size - visible, 0}.max)
+        @cfg_scroll =
+          if idx = current_set_index
+            Viewport.scroll_to_show(idx, @cfg_scroll, visible, @sets.size)
+          else
+            Viewport.clamp_scroll(@cfg_scroll, visible, @sets.size) # tail row: clamp only, never re-anchor
+          end
         stop = {@cfg_scroll + visible, @sets.size}.min
         y = y0
         (@cfg_scroll...stop).each do |i|
@@ -2534,7 +2536,7 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
-      adjust_scroll(inner.h)
+      adjust_scroll(inner.h, view.size)
       if view.empty?
         # No column header over an empty list: it is a legend for a table that is not drawn, and
         # it sat directly on the onboarding card's roof. The card takes the whole interior
@@ -2772,11 +2774,15 @@ module Gori::Tui
       {Spark.histogram(values, w, min: lo.to_f, max: hi.to_f), lo, hi}
     end
 
-    private def adjust_scroll(h : Int32) : Nil
-      rows_h = {h - 1, 1}.max
-      @scroll = @sel if @sel < @scroll
-      @scroll = @sel - rows_h + 1 if @sel >= @scroll + rows_h
-      @scroll = {@scroll, 0}.max
+    # The same list-viewport derivation the other lists run, with the column header taken out
+    # of the height first: `h` is the card's whole interior and row 0 of it is the header, so
+    # only `h - 1` rows scroll — the SAME `rows_h` render_results then loops over.
+    #
+    # `count` is passed in rather than read here because the caller already holds `view` —
+    # `sorted_results`, the SORTED and (with `m`) MATCHED-ONLY projection the draw loop walks.
+    # `@results.size` would be the wrong number the moment either toggle is on.
+    private def adjust_scroll(h : Int32, count : Int32) : Nil
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, {h - 1, 0}.max, count)
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil

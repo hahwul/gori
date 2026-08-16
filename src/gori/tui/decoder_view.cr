@@ -6,6 +6,7 @@ require "./input_mode"
 require "./read_cursor"
 require "./read_pane"
 require "./text_read_state"
+require "./viewport"
 require "./gutter"
 require "../decoder"
 
@@ -411,10 +412,9 @@ module Gori::Tui
       h = {@matches.size, 8, max_h}.min
       return if h <= 0
       # Scroll the window so the selected row is always painted (the match list can be
-      # taller than the 8-row fold; move() clamps @selected against the full list).
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = @scroll.clamp(0, {@matches.size - h, 0}.max)
+      # taller than the 8-row fold; move() clamps @selected against the full list, which is
+      # `@matches` — the same list the loop below indexes).
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @matches.size)
       x = chain_rect.x + 2
       y = chain_rect.y + 1
       (0...h).each do |i|

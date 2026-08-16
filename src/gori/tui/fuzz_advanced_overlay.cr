@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./overlay"
 require "./text_field"
+require "./viewport"
 
 module Gori::Tui
   # A flat snapshot of the Fuzzer's advanced knobs, moved between FuzzerView (which
@@ -206,9 +207,8 @@ module Gori::Tui
       Frame.card(screen, box, "ADVANCED", bg: Theme.bg, border: Theme.border_focus)
       top = box.y + 1
       visible = list_capacity(box)
-      @scroll = @sel if @sel < @scroll
-      @scroll = @sel - visible + 1 if @sel >= @scroll + visible
-      @scroll = @scroll.clamp(0, {ROWS.size - visible, 0}.max)
+      # `ROWS` is the form's fixed row table — the same one the loop below breaks against.
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, visible, ROWS.size)
       vx = box.x + 2 + LABEL_W
       (0...visible).each do |i|
         ri = @scroll + i

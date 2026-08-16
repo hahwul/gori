@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./viewport"
 
 module Gori::Tui
   # A caret-anchored autocomplete dropdown for `$ENV` variable references typed inside a
@@ -81,11 +82,10 @@ module Gori::Tui
       ({key_w + (val_w > 0 ? val_w + 2 : 0) + 2, 14}.max).clamp(1, bounds.w)
     end
 
-    # Slide the visible window so the selected row is always painted.
+    # Slide the visible window so the selected row is always painted. `@matches` is the
+    # {key, value} list `render` windows and `draw_row` indexes.
     private def sync_scroll(h : Int32) : Nil
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = @scroll.clamp(0, {@matches.size - h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @matches.size)
     end
 
     # One dropdown row: a fill band, a selection bar, the `$KEY`, then the dim value hint.

@@ -14,6 +14,7 @@ require "./fmt"
 require "./flow_status"
 require "./read_cursor"
 require "./wrap"
+require "./viewport"
 require "./copy_menu"
 require "./preview_split"
 require "../store"
@@ -2633,15 +2634,11 @@ module Gori::Tui
       @host_suggest_values = [] of String
     end
 
+    # `@rows` is the windowed query result the draw loop walks, and it is what the tail
+    # clamp is measured against: on_event's `@scroll += 1` (not-following) and the trim
+    # clamp can both leave @scroll above (rows.size - list_h). See `Viewport.clamp_scroll`.
     private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      # Never scroll past what fits: on_event's `@scroll += 1` (not-following) and the
-      # trim clamp can leave @scroll above (rows.size - list_h), stranding the newest
-      # rows off the top with blank space below. Pull it back when the list underfills.
-      @scroll = {@scroll, {@rows.size - list_h, 0}.max}.min
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, @rows.size)
     end
 
     # Position of `id` in @rows. Sorted id-DESC (newest first) or id-ASC (oldest

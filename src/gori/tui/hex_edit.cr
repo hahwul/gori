@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./hex_view"
+require "./viewport"
 
 module Gori::Tui
   # Editable byte buffer rendered as a hex dump (the writable counterpart of the
@@ -136,9 +137,10 @@ module Gori::Tui
       return scroll if rect.w < 1 || rect.h < 1
       cur_row = @nib // 2 // COLS
       total = {HexView.rows(len), cur_row + 1}.max
-      scroll = cur_row if cur_row < scroll
-      scroll = cur_row - rect.h + 1 if cur_row >= scroll + rect.h
-      scroll = 0 if scroll < 0
+      # `scroll` is a PARAMETER the caller persists (`@scroll_req = h.render(…, @scroll_req)`),
+      # so this is the shared derivation at its plainest — no ivar on either side, the pure
+      # signature the module was written for. `total` is what the loop below breaks against.
+      scroll = Viewport.scroll_to_show(cur_row, scroll, rect.h, total)
       right = rect.x + rect.w # clip every column to the pane (cells otherwise bleed into the next pane)
       (0...rect.h).each do |i|
         row = scroll + i

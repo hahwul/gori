@@ -14,6 +14,7 @@ require "../../oast/provider_config"
 require "../oast_provider_overlay"
 require "../oast_provider_picker"
 require "../oast_session_picker"
+require "../viewport"
 
 module Gori::Tui
   # The OAST tab: register out-of-band payload URLs and watch the DNS/HTTP/SMTP callbacks
@@ -905,10 +906,10 @@ module Gori::Tui
       visible = rows_rect.h
       return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
       # Keep the selection in view in BOTH directions (@cb_sel may have moved via keys or
-      # the wheel, neither of which advances the viewport downward on its own).
-      @cb_scroll = @cb_sel if @cb_sel < @cb_scroll
-      @cb_scroll = @cb_sel - visible + 1 if @cb_sel >= @cb_scroll + visible
-      @cb_scroll = @cb_scroll.clamp(0, {ordered.size - visible, 0}.max)
+      # the wheel, neither of which advances the viewport downward on its own). `ordered` is
+      # the filtered, newest-first projection this loop slices — `callback_row_at` runs the
+      # SAME call against the same list so the hit-test inverts this window exactly.
+      @cb_scroll = Viewport.scroll_to_show(@cb_sel, @cb_scroll, visible, ordered.size)
       ordered[@cb_scroll, visible]?.try &.each_with_index do |row, i|
         py = rows_rect.y + i
         abs = @cb_scroll + i
@@ -1006,11 +1007,7 @@ module Gori::Tui
     # Keep @prov_sel within the visible provider window (both directions), then clamp — so a
     # selection taller than the pane scrolls into view instead of vanishing off the bottom.
     private def sync_prov_scroll(visible : Int32) : Nil
-      if visible > 0
-        @prov_scroll = @prov_sel if @prov_sel < @prov_scroll
-        @prov_scroll = @prov_sel - visible + 1 if @prov_sel >= @prov_scroll + visible
-      end
-      @prov_scroll = @prov_scroll.clamp(0, {@providers.size - visible, 0}.max)
+      @prov_scroll = Viewport.scroll_to_show(@prov_sel, @prov_scroll, visible, @providers.size)
     end
 
     private def selected_callback : CbRow?
@@ -1257,10 +1254,10 @@ module Gori::Tui
       visible = rows.h
       return nil if visible <= 0
       ordered = ordered_callbacks
-      scroll = @cb_scroll
-      scroll = @cb_sel if @cb_sel < scroll
-      scroll = @cb_sel - visible + 1 if @cb_sel >= scroll + visible
-      scroll = scroll.clamp(0, {ordered.size - visible, 0}.max)
+      # The SAME derivation render_callback_table runs, into a LOCAL — a hit-test must invert
+      # the window, never move it (a click that scrolled the pane it is measuring would pick
+      # the row that slid under the cursor).
+      scroll = Viewport.scroll_to_show(@cb_sel, @cb_scroll, visible, ordered.size)
       abs = scroll + (my - rows.y)
       abs >= 0 && abs < ordered.size ? abs : nil
     end
@@ -1284,12 +1281,8 @@ module Gori::Tui
       return nil if mx < rows.x || mx >= rows.right
       visible = rows.h
       return nil if visible <= 0
-      scroll = @prov_scroll
-      if visible > 0
-        scroll = @prov_sel if @prov_sel < scroll
-        scroll = @prov_sel - visible + 1 if @prov_sel >= scroll + visible
-      end
-      scroll = scroll.clamp(0, {@providers.size - visible, 0}.max)
+      # The SAME derivation `sync_prov_scroll` runs, into a LOCAL — see callback_row_at.
+      scroll = Viewport.scroll_to_show(@prov_sel, @prov_scroll, visible, @providers.size)
       abs = scroll + (my - rows.y)
       abs >= 0 && abs < @providers.size ? abs : nil
     end

@@ -6,6 +6,7 @@ require "./text_area"
 require "./input_mode"
 require "./text_read_state"
 require "./gutter"
+require "./viewport"
 require "../settings"
 require "../store"
 require "../issues_query"
@@ -311,12 +312,10 @@ module Gori::Tui
       move_links(delta)
     end
 
+    # `@detail_resolved` is the RELATED list the detail pane windows from `@links_scroll`.
     private def ensure_links_visible : Nil
-      list_h = links_visible_rows
-      max_scroll = {@detail_resolved.size - list_h, 0}.max
-      @links_scroll = @selected_link if @selected_link < @links_scroll
-      @links_scroll = @selected_link - list_h + 1 if @selected_link >= @links_scroll + list_h
-      @links_scroll = @links_scroll.clamp(0, max_scroll)
+      @links_scroll = Viewport.scroll_to_show(@selected_link, @links_scroll,
+        links_visible_rows, @detail_resolved.size)
     end
 
     def selected_resolved_link : Links::Resolved?
@@ -922,8 +921,7 @@ module Gori::Tui
       end
       list_y = y + 2
       list_h = links_visible_rows
-      max_scroll = {@detail_resolved.size - list_h, 0}.max
-      @links_scroll = @links_scroll.clamp(0, max_scroll)
+      @links_scroll = Viewport.clamp_scroll(@links_scroll, list_h, @detail_resolved.size)
       if @detail_resolved.empty?
         screen.text(rect.x + 1, list_y, "(none — space l to link History/Repeater/…)", Theme.muted, width: w)
       else
@@ -1022,17 +1020,12 @@ module Gori::Tui
       Time.unix(us // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M")
     end
 
+    # `@issues` is the FILTERED list (apply_filter rebuilds it from the `/` query and from
+    # batch deletes) and it is what the draw loop walks — so it is the count the tail clamp
+    # is measured against. That clamp is why this pane no longer reads 44 results as the 3
+    # under a stale window; see `Viewport.clamp_scroll`.
     private def ensure_visible(h : Int32) : Nil
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      # Never scroll past what fits: apply_filter re-clamps @selected when the list SHRINKS
-      # (a batch delete, a `/` query) but never touches @scroll, and neither rule above fires
-      # while the clamped cursor is still inside the stale window. The draw loop then breaks
-      # at the (now shorter) end and leaves dead space below — and IssuesView paints no scroll
-      # gauge, so 44 results silently read as the 3 that happen to be under the old window.
-      # Pull the window back to the last full page (mirrors HistoryView#ensure_visible).
-      @scroll = @scroll.clamp(0, {@issues.size - h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @issues.size)
     end
   end
 end

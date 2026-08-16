@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./overlay"
 require "../browser"
+require "./viewport"
 
 module Gori::Tui
   # The "Open browser" overlay (palette → browser.open). Lists the browsers
@@ -93,10 +94,7 @@ module Gori::Tui
     end
 
     private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {@browsers.size - list_h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, @browsers.size)
     end
 
     # Clamp + set the highlighted row (mirrors `move`'s clamp).

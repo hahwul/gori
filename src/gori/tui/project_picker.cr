@@ -17,6 +17,7 @@ require "./companion"
 require "./settings_view"
 require "./preferences_view"
 require "./compact_overlay"
+require "./viewport"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -1985,16 +1986,10 @@ module Gori::Tui
         @results_scroll = 0 # focus is on New/Temp/Search → show the list from the top
         return
       end
-      pi = @selected - 3
-      total = filtered_projects.size
-      if pi < @results_scroll
-        @results_scroll = pi
-      elsif pi >= @results_scroll + list_h
-        @results_scroll = pi - list_h + 1
-      end
-      @results_scroll = 0 if @results_scroll < 0
-      max_s = [total - list_h, 0].max
-      @results_scroll = max_s if @results_scroll > max_s
+      # The list is offset by the three pinned action rows, so the WINDOW tracks `@selected - 3`
+      # against `filtered_projects` — the same array render_list windows from `@results_scroll`.
+      @results_scroll = Viewport.scroll_to_show(@selected - 3, @results_scroll, list_h,
+        filtered_projects.size)
     end
 
     private def invalidate_running_cache : Nil

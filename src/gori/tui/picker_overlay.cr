@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./viewport"
 
 module Gori::Tui
   # Shared base for the selection-list modals — copy-as, send-to, the Comparer flow
@@ -48,11 +49,10 @@ module Gori::Tui
     end
 
     # Selection-follow scroll, like the History list: keep the cursor on-screen.
+    # `entry_count` is the subclass's own navigable-row count — the FILTERED list plus any
+    # pinned action row — which is exactly what its draw loop walks.
     private def ensure_visible(list_h : Int32) : Nil
-      return if list_h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {entry_count - list_h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, entry_count)
     end
   end
 

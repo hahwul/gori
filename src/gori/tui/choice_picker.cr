@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./viewport"
 require "../store"
 
 module Gori::Tui
@@ -159,10 +160,7 @@ module Gori::Tui
     end
 
     private def ensure_visible(rows : Int32) : Nil
-      return if rows <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - rows + 1 if @selected >= @scroll + rows
-      @scroll = @scroll.clamp(0, {@choices.size - rows, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, rows, @choices.size)
     end
 
     def render(screen : Screen, area : Rect) : Nil

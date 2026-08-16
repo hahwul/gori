@@ -10,6 +10,7 @@ require "../miner"
 require "../fuzz"
 require "../repeater/flow_request"
 require "./subtab_clone"
+require "./viewport"
 
 module Gori::Tui
   # The view for ONE mining session (a sub-tab under the Miner tab). Read-only: the
@@ -608,11 +609,10 @@ module Gori::Tui
       screen.text(inner.x + nw + 24, py, f.confidence.confirmed? ? "yes" : "tent", cc, bg)
     end
 
+    # `cap` is the rows region — `inner.h - 1`, the column header above it is not scrolled —
+    # and `@results` is what the draw loop walks.
     private def ensure_visible(cap : Int32) : Nil
-      return if cap <= 0
-      @scroll = @sel if @sel < @scroll
-      @scroll = @sel - cap + 1 if @sel >= @scroll + cap
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, cap, @results.size)
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil

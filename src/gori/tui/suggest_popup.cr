@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./query_suggest"
+require "./viewport"
 
 module Gori::Tui
   # The filter bars' opt-in completion dropdown: the same candidates the inline row already
@@ -129,10 +130,9 @@ module Gori::Tui
       @items.max_of { |c| c.size + (QuerySuggest.negated?(c) ? EXCLUDES.size : 0) }
     end
 
+    # `@items` is the candidate list `render` windows and `draw_row` indexes.
     private def sync_scroll(h : Int32) : Nil
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = @scroll.clamp(0, {@items.size - h, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @items.size)
     end
 
     # One row: selection bar, the candidate, then its meaning. A NEGATED candidate says so, in

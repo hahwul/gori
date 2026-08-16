@@ -4,6 +4,7 @@ require "./frame"
 require "./fmt"
 require "./traffic_empty_state"
 require "../discover"
+require "./viewport"
 
 module Gori::Tui
   # One discovery run (a spider + brute session). Ephemeral (in-memory) — the durable
@@ -459,11 +460,11 @@ module Gori::Tui
       s == :error || s == :budget_exhausted ? status_hue(s) : Theme.muted
     end
 
+    # `cap` is `run_bands`' row band — the header above it is not scrolled — and `@runs` is
+    # what the draw loop walks. Sibling of `ensure_visible` below, which windows the FINDINGS
+    # of the selected run; this one windows the runs themselves.
     private def ensure_run_visible(cap : Int32) : Nil
-      return if cap <= 0
-      @rscroll = @sel if @sel < @rscroll
-      @rscroll = @sel - cap + 1 if @sel >= @rscroll + cap
-      @rscroll = 0 if @rscroll < 0
+      @rscroll = Viewport.scroll_to_show(@sel, @rscroll, cap, @runs.size)
     end
 
     private def status_hue(s : Symbol) : Color
@@ -549,11 +550,12 @@ module Gori::Tui
       end
     end
 
+    # `cap` is the rows region — `inner.h - 1`, the column header above it is not scrolled.
+    # The count lives on the RUN, not on the view: `@scroll`/`@fsel` window `r.findings`,
+    # which is what the draw loop walks, and switching runs re-enters here with a different
+    # list under the same offset — the case the tail clamp exists for.
     private def ensure_visible(cap : Int32, r : DiscoverRun) : Nil
-      return if cap <= 0
-      @scroll = @fsel if @fsel < @scroll
-      @scroll = @fsel - cap + 1 if @fsel >= @scroll + cap
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@fsel, @scroll, cap, r.findings.size)
     end
 
     # --- click hit-test ---

@@ -4,6 +4,7 @@ require "../custom_colors_view"
 require "../../store"
 require "../../settings"
 require "../../colormarker"
+require "../viewport"
 
 module Gori::Tui
   # The Colormarker tab: two stacked panes. The POLICY list on top manages this project's
@@ -126,26 +127,17 @@ module Gori::Tui
       end
     end
 
+    # Both counts are the arrays the caller hands straight to the matching view — `rule_list`
+    # for the POLICY pane, `custom_colors` for the COLOURS pane — so each window and its draw
+    # walk the same list by construction. `row_capacity` takes the count because the pane's
+    # usable height depends on how many rows it has to place.
     private def ensure_visible(rect : Rect, count : Int32) : Nil
-      lh = @view.row_capacity(rect, count)
-      return if lh <= 0
-      if @sel < @scroll
-        @scroll = @sel
-      elsif @sel >= @scroll + lh
-        @scroll = @sel - lh + 1
-      end
-      @scroll = @scroll.clamp(0, {count - lh, 0}.max)
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, @view.row_capacity(rect, count), count)
     end
 
     private def ensure_color_visible(rect : Rect, count : Int32) : Nil
-      lh = @colors_view.row_capacity(rect, count)
-      return if lh <= 0
-      if @color_sel < @color_scroll
-        @color_scroll = @color_sel
-      elsif @color_sel >= @color_scroll + lh
-        @color_scroll = @color_sel - lh + 1
-      end
-      @color_scroll = @color_scroll.clamp(0, {count - lh, 0}.max)
+      @color_scroll = Viewport.scroll_to_show(@color_sel, @color_scroll,
+        @colors_view.row_capacity(rect, count), count)
     end
 
     def body_hint(focus : Symbol) : String

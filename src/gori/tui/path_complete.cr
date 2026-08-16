@@ -3,6 +3,7 @@ require "./theme"
 require "../fuzzy"
 require "../paths"
 require "../settings"
+require "./viewport"
 
 module Gori::Tui
   # Inline filesystem path completion for the wordlist payload field. Mirrors the
@@ -161,9 +162,8 @@ module Gori::Tui
       w = ({@entries.max_of(&.label.size) + 2, 18}.max).clamp(1, {inner.right - x, 1}.max)
       h = {@entries.size, 8, {inner.bottom - y, 1}.max}.min
       return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = @scroll.clamp(0, {@entries.size - h, 0}.max)
+      # `@entries` is what the loop below walks (headers included — they are navigable rows).
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @entries.size)
       (0...h).each do |i|
         e = @entries[@scroll + i]? || break
         if e.header

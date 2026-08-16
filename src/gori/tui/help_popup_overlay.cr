@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./overlay"
 require "./help_view"
+require "./viewport"
 require "../verb"
 
 module Gori::Tui
@@ -249,7 +250,7 @@ module Gori::Tui
       list = list_rect(box)
       return if list.h <= 0
       @page = list.h # what ⇞/⇟ steps by — only knowable here (see page_step)
-      @scroll = @scroll.clamp(0, {@rows.size - list.h, 0}.max)
+      @scroll = Viewport.clamp_scroll(@scroll, list.h, @rows.size)
       if @rows.empty?
         screen.text(box.x + 3, list.y, "no rows match", Theme.muted, Theme.panel)
         return

@@ -6,6 +6,7 @@ require "./frame"
 require "./layout"
 require "./mascot"
 require "./tutorial"
+require "./viewport"
 require "../settings"
 
 module Gori::Tui
@@ -735,10 +736,11 @@ module Gori::Tui
       list_w = theme_list_w(box)
       two_col = list_w < box.w - 2 # theme_list_w gives the list everything when it can't fit both
 
-      # Scroll-follow: clamp to a valid window, then keep `sel` on screen.
-      @theme_scroll = @theme_scroll.clamp(0, {names.size - vp, 0}.max)
-      @theme_scroll = sel if sel < @theme_scroll
-      @theme_scroll = sel - vp + 1 if sel >= @theme_scroll + vp
+      # Scroll-follow over `names`, the list the row loop below walks. (This used to clamp
+      # BEFORE following; `Viewport` follows then clamps, which lands on the same offset for
+      # every in-range selection — see the ordering example in spec/tui/viewport_spec.cr —
+      # and `sel` is always in range here, `names` being non-empty by the guard above.)
+      @theme_scroll = Viewport.scroll_to_show(sel, @theme_scroll, vp, names.size)
 
       list_top = box.y + 2
       vp.times do |row|

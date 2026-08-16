@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "../verb"
 require "../hotkeys"
+require "./viewport"
 
 module Gori::Tui
   # The command palette overlay (Ctrl-P) — the GORI-WIDE app-control surface:
@@ -147,14 +148,12 @@ module Gori::Tui
       end
     end
 
-    # Scroll the visible window so the selection stays on-screen (the list can be
-    # taller than the box). Adjusted at render time because the row count is only
-    # known here. Mirrors IssuesView#ensure_visible.
+    # Scroll the visible window so the selection stays on-screen (the list can be taller
+    # than the box). Adjusted at render time because the row count is only known here.
+    # `@results` is the FUZZY-FILTERED verb list the draw loop walks — every keystroke on the
+    # query rebuilds it shorter under the same @scroll, which is what the tail clamp catches.
     private def ensure_visible(h : Int32) : Nil
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @results.size)
     end
 
     # Inverts render's result-list loop: list starts at box.y + 3, rows fill the

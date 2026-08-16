@@ -13,6 +13,7 @@ require "../interceptor"
 require "../store"
 require "../fuzz/content_length"
 require "../env"
+require "./viewport"
 
 module Gori::Tui
   # The Intercept tab: a queue of held requests/responses (P4 — the human decides
@@ -1312,11 +1313,10 @@ module Gori::Tui
       end
     end
 
+    # `@items` is the held queue the draw loop walks. It SHRINKS under a stale @scroll every
+    # time a hold is forwarded or dropped, which is what the tail clamp catches.
     private def ensure_visible(h : Int32) : Nil
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, h, @items.size)
     end
   end
 end

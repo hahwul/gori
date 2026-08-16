@@ -10,6 +10,7 @@ require "../store"
 require "../sequencer"
 require "../fuzz"
 require "../repeater/flow_request"
+require "./viewport"
 
 module Gori::Tui
   # The view for ONE token-randomness session (a sub-tab under the Sequencer tab). The
@@ -768,13 +769,14 @@ module Gori::Tui
       clean.size > w ? "#{clean[0, w - 1]}…" : clean
     end
 
+    # `cap` is the rows region — `inner.h - 1`, the column header above it is not scrolled —
+    # and `@samples` is what the draw loop walks.
     private def ensure_visible(cap : Int32) : Nil
       return if cap <= 0
-      # Auto-follow the tail while a run streams (unless the user scrolled up).
+      # Auto-follow the tail while a run streams (unless the user scrolled up). Caller-specific
+      # state, so it stays here and keeps running BEFORE the window is derived from @sel.
       @sel = @samples.size - 1 if @running && @sel >= @samples.size - 1
-      @scroll = @sel if @sel < @scroll
-      @scroll = @sel - cap + 1 if @sel >= @scroll + cap
-      @scroll = 0 if @scroll < 0
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, cap, @samples.size)
     end
 
     # --- analysis pane ---

@@ -3,6 +3,7 @@ require "./theme"
 require "./brand"
 require "../hotkeys"
 require "../ql"
+require "./viewport"
 
 module Gori::Tui
   # The Help tab: a scrollable keyboard + mouse cheat-sheet, a QL reference, and an About page.
@@ -375,9 +376,13 @@ module Gori::Tui
       end
     end
 
+    # The tail half of the shared list-viewport arithmetic, alone: this page has no selection
+    # to track (↑/↓ and the wheel move `@scroll` itself, and `move` applies the floor), so only
+    # the "never scroll past the last full page" clamp applies. `@rows` is the built page the
+    # draw loop walks — it is rebuilt whole when the sub-tab changes, which is when a stale
+    # offset from a longer page would otherwise strand the new one.
     private def clamp_scroll(h : Int32) : Nil
-      max = {@rows.size - h, 0}.max
-      @scroll = @scroll.clamp(0, max)
+      @scroll = Viewport.clamp_scroll(@scroll, h, @rows.size)
     end
 
     # --- the "Query" sub-tab page ---------------------------------------------

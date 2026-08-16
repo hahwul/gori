@@ -5,6 +5,7 @@ require "./text_area"
 require "./input_mode"
 require "./text_read_state"
 require "./gutter"
+require "./viewport"
 require "../jwt"
 
 module Gori::Tui
@@ -221,9 +222,10 @@ module Gori::Tui
       end
       @atk_h = body.h
       @atk_sel = @atk_sel.clamp(0, attacks.size - 1)
-      @atk_scroll = @atk_scroll.clamp(0, {attacks.size - body.h, 0}.max)
-      @atk_scroll = @atk_sel if @atk_sel < @atk_scroll
-      @atk_scroll = @atk_sel - body.h + 1 if @atk_sel >= @atk_scroll + body.h
+      # `attacks` is the generated payload list the row loop below indexes. (Clamp-then-follow
+      # before; `Viewport` follows then clamps, same offset for an in-range selection — and
+      # `@atk_sel` is clamped into range on the line above.)
+      @atk_scroll = Viewport.scroll_to_show(@atk_sel, @atk_scroll, body.h, attacks.size)
       (0...body.h).each do |i|
         idx = @atk_scroll + i
         a = attacks[idx]?

@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./viewport"
 
 module Gori::Tui
   # The tab-bar "more" dropdown: the tabs hidden via settings:tabs (Miner by default),
@@ -86,13 +87,9 @@ module Gori::Tui
       {box.h - 2, @items.size}.min
     end
 
-    # Keep the selection on-screen when the list is taller than the card (short
-    # terminals). Mirrors ChoicePicker#ensure_visible.
+    # Keep the selection on-screen when the list is taller than the card (short terminals).
     private def ensure_visible(rows : Int32) : Nil
-      return if rows <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - rows + 1 if @selected >= @scroll + rows
-      @scroll = @scroll.clamp(0, {@items.size - rows, 0}.max)
+      @scroll = Viewport.scroll_to_show(@selected, @scroll, rows, @items.size)
     end
   end
 end

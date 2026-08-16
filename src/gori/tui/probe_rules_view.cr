@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "../probe"
 require "../store"
+require "./viewport"
 
 module Gori::Tui
   # The Probe tab's "Rules" sub-tab body: a navigable list of the scan rules that drive the
@@ -231,11 +232,9 @@ module Gori::Tui
       row.desc.empty? ? nil : row.desc
     end
 
+    # `@rows` is the flattened section list (headers + rules) the draw loop walks.
     private def ensure_visible(avail : Int32) : Nil
-      return if avail <= 0
-      @scroll = @sel if @sel < @scroll
-      @scroll = @sel - avail + 1 if @sel >= @scroll + avail
-      @scroll = @scroll.clamp(0, {@rows.size - avail, 0}.max)
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, avail, @rows.size)
     end
 
     # A section header: bold title, plus a right-aligned annotation when it carries one (the

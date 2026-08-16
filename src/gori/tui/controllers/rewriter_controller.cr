@@ -4,6 +4,7 @@ require "../text_area"
 require "../read_pane"
 require "../../store"
 require "../../rules"
+require "../viewport"
 
 module Gori::Tui
   # The Rewriter tab: manage the project's Match & Replace rules (the shared Rules engine
@@ -166,15 +167,12 @@ module Gori::Tui
       @view.render_bindings(screen, inner, rows, @sub_sel, @sub_scroll, body_focused, Time.utc)
     end
 
+    # `count` is whichever sub-tab list the caller is about to hand the view — `extract_list`
+    # for EXTRACT, `binding_rows` for BINDINGS — so it is by construction the collection the
+    # render walks.
     private def ensure_sub_visible(inner : Rect, count : Int32) : Nil
-      lh = @view.sub_row_capacity(inner)
-      return if lh <= 0
-      if @sub_sel < @sub_scroll
-        @sub_scroll = @sub_sel
-      elsif @sub_sel >= @sub_scroll + lh
-        @sub_scroll = @sub_sel - lh + 1
-      end
-      @sub_scroll = @sub_scroll.clamp(0, {count - lh, 0}.max)
+      @sub_scroll = Viewport.scroll_to_show(@sub_sel, @sub_scroll,
+        @view.sub_row_capacity(inner), count)
     end
 
     # ⇥ / ⇧⇥ cycles the sub-tab strip. Selection and scroll reset because the three lists
@@ -188,15 +186,11 @@ module Gori::Tui
       @focus = :list
     end
 
+    # `count` is `rule_list.size` — the array `render_rules` hands straight to `@view.render`,
+    # so the window and the draw walk the same list by construction.
     private def ensure_visible(inner : Rect, count : Int32) : Nil
-      lh = @view.list_row_capacity(inner, rules_engine.active?)
-      return if lh <= 0
-      if @sel < @scroll
-        @scroll = @sel
-      elsif @sel >= @scroll + lh
-        @scroll = @sel - lh + 1
-      end
-      @scroll = @scroll.clamp(0, {count - lh, 0}.max)
+      @scroll = Viewport.scroll_to_show(@sel, @scroll,
+        @view.list_row_capacity(inner, rules_engine.active?), count)
     end
 
     # Point the OUTPUT pane at the current transform. Recomputed rather than cached, exactly as
