@@ -114,6 +114,99 @@ describe Gori::Browser do
     end
   end
 
+  # #700: "open browser" reported success the instant exec returned, so a browser that
+  # refused to start (WSL sandbox, a Windows .exe handed a Linux profile path) was
+  # announced as "opened" — and its stderr, the only account of why, was closed outright.
+  describe ".launch" do
+    root = File.join(Dir.tempdir, "gori-browser-launch-spec-#{Process.pid}")
+    bin = ->(name : String, body : String) do
+      Dir.mkdir_p(root)
+      path = File.join(root, name)
+      File.write(path, "#!/bin/sh\n#{body}\n")
+      File.chmod(path, 0o755)
+      Gori::Browser::Found.new("chromium", "Chromium", Gori::Browser::Kind::Chromium, path)
+    end
+    spec = Gori::Browser::LaunchSpec.new(
+      proxy_host: "127.0.0.1", proxy_port: 8070,
+      ca_cert_path: "/tmp/root.crt.pem", spki_sha256: "PIN123=",
+      profile_root: root)
+
+    after_all { FileUtils.rm_rf(root) }
+
+    it "reports the browser's own words when it quits on the spot" do
+      status = Gori::Browser.launch(bin.call("dies", "echo 'Failed to move to new namespace' >&2; exit 1"), spec, grace: 10.seconds)
+      status.should_not contain("opened")
+      status.should contain("quit right after starting")
+      status.should contain("Failed to move to new namespace")
+      status.should contain("exit 1")
+    end
+
+    # Chromium's sandbox refusal — the actual #700 shape — is a LOG(FATAL), so the browser
+    # ABORTS rather than exiting. Process::Status#exit_code raises on that, which would
+    # have thrown away the stderr line this whole change exists to surface.
+    it "reports the browser's words when it dies on a signal, not an exit code" do
+      status = Gori::Browser.launch(bin.call("aborts", "echo 'Failed to move to new namespace' >&2; kill -ABRT $$"), spec, grace: 10.seconds)
+      status.should contain("quit right after starting")
+      status.should contain("Failed to move to new namespace")
+      status.should contain("ABRT")
+      status.should_not contain("Abnormal exit")
+    end
+
+    # A grandchild holding the write end means EOF never comes; the reason is still in the
+    # pipe and must reach the operator instead of being dropped for a bare exit code. It
+    # also means we cannot claim nothing is running — hence the hedged wording.
+    it "keeps the stderr it has read when the pipe never reaches EOF" do
+      status = Gori::Browser.launch(
+        bin.call("zygote", "echo 'sandbox refused' >&2; sleep 30 & exit 1"), spec, grace: 10.seconds)
+      status.should contain("may not have started")
+      status.should contain("sandbox refused")
+      status.should contain("exit 1")
+    end
+
+    # Distro wrappers colorize their errors: a raw ESC in the status row corrupts the rest
+    # of the frame's attributes, and dropping only the ESC leaves "[31m…" in the text.
+    it "strips whole escape sequences out of the browser's stderr before toasting it" do
+      status = Gori::Browser.launch(
+        bin.call("ansi", "printf '\\033[31mred failure\\033[0m\\n' >&2; exit 1"), spec, grace: 10.seconds)
+      status.should contain("red failure")
+      status.should_not contain("\e")
+      status.should_not contain("[31m")
+      status.should_not contain("[0m")
+    end
+
+    it "still reports the exit code when the browser dies silently" do
+      status = Gori::Browser.launch(bin.call("mute", "exit 3"), spec, grace: 10.seconds)
+      status.should contain("quit right after starting")
+      status.should contain("exit 3")
+    end
+
+    # Guards the regression the fixed-sleep version shipped with: the verdict has to come
+    # from WAITING on the child, not from sampling `terminated?` once the window is up.
+    # `terminated?` only flips after the child is reaped, and under load that hand-off
+    # outlasts SPAWN_GRACE — every failure-path example above then reported "opened",
+    # which is #700 itself, on exactly the slow machines it was reported from. Waiting
+    # also returns as soon as the browser refuses, so the failure path never burns the
+    # window; that is what this asserts, because it is the observable half.
+    it "decides a failed launch by waiting on the child, not by burning the grace window" do
+      started = Time.instant
+      Gori::Browser.launch(bin.call("quick", "exit 1"), spec, grace: 10.seconds).should contain("exit 1")
+      (Time.instant - started).should be < 5.seconds
+    end
+
+    it "reports success once the browser survives the grace window" do
+      status = Gori::Browser.launch(bin.call("lives", "sleep 30"), spec, grace: 100.milliseconds)
+      status.should contain("opened Chromium")
+      status.should contain("proxy → 127.0.0.1:8070")
+    end
+
+    # `firefox` and the packaged-Chrome wrappers hand off to a running instance and
+    # return 0. That is a launch, not a failure — calling it one would trade #700's
+    # false success for an equally wrong false failure.
+    it "treats a launcher that hands off and exits 0 as opened" do
+      Gori::Browser.launch(bin.call("handoff", "exit 0"), spec, grace: 10.seconds).should contain("opened Chromium")
+    end
+  end
+
   it "registers browser.open as a visible palette verb" do
     r = Gori::Verb::Registry.new
     Gori::Verbs.register_core(r)
