@@ -107,7 +107,7 @@ bottleneck every time.
 | Build (debug, → `bin/gori`) | `just build` (`shards build`) |
 | Full suite | `just test` (`crystal spec`) |
 | One file or dir | `just test-file spec/store_spec.cr` |
-| One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import` |
+| One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
 | Format + lint check | `just check` (`crystal tool format --check` then `lib/ameba/bin/ameba.cr`) |
 | Proxy benchmark | `just benchmark` |
 | Version consistency | `just vc` |
@@ -118,7 +118,11 @@ and docker: there is **no lint or format gate** (see the comment in
 
 ## Repo map
 
-`src/main.cr` → `src/gori.cr` → `src/gori/`. Specs under `spec/` mirror the source tree.
+`src/main.cr` → `src/gori.cr` → `src/gori/`. Specs under `spec/` mirror the source tree:
+`spec/<dir>/<name>_spec.cr` covers `src/gori/<dir>/<name>.cr`. The root of `spec/` holds two
+kinds of file and nothing else — the spec for a top-level source file (`spec/scope_spec.cr` ↔
+`src/gori/scope.cr`), and a cross-cutting **seam** spec that asserts a property of several
+subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam_provenance_spec.cr`).
 
 | Path | What |
 | --- | --- |

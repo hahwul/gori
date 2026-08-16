@@ -53,7 +53,11 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 (SQLite persistence), `tui/` (terminal UI), `verb.cr` + `verbs/` (the command system),
 `mcp/` (MCP server), `cli/` (the `gori run` suite), and one directory per tool
 (`repeater`, `fuzz`, `miner`, `sequencer`, `discover`, `oast`, `probe`, `decoder`).
-Specs under `spec/` mirror the source tree.
+Specs under `spec/` mirror the source tree: `spec/<dir>/<name>_spec.cr` covers
+`src/gori/<dir>/<name>.cr`. The root of `spec/` holds two kinds of file and nothing else —
+the spec for a top-level source file (`spec/scope_spec.cr` ↔ `src/gori/scope.cr`), and a
+cross-cutting *seam* spec that asserts a property of several subsystems at once and so
+mirrors no single file (`layering_spec.cr`, `send_seam_provenance_spec.cr`).
 
 [DESIGN.md](DESIGN.md) covers the *why*: the P0 to P8 principles that source comments
 cite inline (`(P4)`, `(P6/P7)`), the layering contract those directories have to honour,

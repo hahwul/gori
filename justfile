@@ -81,6 +81,14 @@ test-sequencer:
 test-import:
     crystal spec spec/import
 
+[group('development')]
+test-mcp:
+    crystal spec spec/mcp
+
+[group('development')]
+test-settings:
+    crystal spec spec/settings
+
 # Check code format and lint without changing files.
 # Paths are explicit and must stay in step with ci.yml's `format` job: bare
 # `crystal tool format` walks the whole working directory, so once `shards install`
