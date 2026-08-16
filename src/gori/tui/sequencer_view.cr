@@ -59,6 +59,12 @@ module Gori::Tui
       @focus = :config
       @sel = 0
       @scroll = 0
+      # "Following" the live tail means the cursor sits on the newest sample, exactly as
+      # HistoryView's `@follow` means it sits on `follow_index`. It is what makes `append_sample`
+      # drag the cursor down while a run streams — and moving the cursor off the last row
+      # (↑/↓, wheel, a click) clears it, so collecting 500 tokens does not fight an operator
+      # reading row 12.
+      @follow = true
       # The ANALYSIS report's row cursor, selection and scroll. `line_select_only`: a row here is
       # a label/value pair drawn in two columns (or a banner, or a sparkline), so a char rectangle
       # would address cells that are not adjacent — selection is whole rows, and the copy payload
@@ -282,9 +288,20 @@ module Gori::Tui
     end
 
     # --- samples nav ---
+    # ↑/↓ and the wheel. Both re-ask whether the cursor is on the tail — scrolling up during a
+    # collection is how the operator says "stop following"; walking back down to the newest
+    # sample re-arms it. Same post-condition as `select_sample_row` and HistoryView's `move`.
     def samples_move(d : Int32) : Nil
       return if @samples.empty?
       @sel = (@sel + d).clamp(0, @samples.size - 1)
+      @follow = (@sel == follow_index)
+    end
+
+    # The row a following cursor sits on. Samples are appended oldest-first, so the live tail
+    # is always the last index (HistoryView's `follow_index` picks an end per sort order).
+    private def follow_index : Int32
+      return 0 if @samples.empty?
+      @samples.size - 1
     end
 
     # ↑/↓ (⇧ to select) walk the report rows; the wheel scrolls the viewport and leaves the
@@ -470,6 +487,7 @@ module Gori::Tui
       @report_rev = -1
       @sel = 0
       @scroll = 0
+      @follow = true # a fresh run streams into an empty list — follow until the operator scrolls up
       @analysis.reset
     end
 
@@ -477,9 +495,14 @@ module Gori::Tui
       @running = false
     end
 
+    # The follow decision lives HERE, at the append, not in render's `ensure_visible`: there
+    # `@samples.size` has already grown, so a cursor on what was the tail reads as one row
+    # short of it and no post-append comparison can tell it apart from a cursor the operator
+    # parked one row up (#711). `@follow` is asked before the row lands, answered by the nav.
     def append_sample(s : Sequencer::Sample) : Nil
       @samples << s
       @samples_rev += 1
+      @sel = @samples.size - 1 if @running && @follow
     end
 
     # `requests` is the TRUE wire count (`Fuzz::CappedBackend#sent`, what `max_requests` is
@@ -773,9 +796,9 @@ module Gori::Tui
     # and `@samples` is what the draw loop walks.
     private def ensure_visible(cap : Int32) : Nil
       return if cap <= 0
-      # Auto-follow the tail while a run streams (unless the user scrolled up). Caller-specific
-      # state, so it stays here and keeps running BEFORE the window is derived from @sel.
-      @sel = @samples.size - 1 if @running && @sel >= @samples.size - 1
+      # Pure derivation: the window follows the cursor, and the cursor followed the tail back
+      # at `append_sample`. Nothing about following belongs here — by render time the append
+      # that would have to be detected is already indistinguishable from an operator's move.
       @scroll = Viewport.scroll_to_show(@sel, @scroll, cap, @samples.size)
     end
 
@@ -956,8 +979,11 @@ module Gori::Tui
         @samples.size, mx, my)
     end
 
+    # Click-select a row. Same post-condition as the keyboard `samples_move`: clicking off the
+    # newest sample stops the tail-follow, clicking back onto it re-arms it.
     def select_sample_row(idx : Int32) : Nil
       @sel = idx.clamp(0, {@samples.size - 1, 0}.max)
+      @follow = (@sel == follow_index)
     end
 
     def samples_selected_index : Int32

@@ -97,28 +97,68 @@ describe "list viewport tail clamp" do
       tall.contains?("tok11").should be_true
     end
 
-    # The auto-follow-the-tail line lives INSIDE ensure_visible and runs BEFORE the window is
-    # derived from @sel. It is caller-specific state, so it stayed at the call site rather than
-    # moving into the shared derivation, and this pins that it still runs in that order: while a
-    # run streams, a cursor sitting on the newest sample is held there and the window follows it
-    # down — the pane is far too short to show that row from the top.
-    #
-    # (`@sel >= @samples.size - 1` is evaluated AFTER the append, so it only ever HOLDS a cursor
-    # that is already the last index; it does not drag one up from the middle. Pre-existing —
-    # unchanged by this refactor, and pinned here as the behaviour it actually has.)
-    it "holds the cursor on the newest sample while a run streams" do
+    # --- auto-follow-the-tail (#711) ---------------------------------------------------
+    # The decision is made at `append_sample`, not in render's `ensure_visible`: by render time
+    # the list has already grown, so a cursor on what WAS the tail is indistinguishable from one
+    # the operator parked a row above it. `@follow` — HistoryView's vocabulary, re-asked by every
+    # cursor move as `@sel == follow_index` — is what tells them apart.
+    it "drags the cursor down to the newest sample while a run streams" do
       view = Gori::Tui::SequencerView.new
       view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
         Gori::Sequencer::Config.new)
       view.focus_pane(:samples)
       view.begin_run
       12.times { |i| view.append_sample(sequencer_sample(i)) }
-      view.samples_move(11) # parked on the newest
 
-      backend = render_at(view, 120, 20)
+      # No cursor key was pressed: the appends alone moved it.
       view.samples_selected_index.should eq(11)
+      backend = render_at(view, 120, 20)
       backend.contains?("tok11").should be_true
       backend.contains?("tok00").should be_false # the window followed it down
+    end
+
+    # The other half of the promise: collecting 500 tokens must not fight an operator reading
+    # row 07. Scrolling up is the "stop following" gesture, and walking back onto the newest
+    # sample re-arms it.
+    it "stops following the tail once the operator scrolls up, and re-arms at the bottom" do
+      view = Gori::Tui::SequencerView.new
+      view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
+        Gori::Sequencer::Config.new)
+      view.focus_pane(:samples)
+      view.begin_run
+      12.times { |i| view.append_sample(sequencer_sample(i)) }
+      view.samples_move(-4) # read row 07 while the run keeps collecting
+      view.samples_selected_index.should eq(7)
+
+      6.times { |i| view.append_sample(sequencer_sample(12 + i)) }
+      view.samples_selected_index.should eq(7) # the cursor stayed where it was put
+      backend = render_at(view, 120, 20)
+      backend.contains?("tok07").should be_true
+      backend.contains?("tok17").should be_false # and so did the window
+
+      view.samples_move(10) # back down onto the newest sample
+      view.samples_selected_index.should eq(17)
+      view.append_sample(sequencer_sample(18))
+      view.samples_selected_index.should eq(18) # following again
+    end
+
+    # A finished collection is a static list the operator reads. `finish_run` does not clear
+    # `@follow` — `@running` is the gate, so a late append (a saved run reloaded, a stray
+    # terminal event) never yanks the cursor out from under a reader.
+    it "does not follow an append when no run is streaming" do
+      view = Gori::Tui::SequencerView.new
+      view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,
+        Gori::Sequencer::Config.new)
+      view.focus_pane(:samples)
+      12.times { |i| view.append_sample(sequencer_sample(i)) }
+      view.samples_selected_index.should eq(0)
+
+      view.begin_run
+      3.times { |i| view.append_sample(sequencer_sample(i)) }
+      view.samples_selected_index.should eq(2)
+      view.finish_run
+      view.append_sample(sequencer_sample(3))
+      view.samples_selected_index.should eq(2) # the run ended; the cursor is the operator's now
     end
   end
 

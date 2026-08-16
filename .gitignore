@@ -9,3 +9,6 @@
 /home*/
 *.key.pem
 .DS_Store
+
+# Per-worktree Crystal build cache (agents set CRYSTAL_CACHE_DIR here).
+.crystal-cache/
