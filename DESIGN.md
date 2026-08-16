@@ -187,8 +187,8 @@ Core subsystems do not know that a surface exists. `store/`, `proxy/`, `probe/`,
 
 ```sh
 grep -rnE '\b(Tui|CLI|MCP)::' \
-  src/gori/{store,proxy,probe,fuzz,miner,discover,sequencer,oast}/ \
-  src/gori/{store,probe,fuzz,miner,discover,sequencer,oast}.cr
+  src/gori/{store,proxy,probe,fuzz,miner,discover,sequencer,oast,authorize}/ \
+  src/gori/{store,probe,fuzz,miner,discover,sequencer,oast,authorize}.cr
 ```
 
 (There is no `src/gori/proxy.cr`; the proxy is directory-only.) A comment may point at a

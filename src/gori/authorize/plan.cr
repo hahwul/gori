@@ -193,10 +193,13 @@ module Gori::Authorize
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
-      # Identities FIRST: `Passive.skip_reason` asks whether any identity would change a
-      # given request, so the skip decisions below cannot be taken without them.
-      identities = resolve_identities(options)
+      # Selection FIRST, identities second. `partition` needs both, but only this order
+      # reports the right mistake: a bare `gori run authorize` in a project with no saved
+      # identities is a `NoTarget` ("name a flow id or --query"), and resolving identities
+      # first answered it with `NoIdentities` — sending the operator off to configure a
+      # tab when they had simply named nothing to replay.
       details = resolve_flows(options)
+      identities = resolve_identities(options)
       targets, skipped = partition(details, identities, options, outbound)
       if targets.empty?
         raise PlanError.new(PlanError::Reason::NothingToSend,
@@ -331,7 +334,16 @@ module Gori::Authorize
     private def self.skip_reason(detail : Store::FlowDetail, identities : Array(Identity),
                                  options : PlanOptions) : Symbol?
       reason = Passive.skip_reason(detail, identities)
-      return nil if reason == :unsafe_method && options.unsafe_methods?
+      # Lifting `:unsafe_method` must not lift what comes AFTER it. `Passive.skip_reason` is
+      # an ordered chain and `:unsafe_method` is the third rung, so returning nil here would
+      # also skip the fourth — `:no_effect` — and replay a flow no identity changes. Every
+      # trial would then send byte-identical bytes, every verdict would come back `Same`, and
+      # the run would report a bypass it manufactured (see the comment above
+      # `Passive.skip_reason`). On an unsafe method that is the expensive version of the
+      # mistake: the POST runs again, once per identity, to prove nothing.
+      if reason == :unsafe_method && options.unsafe_methods?
+        return Passive.any_identity_changes?(detail, identities) ? nil : :no_effect
+      end
       reason
     end
 

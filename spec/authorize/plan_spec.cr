@@ -188,6 +188,22 @@ describe Gori::Authorize::Plan do
       end
     end
 
+    # The bare `gori run authorize` on a fresh project — nothing named AND no identities
+    # saved. Both are missing, so the order the builder resolves them in decides which
+    # mistake the operator is told about. It has to be the one they actually made:
+    # `NoIdentities` sends them to configure the Authorize tab, when all they did was
+    # forget to name a request. The helper above always supplies identities, so this is
+    # the one place the ordering is observable.
+    it "NoTarget wins over NoIdentities when neither was supplied" do
+      with_store do |store|
+        seed(store)
+        ex = expect_raises(PlanError) do
+          Plan.build(PlanOptions.new(store), ungated_outbound)
+        end
+        ex.reason.should eq(Reason::NoTarget)
+      end
+    end
+
     it "NoFlows — the selection resolved to nothing" do
       with_store do |store|
         seed(store)
@@ -269,6 +285,24 @@ describe Gori::Authorize::Plan do
         plan = Plan.build(options(store, flow_ids: [id], unsafe_methods: true), ungated_outbound)
         plan.targets.map(&.row.id).should eq([id])
         plan.skipped.should be_empty
+      end
+    end
+
+    # Lifting `:unsafe_method` must not lift `:no_effect` behind it. `Passive.skip_reason` is
+    # an ordered chain and the unsafe rung comes FIRST, so a builder that simply returns nil
+    # there never asks whether any identity changes the request. The cost of getting this
+    # wrong is not a spurious row: every trial sends identical bytes, every verdict comes
+    # back `Same`, and the run reports a bypass it manufactured — after re-running a POST
+    # once per identity to do it.
+    it "still declines an unsafe method no identity changes, even with the opt-in" do
+      with_store do |store|
+        # No Cookie on the wire, so the `anonymous` identity's `remove` is a no-op.
+        id = seed(store, method: "POST", target: "/transfer", cookie: false)
+        ex = expect_raises(PlanError) do
+          Plan.build(options(store, flow_ids: [id], unsafe_methods: true), ungated_outbound)
+        end
+        ex.reason.should eq(Reason::NothingToSend)
+        ex.skipped.map(&.reason).should eq([:no_effect])
       end
     end
 

@@ -59,8 +59,8 @@ parity with it, and every parity gap found so far has been in a surface, not an 
 
   ```sh
   grep -rnE '\b(Tui|CLI|MCP)::' \
-    src/gori/{store,proxy,probe,fuzz,miner,discover,sequencer,oast}/ \
-    src/gori/{store,probe,fuzz,miner,discover,sequencer,oast}.cr
+    src/gori/{store,proxy,probe,fuzz,miner,discover,sequencer,oast,authorize}/ \
+    src/gori/{store,probe,fuzz,miner,discover,sequencer,oast,authorize}.cr
   ```
 
   Today that returns hits in `src/gori/store/models.cr`, `src/gori/probe/group.cr`,

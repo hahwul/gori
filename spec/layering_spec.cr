@@ -22,7 +22,11 @@ require "./spec_helper"
 describe "layering contract" do
   it "keeps every surface reference in the core subsystems on a comment line" do
     root = File.expand_path(File.join(__DIR__, ".."))
-    subsystems = %w[store proxy probe fuzz miner discover sequencer oast]
+    # `authorize` is not in the AGENTS.md list because it did not exist when that list was
+    # written. It is a core engine layer with all three surfaces hanging off it — exactly
+    # the shape this contract governs — and it is clean today, so this is the one moment
+    # adding it costs nothing.
+    subsystems = %w[store proxy probe fuzz miner discover sequencer oast authorize]
 
     paths = [] of String
     subsystems.each do |name|
