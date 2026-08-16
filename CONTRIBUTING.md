@@ -5,7 +5,7 @@ only — please keep contributions aligned with that purpose.
 
 ## Getting set up
 
-Requires [Crystal](https://crystal-lang.org) `>= 1.20.2` and the native libraries used
+Requires [Crystal](https://crystal-lang.org) `>= 1.21.0` and the native libraries used
 for HTTP body decode:
 
 - macOS: `brew install crystal brotli zstd sqlite`

@@ -17,10 +17,10 @@
         inherit (pkgs) lib;
 
         # nixpkgs still ships Crystal 1.19.1, which is below shard.yml's
-        # `crystal: '>= 1.20.2'` and does not compile gori: src/gori/proxy/
+        # `crystal: '>= 1.21.0'` and does not compile gori: src/gori/proxy/
         # socket_tuning.cr reopens OpenSSL::SSL::Socket to reach `#bio`, which only
         # exists from 1.20 on. So pin the version gori's CI builds with instead.
-        # Delete this override (and use pkgs.crystal) once nixpkgs is >= 1.20.2.
+        # Delete this override (and use pkgs.crystal) once nixpkgs is >= 1.21.0.
         crystalVersion = "1.21.0";
         crystal = pkgs.crystal_1_19.overrideAttrs (old: {
           version = crystalVersion;

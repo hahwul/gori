@@ -168,7 +168,7 @@ sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
 
 ### Prerequisites
 
-- **Crystal** `>= 1.20.2`
+- **Crystal** `>= 1.21.0`
 - **pkg-config**
 - **Git**, to clone the repository
 

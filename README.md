@@ -89,7 +89,7 @@ nix profile install github:hahwul/gori   # or keep it
 
 ### From source
 
-Requires [Crystal](https://crystal-lang.org/) `>= 1.20.2` and `pkg-config`.
+Requires [Crystal](https://crystal-lang.org/) `>= 1.21.0` and `pkg-config`.
 
 ```bash
 git clone https://github.com/hahwul/gori.git

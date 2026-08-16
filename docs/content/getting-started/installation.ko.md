@@ -168,7 +168,7 @@ sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
 
 ### 사전 요구 사항 {#prerequisites}
 
-- **Crystal** `>= 1.20.2`
+- **Crystal** `>= 1.21.0`
 - **pkg-config**
 - 리포지터리를 클론할 **Git**
 

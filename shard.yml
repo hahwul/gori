@@ -8,7 +8,7 @@ targets:
   gori:
     main: src/main.cr
 
-crystal: '>= 1.20.2'
+crystal: '>= 1.21.0'
 
 license: Apache-2.0
 

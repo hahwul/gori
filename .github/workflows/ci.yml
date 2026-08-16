@@ -29,19 +29,11 @@ on:
 jobs:
   build-crystal:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # The floor shard.yml declares (`>= 1.20.2`) and the version development
-        # actually happens on. 1.21 is not incidental: the termisu fork and the
-        # ameba master pin in shard.yml exist specifically because upstream does
-        # not compile under it, so leaving 1.21 untested would test a toolchain
-        # nobody uses.
-        crystal-version: [1.20.2, 1.21.0]
     steps:
       - uses: actions/checkout@v6
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: ${{ matrix.crystal-version }}
+          crystal: 1.21.0
       - name: Install native link dependencies
         # brotli/zstd are linked via `@[Link(pkg_config:)]` (proxy/codec), sqlite3
         # via the sqlite3 shard. The rest (openssl, yaml, gmp, pcre2, gc, zlib)
@@ -94,9 +86,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: crystal-lang/install-crystal@v1
         with:
-          # One version, not the build matrix, for the same reason `format` pins one: the
-          # harnesses compile against the same `src` the matrix already builds twice, so a
-          # second version here would re-test the compiler rather than this repo.
+          # One version, for the same reason `format` pins one: the harnesses
+          # compile against the same `src` that `build-crystal` already builds, so
+          # an extra version here would re-test the compiler rather than this repo.
           crystal: 1.21.0
       - name: Install native link dependencies
         run: |
@@ -117,14 +109,11 @@ jobs:
   # always red is a check nobody reads, but one that is green by exclusion is worse.
   tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        crystal-version: [1.20.2, 1.21.0]
     steps:
       - uses: actions/checkout@v6
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: ${{ matrix.crystal-version }}
+          crystal: 1.21.0
       - name: Install native link dependencies
         run: |
           sudo apt-get update
