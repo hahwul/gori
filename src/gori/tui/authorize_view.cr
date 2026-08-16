@@ -28,11 +28,21 @@ module Gori::Tui
       property target : Authorize::Target?
       property state : Symbol # :pending | :running | :done | :error
       property error : String?
+      # The identity revision `target` was produced under. A result from an older set is not
+      # wrong — it is what those identities saw — but it no longer describes the current ones,
+      # so it counts as pending again.
+      property result_rev : Int32
 
       def initialize(@id : Int32, @detail : Store::FlowDetail)
         @target = nil
         @state = :pending
         @error = nil
+        @result_rev = -1
+      end
+
+      # Does this entry hold a result for the identity set `rev` names?
+      def current?(rev : Int32) : Bool
+        !@target.nil? && @result_rev == rev
       end
 
       def method : String
@@ -67,10 +77,25 @@ module Gori::Tui
 
     getter identities : Array(Authorize::Identity)
     getter entries : Array(Entry)
+    # Bumped whenever the identity set changes. An entry's result records the revision it was
+    # produced under, so a result from an older set counts as PENDING again — see
+    # `pending_entries`.
+    getter identity_rev : Int32
+
+    # Replace the identity set. Bumps `identity_rev`, which is what makes every result already
+    # on screen count as pending again: those verdicts were produced under the OLD set, and
+    # without this an operator who fixes a session cookie and presses ^R is told "every request
+    # already has a result" and nothing goes out.
+    def identities=(list : Array(Authorize::Identity)) : Nil
+      return if list == @identities
+      @identities = list
+      @identity_rev += 1
+    end
 
     def initialize
       @entries = [] of Entry
       @identities = AuthorizeView.default_identities
+      @identity_rev = 0
       @next_id = 0
       @sel = 0  # master (request) cursor
       @tsel = 0 # identity sub-cursor within the selected request
@@ -117,14 +142,19 @@ module Gori::Tui
       @entries.reject { |e| e.state == :running }
     end
 
-    # Entries with NO result yet — what "Run pending" sends. Includes an entry whose previous
-    # send ERRORED: it carries no verdict either, so it is unfinished work, not a done row.
+    # Entries with no CURRENT result — what "Run pending" sends. Three ways in: never run, a
+    # previous send errored (no verdict either way), or the result predates the identity set
+    # now configured.
     def pending_entries : Array(Entry)
-      @entries.select { |e| e.target.nil? && e.state != :running }
+      @entries.select { |e| pending?(e) }
     end
 
     def pending_count : Int32
-      @entries.count { |e| e.target.nil? && e.state != :running }
+      @entries.count { |e| pending?(e) }
+    end
+
+    private def pending?(e : Entry) : Bool
+      e.state != :running && !e.current?(@identity_rev)
     end
 
     # Remove the cursor entry. Returns false (and changes nothing) while that row is mid-run —
@@ -197,6 +227,7 @@ module Gori::Tui
       e.target = target
       e.state = :done
       e.error = nil
+      e.result_rev = @identity_rev
     end
 
     def apply_error(id : Int32, message : String) : Nil

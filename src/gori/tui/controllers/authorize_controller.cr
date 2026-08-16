@@ -31,6 +31,7 @@ module Gori::Tui
       @active_gen = nil.as(Int32?) # non-nil while a run fiber is alive
       @batch_ids = Set(Int32).new
       @batch_size = 0
+      @identities_loaded = nil.as(Array(Authorize::Identity)?)
     end
 
     def view : AuthorizeView
@@ -43,6 +44,57 @@ module Gori::Tui
 
     def command_scope : Verb::Scope
       Verb::Scope::Authorize
+    end
+
+    # --- identities ----------------------------------------------------------
+
+    # The identities every run replays under, loaded from the project on first use.
+    #
+    # LAZY rather than loaded at `Session.open` the way env vars are: these are TUI-only, and a
+    # fresh Runner (and so a fresh controller) is built per project, so switching projects
+    # re-reads them for free. Nothing outside the TUI reads them, which is why there is no
+    # `#reload` hook — a second gori process editing the same project would go unnoticed here.
+    def identities : Array(Authorize::Identity)
+      loaded = @identities_loaded
+      return loaded if loaded
+      stored = Authorize.parse_json(@host.session.store.setting(Store::AUTHORIZE_IDENTITIES_KEY))
+      list = stored.empty? ? AuthorizeView.default_identities : stored
+      @view.identities = list
+      @identities_loaded = list
+      list
+    end
+
+    # Add or replace one identity. `index` nil = append. Returns false (keeping the form open)
+    # when the form could not build one.
+    def apply_identity(index : Int32?, identity : Authorize::Identity?) : Bool
+      return false unless identity
+      list = identities.dup
+      if i = index
+        return false unless 0 <= i < list.size
+        # Editing must not move the baseline: the flag belongs to the list, and the form does
+        # not carry it (see AuthorizeIdentityOverlay).
+        list[i] = identity.with_baseline(list[i].baseline?)
+      else
+        list << identity.with_baseline(false)
+      end
+      replace_identities(list)
+      true
+    end
+
+    # Write a whole list back — the list card's delete / baseline moves come through here too.
+    # Returns whether the project write committed; a false is REPORTED by the caller rather
+    # than swallowed, since the operator would otherwise lose the identity on restart with no
+    # word.
+    def replace_identities(list : Array(Authorize::Identity)) : Bool
+      @view.identities = list
+      @identities_loaded = list
+      @host.session.store.set_setting(Store::AUTHORIZE_IDENTITIES_KEY, Authorize.serialize(list))
+    end
+
+    # Editing while a batch is in flight would change the set the running requests are being
+    # sent under, halfway through.
+    def identities_editable? : Bool
+      !running?
     end
 
     # --- cross-tab seeding (Send to Authorize) -------------------------------

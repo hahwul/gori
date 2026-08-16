@@ -19,6 +19,12 @@ module Gori
     # see what the rules do to it. Absent = show RewriterController::DEFAULT_SAMPLE.
     REWRITER_SAMPLE_KEY = "rewriter_sample"
 
+    # The Authorize tab's identities (name + header overlay), as a JSON array. Per PROJECT
+    # because a session cookie belongs to one target — carrying it into the next engagement
+    # would be both useless and a disclosure. The values are stored in PLAINTEXT, exactly as
+    # `env.vars` already is on this same table; the tree is 0700 and the DB 0600.
+    AUTHORIZE_IDENTITIES_KEY = "authorize_identities"
+
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end

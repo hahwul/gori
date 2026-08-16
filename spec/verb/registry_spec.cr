@@ -1021,6 +1021,10 @@ private class FakeContext < ExecContext
     @calls << :authorize_remove
   end
 
+  def authorize_identities : Nil
+    @calls << :authorize_identities
+  end
+
   def authorize_clear : Nil
     @calls << :authorize_clear
   end

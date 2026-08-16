@@ -105,7 +105,69 @@ describe Gori::Authorize do
     end
   end
 
+  describe "persistence" do
+    it "round-trips a set of identities" do
+      ids = [
+        Identity.as_captured("as-captured"),
+        Identity.new("admin", set_headers: [{"Cookie", "session=ADMIN"}, {"X-Role", "admin"}]),
+        Identity.new("anonymous", remove_headers: ["Cookie", "Authorization"]),
+      ]
+      back = Gori::Authorize.parse_json(Gori::Authorize.serialize(ids))
+      back.size.should eq(3)
+      back[0].name.should eq("as-captured")
+      back[0].baseline?.should be_true
+      back[1].set_headers.should eq([{"Cookie", "session=ADMIN"}, {"X-Role", "admin"}])
+      back[1].baseline?.should be_false
+      back[2].remove_headers.should eq(["Cookie", "Authorization"])
+    end
+
+    # This is the whole reason the reader is written the way it is: identities are read on the
+    # project-open path, so a raise here would fail the project open over one settings row.
+    it "returns an empty list for unparseable JSON instead of raising" do
+      Gori::Authorize.parse_json("{not json at all").should be_empty
+      Gori::Authorize.parse_json("").should be_empty
+      Gori::Authorize.parse_json(nil).should be_empty
+      Gori::Authorize.parse_json(%({"an":"object, not an array"})).should be_empty
+    end
+
+    it "skips a malformed entry and keeps the rest" do
+      raw = %([{"nope":1},{"name":""},{"name":"good","set":[],"remove":[]}])
+      ids = Gori::Authorize.parse_json(raw)
+      ids.map(&.name).should eq(["good"])
+    end
+
+    it "skips malformed header rows inside an otherwise good identity" do
+      raw = %([{"name":"x","set":[{"name":"A","value":"1"},{"name":"B"},"junk"],"remove":["C","",7]}])
+      id = Gori::Authorize.parse_json(raw).first
+      id.set_headers.should eq([{"A", "1"}])
+      id.remove_headers.should eq(["C"])
+    end
+
+    it "defaults a missing baseline flag to false" do
+      Gori::Authorize.parse_json(%([{"name":"x"}])).first.baseline?.should be_false
+    end
+  end
+
   describe Identity do
+    it "summarises by header NAME, never by value (a list must not paint credentials)" do
+      id = Identity.new("admin", set_headers: [{"Cookie", "session=SECRET"}])
+      id.summary.should eq("sets Cookie")
+      id.summary.should_not contain("SECRET")
+
+      Identity.new("anon", remove_headers: ["Cookie", "Authorization"]).summary
+        .should eq("drops Cookie, Authorization")
+      Identity.as_captured.summary.should eq("as captured")
+    end
+
+    it "moves the baseline flag without touching anything else" do
+      id = Identity.new("admin", set_headers: [{"Cookie", "x"}])
+      promoted = id.with_baseline(true)
+      promoted.baseline?.should be_true
+      promoted.name.should eq("admin")
+      promoted.set_headers.should eq(id.set_headers)
+      id.baseline?.should be_false # the original is untouched (a struct)
+    end
+
     it "as_captured is a passthrough baseline" do
       id = Identity.as_captured
       id.passthrough?.should be_true

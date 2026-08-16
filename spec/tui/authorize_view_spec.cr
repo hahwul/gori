@@ -213,6 +213,49 @@ describe AuthorizeView do
     end
   end
 
+  # Changing the identity set invalidates every result already on screen: those verdicts were
+  # produced under the OLD set. Without this, an operator who fixes a session cookie and
+  # presses ^R is told "every request already has a result" and nothing goes out.
+  describe "identity revisions" do
+    it "makes a finished entry pending again when the identities change" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(bypass: false))
+      v.pending_entries.should be_empty
+
+      v.identities = [Gori::Authorize::Identity.new("new-session", set_headers: [{"Cookie", "x"}])]
+      v.pending_entries.map(&.id).should eq([id])
+      v.pending_count.should eq(1)
+    end
+
+    it "keeps the old verdict on screen while it waits to be re-run" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(bypass: true))
+      v.identities = [Gori::Authorize::Identity.new("other")]
+      # still readable — it is what those identities saw, just no longer current
+      v.entry_by_id(id).not_nil!.verdict.should eq(:bypass)
+      render(v)
+    end
+
+    it "does not bump the revision when the set is assigned an equal list" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(bypass: false))
+      v.identities = AuthorizeView.default_identities # same content
+      v.pending_entries.should be_empty
+    end
+
+    it "counts a re-run under the new set as current again" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(bypass: false))
+      v.identities = [Gori::Authorize::Identity.new("other")]
+      v.apply_result(id, target(bypass: false))
+      v.pending_entries.should be_empty
+    end
+  end
+
   describe "queue editing" do
     it "removes the cursor entry and clamps the cursor" do
       v = AuthorizeView.new

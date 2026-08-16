@@ -1038,6 +1038,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:authorize_remove)
   end
 
+  def authorize_identities : Nil
+    rec(:authorize_identities)
+  end
+
   def authorize_clear : Nil
     rec(:authorize_clear)
   end

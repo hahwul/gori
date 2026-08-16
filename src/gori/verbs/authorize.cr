@@ -42,6 +42,15 @@ module Gori
         Verb::Scope::Authorize, [Verb::Chord.new("x", ctrl: true)],
         available: busy, mnemonic: 's') { |ctx| ctx.authorize_stop; nil }
 
+      # Available even with an empty queue: configuring who you are is what you do BEFORE
+      # sending anything here. Only a live run locks it.
+      r.register Verb::Definition.new(
+        "authorize.identities", "Identities",
+        "Edit the identities every request is replayed under (saved with the project)",
+        Verb::Scope::Authorize, [Verb::Chord.new("i")],
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :authorize && !ctx.authorize_running? },
+        mnemonic: 'i') { |ctx| ctx.authorize_identities; nil }
+
       r.register Verb::Definition.new(
         "authorize.remove", "Remove request", "Drop the selected request from the queue",
         Verb::Scope::Authorize, [Verb::Chord.new("d")],

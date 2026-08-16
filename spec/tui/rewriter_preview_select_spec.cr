@@ -83,6 +83,9 @@ private class FakeHost
   def open_fuzz_advanced_editor : Nil
   end
 
+  def open_authorize_identities : Nil
+  end
+
   def reconfigure_sequence : Nil
   end
 

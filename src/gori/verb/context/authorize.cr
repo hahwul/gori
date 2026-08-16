@@ -16,6 +16,9 @@ abstract class Gori::Verb::ExecContext
   abstract def authorize_remove : Nil # drop the cursor request from the queue
   abstract def authorize_clear : Nil  # empty the queue
 
+  # Open the identity list — who the queue is replayed as. The set persists per project.
+  abstract def authorize_identities : Nil
+
   # A request is queued — the gate for run/remove/clear.
   abstract def authorize_has_target? : Bool
   # A run is in flight — gates Stop, and hides the run verbs while one is going.

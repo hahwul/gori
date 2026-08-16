@@ -1,3 +1,5 @@
+require "json"
+
 module Gori
   # Authorization / access-control testing (Burp Autorize / Auth Analyzer shape): replay a
   # captured request under several IDENTITIES — an admin session, a low-privilege user, an
@@ -6,8 +8,9 @@ module Gori
   #
   # gori has no multi-session primitive of its own: Env is one value per key and Bindings is a
   # single process-global namespace. So an identity here is a small STATIC header overlay —
-  # the 90% case — carried in memory only. The send path, the diff and the verdict all reuse
-  # existing engines (`Fuzz::Sender`, `Repeater::ExchangeMeta`, `Discover::Fingerprint`).
+  # the 90% case. The send path, the diff and the verdict all reuse existing engines
+  # (`Fuzz::Sender`, `Repeater::ExchangeMeta`, `Discover::Fingerprint`); the identities
+  # themselves persist per project (see `serialize` / `parse_json` below).
   module Authorize
     # One identity worth of auth state, applied as a header overlay onto a captured request
     # before it is replayed. `set_headers` upsert (replace any existing header of that name,
@@ -40,6 +43,101 @@ module Gori
       def passthrough? : Bool
         @set_headers.empty? && @remove_headers.empty?
       end
+
+      # The same identity with a different baseline flag — the list editor's `b` key, which is
+      # the ONLY place the flag moves, so two identities can never both claim it.
+      def with_baseline(flag : Bool) : Identity
+        Identity.new(@name, @set_headers, @remove_headers, flag)
+      end
+
+      # A one-line summary of what this overlay does, header NAMES only. The identities list
+      # renders this rather than the values: a session cookie is a credential, and a list that
+      # paints it on screen leaks it to anyone glancing at the terminal. The form shows the
+      # value, because that is what editing means.
+      def summary : String
+        return "as captured" if passthrough?
+        parts = [] of String
+        parts << "sets #{@set_headers.map(&.[0]).join(", ")}" unless @set_headers.empty?
+        parts << "drops #{@remove_headers.join(", ")}" unless @remove_headers.empty?
+        parts.join(" · ")
+      end
+    end
+
+    # --- persistence ------------------------------------------------------------
+    # Hand-built JSON, mirroring `Env.serialize_vars` / `Env.parse_vars_json` rather than
+    # `JSON::Serializable`: this is the shape every persisted blob in the project's `settings`
+    # table already uses, and the tolerant reader below is the half that matters.
+
+    def self.serialize(identities : Array(Identity)) : String
+      JSON.build do |j|
+        j.array do
+          identities.each do |id|
+            j.object do
+              j.field "name", id.name
+              j.field "baseline", id.baseline?
+              j.field "set" do
+                j.array do
+                  id.set_headers.each do |(name, value)|
+                    j.object do
+                      j.field "name", name
+                      j.field "value", value
+                    end
+                  end
+                end
+              end
+              j.field "remove" do
+                j.array { id.remove_headers.each { |name| j.string(name) } }
+              end
+            end
+          end
+        end
+      end
+    end
+
+    # A malformed blob degrades to "no identities" and a malformed ENTRY is skipped — never a
+    # raise. The `rescue JSON::ParseException` is load-bearing rather than defensive: this is
+    # read on the project-open path, and letting a bad parse escape would fail the whole
+    # project open over a settings row (the exact reasoning `Env.parse_vars_json` records).
+    def self.parse_json(raw : String?) : Array(Identity)
+      list = [] of Identity
+      return list if raw.nil? || raw.strip.empty?
+      arr = begin
+        JSON.parse(raw).as_a?
+      rescue JSON::ParseException
+        nil
+      end
+      return list unless arr
+      arr.each do |e|
+        next unless o = e.as_h?
+        name = o["name"]?.try(&.as_s?)
+        next if name.nil? || name.empty?
+        list << Identity.new(name, parse_set(o["set"]?), parse_remove(o["remove"]?),
+          o["baseline"]?.try(&.as_bool?) || false)
+      end
+      list
+    end
+
+    private def self.parse_set(node : JSON::Any?) : Array({String, String})
+      pairs = [] of {String, String}
+      return pairs unless arr = node.try(&.as_a?)
+      arr.each do |e|
+        next unless o = e.as_h?
+        name = o["name"]?.try(&.as_s?)
+        value = o["value"]?.try(&.as_s?)
+        next if name.nil? || name.empty? || value.nil?
+        pairs << {name, value}
+      end
+      pairs
+    end
+
+    private def self.parse_remove(node : JSON::Any?) : Array(String)
+      names = [] of String
+      return names unless arr = node.try(&.as_a?)
+      arr.each do |e|
+        name = e.as_s?
+        names << name if name && !name.empty?
+      end
+      names
     end
 
     # Apply an identity's header overlay to a captured request and return the wire bytes to

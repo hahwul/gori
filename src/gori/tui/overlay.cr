@@ -58,6 +58,11 @@ module Gori::Tui
     ColormarkerColor
     ExtractRule
     RewriterStub
+    # The Authorize tab's identities: a LIST card (pick / reorder the baseline / delete) and
+    # the per-identity FORM it hands off to. Two members, because the list stays the thing the
+    # form returns to — see Runner#open_authorize_identities.
+    AuthorizeIdentities
+    AuthorizeIdentity
     CaImport
     Import
     Export

@@ -32,7 +32,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :passthrough, :listeners, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
-  :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :ca_import, :import, :export, :scope_rule, :sequence_config,
+  :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :library_pick, :copy_as, :send_to,
 }
 
@@ -41,6 +41,10 @@ private EXPECTED_OVERLAY_SYMS = {
 # batches appending different lines merge cleanly, where a shared count could not. Both
 # examples below read this, so the ledger lives in exactly one place.
 private MIGRATED_KINDS = [
+  # Authorize identities — the list card and the per-identity form it hands off to.
+  # Born on the seam.
+  OverlayKind::AuthorizeIdentities,
+  OverlayKind::AuthorizeIdentity,
   OverlayKind::ScopeRule,
   OverlayKind::SequenceConfig,
   OverlayKind::MineConfig,

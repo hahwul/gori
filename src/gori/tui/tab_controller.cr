@@ -33,6 +33,10 @@ module Gori::Tui
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
     abstract def open_fuzz_advanced_editor : Nil
+    # The Authorize tab's identity LIST. Only the list is opened from outside: the per-identity
+    # form is reached from it, and an overlay cannot open another overlay, so the Runner keeps
+    # that hand-off to itself (Runner#open_authorize_identities).
+    abstract def open_authorize_identities : Nil
     # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
     abstract def reconfigure_sequence : Nil
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).

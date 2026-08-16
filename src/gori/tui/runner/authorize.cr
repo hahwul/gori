@@ -33,6 +33,44 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     "#{base} — ^R to run"
   end
 
+  # The identity LIST card. Add/edit hand off to the form and come back here.
+  #
+  # An overlay cannot open another overlay — `open_overlay` is private to the Runner — so the
+  # list ARMS `pending` and closes, and this `on_close` (run by the shell AFTER the card is
+  # dropped) is what opens the form. Same shape as the Links list → picker hand-off.
+  def open_authorize_identities : Nil
+    open_authorize_identities_at(nil)
+  end
+
+  private def open_authorize_identities_at(cursor : Int32?) : Nil
+    list = AuthorizeIdentitiesOverlay.new(authorize_controller.identities, cursor)
+    list.on_change = ->(updated : Array(Gori::Authorize::Identity)) {
+      authorize_controller.replace_identities(updated)
+    }
+    list.on_close = -> {
+      if pending = list.pending
+        open_authorize_identity_form(pending, list.selected)
+      end
+    }
+    open_overlay(list)
+  end
+
+  private def open_authorize_identity_form(pending : AuthorizeIdentitiesOverlay::Pending,
+                                           cursor : Int32) : Nil
+    all = authorize_controller.identities
+    idx = pending.index
+    editing = idx ? all[idx]? : nil
+    # Every OTHER identity's name, so the form can refuse a duplicate: two rows under one
+    # label in the results table would leave no way to tell which session produced which.
+    taken = all.each_with_index.compact_map { |(id, i)| i == idx ? nil : id.name }.to_a
+    form = AuthorizeIdentityOverlay.new(editing, idx, taken)
+    form.on_commit = -> { authorize_controller.apply_identity(idx, form.build_identity) }
+    # Both paths — saved or cancelled — return to a FRESHLY built list, so it shows whatever
+    # the commit just wrote.
+    form.on_close = -> { open_authorize_identities_at(cursor) }
+    open_overlay(form)
+  end
+
   def authorize_run : Nil
     authorize_controller.run(:pending)
   end
@@ -63,5 +101,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def authorize_running? : Bool
     authorize_controller.running?
+  end
+
+  def authorize_identities : Nil
+    if authorize_controller.identities_editable?
+      open_authorize_identities
+    else
+      @toast = "a run is in flight — ^X to stop it first"
+    end
   end
 end
