@@ -1966,7 +1966,8 @@ module Gori::Tui
         sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
-        listeners: listener_chip_count, listener_errors: @session.listener_errors.size)
+        listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
+        authorize: authorize_chip_label)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
@@ -2050,6 +2051,12 @@ module Gori::Tui
     # colour off — keep the `probe:<mode>` shape if you change this.
     private def probe_label : String
       "probe:#{@session.probe.mode.label}"
+    end
+
+    # The Authorize tab's passive replay, and ONLY while it is on — an empty string is what
+    # keeps the chip off the bar the rest of the time (see `Chrome.top_bar_chips`).
+    private def authorize_chip_label : String
+      authorize_controller.passive? ? "authz:replay" : ""
     end
 
     # A red top-bar chip whenever the sandbox is on — a hard block gate MUST stay visible

@@ -432,6 +432,38 @@ describe "Chrome top-bar chip hit-testing" do
       bypass: 2).should eq(:bypass)
   end
 
+  # Passive replay is the one mode on this bar that puts requests on a target unattended, so
+  # it is announced while it runs and absent the rest of the time.
+  it "shows the authorize chip only while passive replay is on" do
+    rect = Rect.new(0, 0, 110, 1)
+    off = MemoryBackend.new(110, 1)
+    Chrome.render_top_bar(Screen.new(off), rect, project: "acme", scope: "scope:2",
+      probe: "probe:passive", listen: "127.0.0.1:8080")
+    off.row(0).should_not contain("authz")
+
+    on = MemoryBackend.new(110, 1)
+    Chrome.render_top_bar(Screen.new(on), rect, project: "acme", scope: "scope:2",
+      probe: "probe:passive", listen: "127.0.0.1:8080", authorize: "authz:replay")
+    on.row(0).should contain("authz:replay")
+  end
+
+  # The hit-test builds its rects from the SAME chip list render does. If the authorize chip
+  # were threaded into one and not the other, every clickable chip right of it would answer
+  # for its neighbour's cells the whole time passive was on.
+  it "keeps every clickable chip's hit box correct while the authorize chip is present" do
+    rect = Rect.new(0, 0, 110, 1)
+    args = {scope: "scope:2", probe: "probe:passive", listen: "127.0.0.1:8080",
+            authorize: "authz:replay"}
+    {:scope, :probe, :listen, :palette, :settings}.each do |tag|
+      r = Chrome.top_bar_chip_rect(rect, tag, **args).not_nil!
+      Chrome.top_bar_chip_at(rect, r.x, 0, **args).should eq(tag)
+      Chrome.top_bar_chip_at(rect, r.right - 1, 0, **args).should eq(tag)
+    end
+    # Read-only: a stray click must not toggle unattended sending.
+    arect = Chrome.top_bar_chip_rect(rect, :authorize, **args).not_nil!
+    Chrome.top_bar_chip_at(rect, arect.x, 0, **args).should be_nil
+  end
+
   it "resolves a click to the chip's tag, and ignores passive readouts" do
     # 110 cols: every optional chip is present at once here (notify + sandbox on top of the
     # always-on ones), which overflows an 80-col bar — see the overflow spec below.

@@ -358,7 +358,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       listen: listen_chip_label,
       unread: @notifications.unread, capturing: @session.capturing?,
       write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
-      listeners: listener_chip_count, listener_errors: @session.listener_errors.size)
+      listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
+      authorize: authorize_chip_label)
     return false unless tag
 
     case tag

@@ -176,7 +176,8 @@ module Gori::Tui
                             sandbox : String = "",
                             unread : Int32 = 0, capturing : Bool = true,
                             write_failures : Int32 = 0, bypass : Int32 = 0,
-                            listeners : Int32 = 0, listener_errors : Int32 = 0) : Nil
+                            listeners : Int32 = 0, listener_errors : Int32 = 0,
+                            authorize : String = "") : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
@@ -196,7 +197,7 @@ module Gori::Tui
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
-        listeners: listeners, listener_errors: listener_errors)
+        listeners: listeners, listener_errors: listener_errors, authorize: authorize)
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -213,7 +214,8 @@ module Gori::Tui
                                    intercept : String, sandbox : String, listen : String,
                                    unread : Int32, capturing : Bool,
                                    write_failures : Int32, bypass : Int32 = 0,
-                                   listeners : Int32 = 0, listener_errors : Int32 = 0) : Array(Chip)
+                                   listeners : Int32 = 0, listener_errors : Int32 = 0,
+                                   authorize : String = "") : Array(Chip)
       chips = [] of Chip
       chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
       unless scope.empty?
@@ -229,6 +231,20 @@ module Gori::Tui
       # scanning), accent while passive, orange once active probes are in flight — the same
       # colour ladder ProbeView#mode_color uses, so the two readouts can't disagree.
       chips << Chip.new(:probe, probe, probe_chip_color(probe), clickable: true) unless probe.empty?
+      # Authorize's passive replay, beside Probe because they are the two subsystems that act
+      # on captured traffic on their own. ORANGE, the colour Probe uses once its ACTIVE rules
+      # are in flight — the shared meaning being "gori is putting requests on the target
+      # without being asked each time", which is the one state on this bar you would want to
+      # notice from across the room.
+      #
+      # ABSENT when off, rather than a muted `:off` like scope and probe carry: those two are
+      # always-on lenses whose state you read, while this is a mode you switch on for a while.
+      # A chip that is only ever there while it matters is its own signal.
+      #
+      # Not `authorize:passive`: `probe:passive` already sits two chips away meaning "scanning
+      # WITHOUT sending", and this mode is the opposite — the word would name two opposite
+      # behaviours on one bar. `replay` says what leaves the machine.
+      chips << Chip.new(:authorize, authorize, Theme.orange) unless authorize.empty?
       chips << Chip.new(:rules, rules, Theme.text) unless rules.empty?
       chips << Chip.new(:intercept, intercept, Theme.red) unless intercept.empty?
       # TLS passthrough (#497): N hosts gori relayed WITHOUT decrypting, so nothing was
@@ -318,10 +334,11 @@ module Gori::Tui
     def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, probe : String = "",
                                rules : String = "", intercept : String = "", sandbox : String = "",
                                listen : String, unread : Int32 = 0, capturing : Bool = true,
-                               write_failures : Int32 = 0, bypass : Int32 = 0) : Rect?
+                               write_failures : Int32 = 0, bypass : Int32 = 0,
+                               authorize : String = "") : Rect?
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
-        write_failures: write_failures, bypass: bypass)
+        write_failures: write_failures, bypass: bypass, authorize: authorize)
       idx = chips.index { |c| c.tag == tag }
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
@@ -337,12 +354,12 @@ module Gori::Tui
                              sandbox : String = "", listen : String, unread : Int32 = 0,
                              capturing : Bool = true, write_failures : Int32 = 0,
                              bypass : Int32 = 0, listeners : Int32 = 0,
-                             listener_errors : Int32 = 0) : Symbol?
+                             listener_errors : Int32 = 0, authorize : String = "") : Symbol?
       return nil unless rect.contains?(mx, my)
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
-        listeners: listeners, listener_errors: listener_errors)
+        listeners: listeners, listener_errors: listener_errors, authorize: authorize)
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
       rects = chip_layout(rect, chips, name_x + 1)
       chips.each_with_index do |chip, i|
