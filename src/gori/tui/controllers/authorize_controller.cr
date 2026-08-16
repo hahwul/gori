@@ -61,6 +61,7 @@ module Gori::Tui
       @passive_unscoped = Set(String).new
       @seeds = Channel(Store::FlowDetail).new(64)
       @passive_seen_count = 0
+      @passive_closed = false
       @passive_skips = Hash(Symbol, Int32).new(0)
     end
 
@@ -107,7 +108,12 @@ module Gori::Tui
       else
         list << identity.with_baseline(false)
       end
-      replace_identities(list)
+      # The write's outcome is the caller's answer: `false` keeps the form open, which is what
+      # stops an identity from looking saved and being gone at the next restart.
+      unless replace_identities(list)
+        @host.status("authorize: the project could not be written — identity not saved")
+        return false
+      end
       true
     end
 
@@ -192,6 +198,10 @@ module Gori::Tui
         end
       rescue Channel::ClosedError
         # project closing
+      ensure
+        # The feed only ends when the session closes it, which is also the signal the catch-up
+        # loop needs — nothing else would ever tell that timer to stop.
+        @passive_closed = true
       end
       start_passive_catchup(store)
     end
@@ -205,12 +215,18 @@ module Gori::Tui
       spawn(name: "authorize-passive-catchup") do
         loop do
           sleep PASSIVE_CATCHUP_INTERVAL
+          break if @passive_closed # the session went away; nothing else stops this timer
           next unless @passive
           store.recent_flows(PASSIVE_CATCHUP_SCAN).each do |row|
             break unless @passive
             next unless row.state.complete?
             detail = store.get_flow(row.id)
             next unless detail
+            # Skip what is already queued HERE rather than letting `accept_seed` count it as a
+            # duplicate: this loop re-offers the same 200 rows every 30s, so counting them made
+            # the readout climb to thousands "seen" on an idle session and left `already queued`
+            # permanently winning the skip tally — hiding the reason worth reading.
+            next if @passive_seen.includes?(Authorize::Passive.key(detail))
             select
             when @seeds.send(detail)
             else
@@ -306,7 +322,13 @@ module Gori::Tui
     private def maybe_autorun : Nil
       return unless @passive
       return if running?
-      return if @view.pending_entries.empty?
+      # A stop the operator asked for OUTLIVES the batch it stopped. `finish_batch` settles the
+      # un-run rows back to :pending, so without this the very next drain tick saw pending work,
+      # called `run`, and `run`'s `reset_stop` erased the stop — ^X could not stop anything
+      # while passive was on, which is the operator losing control of what leaves the machine.
+      # Cleared by the next explicit run, or by switching passive off and on.
+      return if @view.stop_requested?
+      return if @view.auto_pending_entries.empty?
       run(:pending)
     end
 
@@ -361,7 +383,12 @@ module Gori::Tui
       return @host.status("a run is already in flight") if running?
       batch = select_batch(mode)
       return if batch.nil? # select_batch already said why
-      identities = @view.identities
+                # `identities`, not `@view.identities`: the loader is what reads the project's persisted
+                # set, and the view is seeded with the built-in defaults at construction. Reading the
+                # view here replayed a reopened project under as-captured + anonymous while the header
+                # advertised the same two — the persisted identities were silently ignored on every
+                # manual run of a fresh session.
+      idents = identities
       outbound = Outbound.allowlist(@host.session.scope)
       verify = Settings.verify_upstream?
       # Arm the batch on the MAIN fiber, before anything is spawned: the stop flag has to be
@@ -375,7 +402,7 @@ module Gori::Tui
       @active_gen = gen
       noun = "#{batch.size} request#{batch.size == 1 ? "" : "s"}"
       @job_id = @host.jobs.start(:authorize, noun, Jobs::Goto.new(:authorize))
-      @host.status("authorize: replaying #{noun} under #{identities.size} identities…")
+      @host.status("authorize: replaying #{noun} under #{idents.size} identities…")
       # Snapshot the details now — the background fiber must not touch the view.
       jobs = batch.map { |e| {e.id, e.detail} }
       stop = -> { @view.stop_requested? }
@@ -386,7 +413,7 @@ module Gori::Tui
           begin
             # nil = the stop landed part-way through this request's identities, so it has no
             # complete result and must not claim a verdict (see `Authorize::Engine#run`).
-            if target = engine.run(detail, identities, stop)
+            if target = engine.run(detail, idents, stop)
               @events.send(Outcome.new(gen, eid, target: target))
             end
           rescue ex
@@ -450,6 +477,14 @@ module Gori::Tui
     def clear : Nil
       return @host.status("a run is in flight — ^X to stop it first") if running?
       @view.clear
+      # The dedup set and the cap notice go with the queue. The cap's own advice is "clear it to
+      # keep going", and leaving the keys behind made that false: every endpoint already seen
+      # would be skipped as a duplicate forever, with its results gone.
+      @passive_seen.clear
+      @passive_capped = false
+      @passive_seen_count = 0
+      @passive_skips.clear
+      @view.passive_note = passive_readout if @passive
       @host.status("authorize: cleared")
     end
 
@@ -518,6 +553,14 @@ module Gori::Tui
     private def run_summary(stopped : Bool) : String
       done = @view.completed_in(@batch_ids)
       bypasses = @view.bypasses_in(@batch_ids)
+      # A run the gate refused outright is NOT a clean bill of health. Sandbox mode or an
+      # EXCLUDE rule stops every send before the socket, and reporting that as "no identity
+      # matched the baseline" claims a result for traffic that never left.
+      blocked = @view.blocked_in(@batch_ids)
+      if blocked > 0 && blocked == done
+        why = @view.blocked_reason_in(@batch_ids)
+        return "authorize: nothing was sent — #{blocked} request#{blocked == 1 ? "" : "s"} refused before the socket#{why ? " (#{why})" : ""}"
+      end
       if stopped
         tail = bypasses > 0 ? " · #{bypasses} bypass#{bypasses == 1 ? "" : "es"}" : ""
         return "authorize: stopped — #{done} of #{@batch_size} replayed#{tail}"

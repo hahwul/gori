@@ -283,6 +283,86 @@ describe AuthorizeView do
     end
   end
 
+  # Review findings, each pinned where it broke.
+  describe "re-run eligibility" do
+    # A manual ^R is the operator asking again, and a request that raised is exactly what they
+    # might want retried.
+    it "still offers a raised entry to a manual run" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_error(id, "boom")
+      v.pending_entries.map(&.id).should contain(id)
+    end
+
+    # ...but passive asks on every drain tick with nobody watching, so an entry that raises by
+    # construction would be re-dispatched forever, one fiber and one Jobs row per tick.
+    it "keeps a raised entry out of passive's unattended re-run" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_error(id, "boom")
+      v.auto_pending_entries.map(&.id).should_not contain(id)
+    end
+
+    it "offers it to passive again once the identity set changes" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_error(id, "boom")
+      v.identities = [Gori::Authorize::Identity.new("other", set_headers: [{"Cookie", "x"}])]
+      v.auto_pending_entries.map(&.id).should contain(id)
+    end
+
+    it "offers a never-run entry to both" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.pending_entries.map(&.id).should contain(id)
+      v.auto_pending_entries.map(&.id).should contain(id)
+    end
+  end
+
+  # Sandbox or an EXCLUDE rule refuses every send before the socket. Reporting that as "no
+  # identity matched the baseline" claims a result for traffic that never left.
+  describe "gate refusals" do
+    it "reports a request whose every send the gate refused" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      errored = Gori::Repeater::ExchangeMeta.of(nil, nil, nil, "sandbox: blocked")
+      summary = Gori::Authorize::ResponseSummary.new(nil, nil, 0_u64, error: "sandbox: blocked")
+      trials = [
+        Gori::Authorize::Trial.new("as-captured", true, errored, Gori::Authorize::Verdict::Baseline,
+          nil, summary, "req".to_slice, nil, nil),
+        Gori::Authorize::Trial.new("anon", false, errored, Gori::Authorize::Verdict::Error,
+          nil, summary, "req".to_slice, nil, nil),
+      ]
+      v.apply_result(id, Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/a", trials,
+        2_i64, "sandbox: blocked"))
+      v.blocked_in(Set{id}).should eq(1)
+      v.blocked_reason_in(Set{id}).should eq("sandbox: blocked")
+    end
+
+    it "does not call a normal run blocked" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(bypass: false))
+      v.blocked_in(Set{id}).should eq(0)
+      v.blocked_reason_in(Set{id}).should be_nil
+    end
+  end
+
+  # `short_pane_clamp_spec` pins this for the EMPTY state; the populated view had no such
+  # guard and drew a request row over the hint line on a 3-row body.
+  it "never draws a request row below its pane, at any height the app supports" do
+    (2..20).each do |h|
+      v = AuthorizeView.new
+      3.times { |i| v.add(flow("GET", "/r#{i}")) }
+      margin = 6
+      b = MemoryBackend.new(80, h + margin)
+      v.render(Screen.new(b), Rect.new(0, 0, 80, h), true)
+      (h...(h + margin)).each do |y|
+        b.row(y).strip.should eq(""), "spilled onto row #{y} at 80x#{h}"
+      end
+    end
+  end
+
   describe "queue editing" do
     it "removes the cursor entry and clamps the cursor" do
       v = AuthorizeView.new

@@ -119,7 +119,12 @@ module Gori::Tui
     end
 
     private def publish(what : String) : Nil
-      saved = @on_change.try(&.call(@identities))
+      # A COPY. `AuthorizeView#identities=` short-circuits on `list == @identities`, so handing
+      # over the same object made every later in-place edit invisible to it: after one delete
+      # the view held THIS array, and the next `delete_at` mutated it behind the setter's back.
+      # `identity_rev` then stopped advancing, ^R answered "every request already has a result",
+      # and the table kept showing trials for identities that no longer existed.
+      saved = @on_change.try(&.call(@identities.dup))
       @note = saved == false ? "#{what} — but the project could not be written" : what
     end
 

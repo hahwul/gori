@@ -35,8 +35,20 @@ module Gori
       getter method : String
       getter url : String
       getter trials : Array(Trial)
+      # Sends the OUTBOUND gate refused before the socket — Sandbox mode, or an explicit
+      # EXCLUDE rule — and the first refusal's text. Carried because a run where every send
+      # was refused otherwise reports as `ran N · no identity matched the baseline`: a clean
+      # bill of health for traffic that never left. `Fuzz::Backend#blocked`'s own comment names
+      # that false negative as the worst way this can fail.
+      getter blocked : Int64
+      getter blocked_reason : String?
 
-      def initialize(@flow_id, @method, @url, @trials)
+      def initialize(@flow_id, @method, @url, @trials, @blocked = 0_i64, @blocked_reason = nil)
+      end
+
+      # Nothing in this request actually reached the origin.
+      def fully_blocked? : Bool
+        @blocked > 0 && @trials.all?(&.meta.errored?)
       end
 
       def baseline : Trial?
@@ -63,15 +75,21 @@ module Gori
       # The live engine: sends through `Fuzz::Sender`, scope-gated by `outbound`.
       def self.live(outbound : Gori::Outbound, verify_upstream : Bool,
                     timeout : Time::Span = ACTIVE_TIMEOUT) : Engine
+        # keep_alive: FALSE, unlike every other sweep in gori. The whole point of the second
+        # request is that it carries different credentials, and connection-oriented auth
+        # (NTLM, Negotiate — ordinary on internal engagements) authenticates the CONNECTION,
+        # not the message: reusing the socket would serve an identity that DROPS Cookie /
+        # Authorization the baseline's content anyway, and the run would report a bypass that
+        # does not exist. A handshake per identity is the price of the property under test.
         new(->(origin : Fuzz::Origin, http2 : Bool) {
-          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
-            keep_alive: true, idle_conns: 1).as(Fuzz::Backend)
+          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
+            .as(Fuzz::Backend)
         })
       end
 
       # Replay `detail` under every identity — baseline first, so the others can be judged
-      # against it — over one keep-alive connection to the origin. Identities beyond the
-      # baseline are sent in the given order.
+      # against it — each on its OWN connection (see `live`). Identities beyond the baseline
+      # are sent in the given order.
       #
       # `stop` is polled BEFORE each identity's send, so an operator's stop takes effect between
       # identities rather than only between requests. That distinction is a correctness one, not
@@ -112,7 +130,8 @@ module Gori
           backend.close
         end
         return nil if trials.size < ordered.size # stopped part-way — see the note above
-        Target.new(row.id > 0 ? row.id : nil, row.method, row.url, trials)
+        Target.new(row.id > 0 ? row.id : nil, row.method, row.url, trials,
+          backend.blocked, backend.blocked_reason)
       end
 
       # Send one identity's overlaid request and build its Trial. `baseline_trial` is nil while

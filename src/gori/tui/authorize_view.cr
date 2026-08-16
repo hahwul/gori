@@ -163,6 +163,22 @@ module Gori::Tui
       e.state != :running && !e.current?(@identity_rev)
     end
 
+    # What PASSIVE's unattended re-run may pick up: pending work that has not already blown up
+    # under this identity set.
+    #
+    # The split matters because the two callers mean different things by "unfinished". A manual
+    # ^R is the operator asking again, and a request that raised is exactly what they might
+    # want retried. Passive asks on every drain tick with nobody watching, so an entry that
+    # raises — a stored h2 pseudo-header head, say, which raises every time by construction —
+    # would be re-dispatched forever, one fiber and one Jobs row per tick.
+    def auto_pending_entries : Array(Entry)
+      @entries.select { |e| pending?(e) && !errored_this_rev?(e) }
+    end
+
+    private def errored_this_rev?(e : Entry) : Bool
+      !e.error.nil? && e.result_rev == @identity_rev
+    end
+
     # Remove the cursor entry. Returns false (and changes nothing) while that row is mid-run —
     # its outcome is still coming. Clamps the cursor: the new selection has a different trial
     # count, so the sub-cursor and the detail scroll cannot carry over.
@@ -236,14 +252,41 @@ module Gori::Tui
       e.result_rev = @identity_rev
     end
 
+    # A run that RAISED for this entry (as opposed to a send that failed and produced error
+    # trials). `result_rev` is stamped so `pending?` counts it as answered under the current
+    # identity set: without it a raising entry stayed pending forever, and passive's autorun
+    # re-dispatched it — a fresh fiber and a fresh Jobs row — on every drain tick.
+    #
+    # Re-running it is still one keystroke: ⇧R takes every row, and changing the identity set
+    # bumps the revision, which is when a retry could plausibly go differently.
     def apply_error(id : Int32, message : String) : Nil
       return unless e = entry_by_id(id)
       e.state = :error
       e.error = message
+      e.result_rev = @identity_rev
     end
 
     # Total non-baseline identities that matched their baseline across every request — the
     # headline count the run summary states.
+    # Requests in `ids` whose every send the outbound gate refused. A run made entirely of
+    # these has to say so — silence there reads as "tested, nothing found".
+    def blocked_in(ids : Set(Int32)) : Int32
+      @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.fully_blocked? }
+    end
+
+    # The first refusal any batch entry recorded, for the summary line.
+    def blocked_reason_in(ids : Set(Int32)) : String?
+      @entries.each do |e|
+        next unless ids.includes?(e.id)
+        t = e.target
+        next unless t && t.fully_blocked?
+        if r = t.blocked_reason
+          return r
+        end
+      end
+      nil
+    end
+
     def bypass_total : Int32
       @entries.sum { |e| (t = e.target) ? t.same_count : 0 }
     end
@@ -294,7 +337,13 @@ module Gori::Tui
       y = render_header(screen, rect, rect.y)
       # Split: the request list up top (bounded to half the body), the selected request's
       # identities + response below.
-      list_h = (@entries.size + 1).clamp(2, {rect.h // 2, 3}.max)
+      # Bounded by the ROWS THIS PANE HAS, not just by a share of them: the old floor of 3
+      # applied at any height, so a 3-row body drew a request row (and its selection fill) at
+      # `rect.bottom` — outside the framed body, over the hint line. `rect.bottom - y` is what
+      # is actually left below the header.
+      avail = {rect.bottom - y, 0}.max
+      list_h = (@entries.size + 1).clamp(1, {rect.h // 2, 3}.max)
+      list_h = {list_h, avail}.min
       list_bottom = y + list_h
       render_list(screen, rect, y, list_bottom, focused)
       divider_y = list_bottom
@@ -353,6 +402,10 @@ module Gori::Tui
       # Request line for the selected entry.
       screen.text(x, y, "#{e.method} #{e.detail.row.url}", Theme.text_bright, Theme.bg, Attribute::Bold, width: right - x)
       y += 1
+      # Every row below re-checks: `bottom` is the pane's edge, and a short body can run out
+      # between any two of these writes. Nothing downstream clips for us — `Screen` bounds-checks
+      # against the TERMINAL, so an overrun lands on the hint line rather than being dropped.
+      return if y >= bottom
       t = e.target
       unless t
         note = e.state == :running ? "running…" : (e.error || "not run yet — press r")
@@ -366,6 +419,7 @@ module Gori::Tui
 
     private def render_trials(screen : Screen, x : Int32, y : Int32, right : Int32, bottom : Int32,
                               t : Authorize::Target, focused : Bool) : Int32
+      return y if y >= bottom
       hdr = sprintf("  %-14s %-7s %-9s %-22s %s", "IDENTITY", "STATUS", "SIZE", "Δ VS BASELINE", "VERDICT")
       screen.text(x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: right - x)
       y += 1

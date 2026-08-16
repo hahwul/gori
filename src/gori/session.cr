@@ -532,6 +532,10 @@ module Gori
       # channel as defense-in-depth — incl. the now-closed probe_events.)
       @store.close
       @flow_events.close
+      # The third feed closes with them, or the Authorize passive watcher parks in `receive?`
+      # forever — one leaked fiber per project switch, each holding a closed store and a dead
+      # controller (a fresh Runner is built per project).
+      @authorize_events.close
       # Release the capture flock LAST — only after this session's store + probe have torn
       # down — so a second instance racing to reopen the same project can't become
       # concurrently live (its own analyzer/store touching shared state) while ours winds down.
