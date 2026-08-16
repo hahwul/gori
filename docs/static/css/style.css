@@ -27,17 +27,20 @@
      (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
   --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
-  /* Hero-ring palette. The bands are one base colour seen through a
-     generated transparency mask; --ring-hi is the warm wash over the bright
-     zones and the light grain, --ring-lo the ink the depth scrim and dark
-     grain pull toward, --ring-sh the planet's shadow on the sheet and the
-     sheet's shadow on the planet, --ring-glow the light the tubes spill
-     into the page (halo, near-rim sweep, comet dots, gold dust). */
-  --ring-base: #d4b276;
-  --ring-hi: #f7e9bd;
+  /* Hero-ring palette. The orbits are neon tubes: --ring-base the gold
+     body, --ring-hi the hot core filament and the bright grain, --ring-lo
+     the ink the far-side scrim and dark grain pull toward, --ring-sh every
+     shadow (ring on ring, planet on ring, ring on planet), --ring-glow the
+     light the tubes spill into the page (glow layers, near-rim lume, comet
+     dots, gold dust). */
+  --ring-base: #d9ba76;
+  --ring-hi: #fff1c4;
   --ring-lo: #060a12;
   --ring-sh: #030509;
-  --ring-glow: #ffe9a8;
+  --ring-glow: #ffdf9a;
+  /* How far the tubes' glow spills into the page: 1 is the full neon
+     bloom; paper themes dial it down so ink stays ink. */
+  --ring-spill: 1;
   /* The planet's own lift off the ring sheet. Lengths live with .ring-core;
      only the colour flips, so the cream theme gets a warm shadow instead of
      a near-black smudge. */
@@ -95,22 +98,23 @@
      sweep, so 4.9:1 there is the floor for the whole mark. */
   --grad-logo: linear-gradient(135deg, #776d57 0%, #524a3a 55%, #332f26 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
-  /* On paper the values invert: the base is the deep readable tone, the
-     highlight a lighter one rather than near-white, and the shading colours
-     are warm browns -- the dark theme's near-blacks would print as soot on
-     the cream. The whole ramp is the same tarnished bronze as --grad-logo,
-     because a saturated gold band bleeds a yellow wash into the page: the
-     halo composites at half alpha, so #e6b23c landed on the cream as butter.
-     What matters when retuning is the ordering, not the hex: --ring-hi must
-     stay lighter than --ring-base (the bright core has to read bright),
-     --ring-sh deeper than --ring-lo, and --ring-glow a step above
-     --ring-base -- the near-rim sweep lays it over the band at alpha 0.2 and
-     vanishes if the two share a value. */
-  --ring-base: #6f6550;
-  --ring-hi: #8d8266;
-  --ring-lo: #2e2a21;
-  --ring-sh: #241f18;
-  --ring-glow: #8a7c5a;
+  /* On paper the tubes turn to black ink: gold neon on cream reads as a
+     butter wash, so the light theme draws the same orbits as crisp
+     ink-drawn rings instead. The base is a warm near-black, the core a
+     lighter warm grey so the tube keeps a glossy highlight, and the glow
+     layers become a soft ink spread rather than light. What matters when
+     retuning is the ordering, not the hex: --ring-hi must stay lighter
+     than --ring-base (the core has to read as the tube's sheen),
+     --ring-lo deeper than --ring-base (the far side has to recede), and
+     --ring-sh deepest of all. */
+  --ring-base: #262218;
+  --ring-hi: #574f3d;
+  --ring-lo: #100e09;
+  --ring-sh: #060504;
+  --ring-glow: #2e2921;
+  /* Ink spreads less than light: half the glow keeps the rings crisp
+     black lines with a soft wash instead of a grey smudge. */
+  --ring-spill: 0.5;
   --ring-core-shadow: rgb(46 42 33 / 0.3);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
@@ -869,10 +873,10 @@ kbd {
   display: block;
 }
 
-/* The hero mark: a ringed planet -- the official art disc circled by a
-   Saturn-like sheet of translucent ring bands. Geometry, band structure and
-   grain are generated (see tools/hero-rings/build.py); everything below is
-   only paint and motion. The sheet reaches the edge of its box, so the box
+/* The hero mark: glowing orbits -- the official art disc circled by three
+   thin luminous ring tubes. Geometry, the neon layer stack and grain are
+   generated (see tools/hero-rings/build.py); everything below is only
+   paint and motion. The orbits reach the edge of their box, so the box
    stays under 100% of the column, which .home-main would otherwise clip. */
 .hero-art {
   justify-self: center;
@@ -887,54 +891,68 @@ kbd {
   height: 100%;
 }
 
-/* The band sheet's base colour. Structure and translucency come from the
-   generated mask, so this fill is the whole of the bands' own colour; the
-   gradients painted over it are washes of --ring-hi and --ring-lo. */
-.ring-fill {
-  fill: var(--ring-base);
+/* The tubes are stacks of concentric strokes on each orbit's projected
+   centreline: wide faint glow layers, a translucent gold body, a hot
+   narrow core. Widths and opacities are baked per stroke by the
+   generator; only colour lives here, so the theme flips gold neon to
+   black ink without touching the geometry. */
+.rt-glow {
+  fill: none;
+  stroke: var(--ring-glow);
+  opacity: var(--ring-spill);
 }
 
-.rs-hi {
-  stop-color: var(--ring-hi);
+.rt-body {
+  fill: none;
+  stroke: var(--ring-base);
 }
 
-.rs-lo {
-  stop-color: var(--ring-lo);
+.rt-core {
+  fill: none;
+  stroke: var(--ring-hi);
 }
 
-.rs-sh {
-  stop-color: var(--ring-sh);
+/* What varies ALONG a tube, painted through static gradient masks: the
+   far side recedes into --ring-lo, the near rim picks up the light. */
+.rt-scrim {
+  fill: none;
+  stroke: var(--ring-lo);
 }
 
+.rt-lume {
+  fill: none;
+  stroke: var(--ring-glow);
+}
+
+/* Every shadow: ring on ring at the crossings, the planet on the far
+   tubes, the near tubes across the planet's face. */
+.rt-sh {
+  fill: none;
+  stroke: var(--ring-sh);
+}
+
+/* The comet dots' baked glow gradient. */
 .rs-glow {
   stop-color: var(--ring-glow);
-}
-
-/* The near bands' shadow across the planet's face. */
-.ring-cast-fill {
-  fill: var(--ring-sh);
-}
-
-/* The light each tube spills into the page behind it: a blurred copy of the
-   band, and the loose dust hanging around the system. */
-.ring-glow-fill {
-  fill: var(--ring-glow);
 }
 
 .ring-dust {
   fill: var(--ring-glow);
 }
 
-/* Orbiting grain: light and dark streaks of ring material. Width and
-   opacity are baked per streak; the mask trims them to the bands. */
+/* Orbiting grain: bright energy glints and dark flickers riding each
+   tube. Width and opacity are baked per arc; round caps keep the short
+   hot packets reading as sparks, not ticks. */
 .rg-l {
   fill: none;
   stroke: var(--ring-hi);
+  stroke-linecap: round;
 }
 
 .rg-d {
   fill: none;
   stroke: var(--ring-lo);
+  stroke-linecap: round;
 }
 
 /* The grain groups spin about the ring centre (motion block). Their
@@ -963,7 +981,7 @@ kbd {
 
 /* Filter lengths are user units here, not CSS pixels: the viewBox is 240
    wide, so 13 is roughly the 40px lift the rest of the page uses. The
-   planet's lifted shadow falls across the far bands behind it, which is
+   planet's lifted shadow falls across the far tubes behind it, which is
    exactly where a planet's shadow belongs. */
 .ring-core {
   filter: drop-shadow(0 5px 13px var(--ring-core-shadow));
@@ -975,9 +993,9 @@ kbd {
   stroke-width: 0.8;
 }
 
-/* Request traffic riding the ring lanes: per lane a head and three trail
-   dots fading behind it, a comet on orbit. Every dot exists twice, once
-   behind the disc and once in front; the motion block gives the two copies
+/* Request traffic riding the tubes: per lane a head and five trail dots
+   fading behind it, a comet on orbit. Every dot exists twice, once behind
+   the disc and once in front; the motion block gives the two copies
    complementary opacity windows, so a lap truly passes behind the planet
    rather than fading near it. They are placed by offset-path alone and so
    only exist where that is supported -- otherwise they would pile up at the
@@ -997,11 +1015,19 @@ kbd {
 }
 
 .rn-t2 {
-  fill-opacity: 0.3;
+  fill-opacity: 0.36;
 }
 
 .rn-t3 {
-  fill-opacity: 0.16;
+  fill-opacity: 0.22;
+}
+
+.rn-t4 {
+  fill-opacity: 0.13;
+}
+
+.rn-t5 {
+  fill-opacity: 0.07;
 }
 
 @supports (offset-path: path("M0 0L1 1")) {
@@ -1014,27 +1040,36 @@ kbd {
     offset-rotate: 0deg;
   }
 
-  /* Generated with the sheet: each lane's projected ellipse. --dur/--ph
-     set the lap time and phase; --step spaces the trail dots along the
-     lap. All three lanes run prograde, with the grain. */
+  /* Generated with the tubes: each lane IS its ring's centreline ellipse.
+     --dur/--ph set the lap time and phase; --step spaces the trail dots
+     along the lap. All three lanes run prograde, with the grain. */
   .rn-r0 {
     --dur: 40s;
     --ph: -25s;
-    --step: 0.75s;
+    --step: 0.55s;
     offset-path: path("M223.8 90.2A108 32.4 -16 0 1 16.2 149.8A108 32.4 -16 0 1 223.8 90.2");
   }
 
   .rn-r1 {
     --dur: 28s;
     --ph: -11s;
-    --step: 0.6s;
-    offset-path: path("M187.4 172.6A85.5 44.5 38 0 1 52.6 67.4A85.5 44.5 38 0 1 187.4 172.6");
+    --step: 0.45s;
+    offset-path: path("M187 172.3A85 44.2 38 0 1 53 67.7A85 44.2 38 0 1 187 172.3");
+  }
+
+  .rn-r2 {
+    --dur: 21s;
+    --ph: -6s;
+    --step: 0.4s;
+    offset-path: path("M157.6 59.8A71 29.8 -58 0 1 82.4 180.2A71 29.8 -58 0 1 157.6 59.8");
   }
 
   .rn-t0 { --k: 0; }
   .rn-t1 { --k: 1; }
   .rn-t2 { --k: 2; }
   .rn-t3 { --k: 3; }
+  .rn-t4 { --k: 4; }
+  .rn-t5 { --k: 5; }
 }
 
 /* --- Showcase: a real terminal capture floating under the hero --------- */
@@ -2891,14 +2926,14 @@ html.search-lock body {
 
   /* Ring material on orbit: the grain groups turn inside the squashed ring
      plane -- a rotation of the flat sheet about its own axis, the one
-     motion the baked projection keeps honest -- with the inner bands
-     faster than the outer, as orbits are. The bands' base gradient is
+     motion the baked projection keeps honest -- with the inner tubes
+     faster than the outer, as orbits are. The tubes' stroke stacks are
      rotationally symmetric, so only the grain and the traffic show the
      turn, which is why it can be this slow and still read.
 
      will-change promotes each spinning group to its own compositor layer,
      so the turn runs on the GPU instead of re-rasterizing the whole SVG --
-     the static bands, halos and planet paint once and are reused. It sits
+     the static tubes, glow layers and planet paint once and are reused. It sits
      here, inside the no-reduced-motion block, so a static page never pays
      the layer memory. */
   .ring-grain-r0 {
@@ -2908,6 +2943,11 @@ html.search-lock body {
 
   .ring-grain-r1 {
     animation: ring-turn 70s linear infinite;
+    will-change: transform;
+  }
+
+  .ring-grain-r2 {
+    animation: ring-turn 52s linear infinite;
     will-change: transform;
   }
 

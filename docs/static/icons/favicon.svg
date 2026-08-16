@@ -9,8 +9,24 @@
       #dark-icon { display: inline; }
     }
   </style>
+  <defs>
+    <!-- The docs wordmark gradients (grad-logo in static/css/style.css),
+         135deg screen top-left to bottom-right. The icon paths live in a
+         translate(0,512) scale(0.025,-0.025) space, so in their user units
+         that diagonal runs (0,20480) to (20480,0). -->
+    <linearGradient id="grad-light" gradientUnits="userSpaceOnUse" x1="0" y1="20480" x2="20480" y2="0">
+      <stop offset="0" stop-color="#776d57"/>
+      <stop offset="0.55" stop-color="#524a3a"/>
+      <stop offset="1" stop-color="#332f26"/>
+    </linearGradient>
+    <linearGradient id="grad-dark" gradientUnits="userSpaceOnUse" x1="0" y1="20480" x2="20480" y2="0">
+      <stop offset="0" stop-color="#f1e1b1"/>
+      <stop offset="0.4" stop-color="#eedca5"/>
+      <stop offset="1" stop-color="#d9c28b"/>
+    </linearGradient>
+  </defs>
   <g id="light-icon">
-  <g transform="translate(0.0000,512.0000) scale(0.025000,-0.025000)" fill="#77664e" stroke="none">
+  <g transform="translate(0.0000,512.0000) scale(0.025000,-0.025000)" fill="url(#grad-light)" stroke="none">
     <path d="M13100 18944 c-25 -7 -83 -14 -130 -14 -47 0 -110 -7 -140 -15 -30
 -8 -77 -15 -105 -15 -27 0 -75 -7 -105 -15 -30 -8 -70 -15 -89 -15 -34 0 -82
 -10 -301 -60 -69 -16 -150 -34 -180 -39 -30 -5 -81 -19 -112 -30 -32 -11 -79
@@ -204,7 +220,7 @@
   </g>
   </g>
   <g id="dark-icon">
-  <g transform="translate(0.0000,512.0000) scale(0.025000,-0.025000)" fill="#d9c28b" stroke="none">
+  <g transform="translate(0.0000,512.0000) scale(0.025000,-0.025000)" fill="url(#grad-dark)" stroke="none">
     <path d="M13100 18944 c-25 -7 -83 -14 -130 -14 -47 0 -110 -7 -140 -15 -30
 -8 -77 -15 -105 -15 -27 0 -75 -7 -105 -15 -30 -8 -70 -15 -89 -15 -34 0 -82
 -10 -301 -60 -69 -16 -150 -34 -180 -39 -30 -5 -81 -19 -112 -30 -32 -11 -79
