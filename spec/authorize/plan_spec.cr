@@ -170,8 +170,10 @@ describe Gori::Authorize::Plan do
     it "keeps the operator's own baseline when the JSON flags one" do
       with_store do |store|
         id = seed(store)
-        json = %([{"name": "admin", "baseline": true, "set": [{"name": "Cookie", "value": "a=1"}]},
-                  {"name": "user", "set": [{"name": "Cookie", "value": "b=2"}]}])
+        json = <<-JSON
+          [{"name": "admin", "baseline": true, "set": [{"name": "Cookie", "value": "a=1"}]},
+           {"name": "user", "set": [{"name": "Cookie", "value": "b=2"}]}]
+          JSON
         plan = Plan.build(PlanOptions.new(store, flow_ids: [id], identities_json: json), ungated_outbound)
         plan.identities.map(&.name).should eq(["admin", "user"])
       end
@@ -275,8 +277,10 @@ describe Gori::Authorize::Plan do
     it "declines a flow no identity actually changes" do
       with_store do |store|
         ok = seed(store, target: "/admin")
-        json = %([{"name": "as-captured", "baseline": true},
-                  {"name": "nudge", "remove": ["X-Not-Present"]}])
+        json = <<-JSON
+          [{"name": "as-captured", "baseline": true},
+           {"name": "nudge", "remove": ["X-Not-Present"]}]
+          JSON
         ex = expect_raises(PlanError) do
           Plan.build(PlanOptions.new(store, flow_ids: [ok], identities_json: json), ungated_outbound)
         end
@@ -325,10 +329,10 @@ describe Gori::Authorize::Plan do
         sent = plan.run { |_detail, target| seen << target }
         sent.should eq(2)
         seen.map(&.url).should eq(["https://acme.test/admin", "https://acme.test/orders"])
-        seen.each { |t| t.trials.size.should eq(2) }
+        seen.each(&.trials.size.should(eq(2)))
         backend.sent.size.should eq(4)
         # The anonymous identity's overlay reached the wire.
-        backend.sent.count { |b| String.new(b).includes?("Cookie:") }.should eq(2)
+        backend.sent.count { |wire| String.new(wire).includes?("Cookie:") }.should eq(2)
       end
     end
 

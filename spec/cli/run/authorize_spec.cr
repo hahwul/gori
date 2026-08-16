@@ -246,7 +246,7 @@ describe "gori run authorize — output" do
     doc = JSON.parse(Gori::CLI::Output.authorize_array_json([bypass_target, bypass_target]))
     arr = doc.as_a
     arr.size.should eq(2)
-    arr.each { |o| o["verdict"].as_s.should eq("bypass") }
+    arr.each(&.["verdict"].as_s.should(eq("bypass")))
   end
 
   it "json: blocked is emitted only when sends were actually refused" do

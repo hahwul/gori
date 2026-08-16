@@ -84,7 +84,7 @@ module Gori
       private def apply_authorize_target(ajob : AuthorizeJob, target : Authorize::Target) : Nil
         ajob.replayed += 1
         ajob.sent += target.trials.size
-        ajob.errors += target.trials.count { |t| t.meta.errored? }
+        ajob.errors += target.trials.count(&.meta.errored?)
         ajob.blocked += target.blocked
         ajob.blocked_reason ||= target.blocked_reason
         ajob.fully_blocked += 1 if target.fully_blocked?
@@ -403,7 +403,7 @@ module Gori
         first = skipped.first
         detail = store.get_flow(first.flow_id)
         sc = detail ? ob.check_request(detail.row.scheme, detail.row.host, detail.row.target) : nil
-        hosts = skipped.compact_map { |s| URI.parse(s.url).host rescue nil }.uniq
+        hosts = skipped.compact_map { |s| URI.parse(s.url).host rescue nil }.uniq!
         reason = if sc.nil?
                    "every selected flow is outside the project's configured scope"
                  elsif sc.unscoped?
@@ -482,13 +482,13 @@ module Gori
       # routinely), so the ONE-string audit field names the first origin and counts the rest
       # rather than pretending the run had a single target.
       private def authorize_audit_target(plan : Authorize::Plan) : String
-        origins = plan.targets.map { |d| "#{d.row.scheme}://#{d.row.host}:#{d.row.port}" }.uniq
+        origins = plan.targets.map { |d| "#{d.row.scheme}://#{d.row.host}:#{d.row.port}" }.uniq!
         return "unknown" if origins.empty?
         origins.size == 1 ? origins[0] : "#{origins[0]} +#{origins.size - 1} more"
       end
 
       private def authorize_hosts(plan : Authorize::Plan) : Array(String)
-        plan.targets.map(&.row.host).uniq
+        plan.targets.map(&.row.host).uniq!
       end
 
       # The tools/list schemas for the Authorize tools, kept beside the handlers that

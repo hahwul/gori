@@ -83,7 +83,7 @@ private def call_json(tools, name, args : String) : JSON::Any
 end
 
 private def tool_names(tools) : Array(String)
-  JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map { |t| t["name"].as_s }
+  JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s)
 end
 
 # Poll to a terminal state and return the final status payload.
@@ -229,7 +229,7 @@ describe "MCP authorize tools" do
         both["skipped"].as_a.should be_empty
         drain_job(tools, both["job_id"].as_s)
         rows = call_json(tools, "authorize_results", %({"job_id":#{both["job_id"].as_s.to_json}}))
-        rows["results"].as_a.map { |r| r["flow_id"].as_i64 }.should contain(get)
+        rows["results"].as_a.map(&.["flow_id"].as_i64).should contain(get)
       end
     end
 
@@ -417,7 +417,7 @@ describe "MCP authorize tools" do
           {"flow_ids" => [keep, drop], "identities" => anon}.to_json)
         start["scope_gate"].as_s.should eq("allowlist")
         start["requests"].as_i.should eq(1)
-        start["skipped"].as_a.map { |s| s["reason"].as_s }.should eq(["out_of_scope"])
+        start["skipped"].as_a.map(&.["reason"].as_s).should eq(["out_of_scope"])
         drain_job(tools, start["job_id"].as_s)
       end
     end
@@ -456,7 +456,7 @@ describe "MCP authorize tools" do
       with_store do |store|
         tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
         listed = JSON.parse(JSON.build { |j| tools.list(j) }).as_a
-          .select { |t| t["name"].as_s.starts_with?("authorize_") }
+          .select(&.["name"].as_s.starts_with?("authorize_"))
         listed.size.should eq(4)
         listed.each do |t|
           t["description"].as_s.should_not be_empty
