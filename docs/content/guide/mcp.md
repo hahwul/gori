@@ -63,11 +63,15 @@ gori can write the MCP configuration for common clients for you:
 
 | Flag | Client | Config written |
 |------|--------|----------------|
-| `--install-claude` | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+
+Every client except Claude Desktop keeps its config in the same place on macOS, Linux and Windows. Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` — defaulting to `~/.config/Claude/` — on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
+
+The exception is a **Flatpak** Claude Desktop: it reads `XDG_CONFIG_HOME` from inside its own sandbox (`~/.var/app/<app-id>/config/Claude/`), which the host shell running gori cannot see. There gori writes `~/.config/Claude/claude_desktop_config.json` and prints that path — copy it into the app's sandbox directory yourself. Every install command prints the file it wrote, so check that line against where your build actually reads.
 
 ```bash
 gori mcp --install-claude-code

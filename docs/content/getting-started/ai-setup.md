@@ -24,13 +24,15 @@ gori mcp --install-grok          # Grok
 
 | Flag | Client | Config written |
 |------|--------|----------------|
-| `--install-claude` | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 
 Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, not JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
+
+Only Claude Desktop's location differs per platform — it follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
 
 Wiring it up by hand instead? The server is just the `gori mcp` command over stdio. Point any MCP client at that command with no extra arguments.
 
