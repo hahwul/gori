@@ -4,6 +4,7 @@
 /result
 /result-*
 /.shards/
+/.crystal-cache/
 *.dwarf
 /ca2/
 /home*/

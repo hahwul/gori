@@ -131,7 +131,7 @@ describe "focus_gold" do
     # `focus_gold` when the card has focus. Filling it gold put two golds on one edge and
     # "gold means focus is here" stopped being readable. It is a bold ACCENT pill now: still
     # the loudest thing on the band, no longer competing with the focus outline.
-    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "repeater_view.cr"))
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "repeater_view", "render.cr"))
     chip = src[/if transport_badge_lit\?.*?end/m].not_nil!
     chip.should_not contain("focus_gold")
   end

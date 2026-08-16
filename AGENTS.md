@@ -124,7 +124,7 @@ and docker: there is **no lint or format gate** (see the comment in
 | --- | --- |
 | `proxy/` | the MITM proxy: codec, conn, h2, tls, ws (directory-only, there is no `proxy.cr`) |
 | `store.cr` + `store/` | SQLite persistence, migrations, reads |
-| `tui/` | terminal UI: views, `controllers/`, `runner/` |
+| `tui/` | terminal UI: views, `controllers/`, and the class-reopen slices in `runner/` + `repeater_view/` |
 | `verb.cr` + `verb/` + `verbs/` | the TUI command system (definitions, keymap, `ExecContext`) |
 | `cli/` | the `gori run` suite |
 | `mcp/` | the MCP server and its tools |

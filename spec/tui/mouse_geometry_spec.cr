@@ -204,12 +204,20 @@ describe "advertised chords" do
     keys
   end
 
-  # Ctrl letters PRINTED by a file — badge labels and hint strings alike.
+  # Ctrl letters PRINTED by a file — badge labels and hint strings alike. A view whose body
+  # is split across class-reopen slices (`repeater_view/`) prints from those too, so the
+  # sibling directory counts as part of the file; without it the check goes quiet the moment
+  # a label moves one file over.
   advertised = ->(file : String) do
     out = Set(String).new
-    File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", file)).each_line do |line|
-      next if line.matches?(/^\s*#/) # prose, not a label
-      line.scan(/\^([A-Z])/) { |m| out << m[1].downcase }
+    root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
+    paths = [File.join(root, file)]
+    paths.concat(Dir.glob(File.join(root, File.basename(file, ".cr"), "*.cr")).sort)
+    paths.each do |path|
+      File.read(path).each_line do |line|
+        next if line.matches?(/^\s*#/) # prose, not a label
+        line.scan(/\^([A-Z])/) { |m| out << m[1].downcase }
+      end
     end
     out
   end
@@ -292,10 +300,12 @@ describe "code-review fixes" do
     # ENVELOPE ⇄ DECODED instead of inserting a §. `req_split?` routes those through the SAME
     # `render_request`, so the badge was drawn — and clickable — reading `^T:MARK` while the
     # key it names did something unrelated. Draw and hit are gated together.
-    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "repeater_view.cr"))
-    draw = src[/# NOT on a decode split either\..*?end/m].not_nil!
+    root = File.join(__DIR__, "..", "..", "src", "gori", "tui", "repeater_view")
+    draw_src = File.read(File.join(root, "render_request.cr"))
+    draw = draw_src[/# NOT on a decode split either\..*?end/m].not_nil!
     draw.should contain("!decode_mode?")
-    hit = src[/` \^T:MARK ` chains LEFT.*?return :mark/m].not_nil!
+    hit_src = File.read(File.join(root, "pointer.cr"))
+    hit = hit_src[/` \^T:MARK ` chains LEFT.*?return :mark/m].not_nil!
     hit.should contain("!decode_mode?")
   end
 
