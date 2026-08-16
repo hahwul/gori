@@ -361,6 +361,21 @@ module Gori::Fuzz
       length == b.length && words == b.words
     end
 
+    # True when ANY match/filter dimension is set — the run carries a success/rejection
+    # criterion rather than the "everything passes" default. `extract` is deliberately excluded:
+    # it grabs a value from each response, it is not a pass/reject predicate. Surfaces read this
+    # to decide whether to nudge the operator toward `--mc/--fc` (a race run's `matched` count is
+    # only meaningful once a predicate names the success response — see `Engine#matcher_constrained?`).
+    def constrained? : Bool
+      !(@match_status_c.nil? && @filter_status_c.nil? &&
+        @match_grpc_c.nil? && @filter_grpc_c.nil? &&
+        @match_size_c.nil? && @filter_size_c.nil? &&
+        @match_words_c.nil? && @filter_words_c.nil? &&
+        @match_lines_c.nil? && @filter_lines_c.nil? &&
+        @match_regex.nil? && @filter_regex.nil? &&
+        @match_header_lc.nil?)
+    end
+
     # Every active matcher dimension must pass.
     private def matchers_pass?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
                                length : Int64, words : Int32, lines : Int32, text : String) : Bool

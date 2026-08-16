@@ -230,4 +230,71 @@ describe "Fuzz::Engine race_count" do
     spread = (times.max - times.min).total_microseconds
     spread.should be < 100_000 # 100ms — generous for a localhost run under CI load
   end
+
+  it "skips baseline calibration for a race run, never firing the race request as a sample" do
+    # For a 0-position race template `Generator#calibration_requests` returns copies of the
+    # baseline — the race request ITSELF — so a calibrated race would send that side-effecting
+    # request CALIBRATION_SAMPLES times before the timed attempt (the thing `race_warmup`
+    # forbids). `calibrate_baseline` must no-op for a race run: the origin then sees only the N
+    # race requests, never the extra samples. Without the guard this origin would log N+6.
+    origin = RaceOrigin.new
+    n = 4
+    tmpl = F::Template.parse(String.new(RACE_REQ))
+    cfg = F::Config.new(race_count: n, auto_calibrate: true, timeout: 2.seconds)
+    sender = race_sender(origin, timeout: 2.seconds)
+    engine = F::Engine.new(F::Generator.new(tmpl, [] of F::PayloadSet, cfg), F::Matcher.new, sender, cfg)
+    engine.calibrate_baseline
+    engine.run { }
+
+    origin.events.size.should eq(n) # exactly the race group — no calibration samples
+    origin.events.none?(&.warmup).should be_true
+    origin.close
+  end
+
+  it "counts each connection's warm-up in the on-the-wire request total, not only the race sends" do
+    # A race of N with a warm-up puts 2N requests on the wire; without crediting the warm-ups to
+    # `extra_requests`, `Progress#requests` (the number a tester works an agreed budget against)
+    # reported only N. See `Sender#extra_requests` / `#send_race`.
+    origin = RaceOrigin.new
+    n = 3
+    warmup = "GET /warmup HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+    tmpl = F::Template.parse(String.new(RACE_REQ))
+    cfg = F::Config.new(race_count: n, race_warmup: warmup, timeout: 2.seconds)
+    sender = race_sender(origin, timeout: 2.seconds)
+    engine = F::Engine.new(F::Generator.new(tmpl, [] of F::PayloadSet, cfg), F::Matcher.new, sender, cfg)
+    done = nil.as(F::DoneEvent?)
+    engine.run { |ev| done = ev if ev.is_a?(F::DoneEvent) }
+
+    ev = done.should_not be_nil
+    ev.progress.sent.should eq(n)         # N payload units
+    ev.progress.requests.should eq(n * 2) # N race + N warm-ups actually on the wire
+    origin.events.count(&.warmup).should eq(n)
+    origin.close
+  end
+
+  it "counts a scope-refused race group on the engine's blocked tally, not only errors" do
+    # A Sandbox-blocked race returns all-error Results BEFORE any socket. Without `run_race`
+    # crediting the ENGINE's `@blocked`, a 100%-refused race read as "N errors" and the "blocked
+    # · N refused before the socket" summary never fired. See `Engine#run_race`.
+    store = Gori::Store.open(File.tempname("gori-race-blk", ".db"))
+    begin
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in-scope.test")
+      scope.enable_sandbox
+      n = 5
+      sender = F::Sender.new(F::Origin.new("http", "evil.test", 80),
+        Gori::Outbound.agent(scope, true), false, false)
+      tmpl = F::Template.parse("GET /race HTTP/1.1\r\nHost: evil.test\r\n\r\n")
+      cfg = F::Config.new(race_count: n, timeout: 2.seconds)
+      engine = F::Engine.new(F::Generator.new(tmpl, [] of F::PayloadSet, cfg), F::Matcher.new, sender, cfg)
+      done = nil.as(F::DoneEvent?)
+      engine.run { |ev| done = ev if ev.is_a?(F::DoneEvent) }
+
+      ev = done.should_not be_nil
+      ev.progress.blocked.should eq(n)
+      ev.progress.blocked_reason.should_not be_nil
+    ensure
+      store.close
+    end
+  end
 end

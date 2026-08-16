@@ -328,6 +328,8 @@ module Gori
           %(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
+        in Fuzz::PlanError::Reason::BadRaceCount
+          "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
         end
       end
 

@@ -284,10 +284,14 @@ describe Gori::Fuzz::Plan do
     end
 
     it "refuses a race_count below 2" do
-      expect_raises(Gori::Error, /race_count must be at least 2/) do
+      ex = expect_raises(F::PlanError, /race_count must be at least 2/) do
         F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n",
           target: "http://t.test", config: F::Config.new(race_count: 1)), ungated)
       end
+      # A PlanError (not a bare Gori::Error) so the CLI's `rescue Fuzz::PlanError` around
+      # Plan.build catches it — closing outbound and prefixing the message — like every other
+      # plan-input refusal above (see `validate_race_count`).
+      ex.reason.should eq(F::PlanError::Reason::BadRaceCount)
     end
   end
 

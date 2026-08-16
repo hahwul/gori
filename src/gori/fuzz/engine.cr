@@ -106,11 +106,12 @@ module Gori::Fuzz
     def close : Nil
     end
 
-    # Requests this backend put on the wire BELOW the caller's own count. Today that is only
-    # `ConnPool`'s stale re-sends, which happen inside one `send` call: `CappedBackend` counts
-    # calls, so without this a run that re-sent three requests reported the traffic of four
-    # when seven left the machine. `Progress#requests` documents itself as "REQUESTS actually
-    # put on the wire", which is the number a tester works an agreed budget against.
+    # Requests this backend put on the wire BELOW the caller's own count: `ConnPool`'s stale
+    # re-sends (inside one `send` call) and `Sender#send_race`'s per-connection warm-ups (inside
+    # one `send_race` call). `CappedBackend` counts CALLS, so without this a run that re-sent
+    # three requests reported the traffic of four when seven left the machine, and a race of 50
+    # with a warmup reported 50 when 100 did. `Progress#requests` documents itself as "REQUESTS
+    # actually put on the wire", which is the number a tester works an agreed budget against.
     def extra_requests : Int64
       0_i64
     end
@@ -164,6 +165,12 @@ module Gori::Fuzz
     # Sends refused by the scope gate — never put on the wire.
     getter blocked : Int64 = 0_i64
     getter blocked_reason : String? = nil
+    # Race warm-up requests actually put on the wire (one per successfully-dialed connection
+    # when `send_race` is given a warmup). Reported via `extra_requests`, exactly like the
+    # ConnPool's stale re-sends: a per-connection send that rides BELOW the caller's own count,
+    # so `Progress#requests` ("REQUESTS actually put on the wire") stays honest — a race of 50
+    # with a warmup is 100 requests, not 50. See `Backend#extra_requests`.
+    @race_warmups : Int64 = 0_i64
     # The HTTP/1.1 keep-alive pool, or nil for connection-per-send (h2, or keep_alive off).
     # Exposed so a surface can report how many handshakes a run actually paid for.
     getter pool : ConnPool?
@@ -292,7 +299,7 @@ module Gori::Fuzz
     end
 
     def extra_requests : Int64
-      @pool.try(&.stale_retries) || 0_i64
+      (@pool.try(&.stale_retries) || 0_i64) + @race_warmups
     end
 
     # Same-connection group send for the active smuggling/desync probe. Unlike `send`, the whole
@@ -372,6 +379,10 @@ module Gori::Fuzz
         end
         if w = warmup
           wr = Repeater::Engine.exchange(upstream, w, @origin.host, @origin.port, Time.instant)
+          # The warmup request is now on the wire (whether or not the response says the socket
+          # survives), so it counts toward the true wire total — reported via `extra_requests`,
+          # below the caller's `jobs.size`, matching how ConnPool re-sends are counted.
+          @race_warmups += 1
           # Same retirement rule `send_pipeline`/`ConnPool` use: an error, an incomplete read,
           # or a response that itself says the connection will NOT survive (`Connection:
           # close`, HTTP/1.0 without keep-alive, a close-delimited body) all leave this socket
@@ -505,7 +516,9 @@ module Gori::Fuzz
     #
     # The cap is enforced per GROUP, not per connection within one: splitting a race group at
     # a budget boundary mid-release would corrupt the synchronization the primitive exists to
-    # provide, so a group that is already over cap is refused whole, before any dial.
+    # provide, so a group that is already over cap is refused whole, before any dial. A
+    # per-connection warm-up is NOT pre-charged here — like a ConnPool re-send it happens inside
+    # this one call and is reported after the fact via `extra_requests` (see `Sender#send_race`).
     def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
       return [] of Repeater::Result if jobs.empty?
       return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) } if cap_reached?
@@ -673,6 +686,21 @@ module Gori::Fuzz
       @config.auto_calibrate?
     end
 
+    # The CLAMPED, effective race group size (nil for a non-race run). `Config#race_count` is
+    # clamped to `MAX_RACE_SIZE` here at the deepest point, so a surface that SHOWS the count
+    # (a preflight banner) must read this, not the raw request — the two disagree when the
+    # operator asked for more connections than the ceiling allows.
+    def race_count : Int32?
+      @race_count
+    end
+
+    # Whether the matcher carries ANY match/filter predicate. A race run whose "matched" tally
+    # is meaningless until a predicate names the success response reads this to decide whether
+    # to nudge the operator toward one (see `CLI::Run.warn_fuzz_race`).
+    def matcher_constrained? : Bool
+      @matcher.constrained?
+    end
+
     # Seed the matcher's calibration set from CALIBRATION_SAMPLES synthetic,
     # randomly-payloaded requests (see Generator#calibration_requests and
     # Matcher.reflects_length?) — replaces the old single-snapshot baseline, which a
@@ -689,6 +717,14 @@ module Gori::Fuzz
       # A stop that landed before the run fiber's first tick (the TUI publishes `v.engine`
       # before spawning, so ^X can arrive here) must not open with a burst of real sends.
       return if @state == State::Stopped
+      # A race run has no payload sweep to calibrate against. `Generator#calibration_requests`
+      # for a 0-position race template returns copies of the baseline — i.e. the race request
+      # ITSELF — so calibrating would fire that side-effecting request up to CALIBRATION_SAMPLES
+      # times BEFORE the timed attempt, the exact thing `race_warmup`'s doc forbids ("never the
+      # race request itself … would perform its side effect once per connection before the timed
+      # attempt"). The matcher's length-reflection baseline is meaningless for a group of N
+      # byte-identical sends anyway, so skip it outright rather than special-case it downstream.
+      return if @race_count
       wanted = CALIBRATION_SAMPLES
       if (cap = @config.max_requests) && cap > 0
         room = cap - 1
@@ -827,7 +863,19 @@ module Gori::Fuzz
       base = @generator.baseline_request
       jobs = Array.new(n) { |i| Job.new(i.to_i64, [] of String, nil, base) }
       results = @backend.send_race(jobs, warmup: @config.race_warmup, timeout: @config.timeout)
-      results.each_with_index { |raw, i| record_result(@matcher.build(jobs[i], raw)) }
+      results.each_with_index do |raw, i|
+        # A scope-gate refusal (Sandbox / an exclude rule) is a PAYLOAD-unit block, exactly as
+        # `run_one` treats it on the sweep path — bump the ENGINE's `@blocked` so the "blocked ·
+        # N refused before the socket" summary line fires and `all_blocked` reads true on a
+        # 100%-refused race. Without this the whole group counted only as `@errors`, so a fully
+        # gate-refused race read as "the target is down". `record_result` still tallies it in
+        # `@errors` too, matching how a gate-refused sweep row is both blocked and errored.
+        if gate_refused?(raw.error)
+          @blocked += 1
+          @blocked_reason ||= raw.error
+        end
+        record_result(@matcher.build(jobs[i], raw))
+      end
     ensure
       @backend.close rescue nil
       @events.send(DoneEvent.new(snapshot, @state == State::Stopped))

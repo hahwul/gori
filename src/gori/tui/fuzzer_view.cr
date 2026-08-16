@@ -1271,6 +1271,8 @@ module Gori::Tui
         "add a payload set — ^O config · + Add set (^L for a List)"
       in Fuzz::PlanError::Reason::UnresolvedEnv
         "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+      in Fuzz::PlanError::Reason::BadRaceCount
+        "race needs at least 2 connections — set Race to 2 or more (^O config)"
       end
     end
 

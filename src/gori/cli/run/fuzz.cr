@@ -155,6 +155,14 @@ module Gori
         end
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
+        # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
+        # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
+        # sends and a configured --race-warmup cannot be honored. Say so rather than drop it
+        # silently (a true single-packet HTTP/2 race is a separate, larger change).
+        if http2 && race && race_warmup_file
+          STDERR.puts "gori run fuzz: note: --race-warmup is ignored under HTTP/2 " \
+                      "(last-byte-sync degrades to independent per-connection sends)"
+        end
         origin = plan.origin
         unless origin.scheme.in?("http", "https")
           outbound.close
@@ -203,6 +211,8 @@ module Gori
           "no payloads — add -w/--preset/--payloads/--numbers/--null/--brute"
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
+        in Fuzz::PlanError::Reason::BadRaceCount
+          "--race needs at least 2 connections (a race of 1 is just a send)"
         end
       end
 
@@ -301,7 +311,7 @@ module Gori
               matched += 1 if r.matched?
               errored += 1 if r.error && !r.matched?
             end
-          when Fuzz::DoneEvent  then fuzz_done(ev, shown, pool, max_requests, race)
+          when Fuzz::DoneEvent  then fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?)
           when Fuzz::ErrorEvent then had_error = true; STDERR.puts "fuzz error: #{ev.message}"
           end
         end
@@ -326,7 +336,15 @@ module Gori
         rescue ex
           abort "gori run fuzz: #{ex.message}"
         end
-        label = race ? "race ×#{race}" : mode.label
+        # Show the CLAMPED group size the engine will actually run (`engine.race_count`), not the
+        # raw `--race` the operator typed: a `--race=500` is clamped to MAX_RACE_SIZE, and the
+        # request `total` already reflects that — so the label has to agree or the two disagree.
+        effective_race = engine.race_count
+        if race && (eff = effective_race) && eff < race
+          STDERR.puts "gori run fuzz: note: --race #{race} clamped to #{eff} " \
+                      "(max #{Fuzz::Engine::MAX_RACE_SIZE} connections)"
+        end
+        label = race ? "race ×#{effective_race || race}" : mode.label
         STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}"
         if (total.nil? || total > FUZZ_AUTO_CAP) && !force
           abort "gori run fuzz: refusing to send #{total ? total.to_s : "an unbounded number of"} requests without --force (narrow positions/payloads or pass --force)"
@@ -369,14 +387,18 @@ module Gori
       # nothing set) — no separate race-verdict field exists. Say so once, since an operator
       # who forgot to set one would otherwise see an unhelpful "N sent · N matched" and nothing
       # pointing at what that number means for a race group specifically.
-      private def self.warn_fuzz_race(p : Fuzz::Progress, race : Int32?) : Nil
+      private def self.warn_fuzz_race(p : Fuzz::Progress, race : Int32?, matcher_constrained : Bool) : Nil
         return unless race
+        # Only when NO match/filter predicate is set: with `--mc`/`--fc` already given, `matched`
+        # IS the success signal and telling the operator to set flags they set reads as noise.
+        return if matcher_constrained
         STDERR.puts "race · #{p.sent} sent · #{p.matched} matched — set --mc/--fc so 'matched' " \
                     "marks the success response (a correctly-guarded endpoint should show ≤1)"
       end
 
       private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::ConnPool?,
-                                 max_requests : Int64? = nil, race : Int32? = nil) : Nil
+                                 max_requests : Int64? = nil, race : Int32? = nil,
+                                 matcher_constrained : Bool = false) : Nil
         STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
         # `requests` only when it DIFFERS from the payload count — retries and redirect hops
         # are the two things that make them diverge, and a run with neither should not grow a
@@ -386,7 +408,7 @@ module Gori
         STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ev.stopped ? " (stopped)" : ""}"
         warn_fuzz_budget(p, max_requests)
         warn_fuzz_grpc_framing(p)
-        warn_fuzz_race(p, race)
+        warn_fuzz_race(p, race, matcher_constrained)
         # Sends stopped BEFORE the socket (Sandbox, an exclude rule). They already appear as
         # per-row errors, but a run that is 100% refused reads as "the target is down" unless
         # the gate is named once.

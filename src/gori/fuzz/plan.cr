@@ -33,6 +33,9 @@ module Gori::Fuzz
       # the run would put the token's own characters on the wire (`detail` = the
       # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
       UnresolvedEnv
+      # `--race`/`race_count` below 2 — a race needs at least two connections in flight
+      # together, so 1 is just a send (refused, not silently clamped, so the operator sees why).
+      BadRaceCount
     end
 
     getter reason : Reason
@@ -345,10 +348,16 @@ module Gori::Fuzz
     # Race mode needs at least two connections in flight together (one is just a send).
     # Refused here — not silently clamped — so the operator sees why a `--race=1` did nothing.
     # Returns the count back so the caller can gate the position/payload guards on it in one go.
+    #
+    # A `PlanError`, not a bare `Gori::Error`: this is a plan-INPUT refusal, the same family as
+    # `NoPositions`/`NoPayloads` above, so it rides the `rescue Fuzz::PlanError` every surface
+    # already wraps `Plan.build` in (the CLI closes `outbound` and prefixes `gori run fuzz:`
+    # there; a raw `Gori::Error` slipped past that rescue and leaked to the top-level handler).
     private def self.validate_race_count(race_count : Int32?) : Int32?
       if race_count && race_count < 2
-        raise Gori::Error.new("race_count must be at least 2 (a race needs at least two " \
-                              "connections in flight together, or it is just a send)")
+        raise PlanError.new(PlanError::Reason::BadRaceCount,
+          "race_count must be at least 2 (a race needs at least two connections in " \
+          "flight together, or it is just a send)")
       end
       race_count
     end
