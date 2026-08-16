@@ -44,6 +44,12 @@ module Gori
         @set_headers.empty? && @remove_headers.empty?
       end
 
+      # Identity by NAME, which is the field the list keeps unique. Used to tell the baseline
+      # apart from the rest without comparing whole structs (the baseline flag differs).
+      def same?(other : Identity) : Bool
+        @name == other.name
+      end
+
       # The same identity with a different baseline flag — the list editor's `b` key, which is
       # the ONLY place the flag moves, so two identities can never both claim it.
       def with_baseline(flag : Bool) : Identity

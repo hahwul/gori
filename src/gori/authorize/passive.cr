@@ -1,41 +1,72 @@
 require "../store/models"
-require "../proxy/codec/http1"
+require "./identity"
 
 module Gori
   module Authorize
-    # Which captured flows passive replay will pick up, and how they are keyed.
-    #
-    # Passive replay puts real requests on a real target without anyone pressing anything, so
-    # what it declines to replay matters as much as what it replays.
+    # Which captured flows passive replay picks up, why it declines the rest, and how it keys
+    # them. Passive puts real requests on a real target without anyone pressing a key, so what
+    # it declines matters as much as what it takes — and every refusal is NAMED, because the
+    # failure mode of an unattended feature is looking broken while working as designed.
     module Passive
-      # The headers that make a request worth testing. A request carrying NO session is
-      # already the anonymous case — replaying it under an anonymous identity compares a
-      # thing to itself, and the queue fills with rows that can only ever read `same`.
-      AUTH_HEADERS = {"Cookie", "Authorization"}
-
       # Methods replayed without asking. A replayed POST/PUT/PATCH/DELETE runs the side effect
-      # AGAIN, once per identity — passive replay is unattended, so the operator never gets to
-      # decide that a second checkout, transfer or delete is acceptable. The manual queue takes
-      # any method, because there a human chose the request.
+      # AGAIN, once per identity, and passive is unattended — the operator never gets to decide
+      # that a second checkout, transfer or delete is acceptable. The manual queue takes any
+      # method, because there a human chose the request.
       SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-      # Whether this flow is one passive replay should test.
-      def self.replayable?(detail : Store::FlowDetail) : Bool
+      # Why this flow will not be replayed, or nil when it will be.
+      #
+      # `:no_effect` is the interesting one, and it replaced a "does the request carry a Cookie
+      # or Authorization header?" test. That heuristic asked the wrong question twice over: it
+      # missed APIs authenticating through `X-Api-Key` and friends, and on a site the operator
+      # was not logged into it skipped everything while saying nothing.
+      #
+      # The exact question is whether any identity would CHANGE this request. If none does,
+      # every trial sends identical bytes, the responses match by construction, and the row
+      # reads `⚠ same` — a finding manufactured out of nothing. That is worse than skipping:
+      # a public site would light up red on every page. Asking it this way also fixes itself
+      # the moment the operator adds an identity that sets a session.
+      def self.skip_reason(detail : Store::FlowDetail,
+                           identities : Array(Identity)) : Symbol?
         row = detail.row
-        return false unless row.state.complete?
-        return false if row.short_circuited? # gori answered it; there is no origin behind it
-        return false unless SAFE_METHODS.includes?(row.method.upcase)
-        carries_auth?(detail.request_head)
+        return :incomplete unless row.state.complete?
+        return :short_circuited if row.short_circuited? # gori answered it; no origin behind it
+        return :unsafe_method unless SAFE_METHODS.includes?(row.method.upcase)
+        return :no_effect unless any_identity_changes?(detail, identities)
+        nil
       end
 
-      # Does the request head carry a session? Parsed through the codec rather than scanned as
-      # text: a `Cookie` fold, odd casing and a body that happens to contain the word are all
-      # things a substring search gets wrong, and `HeaderList#has?` is already case-insensitive.
-      def self.carries_auth?(head : Bytes) : Bool
-        req = Proxy::Codec::Http1.parse_request_head(head)
-        AUTH_HEADERS.any? { |name| req.headers.has?(name) }
-      rescue
-        false # an unparseable head is not a request we can reason about
+      def self.replayable?(detail : Store::FlowDetail, identities : Array(Identity)) : Bool
+        skip_reason(detail, identities).nil?
+      end
+
+      # Does at least one NON-baseline identity produce different bytes than the baseline does?
+      # Compared against the baseline rather than against the raw capture, because the baseline
+      # may itself carry an overlay — what a run compares is baseline-vs-other, so that is what
+      # decides whether there is anything to compare.
+      def self.any_identity_changes?(detail : Store::FlowDetail,
+                                     identities : Array(Identity)) : Bool
+        return false if identities.size < 2
+        head = detail.request_head
+        base_id = identities.find(&.baseline?) || identities.first
+        base = Authorize.overlay_head(head, base_id)
+        identities.any? do |id|
+          next false if id.same?(base_id)
+          Authorize.overlay_head(head, id) != base
+        end
+      end
+
+      # A human sentence for a skip reason, for the readout the tab carries.
+      def self.reason_label(reason : Symbol) : String
+        case reason
+        when :no_effect       then "no identity changes them"
+        when :unsafe_method   then "not a safe method to repeat"
+        when :incomplete      then "never completed"
+        when :short_circuited then "answered by gori"
+        when :out_of_scope    then "outside project scope"
+        when :duplicate       then "already queued"
+        else                       reason.to_s
+        end
       end
 
       # The dedup key for passive seeding: METHOD + URL, not the flow id.

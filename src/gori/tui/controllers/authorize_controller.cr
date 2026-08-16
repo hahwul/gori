@@ -60,6 +60,8 @@ module Gori::Tui
       @passive_capped = false
       @passive_unscoped = Set(String).new
       @seeds = Channel(Store::FlowDetail).new(64)
+      @passive_seen_count = 0
+      @passive_skips = Hash(Symbol, Int32).new(0)
     end
 
     def view : AuthorizeView
@@ -143,14 +145,13 @@ module Gori::Tui
         # anything — and the operator is browsing in another window by the time the per-host
         # notice fires, if they are looking at gori at all. "Nothing happened" is the one
         # outcome this mode must never leave unexplained.
-        if @host.session.scope.include_count.zero?
+        if no_scope?
           @host.status("authorize: passive replay ON, but this project has no scope include rule — " \
                        "nothing is replayed until you add one (Project → Scope)")
-          @view.passive_note = "passive replay on — add a scope include rule to replay anything"
         else
-          @host.status("authorize: passive replay ON — in-scope authenticated GETs will be replayed as they are captured")
-          @view.passive_note = "passive replay on — waiting for authenticated GETs"
+          @host.status("authorize: passive replay ON — in-scope requests any identity changes will be replayed")
         end
+        @view.passive_note = passive_readout
       else
         @view.passive_note = nil
         # The watcher fiber stays parked on the channel; it re-checks the flag per event, so
@@ -179,7 +180,9 @@ module Gori::Tui
           next unless ev.kind == :updated # the response side exists only on the second event
           detail = store.get_flow(ev.id)
           next unless detail
-          next unless Authorize::Passive.replayable?(detail)
+          # NO filtering here. The decision needs the identity set and its outcome needs to be
+          # COUNTED, and both live on the main fiber — a flow silently dropped on this side is
+          # exactly how this mode came to look broken.
           select
           when @seeds.send(detail)
           else
@@ -208,7 +211,6 @@ module Gori::Tui
             next unless row.state.complete?
             detail = store.get_flow(row.id)
             next unless detail
-            next unless Authorize::Passive.replayable?(detail)
             select
             when @seeds.send(detail)
             else
@@ -243,24 +245,31 @@ module Gori::Tui
       end
     end
 
+    # Decide one flow the watcher handed over, COUNTING the outcome either way. Every refusal
+    # is tallied by reason so the tab can say what passive is doing instead of appearing idle.
     private def accept_seed(detail : Store::FlowDetail) : Bool
-      key = Authorize::Passive.key(detail)
-      return false if @passive_seen.includes?(key)
+      @passive_seen_count += 1
+      if reason = Authorize::Passive.skip_reason(detail, identities)
+        @passive_skips[reason] += 1
+        return false
+      end
       # UNATTENDED sending is gated on the project's scope INCLUDE rules — the strict Layer 1
-      # allowlist, the same one Probe's active rules enqueue behind, and deliberately stricter
-      # than the manual queue (whose sender applies Sandbox/EXCLUDE alone, because a human
-      # picked that request). Passive replays whatever the browser touches, and a browser
-      # session reaches a great deal that is not the engagement.
-      #
-      # Silently is the one way it must not refuse: with no scope configured NOTHING would be
-      # replayed and the tab would look broken. Reported once per host, capped, the way Probe
-      # rate-limits its own per-host failures.
+      # allowlist Probe's active rules enqueue behind, and deliberately stricter than the manual
+      # queue (whose sender applies Sandbox/EXCLUDE alone, because a human picked that request).
+      # Passive follows the browser, and a browser session reaches a great deal that is not the
+      # engagement.
       if Outbound.allowlist(@host.session.scope)
            .check_request(detail.row.scheme, detail.row.host, detail.row.target).blocked?
+        @passive_skips[:out_of_scope] += 1
         host = detail.row.host
         if @passive_unscoped.size < UNSCOPED_REPORT_CAP && @passive_unscoped.add?(host)
           @host.status("authorize: #{host} is outside project scope — passive replay only sends to scoped hosts")
         end
+        return false
+      end
+      key = Authorize::Passive.key(detail)
+      if @passive_seen.includes?(key)
+        @passive_skips[:duplicate] += 1
         return false
       end
       if @view.size >= PASSIVE_CAP
@@ -273,6 +282,21 @@ module Gori::Tui
       @passive_seen << key
       @view.add(detail)
       true
+    end
+
+    # What passive has actually done, as one line for the tab. Without it "nothing happened"
+    # and "nothing matched" are the same picture, which is how this mode read as broken.
+    private def passive_readout : String
+      return "passive replay on — add a scope include rule to replay anything" if no_scope?
+      return "passive replay on — waiting for traffic" if @passive_seen_count.zero?
+      queued = @passive_seen.size
+      top = @passive_skips.max_by? { |(_, n)| n }
+      tail = top ? " · #{top[1]} skipped (#{Authorize::Passive.reason_label(top[0])})" : ""
+      "passive replay on — #{@passive_seen_count} seen · #{queued} queued#{tail}"
+    end
+
+    private def no_scope? : Bool
+      @host.session.scope.include_count.zero?
     end
 
     # Passive's run trigger: whatever the watcher queued goes out as soon as nothing else is in
@@ -440,6 +464,9 @@ module Gori::Tui
       # After the outcomes, not before: a batch that just finished frees the runner for
       # whatever the watcher queued while it was busy.
       maybe_autorun
+      # The readout is what the tab shows while the queue is still empty, which is exactly the
+      # stretch an operator is asking "is this doing anything?".
+      @view.passive_note = passive_readout if @passive
       drained
     end
 
