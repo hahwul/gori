@@ -9,6 +9,7 @@ require "../sitemap"
 require "../probe/group"
 require "../notes"
 require "../jwt"
+require "../authorize/engine"
 
 module Gori
   module CLI
@@ -506,6 +507,127 @@ module Gori
           if r.incomplete?
             io << "  " << Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
           end
+        end
+      end
+
+      # --- authorize (access control) -----------------------------------------
+
+      # The aggregate verdict for ONE replayed request, across its non-baseline identities.
+      #
+      # Same rule as the TUI master row (`AuthorizeView::Entry#verdict`): `:bypass` when ANY
+      # identity was served the baseline's answer — the finding this tool exists to surface —
+      # `:enforced` when every one clearly differed, `:review` otherwise. The one addition is
+      # `:error`: every identity's send failed, so nothing was compared. The TUI paints that
+      # state on the row itself and cannot reach this method; a headless run has only this
+      # word, and calling a set of failed sends "review" would read as a result.
+      def self.authorize_verdict(t : Authorize::Target) : Symbol
+        non = t.trials.reject(&.baseline?)
+        return :error if non.empty? || non.all?(&.verdict.error?)
+        return :bypass if non.any?(&.verdict.same?)
+        return :enforced if non.all?(&.verdict.different?)
+        :review
+      end
+
+      def self.authorize_target_json(t : Authorize::Target) : String
+        JSON.build { |j| authorize_target_fields(j, t) }
+      end
+
+      def self.authorize_array_json(targets : Array(Authorize::Target)) : String
+        JSON.build { |j| j.array { targets.each { |t| authorize_target_fields(j, t) } } }
+      end
+
+      def self.authorize_target_fields(j : JSON::Builder, t : Authorize::Target) : Nil
+        j.object do
+          j.field "flow_id", t.flow_id
+          j.field "method", t.method
+          # The URL is CAPTURED bytes (see json_captured) — an origin/client chose them.
+          json_captured(j, "url", t.url)
+          j.field "verdict", authorize_verdict(t).to_s
+          j.field "same_count", t.same_count
+          # Only when it bit. A `"blocked":0` on every row of every ordinary run would bury the
+          # one run whose traffic never left the machine.
+          if t.blocked > 0
+            j.field "blocked", t.blocked
+            json_captured(j, "blocked_reason", t.blocked_reason)
+          end
+          j.field "trials" do
+            j.array { t.trials.each { |tr| authorize_trial_fields(j, tr) } }
+          end
+        end
+      end
+
+      private def self.authorize_trial_fields(j : JSON::Builder, tr : Authorize::Trial) : Nil
+        j.object do
+          # The identity NAME is operator-authored config, so it stays raw — the same split
+          # json_captured documents. Everything below it came off a socket.
+          j.field "identity", tr.identity
+          j.field "baseline", tr.baseline?
+          j.field "verdict", tr.verdict.label
+          j.field "status", tr.meta.status
+          j.field "size", tr.meta.size
+          j.field "duration_us", tr.meta.duration_us
+          # The DECODED body size the verdict actually compared, beside the wire size above:
+          # a gzipped response makes those two numbers disagree by an order of magnitude, and
+          # `same`/`different` is a claim about the decoded one.
+          j.field "decoded_size", tr.summary.size
+          j.field "delta", tr.delta
+          json_captured(j, "error", tr.summary.error)
+        end
+      end
+
+      # A one-word aggregate a reader can scan a column of. BYPASS is the only one shouted,
+      # because it is the only one that means "look at this".
+      def self.authorize_verdict_label(v : Symbol) : String
+        case v
+        when :bypass   then "[!] BYPASS  "
+        when :enforced then "[ ] enforced"
+        when :error    then "[x] error   "
+        else                "[?] review  "
+        end
+      end
+
+      # One request's block: a headline the eye can scan down the left edge for `[!] BYPASS`,
+      # then one indented row per identity (identity · verdict · status · size · Δ vs baseline).
+      #
+      #   [!] BYPASS   #7  GET  acme.test/admin/users   1 of 2 identities matched the baseline
+      #       as-captured      baseline   200   1.2 KB  —
+      #       anonymous        same       200   1.2 KB  Δ status 200 · size same · time -3 ms
+      def self.authorize_target_text(t : Authorize::Target) : String
+        v = authorize_verdict(t)
+        String.build do |io|
+          io << authorize_verdict_label(v)
+          io << "  #" << (t.flow_id.try(&.to_s) || "-").ljust(6)
+          io << term_safe(t.method).ljust(7)
+          io << term_safe(t.url)
+          # The count is the whole reason the headline is worth reading twice: which identities,
+          # and how many of them, were served what the baseline was served.
+          if v == :bypass
+            total = t.trials.count { |tr| !tr.baseline? }
+            io << "  · " << t.same_count << " of " << total
+            io << " identit" << (total == 1 ? "y" : "ies") << " matched the baseline"
+          end
+          t.trials.each { |tr| io << "\n" << authorize_trial_text(tr) }
+          # Sends the scope gate refused before the socket. Named here rather than left to the
+          # per-trial `error` text, because a request that never left the machine must not be
+          # read as evidence about the target (see `Authorize::Target#blocked`).
+          if t.blocked > 0
+            io << "\n      ⚠ " << t.blocked << " send" << (t.blocked == 1 ? "" : "s")
+            io << " refused before the socket"
+            (reason = t.blocked_reason) && (io << " — " << term_safe(reason))
+          end
+        end
+      end
+
+      private def self.authorize_trial_text(tr : Authorize::Trial) : String
+        String.build do |io|
+          io << "      "
+          io << term_safe(tr.identity).ljust(20)
+          io << tr.verdict.label.ljust(10)
+          io << tr.meta.status_text.ljust(5)
+          io << (tr.meta.size.try { |s| human_size(s) } || "—").ljust(9)
+          # The baseline has nothing to be a delta FROM, and an errored send has no numbers to
+          # subtract — both print "—" rather than an invented zero.
+          io << (tr.delta || tr.summary.error.try { |e| term_safe(e) } || "—")
         end
       end
 

@@ -25,6 +25,7 @@ require "../fuzz"
 require "../decoder"
 require "../miner"
 require "../sequencer"
+require "../authorize/plan"
 require "../discover"
 require "../discover/adapters"
 require "../oast/provider_config"
@@ -46,6 +47,7 @@ require "./run/fuzz_args"
 require "./run/fuzz"
 require "./run/mine"
 require "./run/sequence"
+require "./run/authorize"
 require "./run/discover"
 require "./run/oast"
 require "./run/probe"
@@ -131,6 +133,7 @@ module Gori
         when "compare"   then cmd_compare(rest)
         when "intercept" then cmd_intercept(rest)
         when "links"     then cmd_links(rest)
+        when "authorize" then cmd_authorize(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -154,6 +157,7 @@ module Gori
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
+        {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},
         {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
         {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},

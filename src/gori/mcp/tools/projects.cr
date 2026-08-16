@@ -22,7 +22,8 @@ module Gori
         @jobs.each_value.any? { |j| j.status == :running } ||
           @mine_jobs.each_value.any? { |j| j.status == :running } ||
           @discover_jobs.each_value.any? { |j| j.status == :running } ||
-          @sequence_jobs.each_value.any? { |j| j.status == :running }
+          @sequence_jobs.each_value.any? { |j| j.status == :running } ||
+          @authorize_jobs.each_value.any? { |j| j.status == :running }
       end
 
       private def list_projects : Result

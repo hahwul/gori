@@ -24,6 +24,7 @@ require "../notes"
 require "../probe"
 require "./serialize"
 require "./request_builder"
+require "./tools/authorize"
 require "./tools/compare"
 require "./tools/context"
 require "./tools/decode"
@@ -107,7 +108,8 @@ module Gori
         # reshapes the human's queue; they are recorded for the same reason.
         "intercept_forward", "intercept_drop", "intercept_forward_edit",
         "intercept_toggle", "intercept_set_filter", "intercept_set_direction",
-        "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop", "stop_job",
+        "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop",
+        "authorize_start", "authorize_stop", "stop_job",
         "create_issue", "update_issue",
         "probe_dismiss", "probe_promote", "probe_delete",
         "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
@@ -143,7 +145,11 @@ module Gori
       #     DELETES every var another process added since we bound.
       # Deliberately EXCLUDES other read tools and the async *_status / *_results /
       # *_stop pollers (a running job already captured its fully expanded template at
-      # build time).
+      # build time) — and `authorize_start`, which is the one active *_start that never
+      # expands a `$KEY` at all: an authorize run sends the CAPTURED bytes under an
+      # operator-authored header overlay, so its backend marks every buffer verbatim
+      # (`Fuzz::Backend.all_verbatim`, see `Authorize::Engine#send_one`). A refresh there
+      # would re-read the store for a value nothing on that path reads.
       ENV_REFRESH_TOOLS = Set{
         "send_request", "send_websocket",
         "fuzz_start", "mine_start", "sequence_start", "discover_start",
@@ -188,6 +194,14 @@ module Gori
       SEQUENCE_MAX_CONCURRENCY =          20
       SEQUENCE_MAX_STORED      =      20_000 # tokens kept in memory for the analysis
 
+      # Authorize (access-control replay) safety rails. The run's size is `flows × identities`
+      # and BOTH halves are caller-supplied, so the cap is on the product rather than on
+      # either factor — a 500-row query under four identities is two thousand requests on a
+      # target from one tool call.
+      AUTHORIZE_MAX_SENDS  = 2_000
+      AUTHORIZE_MAX_FLOWS  =   500 # rows a `query` may contribute
+      AUTHORIZE_MAX_STORED =   500 # replayed requests kept in memory for authorize_results
+
       # Discover (spider + brute) safety rails.
       DISCOVER_MAX_REQUESTS    = 100_000_i64
       DISCOVER_MAX_CONCURRENCY =         100
@@ -201,8 +215,8 @@ module Gori
       # never stops them; well above any realistic out-of-band test.
       MAX_OAST_SESSIONS = 32
 
-      # Ceiling on how many finished jobs each of the four async-job maps
-      # (@jobs/@mine_jobs/@sequence_jobs/@discover_jobs) retains. The server is
+      # Ceiling on how many finished jobs each of the five async-job maps
+      # (@jobs/@mine_jobs/@sequence_jobs/@discover_jobs/@authorize_jobs) retains. The server is
       # long-lived (it outlives a single call), and a completed job holds its whole
       # buffered result set (up to FUZZ_MAX_STORED etc.) for the process lifetime, so
       # a long session issuing many *_start calls would grow memory without bound.
@@ -243,6 +257,7 @@ module Gori
         @mine_jobs = {} of String => MineJob
         @sequence_jobs = {} of String => SequenceJob
         @discover_jobs = {} of String => DiscoverJob
+        @authorize_jobs = {} of String => AuthorizeJob
         @oast_mcp = {} of String => OastMcpSession
         @job_seq = 0
         # switch_project reopens @store; @owns_store tracks whether WE opened the
@@ -477,6 +492,75 @@ module Gori
         end
       end
 
+      # An async access-control run tracked for the authorize_* tools.
+      #
+      # Unlike its four siblings this job holds a `Plan` rather than an engine: the Authorize
+      # seam's `Plan#run` IS the send loop (it polls `stop` between requests and hands the same
+      # proc to the engine so it is polled between identities too), so the fiber has nothing to
+      # drive but the accumulation below. `stop` is therefore a FLAG this job owns rather than
+      # a call into an engine — the plan is a struct and the loop reads the proc.
+      class AuthorizeJob
+        getter id : String
+        getter plan : Authorize::Plan
+        property status : Symbol = :running # :running | :done | :stopped | :error
+        # Requests whose FULL identity set was replayed. A request the stop cut short mid-set
+        # yields no Target at all (see `Authorize::Engine#run`), so it is never counted here —
+        # claiming "enforced" from identities that were never sent is worse than a false
+        # positive.
+        property replayed = 0
+        property sent = 0 # individual requests (one per identity per replayed request)
+        property errors = 0
+        # Sends the outbound gate refused before the socket (Sandbox / an EXCLUDE rule).
+        property blocked = 0_i64
+        property blocked_reason : String? = nil
+        # Requests where NOTHING reached the origin. Tracked because a run that was entirely
+        # refused otherwise reports as "no identity matched the baseline" — a clean bill of
+        # health for traffic that never left.
+        property fully_blocked = 0
+        # Non-baseline identities served the same response as the baseline: the finding.
+        property bypasses = 0
+        property reviews = 0
+        property error_msg : String? = nil
+        getter results = [] of Authorize::Target
+        property? truncated = false
+        property ended_at_ms : Int64? = nil
+        property stop_requested_at_ms : Int64? = nil
+        property? stop_requested = false
+        getter audit : JobAudit
+
+        getter db_path : String?
+
+        def initialize(@id : String, @plan : Authorize::Plan, @audit : JobAudit,
+                       @db_path : String? = nil)
+        end
+
+        # The selection's size, snapshotted from the plan so a status read never walks it.
+        def planned : Int32
+          @plan.targets.size
+        end
+
+        def sends_planned : Int32
+          @plan.total_sends
+        end
+
+        def skipped : Array(Authorize::Skipped)
+          @plan.skipped
+        end
+
+        def identities : Array(String)
+          @plan.identities.map(&.name)
+        end
+
+        def baseline_identity : String?
+          @plan.identities.find(&.baseline?).try(&.name)
+        end
+
+        def stop : Nil
+          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+          @stop_requested = true
+        end
+      end
+
       # An async discover (spider + directory brute-force) run tracked for the discover_* tools.
       class DiscoverJob
         getter id : String
@@ -577,6 +661,7 @@ module Gori
           list_fuzz_tools j
           list_mine_tools j
           list_discover_tools j
+          list_authorize_tools j
           list_jobs_tools j
         end
       end
@@ -828,6 +913,10 @@ module Gori
         when "discover_status"           then gated { discover_status(h) }
         when "discover_results"          then gated { discover_results(h) }
         when "discover_stop"             then gated { discover_stop(h) }
+        when "authorize_start"           then gated { authorize_start(h) }
+        when "authorize_status"          then gated { authorize_status(h) }
+        when "authorize_results"         then gated { authorize_results(h) }
+        when "authorize_stop"            then gated { authorize_stop(h) }
         when "list_jobs"                 then gated { list_jobs }
         when "get_job"                   then gated { get_job(h) }
         when "stop_job"                  then gated { stop_job(h) }
@@ -938,7 +1027,7 @@ module Gori
       # resolve to unrelated rows in the NEW database. Refuse the read instead of handing
       # back evidence pointers that silently changed meaning; the results are kept, so
       # switching back makes them readable again.
-      private def job_project_mismatch(job : FuzzJob | MineJob | SequenceJob | DiscoverJob) : Result?
+      private def job_project_mismatch(job : FuzzJob | MineJob | SequenceJob | DiscoverJob | AuthorizeJob) : Result?
         return nil if job.db_path == @db_path
         err("job #{job.id} ran against a different project (#{job.db_path || "unknown"}); " \
             "switch back to that project to read its results",
@@ -947,7 +1036,7 @@ module Gori
 
       # A background job's fiber must never exit with the job still :running — that
       # hangs every poller and permanently trips jobs_running?. Land it terminal.
-      private def finalize_job(job : FuzzJob | MineJob | SequenceJob | DiscoverJob) : Nil
+      private def finalize_job(job : FuzzJob | MineJob | SequenceJob | DiscoverJob | AuthorizeJob) : Nil
         if job.status == :running
           job.status = :error
           job.error_msg ||= "job ended without a terminal event"
