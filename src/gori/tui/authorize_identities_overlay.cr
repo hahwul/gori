@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "../hotkeys"
 require "../authorize/identity"
 
 module Gori::Tui
@@ -154,13 +155,13 @@ module Gori::Tui
           draw_row(screen, box, id, i, py)
         end
       end
+      # The ACTIONS, on the card itself. They were only ever on the shell's hint strip, which
+      # is the wrong place for the one thing a first-time reader needs here: the card lists
+      # what exists and said nothing about how to add to it. A transient note takes the row
+      # when there is one to report, then it goes back to the actions.
       note_y = box.bottom - 2
-      if note = @note
-        screen.text(box.x + 3, note_y, note, Theme.muted, Theme.panel, width: box.w - 6)
-      else
-        screen.text(box.x + 3, note_y, "◆ = baseline · every other identity is read against it",
-          Theme.muted, Theme.panel, width: box.w - 6)
-      end
+      text = @note || "a add · e edit · d delete · b baseline"
+      screen.text(box.x + 3, note_y, Hotkeys.retag(text), Theme.muted, Theme.panel, width: box.w - 6)
     end
 
     private def draw_row(screen : Screen, box : Rect, id : Authorize::Identity, i : Int32, py : Int32) : Nil
@@ -174,7 +175,12 @@ module Gori::Tui
       name_w = 18
       screen.text(name_x, py, id.name, sel ? Theme.text_bright : Theme.text, bg, width: name_w)
       sx = name_x + name_w + 1
-      screen.text(sx, py, id.summary, Theme.muted, bg, width: {box.right - 2 - sx, 1}.max)
+      # The baseline row says so in WORDS, right-aligned, rather than leaving `◆` to a legend
+      # the card no longer has room for. A glyph nobody can look up is not a label.
+      tag = id.baseline? ? "baseline" : ""
+      tag_x = box.right - 2 - tag.size
+      screen.text(sx, py, id.summary, Theme.muted, bg, width: {tag_x - 1 - sx, 1}.max)
+      screen.text(tag_x, py, tag, Theme.focus_gold, bg) unless tag.empty?
     end
   end
 end

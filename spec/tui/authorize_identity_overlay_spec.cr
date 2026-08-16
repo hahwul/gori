@@ -86,6 +86,48 @@ describe AuthorizeIdentityOverlay do
   it "cancels on esc" do
     AuthorizeIdentityOverlay.new.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:cancel)
   end
+
+  # The form was walkable only with ⇥: the editor swallowed every arrow, and Save answered
+  # none — so a keyboard user could reach the last row and not get back out of it.
+  describe "keyboard navigation" do
+    it "walks every row with ↑/↓, editor included" do
+      ov = AuthorizeIdentityOverlay.new(Identity.new("x", set_headers: [{"Cookie", "a"}]))
+      ov.selected.should eq(AuthorizeIdentityOverlay::NAME_ROW)
+      ov.handle_key(okey(Termisu::Input::Key::Down))
+      ov.selected.should eq(AuthorizeIdentityOverlay::REMOVE_ROW)
+      ov.handle_key(okey(Termisu::Input::Key::Down))
+      ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
+      # a one-line buffer is at both edges, so the next ↓ leaves for Save
+      ov.handle_key(okey(Termisu::Input::Key::Down))
+      ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
+    end
+
+    it "walks back up out of the Save row" do
+      ov = AuthorizeIdentityOverlay.new(Identity.new("x"))
+      ov.set_selected(AuthorizeIdentityOverlay::SAVE_ROW)
+      ov.handle_key(okey(Termisu::Input::Key::Up))
+      ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
+    end
+
+    it "keeps ↑/↓ inside a multi-line buffer until the caret reaches an edge" do
+      ov = AuthorizeIdentityOverlay.new(
+        Identity.new("x", set_headers: [{"A", "1"}, {"B", "2"}, {"C", "3"}]))
+      ov.set_selected(AuthorizeIdentityOverlay::EDITOR_ROW)
+      2.times { ov.handle_key(okey(Termisu::Input::Key::Down)) } # caret walks to the last line
+      ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
+      ov.handle_key(okey(Termisu::Input::Key::Down)) # now at the bottom → leave
+      ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
+    end
+  end
+
+  # `remove:` gave no clue it wanted header NAMES. The pair of labels is what says so.
+  it "labels the drop field as headers, alongside the set-headers caption" do
+    b = MemoryBackend.new(100, 30)
+    AuthorizeIdentityOverlay.new.render(Screen.new(b), Rect.new(0, 0, 100, 30))
+    b.contains?("drop headers:").should be_true
+    b.contains?("set headers").should be_true
+    b.contains?("e.g. Cookie, Authorization").should be_true
+  end
 end
 
 describe AuthorizeIdentitiesOverlay do
@@ -152,5 +194,32 @@ describe AuthorizeIdentitiesOverlay do
     ov = AuthorizeIdentitiesOverlay.new(private_ids)
     ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:cancel)
     ov.pending.should be_nil
+  end
+
+  # The card listed what exists and said nothing about how to add to it — the actions were
+  # only ever on the shell's hint strip, which is not where someone opening this looks.
+  it "states its actions on the card, and names the baseline row in words" do
+    b = MemoryBackend.new(100, 30)
+    AuthorizeIdentitiesOverlay.new(private_ids).render(Screen.new(b), Rect.new(0, 0, 100, 30))
+    b.contains?("a add").should be_true
+    b.contains?("e edit").should be_true
+    b.contains?("d delete").should be_true
+    b.contains?("baseline").should be_true # the tag on the row, not a glyph legend
+  end
+
+  it "hands the row back to the actions once a transient note has been read" do
+    ov = AuthorizeIdentitiesOverlay.new(private_ids, 2)
+    ov.on_change = ->(_l : Array(Identity)) { true }
+    ov.handle_key(okey(Termisu::Input::Key::LowerB, 'b')) # sets a note
+    b = MemoryBackend.new(100, 30)
+    ov.render(Screen.new(b), Rect.new(0, 0, 100, 30))
+    b.contains?("is the baseline").should be_true
+    b.contains?("a add").should be_false # the note has the row for now
+  end
+
+  it "tells an empty list how to start" do
+    b = MemoryBackend.new(100, 30)
+    AuthorizeIdentitiesOverlay.new([] of Identity).render(Screen.new(b), Rect.new(0, 0, 100, 30))
+    b.contains?("a adds one").should be_true
   end
 end

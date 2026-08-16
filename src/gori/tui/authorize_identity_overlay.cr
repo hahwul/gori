@@ -28,6 +28,8 @@ module Gori::Tui
     SAVE_ROW   = 3
 
     getter index : Int32? # nil = adding
+    # The focused row, one of the four constants above.
+    getter selected : Int32
 
     # Names already taken by OTHER identities, lower-cased. A duplicate would put two rows
     # under one label in the results table, and nothing on screen would say which session
@@ -43,7 +45,7 @@ module Gori::Tui
       @remove = TextField.new((identity.try(&.remove_headers) || [] of String).join(", "))
       @baseline = identity.try(&.baseline?) || false
       @taken = taken.map(&.downcase).to_set
-      @sel = NAME_ROW
+      @selected = NAME_ROW
       @refused = nil.as(String?)
     end
 
@@ -118,26 +120,49 @@ module Gori::Tui
         return :stay
       end
 
-      case @sel
-      when NAME_ROW, REMOVE_ROW
-        field = @sel == NAME_ROW ? @name : @remove
-        if key.enter?
-          return :commit
-        elsif key.up?
-          move(-1)
-        elsif key.down?
-          move(1)
-        else
-          @refused = nil
-          field.handle_edit_key(ev)
-        end
-        :stay
-      when EDITOR_ROW
-        edit(ev)
-        :stay
-      else
-        (key.enter? || key.space?) ? :commit : :stay
+      case @selected
+      when NAME_ROW, REMOVE_ROW then field_key(ev, @selected == NAME_ROW ? @name : @remove)
+      when EDITOR_ROW           then editor_key(ev)
+      else                           save_key(ev)
       end
+    end
+
+    private def field_key(ev : Termisu::Event::Key, field : TextField) : Symbol
+      key = ev.key
+      return :commit if key.enter?
+      if key.up?
+        move(-1)
+      elsif key.down?
+        move(1)
+      else
+        @refused = nil
+        field.handle_edit_key(ev)
+      end
+      :stay
+    end
+
+    # ↑/↓ move the caret INSIDE the buffer until it reaches an edge, and only then leave the
+    # row — the same "at_top? ? leave : move" rule the Fuzzer template and the Discover lists
+    # follow. Without it the editor was a keyboard trap: arrows never left it, so ⇥ was the
+    # only way out and Save could not be reached by walking down the form.
+    private def editor_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      if key.up? && @editor.at_top?
+        move(-1)
+      elsif key.down? && @editor.at_bottom?
+        move(1)
+      else
+        edit(ev)
+      end
+      :stay
+    end
+
+    private def save_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      return :commit if key.enter? || key.space?
+      # The last row still has to be walkable BACK out of; only ⇥ used to leave it.
+      move(-1) if key.up?
+      :stay
     end
 
     # ⏎ inserts a header line here; everything else is the shared TextArea keymap (⇧arrows
@@ -166,15 +191,15 @@ module Gori::Tui
     end
 
     def move(d : Int32) : Nil
-      @sel = (@sel + d).clamp(NAME_ROW, SAVE_ROW)
+      @selected = (@selected + d).clamp(NAME_ROW, SAVE_ROW)
     end
 
     def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(NAME_ROW, SAVE_ROW)
+      @selected = idx.clamp(NAME_ROW, SAVE_ROW)
     end
 
     def set_preedit(text : String) : Nil
-      case @sel
+      case @selected
       when NAME_ROW   then @name.set_preedit(text)
       when REMOVE_ROW then @remove.set_preedit(text)
       when EDITOR_ROW then @editor.set_preedit(text)
@@ -208,7 +233,7 @@ module Gori::Tui
 
     def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
       return unless box = overlay_box(area)
-      return unless @sel == EDITOR_ROW
+      return unless @selected == EDITOR_ROW
       @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
     end
 
@@ -223,7 +248,7 @@ module Gori::Tui
     # The SET-headers buffer, between the two single-line fields and the refusal band. Shared
     # by render and the pointer entries so a click cannot land on a row the draw never used.
     private def editor_rect(box : Rect) : Rect
-      top = box.y + 5
+      top = box.y + 6 # name, drop, its caption, the set-headers caption
       Rect.new(box.x + 3, top, box.w - 6, {(box.bottom - 3) - top, 1}.max)
     end
 
@@ -238,17 +263,22 @@ module Gori::Tui
       card_title = title
       Frame.card(screen, box, card_title, bg: Theme.bg, border: Theme.border_focus)
       draw_field(screen, box, box.y + 2, row_bg(NAME_ROW), row_fg(NAME_ROW),
-        @sel == NAME_ROW, "name:", @name)
+        @selected == NAME_ROW, "name:", @name)
+      # "drop headers:" against "set headers" below — the PAIR is what says both rows are
+      # about headers. Labelled `remove:` on its own, the field gave no clue it wanted header
+      # NAMES, and a first-time reader had nothing to go on but the example in the buffer.
       draw_field(screen, box, box.y + 3, row_bg(REMOVE_ROW), row_fg(REMOVE_ROW),
-        @sel == REMOVE_ROW, "remove:", @remove)
-      screen.text(box.x + 3, box.y + 4, "set headers — one Name: Value per line",
+        @selected == REMOVE_ROW, "drop headers:", @remove)
+      screen.text(box.x + 3, box.y + 4, "names, comma separated — e.g. Cookie, Authorization",
+        Theme.muted, Theme.bg, width: box.w - 6)
+      screen.text(box.x + 3, box.y + 5, "set headers — one Name: Value per line",
         Theme.muted, Theme.bg, width: box.w - 6)
       ed = editor_rect(box)
       if @editor.line_count == 1 && @editor.text.empty?
         screen.text(ed.x, ed.y, "e.g. Cookie: session=…", Theme.muted, Theme.bg, width: ed.w)
-        screen.cursor(ed.x, ed.y) if @sel == EDITOR_ROW
+        screen.cursor(ed.x, ed.y) if @selected == EDITOR_ROW
       else
-        @editor.render(screen, ed, cursor: @sel == EDITOR_ROW)
+        @editor.render(screen, ed, cursor: @selected == EDITOR_ROW)
       end
       band = box.bottom - 3
       if refused = @refused
@@ -257,17 +287,17 @@ module Gori::Tui
       save_y = box.bottom - 2
       ok = refusal.nil?
       screen.fill(Rect.new(box.x + 1, save_y, box.w - 2, 1), row_bg(SAVE_ROW))
-      screen.cell(box.x + 1, save_y, @sel == SAVE_ROW ? '▎' : ' ', Theme.accent, row_bg(SAVE_ROW))
+      screen.cell(box.x + 1, save_y, @selected == SAVE_ROW ? '▎' : ' ', Theme.accent, row_bg(SAVE_ROW))
       screen.text(box.x + 3, save_y, ok ? "[ Save identity ]" : "[ #{refusal} ]",
         ok ? Theme.accent : Theme.muted, row_bg(SAVE_ROW), Attribute::Bold, width: box.w - 6)
     end
 
     private def row_bg(row : Int32) : Color
-      @sel == row ? Theme.accent_bg : Theme.bg
+      @selected == row ? Theme.accent_bg : Theme.bg
     end
 
     private def row_fg(row : Int32) : Color
-      @sel == row ? Theme.text_bright : Theme.text
+      @selected == row ? Theme.text_bright : Theme.text
     end
   end
 end
