@@ -570,15 +570,24 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("out", data_frame(1_u32, Frame::END_STREAM, "\x88\x02\x03\xe8"))
 
     sink.requests.size.should eq(1)
-    sink.responses.size.should eq(1)
-    resp = sink.responses.first
+    # TWO response writes, and deliberately: since #733 the socket's HTTP half is projected the
+    # moment the origin's 200 arrives (the way the h1 path records its 101 before the tunnel
+    # starts), so the flow does not sit Pending for the socket's whole life while its transcript
+    # fills in underneath it. The row is written again at teardown with the final state and the
+    # full duration — `update_response` is last-write-wins.
+    sink.responses.size.should eq(2)
+    resp = sink.responses.last
     resp.state.should eq(Gori::Store::FlowState::Complete)
     resp.error.should be_nil # the stream really did complete — this is not a failure
     # `advisory_of` joins the accumulated set onto BOTH halves, so it survives to the request
     # row and the response row alike (`update_one` writes the column outright).
     sink.requests.first.advisory.not_nil!.should contain("RFC 8441 extended CONNECT")
     sink.requests.first.advisory.not_nil!.should contain(":protocol \"websocket\"")
-    resp.advisory.not_nil!.should contain("no message transcript")
+    # The sentence's second half, which is the one #733 changed: the transcript IS there now,
+    # and what is still missing is the per-message hold and Match&Replace. See
+    # `spec/proxy/h2/ws_capture_spec.cr` for the transcript itself.
+    resp.advisory.not_nil!.should contain("gori read its frames")
+    resp.advisory.not_nil!.should contain("Match&Replace are NOT available")
     # ... and the head names the stream shape, which the pseudo filter dropped entirely.
     String.new(sink.requests.first.head).should contain("X-Gori-Protocol: websocket")
   end
@@ -592,7 +601,9 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
     assembler.finalize_all("h2 connection closed")
 
-    resp = sink.responses.first
+    # `.last`, not `.first`: the 200 that opened the socket is projected when it arrives (see
+    # the spec above), so the ABORT is the second write to the same row.
+    resp = sink.responses.last
     resp.state.should eq(Gori::Store::FlowState::Aborted)
     resp.error.not_nil!.should contain("h2 connection closed")
     resp.error.not_nil!.should contain("RFC 8441 extended CONNECT")

@@ -477,9 +477,15 @@ module Gori::Proxy::WS
     # buffered prefix, and teardown with an unterminated fragment still held. They had two
     # copies and one omission between them, which is how the merged-row and dropped-bytes bugs
     # got in; `AssemblingPump` has the same three moments and its own equivalents.
-    private def self.emit_pending(assembling : IO::Memory, direction : String, flow_id : Int64,
-                                  sink : FlowSink, message_opcode : UInt8,
-                                  shape : MessageShape) : IO::Memory
+    #
+    # Not `private` for the same reason as `capture_frame` below: `H2::WsCapture` (#733) reads
+    # the WebSocket transcript off an RFC 8441 extended CONNECT stream and has all three of
+    # those moments too. It must record exactly what this pump records, not approximately — an
+    # operator's finding must not depend on whether the socket was opened with an HTTP/1.1
+    # `Upgrade:` or an HTTP/2 `:protocol`.
+    def self.emit_pending(assembling : IO::Memory, direction : String, flow_id : Int64,
+                          sink : FlowSink, message_opcode : UInt8,
+                          shape : MessageShape) : IO::Memory
       if assembling.size == 0
         # No row for a zero-byte message — but the accumulator still has to be cleared when a
         # fragment WAS noted, because a LEADING FRAGMENT MAY BE EMPTY. `TEXT fin=0 ""` then
