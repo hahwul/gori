@@ -407,6 +407,245 @@ describe Gori::Proxy::Server do
     sink.responses.map { |r| String.new(r.body.not_nil!) }.sort.should eq(["RESP-1", "RESP-2"])
   end
 
+  # #728. The spec above proves the interim is relayed when the origin VOLUNTEERS one on a
+  # bodyless GET — which never made the proxy wait for anything. The three below drive the
+  # case that deadlocked: the CLIENT sends `Expect: 100-continue` with a Content-Length and
+  # then WAITS, as RFC 9110 §10.1.1 tells it to, without writing a single body byte.
+  it "relays the origin's 100 Continue to a client withholding its Expect body (#728)" do
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        head = Gori::Proxy::Codec::Http1.read_head(conn)
+        if head
+          # The marker proves the client got the ORIGIN's bytes verbatim (P6/P7) and not
+          # gori's own fallback 100 — see the "origin ignores it" spec below.
+          conn << "HTTP/1.1 100 Continue\r\nX-Origin-Interim: yes\r\n\r\n"
+          conn.flush
+          req = Gori::Proxy::Codec::Http1.parse_request_head(head)
+          framing, len = Gori::Proxy::Codec::Body.request_framing(req)
+          body = Gori::Proxy::Codec::Body.read(conn, framing, len)
+          seen_body.send(body ? String.new(body) : "")
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nSTORED"
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    payload = "upload-me"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    # NOT sending the body — the whole point. Before the fix this read timed out.
+    interim = read_until(client, "\r\n\r\n")
+    interim.should contain("100 Continue")
+    interim.should contain("X-Origin-Interim: yes") # the origin's own bytes, relayed
+
+    # Only now does a conformant client write the body.
+    client << payload
+    client.flush
+    rest = read_until(client, "STORED")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq(payload)
+    rest.should contain("200 OK")
+    sink.responses.first.status.should eq(200)
+    String.new(sink.requests.first.body.not_nil!).should eq(payload)
+  end
+
+  it "relays a FINAL answer given instead of 100 Continue and sends no body (#728)" do
+    # RFC 9110 §10.1.1: the origin may refuse the expectation (417) or answer outright without
+    # reading the body at all. Pumping a body at a server that has stopped reading is how a
+    # request ends up framed into the next response, so gori must relay and stop.
+    done = Channel(Nil).new(1)
+    extra = Channel(Int32).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << "HTTP/1.1 417 Expectation Failed\r\nContent-Length: 6\r\nConnection: close\r\n\r\nNOPE!!"
+          conn.flush
+          # Whatever (if anything) gori pushes at us after the refusal. 0 is a real EOF
+          # (gori closed the upstream); -1 would be the socket held open in silence, which
+          # is a different thing and must not read as success.
+          conn.read_timeout = 1.second
+          extra.send(begin
+            conn.read(Bytes.new(64))
+          rescue
+            -1
+          end)
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: 9\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    got = read_until(client, "NOPE!!")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    got.should contain("417 Expectation Failed")
+    got.should_not contain("100 Continue") # no interim was invented on the origin's behalf
+    extra.receive.should eq(0)             # EOF, not one body byte pumped after the refusal
+    sink.responses.first.status.should eq(417)
+    sink.requests.first.body.not_nil!.size.should eq(0)
+  end
+
+  it "never parks the upstream after answering the expectation with a final status (#728)" do
+    # The reuse-able refusal shape: HTTP/1.1, `Content-Length: 0`, and NO `Connection: close`,
+    # for which `origin_keep_alive?` answers true. gori wrote a head declaring a body and then
+    # sent none, so the origin may still be reading for it — parking that socket would let the
+    # next request be consumed as the missing body. The decision has to come from what gori
+    # sent, not from what the origin's headers claim.
+    done = Channel(Nil).new(1)
+    upstream_after = Channel(Int32).new(1)
+    conns = Atomic(Int32).new(0)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        conns.add(1)
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << "HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n"
+          conn.flush
+          # 0 = gori closed the upstream (what we want). -1 = held open in silence, i.e.
+          # parked for reuse. >0 = it pushed something at an origin still reading for a body.
+          conn.read_timeout = 2.seconds
+          upstream_after.send(begin
+            conn.read(Bytes.new(64))
+          rescue
+            -1
+          end)
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: 9\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    got = read_until(client, "\r\n\r\n")
+
+    # The CLIENT leg must be closed too: the 9 body bytes are still owed on this socket, so
+    # anything arriving on it next is ambiguous. A follow-up request must hit EOF, not be
+    # answered — this is the half that keeps the upstream release above from ever mattering.
+    client << "GET http://127.0.0.1:#{origin_port}/next HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client_after = begin
+      client.read(Bytes.new(64))
+    rescue
+      -1
+    end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    got.should contain("417 Expectation Failed")
+    upstream_after.receive.should eq(0) # upstream released, not parked for reuse
+    client_after.should eq(0)           # client connection closed, second request unanswered
+    conns.get.should eq(1)              # and no second origin connection was ever dialed
+    sink.responses.size.should eq(1)
+    sink.responses.first.status.should eq(417)
+  end
+
+  it "answers 100 Continue itself when the origin ignores the expectation (#728)" do
+    # An origin that simply waits for the body is conformant and common. Nobody would move,
+    # so after a bounded wait gori issues the interim and unblocks the client.
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin_port = start_body_origin("done", seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    payload = "upload-me"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    interim = read_until(client, "\r\n\r\n")
+    interim.should contain("100 Continue")
+    interim.should_not contain("X-Origin-Interim") # this one came from gori, not an origin
+
+    client << payload
+    client.flush
+    rest = read_until(client, "done")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq(payload)
+    rest.should contain("200 OK")
+  end
+
+  it "answers 100 Continue itself on the buffering request-body rewrite path (#728)" do
+    # The hold / body-rewrite / short-circuit paths must have the COMPLETE body before anything
+    # can go upstream, so there is no origin to ask — gori answers the expectation itself or
+    # deadlocks on a body the client is deliberately withholding.
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin_port = start_body_origin("ok", seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    payload = "ping-data" # "ping" → "PONG!" re-frames Content-Length 9 → 10
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    read_until(client, "\r\n\r\n").should contain("100 Continue")
+
+    client << payload
+    client.flush
+    rest = read_until(client, "ok")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq("PONG!-data") # the rewrite still happened
+    rest.should contain("200 OK")
+  end
+
   it "refuses a malformed interim 1xx that declares a body (no response smuggling)" do
     done = Channel(Nil).new(1)
     origin = TCPServer.new("127.0.0.1", 0)

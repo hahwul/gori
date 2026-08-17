@@ -83,6 +83,23 @@ module Gori::Proxy
     # against a hostile upstream streaming an unbounded run of body-less 103s.
     MAX_INTERIM = 64
 
+    # How long the streaming request path waits for the ORIGIN to answer an
+    # `Expect: 100-continue` before giving up on it and unblocking the client itself (#728).
+    #
+    # It has to be bounded, and short. A great many origins simply ignore the expectation and
+    # wait for the body (RFC 9110 §10.1.1 permits exactly that), so an unbounded wait here
+    # would trade the old three-way deadlock for a new one. 1 s is curl's own
+    # `--expect100-timeout` default, i.e. the interval clients already budget for this — and
+    # it costs nothing next to the status quo, where the client was the one paying it.
+    EXPECT_CONTINUE_WAIT = 1.second
+
+    # The interim gori writes ITSELF when it cannot get one from the origin — either because
+    # the origin did not answer in time, or because this path had to have the whole body in
+    # hand before it could dial at all (intercept hold / body rewrite / short circuit).
+    # HTTP/1.1-only: `elicit_request_body` / `settle_expectation` gate on the client's version
+    # exactly as `skip_interim_responses` does, so a 1.0 client never sees a 1xx.
+    CONTINUE_RESPONSE = "HTTP/1.1 100 Continue\r\n\r\n".to_slice
+
     # `fixed_host`/`fixed_port` pin all requests to one origin (post-CONNECT TLS
     # tunnel); when nil the upstream is resolved per request from the target /
     # Host header (plaintext forward proxy). `tls_upstream` wraps the origin
@@ -443,16 +460,50 @@ module Gori::Proxy
       retryable = retryable_request?(sent_req, req_framing.none?)
       req_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(req_framing, req_len))
       req_complete = true
+      # `Expect: 100-continue` (#728). A client that sends it is WITHHOLDING its body until it
+      # is answered, so writing the head and then blocking on `Codec::Body.stream` — which is
+      # what this path used to do — parked the client, gori and the origin on each other until
+      # a timeout broke the tie. Settle the expectation between the head and the body instead:
+      # see `settle_expectation` for the four outcomes.
+      #
+      # Keyed on the CLIENT's `req`, not on `sent_head`: the deadlock is the client holding its
+      # body back, and only the client's own head says whether it is doing that. (A Match&Replace
+      # rule that ADDS `Expect` to the wire head cannot deadlock — the client is not waiting — and
+      # a rule that REMOVES it still leaves the client waiting, which the self-issued 100 covers.)
+      # Also gated on a body actually being declared: an `Expect` on a bodyless request has
+      # nothing to withhold, and — load-bearing for retry safety — `retryable_request?` returns
+      # false for every body-declaring request, so `acquire_and_send` can NOT re-run this block.
+      # That is what guarantees the origin's interim is relayed to the client at most once and no
+      # body is sent twice on a stale-reuse redial.
+      expects_continue = expect_continue?(req) && !req_framing.none?
+      early_head = nil.as(Bytes?)
+      send_body = true
+      client_gone = false
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
         up.write(sent_head)
-        req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture, copy_buf)
-        up.flush
+        if expects_continue
+          up.flush # the head must be ON THE WIRE before there is anything to wait for
+          early_head, send_body, client_gone = settle_expectation(up, req)
+        end
+        if send_body
+          req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture, copy_buf)
+          up.flush
+        end
         true
       end
       unless upstream && sent
         release_upstream
         record_error(req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
+        return false
+      end
+      if client_gone
+        # The client vanished while gori was answering its expectation. Nothing was forwarded
+        # and nothing will be; record it rather than leave the flow Pending (mirrors the same
+        # guard inside `skip_interim_responses`).
+        release_upstream
+        record_error(record_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
         return false
       end
       req_body = req_framing.none? ? nil : req_capture.to_slice
@@ -464,8 +515,44 @@ module Gori::Proxy
         @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body"))
         return false
       end
-      handle_response(upstream, req, flow_id, started, host, port, scheme,
-        reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
+      keep = handle_response(upstream, req, flow_id, started, host, port, scheme,
+        reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req,
+        pre_read_head: early_head)
+      # The origin answered the expectation with a FINAL response (417, 401, a redirect…) and
+      # gori did NOT pump the body. Relaying that answer is right; keeping EITHER leg afterwards
+      # is not, and for the same reason on both sides — an under-delivered body leaves a socket
+      # whose next bytes are ambiguous:
+      #
+      #   - CLIENT: the body is still owed on that socket, and whether the client sends it,
+      #     having read a final status, is its own decision. Reading whatever turns up there as
+      #     the next request line is how a desync starts, so the connection ends (return false).
+      #   - UPSTREAM: gori wrote a head declaring a body and then sent none, so the origin may
+      #     still be reading for it. `update_upstream_reuse` at the end of `handle_response`
+      #     decides purely from the RESPONSE — and `origin_keep_alive?` says yes for exactly the
+      #     shape this branch produces (`417`, HTTP/1.1, `Content-Length: 0`, no `Connection`
+      #     header), parking a socket the next request would be consumed as that body by. RFC
+      #     9110 §10.1.1 only says an origin SHOULD indicate whether it will close or keep
+      #     reading the content, so an origin that says neither is non-conformant but real.
+      #     Release it HERE, from what gori knows about what gori sent, never from what the
+      #     origin's headers claim.
+      #
+      # The release is unconditional on this branch and deliberately AFTER `handle_response`,
+      # which still has to read the final response's own body off that socket first. It is
+      # idempotent (`release_upstream` no-ops on an already-cleared slot) and safe on the exotic
+      # 101 branch, which detaches `@upstream` and hands it to the tunnel before returning.
+      #
+      # Today the client-side close alone would mask the upstream half: the reuse slot is
+      # per-`ClientConn` (`@upstream`, not a shared pool), so ending this connection sends
+      # `run`'s ensure through `release_upstream` before any next request could exist. That
+      # makes the two lines below redundant in the current arrangement and NOT redundant as an
+      # invariant — the safety would otherwise live two frames away from the knowledge, and the
+      # first change that lets this branch keep the client alive would silently reintroduce the
+      # desync with nothing local to stop it.
+      if early_head
+        release_upstream
+        return false
+      end
+      keep
     end
 
     # Removes the client's `Sec-WebSocket-Extensions` offer from the handshake gori is
@@ -506,6 +593,14 @@ module Gori::Proxy
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64, started : Time::Instant,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      # #728: a held request must be COMPLETE before the human can see it, so gori answers the
+      # client's `Expect: 100-continue` itself rather than blocking on a body being withheld.
+      # See `elicit_request_body` for why this path cannot ask the origin instead.
+      unless elicit_request_body(req, req_framing)
+        record_error(sent_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
+        return false
+      end
       buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
       unless body_complete
         # The client cut its request body short — there's nothing whole to hold/forward, and
@@ -567,6 +662,14 @@ module Gori::Proxy
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      # #728: draining the body is what lets a stubbed connection survive, and a client holding
+      # its body back for a `100 Continue` never drains. Answer it here too — the stub's own
+      # status still follows, and a 1xx before it is exactly what the client is waiting for.
+      unless elicit_request_body(req, req_framing)
+        record_error(sent_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
+        return false
+      end
       buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
       unless body_complete
         # Nothing was answered, so this is not a short-circuited flow — record it as the
@@ -642,6 +745,13 @@ module Gori::Proxy
                                                host : String, port : Int32, scheme : String,
                                                created_at : Int64, started : Time::Instant,
                                                req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      # #728: a body rule needs the whole entity before the head can be re-framed and sent, so
+      # (as on the hold path) gori answers the client's `Expect: 100-continue` itself.
+      unless elicit_request_body(req, req_framing)
+        record_error(sent_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
+        return false
+      end
       buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
       unless body_complete
         # Client cut the body short — forwarding it under the original length would desync
@@ -711,11 +821,22 @@ module Gori::Proxy
     # Reads, (optionally holds), forwards, and captures the response. `req` is the
     # ORIGINAL request (framing/keep-alive/method come from it). Returns true to
     # keep the connection alive.
+    #
+    # `pre_read_head` is a response head the caller has ALREADY taken off the upstream socket
+    # and must not be read again — the `Expect: 100-continue` settlement (#728), which has to
+    # look at the origin's answer before it can decide whether to pump the client's body. It is
+    # deliberately handed back UNPARSED so every gate below (interim handling, framing, M&R,
+    # intercept) runs on it exactly as if `read_response_head` had produced it; the one thing it
+    # skips is the stale-reuse redial, which cannot apply once a head has been read.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
                                 started : Time::Instant, host : String, port : Int32, scheme : String,
                                 *, reused : Bool, sent_head : Bytes, can_retry : Bool,
-                                sent_req : Codec::RawRequest) : Bool
-      resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
+                                sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil) : Bool
+      if pre_read_head
+        resp_head = pre_read_head
+      else
+        resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
+      end
       if resp_head.nil?
         @sink.on_response(FlowMapper.error_response(flow_id, "no response from upstream"))
         release_upstream
@@ -919,6 +1040,124 @@ module Gori::Proxy
         resp = Codec::Http1.parse_response_head(resp_head)
       end
       {resp_head, resp}
+    end
+
+    # Does this request withhold its body until it is answered? RFC 9110 §10.1.1: `Expect` is a
+    # comma-separated list of expectations and `100-continue` is the only one anyone defines, so
+    # a case-insensitive containment test is both sufficient and deliberately lenient — the
+    # answer only ever decides whether gori WAITS, never what it forwards (the header itself
+    # goes upstream byte-exact like every other, P7).
+    private def expect_continue?(req : Codec::RawRequest) : Bool
+      value = req.headers.get?("Expect")
+      return false unless value
+      value.downcase.includes?("100-continue")
+    end
+
+    # Settles an `Expect: 100-continue` on the STREAMING path, between the head going upstream
+    # and the client's body being pumped (#728). Returns `{early_head, send_body, client_gone}`:
+    #
+    #   - the origin sent a well-formed interim (100, 103, …) → relay it VERBATIM to the client
+    #     (P6/P7: the origin's own bytes, never a reconstruction) and pump the body:
+    #     `{nil, true, false}`. Only ONE head is read here; a further run of 1xx is left to
+    #     `skip_interim_responses`, which sees them after the body and applies the same rules.
+    #     (The MAX_INTERIM run therefore restarts its count once, at one extra 1xx — a cap, not
+    #     a correctness boundary.)
+    #   - the origin answered something FINAL instead — 417 Expectation Failed, or a 401/403/30x
+    #     it can decide without reading the body, both of which RFC 9110 §10.1.1 explicitly
+    #     allows — then it does NOT want the body, and pumping one at a server that has stopped
+    #     reading is how a request gets smuggled into the next response's framing. Hand the head
+    #     back for relay and send nothing: `{head, false, false}`. A malformed 1xx (one declaring
+    #     a body) takes this branch too, on purpose: `skip_interim_responses` already knows how
+    #     to refuse it, and it gets a flow_id to record against, which this point does not have.
+    #   - the origin closed / errored before answering → `{nil, false, false}`. Uploading a body
+    #     into a dead socket buys nothing; `handle_response` reads the EOF and records
+    #     "no response from upstream".
+    #   - nothing arrived within EXPECT_CONTINUE_WAIT → gori writes the 100 ITSELF and pumps the
+    #     body: `{nil, true, false}`. An origin that ignores the expectation is normal and
+    #     conformant, and it is waiting for exactly the bytes the client is refusing to send, so
+    #     SOMEONE has to move first. If that write fails the client is gone: `{nil, false, true}`.
+    #     (Cost of the self-issued 100: a duplicate is possible when the origin's own 100 lands
+    #     just after the deadline. RFC 9110 §15.2 requires a client to tolerate 1xx it did not
+    #     even ask for, so a second one is harmless.)
+    private def settle_expectation(upstream : IO, req : Codec::RawRequest) : {Bytes?, Bool, Bool}
+      head = read_head_within(upstream, EXPECT_CONTINUE_WAIT)
+      if head
+        resp = Codec::Http1.parse_response_head(head)
+        return {head, false, false} unless interim_response?(resp) && !interim_has_body?(resp)
+        # RFC 9110 §15.2 / RFC 7231: never forward a 1xx to an HTTP/1.0 client, which cannot
+        # parse it. Reading past it is still right — the same rule `skip_interim_responses`
+        # applies — and the body then flows because that client never waited for an answer.
+        return {nil, true, false} unless req.version == "HTTP/1.1"
+        begin
+          @io.write(head)
+          @io.flush
+        rescue
+          return {nil, false, true}
+        end
+        return {nil, true, false}
+      end
+      # Timed out, or the wait could not be bounded at all (a non-socket upstream — specs, a
+      # future transport). Either way, blocking is the one thing that must not happen here.
+      return {nil, true, false} unless req.version == "HTTP/1.1"
+      write_own_continue ? {nil, true, false} : {nil, false, true}
+    end
+
+    # Reads ONE response head, giving up if the first byte does not arrive within `wait`.
+    # Returns nil on the timeout, on EOF/error, and when the socket's read timeout cannot be
+    # reached at all (a non-socket IO) — the caller must treat every nil as "no answer", never
+    # as "keep waiting".
+    #
+    # Only the FIRST byte is on the short clock. Once the origin has started to speak, the head
+    # is finished under the connection's normal timeout via `safe_read_head` (with the peeked
+    # byte pushed back through a `PrefixIO`, the same handoff `handle_connect` uses) — a short
+    # deadline spanning the whole head would abandon a partially-consumed response on the socket,
+    # which is a desync, not a timeout.
+    private def read_head_within(upstream : IO, wait : Time::Span) : Bytes?
+      sock = SocketTuning.underlying_socket(upstream)
+      return nil unless sock
+      saved = sock.read_timeout
+      first = begin
+        sock.read_timeout = wait
+        upstream.read_byte
+      rescue
+        nil # IO::TimeoutError (nothing came) or a reset upstream — both are "no answer"
+      ensure
+        sock.read_timeout = saved
+      end
+      return nil unless first
+      safe_read_head(PrefixIO.new(Bytes[first], upstream))
+    end
+
+    # gori's own `100 Continue` to the client. False when the client is gone.
+    private def write_own_continue : Bool
+      @io.write(CONTINUE_RESPONSE)
+      @io.flush
+      true
+    rescue
+      false
+    end
+
+    # The BUFFERING request paths — intercept hold, request-body Match&Replace, short circuit —
+    # cannot ask the origin what it thinks of an `Expect: 100-continue`, because all three must
+    # hold the COMPLETE body before anything goes upstream (the human has to see it, the rule has
+    # to rewrite it, the stub has to drain it) and two of them may never dial an origin at all.
+    # There is no one to relay, so gori answers the expectation itself — otherwise these paths
+    # block on `read_complete` for a body the client is deliberately withholding, which is the
+    # #728 deadlock with no origin even involved.
+    #
+    # The cost is stated plainly: gori commits to reading the body, so an origin that would have
+    # answered 417 no longer gets the chance to refuse it before it is sent. That is the price of
+    # buffering, it is paid only when the operator has switched on a hold/rewrite/stub rule for
+    # this request, and it fails SAFE — a 100 promises nothing about the final status.
+    #
+    # A no-op (returns true, writes nothing) unless the client both asked and speaks HTTP/1.1,
+    # and unless a body is actually declared. RFC 9110 §10.1.1: a 100-continue expectation from
+    # an HTTP/1.0 client is to be ignored, and such a client could not parse the answer anyway.
+    # Returns false only when the write failed, i.e. the client is gone.
+    private def elicit_request_body(req : Codec::RawRequest, framing : Codec::BodyFraming) : Bool
+      return true unless expect_continue?(req) && !framing.none?
+      return true unless req.version == "HTTP/1.1"
+      write_own_continue
     end
 
     # Computes the response body framing, or records a visible error flow and
