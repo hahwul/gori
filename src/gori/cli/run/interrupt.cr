@@ -28,19 +28,32 @@ module Gori
       def self.install_interrupt_trap(fiber_name : String, notice : String,
                                       &stop : -> Nil) : -> Bool
         interrupted = false
+        seen = false
         shutdown = Channel(Nil).new(1)
-        Signal::INT.trap { shutdown.send(nil) rescue nil }
-        Signal::TERM.trap { shutdown.send(nil) rescue nil }
+        # Escalate on the SECOND signal inside the trap, not after `stop` returns. The
+        # previous second `receive` sat behind `stop.call`, so a drain blocked on
+        # in-flight retries never reached it; a third `send` then blocked inside the
+        # trap (capacity-1 channel, `send` waits rather than raising) and INT/TERM
+        # stayed trapped — SIGKILL was the only way out, the failure this helper's
+        # header says it exists to close.
+        escalate = -> {
+          if seen
+            STDERR.puts "\ninterrupted again — exiting without finishing"
+            exit 130
+          end
+          seen = true
+          select
+          when shutdown.send(nil)
+          else
+          end
+        }
+        Signal::INT.trap { escalate.call }
+        Signal::TERM.trap { escalate.call }
         spawn(name: fiber_name) do
           shutdown.receive
           interrupted = true
           STDERR.puts "\n#{notice}"
           stop.call
-          # Still parked here on the happy path — the process exits right after the command
-          # returns, so the fiber goes with it.
-          shutdown.receive
-          STDERR.puts "\ninterrupted again — exiting without finishing"
-          exit 130
         end
         -> { interrupted }
       end

@@ -45,7 +45,8 @@ module Gori
         project = resolve_capture_project(project_name, db_path)
         config = Config.new(listen, port, project.db_path, Paths.default_ca_dir,
           insecure_upstream: insecure)
-        App.new(config).run_capture(project, format: format, max: max, every: every)
+        signaled = App.new(config).run_capture(project, format: format, max: max, every: every)
+        exit 130 if signaled
       end
     end
   end

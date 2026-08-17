@@ -253,7 +253,9 @@ module Gori
     # capture is the whole point here), streams one line per completed/errored flow
     # (`:text` = the legacy format, `:json` = JSON-Lines), and runs until INT/TERM,
     # an optional wall-clock `every` duration, or an optional completed-flow `max`.
-    def run_capture(project : Project, format : Symbol, max : Int32?, every : Time::Span?) : Nil
+    # Returns true when shutdown came from INT/TERM (caller should exit 130), false
+    # when `--for` / `--max` ended the run on purpose.
+    def run_capture(project : Project, format : Symbol, max : Int32?, every : Time::Span?) : Bool
       setup_logging(STDERR)
       session =
         begin
@@ -272,7 +274,8 @@ module Gori
       print_banner(session)
       spawn { capture_printer(session, format, max) }
       reload_stop = spawn_reload_loop(session)
-      install_signal_traps
+      signaled = false
+      install_signal_traps { signaled = true }
       if span = every
         # Wall-clock terminator: nudge the same shutdown channel the signal traps use.
         spawn do
@@ -286,6 +289,7 @@ module Gori
       # to make no further store calls — safe to close the store right after.
       reload_stop.send(nil) rescue nil
       session.close
+      signaled
     end
 
     # `{outcome, error}`. `outcome` is :quit (leave gori) or :back (return to the picker);
@@ -447,8 +451,8 @@ module Gori
     # buffered send from the signal fiber wakes it and the normal teardown (reload fiber stop,
     # then session.close) runs on the real stack. The interactive TUI cannot use this shape —
     # see SignalGuard.
-    private def install_signal_traps : Nil
-      CAPTURE_SIGNALS.each { |sig| sig.trap { @shutdown.send(nil) rescue nil } }
+    private def install_signal_traps(&on_signal : ->) : Nil
+      CAPTURE_SIGNALS.each { |sig| sig.trap { on_signal.call; @shutdown.send(nil) rescue nil } }
     end
 
     private def setup_logging(io : IO) : Nil
