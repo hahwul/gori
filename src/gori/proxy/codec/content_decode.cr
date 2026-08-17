@@ -8,8 +8,9 @@ require "../../ascii_bytes"
 
 module Gori::Proxy::Codec
   # Decodes a captured body for DISPLAY: de-chunks the h1 wire form (the stored
-  # bytes preserve chunk framing) and inflates the Content-Encoding (gzip/deflate/
-  # br/zstd) so compressed responses stop rendering as garbage. This is a DERIVED
+  # bytes preserve chunk framing) and inflates every compression layer the head declares
+  # — Content-Encoding AND any non-chunked Transfer-Encoding (gzip/deflate/br/zstd) — so
+  # compressed responses stop rendering as garbage. This is a DERIVED
   # view only — the stored/forwarded/resent bytes stay byte-faithful (P7). All
   # decoding is tolerant (truncated capture-capped bodies yield partial output, never
   # raise) and output is capped to guard against decompression bombs.
@@ -64,17 +65,24 @@ module Gori::Proxy::Codec
       return {nil, nil, true} unless head_has_encoding?(head)
       te_values, ce_values = encoding_headers(head)
       te_chunked = transfer_encoding_chunked?(te_values)
-      encodings = ce_values
-        .flat_map(&.split(','))
-        .map(&.strip.downcase)
-        .reject { |e| e.empty? || e == "identity" }
+      # ONE decode chain for both header families, ordered outermost-LAST so the shared
+      # `reverse_each` below undoes it outermost-in. Transfer-Encoding sits OUTSIDE
+      # Content-Encoding: RFC 9110 §8.4.1 makes a content coding a property of the
+      # REPRESENTATION (part of what the sender has to encode before it can send anything),
+      # while RFC 9112 §6.1 defines the transfer codings as "applied to the content in order
+      # to form the message body" — the last transformation before the wire, so the first to
+      # undo. `Transfer-Encoding: gzip` used to be consulted for `chunked` alone: the gzip
+      # layer was never inflated and no note said why, which is worse than an unknown
+      # Content-Encoding (labelled honestly by `inflate`).
+      encodings = content_layers(ce_values) + transfer_layers(te_values, te_chunked)
       return {nil, nil, true} if !te_chunked && encodings.empty?
 
       # A chunked wire form that never reached its terminating 0-chunk is cut, exactly like a
-      # compressed stream that never ended — same fact, same report.
+      # compressed stream that never ended — same fact, same report. `chunked` is the FINAL
+      # transfer coding (the outermost layer), so undoing it first keeps the chain in order.
       entity, complete, notes = te_chunked ? dechunk_step(body) : {body, true, [] of String}
-      # Content-Encoding lists are applied in order; decode from the outermost
-      # (last-listed) inward.
+      # Both header families list their codings in the order they were APPLIED; decode from
+      # the outermost (last-listed) inward.
       encodings.reverse_each do |enc|
         decoded, note, clean = inflate(entity, enc, max_out)
         complete = false unless clean
@@ -123,7 +131,7 @@ module Gori::Proxy::Codec
     def self.content_encoded?(head : Bytes) : Bool
       return false unless AsciiBytes.contains_ci?(head, CE_NEEDLE)
       _, ce_values = encoding_headers(head)
-      return true if ce_values.flat_map(&.split(',')).map(&.strip.downcase).any? { |e| !e.empty? && e != "identity" }
+      return true unless content_layers(ce_values).empty?
       # A Content-Encoding field-name IS present (a bare `Vary: Content-Encoding` yields no
       # entry here at all, so it still returns false) but no readable token came back: refuse
       # only when the head is folded/obfuscated, which is the shape that hides one.
@@ -135,7 +143,33 @@ module Gori::Proxy::Codec
     # substring scan, which would wrongly de-chunk a body whose TE merely contains
     # the word (e.g. a non-final coding, or a token like "xchunked").
     private def self.transfer_encoding_chunked?(values : Array(String)) : Bool
-      values.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?).last? == "chunked"
+      codings(values).last? == "chunked"
+    end
+
+    # The Content-Encoding layers to undo, in the order they were applied. `identity` means
+    # "no transformation" (RFC 9110 §8.4.1), so it is dropped rather than reported.
+    private def self.content_layers(values : Array(String)) : Array(String)
+      codings(values).reject { |e| e == "identity" }
+    end
+
+    # The Transfer-Encoding layers this projection still has to undo. Everything the header
+    # lists EXCEPT the final `chunked`, which is framing, not compression: the wire codec
+    # framed on it (Body.chunked?, same last-token rule) and `dechunk_step` has already removed
+    # it, so leaving it here would decode it twice and then report it as an unknown coding.
+    # `identity` is dropped exactly as it is for Content-Encoding.
+    #
+    # A NON-final `chunked` is deliberately kept: framing did not read it as chunked framing
+    # either (it is malformed per RFC 9112 §6.1), so it stays in the chain and is named as an
+    # undecodable layer instead of pretending the bytes beneath it are plain.
+    private def self.transfer_layers(values : Array(String), chunked : Bool) : Array(String)
+      layers = content_layers(values)
+      layers.pop if chunked # the last token IS that `chunked` — rejecting `identity` cannot displace it
+      layers
+    end
+
+    # Split a header family's values into lowercase codings, in wire order.
+    private def self.codings(values : Array(String)) : Array(String)
+      values.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?)
     end
 
     # {decoded | nil, note | nil, clean end-of-stream}. nil decoded => stop (unsupported or
