@@ -81,6 +81,11 @@ module Gori::Proxy::H2
   # `Assembler#data_block` knows how to strip. `Item#head_only?` carries the distinction to
   # every surface, so an edit that adds a body to one of those is refused before it is acked.
   #
+  # And the wait for a body has a DEADLINE as well as a ceiling (`HOLD_WAIT_DEADLINE`, PR #11):
+  # a declared length says how big the body is, not that it is coming, so a peer that opens
+  # `POST` and then stalls would otherwise wait forever with no queue row and every later
+  # stream parked behind it. Past the deadline the hold falls back to the same head-only shape.
+  #
   # Match&Replace over a BODY is a different question and still forces the h1 downgrade
   # (`Tls::Tunnel#h2_candidate?`): a rule rewrites every matching message on the connection,
   # unbuffered and unattended, where a hold buffers one message a human is already waiting on.
@@ -145,6 +150,22 @@ module Gori::Proxy::H2
     # whose end gori cannot predict" is how a pump stalls.
     MAX_HOLD_BODY = 1 << 20
 
+    # How long a hold may WAIT for a body it agreed to buffer before giving the wait up and
+    # queueing HEAD-ONLY instead. A declared `content-length` is a promise about size, not about
+    # arrival: `holdable_body` only proves gori can predict the END of the body, and a client
+    # that opens `POST` with a length and then stalls never reaches that end, never trips
+    # `check_ceiling` (no bytes arrive to count), and — in the request direction — holds every
+    # later stream open behind it (rule 1, `@opens` order). Past this the hold falls back to the
+    # head-only shape every unbuffered message already has: the operator gets a row to
+    # forward or drop, and the DATA that eventually arrives streams past untouched (P6).
+    #
+    # Five seconds because the only thing being traded is how much of a slow-but-honest upload
+    # the operator gets to see in the editor, against how long a later stream sits behind a peer
+    # that has stopped sending. It is a WALL between the head and the end of the body, not a
+    # per-frame idle timeout: a message still arriving when it fires is one gori has decided not
+    # to keep waiting to show whole.
+    HOLD_WAIT_DEADLINE = 5.seconds
+
     # h1 records exactly these strings (`client_conn.cr:1234`, `:840`, `:1249`), so History
     # reads the same on both protocols.
     DROP_REQUEST_REASON  = "dropped by intercept (request)"
@@ -181,6 +202,9 @@ module Gori::Proxy::H2
       # so the operator sees head+body, and a queue row for half a message is not a thing to
       # offer a human. nil once queued, and nil for every head-only hold.
       property waiting : Held?
+      # When that wait started, monotonic. `check_waiting_locked` gives the wait up past
+      # `HOLD_WAIT_DEADLINE` — the clock the declared length is not.
+      property waiting_since : Time::Instant?
       # Extra `check_ceiling` allowance for the body this slot promised to buffer. The parked
       # frames still get their own `MAX_DEFERRED_BYTES` of unrelated traffic on top; without
       # this the buffer gori just agreed to hold would trip the ceiling meant for everything
@@ -213,6 +237,10 @@ module Gori::Proxy::H2
       refusal : String?
 
     property peer : StreamGate?
+
+    # `HOLD_WAIT_DEADLINE` on every gate this proxy builds; settable only so a spec can trip the
+    # fallback without spending five real seconds inside it.
+    property hold_wait_deadline : Time::Span = HOLD_WAIT_DEADLINE
 
     def initialize(@direction : String, @dst : IO, @conn_id : Int64, @sink : FlowSink,
                    @assembler : Assembler, @host : String, @port : Int32,
@@ -332,9 +360,10 @@ module Gori::Proxy::H2
     #
     # What h2 adds is that the wait costs the REQUEST direction its later stream opens (rule 1
     # pins releases to `@opens` order), so a client that stalls mid-upload delays the streams
-    # behind it. Bounded by the same two things that bound every other wait here: the declared
-    # length gate (`holdable_body`, so gori only ever waits for an end it can predict) and
-    # `check_ceiling`, which fails the whole run of slots open past the ceiling.
+    # behind it. Three things bound it: the declared length gate (`holdable_body`, so gori only
+    # ever waits for an end it can predict), `check_ceiling`, which fails the whole run of slots
+    # open past the ceiling, and `HOLD_WAIT_DEADLINE` — the one that answers the peer sending
+    # NOTHING, which the other two cannot see because they both measure bytes that arrived.
     private def start_hold_locked(slot : Slot, held : Held, block : HeadRewrite::Block) : Nil
       budget = holdable_body(block)
       unless budget
@@ -343,6 +372,7 @@ module Gori::Proxy::H2
       end
       slot.body_budget = budget
       slot.waiting = held
+      slot.waiting_since = Time.instant
       # A head carrying END_STREAM IS the whole message (a GET, a 204, a reply to HEAD), so
       # there is nothing to wait for and its buffered body is zero bytes long.
       slot.complete = true if block.first.end_stream?
@@ -453,23 +483,44 @@ module Gori::Proxy::H2
       take_deferred_cross(cross)
     end
 
-    # Intercept switched off while a hold was still WAITING for its body (PR #6). Such a slot
-    # has no queue row, so `Interceptor#toggle`'s release and `release_all` cannot reach it —
-    # and in the request direction it sits at the head of `@opens`, holding every later stream
-    # open. Toggle-off is one of this file's documented fail-open exits and has to stay one.
+    # The two ways a hold still WAITING for its body gives that wait up (PR #6, #11). Such a
+    # slot has no queue row, so `Interceptor#toggle`'s release and `release_all` cannot reach
+    # it — and in the request direction it sits at the head of `@opens`, holding every later
+    # stream open.
     #
-    # Checked on frame arrival rather than on a timer, and that is sufficient rather than
-    # merely cheap: a waiting slot with nothing behind it blocks nobody, and a stream blocked
-    # BEHIND one only becomes blocked when its own frames arrive here. Costs an empty-Hash test
-    # on every frame of a connection holding nothing, which is the common case.
+    #   * **Intercept switched off.** Nobody is holding the message any more, so the body gori
+    #     was buffering is being buffered for no one. Toggle-off is one of this file's
+    #     documented fail-open exits and has to stay one.
+    #   * **The wait ran past `HOLD_WAIT_DEADLINE`,** intercept still on. A declared length
+    #     bounds the SIZE of the wait, not its duration, so this is the only thing standing
+    #     between a peer that stalls mid-upload and a connection whose later streams never move:
+    #     no bytes arrive, so `check_ceiling` never fires, and there is no queue row for an
+    #     operator to resolve either.
+    #
+    # Both take the same exit, and it is the pre-PR-#6 hold rather than a refusal: queue
+    # HEAD-ONLY, and the DATA that does arrive streams past untouched. On toggle-off the enqueue
+    # inside returns nil anyway (`Interceptor#enqueue` tests the same condition), so
+    # `queue_hold_locked` takes its own not-held exit and drains the slot instead.
+    #
+    # Checked on frame arrival rather than on a timer, and that is sufficient rather than merely
+    # cheap: a waiting slot with nothing behind it blocks nobody, and a stream blocked BEHIND
+    # one only becomes blocked when its own frames arrive HERE — including the HEADERS that
+    # opens it, since `accept_locked` runs this before it defers anything. A timer fiber would
+    # buy only the case where the wait costs nothing, at the price of one more fiber per
+    # buffering hold on the pump's own path (P6). Costs an empty-Hash test on every frame of a
+    # connection holding nothing, which is the common case.
     private def check_waiting_locked : Nil
       return if @slots.empty?
       waiting = @slots.each_value.select(&.waiting).to_a
       return if waiting.empty?
-      return if @interceptor.holding?
-      # Head-only: the body gori was buffering is no longer being held for anyone, and the
-      # enqueue below returns nil anyway (`Interceptor#enqueue` tests the same condition), so
-      # `queue_hold_locked` takes its own not-held exit and drains the slot.
+      if @interceptor.holding?
+        now = Time.instant
+        waiting.select! do |slot|
+          since = slot.waiting_since
+          since && now - since >= hold_wait_deadline
+        end
+        return if waiting.empty?
+      end
       waiting.each { |slot| slot.waiting.try { |held| queue_hold_locked(slot, held, nil) } }
     end
 

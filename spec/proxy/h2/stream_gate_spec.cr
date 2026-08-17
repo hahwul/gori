@@ -784,6 +784,58 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  it "gives a stalled buffering hold up past the deadline and queues it HEAD-ONLY" do
+    with_ic do |ic|
+      # Only /up is held: stream 3 must be parked by ORDER (rule 1), not by a hold of its own,
+      # or the row this spec counts would be ambiguous.
+      ic.set_filter("path:/up")
+      rig = Rig.new(ic)
+      # `HOLD_WAIT_DEADLINE` in production; shortened here so the spec costs milliseconds
+      # rather than seconds. What is under test is that the wait ends on the CLOCK.
+      rig.c2s.hold_wait_deadline = 50.milliseconds
+
+      # A client that declares five bytes and then sends nothing at all. Nothing arrives, so
+      # `check_ceiling` has no bytes to count; intercept stays on, so toggle-off is not coming.
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(0) # still buffering, so there is no queue row yet
+
+      # A later stream is what makes the wait cost anything. Inside the deadline it simply
+      # parks, exactly as it does behind an honest slow upload.
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(0)
+      rig.to_origin.should be_empty
+
+      sleep 60.milliseconds
+      # Any inbound frame notices — here the connection-level WINDOW_UPDATE a real peer keeps
+      # sending. No timer fiber runs on the pump's path to do this (P6).
+      rig.c2s.accept(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, Bytes.new(4)))
+      settle
+
+      # Intercept is still ON: this is the head-only hold the gate had before #6, not a
+      # fail-open. The operator gets a row to forward or drop.
+      ic.holding?.should be_true
+      ic.pending_count.should eq(1)
+      item = ic.pending.first
+      item.head_only?.should be_true
+      String.new(item.raw).should contain("/up")
+
+      ic.forward(item.id)
+      settle
+      # ...and stream 3 is no longer parked behind a stream nobody could decide. Stream 0 is
+      # dropped from the comparison because it was never deferred in the first place — a
+      # connection-level frame goes straight out, held stream or not (D1 rule 1).
+      rig.to_origin.map(&.stream_id).reject(&.zero?).should eq([1_u32, 3_u32])
+
+      # A body that does turn up afterwards streams past untouched, as every head-only hold's
+      # body does (P6/P7).
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      data_payloads(rig.to_origin, 1_u32).should eq(["hello"])
+    end
+  end
+
   it "releases a still-buffering hold when intercept is switched off" do
     with_ic do |ic|
       rig = Rig.new(ic)
