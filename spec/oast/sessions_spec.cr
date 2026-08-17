@@ -192,8 +192,9 @@ describe Gori::Oast::Sessions do
           "q".to_slice, nil, Time.utc.to_unix_ms * 1000)
         store.flush
         bound = O::Sessions.bind(store, id, [] of O::ProviderConfig).as(O::Sessions::Bound)
-        # Never raises: a release runs during teardown, where an error is noise.
-        O::Sessions.release(bound, ExplodingHttp.new)
+        # Returns false rather than raising: a release can run during teardown, where an
+        # exception is noise, but the CLI still needs to know it failed.
+        O::Sessions.release(bound, ExplodingHttp.new).should be_false
         # This releases the LISTENER, not the evidence.
         store.oast_sessions.map(&.id).should contain(id)
         store.oast_callback_count(id).should eq(1)

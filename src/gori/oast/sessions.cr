@@ -116,12 +116,13 @@ module Gori::Oast
     end
 
     # Release the server-side registration. The local row and every callback it collected
-    # stay — this releases the LISTENER, not the evidence. Never raises (`Provider#deregister`
-    # is documented not to, and the rescue is the belt to that braces).
-    def release(bound : Bound, http : Http) : Nil
+    # stay — this releases the LISTENER, not the evidence. Returns false when deregister
+    # raised (network / provider error) so a surface can refuse to print "released".
+    def release(bound : Bound, http : Http) : Bool
       bound.provider.deregister(http, bound.session)
+      true
     rescue
-      nil
+      false
     end
 
     # Persist one polled interaction against its session, with the interaction's OWN time

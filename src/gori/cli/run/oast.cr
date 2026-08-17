@@ -268,18 +268,20 @@ module Gori
         verb = enabled ? "enable" : "disable"
         db_path : String? = nil
         project_name : String? = nil
-        id : String? = nil
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run oast providers #{verb} <id>"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id = (before + after).first? }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
+        id = leftover.first?
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -294,18 +296,20 @@ module Gori
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        id : String? = nil
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id = (before + after).first? }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run oast providers delete: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast providers delete: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
+        id = leftover.first?
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -548,7 +552,7 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           bound = oast_bind_session(store, id, "release")
-          Oast::Sessions.release(bound, Oast::HttpClient.new)
+          abort "gori run oast release: could not deregister session ##{id} (provider error) — payloads minted from it may still resolve" unless Oast::Sessions.release(bound, Oast::HttpClient.new)
           puts "released OAST session ##{id} — its #{store.oast_callback_count(id)} callback(s) stay."
         ensure
           store.close
@@ -641,28 +645,38 @@ module Gori
           Signal::TERM.trap { stop.send(nil) rescue nil }
         end
         once_failed = false
-        loop do
-          interactions = begin
-            prov.poll(http, session)
-          rescue ex
-            STDERR.puts "poll error: #{ex.message}"
-            once_failed = true
-            [] of Oast::Interaction
-          end
-          interactions.each do |i|
-            next if seen.includes?(i.unique_id)
-            seen << i.unique_id
-            if json
-              puts Oast::Present.interaction(i, kind.label).to_json
-            else
-              puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+        begin
+          loop do
+            interactions = begin
+              prov.poll(http, session)
+            rescue ex
+              STDERR.puts "poll error: #{ex.message}"
+              once_failed = true
+              [] of Oast::Interaction
             end
-            STDOUT.flush
+            interactions.each do |i|
+              next if seen.includes?(i.unique_id)
+              seen << i.unique_id
+              if json
+                puts Oast::Present.interaction(i, kind.label).to_json
+              else
+                puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+              end
+              STDOUT.flush
+            end
+            break if once
+            break if oast_wait_or_stop(stop, interval.seconds)
           end
-          break if once
-          break if oast_wait_or_stop(stop, interval.seconds)
+        ensure
+          # Help says listen's registration ends with the process. `--once` used to be
+          # the only path that deregistered; Ctrl-C left a live interactsh/BOAST
+          # registration whose payload still resolved with nobody watching.
+          begin
+            prov.deregister(http, session)
+          rescue ex
+            STDERR.puts "gori run oast: deregister failed: #{ex.message}"
+          end
         end
-        prov.deregister(http, session) if once
         # A --once run whose single poll FAILED must not exit 0 — a scripted caller can't
         # otherwise tell "polled, found nothing" from "the poll errored". (#416)
         exit 1 if once && once_failed
