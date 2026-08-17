@@ -12,8 +12,9 @@ module Gori
     # H2Engine (one request → one buffered response), this does the HTTP/1.1
     # upgrade handshake, then a scripted exchange: send ONE outbound message as a
     # masked client frame, drain the server's answer until it goes idle, send the
-    # next — until the script runs out, the server sends Close, the socket dies, or
-    # a capture cap trips.
+    # next — until the script runs out, the server sends Close, the socket dies, a
+    # capture cap trips, or the drain deadline is reached (see DRAIN_DEADLINE: the
+    # idle gap between turns is the engine's own waiting and is not charged to it).
     #
     # INTERLEAVED, not send-all-then-drain. Every recorded client→server message used to go
     # out back to back and only then were the responses read, so a protocol whose Nth message
@@ -40,8 +41,19 @@ module Gori
       MAX_RECV_MESSAGES = 1000                # cap captured server messages (anti-flood)
       MAX_RECV_BYTES    = 8_i64 * 1024 * 1024 # cap total captured server payload bytes
       MAX_DRAIN_FRAMES  = 100_000             # hard ceiling on frames processed (ping/empty-fragment flood)
-      DRAIN_DEADLINE    = 60.seconds          # wall-clock ceiling on the WHOLE exchange (see DrainState)
-      MAX_CONTROL_BYTES = 125                 # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
+      # Ceiling on ACTIVE drain time across the whole exchange — the time spent reading
+      # frames, not the time spent waiting for one. Every read that ends in the idle
+      # timeout is credited back (`DrainState#credit_idle`), because that gap is the
+      # engine taking its turn and not the origin costing it anything: charged, a
+      # healthy origin answering promptly still burned `idle` per message, so at the
+      # TUI's 3s default a script longer than 20 messages stopped mid-run and blamed
+      # a cap the operator could not raise. What it still bounds is an origin that
+      # never goes idle — a steady sub-idle ping cadence stays under MAX_DRAIN_FRAMES
+      # and would otherwise pin the tab "inflight" for hours. Unlike the three capture
+      # caps above, this one is not about how much was captured; `with_unsent_note`
+      # therefore names the deadline rather than "a capture cap".
+      DRAIN_DEADLINE    = 60.seconds
+      MAX_CONTROL_BYTES = 125 # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
       # Ping/pong rows kept in the transcript. A server's control frames were dropped
       # entirely, which is why a CLOSE reason and a PING payload never reached the operator —
       # but `recv_count` bounds DATA messages only, so an origin pinging under the idle
@@ -131,7 +143,8 @@ module Gori
                     verify_upstream : Bool, sni : String? = nil,
                     idle : Time::Span = DEFAULT_IDLE,
                     overrides : Gori::HostOverrides? = nil,
-                    keep_key : Bool = false) : Result
+                    keep_key : Bool = false,
+                    deadline : Time::Span = DRAIN_DEADLINE) : Result
         started = Time.instant
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
@@ -183,7 +196,12 @@ module Gori
           # SESSION, not each gap in it. Per-drain state would have multiplied every one of
           # them by the number of recorded messages, so a 20-message script could have
           # captured 20 × MAX_RECV_BYTES and run for 20 × DRAIN_DEADLINE.
-          st = DrainState.new
+          # `deadline` and not the constant directly, for the same reason `idle` is a parameter:
+          # the two bounds are only meaningful against each other (a script of more than
+          # `deadline / idle` messages is the regression this pairing exists to catch), and a
+          # spec cannot assert that in a run it is willing to wait for. Nothing in the product
+          # passes it; every surface takes DRAIN_DEADLINE.
+          st = DrainState.new(deadline)
           # Narrow the read bound to `idle` BEFORE the first message goes out. The handshake
           # bound is a PER-READ timeout, and an interleaved replay reads between every pair of
           # messages: left in place, an origin that simply does not answer message 1 would hold
@@ -299,6 +317,11 @@ module Gori
                 "the server sent CLOSE (§5.5.1: no data frames may follow it)"
               elsif st.peer_gone?
                 "the connection ended"
+              elsif st.deadline_reached?
+                # NOT "a capture cap": the deadline is a bound on how long the engine spent
+                # reading, and saying "cap" sent operators looking at MAX_RECV_* — the wrong
+                # knob for a run that was cut short by time.
+                "the #{st.deadline.total_seconds.to_i}s drain deadline was reached"
               else
                 "a capture cap was reached"
               end
@@ -315,6 +338,11 @@ module Gori
       # Not a `record`: the drain mutates every field, and a struct copied by value into the
       # loop would have lost each drain's accounting the moment it returned.
       class DrainState
+        getter deadline : Time::Span # the DRAIN_DEADLINE this exchange runs under
+
+        def initialize(@deadline : Time::Span = DRAIN_DEADLINE)
+        end
+
         property assembling = IO::Memory.new             # the fragments of the message being reassembled
         property msg_opcode : UInt8 = Proxy::WS::OP_TEXT # that message's FIRST frame's opcode
         property shape = Proxy::WS::MessageShape.new     # and its accumulated framing
@@ -327,7 +355,21 @@ module Gori
         property? marked = false                         # the ONE truncation marker row has been appended
         property? peer_gone = false                      # EOF / IO error / failed write — nothing more can be sent
         property? capped = false                         # a HARD cap ended the drain (the control cap does not)
-        getter started : Time::Instant = Time.instant    # DRAIN_DEADLINE runs from here, over the whole exchange
+        property? deadline_reached = false               # ...and that cap was DRAIN_DEADLINE, not a capture cap
+        # DRAIN_DEADLINE runs from here, over the whole exchange — but ADVANCED past every idle
+        # gap by `credit_idle`, so what it measures is active drain time and not wall clock.
+        getter started : Time::Instant = Time.instant
+
+        # Give back a gap that produced nothing. An interleaved replay ends each message's turn
+        # on `IO::TimeoutError` after the full `idle`, and charging those gaps to DRAIN_DEADLINE
+        # made the deadline a cap on SCRIPT LENGTH: at the TUI's 3s idle, message 21 of a healthy
+        # 30-message subscribe/ack exchange was dropped and reported as a capture cap. Waiting is
+        # not work. Pushing `started` forward by exactly the elapsed wait keeps the deadline
+        # bounding what the engine actually did, while an origin that never goes idle — the case
+        # the deadline exists for — is never credited anything and still trips it.
+        def credit_idle(gap : Time::Span) : Nil
+          @started += gap
+        end
 
         # Whether the next recorded message may still go out. A server CLOSE, a dead socket and
         # a hard cap each mean "no" for a different reason, and `with_unsent_note` names which.
@@ -383,18 +425,26 @@ module Gori
           # Count EVERY frame, not just completed messages: an origin flooding pings or
           # empty/non-fin fragments faster than `idle` trips neither the data caps nor
           # the read timeout, so this frame ceiling is what guarantees termination.
-          # A wall-clock deadline also caps total drain time: a steady sub-idle ping cadence
-          # stays under MAX_DRAIN_FRAMES yet could otherwise pin the tab "inflight" for hours.
-          # Both run from the START of the exchange, not of this message's turn.
-          if Time.instant - st.started > DRAIN_DEADLINE
-            st.truncated = "the #{DRAIN_DEADLINE.total_seconds.to_i}s drain deadline was reached; later server frames were not captured"
+          # A deadline also caps total drain time: a steady sub-idle ping cadence stays under
+          # MAX_DRAIN_FRAMES yet could otherwise pin the tab "inflight" for hours. Both run
+          # from the START of the exchange and not of this message's turn — the frame ceiling
+          # over wall clock, the deadline over active drain time only (see `credit_idle`).
+          if Time.instant - st.started > st.deadline
+            st.truncated = "the #{st.deadline.total_seconds.to_i}s drain deadline was reached; later server frames were not captured"
+            st.deadline_reached = true
             st.capped = true
             break
           end
+          # Timed from HERE and not from the top of the loop: what gets credited back below is
+          # the wait that returned no frame, never time spent reading one.
+          read_started = Time.instant
           frame = begin
             Proxy::WS.read_frame(io)
           rescue IO::TimeoutError
-            break # the idle gap — this message's answer is done; the next one goes out
+            # The idle gap — this message's answer is done; the next one goes out. The gap is
+            # the engine's turn, so it is credited back rather than charged to DRAIN_DEADLINE.
+            st.credit_idle(Time.instant - read_started)
+            break
           rescue IO::Error
             st.peer_gone = true # RST or broken pipe — end the exchange, keep what we have
             break

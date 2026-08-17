@@ -1197,6 +1197,35 @@ Not changed, and not by omission: `permessage-deflate` stays unnegotiated and
 `Sec-WebSocket-Extensions` stays stripped, and a WebSocket message is still held only when the
 catch condition names `proto:ws`.
 
+### 2026-08-17: a WebSocket drain deadline bounds work, not waiting
+
+Refines: [P6](#p6). Extends the interleaved-WebSocket-repeater entry above. PR #12.
+
+Interleaving made every recorded message wait out an idle gap before the next one left, and
+`DRAIN_DEADLINE` was still charged the whole exchange from one `DrainState#started`. So the
+60s deadline had quietly become a cap on SCRIPT LENGTH: at the TUI's 3s idle a healthy
+30-message subscribe/ack replay was cut off around message 20 — by an origin that had answered
+every single message promptly — and `with_unsent_note` blamed "a capture cap", pointing the
+operator at `MAX_RECV_*` knobs that had nothing to do with it.
+
+Idle waiting is not work, so it is not charged. A read that ends in `IO::TimeoutError` produced
+no frame, and `DrainState#credit_idle` pushes `started` forward by exactly that gap; what the
+deadline measures is time spent READING frames, across the whole exchange. The three capture
+caps (`MAX_RECV_MESSAGES`, `MAX_RECV_BYTES`, `MAX_DRAIN_FRAMES`) are unchanged and stay
+session-wide — they bound how much was captured, which is a different question from how long
+the engine ran.
+
+The deadline still exists and still fires, on exactly the case it was written for: an origin
+that never goes idle (a keepalive cadence under the idle timeout) is credited nothing, stays
+100k frames clear of `MAX_DRAIN_FRAMES`, and would otherwise pin the tab "inflight" for hours.
+That stop is now NAMED as the deadline in the unsent-message note, distinct from a capture cap,
+because the two have different fixes.
+
+`WsEngine.send` takes the deadline as a parameter defaulting to `DRAIN_DEADLINE`, for the
+reason `idle` is already one: the bug is a RATIO (a script longer than `deadline / idle`
+messages), and a spec cannot demonstrate it at 60s-scale in a run anyone will wait for. No
+surface passes it.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
