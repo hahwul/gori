@@ -123,6 +123,11 @@ module Gori
         @store.try(&.close)
         @store = new_store
         @owns_store = true
+        # A RESUMED OAST handle is bound to the project it was resumed in: its row id means
+        # nothing in the new DB, and oast_poll would file its callbacks under a stranger's
+        # session. Drop those handles — the sessions themselves are persisted and resumable in
+        # their own project. Ad-hoc oast_start handles carry no row and stay pollable.
+        @oast_mcp.reject! { |_, o| !o.store_session_id.nil? }
         @project_name = proj.name
         @project_slug = reg.slug_of(proj)
         @project_id = reg.id_of(proj)

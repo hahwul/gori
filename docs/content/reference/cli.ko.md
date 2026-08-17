@@ -73,6 +73,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
+| `oast list` · `resume` · `release` | 프로젝트에 저장된 OAST 리스닝 세션 목록 / 재개 / 릴리스 |
 | `oast providers` | 저장된 OAST 프로바이더 목록 / 추가 / 수정 / 활성화 / 비활성화 / 삭제 |
 | `jwt [<token>]` | JWT 디코드, 재서명, 또는 공격 페이로드 생성 |
 | `cookie [<cookie>]` | Flask / Rack / Django 세션 쿠키 디코드, 검증, 브루트포스, 위조 |
@@ -482,7 +483,7 @@ gori run sitemap tag --list
 
 ### run oast {#run-oast}
 
-즉석에서 쓰는, 저장소 없는 아웃오브밴드 리스너입니다. 페이로드를 등록하고 출력한 뒤 콜백을 스트리밍합니다.
+아웃오브밴드 리스너입니다. `listen`은 즉석에서 쓰는 저장소 없는 리스너로 페이로드를 등록하고 출력한 뒤 콜백을 스트리밍합니다. `list` / `resume` / `release`는 프로젝트가 저장한 세션 — TUI의 RESUME LISTENER 피커가 보여주는 것과 같은 행 — 을 다룹니다.
 
 ```bash
 gori run oast presets                          # list built-in public providers
@@ -500,6 +501,26 @@ gori run oast listen --provider webhook.site --once --json
 | `--interval=SEC` | 폴링 간격(기본값 5) |
 | `--once` | 한 번만 폴링하고 종료 |
 | `--json` | 각 콜백을 JSON 라인으로 출력(MCP와 동일한 형태) |
+
+**`oast list` / `resume` / `release`**: 프로젝트에 저장된 리스닝 **세션**입니다(아래의 프로바이더는 어디서 듣는지를, 세션은 그 위의 살아 있는 등록 하나를 뜻합니다). 등록은 그것을 만든 프로세스보다 오래 남고, 그래서 어제 심어둔 페이로드를 오늘도 지켜볼 수 있습니다.
+
+```bash
+gori run oast list                                       # id, provider, payload host, hits, last poll
+gori run oast list --format json
+gori run oast resume 7                                   # 세션 #7 재개 후 콜백 스트리밍
+gori run oast resume 7 --once --json                     # 한 번만 폴링하고 JSON 라인 출력 후 종료
+gori run oast release 7                                  # 서버 측 등록 해제
+```
+
+`resume`과 `release`는 세션 **id**(`7`, 또는 `list`가 출력하는 `#7`)를 받습니다. `resume`은 서버 측 상태를 다시 살려 이미 심어둔 페이로드가 계속 resolve되게 한 뒤 폴링합니다. 받은 콜백은 모두 프로젝트에 기록되므로 TUI OAST 탭에서 같은 hit를 보게 되고, `last_poll_at`도 TUI 리스너처럼 갱신됩니다. Ctrl-C는 폴링만 멈추고 등록은 **유지**합니다. 정리는 `release`로 명시적으로 하며, 어느 쪽이든 저장된 콜백은 남습니다. 자동으로 재개되는 것은 없습니다.
+
+| Option | Description |
+|--------|-------------|
+| `--project=NAME` · `--db=PATH` | 어느 프로젝트의 세션인지(기본값: 가장 최근에 사용한 프로젝트) |
+| `--format=FMT` | `list`에서: `text`(기본) 또는 `json` |
+| `--interval=SEC` | `resume`에서: 폴링 간격(기본값 5) |
+| `--once` | `resume`에서: 한 번만 폴링하고 종료 |
+| `--json` | `resume`에서: 페이로드와 각 콜백을 JSON 라인으로 출력 |
 
 **`oast providers`**: 위의 즉석 `listen`과 달리 프로젝트에 저장되는 프로바이더입니다. 동사: `list`(기본), `add`, `update`, `enable`, `disable`, `delete`(`rm`).
 

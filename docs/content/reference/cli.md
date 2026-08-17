@@ -73,6 +73,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
+| `oast list` · `resume` · `release` | List, resume, or release the project's saved OAST listening sessions |
 | `oast providers` | List / add / update / enable / disable / delete saved OAST providers |
 | `jwt [<token>]` | Decode, re-sign, or generate attack payloads for a JWT |
 | `cookie [<cookie>]` | Decode, verify, brute-force, or forge a Flask / Rack / Django session cookie |
@@ -483,7 +484,7 @@ gori run sitemap tag --list
 
 ### run oast
 
-Ad-hoc, store-free out-of-band listener: register a payload, print it, then stream callbacks.
+Out-of-band listener. `listen` is ad-hoc and store-free (register a payload, print it, stream callbacks); `list` / `resume` / `release` act on the sessions the project persists — the same rows the TUI's RESUME LISTENER picker shows.
 
 ```bash
 gori run oast presets                          # list built-in public providers
@@ -501,6 +502,26 @@ gori run oast listen --provider webhook.site --once --json
 | `--interval=SEC` | Poll interval (default 5) |
 | `--once` | Poll once and exit |
 | `--json` | Emit each callback as a JSON line (same shape as MCP) |
+
+**`oast list` / `resume` / `release`**: the project's saved listening SESSIONS, as opposed to the providers below (a provider is where you listen; a session is one live registration on it). A registration outlives the process that minted it, which is what makes a payload planted yesterday still worth watching.
+
+```bash
+gori run oast list                                       # id, provider, payload host, hits, last poll
+gori run oast list --format json
+gori run oast resume 7                                   # re-arm session #7, stream its callbacks
+gori run oast resume 7 --once --json                     # one poll, JSON lines, then exit
+gori run oast release 7                                  # deregister it server-side
+```
+
+`resume` and `release` take the session **id** (`7`, or the `#7` `list` prints). `resume` re-arms the server-side state so payloads already planted keep resolving, then polls: every callback is written into the project, so the TUI OAST tab shows the same hits, and `last_poll_at` is stamped like a TUI listener's. Ctrl-C stops polling and **keeps** the registration — `release` is the deliberate teardown, and it keeps the stored callbacks either way. Nothing auto-resumes; these run only when you ask.
+
+| Option | Description |
+|--------|-------------|
+| `--project=NAME` · `--db=PATH` | Which project's sessions (default: most-recently-active) |
+| `--format=FMT` | On `list`: `text` (default) or `json` |
+| `--interval=SEC` | On `resume`: poll interval (default 5) |
+| `--once` | On `resume`: poll once and exit |
+| `--json` | On `resume`: emit the payload and each callback as a JSON line |
 
 **`oast providers`**: the saved providers stored with the project, as opposed to the ad-hoc `listen` above. Verbs: `list` (default), `add`, `update`, `enable`, `disable`, `delete` (`rm`).
 

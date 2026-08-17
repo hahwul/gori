@@ -1,10 +1,12 @@
-# `gori run oast` — listen for out-of-band callbacks (interactsh & friends);
-# print the payload, then stream decrypted hits.
+# `gori run oast` — listen for out-of-band callbacks (interactsh & friends); print the
+# payload, then stream decrypted hits. `listen` is ad-hoc; `list`/`resume`/`release` act on
+# the sessions the project persists (the TUI's RESUME LISTENER rows).
 module Gori
   module CLI
     module Run
-      # `gori run oast` — headless out-of-band listener (interactsh & friends). Store-free
-      # and ad-hoc: register a payload, print it, then stream decrypted callbacks.
+      # `gori run oast` — headless out-of-band listener (interactsh & friends). `listen` is
+      # store-free and ad-hoc: register a payload, print it, then stream decrypted callbacks.
+      # `providers` and the session verbs (`list`/`resume`/`release`) read the project store.
       private def self.cmd_oast(args : Array(String)) : Nil
         # `providers` is the one OAST subcommand that touches the project store, so it must be
         # dispatched BEFORE strip_project_flags eats the --project/--db it actually needs.
@@ -12,6 +14,17 @@ module Gori
         # providers` is the natural invocation and is exactly the one that carries the flag.
         if i = args.index("providers")
           return cmd_oast_providers(args[...i] + args[(i + 1)..])
+        end
+        # Same reason for the session verbs: `list` / `resume` / `release` are the OAST
+        # subcommands that read and write the PROJECT's persisted sessions, so they must be
+        # dispatched before strip_project_flags eats the --project/--db they need. Unlike the
+        # `providers` scan above this one walks positionally and skips a flag's VALUE, so
+        # `gori run oast --project list resume 7` resumes in the project NAMED "list".
+        if pos = oast_subcommand_index(args)
+          case sub = args[pos]
+          when "list", "resume", "release"
+            return cmd_oast_session_verb(sub, args[...pos] + args[(pos + 1)..])
+          end
         end
 
         filtered = strip_project_flags(args)
@@ -48,14 +61,36 @@ module Gori
         out
       end
 
+      # Index of the first POSITIONAL token — the subcommand — skipping options and the
+      # separate value of the two that take one. nil when the argv is all flags.
+      private def self.oast_subcommand_index(args : Array(String)) : Int32?
+        i = 0
+        while i < args.size
+          a = args[i]
+          if a == "--project" || a == "--db"
+            i += 2
+          elsif a.starts_with?('-')
+            i += 1
+          else
+            return i
+          end
+        end
+        nil
+      end
+
       private def self.oast_help : Nil
         puts <<-HELP
           Usage: gori run oast <subcommand>
-            listen      Register an OAST payload and stream incoming callbacks
+            listen      Register an OAST payload and stream incoming callbacks (ad-hoc)
+            list        List this project's SAVED listening sessions
+            resume      Resume a saved session and stream its callbacks
+            release     Deregister a saved session server-side (its callbacks stay)
             presets     List the built-in public providers
             providers   Manage SAVED providers (list, add, update, enable/disable, delete)
 
-          Run `gori run oast listen -h` for listen options.
+          `listen` is store-free: its registration ends with the process. `list`/`resume`/
+          `release` act on the sessions the TUI OAST tab persists, the same rows its RESUME
+          LISTENER picker shows. Run `gori run oast listen -h` for listen options.
           HELP
       end
 
@@ -294,6 +329,246 @@ module Gori
         abort "gori run oast providers #{verb}: malformed provider id '#{key}' (expected p_<n>)" if row.nil?
         abort "gori run oast providers #{verb}: no project OAST provider with id '#{key}'" unless store.oast_providers.any? { |p| p.id == row }
         row
+      end
+
+      # --- persisted sessions (the TUI OAST tab's RESUME LISTENER) --------------------------
+      #
+      # `listen` above is ad-hoc: it registers, prints a payload, and its registration dies
+      # with the process. These three act on the sessions a PROJECT persists, so a payload
+      # planted yesterday — the stored one that only fires on a nightly job, the mail a
+      # back-office browser opens tomorrow — still has a listener to come home to. Resuming is
+      # always an explicit act (P4): nothing here runs because a project was opened.
+
+      private def self.cmd_oast_session_verb(verb : String, args : Array(String)) : Nil
+        case verb
+        when "list"    then cmd_oast_sessions_list(args)
+        when "resume"  then cmd_oast_session_resume(args)
+        when "release" then cmd_oast_session_release(args)
+        end
+      end
+
+      private def self.cmd_oast_sessions_list(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+        leftover = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast list [options]\n\n" \
+                     "List this project's saved OAST sessions — the rows the TUI's RESUME\n" \
+                     "LISTENER picker shows. Resume one with `gori run oast resume <id>`."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
+          p.invalid_option { |f| abort "gori run oast list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast list: missing value for #{f}" }
+        end
+        parser.parse(args)
+        refuse_list_leftovers(leftover, "oast", "list, resume, release")
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        sessions = begin
+          Oast::Sessions.list(store)
+        ensure
+          store.close
+        end
+
+        if format == :json
+          puts(JSON.build do |j|
+            j.array do
+              sessions.each do |s|
+                j.object do
+                  j.field "id", s.id
+                  j.field "provider", s.provider
+                  j.field "provider_id", s.provider_key
+                  j.field "kind", s.kind
+                  j.field "payload_host", s.payload_host
+                  j.field "server_url", s.server_url
+                  j.field "hits", s.hits
+                  j.field "created_at", s.created_at.to_rfc3339
+                  j.field "last_poll_at", s.last_poll_at.try(&.to_rfc3339)
+                end
+              end
+            end
+          end)
+          return
+        end
+        if sessions.empty?
+          STDERR.puts "no saved OAST sessions (start one on the TUI OAST tab, or `gori run oast listen` ad-hoc)"
+          return
+        end
+        sessions.each do |s|
+          last = s.last_poll_at.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "never"
+          puts "##{s.id.to_s.ljust(5)} #{s.provider.ljust(24)} #{s.kind.ljust(13)} " \
+               "#{s.payload_host.ljust(34)} #{s.hits.to_s.rjust(5)} hits  " \
+               "started #{s.created_at.to_local.to_s("%Y-%m-%d %H:%M")}  last poll #{last}"
+        end
+      end
+
+      # Re-arm a saved session and stream its callbacks, persisting each one into the project
+      # exactly as the TUI listener does — so a headless resume and the tab are collecting into
+      # the same table, and either can pick the session up afterwards.
+      private def self.cmd_oast_session_resume(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        id_arg : String? = nil
+        interval = 5
+        json = false
+        once = false
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast resume <id> [options]\n\n" \
+                     "Resume a saved session (see `gori run oast list`) and stream its\n" \
+                     "callbacks. The registration is KEPT on exit — use `release` to drop it."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--interval=SEC", "Poll interval seconds (default 5)") { |v| interval = parse_count(v, "--interval") }
+          p.on("--once", "Poll once and exit (no loop)") { once = true }
+          p.on("--json", "Emit the payload and each callback as a JSON line (same shape as MCP)") { json = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| id_arg = (before + after).first? }
+          p.invalid_option { |f| abort "gori run oast resume: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast resume: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id = oast_session_id(id_arg, "resume")
+        store = open_store(resolve_read_project(project_name, db_path))
+        failed =
+          begin
+            bound = oast_bind_session(store, id, "resume")
+            http = Oast::HttpClient.new
+            begin
+              Oast::Sessions.resume(bound, http)
+            rescue ex
+              # `Provider#resume` raises deliberately: a resume that failed quietly would leave
+              # a listener polling a correlation id the server has never heard of.
+              abort "gori run oast resume: session ##{id} could not be resumed: #{ex.message}"
+            end
+            oast_stream_session(store, bound, http, id, interval, once, json)
+          ensure
+            store.close
+          end
+        # A --once run whose single poll FAILED must not exit 0 (same contract as `listen`).
+        # Raised out here, not inside the block above, so the store still gets closed.
+        exit 1 if failed
+      end
+
+      # The poll loop for a resumed session: dedup against what the row already holds, persist
+      # every new interaction, and stamp last_poll_at so the cross-process liveness signal
+      # (`OutOfBand::StoreMinter`) sees this listener the way it sees the TUI's. Returns true
+      # when a `--once` poll errored. Never deregisters — resuming is not a lease.
+      #
+      # `io`/`err` default to the real streams and are parameters only so a spec can drive one
+      # `--once` pass over a scripted `Oast::Http` and read back what was printed AND what was
+      # persisted (the same seam idea as `oast_wait_or_stop`).
+      private def self.oast_stream_session(store : Store, bound : Oast::Sessions::Bound,
+                                           http : Oast::Http, id : Int64, interval : Int32,
+                                           once : Bool, json : Bool,
+                                           io : IO = STDOUT, err : IO = STDERR) : Bool
+        label = bound.session.kind.label
+        hits = store.oast_callback_count(id)
+        payload = bound.provider.generate_payload(bound.session)
+        if json
+          io.puts Oast::Present.payload(payload, id, label).to_json
+        else
+          err.puts "resumed session ##{id} on #{bound.session.host} (#{bound.label}) — " \
+                   "#{hits} callback#{hits == 1 ? "" : "s"} on file; payload:"
+          io.puts payload
+          err.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
+        end
+        io.flush
+
+        seen = Oast::Sessions.seen_uids(store, id)
+        # Same trap-into-a-channel shape as `listen`, and for the same reason: without it the
+        # interval sleep swallows Ctrl-C until the next tick. (--once polls exactly once, so it
+        # keeps the default Ctrl-C = immediate-exit behavior and installs no trap.)
+        stop = Channel(Nil).new(1)
+        unless once
+          Signal::INT.trap { stop.send(nil) rescue nil }
+          Signal::TERM.trap { stop.send(nil) rescue nil }
+        end
+        once_failed = false
+        loop do
+          interactions = begin
+            bound.provider.poll(http, bound.session)
+          rescue ex
+            err.puts "poll error: #{ex.message}"
+            once_failed = true
+            [] of Oast::Interaction
+          end
+          store.touch_oast_session(id)
+          interactions.each do |i|
+            next if seen.includes?(i.unique_id)
+            seen << i.unique_id
+            Oast::Sessions.record_callback(store, id, i)
+            oast_emit_callback(io, i, label, json)
+          end
+          break if once
+          break if oast_wait_or_stop(stop, interval.seconds)
+        end
+        once && once_failed
+      end
+
+      # One callback on the wire the operator reads it on: the same JSON shape MCP returns
+      # under --json, the same tab-separated line `listen` prints otherwise.
+      private def self.oast_emit_callback(io : IO, i : Oast::Interaction, label : String,
+                                          json : Bool) : Nil
+        if json
+          io.puts Oast::Present.interaction(i, label).to_json
+        else
+          io.puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+        end
+        io.flush
+      end
+
+      # Deregister a saved session's SERVER-side state. The row and every callback it collected
+      # stay: this releases the listener, not the evidence.
+      private def self.cmd_oast_session_release(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        id_arg : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run oast release <id>\n\n" \
+                     "Deregister the session's server-side state. Its stored callbacks stay,\n" \
+                     "but payloads minted from it stop resolving."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| id_arg = (before + after).first? }
+          p.invalid_option { |f| abort "gori run oast release: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run oast release: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        id = oast_session_id(id_arg, "release")
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          bound = oast_bind_session(store, id, "release")
+          Oast::Sessions.release(bound, Oast::HttpClient.new)
+          puts "released OAST session ##{id} — its #{store.oast_callback_count(id)} callback(s) stay."
+        ensure
+          store.close
+        end
+      end
+
+      # `<id>` as the operator types it: `7`, or the `#7` `list` prints.
+      private def self.oast_session_id(arg : String?, verb : String) : Int64
+        raw = arg
+        abort "gori run oast #{verb}: <id> is required (see `gori run oast list`)" if raw.nil?
+        Oast::Sessions.parse_id(raw) ||
+          abort("gori run oast #{verb}: malformed session id '#{raw}' (expected a number, as `gori run oast list` prints)")
+      end
+
+      private def self.oast_bind_session(store : Store, id : Int64, verb : String) : Oast::Sessions::Bound
+        bound = Oast::Sessions.bind(store, id)
+        if bound.is_a?(Oast::Sessions::Problem)
+          abort "gori run oast #{verb}: #{Oast::Sessions.message_for(bound, id)}"
+        end
+        bound
       end
 
       private def self.oast_presets : Nil

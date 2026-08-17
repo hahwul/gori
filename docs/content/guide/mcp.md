@@ -111,6 +111,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_env` | Project env tokens available to `$KEY` substitution (values redacted) |
 | `list_host_overrides` | The host to IP dial map in force for this project |
 | `list_oast_providers` | Configured OAST providers and which one is active |
+| `list_oast_sessions` | The project's persisted OAST listening sessions — payload host, hits, last poll — the rows `oast_resume` re-arms |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
 | `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
 | `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
@@ -152,7 +153,8 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline — broken access control. Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`nothing_sent`) and a flat, never-paged `bypasses` list |
 | `discover_start` / `discover_stop` | Spider and brute-force endpoints (poll with `discover_status` / `discover_results`) |
-| `oast_start` / `oast_stop` | Register an OAST payload and poll for callbacks (read the hits with `oast_poll`) |
+| `oast_start` / `oast_stop` | Register an ad-hoc OAST payload and poll for callbacks (read the hits with `oast_poll`); `oast_stop` on a RESUMED session stops polling but keeps it resumable |
+| `oast_resume` / `oast_release` | Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement — its callbacks stay |
 | `list_jobs` / `get_job` / `stop_job` | Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | Release a held message byte-exact, release it with edited wire bytes, or drop it |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | Arm or disarm the catch, set its condition query, and choose which leg it holds |

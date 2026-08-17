@@ -11,6 +11,7 @@ require "../../store"
 require "../../settings"
 require "../../oast"
 require "../../oast/provider_config"
+require "../../oast/sessions"
 require "../oast_provider_overlay"
 require "../oast_provider_picker"
 require "../oast_session_picker"
@@ -599,39 +600,17 @@ module Gori::Tui
       @host.status("released session ##{session_id} — its callbacks stay")
     end
 
-    # Rebuild the engine Session from its row. The inverse of what apply_registration persists,
-    # and the reason `oast_sessions` carries the private key at all. `registered: true` because
-    # the row exists precisely because a register once succeeded.
+    # Rebuild the engine Session from its row, and re-resolve the provider it belongs to.
+    # Both live in `Oast::Sessions` — the surface-free half of this controller — because
+    # `gori run oast` and the MCP oast_* tools resume the same rows and must rebuild them
+    # identically (a session whose secrets or endpoint were reconstructed differently on one
+    # surface would poll a correlation id the server has never heard of).
     private def session_from_record(rec : Store::OastSessionRecord) : Oast::Session
-      kind = Oast::ProviderKind.parse?(rec.kind) || Oast::ProviderKind::Interactsh
-      Oast::Session.new(rec.id, kind, rec.server_url, rec.correlation_id, rec.secret,
-        private_key_pem: rec.private_key_pem, token: rec.token, registered: true)
+      Oast::Sessions.session_from_record(rec)
     end
 
-    # The provider a session belongs to, by row id where it has one.
-    #
-    # A GLOBAL provider has no row in this project's DB, so `insert_oast_session` recorded a
-    # NULL provider_id for it — by design (see RegOk#db_provider_id), and the reason this
-    # cannot simply give up on nil: a global provider is the ordinary case for anyone who
-    # configured interactsh once and reuses it across projects, and every one of their sessions
-    # would be unresumable. Re-resolve those by the only identity the row still carries, the
-    # kind and the server it registered against.
     private def provider_config_for(rec : Store::OastSessionRecord) : Oast::ProviderConfig?
-      if pid = rec.provider_id
-        return @providers.find { |p| p.project_id == pid }
-      end
-      @providers.find { |p| p.kind == rec.kind && same_endpoint?(p.host, rec.server_url) }
-    end
-
-    # Compare a configured host against a session's server_url the way `Provider#base_url`
-    # normalises them — the session stored the NORMALISED form ("https://oast.pro") while the
-    # provider row holds whatever was typed ("oast.pro"), so a raw == would never match.
-    private def same_endpoint?(host : String, server_url : String) : Bool
-      normalize_endpoint(host) == normalize_endpoint(server_url)
-    end
-
-    private def normalize_endpoint(url : String) : String
-      Gori::Oast::Provider.normalize_endpoint(url)
+      Oast::Sessions.config_for(rec, @providers)
     end
 
     # What the operator recognises a session BY: the host its payloads point at. That is the
