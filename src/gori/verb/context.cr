@@ -53,6 +53,12 @@ module Gori
       # state (which hosts actually got bypassed), not the rule list settings:network edits.
       abstract def open_passthrough : Nil
       abstract def open_listeners : Nil
+      # Pick the ACTIVE session slot — the identity every later send goes out as (its header
+      # overlay, and the binding table `$NAME` resolves out of). Its own intent rather than a
+      # jump to the Authorize tab: that card edits the LIST, which is configuration, while
+      # this is the one piece of send state, it is memory-only, and it applies to the
+      # Repeater/Fuzzer/intercept forward far more often than to an Authorize run.
+      abstract def open_session_slots : Nil
       # Help's two reference pages as a popup over the current pane, rather than a jump to the
       # Help tab. The distinction is the whole point: `tab.help` costs the pane you were in,
       # and the moment you want a key looked up is the moment you cannot afford that.

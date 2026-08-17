@@ -346,7 +346,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
   # action as the global `s` chord; the probe chip opens the SET PROBE MODE picker
   # (the `m` chord inside the Probe tab); `bypass:N` opens the TLS-passthrough list; the
-  # listen chip toggles capture; the far-right `⌘`/`⚙` glyphs open the command palette
+  # listen chip toggles capture; `session:NAME` opens the session-slot picker; the far-right
+  # `⌘`/`⚙` glyphs open the command palette
   # (Ctrl/Cmd-P) / the Preferences modal (Ctrl+,). Returns true when consumed.
   #
   # One `top_bar_chip_at` pass resolves the tag from the SAME tagged source render
@@ -359,7 +360,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       unread: @notifications.unread, capturing: @session.capturing?,
       write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
       listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-      authorize: authorize_chip_label)
+      authorize: authorize_chip_label, session: session_slot_chip)
     return false unless tag
 
     case tag
@@ -368,6 +369,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :probe     then probe_set_mode
     when :bypass    then open_passthrough
     when :listeners then open_listeners
+    when :session   then open_session_slots
     when :listen    then toggle_capture
     when :palette   then open_palette
     when :settings  then open_preferences

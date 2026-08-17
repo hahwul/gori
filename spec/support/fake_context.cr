@@ -70,6 +70,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:open_listeners)
   end
 
+  def open_session_slots : Nil
+    rec(:open_session_slots)
+  end
+
   def open_help_shortcuts : Nil
     rec(:open_help_shortcuts)
   end

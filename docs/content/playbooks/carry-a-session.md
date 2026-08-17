@@ -7,7 +7,7 @@ weight = 50
 group = "The manual loop"
 +++
 
-An authenticated test is a login you do once and a token you carry everywhere after. This playbook captures the login, binds its rotating token to a name, writes that name onto every later request, and then does the same thing headless in a single command. Budget about ten minutes.
+An authenticated test is a login you do once and a token you carry everywhere after. This playbook captures the login, binds its rotating token to a name, writes that name onto every later request, does the same thing headless in a single command, and then carries several sessions side by side. Budget about ten minutes.
 
 > **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, and be able to log into the target through the proxy so its auth response is captured. Only replay sessions against a target you are authorized to test; the examples use `api.example.com` as a stand-in.
 
@@ -60,8 +60,39 @@ The same flag works on `mine`, `sequence`, and `discover`.
 
 **Checkpoint.** The run prints a `bind-from: flow #… replayed → bound $…` line, and its responses come back authenticated instead of a wall of `401`s.
 
+## 5. Carry more than one session
+
+Steps 2–4 carry *a* session. A real engagement usually needs several at once — an admin, a low-privilege user, an anonymous client — and `$SESSION` can only mean one thing at a time. A **session slot** is that name: an identity with its own header overlay and its own binding table, and the one that is **active** is what a send goes out as.
+
+Slots are the same rows the [Authorize](/guide/authorize/) tab's identities card edits, so a set you already configured there is already here. Add one headless:
+
+```bash
+gori run session add --name admin    --set 'Authorization: Bearer $SESSION' --rule SESSION
+gori run session add --name low-priv --set 'Authorization: Bearer $SESSION' --rule SESSION
+gori run session list
+```
+
+Both slots write the same header off the same `$SESSION`, and they mean different tokens: a slot that **claims** an extract rule (`--rule SESSION`) takes that rule's observed value into its own table instead of the global one. Which token each ends up holding is decided by which login you replay while that slot is active.
+
+Then name the identity on the send. In the TUI it is `Ctrl-P` → **Session slot** (or the `session:NAME` chip in the top bar), and every later send says who it is going out as. Headless it is `--slot`:
+
+```bash
+gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
+# slot: sending as low-priv
+# bind-from: flow #17 replayed → bound $SESSION
+```
+
+`--slot` is applied **before** `--bind-from`, so the login replay fills the active slot's table and the sweep resolves `$SESSION` out of the same one. Run the identical command with `--slot admin` and a different login flow, and the two runs are two sessions of the same target.
+
+The overlay is header-only — `Content-Length` never moves and the body is byte-exact — so a slot is safe on bytes you did not author: a captured replay, a fuzz template with its payload already spliced.
+
+Two limits worth knowing before you lean on it. The active slot is **never persisted**: reopening the project starts as-captured, because a slot's values are memory-only and restoring the pointer into an empty table would send an overlay whose `$SESSION` is literal. And there is no cookie jar and no auto-login macro — a slot carries the headers you wrote and the values gori observed, and `--bind-from` is the explicit version of "log in again".
+
+**Checkpoint.** `gori run session list` shows both slots, and a `--slot low-priv` run prints `slot: sending as low-priv` before its first request.
+
 ## Next Steps
 
+- [Authorize](/guide/authorize/): replay one request under *every* slot at once to find broken access control
 - [Decode and transform](/playbooks/decode-and-transform/): read and rewrite the encoded values a session rides on
 - [Session bindings](/guide/proxy/#session-bindings): the full reference for extract rules and where a value may live
 - [Scripting](/guide/scripting/): the headless sweep contract, exit codes, and `--bind-from`

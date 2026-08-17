@@ -63,6 +63,7 @@ require "./run/decoder"
 require "./run/rewriter"
 require "./run/colormarker"
 require "./run/project"
+require "./run/session"
 
 module Gori
   module CLI
@@ -135,6 +136,7 @@ module Gori
         when "intercept" then cmd_intercept(rest)
         when "links"     then cmd_links(rest)
         when "authorize" then cmd_authorize(rest)
+        when "session"   then cmd_session(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -159,6 +161,7 @@ module Gori
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
         {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},
+        {"session", "Manage session slots — named identities a send goes out as (list, show, add, edit, rm, baseline)"},
         {"discover", "Spider + directory brute-force a target; findings feed the Sitemap"},
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
         {"oast providers", "Manage saved OAST providers (list, add, update, enable/disable, delete)"},
@@ -323,6 +326,9 @@ module Gori
         # per-process and starts nil — see `SessionSlots`), so `gori run` behaves exactly as it
         # did: unscoped rules, global table, no overlay.
         Env.layer = Bindings.load(store, SessionSlots.load(store))
+        # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
+        # holding the pointer. See `reapply_active_slot`.
+        reapply_active_slot
         store
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
@@ -405,6 +411,67 @@ module Gori
         return unless verdict.blocked?
         outbound.close
         abort "#{cmd}: #{host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
+      end
+
+      # ── the active session slot, headless ────────────────────────────────────────────
+      #
+      # `--slot NAME` is `gori run`'s activate. The TUI picks a slot once and every later send
+      # goes out as it; the MCP server does the same across tool calls. A `gori run` process
+      # sends and exits, so there is nothing for a persisted pointer to span — and persisting
+      # one would be actively wrong (`SessionSlots`: a restored pointer resolves an empty
+      # binding table, which is a 401 with no visible cause). The flag carries the same
+      # intent at the only scope this surface has.
+      #
+      # Applied to `Env.layer`'s registry, which is the SAME object `Env.overlay_slot` and
+      # `Env.expand_bindings` read — so naming a slot here changes both halves at once (the
+      # header overlay AND which table `$NAME` resolves out of) instead of one of them.
+
+      # The refusal for `--slot` with no project in play, which is a different fact from a
+      # mistyped name and used to be indistinguishable from one. Mirrors
+      # `BIND_FROM_NO_PROJECT`, for the same reason and on the same code path.
+      SLOT_NO_PROJECT = "--slot: no project is in play (--request/stdin without --project/--db), " \
+                        "so no session slots are loaded — name the project with --project NAME " \
+                        "(or --db PATH)"
+
+      # The slot `--slot NAME` selected, remembered for the whole process.
+      #
+      # It has to be remembered rather than merely applied once, because `open_store`
+      # REPLACES `Env.layer` — and with it the slot registry — every time it is called, and a
+      # command opens its project more than once: the flow read, the host-override snapshot,
+      # and `project_outbound`'s own long-lived connection are three separate opens. A
+      # one-shot activation therefore survived only until the next one, which is how
+      # `--slot admin` could announce itself and then put no overlay on the wire at all.
+      # `open_store` re-applies this, so the selection is independent of how many times a
+      # command opens the project and in what order.
+      @@active_slot : String? = nil
+
+      # Select the send context for THIS process. Must run after the project is open
+      # (`open_store` installs `Env.layer`) and BEFORE anything sends — including
+      # `--bind-from`, whose replay fills the tables the rest of the run resolves against.
+      private def self.activate_slot(name : String?, cmd : String) : Nil
+        return unless name
+        slots = Env.layer.as?(Gori::Bindings).try(&.slots)
+        abort "#{cmd}: #{SLOT_NO_PROJECT}" if slots.nil?
+        unless slots.activate(name)
+          known = slots.names
+          have = known.empty? ? "this project has no session slots saved" : "it has #{known.join(", ")}"
+          abort "#{cmd}: --slot: no session slot named #{name.inspect} — #{have}. " \
+                "List them with `gori run session list`"
+        end
+        @@active_slot = name
+        # Said on STDERR, always: which identity a sweep went out as is the single fact that
+        # decides how to read its results, and an overlay is invisible in the output otherwise.
+        slot = slots.active
+        STDERR.puts "slot: sending as #{name}#{slot.try(&.passthrough?) ? " (as captured — no header overlay)" : ""}"
+      end
+
+      # Re-select `--slot` on a freshly installed layer. Silent: the name was validated at
+      # `activate_slot`, and a later open that cannot honour it (a second `--db` pointing
+      # somewhere else) is not a case any command builds today — reporting it here would put
+      # a line on STDERR for every internal re-open instead.
+      private def self.reapply_active_slot : Nil
+        return unless name = @@active_slot
+        Env.layer.as?(Gori::Bindings).try(&.slots).try(&.activate(name))
       end
 
       # ── session bindings, headless ───────────────────────────────────────────────────

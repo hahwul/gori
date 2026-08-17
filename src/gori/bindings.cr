@@ -322,6 +322,13 @@ module Gori
       slots.overlay(wire) { |value| Env.expand_bindings(value, guard_boundary: true) }
     end
 
+    # `Env::Layer#active_slot_name` — the READOUT half of the two methods above. nil is
+    # as-captured, which is both the default and the honest answer for a table running
+    # without a slot registry (a spec, a `gori run` that never opened a project).
+    def active_slot_name : String?
+      @slots.try(&.active_name)
+    end
+
     # Bumped on every rule edit and every rebind. Consumers that must not rebuild a merged
     # snapshot per message (`Rules`, on the proxy hot path) cache on this plus
     # `Env.highlight_rev`.

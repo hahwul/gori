@@ -110,6 +110,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_rules` | List the Match & Replace rules applied to the project in apply order — global rules first, then the project's own (`scope` filters to one) |
 | `list_env` | Project env tokens available to `$KEY` substitution (values redacted) |
 | `list_host_overrides` | The host to IP dial map in force for this project |
+| `list_session_slots` | The project's [session slots](/guide/authorize/#session-slots-one-list-two-readers) — named identities, each a header overlay plus the extract rules whose bound values belong to it — and which one is ACTIVE (header values redacted) |
 | `list_oast_providers` | Configured OAST providers and which one is active |
 | `list_oast_sessions` | The project's persisted OAST listening sessions — payload host, hits, last poll — the rows `oast_resume` re-arms |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
@@ -143,6 +144,8 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
 | `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
 | `set_env_var` / `delete_env_var` | Manage the project env tokens `$KEY` substitution reads |
+| `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots — the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under |
+| `set_active_session_slot` | Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and `$NAME` resolves against its binding table. Held by this server process only — never persisted, so a new connection starts as-captured |
 | `add_host_override` / `update_host_override` / `delete_host_override` | Manage the host to IP dial map (changes only the connect IP, never the request) |
 | `probe_promote` / `probe_dismiss` / `probe_delete` | Triage a Probe finding into Issues, dismiss it, or remove it |
 | `set_probe_mode` | Set the scan mode: `off`, `passive`, `active`, or `aggressive` (authorized targets only) |

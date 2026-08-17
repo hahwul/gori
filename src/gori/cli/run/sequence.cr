@@ -26,6 +26,7 @@ module Gori
         format = :text
         allow_unscoped = false
         bind_from : Int64? = nil
+        slot : String? = nil
         positional = [] of String
 
         set_loc = ->(k : Sequencer::ExtractKind, v : String) {
@@ -59,6 +60,7 @@ module Gori
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run sequence") }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl | markdown") { |v| format = parse_format(v, [:text, :json, :jsonl, :markdown]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -93,6 +95,7 @@ module Gori
           live << "--http2" if force_h2
           live << "--insecure-upstream" if insecure
           live << "--bind-from" if bind_from
+          live << "--slot" if slot
           live << "--allow-unscoped" if allow_unscoped
           live << "a token location (--cookie/--header/--regex/--position/--jsonpath)" if kind
           unless live.empty?
@@ -142,6 +145,10 @@ module Gori
         # --tokens path returned above without touching the network, so it needs none.)
         # Ahead of Plan.build — see CLI::Run.preflight_bind_from (the builder's unresolved-env
         # refusal otherwise discards this flag without a word).
+        # BEFORE the bind-from seed and the plan: the slot decides which binding table the
+        # replay fills and which one `$NAME` resolves out of, so a later activation would
+        # seed one identity and send as another.
+        activate_slot(slot, "gori run sequence")
         preflight_bind_from(bind_from, "gori run sequence")
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
         plan = begin

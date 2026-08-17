@@ -79,16 +79,23 @@ module Gori::Tui
 
     # --- identities ----------------------------------------------------------
 
-    # The identities every run replays under, loaded from the project on first use.
+    # The identities every run replays under. An identity IS a `Gori::SessionSlot`, so this
+    # reads the session's LIVE slot registry rather than the settings row underneath it
+    # (`Session#slots`, loaded at project open and shared with `Bindings`/`Env.overlay_slot`).
     #
-    # LAZY rather than loaded at `Session.open` the way env vars are: these are TUI-only, and a
-    # fresh Runner (and so a fresh controller) is built per project, so switching projects
-    # re-reads them for free. Nothing outside the TUI reads them, which is why there is no
-    # `#reload` hook — a second gori process editing the same project would go unnoticed here.
+    # That matters both ways round. Reading it means an identity added from the slot picker,
+    # `gori run session add` or MCP shows up here; WRITING through it (see
+    # `replace_identities`) means the send seams see the edit — a card that wrote the settings
+    # row directly left the live registry holding the pre-edit list, so the Authorize tab and
+    # a Repeater send disagreed about what "admin" was until the project was reopened.
+    #
+    # Still cached in `@identities_loaded`: the card mutates the array it is handed and
+    # compares against this one, and a fresh `dup` per read would make every in-place edit
+    # invisible to `AuthorizeView#identities=`.
     def identities : Array(Authorize::Identity)
       loaded = @identities_loaded
       return loaded if loaded
-      stored = Authorize.parse_json(@host.session.store.setting(Store::AUTHORIZE_IDENTITIES_KEY))
+      stored = @host.session.slots.slots
       list = stored.empty? ? AuthorizeView.default_identities : stored
       @view.identities = list
       @identities_loaded = list
@@ -124,7 +131,11 @@ module Gori::Tui
     def replace_identities(list : Array(Authorize::Identity)) : Bool
       @view.identities = list
       @identities_loaded = list
-      @host.session.store.set_setting(Store::AUTHORIZE_IDENTITIES_KEY, Authorize.serialize(list))
+      # Through the live registry, not `set_setting`: `SessionSlots#save` persists the same row
+      # AND updates the object every send seam consults, dropping the active pointer when the
+      # slot it named is gone. Writing the row by hand left the two out of step — the tab
+      # showed the edit, `Env.overlay_slot` kept applying the old overlay.
+      @host.session.slots.save(list)
     end
 
     # Editing while a batch is in flight would change the set the running requests are being

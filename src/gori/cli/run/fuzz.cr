@@ -37,6 +37,7 @@ module Gori
         force = false
         allow_unscoped = false
         bind_from : Int64? = nil
+        slot : String? = nil
         fail_if_no_matches = false
         matcher = Fuzz::Matcher.new(keep_bodies: :none)
         positional = [] of String
@@ -112,6 +113,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run fuzz") }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -150,6 +152,10 @@ module Gori
         # Ahead of Plan.build on purpose: the builder's unresolved-env refusal fires on the very
         # template `--bind-from` was passed for, so the flag was being discarded silently. See
         # CLI::Run.preflight_bind_from.
+        # BEFORE the bind-from seed and the plan: the slot decides which binding table the
+        # replay fills and which one `$NAME` resolves out of, so a later activation would
+        # seed one identity and send as another.
+        activate_slot(slot, "gori run fuzz")
         preflight_bind_from(bind_from, "gori run fuzz")
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
         plan = begin
