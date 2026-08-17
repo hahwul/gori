@@ -137,6 +137,25 @@ module Gori::Repeater
     # Ignored on the h1 path, which has always been byte-exact.
     property? preserve_field_case : Bool
 
+    # h2 ONLY: recompute the body's 5-byte gRPC length prefix over the body actually being
+    # sent (`Proxy::H2::Grpc.reframe_body`). DEFAULT FALSE, and that default is the point:
+    # P7 says a prefix an edit left stale is the operator's bytes — a deliberately-wrong
+    # length prefix is one of the standard gRPC parser tests — so gori REPORTS it
+    # (`Fuzz::Progress#grpc_stale`, the Repeater transcript's framing note) and does not
+    # repair it. The opt-in is for the other operator: the one who hex-edited a message body
+    # and wants the declaration to follow it rather than having the origin reject the call.
+    #
+    # h2 only, because the h1 path is byte-exact by construction — `Engine.send` never parses
+    # the request it is handed, so there is no head/body split there to hang this off, and
+    # inventing one would put a fourth wire-request parser in the tree. gRPC-Web over h1 keeps
+    # the byte-exact behaviour it has always had. Reframing is size-preserving either way, so
+    # a Content-Length is never invalidated by it.
+    #
+    # Applied at the SEND seam (`H2Engine.parse_request`), not here, so it also covers a body
+    # that `Env.expand_bindings` changed on the way out — the one thing that can re-stale a
+    # prefix after this builder has run.
+    property? reframe_grpc : Bool
+
     # h2 ONLY: the EXACT HPACK field list to encode, bypassing the h1-text carrier entirely.
     # When set it WINS over `requests` and forces http2 — the operator supplies :method,
     # :path, :scheme, :authority and every regular field verbatim, so the shapes h1 head text
@@ -155,6 +174,7 @@ module Gori::Repeater
                    @resync_cl_after_expansion : Bool = false,
                    @evidence : Bool = false,
                    @preserve_field_case : Bool = false,
+                   @reframe_grpc : Bool = false,
                    @h2_fields : Array({String, String})? = nil,
                    @h2_body : Bytes? = nil,
                    @origin : Origin? = nil,
@@ -203,6 +223,11 @@ module Gori::Repeater
     # `Sender`) so a surface that REPORTS the wire request can encode the same fields the
     # send will — MCP's `effective_request` is derived that way.
     getter? preserve_field_case : Bool
+    # See `PlanOptions#reframe_grpc?`. Carried on the plan (not only inside the `Sender`) so
+    # `with_requests` can hand the same policy to a post-assembly rewrite, and so a surface
+    # that REPORTS the wire can ask `H2Engine.encoded_request` for the bytes the send will
+    # actually put on it.
+    getter? reframe_grpc : Bool
 
     # The field-native request (see `PlanOptions#h2_fields`), or nil for the ordinary byte
     # path. When present, `send` encodes THESE fields rather than `bytes`, and the surfaces
@@ -215,7 +240,8 @@ module Gori::Repeater
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,
                    @websocket : Bool, @sni : String?, @preserve_field_case : Bool = false,
-                   @h2_fields : Array({String, String})? = nil, @h2_body : Bytes? = nil)
+                   @h2_fields : Array({String, String})? = nil, @h2_body : Bytes? = nil,
+                   @reframe_grpc : Bool = false)
     end
 
     # The single request's wire bytes (the first, for a group).
@@ -266,7 +292,7 @@ module Gori::Repeater
       Plan.new(sender: @sender, requests: requests, scheme: @scheme, host: @host,
         port: @port, http2: @http2,
         websocket: WsEngine.upgrade_request?(String.new(requests.first)), sni: @sni,
-        preserve_field_case: @preserve_field_case)
+        preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
@@ -353,10 +379,12 @@ module Gori::Repeater
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: options.http2?, sni: sni,
         timeout: options.timeout, overrides: options.overrides,
-        preserve_field_case: options.preserve_field_case?, evidence: options.evidence?)
+        preserve_field_case: options.preserve_field_case?, evidence: options.evidence?,
+        reframe_grpc: options.reframe_grpc?)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
-        preserve_field_case: options.preserve_field_case?)
+        preserve_field_case: options.preserve_field_case?,
+        reframe_grpc: options.reframe_grpc?)
     end
 
     # The request wires with `$KEY` expansion applied, or the originals when the surface says

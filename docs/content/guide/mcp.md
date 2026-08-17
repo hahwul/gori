@@ -127,7 +127,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 | Tool | Purpose |
 |------|---------|
-| `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested) |
+| `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent — off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage Repeater sessions |
 | `minimize_repeater` | Shrink a Repeater request to the smallest form that still reproduces the response |
@@ -148,7 +148,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `set_probe_mode` | Set the scan mode: `off`, `passive`, `active`, or `aggressive` (authorized targets only) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | Manage custom match rules and arm or disarm any scan rule |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | Manage the OAST providers `oast_start` can listen on |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer. A gRPC sweep reports `grpc_stale_prefix` when a payload changed a message's length; `fuzz_start{reframe_grpc: true}` recomputes the prefix instead of reporting it |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline — broken access control. Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`nothing_sent`) and a flat, never-paged `bypasses` list |

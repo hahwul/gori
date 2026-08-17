@@ -264,6 +264,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 |--------|-------------|
 | `--diff` | 세션에 마지막으로 저장된 응답과 비교 |
 | `--verbatim` | 저장된 바이트를 정확히 그대로 전송: `$VAR` 확장, 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음 |
+| `--reframe-grpc` | HTTP/2 전용: 실제로 전송되는 본문에 맞춰 gRPC 5바이트 길이 접두사를 다시 계산합니다(길이가 바뀐 단항 메시지용). 기본값은 꺼짐 — 페이로드와 어긋나는 접두사는 표준적인 파서 테스트이므로 쓴 그대로 나갑니다 |
 | `--message=TEXT` | WebSocket: 보낼 텍스트 메시지 (반복 가능; 세션에 저장된 메시지를 대체) |
 | `--message-frame=SPEC` | WebSocket: 형태를 명시한 프레임 하나. 쉼표로 구분한 `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, 그리고 `hex=`/`b64=`/`text=` 중 하나 |
 | `--idle-ms=N` | WebSocket: 첫 수신 프레임 이후 서버 침묵 타임아웃 (100–60000, 기본값 3000) |
@@ -291,7 +292,7 @@ gori run repeater h2 --target https://api.example.com --fields fields.json
 | Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive` |
-| Framing | `--verbatim` — 템플릿의 `Content-Length`를 쓰인 그대로 전송. 페이로드 치환 후에도 재계산하지 않습니다 (CL / CL-TE 디싱크 페이로드용) |
+| Framing | `--verbatim` — 템플릿의 `Content-Length`를 쓰인 그대로 전송. 페이로드 치환 후에도 재계산하지 않습니다 (CL / CL-TE 디싱크 페이로드용). `--reframe-grpc` — 페이로드가 단항 gRPC 메시지에 삽입된 뒤 5바이트 길이 접두사를 다시 계산합니다(기본값은 꺼짐: 오래된 접두사는 고치지 않고 보고만 합니다) |
 | Matchers | `--mc`/`--fc` status, `--mg`/`--fg` `grpc-status` 트레일러의 gRPC 상태 (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mr`/`--fr` body regex, `--extract=REGEX`, `--ac` auto-calibrate |
 | Session bindings | `--bind-from=FLOW-ID` — 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 바인딩을 채우게 합니다 |
 | Scope | `--allow-unscoped` — 프로젝트 스코프 밖으로도 전송. 샌드박스와 명시적 제외 규칙은 매 전송을 여전히 거부합니다 |

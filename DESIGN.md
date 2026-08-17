@@ -1020,6 +1020,40 @@ a message time keeps millisecond fidelity, the same commitment `startedDateTime`
 a socket whose transcript is EMPTY, where the entry would carry the upgrade and stand in for
 frames that were never captured.
 
+### 2026-08-17: a length declaration is repaired only when asked, and only when unambiguous
+
+Refines: [P7](#p7). PR 7 (the gRPC reframe opt-in).
+
+A gRPC message carries a 5-byte length prefix, and an operator's edit — a hex edit in the
+Repeater's gRPC tab, a fuzz payload spliced into the message — changes the payload without
+changing that declaration. A real gRPC server rejects the result, and gori used to report
+`3 sent · 0 errors` over it. That was fixed by *saying so*: `Fuzz::Progress#grpc_stale`
+counts the requests a payload left mis-framed and every surface names it once.
+
+The obvious next step — resync it, the way `Content-Length` is resynced — is the one P7
+forbids by default. A deliberately-wrong length prefix is one of the standard gRPC parser
+tests, and the same argument `--verbatim` makes for Content-Length makes it here: the bytes
+are the test case. So the repair is **opt-in** (`--reframe-grpc`, MCP `reframe_grpc`,
+`Fuzz::Config#reframe_grpc?` / `Repeater::PlanOptions#reframe_grpc?`), default **false**, and
+the two length declarations in one request deliberately carry **opposite** defaults:
+Content-Length is recomputed unless told not to, the gRPC prefix is left alone unless told to.
+
+Even under the opt-in the repair happens only where it is UNAMBIGUOUS. `Proxy::H2::Grpc.reframe`
+answers nil — leave the bytes — for a body that already frames end-to-end, for a
+client-streaming body (where every prefix present is honest and collapsing them would send a
+different message), for a broken streaming body (where "which message grew?" is no longer
+answerable from the bytes), and for `grpc-web-text` (whose frames are base64, so no rewrite
+stays size-preserving). What is left is the unary case, which is the same shape the Repeater's
+gRPC tab has always called reframable. A request the reframe declines is still counted and
+still named, so the opt-in never trades a warning for a corrupt body.
+
+Being size-preserving is what lets it run late: only the four length octets change, so the
+Content-Length framed over the body stays correct and `Fuzz::Generator`'s payload spans do not
+move. It is applied where each tool's bytes become the message — `Generator#emit`, beside the
+Content-Length pass, for fuzz; `H2Engine.parse_request` for the Repeater, so the projection
+`encoded_request` reports the wire through (MCP `effective_request`, `run show --format raw`)
+shows the bytes the send will actually put on it.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

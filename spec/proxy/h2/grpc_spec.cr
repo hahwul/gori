@@ -124,6 +124,74 @@ describe Gori::Proxy::H2::Grpc do
     end
   end
 
+  # PR 7 — the OPT-IN inverse of the `grpc_stale` report. Everything here is about what
+  # `reframe` REFUSES to do: the default across gori stays "a stale prefix is the operator's
+  # bytes", so the repair has to be unambiguous or not happen at all.
+  describe ".reframe" do
+    it "recomputes the prefix for a unary message whose payload GREW" do
+      # prefix says 5, payload is 8 — the exact shape a fuzz payload leaves behind.
+      stale = Bytes[0, 0, 0, 0, 5, 65, 65, 65, 65, 65, 65, 65, 65]
+      fixed = Grpc.reframe(stale).not_nil!
+      fixed.size.should eq(stale.size) # size-preserving: only the four length octets move
+      fixed[1, 4].should eq(Bytes[0, 0, 0, 8])
+      msgs, residual = Grpc.scan(fixed)
+      residual.should eq(0)
+      msgs[0].data.should eq("AAAAAAAA".to_slice)
+    end
+
+    it "recomputes the prefix for a unary message whose payload SHRANK" do
+      # An over-claiming prefix frames NOTHING at all, so `scan` returns zero messages —
+      # the other half of the unary case, and the one a smaller payload produces.
+      stale = Bytes[0, 0, 0, 0, 5, 120]
+      Grpc.scan(stale)[0].size.should eq(0)
+      fixed = Grpc.reframe(stale).not_nil!
+      fixed.should eq(Bytes[0, 0, 0, 0, 1, 120])
+    end
+
+    it "keeps the flag byte verbatim, compressed and TRAILER bits included" do
+      Grpc.reframe(Bytes[0x01, 0, 0, 0, 5, 9, 9]).not_nil![0].should eq(0x01_u8)
+      Grpc.reframe(Bytes[0x80, 0, 0, 0, 5, 9, 9]).not_nil![0].should eq(0x80_u8)
+    end
+
+    it "leaves a body that already frames cleanly alone" do
+      Grpc.reframe(framed("hello")).should be_nil
+      # …including a CLIENT-STREAMING body, where every prefix present is the honest one and
+      # collapsing them into a single frame would send a different message.
+      Grpc.reframe(framed("hello", "world")).should be_nil
+    end
+
+    it "refuses a broken STREAMING body, where 'which message grew?' has no answer" do
+      # Two complete messages, then a third prefix that over-claims. `scan` consumed 2, so
+      # the unary rewrite would swallow both honest frames into one.
+      body = framed("hello", "world")
+      broken = Bytes.new(body.size + 6)
+      body.copy_to(broken)
+      Bytes[0, 0, 0, 0, 99, 65].copy_to(broken[body.size, 6])
+      Grpc.scan(broken)[1].should be > 0
+      Grpc.reframe(broken).should be_nil
+    end
+
+    it "refuses a body too short to hold a prefix" do
+      Grpc.reframe(Bytes[0, 0, 0, 0]).should be_nil
+      Grpc.reframe(Bytes.empty).should be_nil
+    end
+  end
+
+  describe ".reframe_body" do
+    it "reframes only for a declared gRPC content-type" do
+      stale = Bytes[0, 0, 0, 0, 5, 65, 65, 65, 65, 65, 65, 65, 65]
+      Grpc.reframe_body("application/grpc", stale).not_nil![1, 4].should eq(Bytes[0, 0, 0, 8])
+      Grpc.reframe_body("application/grpc-web+proto", stale).not_nil![1, 4].should eq(Bytes[0, 0, 0, 8])
+      Grpc.reframe_body("application/json", stale).should be_nil
+      Grpc.reframe_body(nil, stale).should be_nil
+    end
+
+    it "leaves grpc-web-TEXT alone — its frames are base64, so no rewrite is size-preserving" do
+      Grpc.reframe_body("application/grpc-web-text",
+        Base64.strict_encode(Bytes[0, 0, 0, 0, 5, 65, 65, 65, 65, 65, 65, 65, 65]).to_slice).should be_nil
+    end
+  end
+
   # `application/grpc-web-text` is grpc-web for clients that cannot carry binary: the FRAMING
   # is identical, but the whole framed stream is base64 on the wire. Scanning the raw bytes
   # therefore reads a length prefix built out of base64 characters and reports nothing —

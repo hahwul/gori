@@ -2,6 +2,7 @@ require "../proxy/upstream"
 require "../proxy/h2/frame"
 require "../proxy/h2/hpack"
 require "../proxy/h2/head_codec"
+require "../proxy/h2/grpc"
 require "../proxy/codec/http1"
 require "./engine"
 
@@ -172,14 +173,15 @@ module Gori
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil,
                     overrides : Gori::HostOverrides? = nil,
-                    preserve_field_case : Bool = false) : Result
+                    preserve_field_case : Bool = false,
+                    reframe_grpc : Bool = false) : Result
         started = Time.instant
         upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
         begin
-          headers, body = parse_request(request, scheme, host, port, preserve_field_case)
+          headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
           exchange(upstream, headers, body, host, port, started, timeout)
         rescue ex
           failure(ex.message || "h2 repeater error", started)
@@ -1041,8 +1043,16 @@ module Gori
       # sending `Content-Type` verbatim would RST the stream of every ordinary send. A surface
       # turns it on where the operator has said the bytes ARE the message (`--verbatim`, MCP
       # `verbatim:true`), because then an uppercase name is the conformance probe.
+      #
+      # `reframe_grpc` recomputes the body's 5-byte gRPC length prefix (`Grpc.reframe_body`).
+      # OFF by default and on no other terms: P7 says a prefix a hand edit left stale is the
+      # operator's bytes, so gori reports it and does not repair it. The opt-in lands HERE, in
+      # the fields/body split, rather than one layer up, because `encoded_request` — the
+      # projection MCP's `effective_request` and `run show --format raw` report the wire
+      # through — parses the identical request, so the bytes shown stay the bytes sent.
       def self.parse_request(request : Bytes, scheme : String, host : String,
-                             port : Int32, preserve_field_case : Bool = false) : {Array({String, String}), Bytes?}
+                             port : Int32, preserve_field_case : Bool = false,
+                             reframe_grpc : Bool = false) : {Array({String, String}), Bytes?}
         head_bytes, body = split_head_body(request)
         lines = String.new(head_bytes).split('\n').map(&.rstrip('\r'))
         line = lines[0]? || "GET / HTTP/2"
@@ -1093,7 +1103,19 @@ module Gori
                    {":authority", authority_override || authority(host, port, scheme)}]
         headers.concat(regular)
         headers.each { |(n, v)| reject_uncarriable(n, v) }
+        body = reframed_grpc(regular, body) if reframe_grpc && body
         {headers, body}
+      end
+
+      # The body with its gRPC length prefix recomputed, or the body untouched. Reads the
+      # declared content-type off the fields this parse just produced rather than re-scanning
+      # the head: `Grpc.reframe_body` answers "not gRPC" and "grpc-web-TEXT" itself, and
+      # `Grpc.reframe` answers "nothing is stale" and "this is streaming, so there is no
+      # unambiguous repair" — every one of which leaves the operator's bytes alone.
+      private def self.reframed_grpc(regular : Array({String, String}), body : Bytes) : Bytes
+        ct = regular.find { |(n, _)| n.compare("content-type", case_insensitive: true) == 0 }
+        return body unless ct
+        Proxy::H2::Grpc.reframe_body(ct[1], body) || body
       end
 
       # Why a head line has no h2 form.
@@ -1138,8 +1160,9 @@ module Gori
       # (`:scheme` and a duplicate pseudo-header have nowhere to go, `head_codec.cr:24-32`),
       # but it is the fields, not the source text.
       def self.encoded_request(request : Bytes, *, scheme : String, host : String, port : Int32,
-                               preserve_field_case : Bool = false) : Bytes
-        fields, body = parse_request(request, scheme, host, port, preserve_field_case)
+                               preserve_field_case : Bool = false,
+                               reframe_grpc : Bool = false) : Bytes
+        fields, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
         head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "")
         return head unless body && !body.empty?
         joined = Bytes.new(head.size + body.size)

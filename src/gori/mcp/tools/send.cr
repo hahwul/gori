@@ -102,7 +102,8 @@ module Gori
         return built.bytes if plan.h2_fields
         return built.bytes unless plan.http2?
         Repeater::H2Engine.encoded_request(built.bytes, scheme: built.scheme, host: built.host,
-          port: built.port, preserve_field_case: plan.preserve_field_case?)
+          port: built.port, preserve_field_case: plan.preserve_field_case?,
+          reframe_grpc: plan.reframe_grpc?)
       rescue Gori::Error
         built.bytes
       end
@@ -1021,6 +1022,11 @@ module Gori
         # Read up front, not inside the `flow_id` branch that uses it: an argument validated in
         # one branch and ignored in another is the same silent-substitution trap one level up.
         keep_request_line = bool_arg(h, "keep_request_line", false)
+        # Read up here for the same reason, and applied to ALL THREE branches below: an
+        # argument that worked for `raw` and was silently ignored for `repeater_id` is the
+        # parity gap this builder exists to prevent. Default false — see
+        # `Repeater::PlanOptions#reframe_grpc?`.
+        reframe_grpc = bool_arg(h, "reframe_grpc", false)
         # Honor the project's host overrides on the direct-dial path (parity with the live
         # proxy). nil/empty is behaviorally identical to no override.
         overrides = HostOverrides.load(store)
@@ -1038,6 +1044,7 @@ module Gori
           return {Repeater::PlanOptions.new([rec.request], default_target: rec.target,
             http2: bool_arg(h, "http2", rec.http2?), sni: send_sni(h, rec.sni),
             auto_content_length: rec.auto_content_length?, verify: verify,
+            reframe_grpc: reframe_grpc,
             timeout: timeout, overrides: overrides), false}
         end
         if present?(h, "flow_id")
@@ -1091,7 +1098,7 @@ module Gori
           # capture is the operator's to replay.
           {Repeater::PlanOptions.new([flow.bytes], default_target: flow.target,
             expand_request: false, evidence: true,
-            auto_content_length: false,
+            auto_content_length: false, reframe_grpc: reframe_grpc,
             http2: bool_arg(h, "http2", flow.http2), sni: send_sni(h, flow.sni), verify: verify,
             timeout: timeout, overrides: overrides), flow.rewrote_request_line}
         else
@@ -1106,7 +1113,7 @@ module Gori
           # disagree about the same call.
           verbatim = RequestBuilder.verbatim?(h)
           {Repeater::PlanOptions.new([built.bytes], expand_request: false,
-            auto_content_length: false,
+            auto_content_length: false, reframe_grpc: reframe_grpc,
             # The h2 half of the verbatim promise: `verbatim` means the bytes ARE the message, so
             # an uppercase field name is the RFC 9113 §8.2.1 conformance probe and not a
             # copy-paste artifact to repair. See `PlanOptions#preserve_field_case?`.
@@ -1222,6 +1229,7 @@ module Gori
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no $VAR expansion, no bare-LF promotion")
           s.field "verbatim", boolprop("send 'raw' EXACTLY as given: no $VAR expansion and no bare-LF→CRLF promotion in the head (default false). Use for desync/smuggling tests where a bare LF header terminator IS the payload")
+          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")

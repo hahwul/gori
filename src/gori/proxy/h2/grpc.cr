@@ -128,6 +128,51 @@ module Gori::Proxy::H2
       framed
     end
 
+    # Recompute a UNARY body's 5-byte length prefix so it declares the payload the body
+    # ACTUALLY carries — the OPT-IN inverse of the `grpc_stale` report. The default stays P7:
+    # a stale prefix is the operator's bytes and gori says so (`Fuzz::Progress#grpc_stale`)
+    # rather than rewriting it. This is for the operator who edited a message and wants the
+    # declaration to follow, and it never runs unasked.
+    #
+    # nil — leave the body alone — whenever the repair is not UNAMBIGUOUS:
+    #
+    #   * fewer than 5 bytes: there is no prefix to recompute;
+    #   * `scan` already reaches the end (residual 0): nothing is stale. For a CLIENT-STREAMING
+    #     body (several messages) that is also the case where rewriting would be actively
+    #     WRONG — every prefix there is honest, and collapsing them into one frame would send
+    #     a different message;
+    #   * `scan` consumed two or more complete messages before running out: a streaming body
+    #     whose framing broke, where "which message grew?" has no answer left in the bytes.
+    #
+    # What remains is the unary case (`msgs.size <= 1`) — one message whose payload grew (scan
+    # frames it short and leaves a residual) or shrank (the prefix over-claims, so scan frames
+    # nothing at all). It is the same shape the Repeater's gRPC tab calls reframable
+    # (`RepeaterView#load_grpc`). The flag byte is kept VERBATIM, compressed and grpc-web
+    # TRAILER bits included; only the four length octets change.
+    #
+    # SIZE-PRESERVING by construction, which is what makes this safe to drop in late: a
+    # Content-Length framed over the body stays correct, and a caller holding payload offsets
+    # into the request (`Fuzz::Generator`'s spans) does not have to move them.
+    def self.reframe(body : Bytes) : Bytes?
+      return nil if body.size < 5
+      msgs, residual = scan(body)
+      return nil if residual == 0 || msgs.size > 1
+      framed = body.dup
+      IO::ByteFormat::BigEndian.encode((body.size - 5).to_u32, framed[1, 4])
+      framed
+    end
+
+    # `reframe` for a body whose declared content-type is known — what every caller on a
+    # request path actually holds. nil for anything that does not declare gRPC, and nil for
+    # `-text`, whose frames are base64 on the wire: reframing one means decode/re-encode, so
+    # the rewrite would reach well past the four length octets and stop being size-preserving.
+    # A `-text` body keeps the warning and its bytes.
+    def self.reframe_body(content_type : String?, body : Bytes) : Bytes?
+      return nil unless grpc?(content_type)
+      return nil if web_text?(content_type)
+      reframe(body)
+    end
+
     # Frames a DATA body into messages. A trailing partial frame (incomplete on a
     # still-streaming capture) is left out rather than guessed at.
     def self.messages(body : Bytes) : Array(Message)

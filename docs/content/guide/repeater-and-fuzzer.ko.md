@@ -24,7 +24,7 @@ Repeater는 HTTP/1 이상을 다룹니다.
 
 - **HTTP/2** 요청은 실제 h2 연결로 재전송됩니다.
 - **WebSocket** 리피터는 핸드셰이크를 열고, 메시지를 보내며, 흘러나오는 응답을 지켜봅니다.
-- **gRPC** 리피터는 프레이밍된 메시지를 위해 HTTP/2 엔진을 재사용합니다.
+- **gRPC** 리피터는 프레이밍된 메시지를 위해 HTTP/2 엔진을 재사용합니다. 메시지 앞의 5바이트 길이 접두사는 캡처되거나 입력된 그대로 전송됩니다. 페이로드와 어긋나는 접두사 자체가 표준적인 gRPC 파서 테스트이기 때문입니다. 단항(unary) 메시지를 편집했고 원본 서버가 호출을 받아들이길 원한다면 `gori run repeater send --reframe-grpc`(MCP `send_request{reframe_grpc: true}`)로 실제 전송되는 본문에 맞춰 다시 계산할 수 있습니다.
 - **decode** 모드는 편집된 SAML / GraphQL 페이로드를 전송 시 다시 인코드합니다. (JWT를 디코드하거나 편집하려면 [Decoder](/ko/guide/decoder/) 탭의 `jwt-decode`를 사용하세요.)
 
 명령줄에서 Repeater를 실행하고, 선택적으로 새 대상을 지정할 수 있습니다.
@@ -83,6 +83,12 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 ### 매칭 {#matching}
 
 ffuf 스타일 matcher와 filter로 status, size, words, lines, 본문 정규식에 대해 결과를 필터링합니다. 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
+
+### 스윕의 프레이밍 {#framing-a-sweep}
+
+`Content-Length`는 페이로드가 삽입될 때마다 다시 계산되므로 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--verbatim`(MCP `update_content_length: false`)은 이 계산을 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다.
+
+gRPC 템플릿에는 두 번째 길이 선언 — 각 메시지 앞의 5바이트 접두사 — 이 있으며, 기본값은 반대입니다. gori는 페이로드가 남긴 그대로 두고, 실행이 끝날 때 한 번 알려줍니다(`2 of 3 requests left it stale`, MCP `fuzz_status`의 `grpc_stale_prefix`). 의도적으로 잘못된 접두사를 테스트할 때는 이것이 맞는 동작이지만, 평범한 단항 호출을 스윕하는데 모든 요청이 프레이밍 계층에서 거부된다면 원하는 동작이 아닙니다. `--reframe-grpc`(MCP `reframe_grpc: true`)는 요청마다 접두사를 다시 계산합니다. 단일 메시지에만 적용되며, 클라이언트 스트리밍 본문과 `grpc-web-text` 본문은 그대로 두고 여전히 보고합니다.
 
 ### 연결 재사용 {#connection-reuse}
 
