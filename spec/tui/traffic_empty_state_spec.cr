@@ -13,6 +13,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("FLOW LOG").should be_true
     backend.contains?("localhost:8070").should be_true
     backend.contains?("Open browser").should be_true
+    backend.contains?("HTTP/3 / QUIC bypasses").should be_true
     backend.contains?("──►").should be_true
     backend.contains?("SITE MAP").should be_false
   end

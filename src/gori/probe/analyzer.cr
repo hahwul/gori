@@ -67,6 +67,7 @@ module Gori
         @ws_detail = {} of Int64 => Store::FlowDetail
         @active_seen = Set(String).new
         @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
+        @h3_announced_hosts = Set(String).new # rate-limit Alt-Svc h3 event-feed entries per host
         @suppressed = Set(String).new         # "code|host" hard-deleted this session
         @active_jobs = Channel(ActiveTask).new(ACTIVE_QUEUE)
         @events = Channel(Event).new(256)
@@ -432,6 +433,11 @@ module Gori
           stamped = Probe.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), repeater_id: repeater_id)
           batch << stamped
           host ||= stamped.host
+          if d.code == "tech_http3" && @h3_announced_hosts.add?(d.host)
+            trim(@h3_announced_hosts, ANALYZED_CAP)
+            @store.insert_event("probe", "alt_svc_h3", "info", "Alt-Svc: #{d.host} advertised HTTP/3 (QUIC may bypass proxy)",
+              flow_id: stamped.flow_id, goto_tab: "probe")
+          end
         end
         return if batch.empty?
         @store.upsert_probe_issues(batch)
