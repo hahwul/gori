@@ -995,7 +995,7 @@ module Gori
         # Only a POSITIVE max_body_bytes overrides the cap; 0/negative falls back to
         # the mode default (Crystal treats 0 as truthy, so `max || default` alone
         # wouldn't). Use body_mode:none for a zero-byte, shape-only body.
-        raw = int(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
+        raw = optional_int_arg(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
         max = (raw && raw > 0) ? raw : nil
         case str(h, "body_mode").try(&.strip.downcase)
         when "none"    then {0, true}
@@ -1139,7 +1139,7 @@ module Gori
       end
 
       private def fuzz_timeout(h) : Time::Span?
-        int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
+        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
       private def clamp_nonneg(n : Int64?) : Int32
@@ -1239,10 +1239,16 @@ module Gori
       # silently stored the NON-byte-exact request and reported success. Coercing would be
       # worse than the drop here: `1234` would `to_s` into a string that DECODES (3 octets),
       # so gori would send bytes the caller never named at all.
-      private def strict_str(h, key : String) : String?
+      #
+      # `expected` words the refusal, because this reader also guards the arguments that ARE
+      # the wire message (`body`, `raw`) rather than a base64 envelope for one — the same split
+      # `RequestBuilder.wire_str` makes, and the reason it exists: a body handed over as an
+      # object has no defensible serialization, so guessing at one invents a Content-Length
+      # the caller never stated.
+      private def strict_str(h, key : String, expected : String = "a base64 string") : String?
         v = h[key]?
         return nil if v.nil? || v.raw.nil?
-        v.as_s? || raise Gori::Error.new("invalid '#{key}' (expected a base64 string)")
+        v.as_s? || raise Gori::Error.new("invalid '#{key}' (expected #{expected})")
       end
 
       # "an array" / "an object", or nil for a scalar — the shapes `str` must refuse.
@@ -1344,9 +1350,15 @@ module Gori
       # ("5" → 5) — clients/LLMs often serialize tool args as strings and the
       # schema's "integer" type is advisory, not enforced. A fractional float
       # (5.9) is rejected rather than silently truncated, so the number and
-      # string encodings of the same value agree; an out-of-Int64-range float
-      # returns nil rather than raising OverflowError — for a limit that falls
-      # back to the default, for an id it reads as no-such-id, never a crash.
+      # string encodings of the same value agree.
+      #
+      # A number OUTSIDE Int64 SATURATES to the nearest bound rather than answering nil.
+      # `1e19` is the "no limit" value an LLM reaches for and its intent is unambiguous, so it
+      # has to reach the caller's own `clamp` — answering nil fell back to a DEFAULT smaller
+      # than any value the caller could have meant, and it made this reader's two halves
+      # disagree, because `optional_int_arg` refuses a nil-while-present BY NAME and would
+      # have turned a legal-but-huge number into an argument error. Saturating leaves nil
+      # meaning exactly one thing: the value has no numeric reading at all.
       private def int(h, key : String) : Int64?
         v = h[key]?
         return nil unless v
@@ -1355,19 +1367,57 @@ module Gori
         end
         if f = v.as_f?
           return nil unless f.finite? && f == f.trunc
+          return Int64::MAX if f >= Int64::MAX.to_f64
+          return Int64::MIN if f < Int64::MIN.to_f64
           return f.to_i64
         end
-        v.as_s?.try(&.to_i64?)
+        s = v.as_s?
+        return nil unless s
+        s.to_i64? || saturated_digits(s)
       rescue OverflowError
         nil
       end
 
+      # A digit run too large for Int64, saturated — the string encoding of the same
+      # "as large as possible" the float branch above accepts. nil for anything that is not
+      # a bare signed digit run, so `"fast"` / `"30s"` stay unreadable.
+      private def saturated_digits(s : String) : Int64?
+        t = s.strip
+        negative = t.starts_with?('-')
+        digits = t.lchop('-').lchop('+')
+        return nil if digits.empty? || !digits.each_char.all?(&.ascii_number?)
+        negative ? Int64::MIN : Int64::MAX
+      end
+
+      # The integer argument, or nil when absent — but a value that was SUPPLIED and has no
+      # numeric reading (a container, `"fast"`, a fractional float) is refused BY NAME. Every
+      # non-id integer argument on this surface used to read `int`'s nil as "not passed", so
+      # `fuzz_start{rate:"fast", max_requests:{"n":1}}` answered `isError:false` and swept
+      # with no rate limit and no request budget. Same contract `bool_arg` states for booleans
+      # and `str` for strings: a lenient coercion is fine, a SILENT one is not.
       private def optional_int_arg(h, key : String) : Int64?
         value = int(h, key)
         if present?(h, key) && value.nil?
           raise Gori::Error.new("invalid '#{key}' (expected an integer)")
         end
         value
+      end
+
+      # A NUMBER-shaped argument: `rate` is the only one, and it is genuinely fractional.
+      # `Config#rps` is a `Float64?` and `gori run fuzz --rate` parses it with `to_f?`, so half
+      # a request per second — the pacing a fragile target needs — is expressible on the CLI and
+      # in the engine. MCP read it through the integer reader, which first swallowed `0.5`
+      # silently (rate unset ⇒ UNLIMITED, the opposite of what was asked) and then, once that
+      # became a refusal, made it inexpressible from this surface at all.
+      #
+      # Same "supplied but unreadable is refused BY NAME" contract as `optional_int_arg`;
+      # non-finite is refused too, since `Infinity` is not a rate.
+      private def optional_float_arg(h, key : String) : Float64?
+        v = h[key]?
+        return nil if v.nil? || v.raw.nil?
+        f = v.as_f? || v.as_s?.try(&.to_f?)
+        raise Gori::Error.new("invalid '#{key}' (expected a number)") if f.nil? || !f.finite?
+        f
       end
 
       private def bounded_int_arg(h, key : String, default : Int64, *, min : Int64,
@@ -1471,6 +1521,13 @@ module Gori
 
       private def strprop(desc : String) : JSON::Any
         prop("string", desc)
+      end
+
+      # For an argument that is genuinely fractional (`rate` — see `optional_float_arg`).
+      # Declaring it `integer` while the engine takes a Float64 is how a half-request-per-second
+      # pacing came to be inexpressible from this surface.
+      private def numprop(desc : String) : JSON::Any
+        prop("number", desc)
       end
 
       private def intprop(desc : String) : JSON::Any

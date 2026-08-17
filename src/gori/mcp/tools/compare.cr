@@ -29,7 +29,7 @@ module Gori
         pane = pane_s == "request" ? :request : :response
         changes_only = bool_arg(h, "changes_only", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        context = int(h, "context")
+        context = optional_int_arg(h, "context")
         if context && context < 0
           return err("invalid 'context' (expected >= 0)", "INVALID_ARGUMENT", field: "context")
         end

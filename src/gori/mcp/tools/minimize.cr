@@ -18,12 +18,22 @@ module Gori
       # ACTIVE: sends many real outbound requests, so it is write-gated AND scope-gated
       # (the Gori::Outbound decision its Fuzz::Sender carries hard-blocks a Sandbox/exclude
       # at the socket seam).
+      # Which spelling of the repeater id this CALL used. `delete_repeater` and
+      # `update_repeater` name the same thing `id`, so an agent generalising from its siblings
+      # reaches for `id` here; both are accepted, and the one the caller actually reached for
+      # is what every message below names.
+      #
+      # When NEITHER is there it answers the schema's REQUIRED name. It used to fall back to
+      # the alias, so a call with no id at all was told "missing required 'id'" for an argument
+      # `tools/list` does not mark required — sending the agent to add a field the schema
+      # never asked for.
+      private def minimize_id_key(h) : String
+        return "id" if present?(h, "id") && !present?(h, "repeater_id")
+        "repeater_id"
+      end
+
       private def minimize_repeater(h) : Result
-        # `delete_repeater` and `update_repeater` name this same thing `id`, so an agent
-        # generalising from its siblings reaches for `id` here. That used to be a SILENT
-        # no-op; now that unknown arguments are a hard error it would be a loud one, which is
-        # the better failure but still a failure over a naming inconsistency. Accept both.
-        key = present?(h, "repeater_id") ? "repeater_id" : "id"
+        key = minimize_id_key(h)
         id = int(h, key)
         return Result.new(id_error(h, key), is_error: true) unless id
         rec = store.get_repeater(id)

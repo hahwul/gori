@@ -148,7 +148,7 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | 커스텀 매치 규칙 관리와 스캔 규칙 활성화 / 비활성화 |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | `oast_start`가 사용할 OAST 프로바이더 관리 |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다 |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송, 리트라이, 잘린 응답)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 — 접근 제어 결함. 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |

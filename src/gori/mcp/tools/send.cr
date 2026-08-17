@@ -24,6 +24,15 @@ module Gori
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
         include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
+        # Read BEFORE the send, not on the way out with the reply it shapes. These two only
+        # affect how much of the RESPONSE is inlined, so reading them late looked free — and
+        # was, right up until an unreadable value became a refusal instead of a silent
+        # default. Then `max_body_bytes:"all"` put the request on the wire, wrote the History
+        # flow and the saved repeater, and STILL answered `isError:true` — which an agent reads
+        # as "nothing was sent", so it fixes the argument and sends a second real request with
+        # a second repeater row behind it. Same rule `minimize_repeater` states for `apply`:
+        # every argument is validated before the sends are spent.
+        body_cap, body_omit = body_return_opts(h)
         issue_id = send_issue_id(h, save)
         return issue_id if issue_id.is_a?(Result)
 
@@ -63,7 +72,6 @@ module Gori
           issue_id, recorded_flow_id, plan.h2_fields,
           sni: plan.sni, auto_cl: send_persist_auto_cl(h))
 
-        body_cap, body_omit = body_return_opts(h)
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules, plan.h2_fields,
           request_line_rewritten, plan.websocket?),
@@ -228,7 +236,7 @@ module Gori
       # Per-operation (connect + idle read/write) timeout for a one-shot send, from
       # timeout_ms; nil = the engine defaults. Mirrors fuzz_timeout's bounds.
       private def send_timeout(h) : Time::Span?
-        int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
+        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
       # Substrings that identify a DETERMINISTIC protocol refusal in gori's own error text —
@@ -986,11 +994,19 @@ module Gori
       # The request body for a field-native send: `body` as UTF-8, or `body_base64` for raw
       # bytes (a body an operator wants to send exactly, e.g. a protobuf/gRPC frame). Verbatim
       # — no `$VAR` expansion, matching the "the fields ARE the message" contract of this path.
+      #
+      # `strict_str`, NOT `str`: these two arguments are the SAME two the url/HTTP-1.1 path
+      # reads through `RequestBuilder.wire_str`, which refuses a non-string by name for the
+      # reason `base64_str` states — `12345678` coerces to a string that DECODES to six
+      # octets, so a `body_base64` the caller never wrote would go on the wire. Reading them
+      # leniently here made the identical call refused on one path and sent on the other:
+      # `send_request{url, body_base64: 12345678}` answered INVALID_ARGUMENT while the same
+      # argument alongside `h2_fields` reached the socket with `isError:false`.
       private def h2_body_arg(h) : Bytes?
-        if b64 = str(h, "body_base64")
+        if b64 = strict_str(h, "body_base64")
           return Base64.decode(b64) rescue raise Gori::Error.new("'body_base64' is not valid base64")
         end
-        str(h, "body").try(&.to_slice)
+        strict_str(h, "body", expected: "a JSON string; use body_base64 for exact octets").try(&.to_slice)
       end
 
       # The option set for a field-native h2 send — dispatched from `build_send_plan` so it is

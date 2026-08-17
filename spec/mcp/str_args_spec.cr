@@ -233,6 +233,51 @@ describe "MCP string arguments — byte-exact base64 fields are strict" do
       store.repeaters.size.should eq(0)
     end
   end
+
+  # A SCALAR is the sharp shape here, not a container: `12345678` coerces to a string that
+  # DECODES to six octets, so a lenient reader sends bytes the caller never named — the
+  # failure `base64_str` was written for. Two sites read these arguments through `str` and so
+  # reproduced it, and the first is worse for being an ASYMMETRY: the identical argument was
+  # refused on `send_request`'s url path and sent on its `h2_fields` path.
+  it "send_request refuses a scalar body_base64/body on the FIELD-NATIVE path too" do
+    with_store do |store|
+      tools = str_tools(store)
+      fields = %("h2_fields":[[":method","POST"],[":path","/"]])
+      {"body_base64" => "expected a base64 string",
+       "body"        => "expected a JSON string"}.each do |field, expected|
+        r = tools.call("send_request", JSON.parse(
+          %({"url":"http://127.0.0.1:1/",#{fields},"#{field}":12345678,"allow_unscoped":true})))
+        r.is_error.should be_true
+        r.text.should contain("'#{field}'")
+        r.text.should contain(expected)
+      end
+    end
+  end
+
+  it "fuzz_start refuses a scalar race_warmup rather than warming with invented bytes" do
+    with_store do |store|
+      tools = str_tools(store)
+      r = tools.call("fuzz_start", JSON.parse(
+        %({"template":"GET / HTTP/1.1\\r\\nHost: h\\r\\n\\r\\n","url":"http://127.0.0.1:1/",) +
+        %("race_count":2,"race_warmup":12345678,"allow_unscoped":true})))
+      r.is_error.should be_true
+      r.text.should contain("'race_warmup'")
+    end
+  end
+
+  it "intercept_forward_edit refuses a scalar raw_base64/raw rather than forwarding invented bytes" do
+    with_store do |store|
+      tools = str_tools(store)
+      {"raw_base64", "raw"}.each do |field|
+        r = tools.call("intercept_forward_edit", JSON.parse(%({"item_id":1,"#{field}":12345678})))
+        r.is_error.should be_true
+        r.text.should contain("'#{field}'")
+        # NOT the "no live capturing instance" answer: the argument has to be refused BEFORE
+        # the enqueue, or a live bridge would have received the coerced bytes.
+        r.text.should contain("expected")
+      end
+    end
+  end
 end
 
 describe "MCP string arguments — list readers keep every entry" do

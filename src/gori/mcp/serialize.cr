@@ -247,6 +247,12 @@ module Gori
       def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
         j.object do
           j.field "index", r.index
+          # Did the MATCHER accept this row? Always emitted, unlike the exception flags below,
+          # because the stored set is not matched-only: `store_fuzz_result` also keeps a row
+          # that was re-sent, retried, or came back truncated. Without this bit a "matched and
+          # resent" row and an "unmatched, resent" row are the same shape, so an agent reading
+          # `fuzz_results` as its findings counted requests the matcher had rejected.
+          j.field "matched", r.matched?
           # payloads can come from a caller-supplied wordlist FILE (arbitrary bytes) and
           # `extracted` is a regex capture out of the RESPONSE body — both are outside-origin.
           j.field("payloads") { j.array { r.payloads.each { |p| j.string text(p) } } }

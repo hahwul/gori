@@ -41,8 +41,8 @@ module Gori
         @job_seq += 1
         id = "sq_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
-          int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
-          int(h, "max_requests"), Time.utc.to_unix_ms)
+          optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
+          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
         sjob = SequenceJob.new(id, goal, plan.engine, audit, @db_path)
         evict_finished_jobs(@sequence_jobs)
         @sequence_jobs[id] = sjob
@@ -150,14 +150,14 @@ module Gori
       private def build_sequence_plan(h, ob : Outbound) : Sequencer::Plan
         bytes, default_target, src_h2, evidence = sequence_request_source(h)
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay,
-          token_loc: sequence_token_loc(h), goal: clamp(int(h, "count"), 500, SEQUENCE_MAX_GOAL),
-          concurrency: clamp(int(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
-        config.rps = int(h, "rate").try(&.to_f64)
+          token_loc: sequence_token_loc(h), goal: clamp(optional_int_arg(h, "count"), 500, SEQUENCE_MAX_GOAL),
+          concurrency: clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY))
+        config.rps = optional_float_arg(h, "rate")
         config.timeout = fuzz_timeout(h)
-        config.retries = (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
-        cap = int(h, "max_requests")
+        config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
+        cap = optional_int_arg(h, "max_requests")
         config.max_requests = cap ? {cap, SEQUENCE_MAX_REQUESTS}.min : SEQUENCE_MAX_REQUESTS
-        int(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
+        optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # The builder's sender carries the Outbound decision, so Sandbox / EXCLUDE hard-block
         # a collection run per send — sequence_start used to have only the job-start check.
         options = Sequencer::PlanOptions.new(bytes, default_target: default_target,
@@ -206,7 +206,7 @@ module Gori
         if t = str(h, "template")
           return {t.to_slice, nil, false, false} unless t.strip.empty?
         end
-        if id = int(h, "flow_id")
+        if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
@@ -268,7 +268,7 @@ module Gori
           s.field "jsonpath", strprop("token location: a JSON body path ($.a.b[0])")
           s.field "count", intprop("target tokens to collect (default 500, max #{SEQUENCE_MAX_GOAL})")
           s.field "concurrency", intprop("parallel requests (default 1 — session tokens are often stateful; max #{SEQUENCE_MAX_CONCURRENCY})")
-          s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
           s.field "retries", intprop("retries per request on a network error")
           s.field "http2", boolprop("use real HTTP/2 (default false)")

@@ -9,9 +9,9 @@ module Gori
       # --- read tools ---------------------------------------------------------
 
       private def list_history(h) : Result
-        limit = clamp(int(h, "limit"), 50, 500)
-        before_id = int(h, "before_id")
-        since_id = int(h, "since")
+        limit = clamp(optional_int_arg(h, "limit"), 50, 500)
+        before_id = optional_int_arg(h, "before_id")
+        since_id = optional_int_arg(h, "since")
         if before_id && since_id
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
@@ -42,8 +42,8 @@ module Gori
       # the agent re-scan or skip; on an empty page it echoes the input `since` (never 0,
       # never max-of-empty) so a no-new-events poll keeps the caller's place.
       private def list_events(h) : Result
-        since = int(h, "since") || 0_i64
-        limit = clamp(int(h, "limit"), 100, 500)
+        since = optional_int_arg(h, "since") || 0_i64
+        limit = clamp(optional_int_arg(h, "limit"), 100, 500)
         source = str(h, "source")
         kind = str(h, "kind")
         scanned = store.events_after(since, limit)

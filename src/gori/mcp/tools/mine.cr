@@ -18,8 +18,8 @@ module Gori
         @job_seq += 1
         id = "mn_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
-          int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
-          int(h, "max_requests"), Time.utc.to_unix_ms)
+          optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
+          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
         mjob = MineJob.new(id, total, engine, audit, @db_path)
         evict_finished_jobs(@mine_jobs)
         @mine_jobs[id] = mjob
@@ -126,8 +126,8 @@ module Gori
       private def mine_results(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)
-        offset = clamp_nonneg(int(h, "offset"))
-        limit = clamp(int(h, "limit"), 100, 1000)
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
         page = mjob.results[offset, limit]? || [] of Miner::Finding
         Result.new(JSON.build do |j|
           j.object do
@@ -185,14 +185,14 @@ module Gori
       private def build_mine_job(h, ob : Outbound) : {Miner::Engine, Fuzz::Origin, Int64}
         text, default_target, src_h2, evidence = mine_template_source(h)
         config = Miner::Config.new
-        config.concurrency = clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
-        config.rps = int(h, "rate").try(&.to_f64)
+        config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
+        config.rps = optional_float_arg(h, "rate")
         config.timeout = fuzz_timeout(h)
-        config.retries = (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i # clamp before .to_i (Int32) so a huge value can't OverflowError past the clean-error handler
-        cap = int(h, "max_requests")
+        config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i # clamp before .to_i (Int32) so a huge value can't OverflowError past the clean-error handler
+        cap = optional_int_arg(h, "max_requests")
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
-        int(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
+        optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         config.keep_alive = bool_arg(h, "keep_alive", true)
         options = Miner::PlanOptions.new(text,
           # A `flow_id` template is CAPTURED evidence; a `template` string is the caller's
@@ -248,7 +248,7 @@ module Gori
         if t = str(h, "template")
           return {t, nil, false, false} unless t.strip.empty?
         end
-        if id = int(h, "flow_id")
+        if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
@@ -269,7 +269,7 @@ module Gori
       end
 
       private def mine_bucket(h) : Int32?
-        int(h, "bucket").try(&.clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i) # avoid Int64->Int32 overflow
+        optional_int_arg(h, "bucket").try(&.clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i) # avoid Int64->Int32 overflow
       end
 
       # The tools/list schemas for the Miner tools, kept beside the handlers that
@@ -292,7 +292,7 @@ module Gori
           s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
-          s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
           s.field "retries", intprop("retries per request on a network error")
           s.field "http2", boolprop("use real HTTP/2 (default false)")

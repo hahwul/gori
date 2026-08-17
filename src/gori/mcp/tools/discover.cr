@@ -69,15 +69,15 @@ module Gori
       # able to ask for an unbounded crawl). `user_wordlist` lives on the Config like every
       # other knob — the builder reads it from there on all three surfaces.
       private def discover_config(h) : Discover::Config
-        cap = int(h, "max_requests")
+        cap = optional_int_arg(h, "max_requests")
         Discover::Config.new(
-          concurrency: clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
-          rps: int(h, "rate").try(&.to_f64),
+          concurrency: clamp(optional_int_arg(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
+          rps: optional_float_arg(h, "rate"),
           # `rate` bounds THROUGHPUT; a target that rate-limits on the inter-request GAP needs
           # this instead (`gori run discover --throttle`). Declared on fuzz_start only until now.
-          throttle_ms: int(h, "throttle_ms").try(&.clamp(0_i64, 600_000_i64).to_i),
+          throttle_ms: optional_int_arg(h, "throttle_ms").try(&.clamp(0_i64, 600_000_i64).to_i),
           timeout: discover_timeout(h),
-          retries: (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
+          retries: (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
           keep_alive: bool_arg(h, "keep_alive", true),
           # Both default ON, and both must be readable as a NAMED refusal when the value is
@@ -85,7 +85,7 @@ module Gori
           # after the caller asked for it off AND slipped past the "at least one technique"
           # guard that `spider: false` correctly trips.
           spider: bool_arg(h, "spider", true), bruteforce: bool_arg(h, "bruteforce", true),
-          max_depth: clamp(int(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
+          max_depth: clamp(optional_int_arg(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
           user_wordlist: str(h, "wordlist").presence,
           extensions: discover_extensions(h), containment: discover_containment(h),
           headers: discover_headers(h))
@@ -156,7 +156,7 @@ module Gori
       end
 
       private def discover_timeout(h) : Time::Span?
-        ms = int(h, "timeout_ms")
+        ms = optional_int_arg(h, "timeout_ms")
         ms && ms > 0 ? ms.milliseconds : nil
       end
 
@@ -315,8 +315,8 @@ module Gori
       private def discover_results(h) : Result
         djob = lookup_discover_job(h)
         return djob if djob.is_a?(Result)
-        offset = clamp_nonneg(int(h, "offset"))
-        limit = clamp(int(h, "limit"), 100, 1000)
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
         page = djob.results[offset, limit]? || [] of Discover::Finding
         Result.new(JSON.build do |j|
           j.object do
@@ -387,7 +387,7 @@ module Gori
           s.field "headers", objprop("custom request-header name->value map added to every probe (e.g. Authorization/Cookie); overrides Accept/User-Agent, Host/Connection are ignored")
           s.field "containment", strprop("boundary: same-origin | scope-aware (default) | host+subdomains")
           s.field "concurrency", intprop("parallel requests (default 20, max #{DISCOVER_MAX_CONCURRENCY})")
-          s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
           s.field "retries", intprop("retries per request on a network error")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")

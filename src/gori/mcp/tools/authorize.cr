@@ -137,8 +137,8 @@ module Gori
       private def authorize_results(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
-        offset = clamp_nonneg(int(h, "offset"))
-        limit = clamp(int(h, "limit"), 50, 500)
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        limit = clamp(optional_int_arg(h, "limit"), 50, 500)
         page = ajob.results[offset, limit]? || [] of Authorize::Target
         Result.new(JSON.build do |j|
           j.object do

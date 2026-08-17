@@ -118,11 +118,14 @@ module Gori
         if mismatch = job_project_mismatch(job)
           return mismatch
         end
-        job.stop
+        # Both read BEFORE the stop: `job.stop` is irreversible, and an argument refused after
+        # it tells the caller its call FAILED while the job is already stopping — so an agent
+        # concludes the run is still going and keeps polling a job nothing will restart.
         wait = bool_arg(h, "wait", false)
+        budget = optional_int_arg(h, "wait_timeout_ms").try(&.clamp(1_i64, 60_000_i64)) || 10_000_i64
+        job.stop
         waited_out = false
         if wait
-          budget = int(h, "wait_timeout_ms").try(&.clamp(1_i64, 60_000_i64)) || 10_000_i64
           deadline = Time.utc.to_unix_ms + budget
           while job_running?(job)
             if Time.utc.to_unix_ms >= deadline

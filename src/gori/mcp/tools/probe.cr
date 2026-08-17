@@ -27,6 +27,12 @@ module Gori
         return category if category.is_a?(Result)
 
         active = bool_arg(h, "active", false)
+        # Read up here, not in the result expression it feeds. `limit` only trims the REPORT,
+        # so reading it last looked free — until an unreadable value became a refusal, at which
+        # point `probe_scan{active:true, limit:"all"}` sent the whole active scan at the target
+        # and then threw every detection away with an argument error. Same rule as
+        # `send_request`'s `max_body_bytes` and `minimize_repeater`'s `apply`.
+        limit = clamp(optional_int_arg(h, "limit"), 200, 2000)
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         # --aggressive implies unsafe (it also raises caps + widens bypass sets).
         aggressive = bool_arg(h, "aggressive", false)
@@ -57,7 +63,7 @@ module Gori
 
         groups = probe_filter_groups(Probe.group(dets), severity_from(str(h, "severity")), category.as(String?))
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
-          scope_configured, capped, unsafe, aggressive, clamp(int(h, "limit"), 200, 2000), scan_errors))
+          scope_configured, capped, unsafe, aggressive, limit, scan_errors))
       end
 
       # --- persisted probe issues + triage (parity with the TUI Probe tab) -------------------
@@ -76,8 +82,8 @@ module Gori
         return category if category.is_a?(Result)
 
         include_closed = bool_arg(h, "include_closed", false)
-        req_off = int(h, "offset")
-        req_lim = int(h, "limit")
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 100, 500)
         # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`

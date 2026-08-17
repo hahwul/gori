@@ -593,3 +593,106 @@ describe "MCP fuzz tools" do
     end
   end
 end
+
+# An origin that answers ONE payload with a matching body and the other with a
+# `Content-Length` longer than the bytes it writes before closing. The short read is a
+# premature EOF, which `Codec::Body` reports as an incomplete body — so that row is STORED
+# (`store_fuzz_result` keeps retried / resent / incomplete rows) while the MATCHER rejects
+# it. That mix is the whole point: it is the state in which `fuzz_results` used to hand back
+# a page with no bit separating a match from a non-match.
+private def start_mixed_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      head = String.new(Gori::Proxy::Codec::Http1.read_head(conn) || Bytes.empty)
+      if head.includes?("q=b")
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 50\r\nConnection: close\r\n\r\nshort"
+      else
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nMATCHME"
+      end
+      conn.flush
+      conn.close
+    end
+  end
+  port
+end
+
+private def await_fuzz_done(tools, job_id : String) : JSON::Any
+  60.times do
+    sleep 0.02.seconds
+    status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+    return status unless status["status"].as_s == "running"
+  end
+  fail "fuzz job #{job_id} never reached a terminal status"
+end
+
+describe "MCP fuzz_results — the stored page is not matched-only, and says so" do
+  it "carries a per-row `matched` bit, and matched_only actually filters" do
+    port = start_mixed_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b"]}]),
+        "match"          => {"regex" => "MATCHME"},
+        "allow_unscoped" => true,
+      }.to_json)
+      job_id = start["job_id"].as_s
+      status = await_fuzz_done(tools, job_id)
+      status["matched"].as_i.should eq(1)
+      # The non-matching row was kept for its truncated response, so the stored set is
+      # LARGER than the match count — the condition the "stored matched-only" claim denied.
+      status["stored_results"].as_i.should eq(2)
+
+      all = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))
+      all["total_available"].as_i.should eq(2)
+      all["matched_only"].as_bool.should be_false
+      rows = all["results"].as_a
+      rows.count { |r| r["matched"].as_bool }.should eq(1)
+      rows.count { |r| !r["matched"].as_bool }.should eq(1)
+      rejected = rows.find { |r| !r["matched"].as_bool }.not_nil!
+      rejected["incomplete"].as_bool.should be_true
+
+      only = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json},"matched_only":true}))
+      only["matched_only"].as_bool.should be_true
+      only["total_available"].as_i.should eq(1)
+      only["total_stored"].as_i.should eq(2)
+      only["returned"].as_i.should eq(1)
+      only["has_more"].as_bool.should be_false
+      only["page_complete"].as_bool.should be_true
+      only["results"].as_a.map { |r| r["matched"].as_bool }.should eq([true])
+    end
+  end
+
+  it "pages the FILTERED set, not the stored one" do
+    port = start_mixed_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","a2","b2"]}]),
+        "match"          => {"regex" => "MATCHME"},
+        "allow_unscoped" => true,
+      }.to_json)
+      job_id = start["job_id"].as_s
+      await_fuzz_done(tools, job_id)
+
+      # Two matches (a, a2) among four stored rows: an offset past the FILTERED end must be
+      # empty rather than reaching back into the rows the filter excluded.
+      page = call_json(tools, "fuzz_results",
+        %({"job_id":#{job_id.to_json},"matched_only":true,"offset":1,"limit":100}))
+      page["total_available"].as_i.should eq(2)
+      page["returned"].as_i.should eq(1)
+      page["results"].as_a.map { |r| r["matched"].as_bool }.should eq([true])
+
+      past = call_json(tools, "fuzz_results",
+        %({"job_id":#{job_id.to_json},"matched_only":true,"offset":9}))
+      past["returned"].as_i.should eq(0)
+      past["results"].as_a.should be_empty
+      past["has_more"].as_bool.should be_false
+    end
+  end
+end

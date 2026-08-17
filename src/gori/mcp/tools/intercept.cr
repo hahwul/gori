@@ -171,8 +171,14 @@ module Gori
       # Exactly one of `raw`/`raw_base64`, so a caller that sends both is told rather than
       # silently having one ignored.
       private def intercept_edit_bytes(h, row : Store::HeldRow?) : Bytes | Result
-        b64 = str(h, "raw_base64").presence
-        raw = str(h, "raw").presence
+        # `strict_str`, NOT `str`: both of these ARE the wire message, so the coercion `str`
+        # applies to a scalar is the one failure this argument pair cannot survive. `12345678`
+        # coerces to a string that DECODES to six octets, so gori would forward bytes the
+        # caller never named — into traffic a human is holding mid-flight. `create_repeater`'s
+        # `request_base64` has always refused it (`base64_str`); this site did not, so the same
+        # mistake was an error there and a silent edit here.
+        b64 = strict_str(h, "raw_base64").presence
+        raw = strict_str(h, "raw", expected: "a JSON string; use raw_base64 for exact octets").presence
         if b64 && raw
           return err("pass only one of 'raw' or 'raw_base64'", "INVALID_ARGUMENT", field: "raw_base64")
         end

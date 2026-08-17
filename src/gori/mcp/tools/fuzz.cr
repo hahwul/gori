@@ -27,8 +27,8 @@ module Gori
         @job_seq += 1
         id = "fz_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
-          int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
-          int(h, "max_requests"), Time.utc.to_unix_ms)
+          optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
+          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
         # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
@@ -37,7 +37,7 @@ module Gori
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
-        warn = budget_warning(total, int(h, "max_requests"))
+        warn = budget_warning(total, optional_int_arg(h, "max_requests"))
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
@@ -241,26 +241,41 @@ module Gori
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
-        # Stored results are the matched ones plus any row whose request was re-sent (see
-        # store_fuzz_result), so matched_only is very nearly a no-op; iterate by index to keep
-        # each row aligned with its recorded History flow id.
+        # `matched_only` FILTERS, and it has to: the stored set is not matched-only. Since
+        # `store_fuzz_result` began keeping a row whose request was re-sent, retried or came
+        # back truncated, `fuzz_results` has mixed matches with non-matches — and the row
+        # carried no bit that told them apart, so an agent reading the page as its findings
+        # counted requests the matcher had rejected. The argument declared itself a "no-op"
+        # while that was true; it stopped being true and the sentence stayed.
+        #
+        # Selected by INDEX rather than by zipping the two arrays: `result_flow_ids` is
+        # index-aligned with `results`, and a filtered page still has to point each row at the
+        # History flow that IS its evidence.
         rows = fjob.results
         flow_ids = fjob.result_flow_ids
-        offset = clamp_nonneg(int(h, "offset"))
-        limit = clamp(int(h, "limit"), 100, 1000)
-        last = offset < rows.size ? Math.min(offset + limit, rows.size) : offset
+        matched_only = bool_arg(h, "matched_only", false)
+        picked = (0...rows.size).to_a
+        picked.select! { |i| rows[i].matched? } if matched_only
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
+        last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
         Result.new(JSON.build do |j|
           j.object do
-            j.field("results") { j.array { (offset...last).each { |i| Serialize.fuzz_result(j, rows[i], flow_ids[i]?) } } }
+            j.field("results") { j.array { (offset...last).each { |k| Serialize.fuzz_result(j, rows[picked[k]], flow_ids[picked[k]]?) } } }
             j.field "returned", returned
             j.field "offset", offset
-            j.field "total_available", rows.size
+            j.field "total_available", picked.size
+            j.field "matched_only", matched_only
+            # What the filter is selecting FROM, so a caller that passed matched_only can see
+            # how many non-matching rows the run kept rather than having to page twice to
+            # find out.
+            j.field "total_stored", rows.size if matched_only
             # `job_complete` = the JOB finished. `page_complete` is about THIS page:
             # whether it reached the end of the stored rows.
             j.field "job_complete", fjob.status != :running
-            j.field "page_complete", last >= rows.size
-            j.field "has_more", last < rows.size
+            j.field "page_complete", last >= picked.size
+            j.field "has_more", last < picked.size
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?
             j.field "history_truncated", fjob.history_truncated?
@@ -392,7 +407,7 @@ module Gori
         if t = str(h, "template")
           return {t, nil, false, false} unless t.strip.empty?
         end
-        if id = int(h, "flow_id")
+        if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Repeater::FlowRequest.build(detail)
@@ -581,11 +596,34 @@ module Gori
         end
       end
 
-      # An integer from a JSON scalar — a real number, or a numeric string (LLMs
-      # sometimes quote numbers). nil when it is neither.
-      private def fuzz_int(v : JSON::Any?) : Int64?
+      # An integer from a JSON scalar inside a payload-set object (`{"numbers":{…}}`,
+      # `{"brute":{…}}`), or nil when the key is ABSENT.
+      #
+      # It reads the same three encodings `Tools#int` does — including an INTEGRAL FLOAT, which
+      # it used to reject: `as_i64?` answers nil for `2.0`, so `{"numbers":{"from":1,"to":100,
+      # "step":2.0}}` fell through to the `|| 1_i64` default and swept 100 candidates instead
+      # of 50, and `{"brute":{"min":1,"max":3.0}}` collapsed to `max = 1` and tested length 1
+      # alone — both with `isError:false`. The string spellings of the same mistakes
+      # (`"1-100:two"`, `"ab:1-3.0"`) have always refused loudly, so this was the silent
+      # default one nesting level below the top-level arguments.
+      #
+      # `name` is what makes a present-but-unreadable value a REFUSAL rather than a default,
+      # which is the whole contract `optional_int_arg` states for the arguments above.
+      private def fuzz_int(v : JSON::Any?, name : String? = nil) : Int64?
         return nil unless v
-        v.as_i64? || v.as_s?.try(&.to_i64?)
+        return nil if v.raw.nil?
+        if i = v.as_i64?
+          return i
+        end
+        if f = v.as_f?
+          if f.finite? && f == f.trunc && f < Int64::MAX.to_f64 && f >= Int64::MIN.to_f64
+            return f.to_i64
+          end
+        elsif (s = v.as_s?) && (i = s.to_i64?)
+          return i
+        end
+        raise FuzzArgError.new("invalid #{name} #{v.to_json} (expected an integer)") if name
+        nil
       end
 
       # Clamp a brute-force length so an absurd value can't OverflowError past the
@@ -609,10 +647,10 @@ module Gori
       # partitioned strings, so both are accepted (#4).
       private def fuzz_numbers(v : JSON::Any) : Fuzz::NumberRange
         if obj = v.as_h?
-          from = fuzz_int(obj["from"]?)
-          to = fuzz_int(obj["to"]?)
+          from = fuzz_int(obj["from"]?, "numbers 'from'")
+          to = fuzz_int(obj["to"]?, "numbers 'to'")
           raise FuzzArgError.new(%(numbers object needs integer 'from' and 'to', e.g. {"from":1,"to":100,"step":2})) unless from && to
-          return Fuzz::NumberRange.new(from, to, fuzz_int(obj["step"]?) || 1_i64)
+          return Fuzz::NumberRange.new(from, to, fuzz_int(obj["step"]?, "numbers 'step'") || 1_i64)
         end
         s = v.as_s? || raise FuzzArgError.new(%('numbers' must be a string 'FROM-TO[:STEP]' or an object {from,to,step}))
         # `.scrub`: `s` is a JSON string argument, and the `match` below is a PCRE2 call that
@@ -639,9 +677,9 @@ module Gori
         if obj = v.as_h?
           charset = obj["charset"]?.try(&.as_s?)
           raise FuzzArgError.new(%(brute object needs a non-empty 'charset', e.g. {"charset":"abc","min":1,"max":3})) if charset.nil? || charset.empty?
-          min = fuzz_int(obj["min"]?)
+          min = fuzz_int(obj["min"]?, "brute 'min'")
           raise FuzzArgError.new("brute object needs an integer 'min'") unless min
-          max = fuzz_int(obj["max"]?) || min
+          max = fuzz_int(obj["max"]?, "brute 'max'") || min
           return Fuzz::BruteForce.new(charset, clamp_brute_len(min), clamp_brute_len(max))
         end
         s = v.as_s? || raise FuzzArgError.new(%('brute' must be a string 'CHARSET:MIN-MAX' or an object {charset,min,max}))
@@ -729,15 +767,15 @@ module Gori
       end
 
       private def fuzz_config(h, mode : Fuzz::Mode) : Fuzz::Config
-        rate = int(h, "rate").try(&.to_f64)
+        rate = optional_float_arg(h, "rate")
         # Ignore a non-positive caller cap (it would otherwise become a negative cap
         # that halts the dispatcher at request 0); fall back to the hard ceiling.
-        caller_cap = int(h, "max_requests").try { |m| m > 0 ? m : nil }
+        caller_cap = optional_int_arg(h, "max_requests").try { |m| m > 0 ? m : nil }
         cap = [caller_cap, FUZZ_MAX_REQUESTS].compact.min
         cfg = Fuzz::Config.new(mode: mode,
-          concurrency: clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
+          concurrency: clamp(optional_int_arg(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           rps: (rate && rate > 0 ? rate : nil),
-          retries: (int(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
+          retries: (optional_int_arg(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
           timeout: fuzz_timeout(h),
           keep_bodies: fuzz_record_policy(h),
           max_requests: cap,
@@ -751,9 +789,9 @@ module Gori
         # redirect stub, so an agent-driven run reported uniform "no differences" on exactly
         # the sweeps the CLI found hits in.
         cfg.follow_redirects = bool_arg(h, "follow_redirects", cfg.follow_redirects?)
-        int(h, "max_redirects").try { |v| cfg.max_redirects = v.clamp(0_i64, 50_i64).to_i }
+        optional_int_arg(h, "max_redirects").try { |v| cfg.max_redirects = v.clamp(0_i64, 50_i64).to_i }
         cfg.auto_calibrate = bool_arg(h, "auto_calibrate", cfg.auto_calibrate?)
-        int(h, "throttle_ms").try { |v| cfg.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
+        optional_int_arg(h, "throttle_ms").try { |v| cfg.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # `gori run fuzz --verbatim` and `intercept_forward_edit{update_content_length:false}`
         # both reach this knob; fuzz_start could not, so the whole CL-desync probe class (a
         # Content-Length shorter or longer than the substituted body, or CL alongside
@@ -767,7 +805,7 @@ module Gori
         # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
         # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
-        int(h, "race_count").try { |v| cfg.race_count = v.clamp(1_i64, Fuzz::Engine::MAX_RACE_SIZE.to_i64).to_i }
+        optional_int_arg(h, "race_count").try { |v| cfg.race_count = v.clamp(1_i64, Fuzz::Engine::MAX_RACE_SIZE.to_i64).to_i }
         cfg.race_warmup = fuzz_race_warmup(h)
         cfg
       end
@@ -776,8 +814,13 @@ module Gori
       # race request — the same "no template processing, no Env expansion" contract
       # `--race-warmup=FILE` has on the CLI (`read_input_file` is a bare `File.read`). nil when
       # absent, matching `Config#race_warmup`'s "no warm-up" default.
+      #
+      # `strict_str`, not `str`: these bytes go on the wire untouched, so the scalar coercion
+      # `str` applies would put `"12345678"` on every race connection for a caller that sent a
+      # number — the same "bytes the caller never named" failure closed for `send_request`'s
+      # `body`/`body_base64` and `intercept_forward_edit`'s `raw`/`raw_base64`.
       private def fuzz_race_warmup(h) : Bytes?
-        s = str(h, "race_warmup")
+        s = strict_str(h, "race_warmup", expected: "a JSON string of the exact warm-up bytes")
         return nil if s.nil? || s.empty?
         s.to_slice
       end
@@ -810,7 +853,7 @@ module Gori
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
           s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
-          s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
           s.field "retries", intprop("retries per request on a network error")
           s.field "follow_redirects", boolprop("follow 3xx responses (default false). Matters more than it sounds: against an endpoint that 302s, every status/size/words/lines/regex match otherwise runs against the redirect STUB, so a run reports uniform \"no differences\" while the interesting response is one hop away. Mirrors CLI --follow.")
@@ -844,7 +887,7 @@ module Gori
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max rows (default 100, max 1000)")
-          s.field "matched_only", boolprop("no-op: fuzz results are stored matched-only, so this never changes the page")
+          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row whose request was re-sent, retried, or answered with a truncated response is kept too, so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way.")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

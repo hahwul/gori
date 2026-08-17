@@ -285,7 +285,7 @@ module Gori
         # `bounded_int_arg`: this argument has always been forgiving at both ends, and `0` is
         # the other spelling of "no limit" an agent reaches for — turning that into a hard
         # INVALID_ARGUMENT would be a second, opposite way to fail the same call.
-        limit = (int(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).clamp(1_i64, 5000_i64).to_i
+        limit = (optional_int_arg(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).clamp(1_i64, 5000_i64).to_i
         existing = Gori::Colormarker.merged(store)
         pv = Gori::Colormarker.preview(store, filter, existing, limit)
         Result.new(JSON.build do |j|

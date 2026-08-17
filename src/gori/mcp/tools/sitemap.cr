@@ -7,7 +7,7 @@ module Gori
   module MCP
     class Tools
       private def list_sitemap(h) : Result
-        limit = clamp(int(h, "limit"), 200, 5000)
+        limit = clamp(optional_int_arg(h, "limit"), 200, 5000)
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)

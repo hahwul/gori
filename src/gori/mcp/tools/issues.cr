@@ -7,8 +7,8 @@ module Gori
   module MCP
     class Tools
       private def list_issues(h) : Result
-        req_off = int(h, "offset")
-        req_lim = int(h, "limit")
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 100, 500)
         all = store.issues
