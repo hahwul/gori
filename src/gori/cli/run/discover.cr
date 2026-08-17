@@ -31,6 +31,7 @@ module Gori
         no_store = false
         format = :text
         headers = [] of String
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run discover --target URL [options]"
@@ -61,10 +62,16 @@ module Gori
           p.on("--no-store", "Do not write findings into the project (Sitemap)") { no_store = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run discover: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run discover: missing value for #{f}" }
         end
         parser.parse(args)
+        if leftover.size == 1 && target_override.nil?
+          target_override = leftover[0]
+        elsif !leftover.empty?
+          abort "gori run discover: unexpected argument#{leftover.size == 1 ? "" : "s"} #{leftover.join(" ").inspect} — pass the seed as --target URL"
+        end
 
         # The two checks that read ONLY the flags, made before the project is resolved. The
         # builder makes them too and is the authority — but `--db PATH` is create-or-reopened

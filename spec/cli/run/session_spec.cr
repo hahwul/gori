@@ -179,7 +179,7 @@ describe "gori run — --slot ordering" do
 
   it "offers --slot on every command that sends" do
     root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
-    {"fuzz", "mine", "sequence", "discover", "repeater"}.each do |cmd|
+    {"fuzz", "mine", "sequence", "discover", "repeater", "repeater_minimize"}.each do |cmd|
       File.read(File.join(root, "#{cmd}.cr")).should contain("--slot=NAME")
     end
   end

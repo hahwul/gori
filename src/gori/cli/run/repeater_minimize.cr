@@ -13,6 +13,7 @@ module Gori
         verbatim = false
         format = :text
         allow_unscoped = false
+        slot : String? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -27,6 +28,7 @@ module Gori
           p.on("--verbatim", "Send the stored bytes as-is: no $VAR expansion, no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
           p.on("-k", "--insecure", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -35,6 +37,7 @@ module Gori
         end
         parser.parse(args)
 
+        abort "gori run repeater minimize: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run repeater minimize: <repeater-id> is required")
         id = id_s.to_i64? || abort("gori run repeater minimize: invalid repeater id #{id_s.inspect}")
 
@@ -56,6 +59,7 @@ module Gori
           store.close
         end
         abort "gori run repeater minimize: no repeater session ##{id}" unless rec
+        activate_slot(slot, "gori run repeater minimize")
         outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         text = String.new(rec.request)

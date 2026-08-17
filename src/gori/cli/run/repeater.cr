@@ -68,8 +68,7 @@ module Gori
         abort "gori run repeater h2: --target is required" if tgt.nil? || tgt.empty?
         file = fields_file
         abort "gori run repeater h2: --fields is required" if file.nil? || file.empty?
-        abort "gori run repeater h2: --fields file '#{file}' is not readable" unless File.exists?(file) && !File.directory?(file)
-        fields, body = parse_h2_fields_file(File.read(file))
+        fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
         overrides = begin
           store = open_store(resolve_read_project(project_name, db_path))
@@ -252,8 +251,7 @@ module Gori
 
         req_content = ""
         if file = request_file
-          abort "gori run repeater create: request-file '#{file}' is not readable" unless File.exists?(file) && !File.directory?(file)
-          req_content = File.read(file)
+          req_content = read_input_file(file, "gori run repeater create")
         elsif raw = request_raw
           req_content = raw
         else
@@ -544,7 +542,12 @@ module Gori
         # overrides it for this send. Both mean the same thing: dial the h1/h2 engine and read
         # the 101 as a response. `Engine` already treats 101 as terminal and bodyless, and
         # `ConnPool` already refuses to park an upgraded socket, so nothing else has to change.
-        if plan.websocket? && !(http_only.nil? ? rec.ws_http_only? : http_only)
+        use_ws = plan.websocket? && !(http_only.nil? ? rec.ws_http_only? : http_only)
+        if !use_ws && (!ws_messages.empty? || idle_ms)
+          outbound.close
+          abort "gori run repeater send: --message / --message-frame / --idle-ms apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
+        end
+        if use_ws
           # `rec.flow_id` IS the provenance test, the same one the engine tabs and the h1
           # flow-replay path make: only a `--flow` / MCP `flow_id` seed sets it, and only a
           # seed puts CAPTURED frames in `ws_messages`. A session built from `--request-raw`
@@ -948,9 +951,8 @@ module Gori
         custom_headers = {} of String => Array(String)
         custom_order = [] of {String, String}
         headers.each do |h_str|
-          next unless h_str.includes?(':')
-          name, _, val = h_str.partition(':')
-          next if name.strip.empty?
+          name, sep, val = h_str.partition(':')
+          abort "gori run repeater: header #{h_str.inspect} rejected — write it as 'Name: value'" if sep.empty? || name.strip.empty?
           lname = name.strip.downcase
           custom_order << {lname, name} unless custom_headers.has_key?(lname)
           # The VALUE is the operator's draft, so it expands; the NAME is not (a `$` is not
@@ -1366,7 +1368,7 @@ module Gori
               j.field "head_lossy", true
               j.field "head_base64", Base64.strict_encode(result.head)
             end
-            emit_body_json(j, "body", result.head, result.body, false)
+            emit_body_json(j, "body", result.head, result.body, result.incomplete?)
             if d = diff
               j.field "changed_lines", Repeater::Diff.change_count(d)
               # Sibling to changed_lines, exactly as `cmd_compare`'s JSON carries it: a

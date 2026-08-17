@@ -18,6 +18,7 @@ module Gori
         to = m.try(&.[2].to_i64?)
         abort "gori run fuzz: invalid --numbers '#{v}' (use FROM-TO[:STEP])" unless from && to
         step = step_part.empty? ? 1_i64 : (step_part.to_i64? || abort("gori run fuzz: invalid --numbers step '#{step_part}'"))
+        abort "gori run fuzz: --numbers step must not be 0" if step == 0
         Fuzz::NumberRange.new(from, to, step)
       end
 
@@ -37,6 +38,7 @@ module Gori
         min = min_s.to_i?
         max = max_s.empty? ? min : max_s.to_i?
         abort "gori run fuzz: invalid --brute lengths '#{lens}' (use MIN-MAX)" unless min && max
+        abort "gori run fuzz: --brute MIN (#{min}) is greater than MAX (#{max})" if min > max
         Fuzz::BruteForce.new(charset, min, max)
       end
 

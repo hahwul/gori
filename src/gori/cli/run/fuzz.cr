@@ -124,9 +124,14 @@ module Gori
         parser.parse(args)
 
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
+        abort "gori run fuzz: --request and --flow cannot be combined — pick one template source" if request_file && flow_id
+        abort "gori run fuzz: <flow-id> and --flow/--request cannot be combined" if positional.size == 1 && (flow_id || request_file)
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
 
-        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
+        # Named project / --db always hydrates, even when `--request` is the template:
+        # `--flow` used to skip this and `--request` then skipped `open_store`, so
+        # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
+        hydrate_project_env(project_name, db_path) if project_name || db_path
         text, default_target, src_h2, evidence = fuzz_source(flow_id, request_file, project_name, db_path)
         http2 = force_h2 || src_h2
 

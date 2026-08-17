@@ -113,6 +113,8 @@ module Gori
         end
 
         abort "gori run sequence: too many arguments (expected at most one <flow-id>)" if positional.size > 1
+        abort "gori run sequence: --request and --flow cannot be combined — pick one template source" if request_file && flow_id
+        abort "gori run sequence: <flow-id> and --flow/--request cannot be combined" if positional.size == 1 && (flow_id || request_file)
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run sequence") }
         k = kind
         abort "gori run sequence: specify a token location (--cookie/--header/--regex/--position/--jsonpath) or use --tokens" unless k
@@ -122,7 +124,7 @@ module Gori
         # only GLOBAL vars would resolve — a `$TOKEN` defined in the project would go out
         # literally. Explicit and identical to cmd_fuzz, rather than relying on the store that
         # `cli_host_overrides` happens to open below (see run.cr's open_store).
-        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
+        hydrate_project_env(project_name, db_path) if project_name || db_path
         bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, project_name, db_path)
         token_loc = build_token_loc(k, selector)
 

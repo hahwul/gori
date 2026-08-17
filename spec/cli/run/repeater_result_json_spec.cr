@@ -64,6 +64,8 @@ describe "gori run repeater --format json — a lossy response head" do
     j["head"].as_s.should contain("HTTP/2 200")
     j["body"]["text"].as_s.should eq(%({"partial":))
     j["incomplete"].as_bool.should be_true
+    j["body"]["truncated"].as_bool.should be_true
+    j["body"]["wire_truncated"].as_bool.should be_true
   end
 end
 

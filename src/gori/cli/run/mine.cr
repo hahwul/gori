@@ -62,13 +62,15 @@ module Gori
         parser.parse(args)
 
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
+        abort "gori run mine: --request and --flow cannot be combined — pick one template source" if request_file && flow_id
+        abort "gori run mine: <flow-id> and --flow/--request cannot be combined" if positional.size == 1 && (flow_id || request_file)
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run mine") }
 
         # Load the named project's env vars so `$VAR` in a --request/stdin body resolves the
         # same way it does for a flow (whose read already hydrates them via open_store).
-        # Explicit, as in cmd_fuzz: it used to fall out of cli_host_overrides opening a
-        # store, and that helper ends in `rescue; nil`.
-        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
+        # Always, not only when `flow_id` is nil: `--request` + `--flow` used to skip
+        # this and then skip `open_store`, so `--slot` lied about no project.
+        hydrate_project_env(project_name, db_path) if project_name || db_path
         text, default_target, src_h2, evidence = mine_source(flow_id, request_file, project_name, db_path)
 
         config = Miner::Config.new

@@ -1,5 +1,13 @@
 require "../../spec_helper"
 
+module Gori::CLI::Run
+  def self.build_single_flow_request_for_spec(head : Bytes, body : Bytes, headers : Array(String),
+                                              body_override : String?, target_override : String?,
+                                              removed : Array(String) = [] of String) : {Bytes, Bool}
+    build_single_flow_request(head, body, headers, body_override, target_override, removed)
+  end
+end
+
 # `gori run repeater <flow-id>` header editing: `-H` and `--rm-header`.
 #
 # The two shapes pinned here are ones an operator testing a target's header handling has to
