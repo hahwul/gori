@@ -126,9 +126,9 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 
 | Path | What |
 | --- | --- |
-| `proxy/` | the MITM proxy: codec, conn, h2, tls, ws (directory-only, there is no `proxy.cr`) |
+| `proxy/` | the MITM proxy: codec, conn, h2, tls, ws (directory-only, there is no `proxy.cr`); `h2/stream_gate/` is a class-reopen slice pair |
 | `store.cr` + `store/` | SQLite persistence, migrations, reads |
-| `tui/` | terminal UI: views, `controllers/`, and the class-reopen slices in `runner/` + `repeater_view/` |
+| `tui/` | terminal UI: views, `controllers/`, and the class-reopen slices in `runner/`, `repeater_view/` + `intercept_view/` |
 | `verb.cr` + `verb/` + `verbs/` | the TUI command system (definitions, keymap, `ExecContext`) |
 | `cli/` | the `gori run` suite |
 | `mcp/` | the MCP server and its tools |
