@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.2
+
+A hotfix release: the bug fixes written since v0.3.1, cherry-picked onto it. The features on the way to the next minor are not in it.
+
+- Open browser: a browser that never starts is reported as such, with its own error and how it died, instead of `opened` — gori only checked that the process spawned, not that it survived, and closed the browser's stderr, which was the one thing that could have explained the failure. The verdict comes from waiting on the child rather than a deadline, so it holds on a machine slow enough to lose that race. Brave is also launched without `--test-type`, which 1.92+ treats as a unit-test signal and aborts on — Chrome still gets it, to hide the SPKI-pin infobar (#700, #716, #721)
+- Scope: a regex EXCLUDE rule no longer fails **open** on a target that is not valid UTF-8 — it scrubbed nothing and `rescue false` read as "does not match", which is scope evasion. The History/Sitemap SQL lens also now agrees with the live gate on bracketed IPv6 hosts, brace globs and non-ASCII case (#688, #699)
+- Project settings: a host override reaches gori's own reserved name from either layer and folds case and a trailing root dot into one key, and the TUI refreshes the project env table before writing it back over a peer's edit (#687, #689)
+- TUI: the statusline gets its own timeout and reports why it is blank, instead of killing the script that was about to answer (#690)
+- Stability: a crash audit across the CLI, TUI, store and MCP — a non-UTF-8 byte no longer aborts a command through PCRE2, a stale read cursor no longer takes the session down, and a poisoned release tag no longer crashes every later launch from cache. An MCP discover job also flushed its findings after going terminal, so a run finishing during a `switch_project` could write them into the project you had just moved to (#699)
+- MCP: `gori mcp --install-claude` now writes Claude Desktop's config where the running platform actually keeps it — `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, not a macOS `~/Library/Application Support/…` path built under a Linux `$HOME` (#718)
+
 ## v0.3.1
 
 - Filters: one query grammar on every filter surface, content terms included; `header:`/`body:` now take a side, and the filter bar teaches its own syntax (#668, #674)
