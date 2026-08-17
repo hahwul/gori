@@ -989,6 +989,37 @@ here because the gap was not noticed until a structure review looked for it: a n
 parity is part of shipping it, not a follow-up, and the seam is the thing that makes the two
 non-TUI surfaces cheap enough for that to be true.
 
+### 2026-08-17: a WebSocket flow exports as its handshake plus `_webSocketMessages`
+
+Refines: [P7](#p7). PR "HAR export/import WebSocket messages".
+
+`Export::Har` skipped every `101` by status, on the stated grounds that HAR "has no
+representation for WebSocket messages". That was true of the 1.2 spec and false of the format
+as it is actually used: Chrome DevTools writes the transcript into an `_webSocketMessages`
+array on the entry, and every reader that renders a captured socket reads it. The cost of the
+skip was that the one artifact an operator hands to a teammate dropped the only evidence a
+WebSocket test produces.
+
+The two obvious repairs were both worse than the skip. Folding the messages into a fabricated
+request/response writes an exchange that never happened and — as `skip_reason`'s own comment
+says about a status-0 entry — imports straight back as a real one. Inventing a gori-native
+field nothing else reads keeps the evidence unreadable to the reader it was exported for.
+
+So the handshake is written as **itself** — it is a real request and a real response — and the
+messages ride beside it in Chrome's field. `Import::Har` reads them back into `ws_messages`,
+which makes the transcript part of the export→import→export fixed point rather than a one-way
+rendering. P7 governs what survives: a message payload keeps its exact bytes, base64 when they
+are not valid UTF-8, because an invalid-UTF-8 TEXT frame is an RFC 6455 §8.1 test case and not
+corruption to repair. Control frames and the relay's own `[gori] …` advisory rows travel too,
+in position, since where an advisory sits is what names the frames it is about.
+
+Two things do not survive, and are stated where they are made rather than left to be
+discovered: the V7 frame **shape** has no field in the format (`Export::Har.ws_messages`), and
+a message time keeps millisecond fidelity, the same commitment `startedDateTime` already makes
+(`Export::Har.epoch_seconds`). `Skip::WebSocket` still exists and now means exactly one thing:
+a socket whose transcript is EMPTY, where the entry would carry the upgrade and stand in for
+frames that were never captured.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

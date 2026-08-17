@@ -104,10 +104,69 @@ module Gori
         header_ct = resp_headers.find { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }.try(&.[1])
         content_type = header_ct.presence || mime_type
 
-        Builder.complete_flow(
+        pair = Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared)
+        msgs = ws_messages(entry, status, created_at)
+        msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
+      end
+
+      # Chrome's `_webSocketMessages` back into store rows — the inverse of
+      # `Export::Har.ws_messages`, and read only on a 101.
+      #
+      # The status gate is deliberate and is the same one every other surface uses to ask "is
+      # this flow a socket": `gori run show`, the TUI's WS pane and MCP's `get_flow` all key off
+      # 101, and `Store#ws_messages` is only ever consulted for such a flow. Attaching a
+      # transcript to a 200 would write rows nothing reads back — including a re-export, which
+      # asks the same question — so an entry that carries messages on a non-101 status loses
+      # them rather than storing evidence that cannot be found again.
+      private def self.ws_messages(entry : JSON::Any, status : Int32,
+                                   fallback_time : Int64) : Array(Store::ImportedWsMessage)
+        acc = [] of Store::ImportedWsMessage
+        return acc unless status == 101
+        arr = entry["_webSocketMessages"]?.try(&.as_a?)
+        return acc unless arr
+        arr.each do |m|
+          h = m.as_h?
+          next unless h
+          # "send" is client→server; ANYTHING else reads as inbound, including a missing or
+          # unrecognised `type`. Not a symmetric guess: every surface that seeds a WebSocket
+          # repeater from a capture replays the `direction == "out"` rows, so an unlabelled
+          # message defaulted the other way would be re-sent to the application under test as
+          # one the operator never authored. Defaulting inbound loses no message and cannot
+          # put one on the wire.
+          direction = h["type"]?.try(&.as_s?) == "send" ? "out" : "in"
+          # Clamped, not `as_i`: the column is dynamically typed and a junk opcode must cost
+          # the message its opcode, never the whole entry via the per-entry rescue. An ABSENT
+          # opcode is TEXT (1), which is what a generator omitting the field means.
+          opcode = number_i64(h["opcode"]?).try(&.clamp(0_i64, Int32::MAX.to_i64)).try(&.to_i32) || 1
+          # `encoded_body` is the body path's decoder, deliberately: a `data` marked base64 that
+          # is not base64 RAISES here and the per-entry rescue drops the whole entry into the
+          # SKIPPED count, exactly as a malformed `content.text` already does. A corrupt payload
+          # is a malformed entry, and a counted skip beats storing bytes that are not the ones
+          # the message had. An absent or empty `data` is a legal zero-length frame.
+          payload = encoded_body(h["data"]?.try(&.as_s?) || "", h["encoding"]?.try(&.as_s?)) || Bytes.empty
+          acc << Store::ImportedWsMessage.new(
+            created_at: ws_time(h["time"]?) || fallback_time,
+            direction: direction, opcode: opcode, payload: payload)
+        end
+        acc
+      end
+
+      # `_webSocketMessages[].time` is a Unix timestamp in SECONDS (`Export::Har.epoch_seconds`
+      # writes it at millisecond fidelity); the store keeps micros. ROUND through milliseconds
+      # rather than multiplying the seconds straight out: a Float64 near 1.8e9 has an ulp of
+      # ~0.5µs, so `(s * 1_000_000).to_i64` sheds a microsecond at random and the re-export
+      # would no longer match. nil for anything that is not a usable timestamp, so the caller
+      # falls back to the entry's own `startedDateTime` instead of storing a message at the
+      # epoch.
+      private def self.ws_time(node : JSON::Any?) : Int64?
+        s = node.try(&.as_f?)
+        return nil unless s && s.finite? && s > 0
+        ms = (s * 1_000).round
+        return nil unless ms <= Int64::MAX.to_f64 / 1_000
+        ms.to_i64 * 1_000
       end
 
       # A HAR size field (`bodySize`, `content.size`) as a usable byte count, or nil. The

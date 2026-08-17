@@ -312,6 +312,23 @@ module Gori
       end
     end
 
+    # One captured WebSocket message being RESTORED onto a flow — the import counterpart of
+    # `WsMessage`, which is what a read hands back.
+    #
+    # It carries its own `created_at` and that is the whole reason it exists: `insert_ws_message`
+    # stamps `now_us` at enqueue, which is right for a frame gori is watching go past and wrong
+    # for one it is reading out of a file. A HAR gori wrote records each message's time, so
+    # re-stamping them at import collapsed a whole transcript onto the import instant and broke
+    # export→import→export as a fixed point (`Export::Har` derives `_webSocketMessages[].time`
+    # from this column).
+    #
+    # No `shape`: HAR's `_webSocketMessages` is Chrome's `{type, time, opcode, data}` and has no
+    # field for FIN/RSV/mask, so an imported message takes `WsShape::DEFAULT` rather than a
+    # fabricated one. `direction` is the stored "out"/"in", not HAR's send/receive — the
+    # translation belongs to the format reader, so every store row means one thing.
+    record ImportedWsMessage, created_at : Int64, direction : String, opcode : Int32,
+      payload : Bytes
+
     # One outbound message to persist on a repeater SESSION. Carries the OPCODE and raw
     # BYTES, because `update_repeater_ws_messages` used to take `Array(String)` and write a
     # hardcoded `opcode 1`: a captured BINARY frame could not round-trip a session at all

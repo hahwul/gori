@@ -156,11 +156,12 @@ gori run show <flow-id> --format raw
 
 #### HAR 내보내기 {#har-export}
 
-gori가 쓴 HAR은 다시 gori로 가져와도(`gori run import --har`) 같은 플로우가 되므로 왕복이 보장됩니다. 세 가지를 알아두세요.
+gori가 쓴 HAR은 다시 gori로 가져와도(`gori run import --har`) 같은 플로우가 되므로 왕복이 보장됩니다. 네 가지를 알아두세요.
 
 - **본문은 와이어 바이트**입니다. chunked만 풀고 압축은 풀지 않으며, 유효한 UTF-8이 아니면 base64로 인코딩합니다. `Content-Encoding` 헤더가 `headers`에 그대로 남아 본문과 헤드가 같은 메시지를 가리킵니다.
 - **캡처 상한에 잘린 본문은 표시**되며, 온전한 것처럼 나가지 않습니다. `bodySize`와 `content.size`는 실제 와이어 크기를 유지하고 텍스트에는 캡처된 앞부분만 담기며, `content`/`postData`의 `comment`가 그 사실을 적습니다. 명령은 해당 개수도 STDERR로 보고합니다.
-- **WebSocket 플로우와 응답이 캡처되지 않은 플로우는 건너뜁니다.** HAR로 표현할 수 없기 때문입니다. 개수와 이유는 STDERR로 나가고 STDOUT은 순수한 HAR 문서로 유지됩니다.
+- **WebSocket 플로우는 메시지와 함께 내보내집니다.** 실제 `101` 핸드셰이크에 캡처된 전송 기록이 Chrome DevTools의 `_webSocketMessages` 필드로 나란히 실리며, `gori run import --har`로 다시 복원됩니다. 방향, opcode(제어 프레임 포함), 바이트(유효한 UTF-8이 아니면 base64), 밀리초 단위 타임스탬프가 유지됩니다. 프레임별 형태(`FIN`/`RSV`/마스크 키)는 이 형식에 담을 필드가 없으므로 필요하면 `--format json` 또는 `raw`를 쓰세요.
+- **응답이 캡처되지 않은 플로우는 건너뜁니다.** 전송 기록이 비어 있는 소켓도 마찬가지입니다 — 핸드셰이크만으로는 교환이 아니기 때문입니다. 개수와 이유는 STDERR로 나가고 STDOUT은 순수한 HAR 문서로 유지됩니다.
 
 ### run compare {#run-compare}
 
