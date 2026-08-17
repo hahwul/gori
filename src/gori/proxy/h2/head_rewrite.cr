@@ -104,7 +104,7 @@ module Gori::Proxy::H2
     # constructor argument: the gate needs a live `HeadRewrite` to construct itself around.
     property deferrer : Deferrer?
 
-    # `extractor` is read for ONE thing: `notice_coalesced`, which runs on request heads only.
+    # `extractor` is read for ONE thing: `notice_unreachable`, which runs on request heads only.
     # The "in" direction therefore never touches it, and extraction itself happens in
     # `H2::Extract` on the response side — this seam only has to be able to ASK whether a
     # body-scoped extract rule would have wanted a stream the connection gate could not see.
@@ -116,6 +116,7 @@ module Gori::Proxy::H2
       @warned = false
       @warned_unfaithful = false
       @warned_coalesced = false
+      @warned_live_rule = false
       @buf = [] of Frame::Header
       @block_bytes = 0
       @block_stream = 0_u32
@@ -317,7 +318,7 @@ module Gori::Proxy::H2
       split = split_block(first) # reads every frame in @buf (assembles the CONTINUATIONs)
       # Snapshot the frames and `reset` HERE, the moment `split_block` has finished reading
       # `@buf`, rather than at the single `defer?` site below. Everything between this point
-      # and the return — `decode_head_block`, `head_text`, `notice_coalesced`, `rewrite`
+      # and the return — `decode_head_block`, `head_text`, `notice_unreachable`, `rewrite`
       # (which runs OPERATOR REGEXES over PEER BYTES), `@encoder.encode`, and `defer?` itself —
       # can raise, and a raise unwinds to `StreamGate#close`'s `drain`, which writes whatever
       # is still in `@buf` to the peer. Leaving `@buf` full through all of that is the residual
@@ -347,7 +348,7 @@ module Gori::Proxy::H2
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
       # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a session-binding
       # extract descriptor — the case #536 is about — got nothing.
-      notice_coalesced(fields) if request && head
+      notice_unreachable(fields) if request && head
       rewritten = head ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
       built = if rewritten.nil? && !@engaged
@@ -413,7 +414,7 @@ module Gori::Proxy::H2
         return warn_unfaithful(stream_id, request, reason)
       end
       # The BARE host, because that is what a rule's host glob is written against and what
-      # every other host-scoping site in this pipeline passes (`notice_coalesced` below,
+      # every other host-scoping site in this pipeline passes (`notice_unreachable` below,
       # `H2::Extract`, `StreamGate`'s three gates). `:authority` may carry a port, and
       # `Rules.host_matches?` compiles an anchored regex — so `api.example.com:8443` silently
       # matched no `*.example.com` glob, leaving a head rule that fires on h1 and on this
@@ -488,6 +489,38 @@ module Gori::Proxy::H2
       end
     end
 
+    # This stream's request host, port stripped, falling back to the CONNECT host when the
+    # block carries no `:authority`. One spelling of "which host is this stream for", so the
+    # rule gate and the notices below cannot drift on it.
+    private def request_host(fields : Array(HPACK::Field)) : String
+      authority = HeadCodec.pseudo_of(fields, ":authority")
+      return @host if authority.nil? || authority.empty?
+      host, _ = Upstream.split_host_port(authority, 0)
+      host.empty? ? @host : host
+    end
+
+    # A rule that matches a stream travelling on this connection and that this relay cannot
+    # apply, said out loud. `unreachable_kinds` answers WHICH; this picks WHY, because there are
+    # two disjoint ways to get here and they need different words, a different remedy and a
+    # different latch:
+    #
+    #   - the stream's authority is NOT the CONNECT host (§9.1.1 coalescing, #526/#536) — the
+    #     gate asked about a host that is not this stream's, so the fix is a separate connection;
+    #   - the authority IS the CONNECT host (#730) — the gate asked the right host and got the
+    #     right answer AT CONNECT TIME, and the rule went live afterwards.
+    #
+    # Enforcement is right in both — a rule this relay cannot run must not half-fire — so what
+    # is wrong is only that it is SILENT: the operator sees a request they stubbed reach the
+    # origin, or `$SESSION` never bind, with nothing anywhere saying why.
+    private def notice_unreachable(fields : Array(HPACK::Field)) : Nil
+      host = request_host(fields)
+      if host.compare(@host, case_insensitive: true) == 0
+        notice_live_rule(host)
+      else
+        notice_coalesced(host)
+      end
+    end
+
     # The stated cost of #526, kept spoken instead of silent.
     #
     # Every gate that can cost a connection its protocol (`tls/tunnel.cr#h2_candidate?`) is per
@@ -498,33 +531,11 @@ module Gori::Proxy::H2
     # onto one). A hand-rolled client can still coalesce, and then a rule scoped to the coalesced
     # authority goes unapplied where the pre-#526 blanket downgrade would have caught it.
     #
-    # Enforcement is right either way — a rule that cannot scope a stream must not fire on it —
-    # so what is wrong is only that it is SILENT: the operator sees a request they stubbed reach
-    # the origin, or `$SESSION` never bind, with nothing saying why.
-    #
-    # So: one line per connection, naming the authority, the connection host, and WHICH KIND of
-    # rule was skipped — three kinds now share this notice and they fail differently, so a line
-    # that did not name them would send the operator to the wrong rule table (#536). Costs a
-    # string compare per request head on every normal connection (the authority IS the host, and
-    # that returns before any lock); only a genuinely coalesced stream reaches the rule lookups,
-    # This stream's request host, port stripped, falling back to the CONNECT host when the
-    # block carries no `:authority`. One spelling of "which host is this stream for", so the
-    # rule gate and the coalescing notice below cannot drift on it.
-    private def request_host(fields : Array(HPACK::Field)) : String
-      authority = HeadCodec.pseudo_of(fields, ":authority")
-      return @host if authority.nil? || authority.empty?
-      host, _ = Upstream.split_host_port(authority, 0)
-      host.empty? ? @host : host
-    end
-
-    # and only until the line is written.
-    private def notice_coalesced(fields : Array(HPACK::Field)) : Nil
+    # One line per connection, naming the authority, the connection host, and WHICH KIND of rule
+    # was skipped — three kinds share this notice and they fail differently, so a line that did
+    # not name them would send the operator to the wrong rule table (#536).
+    private def notice_coalesced(host : String) : Nil
       return if @warned_coalesced
-      authority = HeadCodec.pseudo_of(fields, ":authority")
-      return if authority.nil? || authority.empty?
-      # `:authority` may carry a port; the gate asked about a bare host.
-      host, _ = Upstream.split_host_port(authority, 0)
-      return if host.compare(@host, case_insensitive: true) == 0
       kinds = unreachable_kinds(host)
       return if kinds.empty?
       @warned_coalesced = true
@@ -537,13 +548,51 @@ module Gori::Proxy::H2
       end
     end
 
-    # Which of the per-CONNECT gates would have wanted this stream — i.e. which host-scoped
-    # seams the h2 relay cannot reach have a live rule for the coalesced authority. Exactly the
-    # set `h2_candidate?` tests, asked about the authority instead of the CONNECT host, so the
-    # two cannot drift apart in what they consider unreachable.
+    # #730: the same three seams, on the ORDINARY stream — the one whose authority is the
+    # CONNECT host.
     #
-    # Only ever reached on a genuinely coalesced stream and only once per connection, so each
-    # predicate is free to take its lock (all three document themselves as once-per-CONNECT).
+    # The gate that would have downgraded this host runs once, inside CONNECT. `Session#rules`
+    # and `Session#bindings` are live-mutated in place and nothing tears down an open relay when
+    # they change, so a body / short-circuit / body-scoped-extract rule enabled AFTER the h2
+    # handshake applies to nothing on this connection until the client opens a new one. That is
+    # the ordinary workflow — browse a site, spot a request, write a stub, refresh — and the
+    # browser reuses the connection, so the operator watches the request they stubbed reach the
+    # origin. Verbatim the failure `tls/tunnel.cr`'s short-circuit gate says it exists to prevent.
+    #
+    # This does NOT downgrade or GOAWAY the connection: dropping live relays on every rule toggle
+    # is a behaviour change with a real cost, and out of scope here (option (b) in #730). What it
+    # buys is that the window is spoken rather than silent — and h2 HEAD rules, which reach this
+    # very pipeline per request, are unaffected and say so in the line.
+    #
+    # Cost: unlike `notice_coalesced` this runs on the ordinary path, so it is reached on every
+    # request head until it has something to say. All three predicates open with a lock-free
+    # atomic count (`Rules#rewrites_body_for_host?`, `#short_circuits_for_host?`,
+    # `Bindings#extracts_body_for_host?`), so a connection with no such rule anywhere — which is
+    # every connection that was allowed to negotiate h2 at all, at the time it did — pays three
+    # atomic loads per head and takes no lock. A lock IS taken, on every request head for as long
+    # as the connection lives, while such a rule exists on some OTHER host: the count is non-zero
+    # so the fast path does not fire, the host glob then answers no, and the latch never engages
+    # because nothing was announced. That is deliberate and must stay — the premise of #730 is
+    # that a rule can go live at any moment, so a NEGATIVE answer cannot be cached without
+    # re-opening the very window this closes. Only a line actually written is bounded by a latch.
+    private def notice_live_rule(host : String) : Nil
+      return if @warned_live_rule
+      kinds = unreachable_kinds(host)
+      return if kinds.empty?
+      @warned_live_rule = true
+      ::Log.warn do
+        "h2 #{@direction}: #{kinds.join(", ")} now matches #{host.inspect}, but this HTTP/2 " \
+        "connection was already open when it went live. The HTTP/1.1 downgrade that lets such a " \
+        "rule run is decided once per CONNECT, so it fires on nothing carried by this " \
+        "connection. Open a new connection to this host to have it apply. (Match&Replace HEAD " \
+        "rules are not affected — they run on this relay from the next request head.)"
+      end
+    end
+
+    # Which of the per-CONNECT gates would have wanted this stream — i.e. which host-scoped
+    # seams the h2 relay cannot reach have a live rule for this stream's host. Exactly the set
+    # `h2_candidate?` tests, asked per stream instead of once per CONNECT, so the two cannot
+    # drift apart in what they consider unreachable.
     private def unreachable_kinds(host : String) : Array(String)
       kinds = [] of String
       if rw = @rewriter
