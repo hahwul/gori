@@ -466,6 +466,214 @@ describe Gori::Proxy::Server do
     String.new(sink.requests.first.body.not_nil!).should eq(payload)
   end
 
+  it "relays a 103 Early Hints and keeps waiting for the real 100 Continue (#728)" do
+    # RFC 9110 §10.1.1 / §15.2: a 103 (or a 102) is forwarded like any other 1xx, but only the
+    # `100 Continue` — or a final status — releases a body the client is withholding. Concluding
+    # the settlement on the 103 put gori back into exactly the #728 three-way stall one 1xx
+    # later: blocked reading a client that is still waiting for its 100, with the origin's real
+    # answer sitting unread on the upstream socket.
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        head = Gori::Proxy::Codec::Http1.read_head(conn)
+        if head
+          conn << "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+          conn.flush
+          sleep 100.milliseconds # a real early-hints origin answers the expectation later
+          conn << "HTTP/1.1 100 Continue\r\nX-Origin-Interim: yes\r\n\r\n"
+          conn.flush
+          req = Gori::Proxy::Codec::Http1.parse_request_head(head)
+          framing, len = Gori::Proxy::Codec::Body.request_framing(req)
+          body = Gori::Proxy::Codec::Body.read(conn, framing, len)
+          seen_body.send(body ? String.new(body) : "")
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nSTORED"
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    payload = "upload-me"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    # Read past the 103 to the marker header on the 100 — before the fix this read timed out
+    # with only the 103 in hand.
+    interim = read_until(client, "X-Origin-Interim")
+    interim.should contain("103 Early Hints")       # the hint was relayed, verbatim
+    interim.should contain("Link: </style.css>")    #   with its own headers (P6/P7)
+    interim.should contain("HTTP/1.1 100 Continue") # and the settlement still arrived
+    interim.index("103").not_nil!.should be < interim.index("100 Continue").not_nil!
+
+    client << payload
+    client.flush
+    rest = read_until(client, "STORED")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq(payload) # the withheld body did flow, after the 100
+    rest.should contain("200 OK")
+    sink.responses.first.status.should eq(200)
+  end
+
+  it "bounds the whole expectation, not each 1xx, against a 103 drip (#728)" do
+    # The reason the loop above carries ONE deadline instead of re-arming EXPECT_CONTINUE_WAIT
+    # per read: an origin that emits a 103 just inside the interval never technically times out,
+    # so a per-read budget is no budget at all. This origin never sends a 100 — only the shared
+    # deadline ends the wait, at which point gori issues the interim itself.
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        head = Gori::Proxy::Codec::Http1.read_head(conn)
+        if head
+          answered = Atomic(Int32).new(0)
+          spawn do
+            req = Gori::Proxy::Codec::Http1.parse_request_head(head)
+            framing, len = Gori::Proxy::Codec::Body.request_framing(req)
+            body = Gori::Proxy::Codec::Body.read(conn, framing, len)
+            seen_body.send(body ? String.new(body) : "")
+            answered.set(1)
+          rescue
+          end
+          24.times do # bounded so a regression fails the client instead of hanging the suite
+            break if answered.get == 1
+            conn << "HTTP/1.1 103 Early Hints\r\n\r\n"
+            conn.flush
+            sleep 400.milliseconds
+          end
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nDONE"
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    payload = "upload-me"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    interim = read_until(client, "100 Continue")
+    interim.should contain("103 Early Hints") # hints relayed while the budget lasted
+    interim.should contain("100 Continue")    # then gori's own, once it ran out
+
+    client << payload
+    client.flush
+    rest = read_until(client, "DONE")
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq(payload)
+    rest.should contain("200 OK")
+  end
+
+  it "sends no body and invents no 100 when the origin dies before answering (#728)" do
+    # `read_head_within` tells EOF/reset apart from the timeout, which is the whole difference
+    # between "the origin is ignoring the expectation and still reading" and "nobody is there".
+    # Answering the second with gori's own 100 asked the client for a body that could only be
+    # written into a dead socket, and put a 1xx in front of a request that can only fail.
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn) # drain the head, then FIN — a clean EOF
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: 9\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    # The client withholds its body, as RFC 9110 §10.1.1 tells it to. Read whatever gori sends:
+    # 0 is the close we want, and a raise would be the socket held open in silence.
+    buf = Bytes.new(256)
+    got = begin
+      n = client.read(buf)
+      String.new(buf[0, n])
+    rescue
+      "TIMED OUT"
+    end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    got.should eq("")                                                   # closed, nothing invented
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Error) # "no response from upstream"
+    sink.requests.first.body.not_nil!.size.should eq(0)                 # no body pumped at a dead socket
+  end
+
+  it "never waits on an Expect from an HTTP/1.0 client (#728)" do
+    # RFC 9110 §10.1.1: a 100-continue expectation on an HTTP/1.0 request MUST be ignored — that
+    # client is not withholding anything and could not parse an answer. `expect_continue?` says
+    # so for BOTH paths, so this request never enters the settlement. Spelled only at the
+    # buffering site, the streaming path paid a full EXPECT_CONTINUE_WAIT here against an origin
+    # that says nothing until it has the body, for an expectation nobody was waiting on.
+    done = Channel(Nil).new(1)
+    seen_body = Channel(String).new(1)
+    origin_port = start_body_origin("done", seen_body) # says nothing until the body arrives
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    payload = "upload-me"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    # The 1.0 client sends head AND body together, exactly as one that never expected an answer
+    # does — there is no interim to wait for, so nothing gates the body.
+    started = Time.instant
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.0\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: #{payload.bytesize}\r\nExpect: 100-continue\r\n\r\n#{payload}"
+    client.flush
+    got = read_until(client, "done")
+    elapsed = Time.instant - started
+    client.close
+
+    done.receive
+    proxy.stop
+
+    seen_body.receive.should eq(payload)
+    got.should_not contain("100 Continue") # a 1.0 client is never sent a 1xx
+    got.should contain("200 OK")
+    # The load-bearing assertion — the missing gate cost latency, not correctness, so nothing
+    # else here can see it. Half the budget is generous against a loaded machine (the exchange
+    # is local and takes milliseconds) and still well under the full wait a wrongly-entered
+    # settlement burns against this deliberately silent origin.
+    elapsed.should be < (Gori::Proxy::ClientConn::EXPECT_CONTINUE_WAIT / 2)
+  end
+
   it "relays a FINAL answer given instead of 100 Continue and sends no body (#728)" do
     # RFC 9110 §10.1.1: the origin may refuse the expectation (417) or answer outright without
     # reading the body at all. Pumping a body at a server that has stopped reading is how a
