@@ -4,7 +4,7 @@
   <p>Hack from the terminal.</p>
 </div>
 <p align="center">
-<a href="https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md">
+<a href="https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md">
 <img src="https://img.shields.io/badge/CONTRIBUTIONS-WELCOME-000000?style=for-the-badge&labelColor=black"></a>
 <a href="https://github.com/hahwul/gori/releases">
 <img src="https://img.shields.io/github/v/release/hahwul/gori?style=for-the-badge&color=black&labelColor=black&logo=web"></a>

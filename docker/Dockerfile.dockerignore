@@ -1,0 +1,51 @@
+# Ignore list for docker/Dockerfile. BuildKit looks for `<dockerfile>.dockerignore`
+# before falling back to `<context>/.dockerignore`, so this file only applies to a
+# BuildKit build (`docker buildx build`, or `docker build` on Docker >= 23, which is
+# what docker/build-push-action runs in publish-ghcr.yml). A build forced onto the
+# classic builder with DOCKER_BUILDKIT=0 finds no ignore file at all and ships the
+# whole tree as context.
+#
+# Patterns are relative to the build CONTEXT (the repo root), not to this file.
+
+# Build artifacts
+bin/
+lib/
+.shards/
+**/*.o
+**/*.dwarf
+
+# Git & VCS
+.git/
+.gitignore
+
+# Dev tooling (CONTRIBUTING.md and DESIGN.md live under .github/)
+.github/
+.claude/
+.ameba.yml
+.editorconfig
+AGENTS.md
+CLAUDE.md
+CHANGELOG.md
+justfile
+
+# Nix
+flake.nix
+flake.lock
+nix/
+
+# Packaging
+aur/
+scripts/package-macos.sh
+
+# Local state written by gori itself (see .gitignore)
+ca2/
+home*/
+*.key.pem
+
+# Tests, benchmarks & docs
+spec/
+bench/
+docs/
+
+# Docker itself (this file included — it sits under docker/)
+docker/

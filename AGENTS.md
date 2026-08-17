@@ -8,7 +8,7 @@ across HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE.
 Three entry points, one engine layer underneath: `gori` (TUI), `gori mcp` (stdio JSON-RPC for
 agents), `gori run <sub>` (headless, for scripts).
 
-This file is the short version. [DESIGN.md](DESIGN.md) is the long one, and its numbering is
+This file is the short version. [DESIGN.md](.github/DESIGN.md) is the long one, and its numbering is
 load-bearing: source comments cite principles as `(P4)`, `(P6/P7)` and sections as
 `DESIGN.md §4`.
 
@@ -48,7 +48,7 @@ parity with it, and every parity gap found so far has been in a surface, not an 
   TUI); everything downstream of the normalized options has exactly one implementation.
 - Adding a feature means: engine + `Plan.build` path once, then a thin adapter in each of
   `src/gori/tui/`, `src/gori/cli/run/`, `src/gori/mcp/tools/`. Parity is a convention held by
-  each surface calling the same engines, not by a shared dispatcher ([DESIGN.md §2](DESIGN.md)).
+  each surface calling the same engines, not by a shared dispatcher ([DESIGN.md §2](.github/DESIGN.md)).
 - The seam is **not** the `Verb` registry. Its 318 verbs are TUI-only by decision: a verb reads
   its target from TUI selection state instead of naming it, and the missing argument schema is
   the blocker, not registry wiring (`src/gori/verb.cr`, DESIGN.md §7). Do not "fix" parity by
@@ -146,7 +146,7 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
   scope gate use the `ungated_outbound` helper rather than inventing a decision.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.
-- Changing `shard.lock` means regenerating `shards.nix` (`crystal2nix`) in the same commit.
+- Changing `shard.lock` means regenerating `nix/shards.nix` (`just nix-shards`) in the same commit.
 
 ## Traps
 
@@ -163,7 +163,7 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 
 ## Where to read next
 
-[DESIGN.md](DESIGN.md) §1 (principles P0–P8) → §2 (architecture) → §2.1 (layering) → §3
+[DESIGN.md](.github/DESIGN.md) §1 (principles P0–P8) → §2 (architecture) → §2.1 (layering) → §3
 (scope) → §7 (decision log, append-only, dated).
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR rules. [README.md](README.md) for the
+[CONTRIBUTING.md](.github/CONTRIBUTING.md) for setup and PR rules. [README.md](README.md) for the
 product surface.

@@ -33,8 +33,8 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 - Never build or benchmark with `-Dpreview_mt` — gori assumes the single-threaded fiber
   scheduler.
 - If you change `shard.lock`, regenerate the Nix dependency set in the same commit:
-  `crystal2nix` (in the dev shell) rewrites `shards.nix`. `just vu` keeps `flake.nix`'s
-  version in step with `shard.yml`.
+  `just nix-shards` runs `crystal2nix` and puts the result at `nix/shards.nix`. `just vu`
+  keeps `flake.nix`'s version in step with `shard.yml`.
 - Keep changes scoped and behavior-preserving unless the PR is explicitly a behavior
   change; note any intentional behavior change in the PR description.
 - Add a `CHANGELOG.md` line under `## Unreleased` for anything a user would notice, in
@@ -68,4 +68,4 @@ section in the same PR.
 ## Licensing
 
 By contributing you agree that your contributions are licensed under the project's
-[Apache-2.0](LICENSE) license.
+[Apache-2.0](../LICENSE) license.

@@ -107,7 +107,7 @@ NixOS / home-manager 설정에 입력(input)으로 고정할 수도 있습니다
 
 Linux(x86_64 및 arm64)와 Apple Silicon macOS를 지원합니다. nixpkgs가 Intel macOS 지원을 중단했으므로, 그쪽에서는 [Homebrew](#homebrew)나 [사전 빌드 바이너리](#pre-built-binary)를 사용하세요.
 
-`nix develop`을 실행하면 Crystal, shards, `just`와 링크되는 라이브러리가 갖춰진 셸로 들어갑니다. [gori 자체를 개발](https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md)하는 데 필요한 것이 모두 들어 있습니다.
+`nix develop`을 실행하면 Crystal, shards, `just`와 링크되는 라이브러리가 갖춰진 셸로 들어갑니다. [gori 자체를 개발](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md)하는 데 필요한 것이 모두 들어 있습니다.
 
 ## Docker {#docker}
 

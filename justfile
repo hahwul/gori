@@ -25,10 +25,13 @@ build:
 nix-build:
     nix build .#gori
 
-# Regenerate shards.nix from shard.lock (run it alongside any dependency change).
+# Regenerate nix/shards.nix from shard.lock (run it alongside any dependency change).
+# crystal2nix takes no path arguments: it reads ./shard.lock and writes ./shards.nix,
+# so the file is moved into nix/ afterwards — that is where flake.nix reads it from.
 [group('build')]
 nix-shards:
     nix run nixpkgs#crystal2nix
+    mv shards.nix nix/shards.nix
 
 # Run all tests.
 [group('development')]

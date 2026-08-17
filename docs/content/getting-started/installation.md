@@ -107,7 +107,7 @@ Unlike the other channels this one **builds from source**. nixpkgs is still a Cr
 
 Covers Linux (x86_64 and arm64) and Apple Silicon macOS. nixpkgs has dropped Intel macOS, so on those machines use [Homebrew](#homebrew) or a [pre-built binary](#pre-built-binary).
 
-`nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori itself](https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md).
+`nix develop` gives you a shell with Crystal, shards, `just` and the linked libraries, which is all you need to [hack on gori itself](https://github.com/hahwul/gori/blob/main/.github/CONTRIBUTING.md).
 
 ## Docker
 

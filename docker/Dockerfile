@@ -36,7 +36,7 @@ RUN shards install --production
 
 COPY . .
 # `crystal build -o` does not create the output directory, and `bin/` is in
-# .dockerignore so `COPY . .` never brings one — without this mkdir the link
+# Dockerfile.dockerignore so `COPY . .` never brings one — without this mkdir the link
 # step dies with `ld: cannot open output file /gori/bin/gori`.
 #
 # Deliberately NO `-Dpreview_mt`: Store, Fuzz::Engine, Miner::Engine and
