@@ -122,9 +122,12 @@ gori understands the protocols it carries:
 |----------|---------|
 | **HTTP/1.1** | Full capture and repeater |
 | **HTTP/2** | Relay after ALPN with per-stream intercept and head rules, raw frame log, HPACK decode, stream → flow assembly |
+| **HTTP/3** | Not intercepted; `Alt-Svc` `h3` is surfaced so you know the client may bypass |
 | **WebSocket** | Live message capture, repeater, per-message intercept (opt in with `proto:ws`), and Match & Replace on messages. Compression is removed from the handshake (see below) |
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no `.proto` schema) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
+
+gori does not intercept HTTP/3; Alt-Svc h3 is surfaced so you know the client may bypass.
 
 **A WebSocket through gori is never compressed.** gori removes `Sec-WebSocket-Extensions` from the handshake it relays, so `permessage-deflate` is never negotiated and every captured frame is the message that was sent. Without that removal the two peers would agree on compression that gori does not decode, and History, the detail view, `gori run history show`, the MCP tools and export would all show you a deflate stream while presenting it as the payload. Removing the offer is the price of a capture you can trust: an app that would have used compression does not get it while it goes through gori. If you need a particular host's sockets relayed exactly as they are, put it under [TLS passthrough](/reference/config/#tls-passthrough), which leaves the connection alone and captures nothing for it.
 

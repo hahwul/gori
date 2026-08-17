@@ -353,8 +353,12 @@ module Gori::Tui
       screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
       y += 1
       screen.text(ix, y, fit_history_flow(addr, iw), Theme.muted, Theme.bg, width: iw)
-      y += 2
-      unless capturing
+      if capturing
+        y += 1
+        screen.text(ix, y, "HTTP/3 / QUIC bypasses TCP proxy — use ^P or --disable-quic", Theme.muted, Theme.bg, width: iw)
+        y += 1
+      else
+        y += 2
         screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
@@ -774,8 +778,13 @@ module Gori::Tui
 
     private def medium_history(headline, addr, capturing) : Array(String)
       lines = [headline, "──► proxy #{addr} ──► flows"]
-      lines << "capture is OFF — press c to start" unless capturing
-      lines << "^P → Open browser · or set HTTP+HTTPS proxy"
+      if capturing
+        lines << "HTTP/3 / QUIC bypasses proxy — use ^P"
+        lines << "^P → Open browser · or set HTTP+HTTPS proxy"
+      else
+        lines << "capture is OFF — press c to start"
+        lines << "^P → Open browser · or set HTTP+HTTPS proxy"
+      end
       lines
     end
 

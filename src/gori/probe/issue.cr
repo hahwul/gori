@@ -291,6 +291,7 @@ module Gori
       "tech_graphql"   => "GraphQL",
       "tech_sse"       => "SSE",
       "tech_http2"     => "HTTP/2",
+      "tech_http3"     => "HTTP/3",
       "tech_aspnet"    => "ASP.NET",
       "tech_aspnetmvc" => "ASP.NET MVC",
       "tech_drupal"    => "Drupal",

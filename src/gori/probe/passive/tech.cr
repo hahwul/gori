@@ -27,14 +27,44 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("tech", "Technology fingerprints",
-            "Identifies server software, frameworks, and protocols (WebSocket, gRPC, GraphQL, SSE, HTTP/2) from headers and bodies.",
+            "Identifies server software, frameworks, and protocols (WebSocket, gRPC, GraphQL, SSE, HTTP/2, HTTP/3) from headers and bodies.",
             Category::TECH)
         end
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           check_protocols(ctx, acc)
+          check_alt_svc(ctx, acc)
           check_tech_headers(ctx, acc)
           check_frameworks(ctx, acc)
+        end
+
+        # Extracts evidence for Alt-Svc / alt-svc advertising HTTP/3 (h3 or h3-*).
+        # An origin advertising h3 may cause browsers without --disable-quic to switch to QUIC/UDP,
+        # bypassing the TCP proxy.
+        def self.alt_svc_h3_evidence(value : String) : String?
+          val = value.scrub
+          val.split(',').each do |entry|
+            trimmed = entry.strip
+            next if trimmed.empty?
+            parts = trimmed.split('=', 2)
+            next if parts.size < 2
+            proto = parts[0].strip.downcase
+            if proto == "h3" || proto.starts_with?("h3-")
+              return trimmed[0, {trimmed.size, 80}.min]
+            end
+          end
+          nil
+        end
+
+        private def check_alt_svc(ctx : Context, acc : Array(Detection)) : Nil
+          return unless resp = ctx.raw_response
+          return unless resp.headers.has?("Alt-Svc")
+          resp.headers.get_all("Alt-Svc").each do |alt_svc|
+            if ev = self.class.alt_svc_h3_evidence(alt_svc)
+              acc << tech(ctx, "tech_http3", "HTTP/3 advertised via Alt-Svc", ev)
+              break
+            end
+          end
         end
 
         private def check_protocols(ctx : Context, acc : Array(Detection)) : Nil
