@@ -43,6 +43,11 @@ module Gori
     # `rules`, and the same lifetime — the values are gone when the project closes, which
     # is the point (a restored token is stale by construction).
     getter bindings : Bindings
+    # The project's session slots plus the active one. Shared exactly as `rules` and
+    # `bindings` are — one live object, Mutex-guarded — because "which identity am I sending
+    # as" has to be one answer across the Authorize tab, a Repeater send and the proxy's
+    # intercept forward, not one per surface.
+    getter slots : SessionSlots
     getter scope : Scope
     getter host_overrides : HostOverrides
     getter interceptor : Interceptor
@@ -84,8 +89,15 @@ module Gori
         config.port = Settings.effective_bind_port
         lock = nil.as(CaptureLock?)
         sink = Proxy::StoreSink.new(store)
-        rules = Rules.load(store)       # shared: proxy reads, TUI edits (Mutex-guarded)
-        bindings = Bindings.load(store) # #501: extract rules persist, values stay in memory
+        rules = Rules.load(store) # shared: proxy reads, TUI edits (Mutex-guarded)
+        # Session slots: the project's named identities (header overlay + which extract rules
+        # belong to them) and WHICH ONE is the active send context. Loaded before `bindings`
+        # because the binding table is namespaced by it — see `Bindings#candidates`. The LIST
+        # is the same persisted row the Authorize tab has always written; the ACTIVE pointer
+        # starts nil (as-captured) on every open, because a slot's values are memory-only and
+        # restoring a pointer into an empty table resolves nothing.
+        slots = SessionSlots.load(store)
+        bindings = Bindings.load(store, slots) # #501: extract rules persist, values stay in memory
         # Publish this project's binding table as `Env`'s send-time layer. A per-project
         # global, exactly like `Settings.project_env_vars` two lines up and for exactly the
         # same reason: `$SESSION` has to mean one thing in the Rewriter, in a Repeater tab,
@@ -176,7 +188,7 @@ module Gori
           store.clear_intercept_state!
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, slots, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!
         session
       rescue ex
@@ -230,7 +242,7 @@ module Gori
     getter intercept_token : String
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
-                   @rules, @bindings, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
+                   @rules, @bindings, @slots, @scope, @host_overrides, @interceptor, @sink : Proxy::FlowSink,
                    @authorize_events : Channel(Store::FlowEvent),
                    @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil,

@@ -1,3 +1,5 @@
+require "log"
+require "./env"
 require "./scope"
 require "./intercept_filter"
 require "./url"
@@ -533,8 +535,40 @@ module Gori
       item = @mutex.synchronize { @items.delete(id) }
       return false unless item
       @revision.add(1)
-      item.reply.send(Decision.new(Action::Forward, bytes || item.raw))
+      item.reply.send(Decision.new(Action::Forward, overlay_slot(item, bytes || item.raw)))
       true
+    end
+
+    # The ACTIVE SESSION SLOT's header overlay, applied to a REQUEST on its way back out.
+    # This is the third send seam (with `Repeater::Sender` and `Fuzz::Sender`): a held request
+    # is one gori is about to put on the wire, and "browse the rest of this flow as the admin
+    # slot" is the same operator instruction those two obey.
+    #
+    # Three gates, and each one is a case that must not be touched:
+    #
+    #   * REQUESTS only. A held RESPONSE is travelling to the operator's own browser and a WS
+    #     frame has no header lines; writing an identity onto either would be gori inventing
+    #     traffic in a direction nobody asked about.
+    #   * `refuse_edit` must accept the result. That predicate is already the one definition
+    #     of "may these bytes replace the held ones" — it refuses an h2 hold whose head has no
+    #     faithful HTTP/1.1 text form, and a body where a head-only hold has nowhere to put
+    #     one. An overlay is an edit; it earns no exemption.
+    #   * Byte-identical output forwards the ORIGINAL slice, so a project with no slot active
+    #     (the default) allocates nothing and P7's "these are the bytes" stays literally true.
+    #
+    # Best-effort: an overlay must never be able to strand a message the client is waiting on,
+    # so a failure forwards what the operator decided on.
+    private def overlay_slot(item : Item, bytes : Bytes) : Bytes
+      return bytes unless item.kind.request?
+      overlaid = Gori::Env.overlay_slot(bytes)
+      # Pointer identity, not `==`: `Env.overlay_slot` returns the ARGUMENT when no slot is
+      # active, and a content compare would walk every byte of every forwarded message to
+      # learn what the pointer already says (P6).
+      return bytes if overlaid.to_unsafe == bytes.to_unsafe && overlaid.size == bytes.size
+      item.refuse_edit(overlaid) ? bytes : overlaid
+    rescue ex
+      ::Log.warn { "session slot overlay skipped for a forwarded request: #{ex.message}" }
+      bytes
     end
 
     # True when THIS call is the one that settled the item — the same claim `forward` makes,
@@ -565,7 +599,7 @@ module Gori
       @revision.add(1) unless items.empty?
       items.each do |it|
         bytes = overrides.try(&.[it.id]?) || it.raw
-        it.reply.send(Decision.new(Action::Forward, bytes))
+        it.reply.send(Decision.new(Action::Forward, overlay_slot(it, bytes)))
       end
       items.size
     end

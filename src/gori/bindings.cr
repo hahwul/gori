@@ -5,6 +5,7 @@ require "./token_extract"
 require "./proxy/extractor"
 require "./proxy/codec/http1"
 require "./repeater/engine"
+require "./session_slots"
 
 module Gori
   # Session bindings (#501): named values observed from a response and resolved into
@@ -50,7 +51,12 @@ module Gori
       descriptor : String,
       enabled : Bool,
       value : String?,
-      bound_at : Time? do
+      bound_at : Time?,
+      # Which SESSION SLOT's table this value lives in, or nil for the one global table. A
+      # rule no slot claims yields exactly one row (nil); a rule two slots claim yields one
+      # row per slot, because it genuinely holds two values and a readout that folded them
+      # would have to pick one identity's credential to show.
+      slot : String? = nil do
       def bound? : Bool
         !value.nil?
       end
@@ -154,13 +160,24 @@ module Gori
 
     @rules : Array(Store::ExtractRule)
     @compiled : Array(Compiled)
+    # The GLOBAL table: every rule no session slot claims writes here, which before slots
+    # existed was every rule there is. Keeping it as its own table rather than folding it into
+    # a nil-named slot is the compatibility statement — with no slots configured this class
+    # behaves exactly as it did, down to the lock-free counts.
     @values : Hash(String, Bound)
+    # The PER-SLOT tables, `slot name => (binding name => value)`. Created lazily on the first
+    # observation into a slot, so a project whose slots are pure header overlays allocates
+    # none of them. Values here are memory-only for the same reason the global table's are —
+    # see the class doc; a slot changes WHERE a value lives, never WHETHER it persists.
+    @slot_values : Hash(String, Hash(String, Bound))
 
-    def initialize(@store : Store, rules : Array(Store::ExtractRule))
+    def initialize(@store : Store, rules : Array(Store::ExtractRule),
+                   @slots : SessionSlots? = nil)
       @mutex = Mutex.new
       @rules = rules
       @compiled = compile(rules)
       @values = {} of String => Bound
+      @slot_values = {} of String => Hash(String, Bound)
       @rev = 0_u64
       # Lock-free fast-path counts, the same pattern and for the same reason as `Rules`'
       # (`rules.cr`): slice 2 puts this object on the PROXY RESPONSE PATH, where the common
@@ -181,8 +198,15 @@ module Gori
       @miss_reported_rev = 0_u64
     end
 
-    def self.load(store : Store) : Bindings
-      new(store, store.extract_rules)
+    def self.load(store : Store, slots : SessionSlots? = nil) : Bindings
+      new(store, store.extract_rules, slots)
+    end
+
+    # The project's session slots, or nil when this table is running without them (a spec, a
+    # `gori run` that never opened a project). Every slot-aware branch below degrades to the
+    # pre-slot behaviour on nil, which is the same thing it does when the list is empty.
+    def slots : SessionSlots?
+      @slots
     end
 
     # ── Env::Layer ────────────────────────────────────────────────────────────
@@ -226,12 +250,26 @@ module Gori
     # The value itself SURVIVES in `@values` (see `refresh`): toggling a rule off and back on
     # must not lose the token. `rows` and `bound?` read that table directly, which is what
     # keeps the Bindings pane showing a disabled rule's value while nothing resolves it.
+    #
+    # SLOT-AWARE, and this is the read half of "the active slot is the send context": the
+    # global table first, then the ACTIVE slot's table written over it. A slot therefore
+    # SHADOWS a global name rather than being a separate namespace an operator has to spell —
+    # `$SESSION` means one thing in a request and the active slot decides which session that
+    # is. With no slot active (the default, and `as-captured`) this is the global table alone,
+    # byte for byte the answer this method gave before slots existed.
     def values : Hash(String, String)
+      # OUTSIDE `@mutex`: `SessionSlots` has its own, and the two must never nest — see
+      # `candidates`. Nothing here needs the two snapshots to be atomic with each other; a
+      # slot switching between these two lines resolves the next send, not this one.
+      slot = @slots.try(&.active)
       @mutex.synchronize do
         live = Set(String).new
         @rules.each { |r| live << r.name if r.enabled? }
         h = {} of String => String
         @values.each { |(k, b)| h[k] = b.value if live.includes?(k) }
+        if slot && (table = @slot_values[slot.name]?)
+          table.each { |(k, b)| h[k] = b.value if live.includes?(k) }
+        end
         h
       end
     end
@@ -248,19 +286,51 @@ module Gori
     # render CAPTURED bytes, which is the exception the class doc above states — masking a
     # capture would be a P7 violation, not a fix. (This comment used to name exports and the
     # detail view; it named two surfaces that must never call this, and no surface that does.)
+    # Every slot's table too, and NOT merged by name: two slots holding two different
+    # `$SESSION` values are two secrets, and a Hash keyed on the name alone would mask one of
+    # them and print the other. A slot's entries are keyed `NAME@slot`, so `mask_secrets`
+    # redacts both and says which identity's token it found — the readout is `$SESSION@admin`,
+    # which is not a resolvable token and is not meant to be. Masking is a display path; the
+    # RESOLUTION path is `values` above, where a name is a name.
     def held_values : Hash(String, String)
       @mutex.synchronize do
         h = {} of String => String
         @values.each { |(k, b)| h[k] = b.value }
+        @slot_values.each do |(slot, table)|
+          table.each { |(k, b)| h["#{k}@#{slot}"] = b.value }
+        end
         h
       end
+    end
+
+    # ── Env::Layer, the OVERLAY half ──────────────────────────────────────────
+
+    # The active slot's header overlay, applied to wire bytes at a send seam. Returns the
+    # same slice when no slot is active, which is `as-captured` — the no-overlay baseline.
+    #
+    # `$NAME` inside a slot's own header VALUE resolves here, against `values` above — so the
+    # "admin" slot's `Authorization: Bearer $SESSION` means admin's `$SESSION` and the "user"
+    # slot's means user's, off one persisted string each. `guard_boundary: true` because that
+    # resolved value is the ORIGIN'S bytes landing in a header: a CR/LF in it would forge a
+    # header line or a whole second request onto a pooled keep-alive upstream, which is the
+    # exact case `boundary_forging?` above documents. The operator's own literal header value
+    # is NOT guarded — `SessionSlot.overlay_head` copies it verbatim, the same provenance
+    # split every other seam in this codebase draws.
+    def overlay(wire : Bytes) : Bytes
+      slots = @slots
+      return wire unless slots
+      slots.overlay(wire) { |value| Env.expand_bindings(value, guard_boundary: true) }
     end
 
     # Bumped on every rule edit and every rebind. Consumers that must not rebuild a merged
     # snapshot per message (`Rules`, on the proxy hot path) cache on this plus
     # `Env.highlight_rev`.
+    # A SUM and not just `@rev`: activating a slot changes what `$NAME` resolves to and what
+    # a send goes out as, without touching a rule or a value, so a consumer caching on this
+    # alone would keep painting the previous identity's snapshot. Both halves only ever
+    # increase, so the sum only ever increases — which is the whole contract.
     def rev : UInt64
-      @rev
+      @rev &+ (@slots.try(&.rev) || 0_u64)
     end
 
     # ── rule editing (persists, then refreshes the snapshot) ──────────────────
@@ -395,33 +465,65 @@ module Gori
 
     # ── the binding table ─────────────────────────────────────────────────────
 
+    # One row per (rule, table it writes). An unscoped rule is one row with `slot: nil`; a
+    # rule two slots claim is two rows, one per slot, each carrying that slot's own value.
     def rows : Array(Row)
+      slot_names = @slots.try { |s| s.scoped? ? s.slots : nil }
       @mutex.synchronize do
-        @rules.map do |r|
-          b = @values[r.name]?
-          Row.new(r.name, r.id, r.host, r.token_loc.label, r.enabled?, b.try(&.value), b.try(&.at))
+        out = [] of Row
+        @rules.each do |r|
+          owners = slot_names.try(&.select(&.claims?(r.name)))
+          if owners.nil? || owners.empty?
+            b = @values[r.name]?
+            out << Row.new(r.name, r.id, r.host, r.token_loc.label, r.enabled?,
+              b.try(&.value), b.try(&.at))
+          else
+            owners.each do |slot|
+              b = @slot_values[slot.name]?.try(&.[r.name]?)
+              out << Row.new(r.name, r.id, r.host, r.token_loc.label, r.enabled?,
+                b.try(&.value), b.try(&.at), slot.name)
+            end
+          end
         end
+        out
       end
     end
 
+    # In the CURRENT send context: the active slot's table, else the global one. The same
+    # question `values` answers, asked about one name.
     def bound?(name : String) : Bool
-      @mutex.synchronize { @values.has_key?(name) }
+      slot = @slots.try(&.active)
+      @mutex.synchronize do
+        next true if slot && @slot_values[slot.name]?.try(&.has_key?(name))
+        @values.has_key?(name)
+      end
     end
 
     # Forget one name (the `bindings` sub-tab's clear action). The RULE is untouched — a
     # cleared name is declared-but-unbound, so the next send naming it refuses rather than
     # going out with a stale value.
+    #
+    # Clears the name in the CURRENT send context — the active slot's table AND the global
+    # one — because both are resolvable through `values` and forgetting only the shadowing
+    # half would leave the next send going out with the value underneath it. Other slots'
+    # tables are untouched: they are other identities, and the operator asked about this one.
     def clear(name : String) : Nil
+      slot = @slots.try(&.active)
       @mutex.synchronize do
         @values.delete(name)
+        slot.try { |sl| @slot_values[sl.name]?.try(&.delete(name)) }
         @rev &+= 1
       end
       Env.bump_highlight_rev
     end
 
+    # EVERY table, not only the active slot's: this is the panic button, and a "clear all"
+    # that left another identity's live credential in memory would be the one thing an
+    # operator pressing it is trying to avoid.
     def clear_all : Nil
       @mutex.synchronize do
         @values.clear
+        @slot_values.clear
         @rev &+= 1
       end
       Env.bump_highlight_rev
@@ -547,10 +649,31 @@ module Gori
 
     # The enabled rules whose host glob AND condition claim this message. Taken under the lock
     # once; the extraction itself (which decodes a body and can run a regex) runs outside it.
+    # A SCOPED rule — one some slot claims — runs only while the slot claiming it is active.
+    # That is the whole namespacing decision in one line, and it is deliberately a SELECTION
+    # rather than a miss: the rule did not fail to find anything, it was not asked. Reporting
+    # it would write one `events` row per response for every identity the operator is not
+    # currently using.
+    #
+    # An UNSCOPED rule (no slot names it) always runs and always writes the global table, so a
+    # project with no slots — every project that existed before this — sees the same set of
+    # candidates it always did, for the cost of one atomic read.
+    #
+    # Both slot snapshots are taken BEFORE `@mutex`: `SessionSlots` has a mutex of its own and
+    # nesting the two would make the lock order depend on which method you came in through.
     private def candidates(subject : InterceptFilter::Subject) : Array(Compiled)
+      slots = @slots
+      claimed = nil.as(Set(String)?)
+      active = nil.as(SessionSlot?)
+      if slots && slots.scoped?
+        claimed = slots.claimed_names
+        active = slots.active
+      end
       @mutex.synchronize do
         @compiled.select do |c|
-          c.rule.enabled? && Rules.host_matches?(c.rule.host, subject.host) && c.filter.matches?(subject)
+          next false unless c.rule.enabled? && Rules.host_matches?(c.rule.host, subject.host) && c.filter.matches?(subject)
+          next true unless claimed && claimed.includes?(c.rule.name)
+          !!active.try(&.claims?(c.rule.name))
         end
       end
     end
@@ -560,6 +683,10 @@ module Gori
       return [] of String if picked.empty?
       bound = [] of String
       now = Time.utc
+      # The send context, read ONCE for the whole response: every rule that binds off these
+      # bytes belongs to the identity that was active when they arrived, and re-reading per
+      # rule could split one response's values across two slots.
+      active = @slots.try(&.active)
       # Decided at most ONCE per response and only if a `text_only?` descriptor actually binds
       # off it — the check decodes the entity, so a project of cookie rules never pays for it.
       lossy = nil.as(Bool?)
@@ -592,7 +719,7 @@ module Gori
           lossy = Gori::TokenExtract.text_lossy?(raw) if lossy.nil?
           report_scrubbed(c.rule, flow_id) if lossy
         end
-        @mutex.synchronize { @values[c.rule.name] = Bound.new(value, c.rule.id, now) }
+        bind(c.rule, value, active, now)
         bound << c.rule.name
       end
       unless bound.empty?
@@ -603,6 +730,18 @@ module Gori
         Env.bump_highlight_rev
       end
       bound
+    end
+
+    # Write one observed value into the table it belongs in: the ACTIVE slot's when that slot
+    # claims this rule, else the global one. `candidates` has already refused every other
+    # combination, so this is a two-way choice rather than a search.
+    private def bind(rule : Store::ExtractRule, value : String, active : SessionSlot?,
+                     now : Time) : Nil
+      owner = (active && active.claims?(rule.name)) ? active.name : nil
+      @mutex.synchronize do
+        table = owner ? (@slot_values[owner] ||= {} of String => Bound) : @values
+        table[rule.name] = Bound.new(value, rule.id, now)
+      end
     end
 
     # Why an extracted value may not be bound, or nil to bind it. A value that HIT but cannot
@@ -699,6 +838,10 @@ module Gori
         # operator toggling a rule off and back on has not asked to lose the token.
         names = fresh.map(&.name)
         @values.reject! { |k, _| !names.includes?(k) }
+        # Every slot's table too. A deleted rule takes its value with it wherever that value
+        # landed, and an emptied slot table is dropped rather than kept as an empty Hash.
+        @slot_values.each_value { |table| table.reject! { |k, _| !names.includes?(k) } }
+        @slot_values.reject! { |_, table| table.empty? }
         @rev &+= 1
         # An edit is the operator looking at this rule, so let it say the no-body thing again.
         @no_entity_reported.clear

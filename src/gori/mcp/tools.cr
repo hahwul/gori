@@ -314,7 +314,7 @@ module Gori
       # global the TUI's `Session.open` and the CLI's `open_store` install, so `$SESSION`
       # means one thing on all three surfaces.
       private def bind_binding_layer(s : Store) : Nil
-        b = Gori::Bindings.load(s)
+        b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
       end

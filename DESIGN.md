@@ -989,6 +989,57 @@ here because the gap was not noticed until a structure review looked for it: a n
 parity is part of shipping it, not a follow-up, and the seam is the thing that makes the two
 non-TUI surfaces cheap enough for that to be true.
 
+### 2026-08-17: Authorize identities are session slots; Bindings is per-slot
+
+Refines: [P4](#p4), [P5](#p5). Extends the 2026-08-16 Authorize entry.
+
+gori had no multi-session primitive. `Env` is one value per key, and `Bindings` (#501) was a
+single process-global name→value table, so a project could carry exactly one `$SESSION` at a
+time. Authorize needed several and grew its own private answer: an `Identity`, which was a
+static header overlay it applied to a captured request before replaying it. That answer was
+right and it was in the wrong place — every *other* send seam needed the same thing, and a
+second copy under a second name would have made "the admin session" mean one thing in the
+Authorize tab and another at a Repeater send.
+
+So there is one type. A **session slot** (`src/gori/session_slot.cr`) is a name, a header
+overlay (`set_headers` upsert / `remove_headers` strip), and the extract rules whose observed
+values belong to it. `Authorize::Identity` is an alias of it, and the two persist as one JSON
+list in one settings row — still keyed `authorize_identities`, because an existing project's
+identities *are* its slots and renaming the row would orphan them on upgrade.
+
+`Bindings` is namespaced by that list (`src/gori/session_slots.cr`). A rule some slot claims
+writes that slot's table; a rule no slot claims keeps writing the one global table it always
+did, which is what makes every playbook written before slots existed keep working unchanged
+(`docs/content/playbooks/carry-a-session.md`). Resolution reads the global table with the
+**active** slot's written over it, so a slot *shadows* a name rather than introducing a second
+syntax to spell — `$SESSION` stays `$SESSION` and the active slot decides whose it is.
+
+The active slot is the send context, and it is applied at the seams that own a request going
+onto the wire — `Repeater::Sender`, `Fuzz::Sender`, the intercept forward, and `--bind-from`
+by way of the first. `Env.overlay_slot` runs *after* `Env.expand_bindings`: the message's own
+references resolve first, then the identity is written over the result, and a `$NAME` inside a
+slot's own header value resolves against that slot's table (so `Authorization: Bearer $SESSION`
+means one thing on the "admin" slot and another on "user", off one persisted string each).
+
+Three lines this deliberately does not cross:
+
+* **The overlay is header-only.** Content-Length never moves and the body is byte-exact, which
+  is what makes it safe to apply to bytes the operator did not author — a captured replay, a
+  fuzz template with its payload already spliced. `as-captured` (and no slot at all, the
+  default) is the no-overlay baseline.
+* **Values still never reach disk.** A slot changes *where* a value lives, never *whether* it
+  persists. The active pointer is memory-only for the same reason: restoring "admin is active"
+  into an empty admin table on reopen would hand the next send an overlay whose `$SESSION` is
+  literal — a 401 with no visible cause.
+* **No cookie jar and no auto-login.** A slot carries headers the operator wrote and bindings
+  gori observed. RFC 6265 storage, path/domain matching and expiry are a different feature with
+  different failure modes, and a macro that decides for itself when to re-authenticate is gori
+  acting behind the operator's back (P4). `--bind-from` already replays one flow the operator
+  named, which is the same job done explicitly.
+
+The surfaces for selecting and editing slots (TUI, `gori run`, MCP) are a follow-up; this
+change is the engine and its tests.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

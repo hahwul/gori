@@ -317,7 +317,11 @@ module Gori
         # headless send refuse with "unbound session binding $SESSION" instead of the much
         # less useful "unresolved env $SESSION" that an undeclared name would earn. One
         # syntax, one rule, and a refusal that names its gate on every surface.
-        Env.layer = Bindings.load(store)
+        # …and the project's SESSION SLOTS alongside them, so a headless send resolves `$NAME`
+        # out of the same table structure the TUI does. No slot is ACTIVE here (the pointer is
+        # per-process and starts nil — see `SessionSlots`), so `gori run` behaves exactly as it
+        # did: unscoped rules, global table, no overlay.
+        Env.layer = Bindings.load(store, SessionSlots.load(store))
         store
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"

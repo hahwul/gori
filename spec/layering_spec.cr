@@ -38,6 +38,14 @@ describe "layering contract" do
       path = File.join(root, "src", "gori", "#{name}.cr")
       paths << path if File.exists?(path)
     end
+    # Top-level engine files with no directory of their own. The session layer is exactly the
+    # shape this contract governs — the binding table is read by all three surfaces and by the
+    # proxy response path, and session slots are the send context every one of them selects —
+    # so they are held to it even though they never grew a subdirectory.
+    %w[bindings session_slot session_slots].each do |name|
+      path = File.join(root, "src", "gori", "#{name}.cr")
+      paths << path if File.exists?(path)
+    end
     paths.sort!
 
     surface = /\b(?:Tui|CLI|MCP)::/
