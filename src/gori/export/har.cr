@@ -41,6 +41,13 @@ module Gori
     # complete has no fixed point to be: HAR records neither `state` nor gori's `error`
     # string, so a pending / refused / aborted flow is SKIPPED by name and counted
     # (`skip_reason`), never written as a fabricated success.
+    #
+    # A WebSocket flow is the one entry that carries more than an HTTP exchange: the 101
+    # handshake is written as itself and the captured messages ride beside it in Chrome's
+    # `_webSocketMessages` (see WS_MESSAGES). Those round-trip too — `Import::Har` reads them
+    # back into `ws_messages` — with two named exceptions stated where they are made: the
+    # frame SHAPE has no field in the format (`ws_messages`), and a message time keeps
+    # millisecond fidelity (`epoch_seconds`), matching `startedDateTime`.
     module Har
       SPEC_VERSION = "1.2"
 
@@ -76,9 +83,31 @@ module Gori
       # stays equal to the sum of the non-negative timings as §timings requires.
       TIMINGS_NOTE = "gori records total round-trip time only; send/receive are not measured"
 
+      # Chrome DevTools' WebSocket extension to a HAR entry, and the only interchange shape
+      # there is for one: an array of `{type, time, opcode, data}` on the ENTRY, beside the
+      # handshake's own request/response rather than in place of them.
+      #
+      # gori writes it because the alternative was worse in both directions. Skipping every 101
+      # (what this did until now) throws away the entire point of capturing a socket, and the
+      # obvious repair — folding the messages into a fabricated HTTP body — writes an exchange
+      # that never happened and imports back as one. The handshake IS a real request and a real
+      # response, so it is written as itself and the transcript rides beside it in the field a
+      # HAR reader already knows.
+      #
+      # `type` is Chrome's: `send` is client→server, `receive` is server→client, which is the
+      # store's `out`/`in` under other names. `time` is a Unix timestamp in SECONDS — a float,
+      # not gori's micros — and carries the same MILLISECOND fidelity `startedDateTime` does,
+      # for the same reason (see `epoch_seconds`).
+      WS_MESSAGES = "_webSocketMessages"
+
+      # Chrome tags a WebSocket entry with this, and DevTools keys its message rendering off it:
+      # without the tag the entry renders as a bare 101 and the transcript beside it is not shown.
+      # Derived from the status, so it costs the fixed point nothing.
+      WS_RESOURCE_TYPE = "websocket"
+
       # Why a flow has no HAR representation at all.
       enum Skip
-        WebSocket  # a 101 flow — see skip_reason
+        WebSocket  # a 101 flow with NO captured messages — see skip_reason
         NoResponse # nothing came back at all: pending, or a request gori REFUSED to send
         Incomplete # a response head exists but the exchange died mid-flight (aborted/error)
       end
@@ -103,7 +132,8 @@ module Gori
         def notes : Array(String)
           msgs = [] of String
           if websocket > 0
-            msgs << "skipped #{plural(websocket, "WebSocket flow")}: HAR has no representation for WebSocket messages"
+            msgs << "skipped #{plural(websocket, "WebSocket flow")} with no captured messages: " \
+                    "the entry would carry the upgrade handshake and no traffic"
           end
           if no_response > 0
             msgs << "skipped #{plural(no_response, "flow")} with no captured response: a HAR entry requires a response object"
@@ -130,12 +160,18 @@ module Gori
         end
       end
 
+      # Is this flow a WebSocket — i.e. does a message transcript belong to it at all? The 101
+      # status is how every other surface asks (`gori run show`, the TUI's WS pane, MCP's
+      # `get_flow`), so it is asked the same way here rather than a second way.
+      def self.websocket?(detail : Store::FlowDetail) : Bool
+        detail.row.status == 101
+      end
+
       # Why this flow cannot become a HAR entry, or nil when it can.
-      def self.skip_reason(detail : Store::FlowDetail) : Skip?
-        # A 101 flow's entry would carry the upgrade handshake and silently drop every frame
-        # that followed — the whole point of capturing it. HAR has no frame log, so skip the
-        # flow outright and let the caller say so (#495).
-        return Skip::WebSocket if detail.row.status == 101
+      #
+      # `ws_messages` is how many captured messages the caller holds for it — 0 for anything
+      # that is not a socket, and the reason a 101 is no longer skipped by its status alone.
+      def self.skip_reason(detail : Store::FlowDetail, ws_messages : Int32 = 0) : Skip?
         # HAR 1.2 makes `response` a required member of an entry, and gives no field for
         # "this exchange did not finish". A pending flow, a request gori REFUSED to send,
         # and a flow whose connection died mid-response all lack a response to write.
@@ -151,13 +187,42 @@ module Gori
         # so ask it: anything but Complete is skipped and counted.
         head = detail.response_head
         return Skip::NoResponse if head.nil? || head.empty?
+        # A socket is judged on its TRANSCRIPT, not on the two HTTP tests below.
+        #
+        # An EMPTY one is the case that still has nothing to export: the entry would carry the
+        # upgrade handshake and silently stand in for the frames that are the whole point of
+        # capturing the socket. With messages in hand it is written as itself — a real request,
+        # a real response, and `_webSocketMessages` beside them (see WS_MESSAGES).
+        #
+        # And `Incomplete` is not asked of it: `state` is about the HTTP exchange, which for a
+        # 101 finished the moment the handshake did, while how the SOCKET ended is a fact about
+        # the frames. gori already records that where it belongs — `Relay.record_teardown`
+        # writes a `[gori] …` row into the transcript for a peer that reset — so the ending
+        # travels in the messages this entry carries rather than being inferred from a column
+        # whose meaning stops at the upgrade.
+        return ws_messages == 0 ? Skip::WebSocket : nil if websocket?(detail)
         return Skip::Incomplete unless detail.row.state.complete?
         nil
       end
 
+      # How `log` gets a flow's captured WebSocket transcript: flow id → its messages, in
+      # capture order. A PROC and not a `Store`, so `Export` keeps knowing only `Store::`
+      # models and a caller that already holds the messages (`gori run show`, which fetches
+      # them before it closes the store) can answer from what it has.
+      alias WsLookup = Int64 -> Array(Store::WsMessage)
+
+      # The "this flow has no transcript" answer, shared rather than allocated per entry.
+      NO_WS_MESSAGES = [] of Store::WsMessage
+
       # A complete `{"log": {...}}` document over `flows`, written to `io`.
+      #
+      # `ws` is asked ONLY about a 101 flow (`websocket?`), so an HTTP-only export costs no
+      # extra query per entry. Omitting it means "no transcripts are available", which lands
+      # every socket in the `Skip::WebSocket` count — visible in the report rather than a
+      # silently thinner document.
       def self.log(io : IO, flows : Enumerable(Store::FlowDetail),
-                   creator_version : String = Gori::VERSION) : Report
+                   creator_version : String = Gori::VERSION,
+                   ws : WsLookup? = nil) : Report
         report = Report.new
         JSON.build(io, indent: 2) do |j|
           j.object do
@@ -173,12 +238,13 @@ module Gori
                 j.field "entries" do
                   j.array do
                     flows.each do |detail|
-                      case skip_reason(detail)
+                      msgs = ws && websocket?(detail) ? ws.call(detail.row.id) : NO_WS_MESSAGES
+                      case skip_reason(detail, msgs.size)
                       when Skip::WebSocket  then report.websocket += 1
                       when Skip::NoResponse then report.no_response += 1
                       when Skip::Incomplete then report.incomplete += 1
                       else
-                        report.scrubbed += 1 if entry(j, detail)
+                        report.scrubbed += 1 if entry(j, detail, msgs)
                         report.written += 1
                         report.truncated += 1 if detail.request_body_truncated? || detail.response_body_truncated?
                       end
@@ -195,7 +261,10 @@ module Gori
       # One entry object. The caller must have checked `skip_reason` first; a flow with no
       # response head emits nothing rather than a response-less entry. Returns true when the
       # head had to be scrubbed on the way into the document (see `text` / SCRUBBED_MARK).
-      def self.entry(j : JSON::Builder, detail : Store::FlowDetail) : Bool
+      #
+      # `ws` is the flow's captured WebSocket transcript, empty for an ordinary HTTP flow.
+      def self.entry(j : JSON::Builder, detail : Store::FlowDetail,
+                     ws : Array(Store::WsMessage) = NO_WS_MESSAGES) : Bool
         resp_head = detail.response_head
         return false unless resp_head
         row = detail.row
@@ -262,6 +331,7 @@ module Gori
               j.field "comment", TIMINGS_NOTE
             end
           end
+          ws_fields(j, ws)
           # HAR 1.2 §entry allows a `comment`, and this is what it is for: something the
           # tool has to say about the exchange that the recorded request/response cannot.
           # An exported flow keeps "Match&Replace was not applied to this head" and "the
@@ -313,6 +383,71 @@ module Gori
           end
         end
         false
+      end
+
+      # Chrome's two WebSocket fields on an entry, written together because a reader that
+      # renders one keys off the other, and nothing at all for a flow with no transcript.
+      # Emitted AFTER `timings` and before `comment` — where Chrome puts them, and, more to the
+      # point, a fixed order, so re-exporting a re-imported flow is byte-identical.
+      private def self.ws_fields(j : JSON::Builder, ws : Array(Store::WsMessage)) : Nil
+        return if ws.empty?
+        j.field "_resourceType", WS_RESOURCE_TYPE
+        j.field(WS_MESSAGES) { ws_messages(j, ws) }
+      end
+
+      # The captured transcript as Chrome's `_webSocketMessages` array (see WS_MESSAGES).
+      # Capture order, every stored row kept, nothing collapsed.
+      #
+      # Every row, INCLUDING the `[gori] …` notice rows the relay writes (`Store::WsMessage
+      # #notice?`) — the handshake advisory, the §5.4 parking ceiling, a peer's reset. Those
+      # are positioned IN the stream and their position names the frames they apply to, so
+      # dropping them on export would delete gori's own statements about the socket from the
+      # artifact an operator hands to someone else. The `[gori] ` prefix survives the round
+      # trip byte-exact, which is exactly what `notice?` reads, so every seed reader's guard
+      # still fires on a re-imported transcript.
+      #
+      # CONTROL frames ride along too (opcode 8/9/10, since V7) rather than being filtered to
+      # Chrome's data-frame-only habit: a CLOSE code and reason is the single most diagnostic
+      # thing a failed WebSocket test produces, and the field is `opcode`, so a reader that
+      # only understands 1 and 2 sees an opcode it can name rather than a message it cannot.
+      #
+      # NOT carried: the V7 frame SHAPE (FIN/RSV/mask key/fragment count). `_webSocketMessages`
+      # has no field for it and inventing one would be a gori dialect no other reader speaks,
+      # so a shape is a thing `--format json` and `raw` still hold and a HAR does not. The
+      # import side takes `WsShape::DEFAULT` and says so.
+      private def self.ws_messages(j : JSON::Builder, list : Array(Store::WsMessage)) : Nil
+        j.array do
+          list.each do |m|
+            j.object do
+              j.field "type", m.direction == "out" ? "send" : "receive"
+              j.field "time", epoch_seconds(m.created_at)
+              j.field "opcode", m.opcode
+              emit_ws_data(j, m.payload)
+            end
+          end
+        end
+      end
+
+      # A message payload as `data`, base64 when the bytes are not valid UTF-8 — the same
+      # escape hatch, the same spelling and the same measured `valid_encoding?`-before-scrub
+      # ordering as `emit_body`, and for a stronger reason: an invalid-UTF-8 TEXT frame is a
+      # standard RFC 6455 §8.1/§5.6 test case, so those bytes ARE the payload (P7) and a
+      # U+FFFD substitution would rewrite the operator's evidence into a different message.
+      #
+      # `encoding` beside `data` is a gori extension — Chrome base64s a binary frame's data
+      # with no marker at all, which is not a thing a reader can invert, so gori says which
+      # branch it took. KNOWN GAP, the other way round: a CHROME-written HAR's binary frame
+      # therefore imports as the literal base64 TEXT, because guessing "this looks like base64"
+      # would corrupt a text frame that happens to look like base64. gori's own round trip is
+      # exact; a foreign one is exact for text and marked-binary only.
+      private def self.emit_ws_data(j : JSON::Builder, payload : Bytes) : Nil
+        s = String.new(payload)
+        if s.valid_encoding?
+          j.field "data", s
+        else
+          j.field "data", Base64.strict_encode(payload)
+          j.field "encoding", "base64"
+        end
       end
 
       # Wire order, duplicates kept, original casing kept. HAR's `headers` is the only
@@ -480,6 +615,21 @@ module Gori
       private def self.iso_micros(micros : Int64) : String
         (Time.unix(micros // 1_000_000) + (micros % 1_000_000).microseconds)
           .to_utc.to_rfc3339(fraction_digits: 3)
+      end
+
+      # Unix micros → a Unix timestamp in SECONDS, the unit Chrome writes
+      # `_webSocketMessages[].time` in.
+      #
+      # Truncated to MILLISECONDS on the way out, which is not a rounding convenience: it is
+      # what makes the round trip a fixed point. A Float64 near 1.8e9 has an ulp of ~0.5µs, so
+      # a microsecond-resolution timestamp does not survive the divide-and-multiply through
+      # this field reliably, and a re-export would then differ in its last digit. Milliseconds
+      # sit ~2000× clear of that, and it is the same fidelity `iso_micros` already commits
+      # `startedDateTime` to — so the sub-millisecond remainder does not survive a re-import,
+      # in exactly one documented place instead of two contradictory ones. Message ORDER is
+      # unaffected: `Store#ws_messages` reads back `ORDER BY id`, never by this column.
+      private def self.epoch_seconds(micros : Int64) : Float64
+        (micros // 1000) / 1000.0
       end
 
       # HAR `time`/`timings` are milliseconds as a NUMBER. Always emitted as a Float so

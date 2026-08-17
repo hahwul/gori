@@ -67,6 +67,62 @@ describe Gori::Import do
     end
   end
 
+  # `_webSocketMessages` lands on the flow it belongs to, which is `insert_all`'s job: the
+  # transcript is stored against a flow ID that does not exist until the batch commits, so the
+  # ids come back in PAIR ORDER and are walked as the pairing. Two flows here, only one of them
+  # a socket, so an off-by-one would be visible rather than accidentally right.
+  it "restores a HAR's WebSocket transcript onto the right imported flow" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [
+              {
+                "startedDateTime": "2026-06-01T12:00:00.000Z",
+                "request": {"method": "GET", "url": "https://shop.test/items",
+                            "httpVersion": "HTTP/1.1", "headers": []},
+                "response": {"status": 200, "statusText": "OK", "httpVersion": "HTTP/1.1",
+                             "headers": [], "content": {"mimeType": "text/html", "text": "<p>ok</p>"}}
+              },
+              {
+                "startedDateTime": "2026-06-01T12:00:01.000Z",
+                "request": {"method": "GET", "url": "https://shop.test/chat",
+                            "httpVersion": "HTTP/1.1", "headers": []},
+                "response": {"status": 101, "statusText": "Switching Protocols",
+                             "httpVersion": "HTTP/1.1", "headers": [], "content": {"size": 0}},
+                "_resourceType": "websocket",
+                "_webSocketMessages": [
+                  {"type": "send", "time": 1780000000.125, "opcode": 1, "data": "ping-me"},
+                  {"type": "receive", "time": 1780000000.5, "opcode": 2,
+                   "data": "AP/+", "encoding": "base64"}
+                ]
+              }
+            ]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(2)
+        rows = store.search(Gori::QL::EMPTY, 10)
+        http = rows.find { |r| r.target == "/items" }.not_nil!
+        chat = rows.find { |r| r.target == "/chat" }.not_nil!
+
+        store.ws_messages(http.id).should be_empty
+        msgs = store.ws_messages(chat.id)
+        msgs.map(&.direction).should eq(["out", "in"])
+        msgs.map(&.opcode).should eq([1, 2])
+        String.new(msgs[0].payload).should eq("ping-me")
+        msgs[1].payload.should eq(Bytes[0x00, 0xff, 0xfe])
+        # Each message keeps the time the HAR recorded, not the instant of the import.
+        msgs.map(&.created_at).should eq([1_780_000_000_125_000_i64, 1_780_000_000_500_000_i64])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "indexes the imported request body for FTS body: search (response-bearing entry)" do
     har = File.tempname("gori", ".har")
     begin

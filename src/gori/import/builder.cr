@@ -7,7 +7,13 @@ module Gori
   module Import
     # Shared helpers for turning parsed import data into store DTOs.
     module Builder
-      record FlowPair, request : Store::CapturedRequest, response : Store::CapturedResponse?
+      # `ws_messages` is the flow's captured WebSocket transcript, empty for everything that is
+      # not a 101 — only `Import::Har` fills it in (from Chrome's `_webSocketMessages`, which
+      # `Export::Har` writes), and only `Import.insert_all` reads it, after the flow it belongs
+      # to has an id. A DEFAULTED field so the five other parsers and `Discover::Adapters`,
+      # none of which describe a socket, construct a pair exactly as they did.
+      record FlowPair, request : Store::CapturedRequest, response : Store::CapturedResponse?,
+        ws_messages : Array(Store::ImportedWsMessage) = [] of Store::ImportedWsMessage
 
       # Bound a stored import body to the same ceiling live capture uses, so a HAR
       # with a huge (e.g. media/base64) body can't insert an arbitrarily large,

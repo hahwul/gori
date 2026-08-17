@@ -544,6 +544,38 @@ module Gori
       nil
     end
 
+    # Restores a flow's captured WebSocket transcript — the import path, where the messages
+    # already happened and their timestamps come out of the file rather than off the clock
+    # (`ImportedWsMessage` says why that distinction is load-bearing). Blocks until committed.
+    #
+    # ONE transaction for the whole transcript, the way `update_repeater_ws_messages` does it:
+    # a socket's message log is the unit here, and a per-message round trip through the writer
+    # would put a fsync between every frame of an imported capture. Nothing is deleted first —
+    # unlike the repeater case, this only ever runs against a flow that was inserted moments
+    # ago by the same import.
+    #
+    # Rows land in ARRAY order, which is what makes the order survive: `ws_messages` reads back
+    # `ORDER BY id`, not by `created_at`, so two messages inside the same microsecond keep the
+    # sequence the source recorded.
+    def insert_ws_messages(flow_id : Int64, messages : Array(ImportedWsMessage)) : Nil
+      return if messages.empty?
+      exec_task ->(conn : DB::Connection) {
+        messages.each do |msg|
+          args = [flow_id, nil, msg.created_at, msg.direction, msg.opcode] of DB::Any
+          # See `insert_ws_one`: an empty payload binds SQL NULL and violates the NOT NULL
+          # column, which would roll back the whole transaction — and a zero-length TEXT frame
+          # is legal per RFC 6455 (an empty heartbeat), so it reaches here.
+          slot = Store.blob_slot(args, msg.payload)
+          Store.bind_ws_shape(args, WsShape::DEFAULT)
+          conn.exec(
+            "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
+            "fin, rsv, masked, mask_key, frames, declared_len) " \
+            "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
+        end
+        nil
+      }
+    end
+
     # Blocks until every write enqueued before this call has committed AND the search index
     # has caught up with them. The single writer drains its channel FIFO, so a synchronous
     # round-trip also flushes the fire-and-forget h2-frame writes that precede it (a clean

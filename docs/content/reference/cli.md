@@ -158,11 +158,12 @@ gori run show <flow-id> --format raw
 
 #### HAR export
 
-A HAR gori writes imports back into gori as the same flow (`gori run import --har`), so it round-trips. Three things to know:
+A HAR gori writes imports back into gori as the same flow (`gori run import --har`), so it round-trips. Four things to know:
 
 - **Bodies are the wire bytes**, de-chunked but not decompressed, base64-encoded when they are not valid UTF-8. The `Content-Encoding` header stays in `headers`, so body and head keep describing the same message.
 - **A body capped at the capture limit is marked**, never emitted as if complete: `bodySize` and `content.size` stay the true wire size while the text carries only the captured prefix, and a `comment` on `content`/`postData` says so. The command also reports the count on STDERR.
-- **WebSocket flows and flows with no captured response are skipped**, since HAR cannot represent either. The count and reason go to STDERR; STDOUT stays a pure HAR document.
+- **A WebSocket flow exports with its messages**: the real `101` handshake, plus the captured transcript beside it in Chrome DevTools' `_webSocketMessages` field, and `gori run import --har` restores it. Direction, opcode (control frames included), bytes (base64 when not valid UTF-8) and millisecond timestamps survive; the per-frame shape (`FIN`/`RSV`/mask key) has no field in the format, so use `--format json` or `raw` when you need it.
+- **Flows with no captured response are skipped**, along with a socket whose transcript is empty — the handshake alone is not the exchange. The count and reason go to STDERR; STDOUT stays a pure HAR document.
 
 ### run compare
 

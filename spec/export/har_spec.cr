@@ -95,10 +95,52 @@ private def aborted_flow(store) : Gori::Store::FlowDetail
   store.get_flow(id).not_nil!
 end
 
-private def export(details : Array(Gori::Store::FlowDetail)) : {String, Gori::Export::Har::Report}
+private def export(details : Array(Gori::Store::FlowDetail),
+                   ws : Gori::Export::Har::WsLookup? = nil) : {String, Gori::Export::Har::Report}
   io = IO::Memory.new
-  report = Gori::Export::Har.log(io, details)
+  report = Gori::Export::Har.log(io, details, ws: ws)
   {io.to_s, report}
+end
+
+# A captured WebSocket flow: the real 101 handshake plus a transcript written through the real
+# Store writer, so the export reads back exactly what capture stored (`created_at` included).
+private def ws_flow(store, messages : Array({String, Int32, Bytes})) : Gori::Store::FlowDetail
+  detail = capture_flow(store,
+    req_head: "GET /chat HTTP/1.1\r\nHost: shop.test\r\nUpgrade: websocket\r\n" \
+              "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+              "Sec-WebSocket-Version: 13\r\n\r\n",
+    resp_head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+               "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
+    resp_body: nil, status: 101, reason: "Switching Protocols", content_type: nil,
+    target: "/chat")
+  messages.each do |(direction, opcode, payload)|
+    store.insert_ws_message(detail.row.id, direction, opcode, payload)
+  end
+  store.get_flow(detail.row.id).not_nil!
+end
+
+# The transcript lookup a real caller passes (`gori run history --format har` builds the same
+# closure over its open store).
+private def ws_lookup(store) : Gori::Export::Har::WsLookup
+  ->(id : Int64) { store.ws_messages(id) }
+end
+
+# `reimport`, plus the WebSocket transcript the import restored for that flow — read while the
+# store is still open, since that is the only place it exists.
+private def reimport_ws(har : String) : {Gori::Store::FlowDetail, Array(Gori::Store::WsMessage)}
+  path = File.tempname("gori-export-har", ".har")
+  File.write(path, har)
+  begin
+    result = nil
+    with_store do |store|
+      Gori::Import.import_file(store, :har, path)
+      row = store.recent_flows(2).first
+      result = {store.get_flow(row.id).not_nil!, store.ws_messages(row.id)}
+    end
+    result.not_nil!
+  ensure
+    File.delete?(path)
+  end
 end
 
 # Write `har` to a temp file and import it into a fresh store, returning the one flow back.
@@ -471,19 +513,158 @@ describe Gori::Export::Har do
     end
   end
 
-  describe "flows with no HAR representation" do
-    it "skips a WebSocket flow and says so, rather than emitting the handshake alone" do
+  # A 101 used to be skipped by its status alone, which threw away the whole point of having
+  # captured the socket. The handshake IS a real exchange, so it is written as itself and the
+  # transcript rides beside it in Chrome's `_webSocketMessages` — never folded into a
+  # fabricated HTTP body, which would import back as an exchange that never happened.
+  describe "a WebSocket flow's messages" do
+    it "writes the transcript as Chrome's _webSocketMessages beside the real handshake" do
       with_store do |store|
-        detail = capture_flow(store, status: 101, reason: "Switching Protocols",
-          resp_head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n",
-          resp_body: nil, content_type: nil)
+        detail = ws_flow(store, [
+          {"out", 1, %({"op":"subscribe"}).to_slice},
+          {"in", 1, "ack".to_slice},
+        ])
+        har, report = export([detail], ws_lookup(store))
+        report.written.should eq(1)
+        report.websocket.should eq(0)
+        report.skipped.should eq(0)
+
+        entry = JSON.parse(har)["log"]["entries"][0]
+        # The handshake, unfabricated: the request and response really happened.
+        entry["request"]["url"].as_s.should eq("https://shop.test/chat")
+        entry["response"]["status"].as_i.should eq(101)
+        entry["response"]["statusText"].as_s.should eq("Switching Protocols")
+        entry["_resourceType"].as_s.should eq("websocket")
+
+        msgs = entry["_webSocketMessages"].as_a
+        msgs.size.should eq(2)
+        msgs.map(&.["type"].as_s).should eq(["send", "receive"])
+        msgs.map(&.["opcode"].as_i).should eq([1, 1])
+        msgs[0]["data"].as_s.should eq(%({"op":"subscribe"}))
+        msgs[1]["data"].as_s.should eq("ack")
+        # `time` is a Unix timestamp in SECONDS, the unit Chrome writes — not gori's micros
+        # and not an offset from the entry's start.
+        stored = store.ws_messages(detail.row.id)
+        msgs[0]["time"].as_f.should eq((stored[0].created_at // 1000) / 1000.0)
+        msgs[0]["time"].as_f.should be > 1_000_000_000.0
+      end
+    end
+
+    it "round-trips the transcript back into ws_messages, and re-exports identically" do
+      with_store do |store|
+        detail = ws_flow(store, [
+          {"out", 1, "one".to_slice},
+          {"in", 1, "two".to_slice},
+          {"out", 2, Bytes[0x00, 0xff, 0xfe]},
+          {"in", 8, Bytes[0x03, 0xe8] + "bye".to_slice},
+        ])
+        har, _ = export([detail], ws_lookup(store))
+        captured = store.ws_messages(detail.row.id)
+
+        back, restored = reimport_ws(har)
+        back.row.status.should eq(101)
+        back.row.state.should eq(Gori::Store::FlowState::Complete)
+        String.new(back.request_head).should eq(String.new(detail.request_head))
+        String.new(back.response_head.not_nil!).should eq(String.new(detail.response_head.not_nil!))
+
+        # Direction, opcode, payload BYTES and order all survive — a binary frame and a CLOSE
+        # frame included, which is what the base64 escape hatch and the raw opcode are for.
+        restored.map(&.direction).should eq(captured.map(&.direction))
+        restored.map(&.opcode).should eq(captured.map(&.opcode))
+        restored.map(&.payload).should eq(captured.map(&.payload))
+        restored[3].close_code.should eq(1000)
+        String.new(restored[3].close_reason.not_nil!).should eq("bye")
+        # Millisecond fidelity, the same commitment `startedDateTime` makes.
+        restored.map(&.created_at).should eq(captured.map { |m| (m.created_at // 1000) * 1000 })
+
+        # …and the fixed point: exporting the re-imported flow reproduces the identical bytes.
+        export([back], ->(_id : Int64) { restored })[0].should eq(har)
+      end
+    end
+
+    it "base64s a payload that is not valid UTF-8 and keeps a text frame as text" do
+      with_store do |store|
+        detail = ws_flow(store, [
+          {"out", 1, "\xff\xfe not utf-8".to_slice},
+          {"in", 1, "plain".to_slice},
+        ])
+        har, _ = export([detail], ws_lookup(store))
+        msgs = JSON.parse(har)["log"]["entries"][0]["_webSocketMessages"].as_a
+
+        # An invalid-UTF-8 TEXT frame is a standard RFC 6455 §8.1/§5.6 test case; scrubbing it
+        # to U+FFFD would rewrite the operator's evidence into a different message (P7).
+        msgs[0]["encoding"].as_s.should eq("base64")
+        Base64.decode(msgs[0]["data"].as_s).should eq("\xff\xfe not utf-8".to_slice)
+        msgs[1]["data"].as_s.should eq("plain")
+        msgs[1]["encoding"]?.should be_nil
+
+        _, restored = reimport_ws(har)
+        restored[0].payload.should eq("\xff\xfe not utf-8".to_slice)
+        restored[1].payload.should eq("plain".to_slice)
+      end
+    end
+
+    # `[gori] …` rows are positioned IN the stream and their position names the frames they
+    # apply to, so dropping them would delete gori's own statements about the socket from the
+    # artifact. The prefix survives byte-exact, which is what every seed reader's guard reads.
+    it "carries the relay's own notice rows, and they still read as notices afterwards" do
+      with_store do |store|
+        detail = ws_flow(store, [
+          {"in", 1, "[gori] the handshake's Sec-WebSocket-Extensions was stripped".to_slice},
+          {"out", 1, "hello".to_slice},
+        ])
+        har, _ = export([detail], ws_lookup(store))
+        JSON.parse(har)["log"]["entries"][0]["_webSocketMessages"][0]["data"].as_s
+          .should start_with("[gori] ")
+
+        _, restored = reimport_ws(har)
+        restored[0].notice?.should be_true
+        restored[1].notice?.should be_false
+      end
+    end
+
+    # An empty payload is a legal zero-length frame (RFC 6455 — an empty heartbeat), and it is
+    # the shape that binds SQL NULL against a NOT NULL BLOB column and rolls back the batch.
+    it "round-trips a zero-length frame instead of losing the whole transcript to it" do
+      with_store do |store|
+        detail = ws_flow(store, [{"out", 1, Bytes.empty}, {"in", 9, Bytes.empty}])
+        har, _ = export([detail], ws_lookup(store))
+        JSON.parse(har)["log"]["entries"][0]["_webSocketMessages"].as_a
+          .map(&.["data"].as_s).should eq(["", ""])
+
+        _, restored = reimport_ws(har)
+        restored.size.should eq(2)
+        restored.map(&.payload.size).should eq([0, 0])
+        restored.map(&.opcode).should eq([1, 9])
+      end
+    end
+  end
+
+  describe "flows with no HAR representation" do
+    it "skips a WebSocket flow with an EMPTY transcript, rather than emitting the handshake alone" do
+      with_store do |store|
+        detail = ws_flow(store, [] of {String, Int32, Bytes})
         Gori::Export::Har.skip_reason(detail).should eq(Gori::Export::Har::Skip::WebSocket)
 
-        har, report = export([detail])
+        har, report = export([detail], ws_lookup(store))
         report.websocket.should eq(1)
         report.written.should eq(0)
         JSON.parse(har)["log"]["entries"].as_a.should be_empty
         report.notes.join(" ").should contain("WebSocket")
+        report.notes.join(" ").should contain("no captured messages")
+      end
+    end
+
+    # The lookup is how a socket's messages reach the writer at all. A caller that omits it is
+    # saying "no transcripts are available", and every 101 then lands in the skipped COUNT
+    # rather than silently exporting as a handshake with nothing behind it.
+    it "skips a socket WITH messages when the caller passed no transcript lookup" do
+      with_store do |store|
+        detail = ws_flow(store, [{"out", 1, "hello".to_slice}])
+        har, report = export([detail])
+        report.websocket.should eq(1)
+        report.written.should eq(0)
+        JSON.parse(har)["log"]["entries"].as_a.should be_empty
       end
     end
 
@@ -503,9 +684,8 @@ describe Gori::Export::Har do
     it "still writes the exportable flows around a skipped one" do
       with_store do |store|
         ok = capture_flow(store)
-        ws = capture_flow(store, status: 101, reason: "Switching Protocols",
-          resp_head: "HTTP/1.1 101 Switching Protocols\r\n\r\n", resp_body: nil, content_type: nil)
-        har, report = export([ok, ws, pending_flow(store)])
+        ws = ws_flow(store, [] of {String, Int32, Bytes})
+        har, report = export([ok, ws, pending_flow(store)], ws_lookup(store))
         report.written.should eq(1)
         report.websocket.should eq(1)
         report.no_response.should eq(1)

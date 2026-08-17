@@ -175,7 +175,10 @@ module Gori
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
                                 limit : Int32) : Nil
         details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }
-        report = Export::Har.log(STDOUT, details)
+        # The transcript lookup, asked only about a 101 (`Export::Har.log`), so an HTTP-only
+        # export pays nothing for it and a captured socket exports with its messages instead of
+        # being skipped.
+        report = Export::Har.log(STDOUT, details, ws: ->(id : Int64) { store.ws_messages(id) })
         STDOUT.puts
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
@@ -236,7 +239,7 @@ module Gori
         show_response = !req_only
         case format
         when :raw  then show_raw(detail, show_request, show_response)
-        when :har  then show_har(detail)
+        when :har  then show_har(detail, ws_msgs)
         when :json then puts show_json(detail, show_request, show_response, ws_msgs)
         else            show_text(detail, show_request, show_response, ws_msgs)
         end
@@ -245,14 +248,18 @@ module Gori
       # One flow as a one-entry HAR 1.2 log. A flow HAR cannot represent is an ERROR here,
       # not an empty log: the listing can skip and count, but `show <id> --format har` named
       # this flow, so silently handing back `entries: []` would answer a different question.
-      private def self.show_har(detail : Store::FlowDetail) : Nil
+      # `ws_msgs` is already in hand: `cmd_show` fetches it before closing the store, because a
+      # 101's messages are what the entry is mostly FOR.
+      private def self.show_har(detail : Store::FlowDetail,
+                                ws_msgs : Array(Store::WsMessage)) : Nil
         # The refusal names the REAL cause where the store has one: a flow gori itself
         # refused to send carries it in `error` ("request framing rejected: …"), and
         # "has no captured response" alone reads like the origin's fault.
         because = detail.error.presence.try { |e| " (#{e})" } || ""
-        case Export::Har.skip_reason(detail)
+        case Export::Har.skip_reason(detail, ws_msgs.size)
         in Export::Har::Skip::WebSocket
-          abort "gori run show: flow ##{detail.row.id} is a WebSocket flow — HAR has no representation for its messages (use --format json or raw)"
+          abort "gori run show: flow ##{detail.row.id} is a WebSocket flow with no captured messages — " \
+                "the entry would carry the handshake and no traffic (use --format json or raw)"
         in Export::Har::Skip::NoResponse
           abort "gori run show: flow ##{detail.row.id} has no captured response — a HAR entry requires one#{because}"
         in Export::Har::Skip::Incomplete
@@ -261,7 +268,7 @@ module Gori
         in Nil
           # exportable
         end
-        report = Export::Har.log(STDOUT, [detail])
+        report = Export::Har.log(STDOUT, [detail], ws: ->(_id : Int64) { ws_msgs })
         STDOUT.puts
         report.notes.each { |n| STDERR.puts "gori run show: #{n}" }
       end

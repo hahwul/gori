@@ -106,11 +106,20 @@ module Gori
     def self.insert_all(store : Store, pairs : Array(Builder::FlowPair)) : {Int32, Int32}
       committed = 0
       pairs.each_slice(IMPORT_CHUNK) do |slice|
-        n = store.insert_import_batch(slice.map { |pair| {pair.request, pair.response} })
-        committed += n
+        # `_ids`, not the counting form: a flow's WebSocket transcript is stored against the
+        # flow id, which does not exist until this write commits.
+        ids = store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} })
+        committed += ids.size
+        # Ids come back in PAIR ORDER, which is what makes the index the pairing. A short
+        # answer is a rolled-back batch, and walking the ids we actually got is then exactly
+        # right: the pairs past the end have no flow to hang messages on.
+        ids.each_with_index do |id, i|
+          msgs = slice[i].ws_messages
+          store.insert_ws_messages(id, msgs) unless msgs.empty?
+        end
         # A short answer means the batch rolled back or the store is closing; stop rather than
         # push more work at a store that just refused some.
-        break if n < slice.size
+        break if ids.size < slice.size
       end
       {committed, pairs.size}
     end
