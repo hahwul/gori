@@ -330,7 +330,7 @@ module Gori::Proxy
     #     ALPN-negotiated h2 stream on the same reverse listener reaches `relay_h2` with only
     #     the pre-handshake host test in front of it — so h2c here is precisely as gated as the
     #     h2 the listener serves today, and no new hole is opened.
-    #   * the three rule gates (`h2c_unservable?`) — apply, for the reason they apply on
+    #   * the three rule gates (`h2c_refusal`) — apply, for the reason they apply on
     #     CONNECT: they live on `ClientConn`'s h1 path, the relay cannot run them, and with the
     #     preface already sent the only honest answers are refuse or lie.
     #
@@ -550,36 +550,6 @@ module Gori::Proxy
         "Redirect this listener with iptables/pf so the original destination is readable, or " \
         "use a reverse listener with the origin declared — this is logged once"
       end
-    end
-  end
-
-  # A LISTENER's entry into the h2c relay (#737) — `ClientConn` reopened, following the
-  # cross-file reopen this tree uses everywhere (`Store`, `Gori::CLI`, `Tui::Runner`, and
-  # `H2::StreamGate`, whose sandbox half lives in `h2/stream_gate/sandbox.cr` and reaches the
-  # class's private state exactly as this does).
-  #
-  # It is four lines and it delegates; that is the point. `intercept_h2c` — the dial, the two
-  # `SocketTuning.relax` calls, the `H2::Relay.run` carrying all four lenses, the `ensure` that
-  # frees the origin fd — already exists, and this wiring is already spelled twice (here and
-  # `tls/tunnel.cr#relay_h2`). A third spelling in `Server` would be worse than the gap #737
-  # describes, so the listener borrows the one that is there instead of growing one.
-  #
-  # `h2c_unservable?` comes with it rather than being re-tested by the caller, because it is
-  # the same question with the same answer: a body Match&Replace rule, a short-circuit rule or
-  # a body-scoped extract rule is live for this host, the relay structurally cannot apply it,
-  # and the client has already committed to HTTP/2. False when the connection was refused, so
-  # the caller closes the socket. (Its log line says "h2c CONNECT to <host>"; on this path the
-  # preface arrived without one. The sentence after it — which rule, and what to do — is the
-  # part an operator acts on, and rewording it means editing `client_conn.cr`.)
-  #
-  # THE HOME FOR THIS IS `conn/client_conn.cr`, beside the two privates it calls; it sits here
-  # only because #737 landed while two other changes owned regions of that file. Moving the
-  # method there is mechanical and changes nothing — no caller, no behaviour, no gate.
-  class ClientConn
-    def serve_h2c_prior_knowledge(host : String, port : Int32, client : IO) : Bool
-      return false if h2c_unservable?(host)
-      intercept_h2c(host, port, client)
-      true
     end
   end
 end

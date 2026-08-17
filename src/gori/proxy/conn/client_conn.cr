@@ -1577,6 +1577,42 @@ module Gori::Proxy
         "h2c CONNECT tunnel refused: #{reason}. #{advice}")
     end
 
+    # A LISTENER's entry into the h2c relay (#737): a prior-knowledge preface that arrived
+    # DIRECTLY on a reverse or transparent listener, with no CONNECT in front of it. Public
+    # because `Proxy::Server` is the only caller; everything it delegates to is private here,
+    # which is why the method lives beside them rather than in `server.cr`.
+    #
+    # It delegates, and that is the point. `intercept_h2c` — the dial, the two
+    # `SocketTuning.relax` calls, the `H2::Relay.run` carrying all four lenses, the `ensure`
+    # that frees the origin fd — already exists, and the wiring is already spelled twice (there
+    # and `tls/tunnel.cr#relay_h2`). A third spelling in `Server` would be worse than the gap
+    # #737 describes.
+    #
+    # The three RULE gates come with it rather than being re-tested by the caller: same
+    # question, same answer, and with the preface already sent the only honest options are
+    # refuse or lie. `http2_disabled?` — which `h2c_refusal` also reports — has already been
+    # answered by `Server#serve_h2c`, which refuses it in the listener's own words before ever
+    # reaching here; a second look costs one `Settings` read and cannot fire.
+    #
+    # Refusal is a log line and nothing else, unlike the CONNECT path's `refuse_h2c`. There is
+    # no request to record against: `record_error` projects a flow from a `RawRequest`, and on
+    # this path the connection opened with 24 preface octets, not a request. The h2 streams
+    # that would have carried one are exactly what is being refused. Returns false so the
+    # caller closes the socket — nothing else will, since ownership never passes to `run` here.
+    def serve_h2c_prior_knowledge(host : String, port : Int32, client : IO) : Bool
+      if reason = h2c_refusal(host)
+        ::Log.warn do
+          "h2c prior knowledge on a listener, for #{host}:#{port}: refused because #{reason}. " \
+          "The client committed to HTTP/2 by sending the preface, so there is nothing to " \
+          "downgrade — clear what refused it for this host, or reach it over TLS where gori " \
+          "can downgrade the connection instead"
+        end
+        return false
+      end
+      intercept_h2c(host, port, client)
+      true
+    end
+
     # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the CONNECT authority, so
     # we dial it plaintext and run the same h2 relay (no :authority routing / HPACK coupling
     # needed). The origin must speak h2c.
