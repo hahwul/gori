@@ -11,7 +11,7 @@ end
 private def blank_snapshot : Gori::Tui::AdvancedSnapshot
   Gori::Tui::AdvancedSnapshot.new(
     conc: "20", rate: "", timeout: "", retries: "0", max_requests: "", race: "",
-    follow: false, calibrate: false, keep_alive: true, update_cl: true,
+    follow: false, calibrate: false, keep_alive: true, update_cl: true, reframe_grpc: false,
     m_status: "", m_size: "", m_words: "", m_regex: "",
     f_status: "", f_size: "", f_words: "", f_regex: "")
 end
@@ -141,6 +141,27 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     ov.snapshot.update_cl.should be_true
   end
 
+  # The gRPC reframe row is the ONE toggle on this card whose default is off, and it sits
+  # directly under Auto Content-Length because they are the same kind of knob pointed at the
+  # two length declarations one gRPC request carries (DESIGN.md §7). It reaches the snapshot
+  # like any other toggle — FuzzerView#apply_advanced is what puts it on `Fuzz::Config`.
+  it "toggles gRPC reframe, which starts OFF (the headless default)" do
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    ov.snapshot.reframe_grpc.should be_false
+    9.times { ov.handle_key(akey(Termisu::Input::Key::Down)) } # → gRPC reframe (row 9)
+    ov.handle_key(akey(Termisu::Input::Key::Space))
+    ov.snapshot.reframe_grpc.should be_true
+    ov.snapshot.update_cl.should be_true # the neighbour above is untouched
+    ov.snapshot.keep_alive.should be_true
+  end
+
+  it "renders the gRPC reframe row with its unary caveat in the label" do
+    ov = FuzzAdvancedOverlay.new(blank_snapshot)
+    backend = MemoryBackend.new(120, 30)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+    backend.contains?("gRPC reframe (unary)").should be_true
+  end
+
   it "never focuses a row it did not draw — the hint row and the bottom border are not rows" do
     # `render` reserves the last two interior lines (the hint on box.bottom-2, the border on
     # box.bottom-1), but handle_click computed `i = my - (box.y + 1)` with no upper bound
@@ -149,7 +170,7 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     # Focus-only (no commit-on-row-click here), so nothing fired; still the wrong row.
     #
     # Production hands `layout.body`, which is what makes this reachable: the card clips to
-    # 14 rows there, so only 11 of the 17 ROWS are drawn. Under the harness's 80x24 default
+    # 14 rows there, so only 11 of the ROWS are drawn. Under the harness's 80x24 default
     # every row fits and `visible == ROWS.size` hides the whole bug. The 16-row body is what
     # yields that 14-row card now that every modal insets from its area by 2.
     body = Gori::Tui::Rect.new(2, 4, 76, 16)
@@ -162,16 +183,17 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.click_in_box(2, 13).should eq(:open) # the bottom border
     h.type("9")
     ov.snapshot.conc.should eq("209")  # focus never left row 0…
-    ov.snapshot.m_words.should eq("")  # …and did not land on an undrawn row (hint → +11)
-    ov.snapshot.m_regex.should eq("")  # …nor on the one past it (border → +12)
+    ov.snapshot.m_size.should eq("")   # …and did not land on an undrawn row (hint → +11)
+    ov.snapshot.m_words.should eq("")  # …nor on the one past it (border → +12)
     ov.snapshot.m_status.should eq("") # …nor anywhere else in the match block
 
-    # Positive control: the LAST drawn row is still a live click target.
+    # Positive control: the LAST drawn row is still a live click target. (Row +10 — "Match
+    # status" since the gRPC-reframe toggle joined the two length knobs above it.)
     edge = FuzzAdvancedOverlay.new(blank_snapshot)
     eh = OverlayHarness.new(edge, area: body)
     eh.click_in_box(2, 11).should eq(:open)
     eh.type("7")
-    edge.snapshot.m_size.should eq("7")
+    edge.snapshot.m_status.should eq("7")
     edge.snapshot.conc.should eq("20")
   end
 

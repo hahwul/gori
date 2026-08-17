@@ -20,6 +20,7 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_toggle_auto_content_length : Nil # recompute Content-Length on send
   abstract def repeater_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
   abstract def repeater_toggle_ws_key : Nil              # WebSocket: send the typed Sec-WebSocket-Key instead of a fresh one
+  abstract def repeater_toggle_grpc_reframe : Nil        # gRPC: recompute the 5-byte length prefix over the payload on send
   abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
   abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
   abstract def repeater_pretty_request : Nil

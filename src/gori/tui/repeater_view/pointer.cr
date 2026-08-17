@@ -68,6 +68,10 @@ class Gori::Tui::RepeaterView
                  elsif @grpc_reframable
                    b << {:req_hex, "^X", "MSG"} # click to hex-edit the unary payload
                  end
+                 # Chains left of whichever hex chip is drawn — in BOTH states, matching
+                 # render_request. Recompute the 5-byte length prefix over the payload, or send
+                 # the captured one in front of it (DESIGN.md §7).
+                 b << {:grpc_reframe, "␣F", "FRAME"} if @grpc_reframable
                  b
                elsif ws_mode?
                  WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from

@@ -14,6 +14,7 @@ module Gori::Tui
     conc : String, rate : String, timeout : String, retries : String,
     max_requests : String, race : String,
     follow : Bool, calibrate : Bool, keep_alive : Bool, update_cl : Bool,
+    reframe_grpc : Bool,
     m_status : String, m_size : String, m_words : String, m_regex : String,
     f_status : String, f_size : String, f_words : String, f_regex : String
 
@@ -44,6 +45,20 @@ module Gori::Tui
       # ON is the old (and right) default for an ordinary sweep whose payload changed the
       # body length; OFF sends the header exactly as the template declares it.
       {:update_cl, "Auto Content-Length", :toggle},
+      # The SECOND length declaration a gRPC request carries — the 5-byte prefix in front of
+      # the message — and deliberately the OPPOSITE default to the row above it (DESIGN.md §7,
+      # the gRPC reframe entry): Content-Length is recomputed unless told not to, the gRPC
+      # prefix is left as the payload left it unless told to. ON recomputes it per request, so
+      # a sweep whose payload changed the message length is not rejected at the framing layer.
+      # `Fuzz::Config#reframe_grpc?` — the same knob `gori run fuzz --reframe-grpc` and MCP
+      # `reframe_grpc:` set, and the same engine (`Generator#emit`) applies it.
+      #
+      # (unary) is in the LABEL because the refusals are not visible anywhere else on this
+      # card: `GrpcVerdict.reframable_template?` declines a non-gRPC template, a seed whose
+      # framing is ALREADY broken (that mis-framing is the operator's own test), and
+      # grpc-web-text; `Grpc.reframe` then declines a client-streaming body and a body that
+      # frames end-to-end. ON over any of those is a no-op, not a rewrite.
+      {:reframe_grpc, "gRPC reframe (unary)", :toggle},
       {:m_status, "Match status", :text},
       {:m_size, "Match size", :text},
       {:m_words, "Match words", :text},
@@ -52,14 +67,16 @@ module Gori::Tui
       {:f_size, "Filter size", :text},
       {:f_words, "Filter words", :text},
       {:f_regex, "Filter regex", :text},
-      # Appended LAST, deliberately: every other row above is referenced by hardcoded index
-      # in spec/tui/fuzz_advanced_overlay_spec.cr, and this is the one position that shifts
-      # none of them. Race condition (last-byte-sync): N dedicated connections holding back
+      # Appended LAST, deliberately: the rows above are referenced by hardcoded index in
+      # spec/tui/fuzz_advanced_overlay_spec.cr, and this is the one position that shifts none
+      # of them. (`gRPC reframe` DID shift them — it belongs beside the other length-declaration
+      # toggle, not at the bottom next to a connection count — so that spec moved with it.)
+      # Race condition (last-byte-sync): N dedicated connections holding back
       # the final byte, released together — bypasses Mode/payload sets entirely (see
       # Fuzz::Config#race_count). Blank = off. A warm-up request is CLI/MCP-only for this phase.
       {:race, "Race (N conns)", :text},
     ]
-    LABEL_W = 21 # value column offset (widest label "Auto Content-Length" + padding)
+    LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
     def initialize(snap : AdvancedSnapshot)
       @sel = 0
@@ -68,6 +85,7 @@ module Gori::Tui
       @calibrate = snap.calibrate
       @keep_alive = snap.keep_alive
       @update_cl = snap.update_cl
+      @reframe_grpc = snap.reframe_grpc
       @fields = {
         :conc         => TextField.new(snap.conc),
         :rate         => TextField.new(snap.rate),
@@ -151,10 +169,11 @@ module Gori::Tui
 
     private def toggle_current : Nil
       case current[0]
-      when :follow     then @follow = !@follow
-      when :calibrate  then @calibrate = !@calibrate
-      when :keep_alive then @keep_alive = !@keep_alive
-      when :update_cl  then @update_cl = !@update_cl
+      when :follow       then @follow = !@follow
+      when :calibrate    then @calibrate = !@calibrate
+      when :keep_alive   then @keep_alive = !@keep_alive
+      when :update_cl    then @update_cl = !@update_cl
+      when :reframe_grpc then @reframe_grpc = !@reframe_grpc
       end
     end
 
@@ -174,7 +193,7 @@ module Gori::Tui
         timeout: @fields[:timeout].value, retries: @fields[:retries].value,
         max_requests: @fields[:max_requests].value, race: @fields[:race].value,
         follow: @follow, calibrate: @calibrate, keep_alive: @keep_alive,
-        update_cl: @update_cl,
+        update_cl: @update_cl, reframe_grpc: @reframe_grpc,
         m_status: @fields[:m_status].value, m_size: @fields[:m_size].value,
         m_words: @fields[:m_words].value, m_regex: @fields[:m_regex].value,
         f_status: @fields[:f_status].value, f_size: @fields[:f_size].value,
@@ -229,10 +248,11 @@ module Gori::Tui
       screen.text(box.x + 2, y, label, foc ? Theme.text_bright : Theme.muted, bg)
       if kind == :toggle
         on = case key
-             when :follow     then @follow
-             when :keep_alive then @keep_alive
-             when :update_cl  then @update_cl
-             else                  @calibrate
+             when :follow       then @follow
+             when :keep_alive   then @keep_alive
+             when :update_cl    then @update_cl
+             when :reframe_grpc then @reframe_grpc
+             else                    @calibrate
              end
         screen.text(vx, y, on ? "‹ on ›" : "‹ off ›", foc ? Theme.text_bright : Theme.text, bg)
       else

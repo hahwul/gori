@@ -1007,6 +1007,7 @@ module Gori::Tui
         max_requests: @s_max_req, race: @s_race,
         follow: @config.follow_redirects?, calibrate: @config.auto_calibrate?,
         keep_alive: @config.keep_alive?, update_cl: @config.update_content_length?,
+        reframe_grpc: @config.reframe_grpc?,
         m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
         m_words: @matcher.match_words || "", m_regex: @s_m_regex,
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
@@ -1027,6 +1028,10 @@ module Gori::Tui
       @matcher.auto_calibrate = s.calibrate
       @config.keep_alive = s.keep_alive
       @config.update_content_length = s.update_cl
+      # Straight through to the ONE engine that implements it (`Fuzz::Generator#emit`, via
+      # `Plan.build`) — the view neither reframes nor decides what is reframable. Default
+      # false, matching `gori run fuzz` / MCP `fuzz_start`; see DESIGN.md §7.
+      @config.reframe_grpc = s.reframe_grpc
       @matcher.match_status = blank_nil(s.m_status)
       @matcher.match_size = blank_nil(s.m_size)
       @matcher.match_words = blank_nil(s.m_words)
@@ -1995,6 +2000,7 @@ module Gori::Tui
           j.field "calibrate", @config.auto_calibrate?
           j.field "keep_alive", @config.keep_alive?
           j.field "update_cl", @config.update_content_length?
+          j.field "reframe_grpc", @config.reframe_grpc?
           j.field("sets") { j.array { @sets.each { |s| j.object { j.field "kind", s.kind.to_s; j.field "value", s.value } } } }
           j.field "match_status", @matcher.match_status
           j.field "filter_status", @matcher.filter_status
@@ -2030,6 +2036,10 @@ module Gori::Tui
       # Same nil-means-default reading as keep_alive above: a session saved before this
       # key existed must keep the ctor default (on), not silently start sending desyncs.
       @config.update_content_length = obj["update_cl"]?.try(&.as_bool?) != false
+      # The OPPOSITE reading to update_cl above, because the default is the opposite: absent
+      # (a session saved before this key existed) must mean OFF, the ctor default and the
+      # headless one (DESIGN.md §7).
+      @config.reframe_grpc = obj["reframe_grpc"]?.try(&.as_bool?) || false
       apply_sets_json(obj["sets"]?)
       @matcher.match_status = obj["match_status"]?.try(&.as_s?)
       @matcher.filter_status = obj["filter_status"]?.try(&.as_s?)

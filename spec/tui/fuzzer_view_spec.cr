@@ -428,6 +428,7 @@ describe Gori::Tui::FuzzerView do
         conc: "50", rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
         max_requests: snap.max_requests, race: snap.race,
         follow: true, calibrate: snap.calibrate, keep_alive: false, update_cl: snap.update_cl,
+        reframe_grpc: snap.reframe_grpc,
         m_status: "200,500", m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
         f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex)
       view.apply_advanced(edited)
@@ -438,6 +439,75 @@ describe Gori::Tui::FuzzerView do
       back.m_status.should eq("200,500")
     end
 
+    # PR 13 — the Fuzzer pane could not reach `reframe_grpc` at all: `gori run fuzz
+    # --reframe-grpc` and MCP `reframe_grpc:` set it, the TUI never did, so the same operator
+    # gesture produced different bytes on the two surfaces. The engine is unchanged and
+    # already pinned byte-for-byte by spec/fuzz/grpc_verdict_spec.cr; what these pin is the
+    # SEAM — the overlay's toggle reaching the very `Fuzz::Config` that `build_engine` hands
+    # `Plan.build` (and therefore `Fuzz::Generator#emit`).
+    it "the advanced toggle puts reframe_grpc on the config Plan.build receives" do
+      view = loaded_fuzzer
+      view.config.reframe_grpc?.should be_false # the ctor default, and the headless one (P7)
+      view.advanced_snapshot.reframe_grpc.should be_false
+
+      snap = view.advanced_snapshot
+      view.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
+        conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        max_requests: snap.max_requests, race: snap.race,
+        follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
+        update_cl: snap.update_cl, reframe_grpc: true,
+        m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
+      view.config.reframe_grpc?.should be_true
+      view.advanced_snapshot.reframe_grpc.should be_true
+
+      # …and a run actually builds off it. `build_engine` passes `config: @config` straight
+      # through, so this is the object the generator reads.
+      with_fuzz_store do |store|
+        view.auto_mark # ^A: a §position, without which Plan.build refuses the run
+        view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "aa"))
+        engine, err = view.build_engine(false, Gori::Scope.load(store), nil)
+        err.should be_nil
+        engine.should_not be_nil
+        view.config.reframe_grpc?.should be_true
+      end
+    end
+
+    it "leaves reframe_grpc off when the toggle is not touched" do
+      # The half that matters most: nothing about opening the ADVANCED card, editing an
+      # unrelated row, or saving/restoring a session may flip a P7 default ON.
+      view = loaded_fuzzer
+      snap = view.advanced_snapshot
+      view.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
+        conc: "5", rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        max_requests: snap.max_requests, race: snap.race,
+        follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
+        update_cl: snap.update_cl, reframe_grpc: snap.reframe_grpc,
+        m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
+      view.config.reframe_grpc?.should be_false
+
+      dst = FuzzerView.new
+      dst.duplicate_from(view) # config_json → apply_config_json
+      dst.config.reframe_grpc?.should be_false
+    end
+
+    it "carries reframe_grpc across a config_json round-trip once it IS on" do
+      src = loaded_fuzzer
+      snap = src.advanced_snapshot
+      src.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
+        conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        max_requests: snap.max_requests, race: snap.race,
+        follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
+        update_cl: snap.update_cl, reframe_grpc: true,
+        m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
+      dst = FuzzerView.new
+      dst.duplicate_from(src)
+      dst.config.reframe_grpc?.should be_true
+      dst.advanced_snapshot.reframe_grpc.should be_true
+    end
+
     it "persists match/filter words across a config_json round-trip" do
       src = loaded_fuzzer
       snap = src.advanced_snapshot
@@ -445,7 +515,7 @@ describe Gori::Tui::FuzzerView do
         conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
         max_requests: snap.max_requests, race: snap.race,
         follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
-        update_cl: snap.update_cl,
+        update_cl: snap.update_cl, reframe_grpc: snap.reframe_grpc,
         m_status: snap.m_status, m_size: snap.m_size, m_words: "42", m_regex: snap.m_regex,
         f_status: snap.f_status, f_size: snap.f_size, f_words: "7", f_regex: snap.f_regex))
       dst = FuzzerView.new

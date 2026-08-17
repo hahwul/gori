@@ -550,13 +550,16 @@ module Gori::Tui
     def repeater_toggle_hex : Nil
       return unless view = current_view
       if view.grpc_mode?
-        # A unary gRPC call hex-edits its message PAYLOAD (the length prefix is recomputed
-        # on send); a 0- or multi-message body has no unambiguous single payload to edit.
+        # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
+        # unambiguous single payload to edit. What happens to the length prefix in front of
+        # that payload is `␣F:FRAME`'s answer, not this one — so the toast reads the toggle
+        # rather than promising the recompute it used to be fused with.
         if !view.grpc_reframable?
           @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
         elsif view.focus == :request
           on = view.toggle_request_hex
-          @host.status(on ? "gRPC payload hex: on — length prefix recomputed on send (^X/esc exit)" : "gRPC payload hex: off")
+          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
+          @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
         else
           @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
         end
@@ -645,6 +648,31 @@ module Gori::Tui
                          : "Sec-WebSocket-Key: regenerated per send (the key in the editor is not the one on the wire)")
     end
 
+    # Recompute the gRPC 5-byte length prefix over the payload being sent, or leave the
+    # captured one in front of it.
+    #
+    # ON is this tab's default and the OPPOSITE of `gori run repeater send` / MCP
+    # `send_request` (DESIGN.md §7): the tab's whole reason to exist is that `^X` produces a
+    # well-formed unary message, and a stale prefix after a hex edit is the trap it avoids.
+    # Turning it OFF is how an operator asks for the headless behaviour — a length prefix that
+    # disagrees with its payload, which is a standard gRPC parser test.
+    def repeater_toggle_grpc_reframe : Nil
+      return unless view = current_view
+      unless view.grpc_mode?
+        @host.status("gRPC reframe applies to a gRPC tab only")
+        return
+      end
+      unless view.grpc_reframable?
+        # Not a refusal of the toggle so much as a report that there is nothing for it to do:
+        # `Grpc.reframe` declines a 0-/multi-message body outright, and so does this tab.
+        @host.status("gRPC reframe needs a UNARY message (this body has #{view.grpc_msg_count}) — sent verbatim")
+        return
+      end
+      on = view.toggle_grpc_reframe
+      @host.status(on ? "gRPC reframe: on — the 5-byte length prefix follows the payload" \
+                         : "gRPC reframe: off — sending the captured length prefix (stale after a ^X edit)")
+    end
+
     def repeater_pretty_request : Nil
       return unless view = current_view
       if err = view.pretty_print_request
@@ -725,6 +753,9 @@ module Gori::Tui
       when :ws_key
         view.focus_pane(:request)
         repeater_toggle_ws_key
+      when :grpc_reframe
+        view.focus_pane(:request)
+        repeater_toggle_grpc_reframe
       when :transport
         # No `focus_pane`: the chip sits on the TARGET band but the choice belongs to the whole
         # tab, and `cycle_ws_transport` already re-seats the request/response sub-panes it

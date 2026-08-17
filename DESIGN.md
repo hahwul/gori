@@ -1247,3 +1247,38 @@ MCP `list_session_slots`), matching `list_env` and the identities card's names-o
 slot's whole job is carrying a credential, and a list is scrollback. `--set` / `set_headers`
 parse through `Discover::Headers.parse_lines` — the same parser the TUI form uses — so a
 CR/LF-carrying value is refused by name on every surface rather than dropped on one.
+
+### 2026-08-17: the reframe default splits by surface, and hex-editable is not reframe-on-send
+
+Refines: [P1](#p1), [P4](#p4), [P7](#p7). Extends the 2026-08-17 gRPC-reframe entry. PR 13.
+
+The reframe opt-in landed on two of the three surfaces. `gori run fuzz --reframe-grpc` and MCP
+`reframe_grpc:` set `Fuzz::Config#reframe_grpc?`; the TUI's Fuzzer never did, so a knob that
+exists in the engine was unreachable from the tab most operators actually fuzz from. That is
+now a toggle on the ADVANCED card, sitting directly under `Auto Content-Length` because they
+are the same kind of knob pointed at the two length declarations one gRPC request carries —
+and carrying the opposite default, exactly as the engine entry says they must. The view
+neither reframes nor decides what is reframable: it sets one boolean on the `Fuzz::Config`
+that `build_engine` already hands `Plan.build`, and `Generator#emit` is unchanged.
+
+The Repeater's gRPC tab had the inverse problem: it reframed *always*, because
+`grpc_reframable?` was one flag meaning both "unary, so the payload is hex-editable" and
+"reframe on send". Those are different kinds of fact — the first is a property of the capture,
+the second is a decision — and fusing them meant the tab could not send what
+`gori run repeater send` sends by default. They are split (`grpc_reframe?`, `␣F:FRAME`,
+`repeater.toggle-grpc-reframe`); `^X` still needs the first, and only the second is flippable.
+
+**The two defaults differ on purpose, and that is not a parity gap.** Headless the default is
+off (P7): the operator names bytes and gori sends them, and a deliberately-wrong length prefix
+is a standard gRPC parser test. In the Repeater's gRPC tab the default is **on**, because the
+tab's whole reason to exist is that `^X` produces a well-formed unary message — a stale prefix
+after a hex edit is the trap the tab already avoids, not a test anyone typed. Turning it off is
+how an operator asks for the headless behaviour, and the badge says which one is armed. The
+Fuzzer stays off on every surface: there the payload comes from a wordlist, not from a hand
+edit, and `Fuzz::Progress#grpc_stale` already reports what a stale prefix cost the run.
+
+Neither toggle is persisted anywhere new. The Repeater's is view state with the same lifetime
+as its sibling send knobs (reset to on by `load_grpc`, carried by a tab duplicate); the
+Fuzzer's rides the existing `config_json` blob, read back as `|| false` — the opposite of
+`update_cl`'s `!= false` — so a session saved before the key existed starts OFF rather than
+silently reframing bytes the operator never asked to repair.
