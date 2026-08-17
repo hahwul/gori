@@ -851,9 +851,12 @@ module Gori
             end
             j.field "messages" do
               j.array do
-                # `WsEngine.send` frames every outbound message before it reads a single
-                # inbound frame, so the "out" rows appear here in `out_messages` order and
-                # this counter is a safe index back into what was HANDED to the engine.
+                # The engine appends an "out" row as it writes each message, in
+                # `out_messages` order, so this counter is a safe index back into what was
+                # HANDED to it. It counts only "out" rows for that reason: the replay is
+                # INTERLEAVED, so the server's answers sit between them, and an early stop
+                # (peer CLOSE / dead socket / a cap) simply leaves the tail of `source`
+                # unvisited rather than misaligning what is here.
                 out_seen = 0
                 result.messages.each do |message|
                   authored = if message.direction == "out"

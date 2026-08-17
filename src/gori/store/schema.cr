@@ -718,8 +718,8 @@ module Gori
       # nor `cmd_intercept_edit` (CLI) could see before this column existed, so a WebSocket
       # BINARY frame edited through the TEXT `raw` channel (a JSON string / an argv string,
       # both of which force-reencode any byte above 0x7F) was silently rewritten rather than
-      # refused the way the TUI's editor already refuses it (read-only there, `binary?`
-      # gating `read_only_selection?`). Same 0-default rationale as `head_only`: a per-session
+      # refused — while the TUI, on the same `binary?`, routes the operator to a byte channel
+      # (its hex editor) instead. Same 0-default rationale as `head_only`: a per-session
       # snapshot mirror that `clear_intercept_state!` wipes at the next capture start, so no
       # existing row needs a real answer back-filled.
       V9 = [

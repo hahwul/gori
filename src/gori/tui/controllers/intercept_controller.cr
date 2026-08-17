@@ -34,7 +34,12 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       reg = @host.session.registry
-      if @intercept.editing?
+      if @intercept.hex_editing?
+        # The same sentence the Repeater's `^X` footer uses, because they are the same editor
+        # and the same gestures. No `⇧arrows select` / `^Y copy` band: the byte editor has a
+        # nibble cursor and no selection, and `^Y` copies the whole payload.
+        "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue"
+      elsif @intercept.editing?
         # `⇧arrows select · ^Y copy`: this editor is the one INS strip in the tree that named
         # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
         # could not see it. Both are live — `handle_edit_key` routes ⇧arrows through
@@ -69,7 +74,9 @@ module Gori::Tui
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable
-      @intercept.editing? ? :intercept : nil
+      # `text_editing?`: ^G is a LINE number and ^F a substring, and the hex face has neither —
+      # mirrors `RepeaterController#goto_symbol`'s `!v.request_hex?`.
+      @intercept.text_editing? ? :intercept : nil
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -91,7 +98,7 @@ module Gori::Tui
       elsif ev.key.space? && !ev.ctrl? && !ev.alt? && !@intercept.editing?
         @host.open_space_menu # space menu in the navigable queue (editing swallows space as a char)
         true
-      elsif @intercept.editing? && (ev.ctrl? || ev.alt?) &&
+      elsif @intercept.text_editing? && (ev.ctrl? || ev.alt?) &&
             !ev.ctrl_z? && !(ev.ctrl? && key.lower_r?) && !(ev.ctrl? && key.lower_l?) &&
             !@intercept.edit_word_delete_key?(ev) && !editing_motion?(ev)
         # Any OTHER modified chord defers to the central keymap so it stays rebindable — `^Y`
@@ -99,6 +106,8 @@ module Gori::Tui
         # literal character, and typing it would REPLACE the selection). ^Z undo, ^R forward,
         # ^L Content-Length sync and ⌥/⌃ motion are this editor's own and stay above.
         false
+      elsif @intercept.hex_editing?
+        handle_hex_key(ev) # false for any other chord → keymap (^Y copy, and every rebind)
       elsif @intercept.editing?
         handle_edit_key(ev)
         true
@@ -140,6 +149,45 @@ module Gori::Tui
       end
     end
 
+    # Keys while editing a held WebSocket BINARY message as BYTES — the same set
+    # `RepeaterController#edit_repeater_request_hex` takes, because it is the same `HexEdit`.
+    # Returns true when consumed; a modified chord returns false so `^Y` (copy) and every
+    # rebindable Global key keep working, exactly as the text editor defers them.
+    private def handle_hex_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.escape?
+        @intercept.stop_edit
+      elsif ev.ctrl? && key.lower_r?
+        intercept_forward
+      elsif ev.ctrl? || ev.alt?
+        return false
+      else
+        hex_edit_key(ev)
+      end
+      true
+    end
+
+    # The unmodified half: navigation, the three length edits, and a hex digit overtyping the
+    # nibble under the cursor. Split out of `handle_hex_key` only so each stays readable —
+    # this is the same ladder `RepeaterController#edit_repeater_request_hex` walks.
+    private def hex_edit_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.up?        then @intercept.hex_move(-1, 0)
+      when key.down?      then @intercept.hex_move(1, 0)
+      when key.left?      then @intercept.hex_move(0, -1)
+      when key.right?     then @intercept.hex_move(0, 1)
+      when key.home?      then @intercept.hex_home
+      when key.end?       then @intercept.hex_end
+      when key.insert?    then @intercept.hex_insert
+      when key.delete?    then @intercept.hex_delete
+      when key.backspace? then @intercept.hex_backspace
+      else
+        c = ev.char || key.to_char
+        @intercept.hex_set_nibble(c) if c # only 0-9a-fA-F take effect
+      end
+    end
+
     # Keys while navigating the held queue (the left list). Returns true when consumed;
     # false defers to the keymap — catch `c`, filter `/`, forward/drop/all, Global
     # intercept toggle `i`, and breath keys are rebindable verbs. The queue is a
@@ -164,15 +212,14 @@ module Gori::Tui
       true
     end
 
-    # ↵/e on the queue. `toggle_edit` already refuses a binary WebSocket message; a refusal
-    # with no explanation reads as a dead key, so say why — the detail pane's READ-ONLY badge
-    # is only visible once the row is selected.
+    # ↵/e on the queue. `toggle_edit` picks the editor from the message: a WebSocket BINARY
+    # payload (opcode 2) opens the HEX one, everything else the TextArea. It used to open
+    # NOTHING on binary and say so; the status line now names the keys instead, because the
+    # gestures in the byte editor are not the ones the operator just left.
     private def open_editor : Nil
-      if @intercept.read_only_selection?
-        @host.status("binary WebSocket message — read-only (forward or drop it unchanged)")
-        return
-      end
       @intercept.toggle_edit
+      return unless @intercept.hex_editing?
+      @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
     end
 
     # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
@@ -314,6 +361,7 @@ module Gori::Tui
 
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
       inner = hit_rect(rect)
+      return @intercept.hex_click(inner, mx, my) if @intercept.hex_editing? # no selection to drag
       if @intercept.editing?
         @intercept.editor_drag_to_cursor(inner, mx, my)
       else
@@ -323,6 +371,7 @@ module Gori::Tui
 
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = hit_rect(rect)
+      return false if @intercept.hex_editing? # a byte buffer has no words
       @intercept.editing? ? @intercept.editor_select_word(inner, mx, my) : @intercept.preview_select_word(inner, mx, my)
     end
 
@@ -397,6 +446,8 @@ module Gori::Tui
           end_range_gesture unless idx == @intercept.selected_index
           @intercept.select_index(idx)
         end
+      elsif @intercept.hex_editing?
+        @intercept.hex_click(inner, mx, my) # the nibble under the pointer
       elsif @intercept.editing?
         @intercept.editor_click_to_cursor(inner, mx, my)
       else
@@ -443,14 +494,16 @@ module Gori::Tui
       @intercept.reload(@host.session.interceptor)
     end
 
-    # Editor-style Tab: in the held-message editor, forward Tab types a tab rather than
-    # advancing the focus ring (Shift-Tab / esc still leave for the queue).
+    # Editor-style Tab: in the held-message TEXT editor, forward Tab types a tab rather than
+    # advancing the focus ring (Shift-Tab / esc still leave for the queue). The hex editor
+    # declines it: a tab character is not a thing a nibble buffer can hold, so claiming the key
+    # there would turn Tab into a dead key instead of the focus ring it is everywhere else.
     def editor_captures_tab? : Bool
-      @intercept.editing?
+      @intercept.text_editing?
     end
 
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
-      return false unless @intercept.editing?
+      return false unless @intercept.text_editing?
       @intercept.edit_insert('\t')
       true
     end

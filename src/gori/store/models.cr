@@ -1176,7 +1176,7 @@ module Gori
       getter edit_refusal : String?
       getter? head_only : Bool
       # Mirrors `Interceptor::Item#binary?` (opcode == OP_BIN) across the bridge — the same
-      # fact the TUI's editor already gates `read_only_selection?` on. Without it here, MCP
+      # fact the TUI's editor gates its hex-vs-text choice on. Without it here, MCP
       # `intercept_forward_edit`/CLI `intercept edit` had no way to tell a text WS message from
       # a binary one before choosing whether the `raw` (JSON-string / argv-string) channel can
       # carry it byte-exact at all.

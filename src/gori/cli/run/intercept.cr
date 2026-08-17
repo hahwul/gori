@@ -468,8 +468,9 @@ module Gori
       # byte-exact for a BINARY WS frame the same way MCP's `raw_base64` is; `--raw` is an argv
       # STRING — already re-encoded as text before this process ever saw it, so a byte over
       # 0x7F is unrecoverable here (the OS/shell owns that re-encoding, not gori). A binary WS
-      # item through `--raw` is refused by name rather than forwarding the wrong bytes,
-      # mirroring the TUI's read-only stance on a binary WS message (`read_only_selection?`).
+      # item through `--raw` is refused by name rather than forwarding the wrong bytes; the TUI
+      # answers the same problem with a byte channel of its own (the hex editor over the held
+      # payload, `InterceptView#hex_editing?`), which is what `--raw-file` is here.
       #
       # Public and pure (no store, no process exit) so a spec can pin the decision without a
       # live capturing instance.

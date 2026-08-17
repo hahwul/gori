@@ -23,9 +23,17 @@ Once a few dozen have piled up, the chip strip scrolls and hunting along it with
 Repeater handles more than HTTP/1:
 
 - **HTTP/2** requests are re-sent over a real h2 connection.
-- **WebSocket** repeater opens a handshake, then lets you send messages and watch the drained responses.
+- **WebSocket** repeater opens a handshake, then replays your messages **one at a time**: each one goes out, the server's answer is drained until the socket falls quiet, and only then does the next leave.
 - **gRPC** repeater reuses the HTTP/2 engine for framed messages.
 - A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Decoder](/guide/decoder/) tab's `jwt-decode`.)
+
+That one-at-a-time order is the point on WebSocket. A socket carries a conversation, so a script whose third message depends on the answer to the second only replays faithfully if gori waits in between — and the transcript then reads in wire order, instead of listing everything you sent ahead of everything the server said. Three things follow from it:
+
+- **A run costs at least one quiet gap per message** (three seconds of server silence, by default). A long script against a server that answers nothing is the slow case.
+- **gori stops when the peer does.** If the server sends a `CLOSE`, or the connection ends, the rest of your script is *not* written into a socket nobody is reading — RFC 6455 forbids data frames after a `CLOSE` anyway. The result says how many of your messages actually went out.
+- **A `CLOSE` *you* wrote does not stop it.** Sending data after your own `CLOSE` is a protocol test, and Repeater lets you run it — as it does an unmasked frame, a lone continuation, or a length header that disagrees with its payload.
+
+gori never negotiates `permessage-deflate`, and the capture side stores frame payloads exactly as they arrived. A session captured over a compressed connection therefore holds *compressed* bytes and cannot be replayed; re-capture it with compression disabled in the browser.
 
 Replay from the command line, optionally against a new target:
 

@@ -989,6 +989,43 @@ here because the gap was not noticed until a structure review looked for it: a n
 parity is part of shipping it, not a follow-up, and the seam is the thing that makes the two
 non-TUI surfaces cheap enough for that to be true.
 
+### 2026-08-17: a channel that cannot carry the bytes is not a reason to refuse the edit
+
+Refines: [P7](#p7). The WebSocket half of Intercept and of Repeater.
+
+Two surfaces had, for the same reason, stopped short of what the operator was holding the
+message to do.
+
+The intercept editor refused to open on a WebSocket BINARY message (opcode 2). The refusal
+was correct about its premise — the TextArea round trip is `String.new(raw)` → char ops →
+`.to_slice`, which is lossy on non-UTF-8, and on WebSocket that is the common case rather
+than the exception — but it answered a *channel* problem by removing the *capability*. You
+could hold a protobuf frame, read it, forward it and drop it, and not flip the byte you were
+holding it to flip. The answer is the byte channel gori already had: `Tui::HexEdit`, the
+Repeater's `^X` buffer, an `Array(UInt8)` that never becomes a String
+(`src/gori/tui/intercept_view.cr`, `hex_editing?`). The lossy path is still never taken; it
+is simply no longer the only path offered. Where a surface genuinely has no byte channel the
+refusal stands and is named — MCP `raw` and CLI `--raw` are text, and both point at
+`raw_base64` / `--raw-file` instead.
+
+The WebSocket repeater wrote every recorded client→server message and only then read
+(`src/gori/repeater/ws_engine.cr`). A socket carries a conversation, so a script whose Nth
+message depends on the answer to the (N-1)th replayed as a burst the server was answering out
+of step, and the transcript listed every "out" row ahead of every "in" row whatever the wire
+order had been — a derived view contradicting the bytes, which is what P7 exists to forbid.
+It now sends one message, drains the answer, and sends the next; the caps and the reassembly
+buffer became session state (`DrainState`) so they still bound the whole run and a message
+fragmented across an idle gap is still one message. Draining between messages is also what
+lets the engine learn mid-script that the peer closed or went away, so it stops and reports
+how far it got rather than appending "out" rows for bytes it never wrote. A CLOSE the
+*operator* wrote is not a stop condition: "data frames after a CLOSE" is a §5.5.1 test, and
+this engine deliberately lets them run it, as it already lets them send a lone CONT or an
+unmasked frame.
+
+Not changed, and not by omission: `permessage-deflate` stays unnegotiated and
+`Sec-WebSocket-Extensions` stays stripped, and a WebSocket message is still held only when the
+catch condition names `proto:ws`.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
