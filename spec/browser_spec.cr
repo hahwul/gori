@@ -28,6 +28,16 @@ describe Gori::Browser do
       args.should contain("--test-type")    # suppress Chrome's spki-list infobar
       args.should contain("--disable-quic") # QUIC/UDP would bypass the CONNECT proxy
     end
+
+    # Brave 1.92+ CHECK_IS_TEST()s on --test-type and dies with SIGTRAP (exit 133)
+    # on every OS, WSL included. The reporter isolated that one flag; locally
+    # Brave 1.93 exits 133 with it and stays up without it. (#700)
+    it "omits --test-type for Brave so the wallet CHECK does not abort launch" do
+      brave = Gori::Browser.chromium_args("/tmp/prof", SPEC_LAUNCH, "brave")
+      brave.should_not contain("--test-type")
+      brave.should contain("--disable-quic")
+      brave.should contain("--ignore-certificate-errors-spki-list=PIN123=")
+    end
   end
 
   describe ".firefox_args" do
@@ -204,6 +214,17 @@ describe Gori::Browser do
     # false success for an equally wrong false failure.
     it "treats a launcher that hands off and exits 0 as opened" do
       Gori::Browser.launch(bin.call("handoff", "exit 0"), spec, grace: 10.seconds).should contain("opened Chromium")
+    end
+
+    # launch() has to pass found.id into chromium_args — the unit spec above only
+    # covers the builder. A wrapper that dies on --test-type is the #700 shape.
+    it "launches Brave without --test-type so a 1.92+ CHECK does not fire" do
+      Dir.mkdir_p(root)
+      path = File.join(root, "brave-probe")
+      File.write(path, "#!/bin/sh\necho \"$@\" | grep -q -- --test-type && exit 133\nsleep 30\n")
+      File.chmod(path, 0o755)
+      found = Gori::Browser::Found.new("brave", "Brave", Gori::Browser::Kind::Chromium, path)
+      Gori::Browser.launch(found, spec, grace: 100.milliseconds).should contain("opened Brave")
     end
   end
 

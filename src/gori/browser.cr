@@ -124,7 +124,7 @@ module Gori
       # sitting here, in the branch that also picks its args.
       args, note =
         case found.kind
-        in Kind::Chromium then {chromium_args(profile, spec), "CA trusted, proxy → #{spec.dial_authority}"}
+        in Kind::Chromium then {chromium_args(profile, spec, found.id), "CA trusted, proxy → #{spec.dial_authority}"}
         in Kind::Firefox  then {firefox_args(profile), setup_firefox_profile(profile, spec)}
         end
       if failure = spawn_detached(found.path, args, grace)
@@ -136,20 +136,26 @@ module Gori
 
     # Chromium launch flags. Pinning the CA's SPKI trusts exactly gori's CA for the
     # session — safer than --ignore-certificate-errors, which trusts EVERY bad cert.
-    # NOTE: recent Chrome added the spki-list flag to kBadFlags, so it now shows the
+    # NOTE: Chrome added the spki-list flag to kBadFlags, so it shows the
     # "unsupported command-line flag" infobar; --test-type is the only non-policy way
     # to suppress it (what Burp/Caido/Selenium use for an isolated MITM profile).
+    # Brave 1.92+ treats that switch as "this is a unit test" and CHECK_IS_TEST()s
+    # during wallet init — SIGTRAP, exit 133, no FATAL line in official builds
+    # (brave-browser#56903, closed not-planned). Omit it for Brave and accept the
+    # infobar there; Chrome still gets the switch. (#700)
     # --disable-quic keeps traffic on the TCP CONNECT proxy (QUIC/UDP would bypass
     # it); the --disable-* trio + --no-pings cut Google background chatter that adds
     # latency and floods the flow list. "<-loopback>" un-bypasses loopback so
     # localhost targets are proxied too.
-    def self.chromium_args(profile : String, spec : LaunchSpec) : Array(String)
-      [
+    def self.chromium_args(profile : String, spec : LaunchSpec, browser_id : String = "") : Array(String)
+      args = [
         "--user-data-dir=#{profile}",
         "--proxy-server=http://#{spec.dial_authority}",
         "--proxy-bypass-list=<-loopback>",
         "--ignore-certificate-errors-spki-list=#{spec.spki_sha256}",
-        "--test-type",
+      ]
+      args << "--test-type" unless browser_id == "brave"
+      args.concat [
         "--disable-quic",
         "--disable-component-update",
         "--disable-sync",
