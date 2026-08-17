@@ -14,6 +14,7 @@ require "./pump"
 require "./upstream"
 require "./prefix_io"
 require "./orig_dst"
+require "./h2/frame"
 
 module Gori::Proxy
   # The listening proxy. Accepts client connections and spawns one ClientConn
@@ -65,6 +66,7 @@ module Gori::Proxy
       # into one class-level latch would silence the second one's line.
       @socket_dst_logged = false
       @derived_dst_logged = false
+      @missing_h2c_dst_logged = false
     end
 
     # How many ports past the requested one to probe before giving up to ephemeral.
@@ -235,6 +237,23 @@ module Gori::Proxy
       if first && !first.empty? && first[0] == 0x16_u8
         return serve_reverse_tls(client, origin)
       end
+      # h2c prior knowledge (#737). A reverse listener IS the origin — the authority is
+      # declared, not derived — so RFC 9113 §3.4 is as well defined here as it is for gori's own
+      # h2c senders, and none of the `:authority` routing the forward proxy would need applies.
+      # Only for a CLEARTEXT origin: `serve_h2c`'s relay dials the origin in the clear, so an
+      # `https` origin would need an h2-over-TLS leg that does not exist on this path.
+      if h2c_preface?(first)
+        unless scheme == "http"
+          ::Log.warn do
+            "reverse listener #{BindAddress.authority(@host, @port)}: refused an HTTP/2 " \
+            "prior-knowledge connection — the declared origin #{scheme}://#{host}:#{port} is " \
+            "TLS, and gori's h2c relay dials the origin in the clear. Declare an http:// " \
+            "origin to serve h2c here"
+          end
+          return close_client(client)
+        end
+        return serve_h2c(client, host, port, origin_dst: nil)
+      end
       ClientConn.new(client, scheme, @sink,
         fixed_host: host, fixed_port: port, tls_upstream: scheme == "https",
         rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
@@ -267,6 +286,81 @@ module Gori::Proxy
         rewrite_host: @rewrite_host)
     end
 
+    # How few bytes of the preface are still enough to decide. Four is `"PRI "` — the method,
+    # which is the discriminating part; below that a segment holding only `"P"` decides nothing.
+    H2C_PREFACE_FLOOR = 4
+
+    # Does this connection open with the HTTP/2 client preface (RFC 9113 §3.4)?
+    #
+    # Deliberately NOT the single-byte test the CONNECT path uses. After a CONNECT's `200`
+    # reply, `0x50` IS the preface: the only two things a client sends there are a TLS
+    # ClientHello or `PRI * HTTP/2.0`. On a LISTENER the same byte opens `POST`, `PUT` and
+    # `PATCH`, so a first-byte branch would divert every form submission into the h2 relay, and
+    # each one would die at `Frame.read_preface` with the connection already committed. So as
+    # much of the real preface as the peek holds is compared, with a floor.
+    #
+    # `peek` CONSUMES NOTHING, which is what keeps the existing routing byte-exact: a false
+    # answer leaves the socket untouched for `ClientConn`, and a true one leaves the whole
+    # 24-octet preface in the buffer for `Frame.read_preface` to read. That is why neither
+    # listener needs a `PrefixIO` here, and it is the one way this differs from the CONNECT
+    # site, which peeks by READING a byte and therefore has to push it back.
+    private def h2c_preface?(peeked : Bytes?) : Bool
+      return false unless peeked
+      n = Math.min(peeked.size, H2::Frame::PREFACE.size)
+      return false if n < H2C_PREFACE_FLOOR
+      peeked[0, n] == H2::Frame::PREFACE[0, n]
+    end
+
+    # Serve an h2c prior-knowledge connection that arrived DIRECTLY on a listener (#737).
+    #
+    # The relay itself is `ClientConn`'s — see `ClientConn#serve_h2c_prior_knowledge` at the
+    # foot of this file for why the entry point is spelled there and not here. What belongs to
+    # the LISTENER is which gates apply, and they are not the CONNECT path's:
+    #
+    #   * `http2_disabled?` — applies, verbatim. The client committed to HTTP/2 by sending the
+    #     preface, so there is nothing to downgrade to; relaying anyway would make "force
+    #     HTTP/1.1" quietly untrue on this socket, which is worse than a visible refusal.
+    #   * the SANDBOX — the host gate (`sandbox_blocks_host?`), which is what this listener's
+    #     own TLS branch already applies (`serve_reverse_tls`, `serve_transparent_tls`), NOT
+    #     `handle_connect`'s blanket "sandbox on ⇒ refuse the tunnel". Two reasons, and neither
+    #     depends on how the CONNECT-path gate is settled elsewhere. First, `H2::StreamGate`
+    #     has carried a hard PER-STREAM sandbox gate since #492 step 4, so the h2 relay is not
+    #     the ungated path the blanket refusal was written against. Second, h2-over-TLS on
+    #     THESE listeners already runs behind exactly this host gate and nothing more — an
+    #     ALPN-negotiated h2 stream on the same reverse listener reaches `relay_h2` with only
+    #     the pre-handshake host test in front of it — so h2c here is precisely as gated as the
+    #     h2 the listener serves today, and no new hole is opened.
+    #   * the three rule gates (`h2c_unservable?`) — apply, for the reason they apply on
+    #     CONNECT: they live on `ClientConn`'s h1 path, the relay cannot run them, and with the
+    #     preface already sent the only honest answers are refuse or lie.
+    #
+    # Every refusal CLOSES the socket. Nothing else will: ownership never passes to a
+    # `ClientConn#run` on this path, and the accept fiber's rescue only covers pre-run setup —
+    # the same reasoning `serve_transparent_tls` spells out.
+    private def serve_h2c(client : TCPSocket, host : String, port : Int32,
+                          origin_dst : {String, Int32}?) : Nil
+      if Settings.http2_disabled?
+        ::Log.warn do
+          "listener #{BindAddress.authority(@host, @port)}: refused an HTTP/2 prior-knowledge " \
+          "connection to #{host}:#{port} because HTTP/2 is switched off (settings " \
+          "network.http2) — the client already sent the preface, so there is nothing to " \
+          "downgrade to HTTP/1.1"
+        end
+        return close_client(client)
+      end
+      return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
+      # Built for its four lenses and its dial: `origin_dst` is what arms `dial_pin`, so a
+      # transparent h2c connection is dialled at the address the kernel named, exactly as the
+      # cleartext and TLS branches are (#529).
+      conn = ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
+        host_overrides: @host_overrides, origin_dst: origin_dst, extractor: @extractor)
+      begin
+        conn.serve_h2c_prior_knowledge(host, port, client)
+      ensure
+        close_client(client)
+      end
+    end
+
     # A transparent connection. Route on the first byte, the same discriminator the CONNECT path
     # uses: 0x16 is a TLS ClientHello, anything else is cleartext HTTP.
     #
@@ -286,6 +380,8 @@ module Gori::Proxy
       dst = transparent_dst(client, tls)
       if tls
         serve_transparent_tls(client, dst)
+      elsif h2c_preface?(first)
+        serve_transparent_h2c(client, dst)
       else
         ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
@@ -305,6 +401,30 @@ module Gori::Proxy
         log_dst_source(false, "port #{Settings.listener_target_port(@target_port, tls: tls)}")
         nil
       end
+    end
+
+    # Transparent h2c (#737). The kernel's answer is the ONLY destination this branch can have,
+    # and that is a property of the protocol rather than a gap in the lookup.
+    #
+    # Every other transparent branch has a second source when `SO_ORIGINAL_DST`/pf has none: the
+    # cleartext branch derives the host from `Host` and the port from the listener's
+    # `target_port`, and the TLS branch derives it from the SNI. h2c has neither. The name a
+    # client is asking for lives in the `:authority` pseudo-header of the first HEADERS frame,
+    # which is HPACK state the relay owns — reading it here would mean decoding a header block
+    # outside the connection's decoder and then handing a desynchronised table to the relay, and
+    # even then the SECOND stream on the same connection may name a different authority, which
+    # is precisely why prior knowledge is only well defined against a known origin.
+    #
+    # So with no kernel answer there is no destination at all, and the connection is dropped
+    # rather than dialled somewhere invented — with a line, because a client that mysteriously
+    # fails otherwise leaves no trace anywhere. `log_missing_sni`'s reasoning, applied to the
+    # branch that has one fewer fallback than the branch that comment was written for.
+    private def serve_transparent_h2c(client : TCPSocket, dst : {String, Int32}?) : Nil
+      unless dst
+        log_missing_h2c_dst
+        return close_client(client)
+      end
+      serve_h2c(client, dst[0], dst[1], origin_dst: dst)
     end
 
     # #493's discipline, applied to the destination: an operator looking at a flow that went
@@ -412,6 +532,54 @@ module Gori::Proxy
       return if @@missing_sni_logged
       @@missing_sni_logged = true
       ::Log.info { "transparent listener: dropped a TLS connection with no SNI and no original destination from the socket (nothing to derive a destination from) — this is logged once" }
+    end
+
+    # Per LISTENER rather than per process, unlike `@@missing_sni_logged` above: the answer this
+    # announces is `OrigDst`'s, and two transparent listeners on one host can legitimately get
+    # different ones — the same reason `@socket_dst_logged`/`@derived_dst_logged` are instance
+    # state. Folding them would silence the second listener's line.
+    private def log_missing_h2c_dst : Nil
+      return if @missing_h2c_dst_logged
+      @missing_h2c_dst_logged = true
+      why = OrigDst.unavailable_reason ||
+            "the kernel has no original destination for this connection (nothing redirected it here?)"
+      ::Log.info do
+        "transparent listener #{BindAddress.authority(@host, @port)}: dropped an HTTP/2 " \
+        "prior-knowledge connection — #{why}, and h2c carries no Host header or SNI to derive " \
+        "a destination from (the `:authority` lives inside the connection's HPACK state). " \
+        "Redirect this listener with iptables/pf so the original destination is readable, or " \
+        "use a reverse listener with the origin declared — this is logged once"
+      end
+    end
+  end
+
+  # A LISTENER's entry into the h2c relay (#737) — `ClientConn` reopened, following the
+  # cross-file reopen this tree uses everywhere (`Store`, `Gori::CLI`, `Tui::Runner`, and
+  # `H2::StreamGate`, whose sandbox half lives in `h2/stream_gate/sandbox.cr` and reaches the
+  # class's private state exactly as this does).
+  #
+  # It is four lines and it delegates; that is the point. `intercept_h2c` — the dial, the two
+  # `SocketTuning.relax` calls, the `H2::Relay.run` carrying all four lenses, the `ensure` that
+  # frees the origin fd — already exists, and this wiring is already spelled twice (here and
+  # `tls/tunnel.cr#relay_h2`). A third spelling in `Server` would be worse than the gap #737
+  # describes, so the listener borrows the one that is there instead of growing one.
+  #
+  # `h2c_unservable?` comes with it rather than being re-tested by the caller, because it is
+  # the same question with the same answer: a body Match&Replace rule, a short-circuit rule or
+  # a body-scoped extract rule is live for this host, the relay structurally cannot apply it,
+  # and the client has already committed to HTTP/2. False when the connection was refused, so
+  # the caller closes the socket. (Its log line says "h2c CONNECT to <host>"; on this path the
+  # preface arrived without one. The sentence after it — which rule, and what to do — is the
+  # part an operator acts on, and rewording it means editing `client_conn.cr`.)
+  #
+  # THE HOME FOR THIS IS `conn/client_conn.cr`, beside the two privates it calls; it sits here
+  # only because #737 landed while two other changes owned regions of that file. Moving the
+  # method there is mechanical and changes nothing — no caller, no behaviour, no gate.
+  class ClientConn
+    def serve_h2c_prior_knowledge(host : String, port : Int32, client : IO) : Bool
+      return false if h2c_unservable?(host)
+      intercept_h2c(host, port, client)
+      true
     end
   end
 end
