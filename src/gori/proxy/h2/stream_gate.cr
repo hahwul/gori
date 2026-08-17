@@ -7,6 +7,12 @@ require "../sink"
 require "../upstream"
 require "../../interceptor"
 require "../../outbound"
+# The class body continues in `stream_gate/` — one class-reopen file per slice, the same shape
+# `repeater_view/` and `runner/` use. This file keeps the state (ivars + `initialize`), the pump
+# and hold paths, and the lock invariant they are all bound by; the slices are the blocking
+# sandbox gate (`sandbox.cr`) and the body buffer + DATA re-framer (`body.cr`).
+require "./stream_gate/sandbox"
+require "./stream_gate/body"
 
 module Gori::Proxy::H2
   # One direction's writer, and the intercept + sandbox gates in front of it (#492 steps 3-4).
@@ -171,13 +177,6 @@ module Gori::Proxy::H2
     DROP_REQUEST_REASON  = "dropped by intercept (request)"
     DROP_RESPONSE_REASON = "dropped by intercept"
     SANDBOX_REASON       = Gori::Outbound::SANDBOX_ERROR
-
-    # Ceiling on the refused-stream set (see `@refused`). The set is the only thing standing
-    # between a refused request's later DATA and the origin, so past the ceiling the CONNECTION
-    # goes — not the memory bound, and not the guarantee. Generous on purpose: it is per
-    # connection and only refusals count, so reaching it means thousands of refused streams on
-    # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
-    MAX_REFUSED_STREAMS = 4096
 
     # One stream whose delivery is deferred. Created only when something is actually held or
     # queued; a connection that holds nothing never allocates one.
@@ -415,29 +414,6 @@ module Gori::Proxy::H2
       end
     end
 
-    # The body size this gate will buffer for a hold, or nil to hold the HEAD only.
-    #
-    # Known length only, and the reason is `MAX_HOLD_BODY`'s: buffering means waiting, and a
-    # body whose end gori cannot predict is a wait with no end. Streaming uploads, SSE, gRPC
-    # streams and every chunked-equivalent response therefore keep exactly the head-only hold
-    # they have today, which is also what the DATA frames keep: untouched (P6).
-    private def holdable_body(block : HeadRewrite::Block) : Int32?
-      return 0 if block.first.end_stream?
-      len = declared_body_length(block.fields)
-      return nil unless len && len <= MAX_HOLD_BODY
-      len
-    end
-
-    # The one `content-length` this head declares, or nil. Two of them is RFC 9113 §8.1.1-
-    # malformed and gori does not get to pick which one it believes — that message keeps its
-    # head-only hold and its DATA goes out exactly as it arrived (P7).
-    private def declared_body_length(fields : Array(HPACK::Field)) : Int32?
-      declared = fields.select { |f| f.name == "content-length" }
-      return nil unless declared.size == 1
-      len = declared.first.value.to_i32?
-      len && len >= 0 ? len : nil
-    end
-
     # --- pump side (locked) --------------------------------------------------
 
     private def accept_locked(frame : Frame::Header) : Array(UInt32)
@@ -608,29 +584,6 @@ module Gori::Proxy::H2
       queue_hold_locked(slot, held, slot.padded_body? ? nil : body_of(slot))
     end
 
-    # The buffered entity: every parked DATA payload in arrival order. Unpadded by
-    # construction — `note_body_frame` gives the buffer up at the first padded frame.
-    private def body_of(slot : Slot) : Bytes
-      size = 0
-      slot.frames.each { |(f, _)| size += f.payload.size if f.frame_type == Frame::Type::Data }
-      buf = Bytes.new(size)
-      at = 0
-      slot.frames.each do |(f, _)|
-        next unless f.frame_type == Frame::Type::Data
-        f.payload.copy_to(buf + at)
-        at += f.payload.size
-      end
-      buf
-    end
-
-    private def join(head : Bytes, body : Bytes) : Bytes
-      return head if body.empty?
-      buf = Bytes.new(head.size + body.size)
-      head.copy_to(buf)
-      body.copy_to(buf + head.size)
-      buf
-    end
-
     # `body_budget` is the entity this slot PROMISED to buffer (0 for a head-only hold), so the
     # ceiling still measures what it was written to measure: unrelated frames piling up behind a
     # deferred stream. Without the term, agreeing to hold a 1 MiB body would immediately trip the
@@ -718,163 +671,6 @@ module Gori::Proxy::H2
         "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
         "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarding it unedited#{also}"
       end
-    end
-
-    # --- sandbox side --------------------------------------------------------
-
-    # The hard containment gate, per stream (#492 step 4). True when this head was REFUSED —
-    # its frames are then accounted for and nothing is ever written for the stream again.
-    #
-    # ## Why two URLs are tested, not one
-    #
-    # h1 inside a tunnel tests `scheme://<CONNECT host><target>`: `resolve_forward`
-    # short-circuits on the pinned host, so the name in the request and the socket's
-    # destination cannot disagree. On h2 they can. RFC 9113 §9.1.1 lets a client REUSE one
-    # connection for any origin the certificate covers, so a single relay carries streams whose
-    # `:authority` is not the CONNECT host — which is exactly why the head pipeline already
-    # scopes rules and holds on the stream's own authority (`head_rewrite.cr`).
-    #
-    # For a blocking gate, choosing one of the two names is choosing which half to leak. Take a
-    # scope of `https://acme.test/*` — a URL rule, so `sandbox_blocks_host?` lets EVERY host
-    # past the CONNECT gate and every per-request decision is this one:
-    #
-    #   * authority only would pass a stream claiming `:authority: acme.test` on a connection
-    #     to `evil.test`, i.e. the request goes to a host the scope never allowed.
-    #   * connection host only would pass a coalesced stream to `evil.test` riding an
-    #     `acme.test` connection, because the URL it tested was the connection's, not the
-    #     request's.
-    #
-    # So both are tested and either refusal is a refusal. On an ordinary connection the two
-    # names are equal and the second test is skipped, so the common path costs one evaluation.
-    private def sandbox_refuses_locked(block : HeadRewrite::Block) : Bool
-      return false unless @ordered   # a response exists only for a request already allowed
-      return false unless block.head # trailers/PUSH_PROMISE carry no request URL to test
-      fields = block.fields
-      authority = HeadCodec.pseudo_of(fields, ":authority") || @host
-      host, _ = Upstream.split_host_port(authority, @port)
-      scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
-      target = HeadCodec.pseudo_of(fields, ":path") || "/"
-      blocked = @interceptor.sandbox_blocks?(scheme, host, target) ||
-                (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target))
-      return false unless blocked
-      refuse_locked(block)
-      true
-    end
-
-    # The same containment gate for a request the ORIGIN invented (RFC 9113 §8.4 server push).
-    #
-    # `sandbox_refuses_locked` cannot reach it: PUSH_PROMISE arrives on the RESPONSE leg, where
-    # `@ordered` is false, and `HeadRewrite#head_text` returns nil for it (rules are correctly
-    # never run over a promised head), so `block.head` is nil too. A promised request therefore
-    # walked past a gate that refuses the identical authority on a real request, and
-    # `Assembler#handle_push_promise` projected it into History as an ordinary row — a flow the
-    # origin authored, indistinguishable from one the client made, inside the evidence the
-    # operator came to read. "Hard containment" is what the sandbox advertises.
-    #
-    # Refusing a promise means three things, and they are the client's own §8.4 disposition:
-    #   * the PUSH_PROMISE never reaches the client (suppressed, hence `@heads.latch` — the
-    #     third route into the §6.2.1 HPACK asymmetry, exactly as `refuse_locked` describes);
-    #   * RST_STREAM(CANCEL) goes to the ORIGIN on the PROMISED id, which is how a client
-    #     declines a push, so the origin stops before it sends the pushed response;
-    #   * the promised id joins `@refused` on THIS leg, so a pushed response already in flight
-    #     is swallowed rather than written to a client that never learned the stream exists.
-    #
-    # Both URLs are tested for the reason `sandbox_refuses_locked` gives: the promised
-    # `:authority` may be any origin the certificate covers (§9.1.1), which is the whole point
-    # of the finding — an origin that names `evil.test` in a promise.
-    private def push_refuses_locked(block : HeadRewrite::Block) : Bool
-      return false if @ordered # promises are server-initiated; the request leg never sees one
-      return false unless block.first.frame_type == Frame::Type::PushPromise
-      return false unless @interceptor.sandbox_enabled?
-      promised = promised_stream_id(block)
-      return false if promised == 0 || promised.odd? # §5.1.1 — the assembler rejects these too
-      fields = block.fields
-      authority = HeadCodec.pseudo_of(fields, ":authority") || @host
-      host, _ = Upstream.split_host_port(authority, @port)
-      scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
-      target = HeadCodec.pseudo_of(fields, ":path") || "/"
-      blocked = @interceptor.sandbox_blocks?(scheme, host, target) ||
-                (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target))
-      return false unless blocked
-      ::Log.warn do
-        "h2 in: refused a server PUSH_PROMISE for #{scheme}://#{host}#{target} (promised " \
-        "stream #{promised}, promised on stream #{block.stream_id}) — the sandbox does not " \
-        "allow that URL, and a promise is the origin's request, not the client's"
-      end
-      @heads.latch
-      project(block)
-      @assembler.drop_stream(promised, SANDBOX_REASON)
-      remember_refused(promised)
-      @deferred_cross << promised
-      true
-    end
-
-    # The promised stream id out of a PUSH_PROMISE's carried-over prefix (R + 31 bits), which
-    # `HeadRewrite#split_block` preserved verbatim for exactly this frame type. 0 when the
-    # prefix is not there — a malformed promise the caller then leaves alone.
-    private def promised_stream_id(block : HeadRewrite::Block) : UInt32
-      prefix = block.prefix
-      return 0_u32 if prefix.size < 4
-      ((prefix[0].to_u32 & 0x7f) << 24) | (prefix[1].to_u32 << 16) |
-        (prefix[2].to_u32 << 8) | prefix[3].to_u32
-    end
-
-    # Refuse one stream. The head never goes on the wire, so it is fed to the assembler for the
-    # PROJECTION ONLY — `write` is what logs a frame, and P7 logs what gori actually wrote — and
-    # the flow is finalized with h1's own sandbox reason, so a blocked attempt stays visible in
-    # History exactly as `ClientConn#record_blocked_request` keeps it (P4/P7).
-    #
-    # Then RST_STREAM(CANCEL) to the CLIENT only. The origin never saw this stream open, and
-    # RST_STREAM on an idle stream is itself a connection error (§6.4), so telling it would take
-    # down every other stream on the connection — the same per-leg reasoning `drop_locked`
-    # spells out. The client leg belongs to the peer gate, hence the cross list.
-    #
-    # h1 answers a blocked request with `403 + X-Gori-Sandbox: blocked`, and h2 deliberately
-    # does not, for the reason step 3 rejected a synthesized 502: encoding a response head into
-    # the client-bound direction makes gori a SECOND producer of HPACK-bearing frames there,
-    # correct only while dynamic-table insertion stays off. A refusal is the last place to spend
-    # that, since it would be spent on every out-of-scope subresource of every page.
-    private def refuse_locked(block : HeadRewrite::Block) : Nil
-      @heads.latch # suppressing a block desyncs HPACK exactly as reordering one does
-      project(block)
-      @assembler.drop_stream(block.stream_id, SANDBOX_REASON)
-      remember_refused(block.stream_id)
-      @deferred_cross << block.stream_id
-    end
-
-    # Past the ceiling the connection goes. Everywhere else in this file an overflow fails OPEN
-    # (`fail_open`, `close`, the #123 reaper) because the thing being lost is a human's chance
-    # to look at a message. Here it is the record of which streams must never reach the origin,
-    # and a blocking gate that has forgotten what it blocked is not a gate.
-    private def remember_refused(stream_id : UInt32) : Nil
-      @refused << stream_id
-      return if @refused.size <= MAX_REFUSED_STREAMS
-      ::Log.warn do
-        "h2 #{@direction}: over #{MAX_REFUSED_STREAMS} streams refused on one connection " \
-        "(sandbox or intercept drop) — closing it, because gori can no longer keep track of " \
-        "which streams must not reach the far end"
-      end
-      raise Gori::Error.new("h2: refused-stream ceiling reached")
-    end
-
-    # `HeadRewrite::Deferrer`. A header block this direction could not read.
-    #
-    # With the sandbox OFF this is a no-op and the frames go out verbatim — step 2's behaviour
-    # and P7's, since the raw log is the truth and the peer is entitled to gori's honest relay
-    # of what it received. With the sandbox ON the same forward is a hole: an unreadable head
-    # has no URL to scope-test, so it would be the one request shape that walks past a blocking
-    # gate, and it is the shape most likely to be hostile. Both causes (§6.1 padding, §4.3
-    # HPACK) are CONNECTION errors by spec, so the far end would end the connection over this
-    # block anyway — gori doing it first costs nothing and is the only answer that does not
-    # guess. Response-direction blocks are left alone: they bypass no request gate.
-    def undecodable(stream_id : UInt32) : Nil
-      return unless @ordered && @interceptor.sandbox_enabled?
-      ::Log.warn do
-        "h2 out: stream #{stream_id} carries a header block gori cannot decode (RFC 9113 " \
-        "§6.1/§4.3) — the sandbox is on and an unreadable head has no URL to scope-test, " \
-        "so the connection is closed rather than forwarded unexamined"
-      end
-      raise Gori::Error.new("h2 sandbox: undecodable header block on stream #{stream_id}")
     end
 
     # --- hold side -----------------------------------------------------------
@@ -1043,45 +839,6 @@ module Gori::Proxy::H2
       @heads.encode_edited(block, head, false) || block
     end
 
-    # Whether the edit's `content-length` was computed FOR the operator rather than declared BY
-    # them — the one thing that decides whether `HeadCodec.restore_content_length` runs over
-    # their bytes (R3-F2).
-    #
-    # Derived from the bytes, not asserted by the caller, because the caller does not reliably
-    # know: `gori run intercept edit` runs `ContentLength.sync` over `--raw-file` unconditionally,
-    # the MCP tool runs it unless `update_content_length:false`, and the TUI editor runs it
-    # unless `^L` is off. What every one of those affordances PRODUCES is a `content-length`
-    # that agrees with the body the edit carries, and a HEAD-ONLY h2 hold carries no body — so a
-    # value that DISAGREES cannot have come from any of them. That is the operator declaring one,
-    # which on h2 is the RFC 9113 §8.1.1 probe (does this origin/CDN/WAF/gRPC gateway enforce
-    # content-length against DATA?) and on h1 is already forwarded byte-exact.
-    #
-    # Its stated limit: a deliberate `content-length: 0` on a head-only hold is
-    # INDISTINGUISHABLE from a sync of the same empty body, so it still gets the peer's value
-    # back. That case is unreachable by construction, not by choice.
-    #
-    # Asked ONLY of a head-only hold. When the hold covered head+body the question does not
-    # arise — see `edited_with_body`.
-    private def length_synced?(head : Bytes, body_size : Int32) : Bool
-      declared = declared_lengths(head)
-      declared.empty? || declared.all? { |v| v == body_size.to_s }
-    end
-
-    private def declares_length?(head : Bytes) : Bool
-      !declared_lengths(head).empty?
-    end
-
-    private def declared_lengths(head : Bytes) : Array(String)
-      values = [] of String
-      String.new(head).each_line do |line|
-        stripped = line.rstrip('\r')
-        break if stripped.empty?
-        next unless pair = HeadCodec.header_field(stripped)
-        values << pair[1] if pair[0].compare("content-length", case_insensitive: true) == 0
-      end
-      values
-    end
-
     # The restore is a rewrite of the operator's own bytes, so it does not get to be silent —
     # the reasoning `warned_body` already had, applied to the other thing this path changes.
     private def warn_length_restored(stream_id : UInt32) : Nil
@@ -1137,67 +894,6 @@ module Gori::Proxy::H2
         slot.frames.each { |(f, pre)| write(f, pre) }
       end
       NO_CROSS
-    end
-
-    # The operator's body, re-framed, in place of the DATA this gate buffered (PR #6).
-    #
-    # Everything else that was parked keeps its order around it — trailers stay after the body,
-    # WINDOW_UPDATE and PRIORITY stay where the peer put them — and the rebuilt DATA lands at
-    # the position of the FIRST buffered DATA frame, or straight after the head when there was
-    # none (a bodiless message the operator gave a body to).
-    private def write_rebuilt(slot : Slot, body : Bytes) : Nil
-      rebuilt = data_frames(slot.stream_id, body, end_stream_on_body?(slot))
-      written = slot.frames.none? { |(f, _)| f.frame_type == Frame::Type::Data }
-      rebuilt.each { |f| write(f, nil) } if written
-      slot.frames.each do |(f, pre)|
-        if f.frame_type == Frame::Type::Data
-          next if written
-          written = true
-          rebuilt.each { |d| write(d, nil) }
-          next
-        end
-        write(f, pre)
-      end
-    end
-
-    # Whether the rebuilt DATA carries END_STREAM: true when the peer ended the message with a
-    # DATA frame (or with the head itself), false when TRAILERS end it instead — the flag stays
-    # on whatever ended the message, so an edit cannot half-close a stream that still has
-    # trailers to send.
-    private def end_stream_on_body?(slot : Slot) : Bool
-      slot.frames.each do |(f, _)|
-        return true if f.frame_type == Frame::Type::Data && f.end_stream?
-        return false if f.frame_type == Frame::Type::Headers && f.end_stream?
-      end
-      (slot.decided || slot.pending).try(&.first.end_stream?) || false
-    end
-
-    # Re-frame a body into DATA frames of at most `HeadRewrite::MAX_FRAME_PAYLOAD` — the initial
-    # SETTINGS_MAX_FRAME_SIZE, which is also the floor every endpoint must advertise at or above
-    # (RFC 9113 §6.5.2). Same ceiling the head re-framer splits at and for the same reason:
-    # nothing in this relay reads the peer's SETTINGS, and every conformant peer accepts a frame
-    # this size.
-    #
-    # An empty body still emits one empty DATA frame when END_STREAM has to ride on it (a §6.1
-    # zero-length DATA is legal, and the alternative is a stream nobody ever half-closes).
-    private def data_frames(stream_id : UInt32, body : Bytes, ends : Bool) : Array(Frame::Header)
-      frames = [] of Frame::Header
-      return frames if body.empty? && !ends
-      at = 0
-      loop do
-        take = Math.min(HeadRewrite::MAX_FRAME_PAYLOAD, body.size - at)
-        last = at + take >= body.size
-        frames << Frame::Header.new(Frame::Type::Data.value, last && ends ? Frame::END_STREAM : 0_u8,
-          stream_id, body[at, take])
-        at += take
-        break if last
-      end
-      frames
-    end
-
-    private def without_end_stream(f : Frame::Header) : Frame::Header
-      return f unless f.end_stream?
-      Frame::Header.new(f.type, f.flags & ~Frame::END_STREAM, f.stream_id, f.payload)
     end
 
     # An operator drop. The head never went on the wire, so it is fed to the assembler for the
