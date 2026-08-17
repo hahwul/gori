@@ -12,6 +12,17 @@ private def round_trip(op : GQL::Op) : {String?, String, String?}
   GQL.parse_display(GQL.display(op))
 end
 
+# a GraphQL multipart upload request (the `operations`/`map` convention) — the one parsed
+# shape with no inverse, so several examples need the same body.
+private def mp_head : Bytes
+  "POST /g HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=zz\r\n\r\n".to_slice
+end
+
+private def mp_body : Bytes
+  ["--zz", %(Content-Disposition: form-data; name="operations"), "",
+   %({"query":"{ me }"}), "--zz--", ""].join("\r\n").to_slice
+end
+
 describe Gori::Graphql do
   describe ".from_json" do
     it "parses a real GraphQL POST body into an Op" do
@@ -351,15 +362,18 @@ describe Gori::Graphql do
       op.query.should contain("# operationName: B")
     end
 
-    it "recognises a persisted query, which sends no document at all" do
+    it "recognises a persisted query, whose pane is the ENVELOPE because no document was sent" do
       body = %({"operationName":"Q","variables":{"id":1},) +
              %("extensions":{"persistedQuery":{"version":1,"sha256Hash":"abc123"}}})
       op = GQL.from_json(body).not_nil!
       op.form.should eq(GQL::Form::Persisted)
-      op.operation.should eq("Q")
-      op.query.should contain("# persisted query — no document was sent")
-      op.query.should contain("sha256Hash: abc123")
+      op.operation.should eq("Q") # still its own field — `decoded_view` reports it separately
       op.variables.not_nil!.should contain("\"id\": 1")
+      op.query.should contain("# persisted query — no document was sent")
+      op.query.should contain(%("sha256Hash": "abc123"))
+      # The pane is the whole envelope and nothing else, so the hash the operator wants to
+      # change is the text they edit — `display` adds no header/footer that would double it.
+      GQL.display(op).should eq(op.query)
     end
 
     it "recognises an application/graphql body as the document itself" do
@@ -400,36 +414,165 @@ describe Gori::Graphql do
     end
   end
 
-  # REGRESSION PIN. Making the four new shapes parse is what creates the hazard: `location`
-  # drives which side the Repeater RE-ENCODES on send, so answering `:body` would recompose a
-  # batch array into a single object and answering `:query` would rewrite the query STRING of
-  # a request whose payload is in the body. Either one sends a request the operator never
-  # wrote, on the strength of a projection. This guards the decision that only the two
-  # invertible shapes are editable, and that the other four re-encode nothing at all.
+  # REGRESSION PIN. Making the extra shapes parse is what creates the hazard: `location`
+  # drives which side — and in which GRAMMAR — the Repeater re-encodes on send, so answering
+  # `:body` for a batch would collapse the array into a single object and answering `:query`
+  # would rewrite the query STRING of a request whose payload is in the body. Either one sends
+  # a request the operator never wrote, on the strength of a projection. Batch, Persisted and
+  # Document each earned an inverse of their own; Multipart did not, and the pin is that every
+  # shape gets its OWN answer and that `location` never disagrees with `editable?`.
   describe "the re-encode gate" do
-    it "marks only the three invertible shapes editable" do
+    it "marks every shape with an inverse editable, and only those" do
       GQL.from_json(%({"query":"{ me }"})).not_nil!.editable?.should be_true
       GQL.from_query("p?query=%7Bme%7D").not_nil!.editable?.should be_true
       form_head = "POST /g HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice
       GQL.from_flow("/g", form_head, "query=%7Bme%7D".to_slice).not_nil!.editable?.should be_true
-      GQL.from_json(%([{"query":"{a}"}])).not_nil!.editable?.should be_false
-      GQL.from_json(%({"extensions":{"persistedQuery":{"sha256Hash":"h"}}})).not_nil!.editable?.should be_false
+      GQL.from_json(%([{"query":"{a}"}])).not_nil!.editable?.should be_true
+      GQL.from_json(%({"extensions":{"persistedQuery":{"sha256Hash":"h"}}})).not_nil!.editable?.should be_true
+      doc_head = "POST /g HTTP/1.1\r\nContent-Type: application/graphql\r\n\r\n".to_slice
+      GQL.from_flow("/g", doc_head, "{ me }".to_slice).not_nil!.editable?.should be_true
     end
 
-    it "answers :none — never :body or :query — for a shape it cannot re-encode" do
-      GQL.location(%([{"query":"{a}"},{"query":"{b}"}]).to_slice).should eq(:none)
-      GQL.location(%({"extensions":{"persistedQuery":{"sha256Hash":"h"}}}).to_slice).should eq(:none)
-      doc_head = "POST /g HTTP/1.1\r\nContent-Type: application/graphql\r\n\r\n".to_slice
-      GQL.location("{ me }".to_slice, doc_head).should eq(:none)
-      mp_head = "POST /g HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=zz\r\n\r\n".to_slice
-      mp_body = ["--zz", %(Content-Disposition: form-data; name="operations"), "",
-                 %({"query":"{ me }"}), "--zz--", ""].join("\r\n").to_slice
+    it "keeps multipart display-only — the pane is one part of a body it never saw the rest of" do
+      op = GQL.from_flow("/g", mp_head, mp_body).not_nil!
+      op.form.should eq(GQL::Form::Multipart)
+      op.editable?.should be_false
       GQL.location(mp_body, mp_head).should eq(:none)
     end
 
-    it "still answers :body / :query for the two shapes that round-trip" do
+    # A batch is N panes rendered into one, and a persisted ELEMENT renders as its own JSON
+    # envelope while its siblings render as the query triple. One pane cannot be read back as
+    # both, so the whole batch drops to read-only rather than dropping or inventing a document
+    # for the odd element out.
+    it "refuses a batch that carries a persisted operation" do
+      body = %([{"query":"{a}"},{"extensions":{"persistedQuery":{"sha256Hash":"h"}}}])
+      op = GQL.from_json(body).not_nil!
+      op.form.should eq(GQL::Form::Batch)
+      op.lossy.should be_true
+      op.editable?.should be_false
+      GQL.location(body.to_slice).should eq(:none)
+    end
+
+    it "answers with the shape's OWN binding, so the splice never guesses the grammar" do
       GQL.location(%({"query":"{ me }"}).to_slice).should eq(:body)
       GQL.location(nil).should eq(:query)
+      form_head = "POST /g HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n".to_slice
+      GQL.location("query=%7Bme%7D".to_slice, form_head).should eq(:form_body)
+      GQL.location(%([{"query":"{a}"},{"query":"{b}"}]).to_slice).should eq(:batch_body)
+      GQL.location(%({"extensions":{"persistedQuery":{"sha256Hash":"h"}}}).to_slice).should eq(:persisted_body)
+      doc_head = "POST /g HTTP/1.1\r\nContent-Type: application/graphql\r\n\r\n".to_slice
+      GQL.location("{ me }".to_slice, doc_head).should eq(:document_body)
+    end
+
+    it "still answers :none for a decoded entity, however invertible its shape" do
+      head = ("POST /g HTTP/1.1\r\nContent-Type: application/json\r\n" +
+              "Transfer-Encoding: chunked\r\n\r\n").to_slice
+      body = "12\r\n{\"query\":\"{ me }\"}\r\n0\r\n\r\n".to_slice
+      op = GQL.from_flow("/g", head, body).not_nil!
+      op.projected.should be_true
+      op.editable?.should be_false
+      GQL.location(body, head).should eq(:none)
+    end
+  end
+
+  # The three inverses added alongside `editable?`. A shape that PARSES but cannot be written
+  # back is a pane the operator can type into and never send, which is the complaint the
+  # read-only note was papering over: batching abuse, persisted-query allowlist bypass and
+  # content-type confusion are all *edits*, and gori showed them and then refused the edit.
+  # Each inverse is pinned on the same two properties — an untouched pane re-sends the same
+  # request, and an edit lands in exactly the place it was made.
+  describe ".recompose_batch" do
+    it "round-trips an untouched batch back into the array it came from" do
+      body = %([{"query":"{a}"},{"query":"{b}","operationName":"B"}])
+      op = GQL.from_json(body).not_nil!
+      GQL.recompose_batch(body, GQL.display(op))
+        .should eq(%([{"query":"{a}"},{"operationName":"B","query":"{b}"}]))
+    end
+
+    it "lands an edit in the element it was made in and leaves the siblings alone" do
+      body = %([{"query":"{a}","extensions":{"tag":1}},{"query":"{b}"}])
+      decoded = GQL.display(GQL.from_json(body).not_nil!).sub("{a}", "{ edited }")
+      GQL.recompose_batch(body, decoded)
+        .should eq(%([{"query":"{ edited }","extensions":{"tag":1}},{"query":"{b}"}]))
+    end
+
+    # The base element comes off the MARKER, not the block's position. Deleting `[0]` leaves
+    # `[1]` sitting first, and taking the base by position would graft element 0's extensions
+    # onto element 1's query — a request the operator never wrote, assembled out of two.
+    it "keeps each surviving block matched to its own original element" do
+      body = %([{"query":"{a}","extensions":{"only_a":true}},{"query":"{b}"}])
+      full = GQL.display(GQL.from_json(body).not_nil!)
+      kept = full[full.index("# --- [1] ---").not_nil!..]
+      GQL.recompose_batch(body, kept).should eq(%([{"query":"{b}"}]))
+    end
+
+    it "reads a pane the operator stripped of markers as the single operation it now is" do
+      body = %([{"query":"{a}"},{"query":"{b}"}])
+      GQL.recompose_batch(body, "# batch of 2 operations\n\n{ merged }")
+        .should eq(%([{"query":"{ merged }"}]))
+    end
+
+    it "keeps the original body when the pane holds no operation at all" do
+      body = %([{"query":"{a}"}])
+      GQL.recompose_batch(body, "   \n\n").should eq(body)
+    end
+
+    # `# --- [0] ---` is also a legal GraphQL comment. `batch_text` always writes the marker
+    # after a BLANK line, so requiring one is what tells the sentinel apart from a comment
+    # sitting inside a document — the same disambiguation `# variables` already gets, and
+    # without it a query carrying that line would be cut in half and sent as two operations.
+    it "does not let a marker-shaped comment inside a document split the batch" do
+      body = %([{"query":"query A {\\n# --- [0] ---\\n  a\\n}"}])
+      res = GQL.recompose_batch(body, GQL.display(GQL.from_json(body).not_nil!))
+      JSON.parse(res).as_a.size.should eq(1)
+      res.should contain("# --- [0] ---")
+    end
+  end
+
+  describe ".recompose_persisted" do
+    persisted = %({"operationName":"Q","variables":{"id":1},) +
+                %("extensions":{"persistedQuery":{"version":1,"sha256Hash":"abc"}}})
+
+    it "round-trips an untouched envelope, banner line and all" do
+      op = GQL.from_json(persisted).not_nil!
+      GQL.recompose_persisted(persisted, GQL.display(op)).should eq(persisted)
+    end
+
+    it "sends an edited hash — the field the allowlist bypass actually changes" do
+      decoded = GQL.display(GQL.from_json(persisted).not_nil!).sub("abc", "deadbeef")
+      res = GQL.recompose_persisted(persisted, decoded)
+      res.should contain(%("sha256Hash":"deadbeef"))
+      res.should_not contain(%("sha256Hash":"abc"))
+    end
+
+    # gori never writes a `query` the client did not send — but the OPERATOR may, and that is
+    # the whole persisted-query bypass: hash plus document, to see which one the server obeys.
+    it "invents no document, and sends one the operator typed" do
+      GQL.recompose_persisted(persisted, GQL.display(GQL.from_json(persisted).not_nil!))
+        .should_not contain(%("query"))
+      typed = %({"query":"{ me }","extensions":{"persistedQuery":{"sha256Hash":"abc"}}})
+      GQL.recompose_persisted(persisted, "# banner\n#{typed}").should eq(typed)
+    end
+
+    it "keeps the original body when the edit is not valid JSON" do
+      GQL.recompose_persisted(persisted, "# banner\n{\"broken\":").should eq(persisted)
+    end
+  end
+
+  describe ".recompose_document" do
+    # `application/graphql` carries the document as the body, so the pane holds the request's
+    # own bytes: the inverse is the identity, and nothing may be stripped — leading whitespace
+    # in an operator's document is their payload (P7), not formatting gori gets to tidy.
+    it "writes the pane back verbatim" do
+      doc = "  query Hero {\n  hero { name }\n}\n"
+      GQL.recompose_document(doc).should eq(doc)
+    end
+
+    it "round-trips a captured document unchanged through display" do
+      head = "POST /g HTTP/1.1\r\nContent-Type: application/graphql\r\n\r\n".to_slice
+      op = GQL.from_flow("/g", head, "query Hero { hero { name } }".to_slice).not_nil!
+      op.form.should eq(GQL::Form::Document)
+      GQL.recompose_document(GQL.display(op)).should eq("query Hero { hero { name } }")
     end
   end
 

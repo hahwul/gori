@@ -29,6 +29,15 @@ private def load_gql(head : String, body : String) : RepeaterView
   view
 end
 
+# An edit made the way the operator makes it: switch to DECODED, rewrite the pane, send.
+# `replace_edit_buffer` targets whichever sub-pane is active and marks it dirty, so this is
+# the keystroke path without the keystrokes. Returns the raw request bytes as text.
+private def edit_decoded(view : RepeaterView, &) : String
+  view.toggle_req_pane.should eq(:decoded)
+  view.replace_edit_buffer(yield view.edit_buffer_text)
+  String.new(view.request_bytes) # commits the decoded edit on the way out
+end
+
 describe "RepeaterView split-decode (SAML/GraphQL)" do
   before_each { Gori::Settings.pretty_bodies_default = false }
 
@@ -97,6 +106,58 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
       q = JSON.parse(String.new(view.request_bytes).split("\r\n\r\n", 2)[1])["query"].as_s
       q.should contain("ENVEDIT") # the envelope edit reached decoded
       q.should contain("PLUS")    # the decoded edit merged back
+    end
+  end
+
+  # The shapes that used to open as an ordinary raw tab because nothing could write the pane
+  # back. Each has its own inverse now, and each writes a DIFFERENT grammar into the body —
+  # so what these pin is that the splice picks the right one and that the untouched request
+  # still goes out byte-faithfully.
+  describe "GraphQL shapes with their own inverse" do
+    it "writes a batch back as the ARRAY it was, with the edit in its own element" do
+      body = %([{"query":"query A { a }"},{"query":"query B { b }"}])
+      head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\n" \
+             "Content-Length: #{body.bytesize}\r\n\r\n"
+      raw = edit_decoded(load_gql(head, body), &.sub("query B { b }", "query B { EDITED }"))
+      sent = raw.split("\r\n\r\n", 2)[1]
+      arr = JSON.parse(sent).as_a
+      arr.size.should eq(2) # NOT collapsed into one object
+      arr[0]["query"].as_s.should eq("query A { a }")
+      arr[1]["query"].as_s.should eq("query B { EDITED }")
+      raw.should contain("Content-Length: #{sent.bytesize}") # resynced
+    end
+
+    it "edits a persisted query's hash without inventing a document" do
+      body = %({"operationName":"Q","extensions":{"persistedQuery":{"version":1,"sha256Hash":"abc"}}})
+      head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\n" \
+             "Content-Length: #{body.bytesize}\r\n\r\n"
+      sent = edit_decoded(load_gql(head, body), &.sub("abc", "deadbeef")).split("\r\n\r\n", 2)[1]
+      j = JSON.parse(sent)
+      j["extensions"]["persistedQuery"]["sha256Hash"].as_s.should eq("deadbeef")
+      j.as_h.has_key?("query").should be_false # gori writes no document the client never sent
+    end
+
+    it "writes an application/graphql document back as the BODY, not as JSON" do
+      body = "query Hero { hero { name } }"
+      head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/graphql\r\n" \
+             "Content-Length: #{body.bytesize}\r\n\r\n"
+      raw = edit_decoded(load_gql(head, body), &.sub("name", "name id"))
+      sent = raw.split("\r\n\r\n", 2)[1]
+      sent.should eq("query Hero { hero { name id } }") # the pane IS the body
+      raw.should contain("Content-Length: #{sent.bytesize}")
+    end
+
+    it "sends a multipart upload exactly as captured — the one shape with no inverse" do
+      b = "----X"
+      body = ["--#{b}", %(Content-Disposition: form-data; name="operations"), "",
+              %({"query":"mutation($f: Upload!){ upload(file: $f){ id } }","variables":{"f":null}}),
+              "--#{b}--", ""].join("\r\n")
+      head = %(POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: multipart/form-data; boundary="#{b}"\r\nContent-Length: #{body.bytesize}\r\n\r\n)
+      view = load_gql(head, body)
+      # Even after a decoded-pane edit the envelope is untouched: `location` says :none, so
+      # the splice has nothing to write and the captured bytes go out as they came in.
+      edit_decoded(view, &.sub("upload", "pwned"))
+        .split("\r\n\r\n", 2)[1].should eq(body)
     end
   end
 
