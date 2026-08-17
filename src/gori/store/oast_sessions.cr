@@ -123,6 +123,24 @@ module Gori
       list
     end
 
+    # How many callbacks a session has on file. Counted in SQL rather than by loading rows:
+    # the session LIST (three surfaces render one) wants the number beside every session, and
+    # `oast_callbacks` above reads every raw request/response blob to get it.
+    def oast_callback_count(session_id : Int64) : Int32
+      @db.query_one("SELECT COUNT(*) FROM oast_callbacks WHERE session_id = ?", session_id, as: Int64).to_i32
+    end
+
+    # The provider uids a session already holds — the dedup seed a resumed listener starts
+    # from, so a provider that replays its whole buffer on a poll does not re-announce hits
+    # that are already recorded. Uids only, for the same reason as the count above.
+    def oast_callback_uids(session_id : Int64) : Set(String)
+      seen = Set(String).new
+      @db.query("SELECT provider_uid FROM oast_callbacks WHERE session_id = ?", session_id) do |rs|
+        rs.each { seen << rs.read(String) }
+      end
+      seen
+    end
+
     # INSERT OR IGNORE on the UNIQUE(session_id, provider_uid) dedup key. The DB enforces
     # dedup; the return (last_insert_rowid) is NOT a reliable new-vs-ignored signal, so the
     # controller dedups in memory (a seen-uid set) and treats this as a durable backstop.
