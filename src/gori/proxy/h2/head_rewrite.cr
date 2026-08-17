@@ -548,33 +548,18 @@ module Gori::Proxy::H2
       end
     end
 
-    # #730: the same three seams, on the ORDINARY stream — the one whose authority is the
-    # CONNECT host.
+    # The same three unreachable kinds, on the ORDINARY stream — the one whose authority IS the
+    # CONNECT host. The gate that would have taken this host down to h1 ran once, inside CONNECT,
+    # but the rule tables are live-mutated in place, so a body / short-circuit / body-scoped
+    # extract rule enabled afterwards reaches nothing on this connection until the client opens a
+    # new one. Spoken once per connection; the relay is not downgraded or GOAWAYed (#730).
     #
-    # The gate that would have downgraded this host runs once, inside CONNECT. `Session#rules`
-    # and `Session#bindings` are live-mutated in place and nothing tears down an open relay when
-    # they change, so a body / short-circuit / body-scoped-extract rule enabled AFTER the h2
-    # handshake applies to nothing on this connection until the client opens a new one. That is
-    # the ordinary workflow — browse a site, spot a request, write a stub, refresh — and the
-    # browser reuses the connection, so the operator watches the request they stubbed reach the
-    # origin. Verbatim the failure `tls/tunnel.cr`'s short-circuit gate says it exists to prevent.
-    #
-    # This does NOT downgrade or GOAWAY the connection: dropping live relays on every rule toggle
-    # is a behaviour change with a real cost, and out of scope here (option (b) in #730). What it
-    # buys is that the window is spoken rather than silent — and h2 HEAD rules, which reach this
-    # very pipeline per request, are unaffected and say so in the line.
-    #
-    # Cost: unlike `notice_coalesced` this runs on the ordinary path, so it is reached on every
-    # request head until it has something to say. All three predicates open with a lock-free
-    # atomic count (`Rules#rewrites_body_for_host?`, `#short_circuits_for_host?`,
-    # `Bindings#extracts_body_for_host?`), so a connection with no such rule anywhere — which is
-    # every connection that was allowed to negotiate h2 at all, at the time it did — pays three
-    # atomic loads per head and takes no lock. A lock IS taken, on every request head for as long
-    # as the connection lives, while such a rule exists on some OTHER host: the count is non-zero
-    # so the fast path does not fire, the host glob then answers no, and the latch never engages
-    # because nothing was announced. That is deliberate and must stay — the premise of #730 is
-    # that a rule can go live at any moment, so a NEGATIVE answer cannot be cached without
-    # re-opening the very window this closes. Only a line actually written is bounded by a latch.
+    # DO NOT LATCH THE NEGATIVE. This is reached on every request head until it has something to
+    # say, and that is the point — a rule can go live at any moment, so remembering "nothing
+    # matched" re-opens the window this closes. The cost is bounded by the three predicates'
+    # lock-free atomic counts: a connection with no such rule anywhere pays three atomic loads
+    # per head. While one exists on some OTHER host the count is non-zero and each head takes the
+    # lock, for the life of the connection. Only a line actually written is latched.
     private def notice_live_rule(host : String) : Nil
       return if @warned_live_rule
       kinds = unreachable_kinds(host)

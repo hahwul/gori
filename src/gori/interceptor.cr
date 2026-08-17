@@ -341,18 +341,11 @@ module Gori
     # INDEPENDENT of the interceptor's own `@enabled`: the sandbox blocks whether or not
     # intercept is on.
 
-    # Is the sandbox on? Every caller is now inside `H2::StreamGate`, and the Tunnel is not one:
-    # it used to force every sandboxed connection to h1 so that `sandbox_blocks?` below would run
-    # per request, and #492 step 4 replaced that with a per-stream refusal in the gate. What the
-    # gate asks this for is the cases where there is no URL to test at all — a header block it
-    # cannot decode, one that never got END_HEADERS, a promised (§8.4) request — each of which
-    # fails CLOSED only while the sandbox is on.
-    #
-    # The CONNECT h2c refusal in `client_conn.cr` used to be a caller too, on the grounds that the
-    # h2c relay "is wired with no gates at all". That stopped being true when #549 threaded
-    # `interceptor:` into `intercept_h2c`'s relay call — `H2::Relay#gates` builds both
-    # `StreamGate`s whenever an interceptor is present — so the blanket tunnel refusal was
-    # short-circuiting ahead of the per-stream gate it claimed did not exist, and #731 removed it.
+    # Is the sandbox on? Asked only where there is no URL to test against `sandbox_blocks?` —
+    # inside `H2::StreamGate`, for a header block it cannot decode, one that never got
+    # END_HEADERS, or a promised (§8.4) request. Each of those fails CLOSED, but only while the
+    # sandbox is on, which is what this answers. A caller that HAS a URL wants
+    # `sandbox_blocks?`/`sandbox_blocks_host?` instead; this one cannot tell scope from policy.
     def sandbox_enabled? : Bool
       @scope.sandbox?
     end
