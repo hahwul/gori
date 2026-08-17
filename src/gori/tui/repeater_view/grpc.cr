@@ -29,13 +29,14 @@ class Gori::Tui::RepeaterView
   end
 
   # Load a captured gRPC flow (an application/grpc HTTP/2 call) for repeater. The request
-  # HEAD is seeded into the editor (editable — metadata headers). protobuf is opaque
-  # without a .proto, so the message body isn't text-editable — but a UNARY call (exactly
-  # one framed message) exposes its payload for HEX editing (^X), with the 5-byte length
-  # prefix recomputed on send while `␣F:FRAME` is on (see grpc_request_bytes; the toggle
-  # defaults on here and off headless). A 0- or multi-message body is
-  # kept byte-exact in @grpc_body and re-appended verbatim. The response renders as a
-  # deframed gRPC transcript + grpc-status.
+  # HEAD is seeded into the editor (editable — metadata headers). The message body is wire
+  # protobuf, not text, so it isn't text-editable — but a UNARY call (exactly one framed
+  # message) exposes its payload for HEX editing (^X), with the 5-byte length prefix
+  # recomputed on send while `␣F:FRAME` is on (see grpc_request_bytes; the toggle defaults on
+  # here and off headless). A 0- or multi-message body is kept byte-exact in @grpc_body and
+  # re-appended verbatim. The response renders as a deframed gRPC transcript + grpc-status,
+  # each payload decoded schema-lessly (`p` swaps the tree for a hex preview) — the wire
+  # format names every field's number and type without a `.proto`.
   def load_grpc(detail : Store::FlowDetail) : Nil
     @flow = detail
     @evidence = true
@@ -219,6 +220,9 @@ class Gori::Tui::RepeaterView
     if msgs.empty? && residual == 0
       rows << {"← (no complete gRPC messages)", Theme.muted}
     else
+      # One legend above the messages, and only when a tree will actually be drawn — see
+      # ProtobufTree::NOTE. Same rule as the History framing pane, from the same predicate.
+      rows << {ProtobufTree::NOTE, Theme.muted} if ProtobufTree.legend?(msgs, @pretty)
       msgs.each_with_index do |m, i|
         if m.trailer
           rows << {"← trailer  #{m.data.size}b", Theme.green}
@@ -234,7 +238,7 @@ class Gori::Tui::RepeaterView
           end
         else
           rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
-          grpc_hex_preview(m.data).each { |h| rows << {h, Theme.muted} }
+          grpc_payload_rows(m).each { |r| rows << r }
         end
       end
     end
@@ -253,6 +257,21 @@ class Gori::Tui::RepeaterView
     name = n ? Proxy::H2::Grpc.status_name(n) : code
     msg = resp.try(&.headers.get?("grpc-message"))
     {"#{ok ? "✓" : "✗"} grpc-status: #{code} #{name}#{msg ? " · #{msg}" : ""}", ok ? Theme.green : Theme.red}
+  end
+
+  # One response message's payload, under its `← message #N` header. PRETTY (`p`, the same
+  # global toggle that reflows a JSON response body) picks the reading: the schema-less
+  # protobuf tree, or the hex preview that is the honest view when the decoder can make no
+  # sense of the bytes. `ProtobufTree` is shared with the History framing pane so the two
+  # cannot drift — #496 deferred this precisely so it would be answered once.
+  #
+  # `ProtobufTree.decode?` owns the compressed/trailer carve-outs the CLI and MCP make, so
+  # this pane and the History framing pane cannot disagree about which payloads are protobuf.
+  private def grpc_payload_rows(m : Proxy::H2::Grpc::Message) : Array({String, Color})
+    unless ProtobufTree.decode?(m, @pretty)
+      return grpc_hex_preview(m.data).map { |h| {h, Theme.muted} }
+    end
+    ProtobufTree.lines(Protobuf.decode(m.data), indent: "    ").map { |l| {l, Theme.text} }
   end
 
   private def grpc_hex_preview(data : Bytes, max : Int32 = 32) : Array(String)

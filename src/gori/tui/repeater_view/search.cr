@@ -40,12 +40,15 @@ class Gori::Tui::RepeaterView
     resp_wrap_reset
   end
 
-  # Pretty toggle feeds `resp_view`, so a change drops only the response-view cache
-  # (the diff/hex caches are unaffected — pretty touches neither). Change-detected
-  # because the runner pushes this every frame.
+  # Pretty toggle feeds `resp_view` AND the gRPC transcript (where it picks the protobuf tree
+  # over a hex preview), so a change drops both of those caches — the diff/hex caches are
+  # unaffected, pretty touches neither. Change-detected because the runner pushes this every
+  # frame. Missing the transcript cache here would leave a gRPC tab showing hex until the next
+  # send, with a lit ` p:tree ` chip over it saying otherwise.
   def pretty=(on : Bool) : Nil
     return if @pretty == on
     @pretty = on
+    @grpc_lines_cache = nil
     drop_resp_view_cache
     @scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like x/d toggles)
     resp_wrap_reset

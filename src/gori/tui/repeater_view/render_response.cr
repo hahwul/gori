@@ -38,6 +38,36 @@ class Gori::Tui::RepeaterView
     end
   end
 
+  # The GRPC RESPONSE transcript's title, and where a chip cluster may start on its border:
+  # past `Frame.card`'s " TITLE " (drawn from rect.x + 2) plus a column of air. ONE derivation,
+  # read by the draw below and by `chrome_hit` — a chip drawn at one x and hit-tested at
+  # another is a dead cell, which is the defect `␣K:KEY` had.
+  GRPC_TITLE = "GRPC RESPONSE"
+
+  private def grpc_chip_x(rect : Rect) : Int32
+    rect.x + 2 + Screen.draw_width(" #{GRPC_TITLE} ") + 1
+  end
+
+  # ` p:tree ` / ` p:bytes ` on the gRPC transcript border. The transcript is the one response
+  # pane with no chrome of its own, and PRETTY is now live on it — it picks whether each
+  # message payload renders as the schema-less protobuf tree or as a hex preview. A toggle
+  # that changes the pane with nothing on screen naming it is how `p` would read otherwise.
+  # `d:diff` / `^X:hex` are deliberately absent: neither is reachable in gRPC mode.
+  private def render_grpc_chrome(screen : Screen, rect : Rect) : Nil
+    label = @pretty ? " p:bytes " : " p:tree "
+    x = grpc_chip_x(rect)
+    # `Frame.chip` does not clip itself and this card is a half-width split pane, so the stop
+    # is computed rather than assumed — and it clears the LATENCY meta, not just the '╮'.
+    # `render_transcript` drew that meta first and this runs after it, so an un-cleared chip
+    # would silently overpaint the duration of the send the operator just made.
+    stop = rect.right - 1
+    if d = @result.try(&.duration_us)
+      stop = rect.right - 2 - Screen.draw_width(Fmt.dur(d)) # border_meta's own left edge
+    end
+    return if x + Screen.draw_width(label) > stop
+    Frame.chip(screen, x, rect.y, label, @pretty)
+  end
+
   # The HANDSHAKE RESPONSE card (the 101 head). `active` says this card owns the response read
   # cursor, and it decides two things:
   #
@@ -104,6 +134,7 @@ class Gori::Tui::RepeaterView
     end
     if @grpc_mode
       render_transcript(screen, rect, focused, "GRPC RESPONSE", grpc_transcript_lines, @result.try(&.duration_us))
+      render_grpc_chrome(screen, rect)
       return
     end
     if group_mode?
