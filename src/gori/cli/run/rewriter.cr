@@ -214,6 +214,7 @@ module Gori
         rest = [] of String
         parser.unknown_args { |before, after| rest = before + after }
         parser.parse(args)
+        abort "gori run rewriter extract #{verb}: too many arguments (expected one <id>, got: #{rest.join(" ")})" if rest.size > 1
         id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
         {id, open_store(resolve_read_project(project_name, db_path))}
       end

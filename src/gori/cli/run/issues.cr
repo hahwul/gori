@@ -147,6 +147,7 @@ module Gori
         end
         parser.parse(args)
 
+        abort "gori run issues delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run issues delete: <id> is required")
         id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
 
