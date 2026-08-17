@@ -323,6 +323,14 @@ module Gori
         "repeater.toggle-ws-key", "Toggle Sec-WebSocket-Key reuse",
         "WebSocket: send the handshake's OWN Sec-WebSocket-Key instead of a fresh one — the only way to test an absent, short, duplicated or non-base64 key (off by default: a fresh key avoids a server's replay guard)",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'K', section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
+      # gRPC tab only, and no chord for the same reason `␣K` has none: the ctrl- space in
+      # Repeater is dense, this is a per-tab decision rather than a mid-edit key, and the
+      # GRPC REQUEST pane carries a `␣F:FRAME` badge either way — so the state is on screen
+      # (and clickable) without opening the menu.
+      r.register Verb::Definition.new(
+        "repeater.toggle-grpc-reframe", "Toggle gRPC reframe",
+        "gRPC: recompute the 5-byte length prefix over the payload actually being sent (ON by default in this tab, so a ^X hex edit produces a well-formed unary message; turn it OFF to send the captured prefix, which is the `gori run repeater send` default and a standard parser test). Unary only — a 0-/multi-message body is sent verbatim either way",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'F', section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
       r.register Verb::Definition.new(
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",

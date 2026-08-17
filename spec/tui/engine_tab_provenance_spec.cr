@@ -390,7 +390,7 @@ describe "Fuzzer tab — Content-Length (T2)" do
         off.apply_advanced(AdvancedSnapshot.new(
           conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
           max_requests: snap.max_requests, race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
-          keep_alive: snap.keep_alive, update_cl: false,
+          keep_alive: snap.keep_alive, update_cl: false, reframe_grpc: snap.reframe_grpc,
           m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
           f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
         off.apply_set(nil, SetSpec.new(:list, "ZZ"))
@@ -425,7 +425,7 @@ describe "Fuzzer tab — Content-Length (T2)" do
     view.apply_advanced(AdvancedSnapshot.new(
       conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
       max_requests: "250", race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
-      keep_alive: snap.keep_alive, update_cl: false,
+      keep_alive: snap.keep_alive, update_cl: false, reframe_grpc: snap.reframe_grpc,
       m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
       f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
     view.advanced_snapshot.max_requests.should eq("250")

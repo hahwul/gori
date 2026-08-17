@@ -107,6 +107,7 @@ module Gori::Tui
         Item.new("^X", "hex-edit the request", "repeater.toggle-hex"),
         Item.new("^S", "SNI override (on the target)", "repeater.toggle-sni"),
         Item.new("^L", "toggle auto Content-Length", "repeater.toggle-auto-content-length"),
+        Item.new("space → F", "gRPC: reframe the message on send (on by default; off sends the captured 5-byte length prefix)", "repeater.toggle-grpc-reframe"),
         Item.new("^V", "transport: HTTP/1.1 ↔ HTTP/2 · on a WebSocket tab, WS → h1 → h2 (send the handshake as plain HTTP)", "repeater.toggle-http2"),
         Item.new("space → g", "send group: %%%-split requests on one connection"),
         Item.new("↹", "cycle target → request → response"),

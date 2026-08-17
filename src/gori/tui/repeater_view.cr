@@ -225,9 +225,17 @@ module Gori::Tui
       # re-encoded on the way out, so the two never mix.
       @grpc_web_text = false
       # A SINGLE-message gRPC call (the unary common case) is reframable: its payload is
-      # hex-editable (^X) and the 5-byte length prefix is recomputed on send. A 0- or
-      # multi-message body isn't (boundaries are prefix-defined) — it stays verbatim.
+      # hex-editable (^X). A 0- or multi-message body isn't (boundaries are prefix-defined) —
+      # it stays verbatim. This is a property of the CAPTURE, not a choice: it says whether
+      # `^X` is offered and whether @grpc_reframe has anything to act on.
       @grpc_reframable = false
+      # …and whether the 5-byte length prefix is RECOMPUTED over the payload on send, which is
+      # a choice, and a separate one (they were the same flag until PR 13). ON by default here
+      # and off on `gori run` / MCP, deliberately: this tab exists so a hex edit produces a
+      # well-formed unary message, and a stale prefix after `^X` is the trap it already avoids.
+      # Headless the operator may be sending a deliberately-wrong prefix, which is P7's default
+      # and a standard gRPC parser test. See DESIGN.md §7.
+      @grpc_reframe = true
       @grpc_compressed = false    # the editable message's compressed flag (preserved on reframe)
       @grpc_payload = Bytes.empty # the current (possibly hex-edited) single-message payload
       @grpc_lines_cache = nil.as(Array({String, Color})?)

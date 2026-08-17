@@ -1,17 +1,39 @@
 # gRPC repeater mode (an `application/grpc` h2 flow): the editor holds the editable request
-# HEAD and the framed message body is sent byte-exact — or reframed, for the unary case the
-# hex editor can reach — plus the deframed response transcript and status row.
+# HEAD and the framed message body is sent byte-exact — or, for the unary case the hex editor
+# can reach, with its length prefix recomputed while `␣F:FRAME` is on — plus the deframed
+# response transcript and status row.
 # Reopens Gori::Tui::RepeaterView (see tui/repeater_view.cr).
 class Gori::Tui::RepeaterView
   getter? grpc_mode : Bool
-  getter? grpc_reframable : Bool # a unary gRPC call whose payload is hex-editable + reframed
+  getter? grpc_reframable : Bool # a unary gRPC call whose payload is hex-editable
   getter grpc_msg_count : Int32  # deframed request-message count (gates/explains hex availability)
+
+  # Whether a reframable call's 5-byte length prefix is RECOMPUTED over the payload on send.
+  # Split off `grpc_reframable?` in PR 13: "unary, so hex-editable" is a fact about the
+  # capture, "reframe on send" is a decision, and fusing them meant the TUI could not send
+  # what `gori run repeater send` sends by default. ON here, OFF headless — see the ivar's
+  # comment in repeater_view.cr and DESIGN.md §7.
+  getter? grpc_reframe : Bool
+
+  # `␣F:FRAME` / `repeater.toggle-grpc-reframe`. Refused unless this is a gRPC tab holding a
+  # REFRAMABLE body: there is otherwise no unary prefix to recompute, and a flag that cannot
+  # change what goes on the wire is worse than a toast saying so.
+  #
+  # The transcript cache is deliberately NOT dropped: those rows describe the send that
+  # produced the result on screen, and `apply` already rebuilds them per send. Dropping them
+  # here would re-report a PAST send's byte count under the toggle's new state — the same
+  # reason `^X` does not drop them either.
+  def toggle_grpc_reframe : Bool
+    return @grpc_reframe unless @grpc_mode && @grpc_reframable
+    @grpc_reframe = !@grpc_reframe
+  end
 
   # Load a captured gRPC flow (an application/grpc HTTP/2 call) for repeater. The request
   # HEAD is seeded into the editor (editable — metadata headers). protobuf is opaque
   # without a .proto, so the message body isn't text-editable — but a UNARY call (exactly
   # one framed message) exposes its payload for HEX editing (^X), with the 5-byte length
-  # prefix recomputed on send (see grpc_request_bytes). A 0- or multi-message body is
+  # prefix recomputed on send while `␣F:FRAME` is on (see grpc_request_bytes; the toggle
+  # defaults on here and off headless). A 0- or multi-message body is
   # kept byte-exact in @grpc_body and re-appended verbatim. The response renders as a
   # deframed gRPC transcript + grpc-status.
   def load_grpc(detail : Store::FlowDetail) : Nil
@@ -39,6 +61,9 @@ class Gori::Tui::RepeaterView
     framed = grpc_framed_body
     msgs, @grpc_req_residual = Proxy::H2::Grpc.scan(framed)
     @grpc_msg_count = msgs.size
+    # Per LOAD, like `@ws_keep_key`: a freshly seeded tab starts at this tab's own default
+    # (on), whatever the previous flow in this view left it at.
+    @grpc_reframe = true
     # Reframable only when the body is EXACTLY one clean message: then a hex edit of the
     # payload can be re-length-prefixed unambiguously. (A partial trailing frame would
     # leave msgs shorter than the wire, so require the framing to be lossless too.)
@@ -76,10 +101,11 @@ class Gori::Tui::RepeaterView
 
   # The replayable request bytes for a gRPC tab: the edited head + the canonical
   # CRLFCRLF terminator (what H2Engine.split_head_body keys on) + the message body.
-  # A reframable (unary) call reframes the current payload — hex-edited via @req_hex_edit
-  # while in hex mode, else the stored @grpc_payload — so the 5-byte length prefix always
-  # matches the payload the origin receives; otherwise the pristine @grpc_body is resent
-  # verbatim. Auto-Content-Length never applies (h2 frames by DATA/END_STREAM).
+  # A reframable (unary) call sends the current payload — hex-edited via @req_hex_edit while
+  # in hex mode, else the stored @grpc_payload — behind either a RECOMPUTED length prefix
+  # (`␣F:FRAME` on, the default) or the CAPTURED one (off, which is how a deliberately-stale
+  # prefix is sent); a non-reframable body is the pristine @grpc_body, verbatim.
+  # Auto-Content-Length never applies over h2 (it frames by DATA/END_STREAM).
   private def grpc_request_bytes : Bytes
     raw = expanded_editor_bytes
     n = raw.size
@@ -119,14 +145,35 @@ class Gori::Tui::RepeaterView
     Proxy::H2::Grpc.decode_web_text(@grpc_body) || @grpc_body # P7: undecodable → show as captured
   end
 
-  # The message body to send, IN WIRE FORM: a reframable call re-length-prefixes the live
-  # payload (hex buffer if editing, else the stored payload) and re-applies grpc-web-text's
-  # base64; everything else is the captured body verbatim.
+  # The message body to send, IN WIRE FORM: a reframable call frames the live payload (hex
+  # buffer if editing, else the stored payload) and re-applies grpc-web-text's base64;
+  # everything else is the captured body verbatim.
+  #
+  # `@grpc_reframe` picks WHICH prefix goes in front of that payload — recomputed, or the
+  # captured five bytes kept as-is. Both are one message; the difference is whether the
+  # declaration follows the edit (an ordinary call the origin should accept) or stays where
+  # the capture left it (the P7 default headless, where the mismatch IS the test).
   private def grpc_send_body : Bytes
     return @grpc_body unless @grpc_reframable
     payload = (h = @req_hex_edit) ? h.to_bytes : @grpc_payload
-    framed = Proxy::H2::Grpc.frame(@grpc_compressed, payload)
+    framed = @grpc_reframe ? Proxy::H2::Grpc.frame(@grpc_compressed, payload) : grpc_stale_frame(payload)
     @grpc_web_text ? Base64.strict_encode(framed).to_slice : framed
+  end
+
+  # The CAPTURED 5-byte prefix in front of the live payload — the reframe toggle's OFF half.
+  # Flag byte and all four length octets are copied from the capture, so with no hex edit the
+  # result is the captured body byte-for-byte, and after one it is the same stale declaration
+  # `gori run repeater send` (no `--reframe-grpc`) would put on the wire.
+  #
+  # A reframable tab always has ≥ 5 framed bytes (load_grpc proved the body re-frames to
+  # itself); the guard is there so a future caller cannot make this read past the slice.
+  private def grpc_stale_frame(payload : Bytes) : Bytes
+    captured = grpc_framed_body
+    return Proxy::H2::Grpc.frame(@grpc_compressed, payload) if captured.size < 5
+    stale = Bytes.new(5 + payload.size)
+    captured[0, 5].copy_to(stale)
+    payload.copy_to(stale[5, payload.size])
+    stale
   end
 
   # The gRPC transcript as {text, colour} rows (cached): the request message count,

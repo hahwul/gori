@@ -373,6 +373,7 @@ class Gori::Tui::RepeaterView
     @grpc_body = src.@grpc_body.dup
     @grpc_msg_count = src.@grpc_msg_count
     @grpc_reframable = src.@grpc_reframable
+    @grpc_reframe = src.@grpc_reframe # a send knob, so the clone sends what the source would
     @grpc_compressed = src.@grpc_compressed
     @grpc_payload = src.@grpc_payload.dup # carry any hex-edited payload into the clone
     @grpc_lines_cache = nil

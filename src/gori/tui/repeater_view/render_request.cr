@@ -75,18 +75,27 @@ class Gori::Tui::RepeaterView
     # rightmost, a gold button while idle, recessed while a send is in flight.
     send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
     if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
+      # `␣F:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
+      # because the state it reports matters most exactly while the payload is being hex-edited:
+      # off, the five captured length bytes go out in front of the edited payload. Drawn only
+      # where it is live (`grpc_reframable?`) — the same condition `chrome_hit` lists it under.
       if h = @req_hex_edit
-        Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
+        hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
+        Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣F", "FRAME", @grpc_reframe) if @grpc_reframable
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       else
-        msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
+        msg_edge = send_edge
+        if @grpc_reframable
+          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false)
+          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣F", "FRAME", @grpc_reframe)
+        end
         # The gRPC head is a mode-switched text editor like every other non-hex request card
         # (`i`/esc, READ selection, and — since the read chrome landed here — a visible NORMAL
         # caret), so it carries the chip too. It was skipped while its READ caret was invisible;
         # leaving it off now would make this the one pane showing a block caret with nothing on
         # screen naming the mode it belongs to.
-        Frame.mode_badge(screen, msg_edge || send_edge, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
-        @editor.conceal_spans = [] of {Int32, Int32}                                    # gRPC frames aren't §-marker HTTP text — no stale concealment
+        Frame.mode_badge(screen, msg_edge, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
+        @editor.conceal_spans = [] of {Int32, Int32}                       # gRPC frames aren't §-marker HTTP text — no stale concealment
         @editor.chain_peek_text = nil
         render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)
       end
