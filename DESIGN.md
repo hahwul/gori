@@ -1262,11 +1262,6 @@ reason `idle` is already one: the bug is a RATIO (a script longer than `deadline
 messages), and a spec cannot demonstrate it at 60s-scale in a run anyone will wait for. No
 surface passes it.
 
----
-
-*Keep this document honest against the code. When you change a subsystem it describes, update
-the matching section; when you cite a principle inline, use the labels above.*
-
 ### 2026-08-17: session slots reach all three surfaces
 
 Refines: [P1](#p1), [P4](#p4). Extends the 2026-08-17 session-slots entry. PR #10.
@@ -1347,3 +1342,8 @@ as its sibling send knobs (reset to on by `load_grpc`, carried by a tab duplicat
 Fuzzer's rides the existing `config_json` blob, read back as `|| false` — the opposite of
 `update_cl`'s `!= false` — so a session saved before the key existed starts OFF rather than
 silently reframing bytes the operator never asked to repair.
+
+---
+
+*Keep this document honest against the code. When you change a subsystem it describes, update
+the matching section; when you cite a principle inline, use the labels above.*
