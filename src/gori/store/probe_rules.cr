@@ -102,8 +102,8 @@ module Gori
       exec_task_ok ->(c : DB::Connection) { c.exec("UPDATE probe_custom_rules SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id); nil }
     end
 
-    def delete_probe_custom_rule(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM probe_custom_rules WHERE id = ?", id); nil }
+    def delete_probe_custom_rule(id : Int64) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM probe_custom_rules WHERE id = ?", id); nil }
     end
   end
 end
