@@ -852,18 +852,62 @@ describe "Intercept verbs (P1)" do
       end
     end
 
-    it "shows a binary message as its size and refuses the editor" do
+    it "shows a binary message as its size and opens the HEX editor, not the TextArea" do
       tmp_interceptor do |ic|
         hold_ws(ic, Bytes[0x00, 0xFF, 0x10, 0x82], binary: true)
         view = InterceptView.new
         view.reload(ic)
-        view.read_only_selection?.should be_true
         view.toggle_edit
-        view.editing?.should be_false # refused: the TextArea round trip is lossy on non-UTF-8
+        # The TextArea round trip (`String.new(raw)` → char ops → `.to_slice`) is lossy on
+        # non-UTF-8, which is why this used to open nothing at all and the pane said READ-ONLY.
+        view.editing?.should be_true
+        view.hex_editing?.should be_true
+        view.text_editing?.should be_false
         backend = MemoryBackend.new(120, 12)
         view.render(Screen.new(backend), Rect.new(0, 0, 120, 12))
         backend.contains?("<binary, 4 bytes>").should be_true
-        backend.contains?("READ-ONLY").should be_true
+        backend.contains?("READ-ONLY").should be_false
+        backend.contains?("HEX").should be_true
+        backend.contains?("00 ff 10 82").should be_true # the hex dump, not a wall of U+FFFD
+      end
+    end
+
+    it "forwards the EDITED bytes of a binary message, and the pristine ones after a peek" do
+      tmp_interceptor do |ic|
+        it0 = hold_ws(ic, Bytes[0x00, 0xFF, 0x10, 0x82], binary: true)
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        # A pure peek is byte-exact (P7): opening the editor must not mutate a held message.
+        view.forward_bytes(it0).should eq(Bytes[0x00, 0xFF, 0x10, 0x82])
+        view.hex_set_nibble('d') # high nibble of byte 0
+        view.hex_set_nibble('e') # low nibble of byte 0 — the cursor now sits on byte 1
+        view.hex_delete          # drop the byte under the cursor (0xFF)
+        view.forward_bytes(it0).should eq(Bytes[0xDE, 0x10, 0x82])
+        view.pending_edit.not_nil![0].should eq(it0.id)
+        # No Content-Length line spliced in, and no CRLF normalisation: a WS payload has no
+        # head for either, and a binary one has no line structure at all.
+        String.new(view.forward_bytes(it0)).should_not contain("Content-Length")
+      end
+    end
+
+    it "keeps the hex buffer across an Esc back to the queue, and drops it for another item" do
+      tmp_interceptor do |ic|
+        bin = hold_ws(ic, Bytes[0x01, 0x02], binary: true)
+        txt = hold_ws(ic, %({"a":1}))
+        view = InterceptView.new
+        view.reload(ic)
+        view.toggle_edit
+        view.hex_set_nibble('f')
+        view.stop_edit
+        view.toggle_edit                                     # back onto the SAME row — the in-progress edit survives
+        view.forward_bytes(bin).should eq(Bytes[0xF1, 0x02]) # the high nibble of byte 0
+        view.stop_edit
+        view.move(1) # onto the text hold
+        view.toggle_edit
+        view.hex_editing?.should be_false
+        view.text_editing?.should be_true
+        view.forward_bytes(txt).should eq(%({"a":1}).to_slice) # unedited: byte-exact
       end
     end
 

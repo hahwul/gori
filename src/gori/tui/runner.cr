@@ -1209,6 +1209,13 @@ module Gori::Tui
           return
         elsif @active_tab == :intercept && intercept_controller.view.editing?
           iv = intercept_controller.view
+          # `$EDITOR` is a TEXT channel — the buffer goes out as characters and comes back as
+          # characters — so a held BINARY payload cannot make the round trip, which is the one
+          # thing its hex editor exists to prevent. Say so instead of silently corrupting it.
+          if reason = iv.external_editor_refusal
+            status(reason)
+            return
+          end
           run_external_editor(iv.editor_text, :intercept) { |t| iv.replace_editor(t) }
           return
         end

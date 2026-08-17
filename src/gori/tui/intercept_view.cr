@@ -7,6 +7,7 @@ require "./traffic_empty_state"
 require "../settings"
 require "./highlight"
 require "./text_area"
+require "./hex_edit"
 require "./read_pane"
 require "./url"
 require "../interceptor"
@@ -95,6 +96,14 @@ module Gori::Tui
       # by an MCP peer, reaped, released) — at which point a lookup would fall back to the
       # HTTP path and splice a `Content-Length:` line into a payload with no head.
       @loaded_ws = false
+      # The BYTE editor, set only while a held WebSocket BINARY message (opcode 2) is loaded —
+      # and AUTHORITATIVE while it is, exactly as `RepeaterView`'s `^X` buffer is: `pending_edit`
+      # reads it instead of the TextArea, which is frozen and stale. Kept across an Esc back to
+      # the queue so re-entering the same row preserves the in-progress edit (the text path's
+      # `@loaded_id` guard does the same); dropped the moment a different item loads, because a
+      # stale buffer beside a live `@editing` would make `hex_editing?` lie.
+      @hex = nil.as(HexEdit?)
+      @hex_scroll = 0
       # "Update Content-Length" (Burp's option name), default ON — see
       # `toggle_content_length_sync`. Session-wide rather than per-item: it is a property of
       # how the operator is working, and an intercept queue is transient anyway.
@@ -156,6 +165,7 @@ module Gori::Tui
       if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }
         @editing = false
         @loaded_id = nil
+        @hex = nil # its bytes belonged to a hold that has left the queue
       end
     end
 
@@ -418,30 +428,61 @@ module Gori::Tui
       @preedit = text
     end
 
+    # Open (or close) the detail pane's editor on the selected hold. WHICH editor is a
+    # property of the message: a WebSocket BINARY message (opcode 2) gets the hex editor, and
+    # everything else the TextArea.
+    #
+    # Binary used to open NOTHING. The TextArea round trip is `String.new(raw)` → char ops →
+    # `.to_slice`, which is lossy on non-UTF-8, and on WebSocket that is the COMMON case —
+    # opcode 2 is protobuf/msgpack/CBOR, not an exception — so the editor was refused and the
+    # pane said READ-ONLY. That kept the bytes safe and made the one thing an intercept editor
+    # exists for impossible on the one protocol where it matters most: you could hold a
+    # protobuf frame, read it, forward it and drop it, but not flip the byte you were holding
+    # it to flip. The hex editor is the answer the Repeater's `^X` already was — nibble
+    # overtype and byte insert/delete over an `Array(UInt8)` that never becomes a String — so
+    # the refusal is gone and the lossy path is still never taken.
     def toggle_edit : Nil
       if @editing
         @editing = false
-      elsif (it = selected_item) && !it.binary?
-        # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
-        # edit on the same item (Esc/Shift-Tab then back) must preserve the in-progress edit,
-        # mirroring detail_window_for's @detail_win_id guard.
-        if @loaded_id != it.id
-          @editor.set_text(String.new(it.raw))
-          @editor_dirty = false # freshly loaded — not yet modified
-        end
+      elsif it = selected_item
+        it.binary? ? load_hex(it) : load_text(it)
         @loaded_id = it.id
         @loaded_ws = it.kind.ws?
         @editing = true
       end
     end
 
-    # A held WebSocket BINARY message (opcode 2) is holdable, forwardable and droppable but
-    # NOT editable: the TextArea round trip is `String.new(raw)` → char ops → `.to_slice`,
-    # which is lossy on non-UTF-8. That hazard exists for a held HTTP body too (a JPEG
-    # response), but on WebSocket it is the COMMON case — opcode 2 is protobuf/msgpack/CBOR,
-    # not an exception — so it is refused rather than left to corrupt the message silently.
-    def read_only_selection? : Bool
-      !!selected_item.try(&.binary?)
+    # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
+    # edit on the same item (Esc/Shift-Tab then back) must preserve the in-progress edit,
+    # mirroring detail_window_for's @detail_win_id guard.
+    private def load_text(it : Interceptor::Item) : Nil
+      if @loaded_id != it.id
+        @editor.set_text(String.new(it.raw))
+        @editor_dirty = false # freshly loaded — not yet modified
+      end
+      @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
+    end
+
+    # Same rule, over bytes. `HexEdit.new(it.raw)` copies into an `Array(UInt8)`, so the held
+    # item's own slice is never written through — an edit in progress cannot mutate the bytes a
+    # plain Forward would send (P7).
+    private def load_hex(it : Interceptor::Item) : Nil
+      return if @loaded_id == it.id && @hex
+      @hex = HexEdit.new(it.raw)
+      @hex_scroll = 0
+      @editor_dirty = false
+    end
+
+    # Which face the detail pane's EDIT mode is showing. Every TextArea-shaped affordance —
+    # ^G/^F, the motion keymap, the INS selection, ^E, ^L — gates on `text_editing?` rather
+    # than on `editing?`, because in hex mode the TextArea is frozen and stale and acting on
+    # it would write the previous item's text over a byte buffer.
+    def hex_editing? : Bool
+      @editing && !@hex.nil?
+    end
+
+    def text_editing? : Bool
+      @editing && @hex.nil?
     end
 
     def stop_edit : Nil
@@ -484,6 +525,12 @@ module Gori::Tui
     def pending_edit : {Int64, Bytes}?
       id = @loaded_id
       return nil unless id && @editor_dirty
+      # The hex buffer is authoritative when it is open: its bytes ARE the message, with no
+      # encode step of any kind between the operator's nibbles and the wire. Every step below
+      # is a text transform, and the reason binary was refused an editor at all.
+      if h = @hex
+        return {id, h.to_bytes}
+      end
       # `wire_text`, NOT `text` — a WS payload is opaque bytes with no line structure at all,
       # so it has to come back exactly as it was loaded. (`to_bytes` would be worse still: it
       # joins with CRLF because it exists for wire HEADS.)
@@ -614,14 +661,14 @@ module Gori::Tui
     # line endings, so a held message the user only *looked* at would forward as
     # different bytes — breaking the byte-exact hold contract (P7). Gate on a real edit.
     def edit_undo : Nil
-      return unless @editing
+      return unless text_editing?
       before = @editor.edits
       @editor.undo
       mark_editor_edit if @editor.edits != before
     end
 
     def edit_insert(ch : Char) : Nil
-      return unless @editing
+      return unless text_editing?
       @editor.insert(ch)
       mark_editor_edit
     end
@@ -632,13 +679,13 @@ module Gori::Tui
     end
 
     def edit_newline : Nil
-      return unless @editing
+      return unless text_editing?
       @editor.insert_newline
       mark_editor_edit
     end
 
     def edit_backspace : Nil
-      return unless @editing
+      return unless text_editing?
       before = @editor.edits
       @editor.backspace
       mark_editor_edit if @editor.edits != before
@@ -653,10 +700,66 @@ module Gori::Tui
       reflect_content_length_in_editor
     end
 
+    # --- hex edit (a held WebSocket BINARY message) ---
+    # Delegates from the controller's hex key handler, named exactly as `RepeaterView`'s `^X`
+    # ones are: the two panes take the same gestures and there is no reason for a reader to
+    # learn them twice. Navigation never dirties; every mutator marks the hold edited, which is
+    # what makes `forward_bytes` send the edited buffer instead of the pristine `raw`.
+    def hex_set_nibble(c : Char) : Nil
+      return unless (h = @hex) && (v = c.to_i?(16))
+      mark_hex_edit if h.set_nibble(v)
+    end
+
+    def hex_move(dr : Int32, dc : Int32) : Nil
+      return unless h = @hex
+      if dr != 0
+        h.move_rows(dr)
+      elsif dc < 0
+        h.move_left
+      elsif dc > 0
+        h.move_right
+      end
+    end
+
+    def hex_home : Nil
+      @hex.try(&.home)
+    end
+
+    def hex_end : Nil
+      @hex.try(&.end_of_row)
+    end
+
+    def hex_insert : Nil
+      mark_hex_edit if @hex.try(&.insert_byte)
+    end
+
+    def hex_backspace : Nil
+      mark_hex_edit if @hex.try(&.backspace)
+    end
+
+    def hex_delete : Nil
+      mark_hex_edit if @hex.try(&.delete)
+    end
+
+    # Mouse: the nibble under a click in the detail pane (`HexEdit#click_to_nibble` inverts
+    # its own draw), so the byte editor is pointable like the text one beside it.
+    def hex_click(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless h = @hex
+      _, right = split_panes(body_rect(rect))
+      h.click_to_nibble(right.inset(1, 1), mx, my, @hex_scroll)
+    end
+
+    # `mark_editor_edit`'s counterpart, minus the Content-Length reflection: a WS payload has
+    # no head to resync (the `@loaded_ws` bail there says the same thing), and a binary one has
+    # no line structure for `replace_line` to address in the first place.
+    private def mark_hex_edit : Nil
+      @editor_dirty = true
+    end
+
     # `selecting` is the ⇧ half, forwarded to `TextArea#move` exactly as `edit_motion_key` does —
     # exposed so a caller (and a spec) can extend the INS selection without synthesising a key.
     def edit_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
-      @editor.move(dr, dc, selecting: selecting) if @editing
+      @editor.move(dr, dc, selecting: selecting) if text_editing?
     end
 
     # The shared editor keymap — ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word, ⌥⌫
@@ -669,7 +772,7 @@ module Gori::Tui
     # endings, so a held message the operator only NAVIGATED must not be marked edited or it
     # forwards as different bytes (P7).
     def edit_motion_key(ev : Termisu::Event::Key) : Bool
-      return false unless @editing
+      return false unless text_editing?
       before = @editor.edits
       return false unless @editor.handle_motion_key(ev)
       mark_editor_edit if @editor.edits != before
@@ -682,29 +785,29 @@ module Gori::Tui
 
     # Mouse DRAG / DOUBLE-CLICK over the held-bytes editor.
     def editor_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @editing
+      return unless text_editing?
       _, right = split_panes(body_rect(rect))
       @editor.click_to_cursor(right.inset(1, 1), mx, my, selecting: true)
     end
 
     def editor_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
-      return false unless @editing
+      return false unless text_editing?
       _, right = split_panes(body_rect(rect))
       @editor.select_word_at(right.inset(1, 1), mx, my)
     end
 
     # Home/End: caret to line start/end — pure navigation, doesn't change the bytes.
     def edit_home : Nil
-      @editor.home if @editing
+      @editor.home if text_editing?
     end
 
     def edit_end : Nil
-      @editor.end_of_line if @editing
+      @editor.end_of_line if text_editing?
     end
 
     # Forward-delete the char under the caret — a content edit (no-op at end-of-buffer).
     def edit_delete : Nil
-      return unless @editing
+      return unless text_editing?
       before = @editor.edits
       @editor.delete
       mark_editor_edit if @editor.edits != before
@@ -712,19 +815,19 @@ module Gori::Tui
 
     # ^G go-to-line / ^F search in the held-message editor (only while editing).
     def edit_goto_line(n : Int32) : Nil
-      @editor.goto_line(n) if @editing
+      @editor.goto_line(n) if text_editing?
     end
 
     def edit_search_lines(query : String) : Array(Int32)
-      @editing ? @editor.search_lines(query) : [] of Int32
+      text_editing? ? @editor.search_lines(query) : [] of Int32
     end
 
     def edit_match_count(query : String) : Int32
-      @editing ? @editor.match_count(query) : 0
+      text_editing? ? @editor.match_count(query) : 0
     end
 
     def edit_replace_matches(query : String, replacement : String) : Int32
-      return 0 unless @editing
+      return 0 unless text_editing?
       n = @editor.replace_matches(query, replacement)
       mark_editor_edit if n > 0
       n
@@ -747,6 +850,15 @@ module Gori::Tui
       @editor.wire_text
     end
 
+    # Why `^E` is not available on the loaded hold, or nil when it is. An external editor is a
+    # TEXT channel — the file goes out as characters and comes back as characters — so handing
+    # it a protobuf frame would undo, one layer up, exactly what the hex editor exists to
+    # prevent. Named rather than silent: a dead key with no sentence reads as a bug.
+    def external_editor_refusal : String?
+      return nil unless hex_editing?
+      "binary WebSocket message — the external editor is a text channel; edit the bytes here"
+    end
+
     # Replace the held item's editable bytes (e.g. from the external editor); only
     # while editing — forward_bytes then sends the edited text.
     #
@@ -754,7 +866,7 @@ module Gori::Tui
     # round-trips every terminator, including a lone CR), so ^E is a byte-exact round trip
     # for a file the editor left alone.
     def replace_editor(text : String) : Nil
-      return unless @editing
+      return unless text_editing?
       @editor.set_text(text)
       mark_editor_edit
     end
@@ -873,7 +985,7 @@ module Gori::Tui
     # render() receives; re-derive the right (detail) pane + its 1-cell inset exactly
     # as render_detail does. Only meaningful while editing (the editor is shown then).
     def editor_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @editing
+      return unless text_editing?
       _, right = split_panes(body_rect(rect))
       @editor.click_to_cursor(right.inset(1, 1), mx, my)
     end
@@ -1038,7 +1150,13 @@ module Gori::Tui
     # A binary message has no line to show, and rendering one would be a wall of U+FFFD:
     # opcode 2 is protobuf/msgpack/CBOR. Its size is the useful fact.
     private def ws_preview(it : Interceptor::Item) : String
-      return "<binary, #{it.raw.size} bytes>" if it.binary?
+      # The EDITED length once the hex buffer has changed it, for the same reason
+      # `effective_method_target` reports edited values: the row names what a Forward sends.
+      if it.binary?
+        h = @hex
+        size = h && @loaded_id == it.id && @editor_dirty ? h.len : it.raw.size
+        return "<binary, #{size} bytes>"
+      end
       text = @loaded_id == it.id && @editor_dirty ? @editor.text : String.new(it.raw)
       line = (text.split('\n', 2).first? || "").rstrip('\r')
       line.size > WS_LABEL_MAX ? "#{line[0, WS_LABEL_MAX]}…" : line
@@ -1119,7 +1237,9 @@ module Gori::Tui
         return
       end
       mode = editor_highlight(it)
-      if @editing && @loaded_id == it.id
+      if @editing && @loaded_id == it.id && (h = @hex)
+        @hex_scroll = h.render(screen, inner, focused, @hex_scroll)
+      elsif @editing && @loaded_id == it.id
         @editor.render(screen, inner, cursor: focused, highlight: mode, gauge: true, gauge_focused: focused)
       else
         sync_preview(it)
@@ -1136,21 +1256,17 @@ module Gori::Tui
     # setting anywhere in the product.
     private def render_detail_badges(screen : Screen, rect : Rect, it : Interceptor::Item,
                                      min_x : Int32) : Nil
-      return read_only_badge(screen, rect, min_x) if it.binary?
+      # `e`:HEX, not `e`:EDIT — same key, same place, and the chip says which editor it opens.
+      # It used to read READ-ONLY here, which was an accurate label for a refusal that should
+      # not have existed.
+      if it.binary?
+        Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "HEX", @editing)
+        return
+      end
       x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "EDIT", @editing)
       return unless @editing
       return if @loaded_ws # a WS payload has no head — the sync never runs on it
       Frame.toggle_badge(screen, x, rect.y, min_x, "^L", "CL", @sync_content_length)
-    end
-
-    # Where `e`:EDIT would ride, for a message the editor must not open. Right-aligned with
-    # the same min_x guard `Frame.toggle_badge` uses, so it drops out on a narrow pane rather
-    # than overwriting the title.
-    private def read_only_badge(screen : Screen, rect : Rect, min_x : Int32) : Nil
-      label = " READ-ONLY "
-      x = rect.right - 1 - label.size
-      return if x < min_x
-      screen.text(x, rect.y, label, Theme.muted)
     end
 
     # The item's styled window, and the plain projection of it the caret/selection/copy use.
@@ -1211,10 +1327,17 @@ module Gori::Tui
     # hand — while the next printable would REPLACE it. Same split as
     # RepeaterView#pane_selection? / #request_copy_text; all three change together.
     def preview_selection? : Bool
+      return false if hex_editing? # the byte editor has a cursor, not a selection
       @editing ? @editor.selection? : @preview.selection?
     end
 
+    # `scrub`, and only here: a copy is a TEXT channel (the clipboard holds characters), so a
+    # binary payload has to be made valid UTF-8 before it can be put on one. The buffer itself
+    # is untouched — this is the one place bytes become a String, and it is not the wire.
     def preview_copy_text : String
+      if (h = @hex) && @editing # `hex_editing?`, spelled out so the buffer is bound
+        return String.new(h.to_bytes).scrub
+      end
       return @editor.selection_text || @editor.text if @editing
       it = selected_item || return ""
       sync_preview(it)
@@ -1222,6 +1345,9 @@ module Gori::Tui
     end
 
     def preview_copy_all : String
+      if (h = @hex) && @editing
+        return String.new(h.to_bytes).scrub
+      end
       return @editor.text if @editing
       it = selected_item || return ""
       sync_preview(it)
@@ -1259,6 +1385,10 @@ module Gori::Tui
     # reading gesture, and `e` is not a request to stop reading. `vscroll_detail` keeps its own
     # `@editing` bail, so the two faces cannot both move on one notch.
     def scroll_detail_pane(delta : Int32) : Nil
+      # The hex face has no independent scroll: `HexEdit#render` pulls the window back to the
+      # nibble cursor, so a notch moves the CURSOR by rows — which is the only thing that can
+      # move that window, and reads as scrolling because the window follows.
+      return hex_move(delta, 0) if hex_editing?
       @editing ? @editor.scroll_view(delta) : vscroll_detail(delta)
     end
 
@@ -1277,7 +1407,9 @@ module Gori::Tui
       # held bytes — so leaving the editor for the QUEUE doesn't snap the body back to the
       # original. edit_rev keys the cache on the editor's change counter for that case.
       edited = @loaded_id == it.id && @editor_dirty
-      edit_rev = edited ? @editor.edits : -1
+      # `HexEdit#edits` for the same job `TextArea#edits` does here: the buffer's identity does
+      # not change as it is typed into, so the counter is what tells the cache it went stale.
+      edit_rev = edited ? ((h = @hex) ? h.edits : @editor.edits) : -1
       cached = @detail_win
       return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision && @detail_win_edit_rev == edit_rev
       @preview.reset if @detail_win_id != it.id # a newly-previewed item renumbers every row
@@ -1297,7 +1429,13 @@ module Gori::Tui
     # as lazy `BodyLines` (built straight from the BYTES when unedited, which keeps a multi-MiB
     # message off the UI fiber and scrubs per visible line rather than up front).
     private def ws_window_for(it : Interceptor::Item, edited : Bool) : Highlight::Windowed
-      body = edited ? Highlight::BodyLines.from_array(@editor.lines_snapshot) : Highlight::BodyLines.from_bytes(it.raw)
+      # An edited BINARY payload comes back from the hex buffer as BYTES — `lines_snapshot` is
+      # the TextArea's, which in hex mode still holds whatever text item was loaded before.
+      body = if edited
+               (h = @hex) ? Highlight::BodyLines.from_bytes(h.to_bytes) : Highlight::BodyLines.from_array(@editor.lines_snapshot)
+             else
+               Highlight::BodyLines.from_bytes(it.raw)
+             end
       Highlight::Windowed.new([] of Highlight::Line, body, it.binary? ? :text : ws_body_kind(it.raw))
     end
 

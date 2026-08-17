@@ -16,11 +16,16 @@ module Gori::Tui
     getter bytes : Array(UInt8)
     getter nib : Int32     # nibble cursor: 0..len*2 (len*2 = the append slot)
     getter? mutated : Bool # true once any edit changed the bytes (a pure peek stays false)
+    # How many edits have landed — the monotonic counter `TextArea#edits` provides, and for the
+    # same job: a cache keyed on the buffer's identity (the Intercept detail preview) needs to
+    # know that the SAME buffer changed. `mutated?` cannot answer that; it latches once.
+    getter edits : Int32
 
     def initialize(src : Bytes)
       @bytes = src.to_a
       @nib = 0
       @mutated = false
+      @edits = 0
     end
 
     def len : Int32
@@ -102,7 +107,7 @@ module Gori::Tui
       cur = @bytes[b]
       @bytes[b] = @nib.even? ? (cur & 0x0f_u8) | (v.to_u8 << 4) : (cur & 0xf0_u8) | v.to_u8
       @nib = (@nib + 1).clamp(0, len * 2)
-      @mutated = true
+      mutate!
     end
 
     # Insert a 0x00 byte at the cursor byte; cursor lands on its high nibble.
@@ -110,7 +115,7 @@ module Gori::Tui
       b = @nib // 2
       @bytes.insert(b, 0_u8)
       @nib = b * 2
-      @mutated = true
+      mutate!
     end
 
     # Delete the byte BEFORE the cursor (like text backspace).
@@ -119,7 +124,7 @@ module Gori::Tui
       return false if b == 0
       @bytes.delete_at(b - 1)
       @nib = (@nib - 2).clamp(0, len * 2)
-      @mutated = true
+      mutate!
     end
 
     # Delete the byte UNDER the cursor.
@@ -128,6 +133,14 @@ module Gori::Tui
       return false if b >= @bytes.size
       @bytes.delete_at(b)
       @nib = {@nib, len * 2}.min
+      mutate!
+    end
+
+    # Every mutator's tail: latch `mutated?` and advance `edits`, returning true so the caller
+    # can mark itself dirty in one expression. One place, so a new edit cannot bump one and
+    # forget the other.
+    private def mutate! : Bool
+      @edits += 1
       @mutated = true
     end
 

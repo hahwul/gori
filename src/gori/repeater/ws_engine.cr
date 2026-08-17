@@ -10,14 +10,22 @@ module Gori
     # Re-establishes a WebSocket session to an origin and repeaters recorded
     # client→server messages, capturing the server's responses. Unlike Engine /
     # H2Engine (one request → one buffered response), this does the HTTP/1.1
-    # upgrade handshake, then a scripted exchange: send each outbound message as a
-    # masked client frame, then drain inbound frames until the server sends Close
-    # or goes idle.
+    # upgrade handshake, then a scripted exchange: send ONE outbound message as a
+    # masked client frame, drain the server's answer until it goes idle, send the
+    # next — until the script runs out, the server sends Close, the socket dies, or
+    # a capture cap trips.
     #
-    # Two deliberate limitations of this simplified repeater:
-    #  - Sequential, not interleaved: ALL recorded client→server messages are sent
-    #    first, then the server's responses are drained. A protocol that depends on
-    #    per-message request/response interleaving will not repeater faithfully.
+    # INTERLEAVED, not send-all-then-drain. Every recorded client→server message used to go
+    # out back to back and only then were the responses read, so a protocol whose Nth message
+    # depends on the answer to the (N-1)th — a subscribe/ack exchange, a challenge/response
+    # auth, anything request/response-shaped over one socket — was replayed as a burst the
+    # server was answering out of step, and the transcript listed every "out" row ahead of
+    # every "in" row whatever the wire order had actually been. Draining between messages is
+    # also what lets the engine learn MID-script that the peer closed (§5.5.1: nothing follows
+    # a CLOSE) or went away, so it stops and reports how far it got instead of writing into a
+    # socket nobody is reading.
+    #
+    # One deliberate limitation remains:
     #  - No permessage-deflate: the handshake omits the extension, AND the live
     #    capture relay stores frame payloads verbatim without decompressing them. So
     #    a session captured over a compressed connection holds COMPRESSED bytes;
@@ -32,7 +40,7 @@ module Gori
       MAX_RECV_MESSAGES = 1000                # cap captured server messages (anti-flood)
       MAX_RECV_BYTES    = 8_i64 * 1024 * 1024 # cap total captured server payload bytes
       MAX_DRAIN_FRAMES  = 100_000             # hard ceiling on frames processed (ping/empty-fragment flood)
-      DRAIN_DEADLINE    = 60.seconds          # wall-clock ceiling: a sub-idle ping/fragment cadence can't pin a tab for hours
+      DRAIN_DEADLINE    = 60.seconds          # wall-clock ceiling on the WHOLE exchange (see DrainState)
       MAX_CONTROL_BYTES = 125                 # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
       # Ping/pong rows kept in the transcript. A server's control frames were dropped
       # entirely, which is why a CLOSE reason and a PING payload never reached the operator —
@@ -170,32 +178,39 @@ module Gori
           note = verify_accept(resp, keys)
 
           messages = [] of Message
-          # Send all recorded outbound messages first. The opcode goes out AS GIVEN — the
-          # `m.opcode == 2 ? OP_BIN : OP_TEXT` fold that used to live here is why a PING, a
-          # PONG, a CLOSE with a chosen code and a lone CONT were inexpressible from every
-          # surface at once. `mask: true` is still the DEFAULT (§5.3 requires it of a client),
-          # but it is now only a default: `shape.masked == false` sends the unmasked client
-          # frame that §5.1 says the server must reject, which is the most common WebSocket
-          # hardening probe there is.
-          out_messages.each do |m|
-            op = (m.opcode & 0x0f).to_u8
-            upstream.write(Proxy::WS.encode(op, m.payload, m.shape, mask: true))
-            messages << Message.new("out", op.to_i, m.payload, m.shape)
+          # ONE accounting object for the whole exchange, threaded through every per-message
+          # drain: the caps (messages / bytes / frames / deadline / control rows) bound the
+          # SESSION, not each gap in it. Per-drain state would have multiplied every one of
+          # them by the number of recorded messages, so a 20-message script could have
+          # captured 20 × MAX_RECV_BYTES and run for 20 × DRAIN_DEADLINE.
+          st = DrainState.new
+          # Narrow the read bound to `idle` BEFORE the first message goes out. The handshake
+          # bound is a PER-READ timeout, and an interleaved replay reads between every pair of
+          # messages: left in place, an origin that simply does not answer message 1 would hold
+          # message 2 back for HANDSHAKE_TIMEOUT, and a ten-message script for two and a half
+          # minutes of nothing. The generous window is not lost — it is spent once, at the end,
+          # and only if the exchange produced no inbound frame at all (below).
+          set_read_timeout(upstream, idle)
+          sent, last_sent_op = exchange(upstream, out_messages, messages, idle, st)
+          # The generous first-reply window, spent ONCE and only when nothing ever arrived: a
+          # slow-but-alive origin (cold start, auth, a slow proxy in front of it) is not a dead
+          # one, which is what the handshake bound protected and what narrowing to `idle` above
+          # would otherwise have cost. It is also the ONLY drain a session with no outbound
+          # messages gets, which is exactly the single generous drain that shipped before.
+          if st.frames == 0 && st.open?
+            set_read_timeout(upstream, HANDSHAKE_TIMEOUT)
+            drain(upstream, messages, idle, st)
           end
-          upstream.flush
-
-          # The FIRST inbound read keeps the generous handshake bound (a slow first
-          # reply isn't a dead server); drain narrows to `idle` once frames flow.
-          sent_count = messages.size
-          # `drain` now reports its OWN truncation: a bare `break` at a cap was indistinguishable
-          # from a clean end, so it returns the cap sentence (nil when it ran to CLOSE/EOF/idle)
-          # alongside the close code — and has already pushed the matching NOTICE_PREFIX marker row.
-          close_code, truncated = drain(upstream, messages, idle)
+          # Moment 3 (see `drain`) plus the ONE truncation marker row — at the end of the whole
+          # exchange rather than of each gap in it, so neither is emitted per message.
+          finish(messages, st)
           # Only when the operator did not send one themselves. §5.5.1 allows exactly one
           # CLOSE per direction, so appending gori's after theirs would put a second one on
           # the wire that they did not ask for — and the second frame, not the first, is what
-          # the server would be answering.
-          send_close(upstream) unless out_messages.last?.try(&.opcode) == Proxy::WS::OP_CLOSE.to_i
+          # the server would be answering. `last_sent_op` and not `out_messages.last?`: an
+          # interleaved run can stop early, so the last message SCRIPTED is no longer
+          # necessarily the last one SENT.
+          send_close(upstream) unless last_sent_op == Proxy::WS::OP_CLOSE.to_i
           # The "out" rows above are appended before the flush and with no delivery evidence —
           # WebSocket has no ack, so a transcript row means "gori wrote this", never "the peer
           # got it". When the origin closes right after the 101 the drain breaks at EOF and
@@ -204,9 +219,10 @@ module Gori
           # no frame). Say so instead. A NOTE and not an error: a one-way protocol that never
           # answers is legitimate, and in both cases the honest statement is the same —
           # delivery is unconfirmed.
-          note = with_delivery_note(note, sent_count, messages.size, close_code)
+          note = with_delivery_note(note, sent, messages.size, st.close_code)
+          note = with_unsent_note(note, sent, out_messages.size, st)
           Result.new(head, messages, elapsed(started), note: note,
-            close_code: close_code, upgraded: true, truncated: truncated)
+            close_code: st.close_code, upgraded: true, truncated: st.truncated)
         rescue ex
           # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
@@ -214,6 +230,50 @@ module Gori
         ensure
           upstream.close rescue nil
         end
+      end
+
+      # The interleaved script: one message out, its answer drained, the next out. Returns
+      # {how many were actually sent, the opcode of the last one} — the two facts `send` needs
+      # afterwards and cannot recover from `out_messages`, because an interleaved run can stop
+      # early. Extracted from `send` for its own readability, not because it has another caller.
+      private def self.exchange(upstream : IO, out_messages : Array(OutMsg),
+                                messages : Array(Message), idle : Time::Span,
+                                st : DrainState) : {Int32, Int32?}
+        sent = 0
+        last_sent_op = nil.as(Int32?)
+        out_messages.each do |m|
+          # A CLOSE from the server (§5.5.1 forbids data frames after one), a dead socket or
+          # a hard capture cap ends the script here. Only an interleaved replay can know any
+          # of this mid-run; `with_unsent_note` then says how far it got, rather than listing
+          # "out" rows for bytes gori never wrote.
+          break unless st.open?
+          op = (m.opcode & 0x0f).to_u8
+          # The opcode goes out AS GIVEN — the `m.opcode == 2 ? OP_BIN : OP_TEXT` fold that
+          # used to live here is why a PING, a PONG, a CLOSE with a chosen code and a lone
+          # CONT were inexpressible from every surface at once. `mask: true` is still the
+          # DEFAULT (§5.3 requires it of a client), but it is only a default:
+          # `shape.masked == false` sends the unmasked client frame that §5.1 says the server
+          # must reject, which is the most common WebSocket hardening probe there is.
+          #
+          # A CLOSE the OPERATOR wrote does NOT stop the loop: "data frames after a CLOSE" is
+          # a §5.5.1 test this engine deliberately lets them run, exactly as it lets them send
+          # a lone CONT or an unmasked frame. Only the SERVER's close stops it.
+          begin
+            upstream.write(Proxy::WS.encode(op, m.payload, m.shape, mask: true))
+            upstream.flush
+          rescue IO::Error
+            st.peer_gone = true
+            break
+          end
+          messages << Message.new("out", op.to_i, m.payload, m.shape)
+          sent += 1
+          last_sent_op = op.to_i
+          # Drain this message's answer before the next one leaves. `st` carries the caps,
+          # the reassembly buffer and the close/EOF verdict across the calls, so a message the
+          # origin fragments ACROSS an idle gap still comes back as one row.
+          drain(upstream, messages, idle, st)
+        end
+        {sent, last_sent_op}
       end
 
       # Append the unconfirmed-delivery advisory to whatever `note` already says. Kept out of
@@ -225,27 +285,88 @@ module Gori
         note ? "#{note}; #{unreplied}" : unreplied
       end
 
-      # Read inbound frames until the server sends Close, goes idle (read timeout),
-      # or a cap trips. Reassembles fragmented data messages; answers Ping with a
-      # Pong. Returns `{close status code, truncation sentence}` — the second is nil on a
-      # clean end and the reason when ANY cap fired (messages/bytes/frames/deadline/control).
+      # The advisory for a script that ended before every recorded message went out. Only an
+      # INTERLEAVED replay can produce it: draining between messages is what lets gori learn
+      # mid-run that the server closed, that the socket died, or that a capture cap tripped,
+      # and stopping is the honest answer to all three — §5.5.1 forbids data frames after a
+      # CLOSE, and a write into a dead socket would put "out" rows in the transcript for bytes
+      # no peer will ever see. The send-all engine could not detect any of this until it was
+      # already over, so it silently claimed to have sent everything.
+      private def self.with_unsent_note(note : String?, sent : Int32, total : Int32,
+                                        st : DrainState) : String?
+        return note if sent >= total
+        why = if st.close_code
+                "the server sent CLOSE (§5.5.1: no data frames may follow it)"
+              elsif st.peer_gone?
+                "the connection ended"
+              else
+                "a capture cap was reached"
+              end
+        unsent = "stopped after #{sent} of #{total} message(s): #{why}"
+        note ? "#{note}; #{unsent}" : unsent
+      end
+
+      # Everything the drain accumulates, carried ACROSS the per-message drains an interleaved
+      # replay performs. It exists because every one of these is a property of the SESSION and
+      # not of one gap in it: the caps must bound the whole run, the reassembly buffer must
+      # survive an idle gap that falls mid-message, and `open?` is the verdict the send loop
+      # consults before each write.
       #
-      # Truncating at a cap and reporting a CLEAN result is the bug this pair returns fix
-      # (#10 L8-F1): a bare `break` returned only the close code, so a drain that stopped
+      # Not a `record`: the drain mutates every field, and a struct copied by value into the
+      # loop would have lost each drain's accounting the moment it returned.
+      class DrainState
+        property assembling = IO::Memory.new             # the fragments of the message being reassembled
+        property msg_opcode : UInt8 = Proxy::WS::OP_TEXT # that message's FIRST frame's opcode
+        property shape = Proxy::WS::MessageShape.new     # and its accumulated framing
+        property ctl_count = 0                           # ping/pong rows kept (MAX_CONTROL_MESSAGES)
+        property recv_bytes = 0_i64                      # captured server payload bytes (MAX_RECV_BYTES)
+        property recv_count = 0                          # captured server DATA messages (MAX_RECV_MESSAGES)
+        property frames = 0                              # every inbound frame, control included (MAX_DRAIN_FRAMES)
+        property close_code : Int32? = nil               # the server's CLOSE status, once it sends one
+        property truncated : String? = nil               # the cap sentence, once any cap has fired
+        property? marked = false                         # the ONE truncation marker row has been appended
+        property? peer_gone = false                      # EOF / IO error / failed write — nothing more can be sent
+        property? capped = false                         # a HARD cap ended the drain (the control cap does not)
+        getter started : Time::Instant = Time.instant    # DRAIN_DEADLINE runs from here, over the whole exchange
+
+        # Whether the next recorded message may still go out. A server CLOSE, a dead socket and
+        # a hard cap each mean "no" for a different reason, and `with_unsent_note` names which.
+        def open? : Bool
+          !peer_gone? && !capped? && @close_code.nil?
+        end
+      end
+
+      # Read inbound frames until the server sends Close, this message's answer goes idle
+      # (read timeout), the socket ends or a cap trips. Reassembles fragmented data messages;
+      # answers Ping with a Pong. Every verdict lands in `st`, which the caller carries into
+      # the NEXT message's drain — this returns nothing.
+      #
+      # The idle timeout is no longer the end of the run, it is the end of THIS message's
+      # answer: `break` here hands control back to the send loop, which puts the next recorded
+      # message on the wire. Only `st.peer_gone` / `st.close_code` / `st.capped` end the
+      # exchange, which is why each is recorded rather than inferred from "the loop stopped".
+      # `IO::TimeoutError` is split out of `IO::Error` for exactly that reason: they used to
+      # share one `break` because both meant "stop", and now one means "your turn" and the
+      # other means "there is no peer left to take a turn". (A timeout landing MID-frame is
+      # unrecoverable either way — the stream is then desynced — but the next misparse yields
+      # an oversized/short frame, `read_frame` answers nil, and the exchange ends there.)
+      #
+      # Truncating at a cap and reporting a CLEAN result is the bug `st.truncated` fixes
+      # (#10 L8-F1): a bare `break` recorded only the close code, so a drain that stopped
       # short of the server's frames was indistinguishable from one that ran to the end. The
       # sibling `Relay.capture_control` (proxy/ws/relay.cr:465) already does the honest thing —
       # ONE synthetic NOTICE_PREFIX row so the truncation shows in the transcript and can never
-      # be replayed (`Store::WsMessage#notice?` refuses it). `drain` does the same at EVERY cap
-      # and surfaces the reason to the summary as well. The break-site caps set the reason
-      # UNCONDITIONALLY (the cap that ended the loop is the salient one); the control cap, which
-      # does not break, only fills it in if nothing else has (`||=`).
+      # be replayed (`Store::WsMessage#notice?` refuses it). `finish` does the same at the end
+      # of the exchange. The break-site caps set the reason UNCONDITIONALLY (the cap that ended
+      # the run is the salient one); the control cap, which does not break, only fills it in if
+      # nothing else has (`||=`).
       #
       # Reassembly has THREE moments, not one, and this method used to have only the last:
       #
       #   1. a new data frame arriving while the previous message never sent its FIN — an
       #      RFC 6455 §5.4 violation, and the whole point of pointing a repeater at a server;
       #   2. FIN, the ordinary end of a message;
-      #   3. the drain ending with a fragment still unterminated (CLOSE / EOF / idle / a cap).
+      #   3. the exchange ending with a fragment still unterminated (CLOSE / EOF / idle / a cap).
       #
       # Without 1 the two messages were concatenated, so `TEXT fin=0 "AAA"` then
       # `TEXT fin=1 "BBB"` was reported as one well-formed `AAABBB` that never existed; without
@@ -254,81 +375,87 @@ module Gori
       # correctly, so the two surfaces disagreed about the same protocol. `emit_pending` is
       # 1 and 3, `Proxy::WS::MessageShape` is the accumulator both now share, and the flushed
       # fragment carries `fin: false` — gori reports the violation rather than repairing it.
-      private def self.drain(io : IO, messages : Array(Message), idle : Time::Span) : {Int32?, String?}
-        assembling = IO::Memory.new
-        msg_opcode = Proxy::WS::OP_TEXT
-        shape = Proxy::WS::MessageShape.new
-        ctl_count = 0
-        recv_bytes = 0_i64
-        recv_count = 0
-        frames = 0
-        close_code = nil.as(Int32?)
-        truncated = nil.as(String?) # the cap sentence, once any cap has fired
-        started = Time.instant
+      # Moment 3 lives in `finish` and not at the tail of this loop, because an idle gap is a
+      # turn boundary now: a message the origin fragments across one is still ONE message.
+      private def self.drain(io : IO, messages : Array(Message), idle : Time::Span,
+                             st : DrainState) : Nil
         loop do
           # Count EVERY frame, not just completed messages: an origin flooding pings or
           # empty/non-fin fragments faster than `idle` trips neither the data caps nor
           # the read timeout, so this frame ceiling is what guarantees termination.
           # A wall-clock deadline also caps total drain time: a steady sub-idle ping cadence
           # stays under MAX_DRAIN_FRAMES yet could otherwise pin the tab "inflight" for hours.
-          if Time.instant - started > DRAIN_DEADLINE
-            truncated = "the #{DRAIN_DEADLINE.total_seconds.to_i}s drain deadline was reached; later server frames were not captured"
+          # Both run from the START of the exchange, not of this message's turn.
+          if Time.instant - st.started > DRAIN_DEADLINE
+            st.truncated = "the #{DRAIN_DEADLINE.total_seconds.to_i}s drain deadline was reached; later server frames were not captured"
+            st.capped = true
             break
           end
           frame = begin
             Proxy::WS.read_frame(io)
+          rescue IO::TimeoutError
+            break # the idle gap — this message's answer is done; the next one goes out
           rescue IO::Error
-            break # idle timeout, RST, or broken pipe — end the drain, keep what we have
-          end
-          break if frame.nil? # EOF / truncated
-          frames += 1
-          if frames > MAX_DRAIN_FRAMES
-            truncated = "the #{MAX_DRAIN_FRAMES}-frame drain ceiling was reached; later server frames were not captured"
+            st.peer_gone = true # RST or broken pipe — end the exchange, keep what we have
             break
           end
-          # After the first frame, narrow the per-read bound to `idle` so a silent gap
-          # ends the drain promptly (the first read kept the generous handshake bound).
-          narrow_read_timeout(io, idle) if frames == 1
+          if frame.nil? # EOF / truncated
+            st.peer_gone = true
+            break
+          end
+          st.frames += 1
+          if st.frames > MAX_DRAIN_FRAMES
+            st.truncated = "the #{MAX_DRAIN_FRAMES}-frame drain ceiling was reached; later server frames were not captured"
+            st.capped = true
+            break
+          end
+          # After the first frame of the exchange, (re-)narrow the per-read bound to `idle`.
+          # The send loop already narrowed it; this is what takes it back down when the
+          # first-reply grace pass widened it and the origin then answered.
+          set_read_timeout(io, idle) if st.frames == 1
 
           if frame.data?
             if frame.opcode != Proxy::WS::OP_CONT
-              if shape.frames > 0
+              if st.shape.frames > 0
                 # Moment 1: the previous message never FIN'd. Its bytes are the finding, so
                 # they get their own row instead of being merged into this one's — and that
                 # row counts against the same caps a completed message does. Without the
                 # count, an origin that simply never sends a FIN would buy an unbounded
                 # transcript: the byte cap lives on `assembling`, which this flush empties.
-                recv_count += 1
-                recv_bytes += assembling.bytesize
-                assembling = emit_pending(messages, assembling, msg_opcode, shape)
-                if reason = recv_caps_reason(recv_count, recv_bytes)
-                  truncated = reason
+                st.recv_count += 1
+                st.recv_bytes += st.assembling.bytesize
+                st.assembling = emit_pending(messages, st.assembling, st.msg_opcode, st.shape)
+                if reason = recv_caps_reason(st.recv_count, st.recv_bytes)
+                  st.truncated = reason
+                  st.capped = true
                   break
                 end
               end
-              msg_opcode = frame.opcode
+              st.msg_opcode = frame.opcode
             end
-            shape.note(frame)
-            assembling.write(frame.payload)
-            if assembling.bytesize > MAX_RECV_BYTES # runaway fragmented message
-              # gori — not the origin — stops accumulating here, so the fragment the post-loop
-              # `emit_pending` flushes with `fin: false` is OUR truncation, not the origin's
-              # §5.4 violation. Marking it (the adjacent marker row + this sentence) is what
-              # keeps that row from being MISread as a server that never sent a FIN.
-              truncated = bytes_cap_sentence
+            st.shape.note(frame)
+            st.assembling.write(frame.payload)
+            if st.assembling.bytesize > MAX_RECV_BYTES # runaway fragmented message
+              # gori — not the origin — stops accumulating here, so the fragment `finish`
+              # flushes with `fin: false` is OUR truncation, not the origin's §5.4 violation.
+              # Marking it (the adjacent marker row + this sentence) is what keeps that row
+              # from being MISread as a server that never sent a FIN.
+              st.truncated = bytes_cap_sentence
+              st.capped = true
               break
             end
             if frame.fin?
-              payload = assembling.to_slice.dup
-              recv_bytes += payload.size
-              recv_count += 1
+              payload = st.assembling.to_slice.dup
+              st.recv_bytes += payload.size
+              st.recv_count += 1
               # First frame's RSV/mask (§5.2 puts an extension's flags there), last frame's
               # FIN, and how many frames it took — the same accounting the capture relay does,
               # so the two agree about identical bytes.
-              messages << Message.new("in", msg_opcode.to_i, payload, shape.take)
-              assembling = IO::Memory.new
-              if reason = recv_caps_reason(recv_count, recv_bytes)
-                truncated = reason
+              messages << Message.new("in", st.msg_opcode.to_i, payload, st.shape.take)
+              st.assembling = IO::Memory.new
+              if reason = recv_caps_reason(st.recv_count, st.recv_bytes)
+                st.truncated = reason
+                st.capped = true
                 break
               end
             end
@@ -338,13 +465,12 @@ module Gori
             # server actually explains itself — was dropped on the floor, and a PING payload
             # (a real covert channel, and a real length-check bug site) with it.
             #
-            # A half-assembled message ahead of it is flushed by the post-loop `emit_pending`,
+            # A half-assembled message ahead of it is flushed HERE and not left to `finish`,
             # so the CLOSE row lands AFTER the fragment the origin sent before it — arrival
-            # order, which is the order the relay records the same bytes in. Hence `break`
-            # and not `return`: an early return skipped that flush, which is exactly how
-            # `TEXT fin=0 "UNTERMINATED"` followed by a CLOSE left the 12 bytes nowhere.
-            close_code = close_status(frame.payload)
-            assembling = emit_pending(messages, assembling, msg_opcode, shape)
+            # order, which is the order the relay records the same bytes in. That is exactly
+            # how `TEXT fin=0 "UNTERMINATED"` followed by a CLOSE left the 12 bytes nowhere.
+            st.close_code = close_status(frame.payload)
+            st.assembling = emit_pending(messages, st.assembling, st.msg_opcode, st.shape)
             messages << Message.new("in", frame.opcode.to_i, frame.payload.dup, frame.shape)
             break
           else
@@ -352,30 +478,42 @@ module Gori
             # pinging under the idle timeout would otherwise grow this array until
             # MAX_DRAIN_FRAMES — 100k transcript rows for a keepalive. A CLOSE is exempt
             # above; there is at most one, and it is the row that matters.
-            if ctl_count < MAX_CONTROL_MESSAGES
-              ctl_count += 1
+            if st.ctl_count < MAX_CONTROL_MESSAGES
+              st.ctl_count += 1
               messages << Message.new("in", frame.opcode.to_i, frame.payload.dup, frame.shape)
             else
               # Past the cap the ping/pong is still ANSWERED (see send_pong below) but no longer
               # recorded — a drop that otherwise looks exactly like an origin that stopped
-              # pinging. `||=`, not `=`: this does not end the drain, so a hard cap that DOES end
-              # it later should own the summary; control only fills in when nothing else fired.
-              truncated ||= "the #{MAX_CONTROL_MESSAGES}-control-frame cap was reached; later ping/pong frames were not recorded"
+              # pinging. `||=`, not `=`: this does not end the exchange, so a hard cap that DOES
+              # end it later should own the summary; control only fills in when nothing else
+              # fired. It leaves `capped` false for the same reason — the script keeps going.
+              st.truncated ||= "the #{MAX_CONTROL_MESSAGES}-control-frame cap was reached; later ping/pong frames were not recorded"
             end
             send_pong(io, frame.payload) if frame.opcode == Proxy::WS::OP_PING
           end
         end
-        # Moment 3. Every exit above is a `break`, so this is reached on the idle timeout, on
-        # EOF, on a truncated frame, on a cap and on the CLOSE path alike — the same reason
-        # `Relay.pump` puts its own flush in an `ensure` rather than at the tail.
-        emit_pending(messages, assembling, msg_opcode, shape)
-        # The one truncation marker, AFTER the flush so it sits adjacent to (just after) any
-        # `fin: false` fragment the runaway-byte cap left behind — the row that says WHY that
-        # fragment ends unterminated. NOTICE_PREFIX + an "in" TEXT frame mirrors the relay
-        # sibling exactly: it renders in the inbound transcript like the rows it caps, yet a
-        # WS repeater seed can never put gori's own sentence back on the wire.
-        messages << truncation_marker(truncated) if truncated
-        {close_code, truncated}
+      end
+
+      # Moment 3, plus the ONE truncation marker — once, after the LAST drain of the exchange.
+      #
+      # Both used to sit at the tail of `drain`, which was the end of the run when there was
+      # exactly one drain per session. With a drain per message that would have flushed a
+      # half-assembled message at every idle gap (splitting a message the origin fragments
+      # slowly into two `fin: false` rows) and appended a marker row per drain instead of the
+      # single one the relay sibling emits.
+      #
+      # The marker goes AFTER the flush so it sits adjacent to (just after) any `fin: false`
+      # fragment the runaway-byte cap left behind — the row that says WHY that fragment ends
+      # unterminated. NOTICE_PREFIX + an "in" TEXT frame mirrors the relay sibling exactly: it
+      # renders in the inbound transcript like the rows it caps, yet a WS repeater seed can
+      # never put gori's own sentence back on the wire.
+      private def self.finish(messages : Array(Message), st : DrainState) : Nil
+        st.assembling = emit_pending(messages, st.assembling, st.msg_opcode, st.shape)
+        return if st.marked?
+        if reason = st.truncated
+          messages << truncation_marker(reason)
+          st.marked = true
+        end
       end
 
       # The synthetic row a capped drain leaves behind. Built from `NOTICE_PREFIX` (what
@@ -417,9 +555,12 @@ module Gori
         "the #{MAX_RECV_BYTES // (1024 * 1024)} MiB server-payload cap was reached; the transcript is truncated"
       end
 
+      # The per-read bound on the drain. Set both DOWN (to `idle`, before the first message and
+      # again once the first frame arrives) and back UP (to HANDSHAKE_TIMEOUT, for the one
+      # first-reply grace pass), which is why it is no longer named for narrowing.
       # Both socket types respond; responds_to? keeps the union's IO type happy.
-      private def self.narrow_read_timeout(io : IO, idle : Time::Span) : Nil
-        io.read_timeout = idle if io.responds_to?(:read_timeout=)
+      private def self.set_read_timeout(io : IO, span : Time::Span) : Nil
+        io.read_timeout = span if io.responds_to?(:read_timeout=)
       end
 
       # Echo a Ping as a masked Pong, but never amplify: a control frame's payload is

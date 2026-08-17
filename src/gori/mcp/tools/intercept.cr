@@ -163,10 +163,10 @@ module Gori
       #   - A WebSocket BINARY frame (`row.binary?`): even taken literally, a JSON string
       #     cannot carry an arbitrary octet — a byte above 0x7F round-trips through JSON's
       #     Unicode text encoding as MULTIPLE bytes, silently growing the payload (`0xFF` came
-      #     back `0xC3 0xBF`). The TUI refuses to even open its editor on a binary WS message
-      #     for the identical reason (`read_only_selection?`); `raw` refuses here by name
-      #     instead of forwarding the wrong bytes, and `raw_base64` is the byte-exact escape
-      #     hatch it already is for a binary HTTP body.
+      #     back `0xC3 0xBF`). The TUI answers the identical problem with a HEX editor over the
+      #     payload (`InterceptView#hex_editing?`) — a byte channel, which is what this one is
+      #     not — so `raw` refuses here by name instead of forwarding the wrong bytes, and
+      #     `raw_base64` is the byte-exact escape hatch it already is for a binary HTTP body.
       #
       # Exactly one of `raw`/`raw_base64`, so a caller that sends both is told rather than
       # silently having one ignored.

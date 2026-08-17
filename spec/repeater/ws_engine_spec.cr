@@ -46,6 +46,20 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
                    "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
                    "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
 
+# Complete the 101 upgrade on `conn`, deriving Sec-WebSocket-Accept from the key the engine
+# actually sent. Every fake origin below needs it and none of them needs it to differ, so it
+# lives once rather than as a copy per origin.
+private def ws_upgrade(conn : TCPSocket) : Nil
+  head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+  key = String.new(head).each_line
+    .find(&.downcase.starts_with?("sec-websocket-key:"))
+    .try(&.split(':', 2)[1].strip) || ""
+  accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+  conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+          "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+  conn.flush
+end
+
 # An origin that completes the upgrade and then writes EXACTLY these bytes — a frame script,
 # so a sequence RFC 6455 forbids (and therefore `WS.encode` will not build) can still be put
 # on the wire. It never reads, so nothing here depends on what the engine sends.
@@ -55,14 +69,7 @@ private def start_scripted_ws_origin(frames : Bytes) : Int32
   spawn do
     next unless conn = origin.accept?
     conn.read_timeout = 5.seconds
-    head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
-    key = String.new(head).each_line
-      .find(&.downcase.starts_with?("sec-websocket-key:"))
-      .try { |l| l.split(':', 2)[1].strip } || ""
-    accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
-    conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
-            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
-    conn.flush
+    ws_upgrade(conn)
     conn.write(frames)
     conn.flush
     conn.close
@@ -79,14 +86,93 @@ private def start_dead_ws_origin : Int32
   spawn do
     next unless conn = origin.accept?
     conn.read_timeout = 5.seconds
-    head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
-    key = String.new(head).each_line
-      .find(&.downcase.starts_with?("sec-websocket-key:"))
-      .try(&.split(':', 2)[1].strip) || ""
-    accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
-    conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
-            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+    ws_upgrade(conn)
+    conn.close
+  rescue
+  end
+  port
+end
+
+# TURN-TAKING origin: read one client message, answer it, read the next. It never reads ahead,
+# so it can only be driven by an engine that waits for each answer — and the transcript order
+# it produces ("out","in","out","in", …) is the whole assertion: a send-all-then-drain engine
+# lists every "out" row before every "in" row against this same origin.
+private def start_turn_taking_ws_origin(count : Int32) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    ws_upgrade(conn)
+    count.times do
+      frame = WS.read_frame(conn)
+      break unless frame && frame.data?
+      conn.write(WS.encode(frame.opcode, "re:#{String.new(frame.payload)}".to_slice, mask: false))
+      conn.flush
+    end
+    conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false)) # 1000 Normal
     conn.flush
+    conn.close
+  rescue
+  end
+  port
+end
+
+# An origin that answers the FIRST client message and then CLOSEs, with more of the script
+# still to come. §5.5.1 forbids data frames after a CLOSE, so the engine has to stop where it
+# is — a decision only an interleaved replay is in a position to make.
+private def start_early_close_ws_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    ws_upgrade(conn)
+    if (frame = WS.read_frame(conn)) && frame.data?
+      conn.write(WS.encode(frame.opcode, frame.payload, mask: false))
+    end
+    conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE9], mask: false)) # 1001 Going Away
+    conn.flush
+    conn.close
+  rescue
+  end
+  port
+end
+
+# An origin that splits ONE message across the turn boundary: the leading `TEXT fin=0` lands in
+# the first message's drain, and the `CONT fin=1` only after the SECOND client message arrives,
+# so the idle gap between them is guaranteed without a sleep. The engine must still report one
+# row, not two unterminated fragments.
+private def start_split_fragment_ws_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    ws_upgrade(conn)
+    next unless WS.read_frame(conn)
+    conn.write(WS.encode(WS::OP_TEXT, "AA".to_slice, mask: false, fin: false))
+    conn.flush
+    next unless WS.read_frame(conn)
+    conn.write(WS.encode(WS::OP_CONT, "BB".to_slice, mask: false))
+    conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
+    conn.flush
+    conn.close
+  rescue
+  end
+  port
+end
+
+# An origin that upgrades, reads `count` frames and answers NONE of them, then closes. The
+# engine must not spend a per-read handshake timeout on each silent turn.
+private def start_silent_ws_origin(count : Int32) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    ws_upgrade(conn)
+    count.times { break unless WS.read_frame(conn) }
     conn.close
   rescue
   end
@@ -117,6 +203,82 @@ describe Gori::Repeater::WsEngine do
     result.messages.map { |m| {m.direction, m.opcode} }
       .should eq([{"out", 1}, {"in", 1}, {"in", 8}])
     result.messages[0..1].map { |m| String.new(m.payload) }.should eq(["ping", "ping"])
+  end
+
+  # --- interleaving -------------------------------------------------------------------
+  # The engine used to write EVERY recorded client→server message and only then read, so a
+  # protocol whose next message depends on the answer to the last one replayed as a burst the
+  # server was answering out of step — and the transcript said so too, listing every "out" row
+  # ahead of every "in" row whatever the wire order had been.
+
+  it "sends one message, drains the answer, and only then sends the next" do
+    port = start_turn_taking_ws_origin(3)
+    result = WsEngine.send(UPGRADE, [
+      WsEngine::OutMsg.new(1, "one".to_slice),
+      WsEngine::OutMsg.new(1, "two".to_slice),
+      WsEngine::OutMsg.new(1, "three".to_slice),
+    ], scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 500.milliseconds)
+    result.ok?.should be_true
+    result.messages.map { |m| {m.direction, m.opcode} }.should eq([
+      {"out", 1}, {"in", 1},
+      {"out", 1}, {"in", 1},
+      {"out", 1}, {"in", 1},
+      {"in", 8},
+    ])
+    result.messages.select { |m| m.opcode == 1 }.map { |m| String.new(m.payload) }
+      .should eq(["one", "re:one", "two", "re:two", "three", "re:three"])
+    result.close_code.should eq(1000)
+    result.truncated.should be_nil
+  end
+
+  it "stops the script when the server CLOSEs mid-run, and reports how far it got" do
+    port = start_early_close_ws_origin
+    result = WsEngine.send(UPGRADE, [
+      WsEngine::OutMsg.new(1, "one".to_slice),
+      WsEngine::OutMsg.new(1, "two".to_slice),
+      WsEngine::OutMsg.new(1, "three".to_slice),
+    ], scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 500.milliseconds)
+    result.ok?.should be_true
+    # §5.5.1: nothing may follow the peer's CLOSE, so "two" and "three" were never written —
+    # and the transcript must not claim otherwise.
+    result.messages.count { |m| m.direction == "out" }.should eq(1)
+    result.close_code.should eq(1001)
+    (result.note || "(silence)").should contain("stopped after 1 of 3 message(s)")
+    (result.note || "(silence)").should contain("CLOSE")
+  end
+
+  it "reassembles a message the origin splits across a turn boundary into ONE row" do
+    # Moment 3 flushes at the END of the exchange, not at the end of each message's drain —
+    # otherwise the leading `TEXT fin=0` would be emitted as its own unterminated row the
+    # moment the idle gap ended, and the origin's one message would be reported as two.
+    port = start_split_fragment_ws_origin
+    result = WsEngine.send(UPGRADE, [
+      WsEngine::OutMsg.new(1, "a".to_slice),
+      WsEngine::OutMsg.new(1, "b".to_slice),
+    ], scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 150.milliseconds)
+    result.messages.map { |m| {m.direction, m.opcode} }
+      .should eq([{"out", 1}, {"out", 1}, {"in", 1}, {"in", 8}])
+    String.new(result.messages[2].payload).should eq("AABB")
+    result.messages[2].shape.fin.should be_true # the origin DID terminate it, one turn later
+    result.messages[2].shape.frames.should eq(2)
+  end
+
+  it "does not spend a handshake timeout per message when the origin answers nothing" do
+    # The generous first-reply bound is a PER-READ timeout, and an interleaved replay reads
+    # between every pair of messages: left armed, four silent turns would cost four × 15s.
+    # It is spent once, at the end, and only because no frame ever arrived.
+    port = start_silent_ws_origin(4)
+    started = Time.instant
+    result = WsEngine.send(UPGRADE, (1..4).map { |i| WsEngine::OutMsg.new(1, "m#{i}".to_slice) },
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 100.milliseconds)
+    elapsed = Time.instant - started
+    result.messages.count { |m| m.direction == "out" }.should eq(4)
+    elapsed.should be < 5.seconds
+    (result.note || "(silence)").should contain("delivery unconfirmed")
   end
 
   it "captures the server close code" do

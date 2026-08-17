@@ -76,10 +76,12 @@ module Gori
       # the MCP process can render a correct age that does NOT reset on every republish.
       getter held_at_ms : Int64
       getter reply : Channel(Decision)
-      # A WebSocket BINARY message (opcode 2). Holdable, forwardable and droppable, but
-      # read-only in the editor: the TextArea round trip is `String.new(raw)` → char ops →
-      # `.to_slice`, which is lossy on non-UTF-8 — a pre-existing sharp edge on an HTTP body
-      # that WS makes the DEFAULT case, since opcode 2 is protobuf/msgpack/CBOR.
+      # A WebSocket BINARY message (opcode 2). Which EDITOR a surface opens on it, and whether
+      # a text-only edit channel may carry it at all: the TextArea round trip is
+      # `String.new(raw)` → char ops → `.to_slice`, which is lossy on non-UTF-8 — a pre-existing
+      # sharp edge on an HTTP body that WS makes the DEFAULT case, since opcode 2 is
+      # protobuf/msgpack/CBOR. The TUI answers it with a hex editor over the bytes; MCP `raw`
+      # and CLI `--raw` refuse by name and point at `raw_base64` / `--raw-file`.
       getter? binary : Bool
       # Why an EDIT to this message cannot be applied, or nil when it can.
       #
