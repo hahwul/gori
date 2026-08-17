@@ -18,7 +18,7 @@ Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `
 
 ### If you hit a GitHub rate limit
 
-The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP** — behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.3.1 via ... (no API call)`.
+The installer asks the GitHub API which release is latest, and that API allows only **60 unauthenticated requests per hour per IP** — behind shared CI or NAT egress it can answer `403`. Both the installer and `gori update` fall back to the rate-limit-free release redirect automatically, so they keep working; you should see a line like `resolved v0.3.2 via ... (no API call)`.
 
 To use the authenticated 5000/hour limit instead, export a token first. Note that it has to be exported rather than prefixed onto `curl` — the script runs in the piped `bash`, which would not inherit a `curl`-scoped variable:
 
@@ -41,7 +41,7 @@ curl -fsSL -o gori https://github.com/hahwul/gori/releases/latest/download/gori-
 curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/download/gori-osx-arm64.tar.gz
 ```
 
-The versioned names (`gori-v0.3.1-linux-x86_64`) stay published alongside them — use those when you want to pin a build.
+The versioned names (`gori-v0.3.2-linux-x86_64`) stay published alongside them — use those when you want to pin a build.
 
 Each release also publishes a `SHA256SUMS` listing every asset under both naming schemes. The installer and `gori update` check against it automatically; to verify a direct download yourself:
 
@@ -211,7 +211,7 @@ shards build --release -Dwithout_native_codecs
 gori --version
 ```
 
-You should see `gori 0.3.1`.
+You should see `gori 0.3.2`.
 
 ## Run Without Installing
 
