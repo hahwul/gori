@@ -65,6 +65,26 @@ module Gori::Proxy::H2
   # WINDOW_UPDATE and RST_STREAM, and the entire opposite direction. A held RESPONSE blocks
   # nothing at all.
   #
+  # ## What a hold covers (PR #6)
+  #
+  # The frames behind a deferred head are parked here regardless — nothing may overtake the
+  # head (rule 1) — so when the message declares a `content-length` this gate can hold
+  # (`MAX_HOLD_BODY`) the hold covers head+BODY: the queue row carries the entity, an edit's
+  # body is the operator's, and `release_locked` re-frames it into DATA. The queue row then
+  # appears when the message FINISHES arriving, which is h1's own timing (`ClientConn` reads
+  # the whole entity before `hold_request`).
+  #
+  # Every other shape keeps the head-only hold this gate has always had, and each for a reason
+  # rather than by omission: no declared length (a streaming upload, SSE, a gRPC stream) means
+  # waiting for an end gori cannot predict; over the ceiling means a per-stream buffer on a
+  # multiplexed connection (P6); a PADDED DATA frame means showing an operator bytes only
+  # `Assembler#data_block` knows how to strip. `Item#head_only?` carries the distinction to
+  # every surface, so an edit that adds a body to one of those is refused before it is acked.
+  #
+  # Match&Replace over a BODY is a different question and still forces the h1 downgrade
+  # (`Tls::Tunnel#h2_candidate?`): a rule rewrites every matching message on the connection,
+  # unbuffered and unattended, where a hold buffers one message a human is already waiting on.
+  #
   # ## The lock invariant (deadlock guard)
   #
   # One Mutex per direction guards this gate's state AND its writes, so the order frames are
@@ -108,6 +128,23 @@ module Gori::Proxy::H2
     # disposition as toggle-off (`interceptor.cr:147`), `release_all` and the #123 reaper.
     MAX_DEFERRED_BYTES = 1 << 20
 
+    # Ceiling on a message body this gate will BUFFER so an intercept hold covers head+body
+    # (PR #6). Under it the operator sees and edits the whole message and the DATA frames are
+    # rebuilt from their bytes; over it — or with no declared length at all — the hold stays the
+    # HEAD ONLY and DATA streams past untouched, which is the behaviour every h2 hold had.
+    #
+    # Deliberately BELOW h1's own hold ceiling (`ClientConn::MAX_REWRITE_BODY`, 16 MiB), and the
+    # asymmetry is the protocol's: an h1 connection carries one request, so its ceiling is what
+    # one held message can cost. h2 multiplexes — a browser opens ~100 concurrent streams on one
+    # connection — so the same number here would be a per-connection ceiling 100x larger than
+    # h1's on the single-threaded scheduler this proxy runs on (P6). 1 MiB is the size this file
+    # already spends on ONE deferred stream (`MAX_DEFERRED_BYTES`), which is the honest budget.
+    #
+    # It is a ceiling on the DECLARED length, exactly as `MAX_REWRITE_BODY` is: a body with no
+    # `content-length` is not gated here, it is simply not buffered, because "wait for a body
+    # whose end gori cannot predict" is how a pump stalls.
+    MAX_HOLD_BODY = 1 << 20
+
     # h1 records exactly these strings (`client_conn.cr:1234`, `:840`, `:1249`), so History
     # reads the same on both protocols.
     DROP_REQUEST_REASON  = "dropped by intercept (request)"
@@ -136,13 +173,44 @@ module Gori::Proxy::H2
       property? ready = false
       # Frames that arrived for this stream after its head was deferred, in arrival order —
       # DATA, WINDOW_UPDATE, PRIORITY, trailers. Forwarding any of them ahead of the head is
-      # not an option, which is why a head-only hold still buffers a body (#492 step 3, D2).
+      # not an option, which is why even a HEAD-ONLY hold parks a body it will not show anyone.
+      # A head+body hold reads its entity out of exactly this list (`body_of`).
       getter frames = [] of {Frame::Header, Assembler::HeadBlock?}
       property bytes = 0
+      # A hold this gate has DECIDED on but not queued yet: it is buffering the message's body
+      # so the operator sees head+body, and a queue row for half a message is not a thing to
+      # offer a human. nil once queued, and nil for every head-only hold.
+      property waiting : Held?
+      # Extra `check_ceiling` allowance for the body this slot promised to buffer. The parked
+      # frames still get their own `MAX_DEFERRED_BYTES` of unrelated traffic on top; without
+      # this the buffer gori just agreed to hold would trip the ceiling meant for everything
+      # else. 0 for a head-only hold, which is the ceiling exactly as it was.
+      property body_budget = 0
+      # The message ended — END_STREAM on a DATA frame, on trailers, or on the head itself.
+      property? complete = false
+      # A DATA frame arrived PADDED, so the buffer is abandoned (see `park`).
+      property? padded_body = false
+      # The queued hold covers head+body, so an edit's body is the operator's and goes out.
+      property? holds_body = false
+      # The body an edit replaced the buffered one with. nil = write the DATA that arrived.
+      property rebuilt : Bytes?
 
       def initialize(@stream_id : UInt32)
       end
     end
+
+    # A hold this gate has decided on, with everything `Interceptor#enqueue_*` needs — split out
+    # from the enqueue because a head+body hold is decided when the HEAD arrives and queued when
+    # the message finishes arriving, and those are different moments.
+    private record Held,
+      request : Bool,
+      stream_id : UInt32,
+      method : String,
+      target : String,
+      host : String,
+      port : Int32,
+      scheme : String,
+      refusal : String?
 
     property peer : StreamGate?
 
@@ -237,28 +305,114 @@ module Gori::Proxy::H2
       # that is not going anywhere.
       return true if sandbox_refuses_locked(block)
       return true if push_refuses_locked(block)
-      item = start_hold(block)
+      held = plan_hold(block)
       queued = @ordered && !block.head.nil? && !@opens.empty?
-      return false unless item || queued
+      return false unless held || queued
 
       block = @heads.engage(block) # rule 2 — MUST precede any later block going out
       slot = Slot.new(block.stream_id)
       slot.pending = block
       @slots[block.stream_id] = slot
       @opens << block.stream_id if @ordered && !block.head.nil?
-      if item
-        slot.item = item
-        wait_for(item, block)
+      if held
+        start_hold_locked(slot, held, block)
       else
         slot.ready = true # queued for order only; nothing to decide
       end
       true
     end
 
+    # Queue this hold now, or wait for the rest of the message first (PR #6).
+    #
+    # A body gori can BUFFER makes the hold cover head+body, and the queue row for it cannot
+    # appear until the body has finished arriving — half a message is not a thing to offer a
+    # human. That is not a new discipline: h1's hold has always read the whole entity BEFORE
+    # `hold_request` (`ClientConn#handle_hold_request`), so "the row appears when the message
+    # is complete" is the behaviour operators already have on the other protocol.
+    #
+    # What h2 adds is that the wait costs the REQUEST direction its later stream opens (rule 1
+    # pins releases to `@opens` order), so a client that stalls mid-upload delays the streams
+    # behind it. Bounded by the same two things that bound every other wait here: the declared
+    # length gate (`holdable_body`, so gori only ever waits for an end it can predict) and
+    # `check_ceiling`, which fails the whole run of slots open past the ceiling.
+    private def start_hold_locked(slot : Slot, held : Held, block : HeadRewrite::Block) : Nil
+      budget = holdable_body(block)
+      unless budget
+        queue_hold_locked(slot, held, nil)
+        return
+      end
+      slot.body_budget = budget
+      slot.waiting = held
+      # A head carrying END_STREAM IS the whole message (a GET, a 204, a reply to HEAD), so
+      # there is nothing to wait for and its buffered body is zero bytes long.
+      slot.complete = true if block.first.end_stream?
+      settle_waiting_locked(slot)
+    end
+
+    # Queue a decided hold and start its wait fiber. `body` nil = the hold covers the HEAD only.
+    private def queue_hold_locked(slot : Slot, held : Held, body : Bytes?) : Nil
+      slot.waiting = nil
+      block = slot.pending
+      head = block.try(&.head)
+      item = block && head ? enqueue_hold(held, head, body) : nil
+      if block && item
+        slot.holds_body = !body.nil?
+        slot.item = item
+        wait_for(item, block)
+        return
+      end
+      # Intercept was switched off between the gate check and the enqueue (or between the head
+      # and the end of the body, which is a whole upload's worth of window on the buffering
+      # path). Nothing will ever decide this slot, so it must not sit in `@slots` waiting for a
+      # decision that cannot come — that is the freeze `fail_open`'s comment describes, reached
+      # through a race instead of through the ceiling.
+      slot.ready = true
+      @deferred_cross.concat(drain_locked)
+    end
+
+    # Put the hold on the Interceptor's queue. `raw` is what the operator sees and edits: the h1
+    # text form of the head, plus the buffered entity when there is one.
+    private def enqueue_hold(held : Held, head : Bytes, body : Bytes?) : Gori::Interceptor::Item?
+      raw = body ? join(head, body) : head
+      if held.request
+        @interceptor.enqueue_request(raw, method: held.method, target: held.target,
+          host: held.host, port: held.port, scheme: held.scheme,
+          edit_refusal: held.refusal, head_only: body.nil?)
+      else
+        @interceptor.enqueue_response(raw, flow_id: @assembler.flow_id_of(held.stream_id),
+          method: held.method, target: held.target, host: held.host, port: held.port,
+          scheme: held.scheme, edit_refusal: held.refusal, head_only: body.nil?)
+      end
+    end
+
+    # The body size this gate will buffer for a hold, or nil to hold the HEAD only.
+    #
+    # Known length only, and the reason is `MAX_HOLD_BODY`'s: buffering means waiting, and a
+    # body whose end gori cannot predict is a wait with no end. Streaming uploads, SSE, gRPC
+    # streams and every chunked-equivalent response therefore keep exactly the head-only hold
+    # they have today, which is also what the DATA frames keep: untouched (P6).
+    private def holdable_body(block : HeadRewrite::Block) : Int32?
+      return 0 if block.first.end_stream?
+      len = declared_body_length(block.fields)
+      return nil unless len && len <= MAX_HOLD_BODY
+      len
+    end
+
+    # The one `content-length` this head declares, or nil. Two of them is RFC 9113 §8.1.1-
+    # malformed and gori does not get to pick which one it believes — that message keeps its
+    # head-only hold and its DATA goes out exactly as it arrived (P7).
+    private def declared_body_length(fields : Array(HPACK::Field)) : Int32?
+      declared = fields.select { |f| f.name == "content-length" }
+      return nil unless declared.size == 1
+      len = declared.first.value.to_i32?
+      len && len >= 0 ? len : nil
+    end
+
     # --- pump side (locked) --------------------------------------------------
 
     private def accept_locked(frame : Frame::Header) : Array(UInt32)
       return NO_CROSS if @closed
+      check_waiting_locked
       cross = NO_CROSS
       # Every header block goes through `@heads` even for a deferred stream: the per-direction
       # HPACK decoder must advance in ARRIVAL order, so a block cannot wait in a Slot undecoded
@@ -293,10 +447,30 @@ module Gori::Proxy::H2
           cross = cross + abandon_locked(slot, f)
         else
           park(slot, f, pre)
-          check_ceiling(slot)
+          after_park(slot)
         end
       end
       take_deferred_cross(cross)
+    end
+
+    # Intercept switched off while a hold was still WAITING for its body (PR #6). Such a slot
+    # has no queue row, so `Interceptor#toggle`'s release and `release_all` cannot reach it —
+    # and in the request direction it sits at the head of `@opens`, holding every later stream
+    # open. Toggle-off is one of this file's documented fail-open exits and has to stay one.
+    #
+    # Checked on frame arrival rather than on a timer, and that is sufficient rather than
+    # merely cheap: a waiting slot with nothing behind it blocks nobody, and a stream blocked
+    # BEHIND one only becomes blocked when its own frames arrive here. Costs an empty-Hash test
+    # on every frame of a connection holding nothing, which is the common case.
+    private def check_waiting_locked : Nil
+      return if @slots.empty?
+      waiting = @slots.each_value.select(&.waiting).to_a
+      return if waiting.empty?
+      return if @interceptor.holding?
+      # Head-only: the body gori was buffering is no longer being held for anyone, and the
+      # enqueue below returns nil anyway (`Interceptor#enqueue` tests the same condition), so
+      # `queue_hold_locked` takes its own not-held exit and drains the slot.
+      waiting.each { |slot| slot.waiting.try { |held| queue_hold_locked(slot, held, nil) } }
     end
 
     # `defer?` cannot return cross-direction work, so it parks it here. Merged on the way out
@@ -335,16 +509,83 @@ module Gori::Proxy::H2
     private def park(slot : Slot, frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
       slot.frames << {frame, pre}
       slot.bytes += frame.payload.size
+      note_body_frame(slot, frame) if slot.waiting
+    end
+
+    # Track a buffering hold's progress. Nothing here writes or settles — `after_park` owns
+    # that, so a frame is always parked WHOLE before anything can release the slot under it.
+    #
+    # A PADDED DATA frame gives the buffer up. Padding is a display concern the assembler
+    # already answers (`Assembler#data_block` strips it, and raises on a pad length the frame
+    # cannot hold), and re-deriving that here next to a second caller is the shape AGENTS.md
+    # names as a trap — with the extra cost that this copy would raise on the pump fiber, where
+    # a malformed pad would end the connection instead of being projected around. So a padded
+    # body is simply one gori will not show an operator: the hold falls back to HEAD-ONLY,
+    # which is where every other unbuffered shape already lands.
+    private def note_body_frame(slot : Slot, frame : Frame::Header) : Nil
+      if frame.frame_type == Frame::Type::Data
+        slot.padded_body = true if frame.padded?
+        slot.complete = true if frame.end_stream?
+      elsif frame.frame_type == Frame::Type::Headers
+        # Trailers end the message when they carry END_STREAM (RFC 9113 §8.1).
+        slot.complete = true if frame.end_stream?
+      end
     end
 
     private def park_block(slot : Slot, block : HeadRewrite::Block) : Nil
       last = block.frames.size - 1
       block.frames.each_with_index { |f, i| park(slot, f, i == last ? block.pre : nil) }
-      check_ceiling(slot)
+      after_park(slot)
     end
 
+    # Everything that may release or settle a slot once one arrival has been parked whole.
+    # Ceiling first: `fail_open` writes the slot out and takes it out of `@slots`, so a hold
+    # queued after that would have no slot left to decide.
+    private def after_park(slot : Slot) : Nil
+      check_ceiling(slot)
+      return unless @slots.has_key?(slot.stream_id)
+      settle_waiting_locked(slot)
+    end
+
+    # Queue a hold that was waiting for the rest of its message, once the message is in hand —
+    # or once the buffer has been given up, in which case it queues HEAD-ONLY and the parked
+    # DATA goes out as it arrived.
+    private def settle_waiting_locked(slot : Slot) : Nil
+      held = slot.waiting
+      return unless held
+      return unless slot.complete? || slot.padded_body?
+      queue_hold_locked(slot, held, slot.padded_body? ? nil : body_of(slot))
+    end
+
+    # The buffered entity: every parked DATA payload in arrival order. Unpadded by
+    # construction — `note_body_frame` gives the buffer up at the first padded frame.
+    private def body_of(slot : Slot) : Bytes
+      size = 0
+      slot.frames.each { |(f, _)| size += f.payload.size if f.frame_type == Frame::Type::Data }
+      buf = Bytes.new(size)
+      at = 0
+      slot.frames.each do |(f, _)|
+        next unless f.frame_type == Frame::Type::Data
+        f.payload.copy_to(buf + at)
+        at += f.payload.size
+      end
+      buf
+    end
+
+    private def join(head : Bytes, body : Bytes) : Bytes
+      return head if body.empty?
+      buf = Bytes.new(head.size + body.size)
+      head.copy_to(buf)
+      body.copy_to(buf + head.size)
+      buf
+    end
+
+    # `body_budget` is the entity this slot PROMISED to buffer (0 for a head-only hold), so the
+    # ceiling still measures what it was written to measure: unrelated frames piling up behind a
+    # deferred stream. Without the term, agreeing to hold a 1 MiB body would immediately trip the
+    # 1 MiB ceiling meant for everything else and fail the hold open on its own buffer.
     private def check_ceiling(slot : Slot) : Nil
-      fail_open(slot) if slot.bytes > MAX_DEFERRED_BYTES
+      fail_open(slot) if slot.bytes > MAX_DEFERRED_BYTES + slot.body_budget
     end
 
     # Past the buffer ceiling. The hold FAILS OPEN: the head goes out as it arrived, the parked
@@ -385,6 +626,9 @@ module Gori::Proxy::H2
       # dropped is the one outcome worse than holding it.
       return if item && @interceptor.get(item.id).nil?
       unless item
+        # A hold still WAITING for its body has no item yet (PR #6) and never will: past the
+        # ceiling gori has stopped buffering, so there is nothing left to offer a human.
+        target.waiting = nil
         target.ready = true
         return
       end
@@ -420,8 +664,8 @@ module Gori::Proxy::H2
       @warned_overflow = true
       ::Log.warn do
         also = ahead > 0 ? " (releasing #{ahead} stream(s) deferred ahead of it too)" : ""
-        "h2 #{@direction}: held stream #{slot.stream_id} buffered over #{MAX_DEFERRED_BYTES} " \
-        "bytes — forwarding it unedited#{also}"
+        "h2 #{@direction}: held stream #{slot.stream_id} buffered over " \
+        "#{MAX_DEFERRED_BYTES + slot.body_budget} bytes — forwarding it unedited#{also}"
       end
     end
 
@@ -584,16 +828,20 @@ module Gori::Proxy::H2
 
     # --- hold side -----------------------------------------------------------
 
-    # Ask the Interceptor whether this head is held, and enqueue it if so. Returns nil (forward
-    # normally) for a block that is not a message head, an interim 1xx, or anything the precise
-    # per-request/per-response gates decline.
-    private def start_hold(block : HeadRewrite::Block) : Gori::Interceptor::Item?
+    # Ask the Interceptor whether this head is held, and describe the hold if so. Returns nil
+    # (forward normally) for a block that is not a message head, an interim 1xx, or anything the
+    # precise per-request/per-response gates decline.
+    #
+    # DECIDING is separate from QUEUEING (PR #6). A hold that buffers the message's body is
+    # decided here, when the head arrives, and queued later, when the body has finished
+    # arriving — so the two halves cannot be one call any more.
+    private def plan_hold(block : HeadRewrite::Block) : Held?
       head = block.head
       return nil unless head
-      block.request ? hold_request(block, head) : hold_response(block, head)
+      block.request ? plan_request(block, head) : plan_response(block, head)
     end
 
-    private def hold_request(block : HeadRewrite::Block, head : Bytes) : Gori::Interceptor::Item?
+    private def plan_request(block : HeadRewrite::Block, head : Bytes) : Held?
       fields = block.fields
       authority = HeadCodec.pseudo_of(fields, ":authority") || @host
       host, port = Upstream.split_host_port(authority, @port)
@@ -602,14 +850,15 @@ module Gori::Proxy::H2
       scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
       # `head` is the encoded h1-shaped head this block projects to, which is what the operator
       # sees when the message is held — so a `header:` term reads the same bytes on h2 as on h1.
+      # The gate reads the HEAD even when the hold will carry a body: a `header:` term is a
+      # question about the head on both protocols, and the body has not arrived yet anyway.
       return nil unless @interceptor.intercepts_request?(
                           method: method, host: host, target: target, scheme: scheme, head: head)
-      @interceptor.enqueue_request(head, method: method, target: target,
-        host: host, port: port, scheme: scheme,
-        edit_refusal: edit_refusal(block), head_only: true)
+      Held.new(request: true, stream_id: block.stream_id, method: method, target: target,
+        host: host, port: port, scheme: scheme, refusal: edit_refusal(block))
     end
 
-    private def hold_response(block : HeadRewrite::Block, head : Bytes) : Gori::Interceptor::Item?
+    private def plan_response(block : HeadRewrite::Block, head : Bytes) : Held?
       status = (HeadCodec.pseudo_of(block.fields, ":status") || "0").to_i? || 0
       # h1 skips interim 1xx BEFORE the hold gate (`client_conn.cr:467` → `:501`), so an Early
       # Hints response never consumes the decision meant for the real one. Parity, not a gap.
@@ -629,9 +878,9 @@ module Gori::Proxy::H2
                           method: ref.method, host: host, target: ref.target,
                           scheme: ref.scheme, status: status, head: head)
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
-      @interceptor.enqueue_response(head, flow_id: @assembler.flow_id_of(block.stream_id),
-        method: ref.method, target: status.to_s, host: host, port: port, scheme: ref.scheme,
-        edit_refusal: edit_refusal(block), head_only: true)
+      Held.new(request: false, stream_id: block.stream_id, method: ref.method,
+        target: status.to_s, host: host, port: port, scheme: ref.scheme,
+        refusal: edit_refusal(block))
     end
 
     # Why an edit to this held head cannot be applied, or nil. Asked HERE — at hold time, on
@@ -696,26 +945,51 @@ module Gori::Proxy::H2
       if decision.action.drop?
         slot.dropped = true
       else
-        slot.decided = decision.bytes == block.head ? block : edited(block, decision)
+        # `item.raw` rather than `block.head`: what the operator was SHOWN is the whole hold,
+        # and on a head+body hold that is head + entity. The two are the same bytes on a
+        # head-only hold, so this is one test for both shapes rather than a second one.
+        slot.decided = decision.bytes == item.raw ? block : edited(slot, block, decision)
       end
       slot.ready = true
       drain_locked
     end
 
     # The operator's bytes, back through the same pipeline a rule takes.
-    private def edited(block : HeadRewrite::Block,
+    private def edited(slot : Slot, block : HeadRewrite::Block,
                        decision : Gori::Interceptor::Decision) : HeadRewrite::Block
-      head, body = Gori::Interceptor.split_edit(decision.bytes)
-      # h2 holds the HEAD only (#492 step 3, D2) — DATA streams past untouched, so a body typed
-      # into the editor has nowhere to go. `Item#head_only?` lets the surface refuse the edit
-      # outright now, so reaching here means a caller that did not check; say it once anyway.
-      if body && !@warned_body
+      head, has_body = Gori::Interceptor.split_edit(decision.bytes)
+      body = has_body ? decision.bytes[head.size..] : Bytes.empty
+      return edited_with_body(slot, block, head, body) if slot.holds_body?
+      # A HEAD-ONLY hold — the message's body was streaming, undeclared, or over
+      # `MAX_HOLD_BODY`, so DATA goes past this gate untouched and a body typed into the editor
+      # has nowhere to go. `Item#head_only?` lets the surface refuse the edit outright, so
+      # reaching here means a caller that did not check; say it once anyway.
+      if has_body && !@warned_body
         @warned_body = true
-        ::Log.warn { "h2 #{@direction}: an intercept edit added a body (stream #{block.stream_id}) — h2 holds the head only, the body was ignored" }
+        ::Log.warn { "h2 #{@direction}: an intercept edit added a body (stream #{block.stream_id}) — this hold covers the head only (no declared content-length, or one over #{MAX_HOLD_BODY} bytes), so the body was ignored" }
       end
-      restore = length_synced?(head, decision.bytes.size - head.size)
+      restore = length_synced?(head, body.size)
       warn_length_restored(block.stream_id) if restore && declares_length?(head)
       @heads.encode_edited(block, head, restore) || block
+    end
+
+    # An edit to a hold that covered head+body (PR #6). The operator's bytes ARE the message, so
+    # both halves go out as they wrote them and `release_locked` re-frames the body into DATA.
+    #
+    # `restore_length: false` is the whole of the difference, and it is the R3-F2 rule reaching
+    # its own base case rather than an exception to it. `length_synced?` exists because a
+    # head-only hold carries no body, so a `content-length` that AGREES with the edit's body
+    # describes bytes gori was not going to send — an "update Content-Length" affordance
+    # computing a value FOR the operator, which is why the peer's value went back. Here the
+    # edit's body IS what gori sends, so a synced value is simply true and a mismatched one is
+    # the RFC 9113 §8.1.1 probe the operator asked for. Both go out verbatim, which is exactly
+    # what h1 does with the identical edit (P7).
+    private def edited_with_body(slot : Slot, block : HeadRewrite::Block,
+                                 head : Bytes, body : Bytes) : HeadRewrite::Block
+      # Only a CHANGED body is re-framed. An operator who edited the head alone keeps the
+      # peer's own DATA frames byte-for-byte, boundaries included.
+      slot.rebuilt = body unless body == body_of(slot)
+      @heads.encode_edited(block, head, false) || block
     end
 
     # Whether the edit's `content-length` was computed FOR the operator rather than declared BY
@@ -726,14 +1000,17 @@ module Gori::Proxy::H2
     # know: `gori run intercept edit` runs `ContentLength.sync` over `--raw-file` unconditionally,
     # the MCP tool runs it unless `update_content_length:false`, and the TUI editor runs it
     # unless `^L` is off. What every one of those affordances PRODUCES is a `content-length`
-    # that agrees with the body the edit carries, and an h2 hold carries no body — so a value
-    # that DISAGREES cannot have come from any of them. That is the operator declaring one,
+    # that agrees with the body the edit carries, and a HEAD-ONLY h2 hold carries no body — so a
+    # value that DISAGREES cannot have come from any of them. That is the operator declaring one,
     # which on h2 is the RFC 9113 §8.1.1 probe (does this origin/CDN/WAF/gRPC gateway enforce
     # content-length against DATA?) and on h1 is already forwarded byte-exact.
     #
     # Its stated limit: a deliberate `content-length: 0` on a head-only hold is
     # INDISTINGUISHABLE from a sync of the same empty body, so it still gets the peer's value
     # back. That case is unreachable by construction, not by choice.
+    #
+    # Asked ONLY of a head-only hold. When the hold covered head+body the question does not
+    # arise — see `edited_with_body`.
     private def length_synced?(head : Bytes, body_size : Int32) : Bool
       declared = declared_lengths(head)
       declared.empty? || declared.all? { |v| v == body_size.to_s }
@@ -793,12 +1070,83 @@ module Gori::Proxy::H2
 
     private def release_locked(slot : Slot) : Array(UInt32)
       return drop_locked(slot) if slot.dropped?
+      body = slot.rebuilt
       if b = slot.decided || slot.pending
-        last = b.frames.size - 1
-        b.frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil) }
+        # An edit that gives a bodiless message a body has to take END_STREAM off the head:
+        # DATA after a half-closed stream is a §5.1 protocol error, so the flag moves onto the
+        # last rebuilt DATA frame instead.
+        moved = !body.nil? && !body.empty? && b.first.end_stream?
+        frames = moved ? b.frames.map { |f| without_end_stream(f) } : b.frames
+        last = frames.size - 1
+        frames.each_with_index { |f, i| write(f, i == last ? b.pre : nil) }
       end
-      slot.frames.each { |(f, pre)| write(f, pre) }
+      if body
+        write_rebuilt(slot, body)
+      else
+        slot.frames.each { |(f, pre)| write(f, pre) }
+      end
       NO_CROSS
+    end
+
+    # The operator's body, re-framed, in place of the DATA this gate buffered (PR #6).
+    #
+    # Everything else that was parked keeps its order around it — trailers stay after the body,
+    # WINDOW_UPDATE and PRIORITY stay where the peer put them — and the rebuilt DATA lands at
+    # the position of the FIRST buffered DATA frame, or straight after the head when there was
+    # none (a bodiless message the operator gave a body to).
+    private def write_rebuilt(slot : Slot, body : Bytes) : Nil
+      rebuilt = data_frames(slot.stream_id, body, end_stream_on_body?(slot))
+      written = slot.frames.none? { |(f, _)| f.frame_type == Frame::Type::Data }
+      rebuilt.each { |f| write(f, nil) } if written
+      slot.frames.each do |(f, pre)|
+        if f.frame_type == Frame::Type::Data
+          next if written
+          written = true
+          rebuilt.each { |d| write(d, nil) }
+          next
+        end
+        write(f, pre)
+      end
+    end
+
+    # Whether the rebuilt DATA carries END_STREAM: true when the peer ended the message with a
+    # DATA frame (or with the head itself), false when TRAILERS end it instead — the flag stays
+    # on whatever ended the message, so an edit cannot half-close a stream that still has
+    # trailers to send.
+    private def end_stream_on_body?(slot : Slot) : Bool
+      slot.frames.each do |(f, _)|
+        return true if f.frame_type == Frame::Type::Data && f.end_stream?
+        return false if f.frame_type == Frame::Type::Headers && f.end_stream?
+      end
+      (slot.decided || slot.pending).try(&.first.end_stream?) || false
+    end
+
+    # Re-frame a body into DATA frames of at most `HeadRewrite::MAX_FRAME_PAYLOAD` — the initial
+    # SETTINGS_MAX_FRAME_SIZE, which is also the floor every endpoint must advertise at or above
+    # (RFC 9113 §6.5.2). Same ceiling the head re-framer splits at and for the same reason:
+    # nothing in this relay reads the peer's SETTINGS, and every conformant peer accepts a frame
+    # this size.
+    #
+    # An empty body still emits one empty DATA frame when END_STREAM has to ride on it (a §6.1
+    # zero-length DATA is legal, and the alternative is a stream nobody ever half-closes).
+    private def data_frames(stream_id : UInt32, body : Bytes, ends : Bool) : Array(Frame::Header)
+      frames = [] of Frame::Header
+      return frames if body.empty? && !ends
+      at = 0
+      loop do
+        take = Math.min(HeadRewrite::MAX_FRAME_PAYLOAD, body.size - at)
+        last = at + take >= body.size
+        frames << Frame::Header.new(Frame::Type::Data.value, last && ends ? Frame::END_STREAM : 0_u8,
+          stream_id, body[at, take])
+        at += take
+        break if last
+      end
+      frames
+    end
+
+    private def without_end_stream(f : Frame::Header) : Frame::Header
+      return f unless f.end_stream?
+      Frame::Header.new(f.type, f.flags & ~Frame::END_STREAM, f.stream_id, f.payload)
     end
 
     # An operator drop. The head never went on the wire, so it is fed to the assembler for the
