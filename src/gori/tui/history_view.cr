@@ -24,6 +24,7 @@ require "../scope"
 require "../proxy/h2/frame"
 require "../proxy/h2/grpc"
 require "../proxy/codec/body"
+require "./protobuf_tree"
 
 module Gori::Tui
   # The History tab — gori's home. A plain, append-only log of captured flows
@@ -286,8 +287,13 @@ module Gori::Tui
       body : Highlight::BodyLines,
       kind : Symbol,
       trailer : Array(Highlight::Line),
-      pretty : Bool = false,   # whether Pretty actually reflowed this body (drives the indicator)
-      binary : Bool = false do # a binary body shown as a placeholder — reveal/pretty don't apply
+      pretty : Bool = false, # whether Pretty actually reflowed this body (drives the indicator)
+      binary : Bool = false, # a binary body shown as a placeholder — reveal/pretty don't apply
+      # A gRPC framing pane. `binary` too (its bytes are not text), but unlike every other
+      # binary body PRETTY *does* apply here: it swaps each message payload between the
+      # protobuf tree and a hex preview. Without this flag the mode strip would suppress the
+      # very toggle that drives the pane.
+      grpc : Bool = false do
       def total : Int32
         head.size + body.size + trailer.size
       end
@@ -2285,6 +2291,9 @@ module Gori::Tui
     private def detail_mode_status(hex : Bool, ws : Bool, dv : DetailView) : String
       return "HEX" if hex
       return "RAW" if ws
+      # Checked before `binary`: a gRPC pane is both, and what the operator needs named is
+      # which reading of each message payload is on screen.
+      return dv.pretty ? "PROTOBUF" : "BYTES" if dv.grpc
       return "BINARY" if dv.binary
       dv.pretty ? "PRETTY" : "RAW"
     end
@@ -2295,6 +2304,15 @@ module Gori::Tui
         [{:hex, " ^X:text ", true}] of {Symbol, String, Bool}
       elsif ws
         [{:ws, " b:raw ", true}] of {Symbol, String, Bool}
+      elsif dv.grpc
+        # Before the plain `binary` arm, which offers hex alone: on a gRPC pane `p` is live
+        # and switches each payload between the protobuf tree and its hex preview. The label
+        # names what the key WILL do (the `p:raw` / `p:pretty` convention below), `lit` the
+        # state it is in.
+        [
+          {:hex, " ^X:hex ", false},
+          {:pretty, dv.pretty ? " p:bytes " : " p:tree ", dv.pretty},
+        ] of {Symbol, String, Bool}
       elsif dv.binary
         [{:hex, " ^X:hex ", false}] of {Symbol, String, Bool}
       else
@@ -2799,15 +2817,21 @@ module Gori::Tui
         end
       end
 
-      # gRPC: bounded framed hex view — style eagerly into `head`. Flagged binary so the
-      # reveal-whitespace path is gated off (like any other binary body): a gRPC body is
-      # opaque protobuf whose bytes would desync the terminal if rendered as text (the
-      # very 잔상 the binary placeholder avoids). Hex (x) stays available on this pane.
+      # gRPC: bounded framed view — style eagerly into `head`. Flagged binary so the
+      # reveal-whitespace path is gated off (like any other binary body): the raw bytes
+      # would desync the terminal if rendered as text (the very 잔상 the binary placeholder
+      # avoids). Hex (^X) stays available on this pane.
+      #
+      # PRETTY (`p`) is what switches each payload between the schema-less protobuf tree and
+      # the per-message hex preview — the SAME control that reflows a JSON body two branches
+      # down, so there is no new step in the BODY → PRETTY → HEX → SSE → FRAMES chain and no
+      # new key to learn. `grpc: true` tells the mode strip to offer it here, which `binary`
+      # alone suppresses.
       if (body && !body.empty?) && grpc_body?(head)
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
-        ls.concat(wrap(grpc_lines(MediaType.of(head), body)))
-        return DetailView.new(ls, EMPTY_BODY, :text, trailer, binary: true)
+        ls.concat(wrap(grpc_lines(MediaType.of(head), body, @pretty)))
+        return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true)
       end
 
       # Plain body → WINDOWED. Decode compressed/chunked bodies for display
@@ -2891,32 +2915,47 @@ module Gori::Tui
       Proxy::H2::Grpc.grpc?(MediaType.of(head))
     end
 
-    # Renders a gRPC body as framed messages with a hex preview (protobuf is
-    # opaque without the .proto schema — hex is the honest view).
+    # Renders a gRPC body as framed messages, each payload shown as the schema-less protobuf
+    # wire-format tree (`tree: true`, which is what PRETTY means on this pane) or as a hex
+    # preview (PRETTY off). Protobuf stopped being opaque without a `.proto` when the decoder
+    # landed: the wire format carries every field's number and type, so `gori run history show
+    # --format json` and MCP `get_flow` have both shown the tree since. Hex remains the honest
+    # view for a payload the decoder cannot make sense of, and for verifying octets — `p`
+    # switches back to it in place, and `^X` still dumps the whole body byte-exact.
     #
     # `scan`, not `messages`: the tail bytes that could NOT be framed are the finding in a
     # gRPC parser test, and `messages` drops them. A body whose length prefix claims more
     # than arrived rendered here as "(no complete gRPC messages)" with no byte count —
     # indistinguishable from a body that simply is not gRPC, while `gori run show
     # --format json` reported it in full.
-    private def grpc_lines(content_type : String?, body : Bytes) : Array(String)
+    private def grpc_lines(content_type : String?, body : Bytes, tree : Bool) : Array(String)
       # `scan_body`: a grpc-web-text body carries its frames base64-encoded, so scanning the
       # raw bytes finds a length prefix made of base64 characters and reports nothing.
       msgs, residual = Proxy::H2::Grpc.scan_body(content_type, body)
       note = Proxy::H2::Grpc.framing_error(residual)
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       lines = [] of String
+      # The legend belongs above the messages and exactly once — see ProtobufTree::NOTE.
+      lines << ProtobufTree::NOTE if ProtobufTree.legend?(msgs, tree)
       msgs.each_with_index do |m, i|
         if m.trailer
           lines << "▸ trailer  #{m.data.size}b"
           Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| lines << "  #{k}: #{v}" }
         else
           lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
-          lines.concat(hex_preview(m.data))
+          lines.concat(grpc_payload_lines(m, tree))
         end
       end
       lines << "⚠ #{note}" if note
       lines
+    end
+
+    # One gRPC message's payload, under its header line. `ProtobufTree.decode?` owns the
+    # carve-outs (compressed / trailer), shared with the Repeater transcript so the two panes
+    # cannot disagree about which payloads are protobuf.
+    private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, tree : Bool) : Array(String)
+      return hex_preview(m.data) unless ProtobufTree.decode?(m, tree)
+      ProtobufTree.lines(Protobuf.decode(m.data), indent: "  ")
     end
 
     private def hex_preview(data : Bytes, max : Int32 = 64) : Array(String)

@@ -36,6 +36,10 @@ class Gori::Tui::RepeaterView
     left = Rect.new(content.x, content.y, half, content.h)
     right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
 
+    if hit = grpc_chrome_hit(right, mx, my)
+      return hit
+    end
+
     # RESPONSE: d:diff / x:hex / p:pretty (not drawn in WS/gRPC/group transcript modes)
     unless ws_mode? || @grpc_mode || group_mode?
       if right.w >= 2 && my == right.y
@@ -106,6 +110,16 @@ class Gori::Tui::RepeaterView
       end
     end
     nil
+  end
+
+  # GRPC RESPONSE: the one transcript pane that carries a chip — ` p:tree ` / ` p:bytes `,
+  # which picks the schema-less protobuf tree over a hex preview. `grpc_chip_x` and the label
+  # are the SAME derivation `render_grpc_chrome` draws from, so the live cells are exactly the
+  # painted ones. `limit:` is that draw's own stop.
+  private def grpc_chrome_hit(right : Rect, mx : Int32, my : Int32) : Symbol?
+    return nil unless @grpc_mode && right.w >= 2 && my == right.y
+    Frame.left_chip_hit(mx, my, right.y, grpc_chip_x(right),
+      [{:pretty, @pretty ? " p:bytes " : " p:tree "}] of {Symbol, String}, limit: right.right - 1)
   end
 
   # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click. A split
