@@ -102,6 +102,66 @@ module Gori
       Env.bump_highlight_rev
     end
 
+    # ── list edits ────────────────────────────────────────────────────────────
+    #
+    # `save` takes a whole list, which is what the TUI's identities card hands it (the card
+    # holds the array and edits it in place). A surface that names ONE slot — `gori run
+    # session add`, MCP `create_session_slot` — would otherwise each rebuild the list and each
+    # re-decide what "exactly one baseline" means, and three copies of that rule is how the
+    # Authorize tab and a headless run come to disagree about which slot a run is judged
+    # against. So the rule lives here, once.
+    #
+    # All four return `save`'s answer: false means the project was NOT written. They do NOT
+    # answer "no such slot" / "that name is taken" — a caller that needs to tell those apart
+    # from a busy store asks `find` first, the same split `HostOverrides` makes for the same
+    # reason (a deterministic refusal reported as retryable makes an agent loop).
+
+    # Append a slot. The caller has already established the name is free.
+    def add(slot : SessionSlot) : Bool
+      save(with_one_baseline(slots << slot, slot.baseline? ? slot.name : nil))
+    end
+
+    # Replace the slot named `name`, IN PLACE — the list order is the order the Authorize tab
+    # replays in, so an edit must not move a row. A rename is an ordinary update: `replacement`
+    # carries the new name and the caller has checked it is free.
+    def update(name : String, replacement : SessionSlot) : Bool
+      list = slots
+      idx = list.index(&.name.==(name))
+      return false unless idx
+      list[idx] = replacement
+      # An update that TOOK the baseline clears it everywhere else; one that dropped it leaves
+      # the list without an anchor, so the first row inherits it (the card's own delete rule).
+      save(with_one_baseline(list, replacement.baseline? ? replacement.name : nil))
+    end
+
+    # Drop the slot named `name`. Unlike the TUI card this does NOT refuse the last one: an
+    # Authorize run needs two, but a project with zero slots is exactly the pre-slot project
+    # every playbook assumes, and a CLI that cannot undo its own `add` is worse.
+    def remove(name : String) : Bool
+      list = slots
+      before = list.size
+      list.reject!(&.name.==(name))
+      return false if list.size == before
+      save(with_one_baseline(list, nil))
+    end
+
+    # Move the baseline — the flag every other slot is judged against. Separate from `update`
+    # because it is the one edit that changes TWO rows.
+    def set_baseline(name : String) : Bool
+      return false unless find(name)
+      save(with_one_baseline(slots, name))
+    end
+
+    # Exactly one baseline, enforced by construction rather than by every caller remembering
+    # to clear the old one. `winner` names the slot that must hold it; nil keeps whichever
+    # slot already does, and promotes the first row when an edit left none (a set judged
+    # against no baseline is a run with no verdict).
+    private def with_one_baseline(list : Array(SessionSlot), winner : String?) : Array(SessionSlot)
+      return list if list.empty?
+      pick = winner || list.find(&.baseline?).try(&.name) || list[0].name
+      list.map { |s| s.baseline? == (s.name == pick) ? s : s.with_baseline(s.name == pick) }
+    end
+
     # ── the active slot ───────────────────────────────────────────────────────
 
     # The send context, or nil for "as captured" — no overlay, global bindings only. nil is

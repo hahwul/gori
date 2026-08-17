@@ -26,6 +26,7 @@ module Gori
         http2 = false
         allow_unscoped = false
         bind_from : Int64? = nil
+        slot : String? = nil
         force = false
         no_store = false
         format = :text
@@ -54,6 +55,7 @@ module Gori
           p.on("--http2", "Force HTTP/2") { http2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run discover") }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Run even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--force", "Bypass the unbounded-run safety gate") { force = true }
           p.on("--no-store", "Do not write findings into the project (Sitemap)") { no_store = true }
@@ -117,6 +119,10 @@ module Gori
           # Ahead of Plan.build — see CLI::Run.preflight_bind_from (the builder's unresolved-env
           # refusal otherwise discards this flag without a word). `open_store` above has already
           # hydrated `Env.layer`, which is all this needs.
+          # BEFORE the bind-from seed and the plan: the slot decides which binding table the
+          # replay fills and which one `$NAME` resolves out of, so a later activation would
+          # seed one identity and send as another.
+          activate_slot(slot, "gori run discover")
           preflight_bind_from(bind_from, "gori run discover")
           plan = begin
             Discover::Plan.build(options, outbound)

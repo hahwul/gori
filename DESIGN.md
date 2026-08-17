@@ -1102,8 +1102,8 @@ Three lines this deliberately does not cross:
   acting behind the operator's back (P4). `--bind-from` already replays one flow the operator
   named, which is the same job done explicitly.
 
-The surfaces for selecting and editing slots (TUI, `gori run`, MCP) are a follow-up; this
-change is the engine and its tests.
+The surfaces for selecting and editing slots (TUI, `gori run`, MCP) landed next — see the
+2026-08-17 *session slots reach all three surfaces* entry below.
 
 ### 2026-08-17: an h2 intercept may buffer a complete body; Match&Replace body still forces h1
 
@@ -1164,3 +1164,49 @@ until #492 step 5 makes it unnecessary.
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
 the matching section; when you cite a principle inline, use the labels above.*
+
+### 2026-08-17: session slots reach all three surfaces
+
+Refines: [P1](#p1), [P4](#p4). Extends the 2026-08-17 session-slots entry. PR #10.
+
+The engine landed with no way to reach it: a slot could only be edited from the Authorize
+tab's identities card, and NOTHING could select the active one, so `Env.overlay_slot` was a
+seam every send seam called and no operator could arm. This closes that on all three
+surfaces at once, as thin adapters — no engine was re-derived, and the layering check
+(`spec/layering_spec.cr`) still finds no surface name in `session_slot.cr` /
+`session_slots.cr` / `bindings.cr`.
+
+The split each surface makes is the same, and it is the persistence split: **the list is
+configuration, the active pointer is send state.**
+
+* **List editing** is one method set on `SessionSlots` (`add` / `update` / `remove` /
+  `set_baseline`), so "exactly one baseline" is decided once rather than three times. The
+  TUI's identities card is unchanged as a card — but it now reads and writes through
+  `Session#slots` instead of the settings row underneath it. That was a live bug: the card
+  wrote `Store::AUTHORIZE_IDENTITIES_KEY` directly, so the registry `Bindings` and
+  `Env.overlay_slot` hold kept the pre-edit list, and the Authorize tab and a Repeater send
+  disagreed about what "admin" was until the project was reopened.
+* **Activation** is a picker (`session.slot`, Global/palette, plus a clickable `session:NAME`
+  top-bar chip) in the TUI, `set_active_session_slot` on MCP, and `--slot NAME` on
+  `gori run repeater|fuzz|mine|sequence|discover`. There is deliberately no
+  `gori run session activate`: a `gori run` process sends and exits, so a pointer has nothing
+  to span, and persisting one is the exact failure the engine entry rules out. Typing it
+  anyway is answered with the flag rather than "unknown subcommand".
+
+Two consequences worth stating because they are UX contracts, not details:
+
+1. **The active slot is READ OUT wherever a send is initiated.** An overlay is applied after
+   the editor's bytes, so the Repeater pane shows one request and the wire carries another;
+   the `session:NAME` chip, the Repeater's `sending as NAME → host` line, `gori run`'s
+   `slot: sending as NAME` on stderr, and MCP's `active` field are the four places that
+   reconcile them. The chip is ABSENT while nothing is active — as-captured is the default,
+   and a chip that only appears while an overlay is in force makes its appearance the signal.
+2. **`--slot` is applied before `--bind-from`.** The seed replay fills the tables of whichever
+   slots claim each matched rule, and the run then resolves `$NAME` out of the active one; the
+   other order would seed one identity and send as another.
+
+Header values are `[REDACTED]` by default on both new list surfaces (`gori run session list`,
+MCP `list_session_slots`), matching `list_env` and the identities card's names-only rows: a
+slot's whole job is carrying a credential, and a list is scrollback. `--set` / `set_headers`
+parse through `Discover::Headers.parse_lines` — the same parser the TUI form uses — so a
+CR/LF-carrying value is refused by name on every surface rather than dropped on one.

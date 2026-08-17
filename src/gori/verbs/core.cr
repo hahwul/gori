@@ -57,6 +57,15 @@ module Gori
         "app.listeners", "Listeners", "List the additional sockets this session serves (the primary bind is on the listen chip)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_listeners; nil }
 
+      # The ACTIVE session slot — which identity the next Repeater/Fuzzer/intercept-forward
+      # send goes out as. Global and palette-only, with the `session:NAME` chip as the other
+      # way in: it is a session-wide send context, not a tab's action, and it is deliberately
+      # NOT the Authorize tab's `i` (that card edits the LIST — configuration — while this
+      # picks the one pointer, which is memory-only and never persisted).
+      r.register Verb::Definition.new(
+        "session.slot", "Session slot", "Choose the identity every send goes out as (header overlay + $NAME table)",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_session_slots; nil }
+
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
         [Verb::Chord.new("c")]) { |ctx| ctx.toggle_capture; nil }

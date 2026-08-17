@@ -13,7 +13,7 @@ The **Authorize** tab is hidden by default. Reveal it from the tab-bar `⋯` men
 
 ## What an Identity Is
 
-gori has no multi-session primitive: env vars hold one value per key, and session bindings are a single process-global namespace. So an identity here is a **static header overlay** applied to the captured request before it is replayed — the 90% case, and small enough to read at a glance.
+An identity is a **session slot**: a name, a static header overlay applied to the captured request before it is replayed, and the extract rules whose bound values belong to it. It is the same object everywhere in gori — the Authorize tab replays under *every* slot, and a Repeater or Fuzzer send goes out as the *one* that is active (see [Session slots](#session-slots-one-list-two-readers) below). One list, one settings row, three surfaces.
 
 | Field | Effect |
 |-------|--------|
@@ -38,6 +38,30 @@ The add / edit form has three fields: a **name** (unique — two rows under one 
 Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header *names* only — a session cookie is a credential, and a list that paints it on screen leaks it to anyone glancing at your terminal. The form shows values, because that is what editing means.
 
 Changing the identity set marks every result already on screen as pending again. Those verdicts were produced under the old set, and reporting them beside new ones would compare two different tests.
+
+## Session Slots: One List, Two Readers
+
+This tab reads the list *across*: every slot, one request, compare the answers. Every other send seam reads it *down*: pick one slot, and every request from then on goes out wearing it. Same rows, same card, two questions.
+
+Picking the active one is a separate action from editing the list, because it is a different kind of state:
+
+| Surface | Pick the active slot | Edit the list |
+|---------|----------------------|---------------|
+| TUI | `Ctrl-P` → **Session slot**, or click the `session:NAME` chip | `i` on this tab |
+| `gori run` | `--slot NAME` on the sending command | `gori run session list \| show \| add \| edit \| rm \| baseline` |
+| MCP | `set_active_session_slot` | `list_session_slots`, `create_session_slot`, `update_session_slot`, `delete_session_slot` |
+
+What the active slot changes, on `send_request`, a Repeater or Fuzzer send, and an intercept forward:
+
+- its **header overlay** is applied to the final wire bytes — after `$NAME` substitution, header lines only, so `Content-Length` never moves and the body is byte-exact;
+- `$NAME` resolves against **its** binding table. An extract rule a slot claims writes that slot's table; a rule no slot claims keeps writing the one global table it always did. So `Authorization: Bearer $SESSION` means admin's token on the `admin` slot and the low-priv user's on `low-priv`, off one saved string.
+
+Two things the active slot deliberately does **not** do:
+
+- **It is never persisted.** Reopening a project, or a new `gori mcp` connection, starts as-captured. A slot's *values* are memory-only by design, so restoring "admin is active" into an empty admin table would hand the next send an overlay whose `$SESSION` is literal — a `401` with no visible cause. Activation is one keystroke; a stale one is a support ticket.
+- **`as-captured` is the baseline in both senses.** With no slot active nothing changes a byte, which is what makes every project and every playbook written before slots existed behave exactly as it did.
+
+There is no cookie jar and no auto-login macro here. A slot carries the headers you wrote and the values gori observed; `--bind-from` replays one flow *you* named to fill them.
 
 ## The Baseline
 
@@ -156,6 +180,18 @@ skipped 1 flow · 1 no identity changes them
   #1     GET    http://acme.test/pricing  — no identity changes them
 ```
 
+Manage the slot list — the same rows the `i` card edits — without opening the TUI:
+
+```bash
+gori run session list                       # names, overlays (values [REDACTED]), claimed rules
+gori run session add --name low-priv --set 'Cookie: session=…' --rule SESSION
+gori run session edit low-priv --clear-set --set 'Cookie: session=new'
+gori run session baseline as-captured
+gori run session rm low-priv
+```
+
+There is no `gori run session activate`: a `gori run` process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead — `--slot NAME` works on `repeater`, `fuzz`, `mine`, `sequence` and `discover`, and applies before `--bind-from` replays its seed, so the seed fills the slot the run then sends as.
+
 `--format jsonl` streams one object per request as it lands; `--format json` buffers and emits a single array at the end. Both carry the decoded body size the verdict actually compared alongside the wire size, which a gzipped response makes disagree by an order of magnitude. Full flags are in the [CLI Reference](/reference/cli/#run-authorize).
 
 ## From an Agent
@@ -163,6 +199,8 @@ skipped 1 flow · 1 no identity changes them
 Four MCP tools drive the same engine as a background job: `authorize_start` (returns a `job_id`, the planned send count, the identity names, the scope gate, and everything it skipped), `authorize_status`, `authorize_results`, and `authorize_stop`.
 
 `authorize_results` puts the answer first. `access_control` names the outcome in one token — `BYPASS`, `enforced`, `review`, or `nothing_sent` — `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.
+
+Five more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, and `set_active_session_slot` — which picks the identity every *other* tool's sends go out as, for the life of that server process.
 
 A run is capped at 2,000 sends, and the cap counts `flows × identities`: a 500-row query under four identities is refused up front, naming both factors, rather than truncated into a run that would report "enforced" for flows it never sent. Layer-1 scope is strict here — an out-of-scope target needs an explicit `allow_unscoped:true`, because nobody eyeballed it.
 

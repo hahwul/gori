@@ -124,6 +124,7 @@ require "./runner/rewriter"
 require "./runner/scope"
 require "./runner/search"
 require "./runner/sequencer"
+require "./runner/session_slots"
 require "./runner/sitemap"
 require "./runner/subtabs"
 
@@ -1967,7 +1968,7 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label)
+        authorize: authorize_chip_label, session: session_slot_chip)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).

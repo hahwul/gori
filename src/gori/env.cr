@@ -120,6 +120,15 @@ module Gori
       def overlay(wire : Bytes) : Bytes
         wire
       end
+
+      # WHICH slot `overlay` and `values` are answering as, or nil for as-captured. A
+      # READOUT seam and nothing else: a surface has to be able to print the send context
+      # next to a send button without reaching through `Env.layer` and downcasting to
+      # `Bindings` (which is how three surfaces would each acquire their own idea of it).
+      # Defaults to nil, so a layer with no slot registry reads as as-captured.
+      def active_slot_name : String?
+        nil
+      end
     end
 
     # The open project's binding table, or nil when none is open. Set by `Session.open`
@@ -174,6 +183,13 @@ module Gori
     # author — a captured replay, a fuzz template with its payload already spliced.
     def self.overlay_slot(wire : Bytes) : Bytes
       (l = @@layer) ? l.overlay(wire) : wire
+    end
+
+    # The active session slot's NAME, or nil for as-captured (the default). What a surface
+    # prints beside a send — the Repeater's `session:` chip, `gori run`'s send banner, MCP's
+    # `active_slot` field — so all three name one answer rather than three.
+    def self.active_slot_name : String?
+      @@layer.try(&.active_slot_name)
     end
 
     # What a DISPLAY path should treat as known: build-time vars plus whatever is bound

@@ -34,6 +34,7 @@ require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
 require "./tools/host_overrides"
+require "./tools/session_slots"
 require "./tools/import"
 require "./tools/intercept"
 require "./tools/issues"
@@ -128,6 +129,7 @@ module Gori
         "oast_start", "oast_stop", "oast_resume", "oast_release",
         "add_scope_rule", "delete_scope_rule", "set_scope_enabled", "set_sandbox",
         "set_env_var", "delete_env_var",
+        "create_session_slot", "update_session_slot", "delete_session_slot", "set_active_session_slot",
         "add_host_override", "update_host_override", "delete_host_override",
         "import_flows",
       }
@@ -655,6 +657,7 @@ module Gori
           list_context_tools j
           list_env_tools j
           list_host_overrides_tools j
+          list_session_slots_tools j
           list_notes_tools j
           list_decode_tools j
           list_cookie_tools j
@@ -843,6 +846,7 @@ module Gori
         when "list_scope"              then list_scope
         when "list_env"                then list_env(h)
         when "list_host_overrides"     then list_host_overrides
+        when "list_session_slots"      then list_session_slots(h)
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context
         when "get_repeater_context"    then get_repeater_context(h)
@@ -894,6 +898,10 @@ module Gori
         when "set_sandbox"               then gated { set_sandbox(h) }
         when "set_env_var"               then gated { set_env_var(h) }
         when "delete_env_var"            then gated { delete_env_var(h) }
+        when "create_session_slot"       then gated { create_session_slot(h) }
+        when "update_session_slot"       then gated { update_session_slot(h) }
+        when "delete_session_slot"       then gated { delete_session_slot(h) }
+        when "set_active_session_slot"   then gated { set_active_session_slot(h) }
         when "add_host_override"         then gated { add_host_override(h) }
         when "update_host_override"      then gated { update_host_override(h) }
         when "delete_host_override"      then gated { delete_host_override(h) }

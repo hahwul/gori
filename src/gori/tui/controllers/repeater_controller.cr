@@ -1557,6 +1557,16 @@ module Gori::Tui
       @refusal_applied = true
     end
 
+    # " as admin" for the send line, or "" while nothing is active.
+    #
+    # The ACTIVE SESSION SLOT is named where the send is initiated, not only on the `session:`
+    # chip. A slot's header overlay is applied at `Repeater::Sender` — AFTER the editor's
+    # bytes — so the pane shows one request and the wire carries another, and this is the one
+    # line that reconciles them. Silent for as-captured, which is the default.
+    private def sending_as : String
+      (name = Gori::Env.active_slot_name) ? " as #{name}" : ""
+    end
+
     def repeater_send : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
       view.commit_chain_pane                        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
@@ -1589,7 +1599,7 @@ module Gori::Tui
       end
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
-      @host.status("sending → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…")
+      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…")
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).

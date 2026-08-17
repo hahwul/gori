@@ -27,6 +27,7 @@ module Gori
         format = :text
         allow_unscoped = false
         bind_from : Int64? = nil
+        slot : String? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -50,6 +51,7 @@ module Gori
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run mine") }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -98,6 +100,10 @@ module Gori
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
         # Ahead of Plan.build — see CLI::Run.preflight_bind_from (the builder's unresolved-env
         # refusal otherwise discards this flag without a word).
+        # BEFORE the bind-from seed and the plan: the slot decides which binding table the
+        # replay fills and which one `$NAME` resolves out of, so a later activation would
+        # seed one identity and send as another.
+        activate_slot(slot, "gori run mine")
         preflight_bind_from(bind_from, "gori run mine")
         outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
         plan = begin
