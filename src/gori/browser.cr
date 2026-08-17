@@ -174,6 +174,19 @@ module Gori
     # flags). share_proxy_settings routes https through the same host:port.
     # These prefs take a BARE host (the port is its own pref), so they get `dial_host`
     # rather than `dial_authority` — brackets here would be parsed as part of the name.
+    #
+    # allow_hijacking_localhost is what makes localhost targets actually reach gori, the
+    # job Chromium's "<-loopback>" does. Emptying no_proxies_on is NOT enough: since
+    # Firefox 67, nsProtocolProxyService::CanUseProxy refuses loopback (the `localhost`
+    # names, 127.0.0.0/8, ::1) *before* it consults that bypass list, unless this
+    # scary-named pref is true — and it defaults to false (bug 1507110, bug 1535581).
+    # Without it, a Firefox opened here captures nothing from a locally-running app: no
+    # error, no warning, just an empty History that reads as gori being broken.
+    # http3.enable is the counterpart to --disable-quic, and like it it is belt-and-braces
+    # rather than a live hole: Firefox already declines h3 Alt-Svc upgrades behind a
+    # non-direct proxy, and disables HTTP/3 outright when the chain roots in a third-party
+    # root — which gori's certutil-imported CA is. Set anyway so the two profiles agree
+    # and neither depends on those two behaviours staying true.
     def self.firefox_user_js(spec : LaunchSpec) : String
       host = spec.dial_host
       String.build do |s|
@@ -184,6 +197,8 @@ module Gori
         s << %(user_pref("network.proxy.ssl_port", #{spec.proxy_port});\n)
         s << %(user_pref("network.proxy.share_proxy_settings", true);\n)
         s << %(user_pref("network.proxy.no_proxies_on", "");\n)
+        s << %(user_pref("network.proxy.allow_hijacking_localhost", true);\n)
+        s << %(user_pref("network.http.http3.enable", false);\n)
         s << %(user_pref("browser.shell.checkDefaultBrowser", false);\n)
       end
     end
