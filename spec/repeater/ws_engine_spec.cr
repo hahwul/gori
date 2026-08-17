@@ -179,6 +179,53 @@ private def start_silent_ws_origin(count : Int32) : Int32
   port
 end
 
+# An origin that upgrades, answers each client message IMMEDIATELY, and is silent in between —
+# a healthy server, which is the case the drain deadline was mis-charging. Every turn still
+# costs one full `idle` gap of waiting, so a script of more than `deadline / idle` messages is
+# exactly the run that used to be cut short. It answers `count` messages, then closes.
+private def start_prompt_ws_origin(count : Int32) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 10.seconds
+    ws_upgrade(conn)
+    count.times do
+      frame = WS.read_frame(conn)
+      break unless frame && frame.data?
+      conn.write(WS.encode(frame.opcode, frame.payload, mask: false))
+      conn.flush
+    end
+    conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false)) # 1000 Normal
+    conn.flush
+    conn.close
+  rescue
+  end
+  port
+end
+
+# An origin that NEVER goes idle: after the upgrade it pings on a cadence well under the drain's
+# idle timeout, so no read ever times out and nothing is ever credited back. This is the case
+# DRAIN_DEADLINE exists for — the frame ceiling is 100k frames away and the tab would otherwise
+# sit "inflight" for hours. Bounded so a failing spec cannot leave a fiber pinging forever.
+private def start_never_idle_ws_origin(gap : Time::Span, limit : Int32 = 500) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 10.seconds
+    ws_upgrade(conn)
+    limit.times do
+      conn.write(WS.encode(WS::OP_PING, "keepalive".to_slice, mask: false))
+      conn.flush
+      sleep gap
+    end
+    conn.close
+  rescue
+  end
+  port
+end
+
 describe Gori::Repeater::WsEngine do
   # `start_ws_origin` computes the fake origin's Accept with `WsEngine::GUID` itself, so every
   # "no handshake note" assertion below is self-referential: a corrupted GUID would keep the
@@ -279,6 +326,50 @@ describe Gori::Repeater::WsEngine do
     result.messages.count { |m| m.direction == "out" }.should eq(4)
     elapsed.should be < 5.seconds
     (result.note || "(silence)").should contain("delivery unconfirmed")
+  end
+
+  # --- the drain deadline is a bound on WORK, not on waiting ---------------------------
+
+  it "sends a script longer than deadline / idle: idle gaps are not charged to the deadline" do
+    # 25 messages at a 100ms idle is 2.5s of waiting against a 1s deadline — the shape of the
+    # real complaint (30 messages, the TUI's 3s idle, a 60s deadline), scaled so the spec can
+    # afford to wait for it. The origin answers every message at once, so the deadline used to
+    # fire around message 10 purely because DrainState#started never moved: the run stopped
+    # mid-script and called it a capture cap. Waiting is not work; all 25 must go out.
+    count = 25
+    port = start_prompt_ws_origin(count)
+    result = WsEngine.send(UPGRADE, (1..count).map { |i| WsEngine::OutMsg.new(1, "m#{i}".to_slice) },
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 100.milliseconds, deadline: 1.second)
+
+    result.ok?.should be_true
+    result.messages.count { |m| m.direction == "out" }.should eq(count)
+    result.messages.count { |m| m.direction == "in" && m.opcode == 1 }.should eq(count)
+    result.truncated.should be_nil
+    (result.note || "(silence)").should_not contain("stopped after")
+  end
+
+  it "still ends the exchange on a peer that never goes idle" do
+    # Nothing is credited back here: every read returns a frame, so `started` never moves and
+    # the deadline is the only thing that can stop a keepalive cadence under the idle timeout.
+    port = start_never_idle_ws_origin(20.milliseconds)
+    started = Time.instant
+    result = WsEngine.send(UPGRADE, [
+      WsEngine::OutMsg.new(1, "one".to_slice),
+      WsEngine::OutMsg.new(1, "two".to_slice),
+      WsEngine::OutMsg.new(1, "three".to_slice),
+    ], scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      idle: 1.second, deadline: 1.second)
+    elapsed = Time.instant - started
+
+    elapsed.should be < 10.seconds
+    result.truncated.not_nil!.should contain("drain deadline was reached")
+    # The stop is named for what it was. "a capture cap was reached" pointed the operator at
+    # MAX_RECV_* — knobs that had nothing to do with a run cut short by time.
+    note = result.note || "(silence)"
+    note.should contain("stopped after 1 of 3 message(s)")
+    note.should contain("drain deadline was reached")
+    note.should_not contain("capture cap")
   end
 
   it "captures the server close code" do
