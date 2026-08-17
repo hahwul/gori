@@ -4,6 +4,7 @@ alias t := test
 alias vc := version-check
 alias vu := version-update
 alias bm := benchmark
+alias db := docker-build
 alias ds := docs-serve
 
 # List available tasks.
@@ -32,6 +33,29 @@ nix-build:
 nix-shards:
     nix run nixpkgs#crystal2nix
     mv shards.nix nix/shards.nix
+
+# Nothing builds the image on a PR any more — ci.yml dropped its `build-docker`
+# job, and publish-ghcr.yml only runs on a push to `main` — so this recipe is the
+# pre-merge check that docker/Dockerfile still compiles.
+#
+# BuildKit is pinned because the ignore list lives at
+# `docker/Dockerfile.dockerignore`: only BuildKit reads a Dockerfile-adjacent
+# one. The classic builder looks for `.dockerignore` in the context root, finds
+# none, and ships `bin/`, `lib/` and `.git/` into the build context instead.
+
+# Build the container image locally (host arch only).
+[group('docker')]
+docker-build tag="gori:dev":
+    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t {{tag}} .
+
+# Bare, it starts the TUI, which needs the TTY `-it` gives it; state lives in the
+# `gori` volume so the CA survives a run. Trailing args pick a headless
+# subcommand: `just docker-run gori:dev run history`.
+
+# Run the image `docker-build` produced.
+[group('docker')]
+docker-run tag="gori:dev" *args:
+    docker run --rm -it -v gori:/data {{tag}} {{args}}
 
 # Run all tests.
 [group('development')]
