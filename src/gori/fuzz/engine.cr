@@ -274,6 +274,17 @@ module Gori::Fuzz
       # BEFORE the scope gate, because the gate keys on the target actually sent — the same
       # rule `ClientConn` states for Match&Replace on the proxy path.
       bytes = Gori::Env.expand_bindings(bytes, verbatim)
+      # The ACTIVE SESSION SLOT's header overlay, after the `$NAME` pass and BEFORE the scope
+      # gate below — the gate keys on the target actually sent, and an overlay is header-only
+      # so it cannot move the request line, but reading the same bytes the socket will is the
+      # rule this method already follows for expansion.
+      #
+      # `verbatim` does NOT apply and cannot: a payload span is a range inside the message,
+      # and this writes HEADER LINES. A payload spliced into a header VALUE that the active
+      # slot also sets is overwritten by the slot — which is the operator's own instruction
+      # ("send as this identity"), not a substitution behind their back, and is exactly what
+      # selecting `as-captured` or no slot at all switches off.
+      bytes = Gori::Env.overlay_slot(bytes)
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
@@ -331,6 +342,7 @@ module Gori::Fuzz
         end
       end
       reqs = @evidence ? requests : requests.map { |b| Gori::Env.expand_bindings(b) }
+      reqs = reqs.map { |b| Gori::Env.overlay_slot(b) }
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides)
@@ -350,7 +362,7 @@ module Gori::Fuzz
 
       bytes = jobs[0].bytes
       verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
-      expanded = Gori::Env.expand_bindings(bytes, verbatim)
+      expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim))
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       return super if expanded.size < 2

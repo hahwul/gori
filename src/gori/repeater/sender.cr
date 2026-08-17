@@ -97,6 +97,21 @@ module Gori
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         bytes = Gori::Env.expand_bindings(bytes) unless @evidence
+        # SESSION SLOT overlay, after the `$NAME` pass and regardless of `evidence?`. Two
+        # separate reasons for the two halves:
+        #
+        #   * AFTER, because the slot's own header values may name a binding
+        #     (`Authorization: Bearer $SESSION`) and the layer resolves those as it applies
+        #     them, against the ACTIVE slot's table — so the order is "resolve the message,
+        #     then write this identity over it", never the reverse.
+        #   * REGARDLESS of `evidence?`, because a slot is not a resolution of somebody's
+        #     tokens; it is the operator answering "send this AS WHOM" (P4), and replaying a
+        #     capture under another identity is the single most common reason to ask. The
+        #     no-overlay answer has a name and it is `as-captured` — select it, or select no
+        #     slot at all, and this is the identity function.
+        #
+        # Header-only, so Content-Length cannot move and the body stays byte-exact (P7).
+        bytes = Gori::Env.overlay_slot(bytes)
         result =
           if @http2
             H2Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
@@ -121,6 +136,12 @@ module Gori
         if reason = refusal(scope)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
+        # No SESSION SLOT overlay here, and this is a limit rather than an omission: a slot's
+        # overlay is defined over HEADER LINES in an h1 text head (`SessionSlot.overlay_head`),
+        # and a field-native send has no such carrier — that is the entire point of the path.
+        # Applying it would mean a second implementation of the upsert/strip semantics over an
+        # HPACK field list, which is the "two copies of one rule" this file's own history warns
+        # about. An operator who wants an identity on these bytes writes the field.
         result = H2Engine.send_fields(fields, body, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
         extract(scope, result)
@@ -132,6 +153,9 @@ module Gori
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
         requests = requests.map { |b| Gori::Env.expand_bindings(b) } unless @evidence
+        # Per member, for the same reasons `send` states. A group is ONE connection carrying a
+        # deliberate sequence, and every member of it goes out as the same identity.
+        requests = requests.map { |b| Gori::Env.overlay_slot(b) }
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
         # A group is ONE connection carrying a deliberate sequence, so every member is as
@@ -154,7 +178,10 @@ module Gori
         # over them — which by design covers env vars and NOT bindings. So a `$SESSION` in a
         # frame went out as those seven characters with the name bound; `expand_messages` below
         # is what fixed that. Unbound it stays literal, the same rule `refusal` now follows.
-        WsEngine.send(Gori::Env.expand_bindings(upgrade), expand_messages(messages),
+        # The HANDSHAKE takes the slot overlay (it is an HTTP request head, and the session a
+        # WebSocket rides is chosen there); the message FRAMES do not, because a frame has no
+        # header lines for a header overlay to write.
+        WsEngine.send(Gori::Env.overlay_slot(Gori::Env.expand_bindings(upgrade)), expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
           idle: idle, overrides: @overrides, keep_key: keep_key)
       end

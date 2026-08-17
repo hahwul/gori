@@ -644,6 +644,133 @@ end
 
 private WS_SEAM_UPGRADE = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
 
+# ─────────────────────────────────────────────────────────────────────────────────────
+# SESSION SLOTS at the send seams (DESIGN.md §7, 2026-08-17).
+#
+# The provenance axis above asks WHOSE BYTES these are. A slot asks the other question the
+# send seams owe an answer to — AS WHOM are they going out — and the two must not be confused:
+# a slot overlay is the operator's own instruction (P4), so it applies to evidence bytes too,
+# while the `$NAME` inside those bytes still does not. The wire is the only thing that settles
+# either one.
+
+# A binding layer whose project has `slots`, with `active` selected. The value is bound the
+# only way it can be — by observing a response while that slot is active — so the tables here
+# are the ones a live session reaches.
+private def slotted_layer(store : Gori::Store, slots : Array(Gori::SessionSlot),
+                          bind : Hash(String, String) = {} of String => String,
+                          active : String? = nil) : Gori::Bindings
+  registry = Gori::SessionSlots.load(store)
+  registry.save(slots).should be_true
+  b = Gori::Bindings.load(store, registry)
+  b.add("TOKEN", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+  bind.each do |(slot_name, value)|
+    registry.activate(slot_name.empty? ? nil : slot_name).should be_true
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: sid=#{value}; Path=/\r\nContent-Length: 0\r\n\r\n"
+    b.observe(Gori::Repeater::Result.new(head.to_slice, Bytes.empty,
+      Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice), 1_i64, nil),
+      Gori::InterceptFilter::Subject.new(method: "GET", host: "acme.test", target: "/login",
+        scheme: "https", status: 200))
+  end
+  registry.activate(active).should be_true
+  b
+end
+
+describe "session slots at the send seams (the active slot is the send context)" do
+  it "writes the ACTIVE slot's headers onto a Fuzz send, resolving that slot's own binding" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      layer = slotted_layer(store,
+        [Gori::SessionSlot.new("admin", set_headers: [{"Authorization", "Bearer $TOKEN"}], rules: ["TOKEN"]),
+         Gori::SessionSlot.new("anon", remove_headers: ["Authorization"])],
+        bind: {"admin" => "ADMINTOKEN9"}, active: "admin")
+      with_layer(layer) do
+        sender = Gori::Fuzz::Sender.new(
+          Gori::Fuzz::Origin.new("http", "127.0.0.1", origin.port), outbound_any, false, false)
+        req = "GET /me HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer STALE\r\n\r\n".to_slice
+        sender.send(req, nil).error.should be_nil
+
+        wire = String.new(origin.requests.first)
+        wire.should contain("Authorization: Bearer ADMINTOKEN9")
+        wire.should_not contain("STALE")
+        # The request LINE is untouched, which is why the scope gate reads the same target
+        # before and after the overlay.
+        wire.lines.first.should eq("GET /me HTTP/1.1")
+      end
+      origin.close
+    end
+  end
+
+  it "sends byte-exact with no slot active — as-captured is the no-overlay baseline" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      layer = slotted_layer(store,
+        [Gori::SessionSlot.new("admin", set_headers: [{"Authorization", "Bearer $TOKEN"}], rules: ["TOKEN"])],
+        bind: {"admin" => "ADMINTOKEN9"}, active: nil)
+      with_layer(layer) do
+        sender = Gori::Fuzz::Sender.new(
+          Gori::Fuzz::Origin.new("http", "127.0.0.1", origin.port), outbound_any, false, false)
+        req = "GET /me HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer STALE\r\n\r\n"
+        sender.send(req.to_slice, nil).error.should be_nil
+        String.new(origin.requests.first).should eq(req)
+      end
+      origin.close
+    end
+  end
+
+  it "keeps the overlay header-only, so a body and its Content-Length both survive" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      layer = slotted_layer(store,
+        [Gori::SessionSlot.new("anon", remove_headers: ["Cookie"], set_headers: [{"X-Role", "none"}])],
+        active: "anon")
+      with_layer(layer) do
+        sender = Gori::Fuzz::Sender.new(
+          Gori::Fuzz::Origin.new("http", "127.0.0.1", origin.port), outbound_any, false, false)
+        req = "POST /p HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: real=1\r\nContent-Length: 7\r\n\r\nq=value"
+        sender.send(req.to_slice, nil).error.should be_nil
+
+        # `RecordingOrigin` reads the HEAD, which is the half the overlay touches: the Cookie
+        # is gone, X-Role is there, and the declared framing is byte-identical.
+        wire = String.new(origin.requests.first)
+        wire.should_not contain("Cookie: real=1")
+        wire.should contain("X-Role: none")
+        wire.should contain("Content-Length: 7")
+        # And the body the seam handed the socket is the one it was given, byte for byte.
+        String.new(Gori::Env.overlay_slot(req.to_slice)).should end_with("\r\n\r\nq=value")
+      end
+      origin.close
+    end
+  end
+
+  # The two axes, on ONE request. The captured `$TOKEN` in the request line is EVIDENCE and
+  # stays literal; the slot the operator selected still applies, because "send this as admin"
+  # is their instruction and not a reading of somebody else's bytes. This is the pair the
+  # design has to keep separate, so it is asserted as a pair.
+  it "applies a slot to an EVIDENCE replay while its captured $TOKEN stays literal" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      layer = slotted_layer(store,
+        [Gori::SessionSlot.new("admin", set_headers: [{"Authorization", "Bearer $TOKEN"}], rules: ["TOKEN"])],
+        bind: {"admin" => "ADMINTOKEN9"}, active: "admin")
+      with_layer(layer) do
+        captured = "GET /api?$TOKEN=1&sort=asc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([captured.to_slice],
+          evidence: true, target: "http://127.0.0.1:#{origin.port}"), outbound_any)
+        plan.send.error.should be_nil
+
+        wire = String.new(origin.requests.first)
+        wire.should contain("/api?$TOKEN=1&sort=asc")            # evidence: byte-exact
+        wire.should contain("Authorization: Bearer ADMINTOKEN9") # the operator's identity
+      end
+      origin.close
+    end
+  end
+end
+
 # Upgrade, echo every client frame back, then close.
 private def start_seam_ws_origin : Int32
   origin = TCPServer.new("127.0.0.1", 0)

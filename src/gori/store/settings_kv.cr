@@ -25,6 +25,13 @@ module Gori
     # `env.vars` already is on this same table; the tree is 0700 and the DB 0600.
     AUTHORIZE_IDENTITIES_KEY = "authorize_identities"
 
+    # The same row, under the name that describes what it now holds. An Authorize identity IS
+    # a session slot (`Gori::SessionSlot`, DESIGN.md §7 2026-08-17), so there is one list and
+    # one settings row for both. The stored KEY STRING deliberately stays
+    # `authorize_identities`: an existing project's identities are its slots, and renaming the
+    # row would orphan every one of them on upgrade while reporting a clean open.
+    SESSION_SLOTS_KEY = AUTHORIZE_IDENTITIES_KEY
+
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end
