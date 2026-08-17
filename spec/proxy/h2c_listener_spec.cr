@@ -327,7 +327,14 @@ describe "h2c prior knowledge on a listener (#737)" do
       begin
         client = TCPSocket.new("127.0.0.1", listener.local_address.port)
         client.read_timeout = 15.seconds
-        send_h2c_request(client, "[::1]:#{origin_port}")
+        begin
+          send_h2c_request(client, "[::1]:#{origin_port}")
+        rescue IO::Error
+          # The dial fails and gori closes with the client's bytes still unread. On Linux that
+          # is an RST, so this write raises EPIPE; macOS buffers it and the write returns. The
+          # difference is not what this example is about — the refusal is, and the assertions
+          # below hold either way. Narrowed to IO::Error so a real failure still surfaces.
+        end
         head, body = read_h2c_response(client)
         client.close
         head.should be_false
