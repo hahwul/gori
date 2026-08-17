@@ -304,13 +304,17 @@ describe "h2 downgrade gate, host-scoped (#526)" do
       end
     end
 
-    it "says nothing for the ordinary stream — the authority IS the connection host" do
+    # The ordinary stream is not a coalesced one and must never be told it is. It does have its
+    # own way of outliving the gate — a rule enabled after the connection opened, #730 — so what
+    # it gets is that line instead, from `notice_live_rule` and its own latch.
+    it "never tells the coalescing story about a stream whose authority IS the connection host" do
       with_gate_rules do |rules|
         rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "api.example.com")
         pipe, assembler = gate_pipe(rules)
         Log.capture do |logs|
           feed_authority(pipe, assembler, "api.example.com")
-          logs.empty
+          logs.check(:warn, /a Match&Replace BODY rule now matches "api\.example\.com"/)
+          logs.entry.message.should_not contain("coalescing")
         end
       end
     end
