@@ -24,7 +24,7 @@ Repeater handles more than HTTP/1:
 
 - **HTTP/2** requests are re-sent over a real h2 connection.
 - **WebSocket** repeater opens a handshake, then lets you send messages and watch the drained responses.
-- **gRPC** repeater reuses the HTTP/2 engine for framed messages.
+- **gRPC** repeater reuses the HTTP/2 engine for framed messages. The 5-byte length prefix in front of a message is left exactly as captured or typed, because a prefix that disagrees with its payload is one of the standard gRPC parser tests. When you edited a unary message and want the origin to accept the call instead, `gori run repeater send --reframe-grpc` (MCP `send_request{reframe_grpc: true}`) recomputes it over the body actually being sent.
 - A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Decoder](/guide/decoder/) tab's `jwt-decode`.)
 
 Replay from the command line, optionally against a new target:
@@ -83,6 +83,12 @@ A single marker can also carry a Decoder chain of its own. Put the cursor inside
 ### Matching
 
 Filter results with ffuf-style matchers and filters on status, size, words, lines, and body regex, plus auto-calibration to drop noisy baselines. Matched responses are highlighted and can be extracted with a capture regex.
+
+### Framing a Sweep
+
+`Content-Length` is recomputed after every payload is spliced in, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`) turns that off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test.
+
+A gRPC template carries a second length declaration — the 5-byte prefix in front of each message — and it gets the opposite default: gori leaves it exactly as the payload left it, and says so once at the end of the run (`2 of 3 requests left it stale`, `grpc_stale_prefix` in MCP `fuzz_status`). That is the right answer when a deliberately-wrong prefix is what you are testing, and the wrong one when you are sweeping an ordinary unary call and every request is being rejected at the framing layer. `--reframe-grpc` (MCP `reframe_grpc: true`) recomputes it per request. It only touches a single message: a client-streaming body and a `grpc-web-text` body are left alone and still reported.
 
 ### Connection Reuse
 

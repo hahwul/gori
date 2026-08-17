@@ -77,11 +77,13 @@ end
 # what decides `grpc_template?`, so going around it would test the wrong seam).
 private def sweep(template : String, payloads : Array(String),
                   matcher : F::Matcher = F::Matcher.new(keep_bodies: :none),
+                  reframe_grpc : Bool = false,
                   &respond : Bytes -> Gori::Repeater::Result) : {Array(F::Result), F::Progress, Array(Bytes)}
   sources = [F::InlineList.new(payloads).as(F::PayloadSource)]
   options = F::PlanOptions.new(template, evidence: true, target: "http://h:80",
     sources: sources,
-    config: F::Config.new(mode: F::Mode::Sniper, concurrency: 1, keep_bodies: :none),
+    config: F::Config.new(mode: F::Mode::Sniper, concurrency: 1, keep_bodies: :none,
+      reframe_grpc: reframe_grpc),
     matcher: matcher)
   plan = F::Plan.build(options, ungated)
   backend = FakeBackend.new(plan.origin, &respond)
@@ -215,6 +217,57 @@ describe "fuzz over gRPC" do
     progress.grpc_stale_reason.should be_nil
   end
 
+  # PR 7 — `--reframe-grpc` / `reframe_grpc:true`, the OPT-IN inverse. Same three payloads as
+  # the F2 case above, so the pair reads as one before/after: the flag is the ONLY difference,
+  # and the run that asked for it puts well-framed bytes on the wire.
+  it "recomputes the length prefix for every request when reframe_grpc is on" do
+    _, progress, wire = sweep(grpc_template, ["AAAAAAAA", "x", "hello"], reframe_grpc: true) { grpc_response(0, "") }
+
+    bodies = wire.map { |w| String.new(w).split("\r\n\r\n", 2)[1].to_slice.hexstring }
+    bodies.should eq([
+      "00000000084141414141414141", # prefix now 8 for an 8-byte payload
+      "000000000178",               # prefix now 1
+      "000000000568656c6c6f",       # already right — byte-identical to the default run
+    ])
+
+    # And with nothing stale left on the wire, the notice's counter is zero: the two halves
+    # read the SAME bytes, so a run cannot both reframe and report itself stale.
+    progress.grpc_requests.should eq(3_i64)
+    progress.grpc_stale.should eq(0_i64)
+    progress.grpc_stale_reason.should be_nil
+  end
+
+  # The default is not merely "off", it is the P7 answer, and it stays the default. Pinned
+  # against the flag so a future change cannot flip it without this failing.
+  it "leaves the prefix stale by default — reframing is opt-in only" do
+    _, off, wire_off = sweep(grpc_template, ["AAAAAAAA"]) { grpc_response(0, "") }
+    _, on, wire_on = sweep(grpc_template, ["AAAAAAAA"], reframe_grpc: true) { grpc_response(0, "") }
+    off.grpc_stale.should eq(1_i64)
+    on.grpc_stale.should eq(0_i64)
+    wire_off.first.should_not eq(wire_on.first)
+    # Size-preserving, so the Content-Length the CL pass wrote is still right either way.
+    wire_off.first.size.should eq(wire_on.first.size)
+  end
+
+  # A CLIENT-STREAMING template: two framed messages, the marked position inside the second.
+  # `Grpc.reframe` refuses this one on purpose (collapsing two honest frames into one would
+  # send a different message), so the run reports it stale exactly as it does with the flag
+  # off — the opt-in never trades a warning for a corrupt body.
+  it "leaves a multi-message body alone even with reframe_grpc on, and still reports it" do
+    tmpl = "#{GRPC_HEAD}#{GOOD_PREFIX}hello#{GOOD_PREFIX}§world§"
+    _, progress, wire = sweep(tmpl, ["AAAAAAAA"], reframe_grpc: true) { grpc_response(0, "") }
+    body = String.new(wire.first).split("\r\n\r\n", 2)[1].to_slice.hexstring
+    body.should eq("000000000568656c6c6f00000000054141414141414141") # both prefixes verbatim
+    progress.grpc_stale.should eq(1_i64)
+  end
+
+  # A non-gRPC run must not grow a body rewrite from a flag it has no use for.
+  it "does not touch a non-gRPC template when reframe_grpc is on" do
+    _, _, plain_off = sweep(PLAIN_TEMPLATE, ["hello"]) { plain_response }
+    _, _, plain_on = sweep(PLAIN_TEMPLATE, ["hello"], reframe_grpc: true) { plain_response }
+    plain_on.first.should eq(plain_off.first)
+  end
+
   # A seed that is ALREADY mis-framed is the operator's own deliberate parser test. There is
   # nothing left for a payload to break, so the run must not grow a notice about bytes the
   # operator wrote on purpose.
@@ -222,6 +275,19 @@ describe "fuzz over gRPC" do
     _, progress, _ = sweep(grpc_template(LYING_PREFIX), ["hello", "AAAAAAAA"]) { grpc_response(0, "") }
     progress.grpc_requests.should eq(0_i64)
     progress.grpc_stale.should eq(0_i64)
+  end
+
+  # …and `--reframe-grpc` does not override that. "Recompute the prefix after a PAYLOAD
+  # changed the message" has nothing to recompute over a seed that was wrong before any
+  # payload existed — repairing it would destroy the test the operator wrote.
+  it "does not repair a deliberately mis-framed seed even with reframe_grpc on" do
+    _, _, off = sweep(grpc_template(LYING_PREFIX), ["hello"]) { grpc_response(0, "") }
+    _, _, on = sweep(grpc_template(LYING_PREFIX), ["hello"], reframe_grpc: true) { grpc_response(0, "") }
+    on.first.should eq(off.first)
+    # the lying prefix, verbatim. Compared as hex: 0xFF is not valid UTF-8, so a String
+    # comparison would be about the scrub and not about the bytes.
+    String.new(on.first).split("\r\n\r\n", 2)[1].to_slice.hexstring
+      .should eq("00000000ff68656c6c6f")
   end
 end
 

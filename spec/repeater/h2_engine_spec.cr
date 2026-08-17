@@ -1294,6 +1294,33 @@ describe Gori::Repeater::H2Engine do
         scheme: "http", host: "h", port: 80, preserve_field_case: true))
       wire.should contain("X-MiXeD: Keep\r\n")
     end
+
+    # PR 7. `encoded_request` is the projection MCP's `effective_request` and `run show
+    # --format raw` report the wire through, and it shares `parse_request` with `send` — so
+    # the reframe has to show up here or a surface would report bytes the send did not put on
+    # the wire, which is the exact defect this projection was added to close.
+    it "reports the reframed gRPC body when the send will reframe it" do
+      # prefix declares 5, payload is 8 — a hex edit that changed the message length.
+      source = "POST /p.S/M HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice
+      body = Bytes[0, 0, 0, 0, 5, 65, 65, 65, 65, 65, 65, 65, 65]
+      request = Bytes.new(source.size + body.size)
+      source.copy_to(request)
+      body.copy_to(request[source.size, body.size])
+
+      off = Gori::Repeater::H2Engine.encoded_request(request, scheme: "http", host: "h", port: 80)
+      on = Gori::Repeater::H2Engine.encoded_request(request, scheme: "http", host: "h", port: 80,
+        reframe_grpc: true)
+      off[off.size - body.size, body.size].hexstring.should eq("00000000054141414141414141")
+      on[on.size - body.size, body.size].hexstring.should eq("00000000084141414141414141")
+      on.size.should eq(off.size) # size-preserving, so a Content-Length stays right
+    end
+
+    it "leaves a non-gRPC body alone even with reframe_grpc on" do
+      wire = String.new(Gori::Repeater::H2Engine.encoded_request(
+        "POST /p HTTP/2\r\ncontent-type: application/json\r\ncontent-length: 5\r\n\r\nhello".to_slice,
+        scheme: "http", host: "h", port: 80, reframe_grpc: true))
+      wire.should end_with("\r\n\r\nhello")
+    end
   end
 
   it "credits flow-control windows so a response past the default window completes" do

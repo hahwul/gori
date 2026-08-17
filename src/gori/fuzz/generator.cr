@@ -15,6 +15,7 @@ module Gori::Fuzz
     CALIBRATION_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
     @has_chains : Bool
+    @reframe_grpc : Bool
 
     # `registry` (when given) applies each marked position's inline Decoder chain to
     # its payload at render time — see Template#apply_chains. nil = no transforms
@@ -25,6 +26,24 @@ module Gori::Fuzz
       # immutable template so the per-request `chained` hot path can skip apply_chains'
       # array allocation entirely on the common no-chain template (auto_mark / bare §v§).
       @has_chains = @template.positions.any? { |p| !p.chain.empty? }
+      # Does this run re-length-prefix its gRPC bodies? ONE decision, taken off the seed
+      # rendering, never per request (P6): `reframable_template?` reads the head as a String
+      # to find content-type, which is fine once and not fine ten thousand times. The knob is
+      # short-circuited first, so a run that did not ask pays nothing — not even the extra
+      # `baseline_raw` render.
+      @reframe_grpc = @config.reframe_grpc? && GrpcVerdict.reframable_template?(baseline_raw)
+    end
+
+    # The opt-in gRPC re-length-prefix, applied to a request that is otherwise finished.
+    #
+    # AFTER `ContentLength.sync`, deliberately: the reframe is size-preserving (only the four
+    # length octets change), so it can neither invalidate the Content-Length that pass just
+    # wrote nor move a payload span, while the reverse order would leave the CL pass reading a
+    # body it had already framed. A no-op on every non-gRPC run and on any request `Grpc.reframe`
+    # cannot repair unambiguously — those still go out stale, and `Matcher#note_grpc_framing`
+    # still counts and names them.
+    private def reframed(bytes : Bytes) : Bytes
+      @reframe_grpc ? GrpcVerdict.reframe(bytes) : bytes
     end
 
     def mode : Mode
@@ -59,7 +78,7 @@ module Gori::Fuzz
     # to seed the matcher baseline for anomaly diffing.
     def baseline_request : Bytes
       raw = baseline_raw
-      @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
+      reframed(@config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw)
     end
 
     # The same request WITHOUT the Content-Length pass. Split out so a surface can ask
@@ -86,7 +105,7 @@ module Gori::Fuzz
         payloads = Array.new(count) { random_nonce(plen) }
         raw = @template.render(chained(payloads))
         bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
-        {bytes, plen * count}
+        {reframed(bytes), plen * count}
       end
     end
 
@@ -176,6 +195,7 @@ module Gori::Fuzz
         bytes, at, delta = ContentLength.sync_at(raw, @config.add_content_length_when_missing?)
         spans = shift_spans(spans, at, delta) unless delta == 0
       end
+      bytes = reframed(bytes)
       # keep the ORIGINAL payloads for reporting; only the wire bytes are transformed.
       # `chain_error` names any position whose `¦chain` could not run on its payload, so a
       # request that went out with the transform SKIPPED is not reported as a clean send.

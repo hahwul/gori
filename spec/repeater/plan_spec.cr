@@ -166,6 +166,48 @@ describe Gori::Repeater::Plan do
     end
   end
 
+  # PR 7. The gRPC length prefix is the OTHER length declaration in the same request, and it
+  # gets the opposite default on purpose: Content-Length is resynced unless told not to, this
+  # is left alone unless told to. See `PlanOptions#reframe_grpc?`.
+  describe "the gRPC reframe policy" do
+    it "is OFF by default, on the plan and on the sender it builds" do
+      plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
+        default_target: "http://t.test"), ungated)
+      plan.reframe_grpc?.should be_false
+      plan.sender.reframe_grpc?.should be_false
+    end
+
+    it "carries the opt-in through to the sender that will encode the h2 request" do
+      plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+      plan.reframe_grpc?.should be_true
+      plan.sender.reframe_grpc?.should be_true
+    end
+
+    # `with_requests` is MCP's post-assembly Match&Replace seam. It reuses the SAME sender
+    # (so the scope verdict cannot be moved out from under a rewrite) and must keep the same
+    # framing policy with it — a rewrite that changed the body length is precisely the case
+    # the opt-in was turned on for.
+    it "survives with_requests" do
+      plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+      plan.with_requests(["GET /rewritten HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice])
+        .reframe_grpc?.should be_true
+    end
+
+    # The wires are NOT rewritten at build time: the reframe rides `H2Engine.parse_request`
+    # at the send seam, so a body a `$BINDING` changes on the way out is covered too. Pinned
+    # because "the plan bytes look unchanged" is otherwise easy to misread as "the flag did
+    # nothing" — `spec/repeater/h2_engine_spec.cr` owns the byte-level half.
+    it "leaves the plan's own wire bytes untouched — the reframe happens at the send seam" do
+      opts = R::PlanOptions.new([SESSION_RAW.to_slice], default_target: "http://t.test", http2: true)
+      off = R::Plan.build(opts, ungated)
+      on = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
+        default_target: "http://t.test", http2: true, reframe_grpc: true), ungated)
+      on.bytes.should eq(off.bytes)
+    end
+  end
+
   describe "env expansion" do
     it "expands the request wire, the target and the SNI in one pass" do
       with_env_vars([{"HOSTV", "t.test"}, {"TOK", "s3cr3t"}, {"SNIV", "front.test"}]) do

@@ -263,6 +263,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 |--------|-------------|
 | `--diff` | Diff against the session's last stored response |
 | `--verbatim` | Send the stored bytes exactly: no `$VAR` expansion, no bare-LF promotion, no `Content-Length` resync, no HTTP/2→1.1 version fix, no h2 field-name lowercasing |
+| `--reframe-grpc` | HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent, for a unary message an edit changed the length of. Off by default — a prefix that disagrees with its payload is a standard parser test, so it ships as written |
 | `--message=TEXT` | WebSocket: outbound text message (repeatable; replaces the session's stored messages) |
 | `--message-frame=SPEC` | WebSocket: one frame with an explicit shape. Comma-separated `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, and one of `hex=`/`b64=`/`text=` |
 | `--idle-ms=N` | WebSocket: server-silence timeout after the first inbound frame (100–60000, default 3000) |
@@ -290,7 +291,7 @@ Sources: `--flow=ID`, `--request=FILE`, or stdin. Positions: `§…§` markers, 
 | Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (hard cap, retries and redirect hops count), `--follow-redirects`, `--no-keep-alive` |
-| Framing | `--verbatim` — send the template's `Content-Length` as written, with no resync after payload substitution (for CL / CL-TE desync payloads) |
+| Framing | `--verbatim` — send the template's `Content-Length` as written, with no resync after payload substitution (for CL / CL-TE desync payloads). `--reframe-grpc` — recompute the gRPC 5-byte length prefix after each payload is spliced into a unary message (off by default: a stale prefix is reported, not repaired) |
 | Matchers | `--mc`/`--fc` status, `--mg`/`--fg` gRPC status from the `grpc-status` trailer (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mr`/`--fr` body regex, `--extract=REGEX`, `--ac` auto-calibrate |
 | Session bindings | `--bind-from=FLOW-ID` — replay that captured flow first so its response fills the project's `$NAME` bindings for the rest of the run |
 | Scope | `--allow-unscoped` — send outside the project scope; Sandbox mode and explicit excludes still refuse each send |

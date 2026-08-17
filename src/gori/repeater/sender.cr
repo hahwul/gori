@@ -47,10 +47,16 @@ module Gori
       # both can expand at its own merge seam, where it still knows whose bytes are whose.
       getter? evidence : Bool
 
+      # See `PlanOptions#reframe_grpc?`. h2 ONLY, and carried down to `H2Engine.parse_request`
+      # rather than applied to `bytes` here, so the reframe rides the same fields/body split
+      # `encoded_request` reports the wire through.
+      getter? reframe_grpc : Bool
+
       def initialize(@outbound : Gori::Outbound, *, @scheme : String, @host : String, @port : Int32,
                      @verify : Bool, @http2 : Bool = false, @sni : String? = nil,
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil,
-                     @preserve_field_case : Bool = false, @evidence : Bool = false)
+                     @preserve_field_case : Bool = false, @evidence : Bool = false,
+                     @reframe_grpc : Bool = false)
       end
 
       # The reason this request may not go out, or nil to proceed. ONE rule stops a deliberate
@@ -95,7 +101,7 @@ module Gori
           if @http2
             H2Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-              preserve_field_case: @preserve_field_case)
+              preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
           else
             Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)

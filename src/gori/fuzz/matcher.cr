@@ -75,6 +75,37 @@ module Gori::Fuzz
       grpc_request?(request) && residual(request) == 0
     end
 
+    # A template this run may RE-length-prefix under `reframe_grpc`: `framed_template?` (a
+    # gRPC content-type over a seed body that frames CLEANLY) minus grpc-web-TEXT, whose
+    # frames are base64 on the wire — see `Grpc.reframe_body`.
+    #
+    # The clean-seed half is not a leftover of the warning's logic, it is the same argument in
+    # the other direction: a seed that was ALREADY mis-framed is the operator's own parser
+    # test, so "recompute the prefix after a payload changes the message" has nothing to
+    # recompute there and would only DESTROY the test. Read ONCE per run — see
+    # `Generator#initialize`.
+    def self.reframable_template?(request : Bytes) : Bool
+      framed_template?(request) && !Proxy::H2::Grpc.web_text?(header(request, "content-type"))
+    end
+
+    # A rendered request with its gRPC length prefix recomputed over the body it actually
+    # carries, or the request UNCHANGED when there is nothing unambiguous to do (see
+    # `Grpc.reframe`). Only ever called on a run whose template `reframable_template?`
+    # accepted, so the content-type re-read is the only per-request head scan it adds.
+    #
+    # SIZE-PRESERVING, which is why `Generator#emit` can run it after `ContentLength.sync_at`
+    # without moving a single payload span and without invalidating the Content-Length that
+    # pass just wrote.
+    def self.reframe(request : Bytes) : Bytes
+      body = body(request)
+      return request unless body && !body.empty?
+      framed = Proxy::H2::Grpc.reframe_body(header(request, "content-type"), body)
+      return request unless framed
+      reframed = request.dup
+      framed.copy_to(reframed[request.size - body.size, body.size])
+      reframed
+    end
+
     # The body slice of a raw request, or nil when there is no head/body boundary. Same
     # LFLF-or-CRLFCRLF rule as `Fuzz::ContentLength.boundary` — a bare-LF head is a desync
     # primitive the fuzzer deliberately crafts, and it still has a body.

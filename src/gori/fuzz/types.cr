@@ -215,6 +215,21 @@ module Gori
       property max_redirects : Int32
       property? update_content_length : Bool # recompute CL after body substitution
       property? add_content_length_when_missing : Bool
+      # Recompute the gRPC 5-byte length prefix after a payload is spliced into a gRPC
+      # message body — the opt-in inverse of the `grpc_stale` notice, and DEFAULT FALSE.
+      #
+      # The default is the P7 answer and stays it: a payload that changes the message length
+      # leaves the prefix declaring the old one, gori SAYS so once per run (`grpc_stale`
+      # below) and sends the operator's bytes, because a deliberately-wrong length prefix is
+      # one of the standard gRPC parser tests. This flag is for the other run — a sweep of an
+      # ordinary unary call where every request being rejected at the framing layer is noise,
+      # not the test — and it is exactly the shape `update_content_length` already has for the
+      # other length declaration in the same request.
+      #
+      # Applied by `Generator` (beside the Content-Length pass, and size-preservingly) rather
+      # than at the send seam, so `Result#request` and the matcher's own `grpc_stale` scan
+      # both read the bytes that went out.
+      property? reframe_grpc : Bool
       property? auto_calibrate : Bool # drop responses identical to the baseline
       property keep_bodies : Symbol   # :none | :matched | :all
       property max_requests : Int64?  # hard cap on total sends
@@ -257,6 +272,7 @@ module Gori
                      @max_redirects : Int32 = 5,
                      @update_content_length : Bool = true,
                      @add_content_length_when_missing : Bool = false,
+                     @reframe_grpc : Bool = false,
                      @auto_calibrate : Bool = false,
                      @keep_bodies : Symbol = :matched,
                      @max_requests : Int64? = nil,

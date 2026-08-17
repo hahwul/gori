@@ -30,6 +30,11 @@ module Gori
           int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           int(h, "max_requests"), Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
+        # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
+        # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
+        # `fuzz_config` applies, so a second accessor on the plan would only be a second place
+        # for the two to disagree.
+        fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, int(h, "max_requests"))
@@ -203,10 +208,22 @@ module Gori
             if fjob.grpc_stale > 0
               j.field "grpc_stale_prefix", fjob.grpc_stale
               j.field "grpc_requests_scanned", fjob.grpc_requests
+              # Two sentences, because the remedy differs. Without `reframe_grpc` the prefix
+              # was left alone by policy and naming the argument is the useful half; WITH it
+              # these are the requests the reframe could not repair unambiguously (a
+              # client-streaming body, a grpc-web-text body), and pointing the agent at an
+              # argument it already passed would read as gori not having heard it.
               j.field "grpc_stale_prefix_reason",
-                "#{Serialize.text(fjob.grpc_stale_reason)} — the template's gRPC length prefix " \
-                "is not recomputed when a payload changes the message length; " \
-                "#{fjob.grpc_stale} of #{fjob.grpc_requests} requests left it stale"
+                if fjob.reframe_grpc?
+                  "#{Serialize.text(fjob.grpc_stale_reason)} — reframe_grpc could not recompute " \
+                  "the gRPC length prefix unambiguously (a multi-message body, or grpc-web-text); " \
+                  "#{fjob.grpc_stale} of #{fjob.grpc_requests} requests went out stale"
+                else
+                  "#{Serialize.text(fjob.grpc_stale_reason)} — the template's gRPC length prefix " \
+                  "is not recomputed when a payload changes the message length; " \
+                  "#{fjob.grpc_stale} of #{fjob.grpc_requests} requests left it stale " \
+                  "(pass reframe_grpc:true to recompute it)"
+                end
             end
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
@@ -743,6 +760,10 @@ module Gori
         # Transfer-Encoding) was unreachable for an agent — every payload was re-framed to fit
         # before it went out, which is precisely the observation such a sweep is looking for.
         cfg.update_content_length = bool_arg(h, "update_content_length", cfg.update_content_length?)
+        # The same knob for the OTHER length declaration a gRPC request carries. Default
+        # false, i.e. the P7 behaviour the `grpc_stale_prefix` field reports — see
+        # `Fuzz::Config#reframe_grpc?`.
+        cfg.reframe_grpc = bool_arg(h, "reframe_grpc", cfg.reframe_grpc?)
         # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
         # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
@@ -804,6 +825,7 @@ module Gori
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", strprop("none (default) | matched | all — record each sent request+response as a History flow for audit/evidence; matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.")
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body (default true). Set FALSE to send your template's declared value verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
+          s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
           s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")
           s.field "race_warmup", strprop("race_count only: a raw HTTP request sent, and its response fully read, on each connection BEFORE it holds the race request — equalizes per-connection TLS-handshake/accept latency, which narrows the achievable release window. Sent EXACTLY as given (no §…§, no Env expansion) — use something harmless (e.g. a plain GET) against the same origin, never the race request itself (which would perform its side effect once per connection before the timed attempt).")
         end

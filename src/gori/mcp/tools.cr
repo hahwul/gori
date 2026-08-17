@@ -386,6 +386,9 @@ module Gori
         property grpc_stale = 0_i64
         property grpc_requests = 0_i64
         property grpc_stale_reason : String? = nil
+        # Whether the run asked for `reframe_grpc` — read only to word `grpc_stale_prefix_reason`,
+        # since the remedy an agent should act on differs by whether it already passed it.
+        property? reframe_grpc = false
         property error_msg : String? = nil
         # How many times the drain / history-record rescues have fired for this job. Those
         # rescues log, and they sit on the per-EVENT path: a persistent failure (a broken
