@@ -48,23 +48,40 @@ class Gori::Tui::RepeaterView
     rect.x + 2 + Screen.draw_width(" #{GRPC_TITLE} ") + 1
   end
 
+  # The chip's own label — the toggle names what `p` WILL do, `lit` (the same `@pretty`) the
+  # state it is in. A method rather than a literal in each place for the reason `grpc_chip_x`
+  # is one: the draw and the hit-test must not be able to disagree about its width.
+  private def grpc_chip_label : String
+    @pretty ? " p:bytes " : " p:tree "
+  end
+
+  # …and where that chip must STOP. `Frame.chip` does not clip itself and this card is a
+  # half-width split pane, so the stop is computed rather than assumed — and it clears the
+  # LATENCY meta, not just the '╮'. `render_transcript` drew that meta first and this runs
+  # after it, so an un-cleared chip would silently overpaint the duration of the send the
+  # operator just made.
+  #
+  # The THIRD half of the one derivation, and the one that was missing: `chrome_hit` used to
+  # pass its own `rect.right - 1` while claiming to share this draw's stop. Below ~64 columns
+  # that difference is a live ` p:` region sitting on the duration text, and below ~56 one
+  # sitting on a border where the draw painted nothing at all.
+  private def grpc_chrome_limit(rect : Rect) : Int32
+    if d = @result.try(&.duration_us)
+      rect.right - 2 - Screen.draw_width(Fmt.dur(d)) # border_meta's own left edge
+    else
+      rect.right - 1 # keep the corner
+    end
+  end
+
   # ` p:tree ` / ` p:bytes ` on the gRPC transcript border. The transcript is the one response
   # pane with no chrome of its own, and PRETTY is now live on it — it picks whether each
   # message payload renders as the schema-less protobuf tree or as a hex preview. A toggle
   # that changes the pane with nothing on screen naming it is how `p` would read otherwise.
   # `d:diff` / `^X:hex` are deliberately absent: neither is reachable in gRPC mode.
   private def render_grpc_chrome(screen : Screen, rect : Rect) : Nil
-    label = @pretty ? " p:bytes " : " p:tree "
+    label = grpc_chip_label
     x = grpc_chip_x(rect)
-    # `Frame.chip` does not clip itself and this card is a half-width split pane, so the stop
-    # is computed rather than assumed — and it clears the LATENCY meta, not just the '╮'.
-    # `render_transcript` drew that meta first and this runs after it, so an un-cleared chip
-    # would silently overpaint the duration of the send the operator just made.
-    stop = rect.right - 1
-    if d = @result.try(&.duration_us)
-      stop = rect.right - 2 - Screen.draw_width(Fmt.dur(d)) # border_meta's own left edge
-    end
-    return if x + Screen.draw_width(label) > stop
+    return if x + Screen.draw_width(label) > grpc_chrome_limit(rect)
     Frame.chip(screen, x, rect.y, label, @pretty)
   end
 

@@ -113,13 +113,20 @@ class Gori::Tui::RepeaterView
   end
 
   # GRPC RESPONSE: the one transcript pane that carries a chip — ` p:tree ` / ` p:bytes `,
-  # which picks the schema-less protobuf tree over a hex preview. `grpc_chip_x` and the label
-  # are the SAME derivation `render_grpc_chrome` draws from, so the live cells are exactly the
-  # painted ones. `limit:` is that draw's own stop.
+  # which picks the schema-less protobuf tree over a hex preview. All THREE numbers come from
+  # `render_grpc_chrome`'s own helpers — `grpc_chip_x`, `grpc_chip_label` and, since #741's
+  # review, `grpc_chrome_limit` — so the live cells are exactly the painted ones.
+  #
+  # That last one is the whole point: this used to pass its own `right.right - 1`, one column
+  # short of the card's '╮', while the draw stopped at the LATENCY meta's left edge instead.
+  # On a half-width pane with a duration on the border the two disagreed, and `Frame.chip`
+  # draws nothing at all when it does not fit — so the ` p:` region answered clicks on the
+  # duration text, and on a narrower pane on bare border. Asking `grpc_chrome_limit` closes
+  # both: `left_chip_hit` BREAKS at the same chip the draw refuses, which is nil here.
   private def grpc_chrome_hit(right : Rect, mx : Int32, my : Int32) : Symbol?
     return nil unless @grpc_mode && right.w >= 2 && my == right.y
     Frame.left_chip_hit(mx, my, right.y, grpc_chip_x(right),
-      [{:pretty, @pretty ? " p:bytes " : " p:tree "}] of {Symbol, String}, limit: right.right - 1)
+      [{:pretty, grpc_chip_label}] of {Symbol, String}, limit: grpc_chrome_limit(right))
   end
 
   # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click. A split

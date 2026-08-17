@@ -282,6 +282,56 @@ describe "RepeaterView gRPC protobuf transcript" do
     end
   end
 
+  # …and the inverse, which the shared geometry only half covered (#741 review). The draw's
+  # stop is the LATENCY meta's left edge, not the card's '╮'; the hit-test passed its own
+  # `right - 1`. At 60 columns the RESPONSE half is 30 wide, ` p:bytes ` no longer clears the
+  # ` 5ms ` on that border, and the draw paints NOTHING — while the hit test kept nine live
+  # cells there, two of them on the duration text itself. Clicking the send you just made and
+  # having the pane silently swap readings is exactly the dead/ghost-cell class `␣K:KEY` had.
+  it "does not light the p: chip over the duration meta it could not clear" do
+    pb_tmp_store do |store|
+      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
+      view.focus_pane(:response)
+      view.pretty = true
+      rect = Rect.new(0, 0, 60, 24)
+      b = MemoryBackend.new(60, 24)
+      view.render(Screen.new(b), rect)
+
+      row = b.row(rect.y + 3)
+      row.should contain("GRPC RESPONSE")
+      row.should_not contain("p:bytes") # the draw refused — it would have overpainted the meta
+      meta = Fmt.dur(5000_i64)
+      col = row.index(meta).not_nil!
+      # Every cell the duration occupies.
+      meta.size.times { |i| view.chrome_hit(rect, col + i, rect.y + 3).should be_nil }
+    end
+  end
+
+  # The other half of the same split: a chip the draw refused paints no cell ANYWHERE, so no
+  # cell on that border may answer for it — not the duration's, and not the bare border left
+  # of it where the chip would have started.
+  it "leaves the whole transcript border dead when the chip was not painted" do
+    pb_tmp_store do |store|
+      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
+      view.focus_pane(:response)
+      view.pretty = true
+      # 60 cols: the chip fits under the card's corner but not under the meta (the draw is the
+      # authority). 44: too narrow for it on any reading — a guard that the tightened stop
+      # never re-opens a cell as the pane shrinks further.
+      {60, 44}.each do |w|
+        rect = Rect.new(0, 0, w, 24)
+        b = MemoryBackend.new(w, 24)
+        view.render(Screen.new(b), rect)
+        b.row(rect.y + 3).should_not contain("p:bytes")
+        # The RESPONSE half is everything right of the divider.
+        half = (w - 1) // 2
+        (half + 1).upto(w - 1) do |mx|
+          view.chrome_hit(rect, mx, rect.y + 3).should be_nil
+        end
+      end
+    end
+  end
+
   it "keeps the hex preview for a compressed response message" do
     pb_tmp_store do |store|
       view = answered.call(loaded.call(store), grpc_frame(PB_BODY, compressed: true))
