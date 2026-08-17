@@ -55,6 +55,20 @@ describe Gori::Browser do
       js.should contain(%(user_pref("network.proxy.http_port", 8070);))
       js.should contain(%(user_pref("network.proxy.share_proxy_settings", true);))
     end
+
+    # Firefox's counterpart to Chromium's "<-loopback>". Emptying no_proxies_on does NOT
+    # do it: CanUseProxy refuses loopback before it reads that list unless this pref is
+    # true, and it defaults to false — so localhost is captured silently by nothing.
+    it "routes loopback targets through the proxy too" do
+      js.should contain(%(user_pref("network.proxy.no_proxies_on", "");))
+      js.should contain(%(user_pref("network.proxy.allow_hijacking_localhost", true);))
+    end
+
+    # Counterpart to --disable-quic: belt-and-braces, since Firefox already declines h3
+    # behind a proxy and with a third-party root, but both profiles should say it.
+    it "keeps traffic on the TCP proxy by disabling HTTP/3" do
+      js.should contain(%(user_pref("network.http.http3.enable", false);))
+    end
   end
 
   # A browser is the one surface that doesn't just PRINT the bind — it dials it. Under a
