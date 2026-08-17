@@ -186,7 +186,7 @@ module Gori
           doc.texts.each_with_index do |text, i|
             puts "" if i > 0
             puts "=== note #{i + 1}: #{CLI::Output.note_label(i, text)}#{doc.cur == i ? " *" : ""} ==="
-            STDOUT.puts text
+            STDOUT.puts Issues::Export.scrub_controls(text)
           end
         end
       end

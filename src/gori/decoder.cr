@@ -27,6 +27,8 @@ module Gori::Decoder
       {data.hexstring, RenderAs::Hex}
     when RenderAs::Base64
       {Base64.strict_encode(data), RenderAs::Base64}
+    when RenderAs::Text
+      {String.new(data), RenderAs::Text}
     else
       s = String.new(data)
       s.valid_encoding? ? {s, RenderAs::Text} : {Base64.strict_encode(data), RenderAs::Base64}

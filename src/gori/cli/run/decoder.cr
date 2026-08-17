@@ -50,13 +50,15 @@ module Gori
           puts decoder_json(result, output_mode)
         else
           if final_bytes = result.output
-            rendered, _ = Decoder.display(final_bytes, output_mode)
-            # Decoder input is routinely attacker-controlled captured traffic (base64/hex/
-            # gzip blobs); an auto/text render of a decoded ANSI/OSC escape would otherwise
-            # write raw control bytes to the live terminal. Neutralize them like every other
-            # captured-text view (run.cr#print_message_text). --format json and --output
-            # hex/base64 stay byte-exact for scripts.
-            STDOUT.puts CLI::Output.term_safe_multiline(rendered)
+            rendered, render = Decoder.display(final_bytes, output_mode)
+            # Neutralize ANSI/OSC on a live terminal for auto/text. A pipe or an explicit
+            # hex/base64 render stays byte-exact — the default job of this command is
+            # "give me the decoded bytes".
+            if STDOUT.tty? && render.text?
+              STDOUT.puts CLI::Output.term_safe_multiline(rendered)
+            else
+              STDOUT.puts rendered
+            end
           end
           report_convert_failure(result) unless result.ok?
         end

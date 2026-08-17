@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `gori run`: leftover reserved verbs after a leading `--project`/`--db` no longer silently list or scan (session, history, probe, colormarker color, sitemap tag); `history clear --yes 42` no longer wipes the project; extra ids on one-target deletes abort; `--query` dotted negations and OR-grouping with a trailing `-path:` work as documented; `--bind-from`/`--slot` hydrate when `--request` is the template; `oast listen` deregisters on stop; a second Ctrl-C during a sweep exits 130; capture Ctrl-C exits 130; `probe rules delete` and `oast release` report a failed write
 - Authorize: a new tab that replays a captured request under a set of identities and reads each response against a baseline, to find broken access control. Identities are header overlays saved with the project, `p` turns on passive replay of what the browser touches, and the same plan drives `gori run authorize` and the MCP tools (#707, #710)
 - Fuzzer: a Race condition (last-byte-sync) attack mode over HTTP/1.1 — N connections held at the final byte and released together — on all three surfaces, with an optional warm-up (#705)
 - Scope: a regex EXCLUDE rule no longer fails **open** on a target that is not valid UTF-8 — it scrubbed nothing and `rescue false` read as "does not match", which is scope evasion. The History/Sitemap SQL lens also now agrees with the live gate on bracketed IPv6 hosts, brace globs and non-ASCII case (#688, #699)

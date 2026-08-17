@@ -576,16 +576,23 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         action = enable ? "enable" : "disable"
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project scope #{action} [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project scope #{action}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope #{action}: missing value for #{f}" }
         end
         parser.parse(args)
+        unless leftover.empty?
+          abort "gori run project scope #{action}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
+                "#{leftover.join(" ").inspect} — this #{action}s the whole filter, not a rule id. " \
+                "Per-rule change: `gori run project scope update <id>`"
+        end
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
@@ -1049,7 +1056,7 @@ module Gori
           end
           unless ov.update(id, h, i)
             store.close
-            abort "gori run project host-override update: failed (duplicate host, empty, or invalid)"
+            abort "gori run project host-override update: NOT updated (duplicate host, or store busy or unwritable)"
           end
           puts "Host override ##{id} updated: #{i} → #{OverrideHost.key(h)}" # the stored form, not the typed one
         ensure

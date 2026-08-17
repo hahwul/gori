@@ -129,15 +129,19 @@ module Gori
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
 
-      parsed = case kind
-               when :har      then from_har(expanded)
-               when :urls     then from_urls(expanded)
-               when :oas      then from_oas(expanded)
-               when :postman  then from_postman(expanded)
-               when :insomnia then from_insomnia(expanded)
-               when :burp     then from_burp(expanded)
-               else                raise Gori::Error.new("unknown import kind: #{kind}")
-               end
+      parsed = begin
+        case kind
+        when :har      then from_har(expanded)
+        when :urls     then from_urls(expanded)
+        when :oas      then from_oas(expanded)
+        when :postman  then from_postman(expanded)
+        when :insomnia then from_insomnia(expanded)
+        when :burp     then from_burp(expanded)
+        else                raise Gori::Error.new("unknown import kind: #{kind}")
+        end
+      rescue ex : File::Error
+        raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
+      end
       if parsed.flows.empty?
         # Preserve WHY nothing landed: if every entry was skipped as malformed, say so
         # (with the count) instead of the generic "no flows found", which hid the real
