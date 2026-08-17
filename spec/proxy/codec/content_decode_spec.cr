@@ -8,6 +8,12 @@ private def gzip(data : String) : Bytes
   io.to_slice
 end
 
+private def gzip_bytes(data : Bytes) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io) { |w| w.write(data) }
+  io.to_slice
+end
+
 private def zlib_deflate(data : String) : Bytes
   io = IO::Memory.new
   Compress::Zlib::Writer.open(io) { |w| w.print(data) }
@@ -67,12 +73,58 @@ describe Gori::Proxy::Codec::ContentDecode do
 
   it "does NOT de-chunk a body whose TE only CONTAINS 'chunked' as a substring" do
     # "xchunked" is not the chunked coding — a loose substring match used to
-    # wrongly de-chunk this, mangling the displayed body. The raw (passthrough)
-    # result is signalled by a nil decoded value.
+    # wrongly de-chunk this, mangling the displayed body. The bytes come back
+    # untouched; the unknown transfer coding is NAMED rather than passed off as plain.
     body = "5\r\nhello\r\n0\r\n\r\n".to_slice
     decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: xchunked"), body)
+    decoded.should eq(body) # not de-chunked: the chunk framing is still there
+    note.not_nil!.should contain("xchunked")
+    note.not_nil!.should contain("unsupported")
+  end
+
+  # `Transfer-Encoding: gzip` is legal (RFC 9112 §6.1) and close-delimited (Body.response_framing).
+  # gori used to consult Transfer-Encoding for `chunked` alone, so the gzip layer was neither
+  # inflated NOR labelled — silent garbage, strictly worse than an unknown Content-Encoding.
+  it "decodes a Transfer-Encoding: gzip body (close-delimited, no chunk framing)" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: gzip"), gzip("transfer coded body"))
+    String.new(decoded.not_nil!).should eq("transfer coded body")
+    note.should eq("decoded: gzip")
+  end
+
+  it "de-chunks THEN gunzips a 'Transfer-Encoding: gzip, chunked' body" do
+    gz = gzip("te gzip then chunked")
+    buf = IO::Memory.new
+    buf << gz.size.to_s(16) << "\r\n"
+    buf.write(gz)
+    buf << "\r\n0\r\n\r\n"
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: gzip, chunked"), buf.to_slice)
+    String.new(decoded.not_nil!).should eq("te gzip then chunked")
+    note.should eq("de-chunked · decoded: gzip")
+  end
+
+  it "reports an unsupported TRANSFER coding instead of silent garbage" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: compress"), "rawbytes".to_slice)
+    decoded.should eq("rawbytes".to_slice)
+    note.not_nil!.should contain("compress")
+    note.not_nil!.should contain("unsupported")
+  end
+
+  it "ignores a Transfer-Encoding: identity (nothing applied, nothing to undo)" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: identity"), "plain".to_slice)
     decoded.should be_nil
     note.should be_nil
+  end
+
+  # Layer order is the whole point: RFC 9110 §8.4.1 makes the content coding a property of the
+  # representation, and RFC 9112 §6.1 applies the transfer codings "to the content in order to
+  # form the message body" — so TE is OUTSIDE CE and must come off first. Decoding CE first
+  # here would hand zlib a gzip stream and recover nothing.
+  it "undoes Transfer-Encoding BEFORE Content-Encoding (order-critical)" do
+    body = gzip_bytes(zlib_deflate("outer gzip over inner deflate"))
+    decoded, note = decode(
+      head("HTTP/1.1 200 OK", "Content-Encoding: deflate", "Transfer-Encoding: gzip"), body)
+    String.new(decoded.not_nil!).should eq("outer gzip over inner deflate")
+    note.should eq("decoded: gzip · decoded: deflate")
   end
 
   it "reports an unsupported encoding instead of decoding to garbage" do
