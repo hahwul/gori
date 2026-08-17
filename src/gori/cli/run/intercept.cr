@@ -186,8 +186,9 @@ module Gori
               # `[no-edit]` marks a message an edit cannot be applied to, so the state is
               # scannable down a queue listing the way `[stub]` is in History. The sentence
               # itself is `intercept get`'s; a list row has no space for it.
-              # `edit_refusal` ONLY, never `head_only`: the gate holds the head of every h2
-              # message, so chipping on that would mark every held HTTP/2 row uneditable.
+              # `edit_refusal` ONLY, never `head_only`: an h2 hold whose body gori could not
+              # buffer is still fully editable in the head, so chipping on that would mark a
+              # row uneditable when only its body is out of reach.
               chip = r.edit_refusal ? "  [no-edit]" : ""
               puts "##{r.item_id}  [#{r.kind}]  #{method} #{CLI::Output.term_safe(intercept_row_where(r))}  (#{body.size}b body)#{chip}"
             end

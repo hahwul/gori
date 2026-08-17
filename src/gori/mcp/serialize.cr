@@ -189,10 +189,11 @@ module Gori
       # the state a CRLF-injection probe INDUCES, so it is the normal case for the test an
       # agent is most likely to be running. Emitted only when there is something to say.
       # `edit_refusal` is the HARD one — gori will apply no edit to this message at all.
-      # `head_only` is the caveat: it is true for EVERY h2 hold (the gate holds the head), a
+      # `head_only` is the caveat: it is true for an h2 hold whose body the gate could not
+      # buffer (no declared content-length, or one over `H2::StreamGate::MAX_HOLD_BODY`), a
       # head edit applies normally, and only a body has nowhere to go. Reporting the caveat as
-      # a refusal would mark every held HTTP/2 message uneditable, so they stay separate
-      # fields and an agent can act on each.
+      # a refusal would mark such a message uneditable, so they stay separate fields and an
+      # agent can act on each.
       def self.emit_edit_warning(j : JSON::Builder, row : Store::HeldRow) : Nil
         j.field "head_only", true if row.head_only?
         row.head_only_note.try { |n| j.field "head_only_note", text(n) }

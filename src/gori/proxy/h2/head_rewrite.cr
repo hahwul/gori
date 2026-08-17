@@ -163,8 +163,10 @@ module Gori::Proxy::H2
     #
     # `restore_length` is PROVENANCE, not policy (#513 / R3-F2). Reverting the operator's
     # `content-length` is right when the surface computed it FOR them — the TUI intercept
-    # editor's `^L` recomputes it from the editor's body, and an h2 hold is the head only, so
-    # on a dirty edit that lands as `content-length: 0` beside DATA gori still relays. It is
+    # editor's `^L` recomputes it from the editor's body, and a HEAD-ONLY h2 hold carries no
+    # body, so on a dirty edit that lands as `content-length: 0` beside DATA gori still relays.
+    # (`StreamGate` passes false for a hold that buffered the body: there the edit's body IS
+    # what gori sends, so the operator's value is simply true about it.) It is
     # wrong when the operator DECLARED it: a content-length that disagrees with the DATA is
     # RFC 9113 §8.1.1-malformed, and whether a given origin/CDN/WAF/gRPC gateway enforces that
     # is exactly the probe they opened the editor to run. h1 forwards the identical edit

@@ -70,11 +70,14 @@ Match & Replace runs **before** the hold, so what you see in the editor is what 
 
 ### Intercept on HTTP/2
 
-Intercept works on HTTP/2 without downgrading the connection, so gRPC clients keep working while catch is on, and streams are held **individually** — holding one request does not freeze the tab. Three things differ from HTTP/1.1:
+Intercept works on HTTP/2 without downgrading the connection, so gRPC clients keep working while catch is on, and streams are held **individually** — holding one request does not freeze the tab. Four things differ from HTTP/1.1:
 
-- **The head is held, not the body.** You see and edit the request or response head; the body streams past untouched. For a message with no body — most page loads — that is the whole message and nothing is missing. For one with a body, the body is still fully visible in History afterwards, just not editable in the intercept editor. A body typed into the editor is ignored, and `Content-Length` stays as the sender set it.
+- **The body is held when gori can buffer it, and only then.** A message that declares a `Content-Length` of 1 MiB or less — and one with no body at all, which is most page loads — is held whole: you see and edit head *and* body, and on forward the `DATA` frames are rebuilt from your bytes with the `Content-Length` you sent, exactly as on HTTP/1.1. Its queue row appears once the whole message has arrived, not when its head does, which is also HTTP/1.1's timing.
+
+  Everything else is held **head-only**: a streaming upload or response with no declared length (SSE, gRPC streams), a body over the ceiling, or a padded body. Those bodies stream past the gate untouched, a body typed into the editor is refused rather than silently dropped, and `Content-Length` stays as the sender set it. The intercept editor, `gori run intercept get` and the MCP `intercept_get` tool all say which kind of hold you have before you write an edit — and the body of a head-only hold is still fully visible in History afterwards.
 - **Drop cancels the stream** rather than answering with a `502` page. The client sees a cancelled request (gRPC reports `CANCELLED`); the connection and every other stream on it stay up. History records the drop exactly as it does on HTTP/1.1.
-- **A held request delays later requests on the same connection.** HTTP/2 requires new streams to reach the origin in order, so requests that start *after* a held one wait for your decision. Requests already in flight keep uploading, all responses keep arriving, and a held *response* delays nothing at all.
+- **A held request delays later requests on the same connection.** HTTP/2 requires new streams to reach the origin in order, so requests that start *after* a held one wait for your decision — including while gori is still buffering that request's body. Requests already in flight keep uploading, all responses keep arriving, and a held *response* delays nothing at all.
+- **Match & Replace on a *body* still downgrades the connection to HTTP/1.1**, even though a hold can now edit one. They are different bargains: a hold buffers a single message you are already waiting on, under a length it can see, while a body rule would have to rewrite every matching message unattended — including the streaming ones a hold declines to buffer.
 
 Everything a head rule cannot express on HTTP/2 ([Head rules on HTTP/2](#head-rules-on-http2), below) applies to a head you edit by hand too.
 

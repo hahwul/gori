@@ -14,6 +14,12 @@ require "socket"
 # ceiling the message is NOT held and takes the byte-exact streaming path, with one warning so
 # the operator learns why nothing appeared in the queue.
 #
+# h2 gained its own, LOWER ceiling on the same question in PR #6 (`H2::StreamGate::MAX_HOLD_BODY`,
+# 1 MiB): under it a held stream's body is buffered and editable, over it the hold covers the
+# head only and DATA streams past. The two numbers differ because an h1 connection carries one
+# request and an h2 connection multiplexes ~100 streams — see that constant's comment.
+# `spec/proxy/h2/stream_gate_spec.cr` covers the h2 side; this file is the h1 hold's ceiling.
+#
 # The tests key on "did the head reach the other side promptly?" rather than on shipping 16 MiB:
 # a hold reads the body BEFORE writing anything onward, so a held message shows the peer nothing.
 

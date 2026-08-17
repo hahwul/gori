@@ -286,7 +286,9 @@ module Gori::Proxy::Tls
     # (`H2::StreamGate`). `intercepts_host?` is not consulted by
     # `intercepts_request?`/`intercepts_response?` (`interceptor.cr` — they take their own
     # snapshot), so removing it weakened no gate. What it DID change is that a held h2 message
-    # is the head only, because DATA streams past untouched until step 5.
+    # was the head only, because DATA streamed past untouched. PR #6 narrowed that to the
+    # bodies the gate cannot buffer (`H2::StreamGate::MAX_HOLD_BODY`); a Match&Replace BODY
+    # rule still earns the downgrade, which is what this gate is left deciding.
     #
     # The SANDBOX gate came out in step 4, and it is the one removal that had to answer a
     # different question, because the sandbox is not a seam: an unreachable seam silently does

@@ -989,6 +989,61 @@ here because the gap was not noticed until a structure review looked for it: a n
 parity is part of shipping it, not a follow-up, and the seam is the thing that makes the two
 non-TUI surfaces cheap enough for that to be true.
 
+### 2026-08-17: an h2 intercept may buffer a complete body; Match&Replace body still forces h1
+
+Refines: [P4](#p4), [P6](#p6), [P7](#p7). PR #6.
+
+Every HTTP/2 intercept hold used to cover the HEAD only. The reason was structural rather than
+a limit: `H2::StreamGate` defers a stream's opening header block and *parks every frame that
+arrives behind it* — nothing may overtake a deferred head (RFC 9113 §5.1.1) — so the body was
+already in gori's hands, and the hold showed a human the head anyway. A body typed into the
+editor was discarded, and `Interceptor::Item#head_only?` existed to let each surface say so
+before it acked an edit it could not apply.
+
+The hold now covers head+body when the message declares a `content-length` at or under
+`H2::StreamGate::MAX_HOLD_BODY` (1 MiB), or when its head carries END_STREAM and so *is* the
+whole message. The queue row then carries the entity, an edit's body is the operator's, and
+`release_locked` re-frames it into DATA — moving END_STREAM onto the last DATA frame when the
+head had carried it, and leaving it on the trailers when trailers end the message.
+
+Three exclusions keep the head-only hold, each for its own reason rather than by omission:
+
+* **No declared length** — a streaming upload, SSE, a gRPC stream. Buffering means waiting, and
+  a body whose end gori cannot predict is a wait with no end ([P6](#p6)).
+* **Over the ceiling.** 1 MiB is deliberately below h1's own hold ceiling
+  (`ClientConn::MAX_REWRITE_BODY`, 16 MiB), and the asymmetry is the protocol's: an h1
+  connection carries one request, an h2 connection multiplexes ~100 concurrent streams, so the
+  same number would be a per-connection budget 100x larger on a single-threaded scheduler.
+* **A PADDED DATA frame.** Stripping §6.1 padding is `Assembler#data_block`'s job, and a second
+  copy of it on the pump fiber would raise where the assembler projects around the failure.
+
+Two consequences are worth stating because they are behaviour changes, not refinements:
+
+1. **The queue row appears when the message finishes arriving, not when its head does.** That is
+   h1's own timing (`ClientConn` reads the whole entity before `hold_request`), but on h2 the
+   wait also delays later stream opens behind it, because releases follow `@opens` order. It is
+   bounded by the declared-length gate — gori only ever waits for an end it can predict — by
+   `check_ceiling`, which fails the whole run of slots open past `MAX_DEFERRED_BYTES` plus the
+   body it agreed to buffer, and by toggle-off. That last one needed a new seam: a hold still
+   buffering has no queue row, so `Interceptor#toggle`'s release cannot reach it. The gate asks
+   `Interceptor#holding?` when a frame arrives instead, which is sufficient rather than merely
+   cheap — a waiting slot with nothing behind it blocks nobody, and a stream blocked behind one
+   only becomes blocked when its own frames reach the gate.
+2. **`restore_content_length` does not run on a buffered hold.** The R3-F2 rule (#513) reverts a
+   `content-length` an editor computed *for* the operator, because on a head-only hold it
+   described bytes gori was not going to send. When the body is held, the edit's body *is* what
+   gori sends, so a synced value is simply true and a mismatched one is the §8.1.1 probe the
+   operator opened the editor to run. Both go out verbatim — which is what h1 already does with
+   the identical edit ([P7](#p7)).
+
+**Match&Replace over a body still forces the h1 downgrade** (`Tls::Tunnel#h2_candidate?`), along
+with a body-scoped extract rule and a short-circuit stub, and this decision does not weaken that.
+A hold buffers *one* message a human is already waiting on, under a declared length, with the
+operator watching. A body rule rewrites *every* matching message on the connection, unattended,
+including the ones with no declared length at all — the shapes the hold explicitly refuses to
+buffer. They are different bargains, and the downgrade is the honest answer for the second one
+until #492 step 5 makes it unnecessary.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update

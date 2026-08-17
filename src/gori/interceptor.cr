@@ -90,8 +90,14 @@ module Gori
       # nil on h1, where the decision bytes are forwarded byte-exact.
       getter edit_refusal : String?
       # This hold covers the HEAD only, so a body typed into an edit has nowhere to go: the h2
-      # relay streams DATA past the gate untouched (#492 step 3, D2). h1 holds head+body and
-      # leaves this false.
+      # relay is streaming this message's DATA past the gate untouched.
+      #
+      # NOT every h2 hold, since PR #6: when the message declares a `content-length` the gate
+      # can buffer (`H2::StreamGate::MAX_HOLD_BODY`), or ends at its own head, the hold covers
+      # head+body and this stays false — the operator's body is re-framed into DATA on forward.
+      # It is true for the shapes gori will not buffer: no declared length (a streaming upload,
+      # SSE, a gRPC stream), a length over the ceiling, or a padded body. h1 holds head+body
+      # always and leaves this false.
       getter? head_only : Bool
 
       def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at,
@@ -116,9 +122,10 @@ module Gori
         end
         return nil unless head_only? && Interceptor.split_edit(bytes)[1]
         "this HTTP/2 hold covers the HEAD only, so the body in this edit has nowhere to go — " \
-        "DATA frames stream past the intercept gate untouched (#492 step 3) and gori will not " \
-        "report having sent bytes it dropped. Edit the head, or replay the whole message from " \
-        "the Repeater"
+        "gori buffers a held h2 body only when the message declares a content-length it can " \
+        "hold, and this one does not (a streaming body, or one over the ceiling), so its DATA " \
+        "frames stream past the intercept gate untouched and gori will not report having sent " \
+        "bytes it dropped. Edit the head, or replay the whole message from the Repeater"
       end
 
       # How this queue row is NAMED to a human or an agent — the ack for an irreversible
@@ -234,6 +241,16 @@ module Gori
 
     def enabled? : Bool
       @mutex.synchronize { @enabled }
+    end
+
+    # Whether a hold offered right now would actually be QUEUED — the condition `enqueue` tests,
+    # and the one `gate_snapshot` reads for the same reason. Distinct from `enabled?` because
+    # shutdown latches `@shutting_down` without flipping `@enabled`, and a caller asking "is
+    # there any point holding this?" needs both. `H2::StreamGate` asks: a hold of its still
+    # buffering a body has no queue row for `toggle`/`release_all` to hand back, so it has to
+    # notice the gate closing on its own.
+    def holding? : Bool
+      @mutex.synchronize { @enabled && !@shutting_down }
     end
 
     # Which leg(s) are currently held (TUI reads it to render the catch chip).

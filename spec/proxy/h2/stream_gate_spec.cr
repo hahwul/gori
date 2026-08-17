@@ -127,6 +127,31 @@ private def data_bytes(frames : Array(Frame::Header), stream : UInt32) : Int32
   frames.select { |f| f.stream_id == stream && f.frame_type == Frame::Type::Data }.sum(&.payload.size)
 end
 
+# A PADDED DATA frame (RFC 9113 §6.1): one pad-length octet, the data, then the padding.
+private def padded_data(stream : UInt32, body : String, pad : Int32, flags = 0_u8) : Frame::Header
+  payload = IO::Memory.new
+  payload.write_byte(pad.to_u8)
+  payload.write(body.to_slice)
+  pad.times { payload.write_byte(0_u8) }
+  Frame::Header.new(Frame::Type::Data.value, flags | Frame::PADDED, stream, payload.to_slice)
+end
+
+# A declared body over `MAX_HOLD_BODY`, so the hold stays HEAD-ONLY. Only the DECLARED length
+# is gated, so no spec ever has to move a megabyte.
+private def over_hold_body : String
+  (Gate::MAX_HOLD_BODY + 1).to_s
+end
+
+# A POST that declares `len` bytes of body — the shape the gate buffers.
+private def post_len(path : String, len : Int32) : Array({String, String})
+  post(path) + [{"content-length", len.to_s}]
+end
+
+private def data_payloads(frames : Array(Frame::Header), stream : UInt32) : Array(String)
+  frames.select { |f| f.stream_id == stream && f.frame_type == Frame::Type::Data }
+    .map { |f| String.new(f.payload) }
+end
+
 private def response(status : String) : Array({String, String})
   [{":status", status}, {"content-type", "text/plain"}]
 end
@@ -349,12 +374,16 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
-  it "ignores a body typed into a held h2 head, and reverts the editor's Content-Length" do
+  # A body gori will NOT buffer keeps the head-only hold: no `content-length` at all, which is
+  # every streaming upload, SSE stream and gRPC stream. There is no end to wait for, so the
+  # hold covers the head and the DATA goes past untouched.
+  it "ignores a body typed into a HEAD-ONLY held h2 head, and reverts the editor's Content-Length" do
     with_ic do |ic|
       rig = Rig.new(ic)
-      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/p"))))
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post("/p")), Frame::END_HEADERS))
       settle
       item = ic.pending.first
+      item.head_only?.should be_true
       # What `InterceptView#forward_bytes` would produce for an edit that adds a body.
       ic.forward(item.id, "POST /p HTTP/2\r\nHost: api.example.com\r\nContent-Length: 5\r\n\r\nhello".to_slice)
       settle
@@ -382,7 +411,9 @@ describe Gori::Proxy::H2::StreamGate do
       item = ic.pending.first
       item.edit_refusal.not_nil!.should contain("x-evil")
       item.edit_refusal.not_nil!.should contain("CR or LF")
-      item.head_only?.should be_true
+      # The head carries END_STREAM, so it IS the whole message and the hold covers head+body
+      # (PR #6) — the refusal is about the head's h1 text form, which is a different question.
+      item.head_only?.should be_false
     end
   end
 
@@ -418,10 +449,15 @@ describe Gori::Proxy::H2::StreamGate do
   # R3-F2. h1 forwards the identical edit byte-exact and its comment says why: "the proxy must
   # not rewrite bytes the human chose to send (e.g. a deliberately CL-mismatched smuggling
   # probe)". On h2 that probe is the RFC 9113 §8.1.1 one, and it was unexpressible.
+  #
+  # Both of these need a HEAD-ONLY hold, which is why the declared length is over
+  # `MAX_HOLD_BODY`: a body gori buffers makes the operator's content-length simply true about
+  # the bytes it is about to send, so neither the probe nor the restore is a question there
+  # (`StreamGate#edited_with_body`).
   it "honours a content-length the operator DECLARED (no editor synced it)" do
     with_ic do |ic|
       rig = Rig.new(ic)
-      fields = post("/cl") + [{"content-length", "10"}]
+      fields = post("/cl") + [{"content-length", over_hold_body}]
       rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
       settle
       item = ic.pending.first
@@ -443,16 +479,17 @@ describe Gori::Proxy::H2::StreamGate do
   it "puts the peer's content-length back when the surface synced it against a body h2 will not send" do
     with_ic do |ic|
       rig = Rig.new(ic)
-      fields = post("/cl") + [{"content-length", "10"}]
+      fields = post("/cl") + [{"content-length", over_hold_body}]
       rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
       settle
       item = ic.pending.first
+      item.head_only?.should be_true
       ic.forward(item.id,
         "POST /cl HTTP/2\r\nHost: api.example.com\r\ncontent-length: 0\r\nx-probe: edited\r\n\r\n".to_slice)
       settle
 
       head = head_of(rig.to_origin, 1_u32).not_nil!
-      head.find { |(n, _)| n == "content-length" }.not_nil![1].should eq("10")
+      head.find { |(n, _)| n == "content-length" }.not_nil![1].should eq(over_hold_body)
       head.find { |(n, _)| n == "x-probe" }.not_nil![1].should eq("edited")
     end
   end
@@ -483,6 +520,300 @@ describe Gori::Proxy::H2::StreamGate do
       rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
       settle
       ic.pending_count.should eq(1)
+    end
+  end
+
+  # ---- PR #6: a hold that covers the BODY ------------------------------------
+  #
+  # The frames behind a deferred head are parked regardless (rule 1 lets nothing overtake it),
+  # so a message that declares a length the gate can hold gets a hold over head+body: the queue
+  # row carries the entity and an edit's body is re-framed into DATA. Everything else keeps the
+  # head-only hold, and each exclusion is its own spec below.
+
+  it "waits for the declared body, then holds head+BODY" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      settle
+      # Nothing is offered to a human yet: half a message is not a thing to decide about. That
+      # is h1's own timing — its hold reads the whole entity before `hold_request`.
+      ic.pending_count.should eq(0)
+      rig.to_origin.should be_empty
+
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.pending_count.should eq(1)
+      item = ic.pending.first
+      item.head_only?.should be_false
+      String.new(item.raw).should eq("POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 5\r\n\r\nhello")
+      rig.to_origin.should be_empty
+    end
+  end
+
+  it "forwards an unedited head+body hold with the peer's own DATA frames, unsplit" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "he"))
+      rig.c2s.accept(data(1_u32, "llo", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id)
+      settle
+
+      sent = rig.to_origin
+      sent.map(&.frame_type).should eq([Frame::Type::Headers, Frame::Type::Data, Frame::Type::Data])
+      data_payloads(sent, 1_u32).should eq(["he", "llo"]) # boundaries included
+      sent.last.end_stream?.should be_true
+    end
+  end
+
+  it "re-frames DATA from an edited body and sends the operator's content-length" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 7\r\n\r\ngoodbye".to_slice)
+      settle
+
+      sent = rig.to_origin
+      # The edit's body IS what gori sends, so its content-length is simply true about the
+      # DATA — no `restore_content_length` (R3-F2 reaching its base case).
+      head_of(sent, 1_u32).not_nil!.find { |(n, _)| n == "content-length" }.not_nil![1].should eq("7")
+      data_payloads(sent, 1_u32).should eq(["goodbye"])
+      sent.last.end_stream?.should be_true
+    end
+  end
+
+  it "keeps the peer's DATA frames byte-for-byte when the edit changed only the head" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "he"))
+      rig.c2s.accept(data(1_u32, "llo", Frame::END_STREAM))
+      settle
+      item = ic.pending.first
+      ic.forward(item.id, String.new(item.raw).sub("Host:", "x-probe: 1\r\nHost:").to_slice)
+      settle
+
+      head_of(rig.to_origin, 1_u32).not_nil!.find { |(n, _)| n == "x-probe" }.not_nil![1].should eq("1")
+      data_payloads(rig.to_origin, 1_u32).should eq(["he", "llo"]) # not re-framed
+    end
+  end
+
+  it "gives a bodiless message a body, moving END_STREAM off the head onto the DATA" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      # A GET: the head carries END_STREAM, so it IS the whole message and its body is zero
+      # bytes long — buffered by construction, which is why an edit may add one.
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/p"))))
+      settle
+      ic.pending.first.head_only?.should be_false
+      ic.forward(ic.pending.first.id,
+        "POST /p HTTP/2\r\nHost: api.example.com\r\ncontent-length: 5\r\n\r\nhello".to_slice)
+      settle
+
+      sent = rig.to_origin
+      sent.map(&.frame_type).should eq([Frame::Type::Headers, Frame::Type::Data])
+      # DATA after a half-closed stream is a §5.1 protocol error, so the flag moved.
+      sent.first.end_stream?.should be_false
+      sent.last.end_stream?.should be_true
+      data_payloads(sent, 1_u32).should eq(["hello"])
+      head_of(sent, 1_u32).not_nil!.find { |(n, _)| n == "content-length" }.not_nil![1].should eq("5")
+    end
+  end
+
+  it "still half-closes the stream when an edit empties the body" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 0\r\n\r\n".to_slice)
+      settle
+
+      sent = rig.to_origin
+      data_payloads(sent, 1_u32).should eq([""]) # a zero-length DATA is legal (§6.1)
+      sent.last.end_stream?.should be_true       # ...and nobody else is left to half-close it
+    end
+  end
+
+  it "leaves END_STREAM on the trailers rather than on a rebuilt body" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello"))
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode([{"x-trailer", "1"}])))
+      settle
+      ic.pending_count.should eq(1)
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 3\r\n\r\nbye".to_slice)
+      settle
+
+      sent = rig.to_origin
+      sent.map(&.frame_type).should eq([Frame::Type::Headers, Frame::Type::Data, Frame::Type::Headers])
+      data_payloads(sent, 1_u32).should eq(["bye"])
+      sent[1].end_stream?.should be_false # the trailers still end the message
+      sent[2].end_stream?.should be_true
+    end
+  end
+
+  it "splits a rebuilt body at the frame size every peer must accept" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      big = "B" * (Gori::Proxy::H2::HeadRewrite::MAX_FRAME_PAYLOAD + 100)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 1)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "x", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: #{big.size}\r\n\r\n#{big}".to_slice)
+      settle
+
+      payloads = data_payloads(rig.to_origin, 1_u32)
+      payloads.map(&.size).should eq([Gori::Proxy::H2::HeadRewrite::MAX_FRAME_PAYLOAD, 100])
+      payloads.join.should eq(big)
+      rig.to_origin.last.end_stream?.should be_true
+    end
+  end
+
+  it "keeps the head-only hold for a declared body over the ceiling" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      fields = post("/big") + [{"content-length", over_hold_body}]
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
+      settle
+      # Held at once — there is no body to wait for, because gori is not going to buffer it.
+      ic.pending_count.should eq(1)
+      ic.pending.first.head_only?.should be_true
+    end
+  end
+
+  it "keeps the head-only hold when the message declares two content-lengths" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      # RFC 9113 §8.1.1-malformed, and gori does not get to pick which one it believes.
+      fields = post("/two") + [{"content-length", "5"}, {"content-length", "9"}]
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+      ic.pending.first.head_only?.should be_true
+    end
+  end
+
+  it "gives the buffer up on a PADDED DATA frame and holds the head only" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(0)
+
+      padded = padded_data(1_u32, "hello", 4, Frame::END_STREAM)
+      rig.c2s.accept(padded)
+      settle
+      # Stripping padding is `Assembler#data_block`'s job, not a second copy of it here.
+      ic.pending_count.should eq(1)
+      item = ic.pending.first
+      item.head_only?.should be_true
+      String.new(item.raw).should_not contain("hello")
+
+      ic.forward(item.id)
+      settle
+      # ...and the peer's own padded frame goes out exactly as it arrived (P7).
+      rig.to_origin.last.payload.should eq(padded.payload)
+    end
+  end
+
+  it "holds a RESPONSE head+body and re-frames an edited body to the client" do
+    with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/x")), Frame::END_HEADERS))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200") + [{"content-length", "2"}]),
+        Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(0) # waiting for the body, exactly as the request leg does
+      rig.s2c.accept(data(1_u32, "ok", Frame::END_STREAM))
+      settle
+
+      item = ic.pending.first
+      item.head_only?.should be_false
+      String.new(item.raw).should end_with("\r\n\r\nok")
+      ic.forward(item.id, String.new(item.raw).sub("content-length: 2", "content-length: 3").sub(/ok\z/, "OK!").to_slice)
+      settle
+
+      data_payloads(rig.to_client, 1_u32).should eq(["OK!"])
+      head_of(rig.to_client, 1_u32).not_nil!.find { |(n, _)| n == "content-length" }.not_nil![1].should eq("3")
+    end
+  end
+
+  it "queues a LATER stream open behind one that is still buffering its body" do
+    with_ic do |ic|
+      ic.set_filter("path:/held")
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/held", 5)), Frame::END_HEADERS))
+      settle
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free")), Frame::END_HEADERS))
+      settle
+      # §5.1.1 again: 3 may not reach the origin ahead of 1, and 1 is not decided yet because
+      # its body is still arriving.
+      rig.to_origin.should be_empty
+
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.pending_count.should eq(1)
+      ic.forward(ic.pending.first.id)
+      settle
+      rig.to_origin.map(&.stream_id).should eq([1_u32, 1_u32, 3_u32])
+    end
+  end
+
+  it "fails a still-buffering hold open past the ceiling rather than waiting forever" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      settle
+      # A peer that declares 5 bytes and then ignores both its promise and its flow-control
+      # window. The hold fails OPEN, the same disposition every other overflow here has.
+      blast(rig.c2s, 1_u32, Gate::MAX_DEFERRED_BYTES + 5 + 16384)
+      settle
+      ic.pending_count.should eq(0)
+      rig.to_origin.first.frame_type.should eq(Frame::Type::Headers)
+      data_bytes(rig.to_origin, 1_u32).should be > Gate::MAX_DEFERRED_BYTES
+    end
+  end
+
+  it "releases a still-buffering hold when intercept is switched off" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(0) # waiting for the body, so there is no queue row to release
+
+      ic.toggle # off — `Interceptor#toggle` hands back every QUEUED item, and this is not one
+      settle
+      rig.to_origin.should be_empty # nothing has arrived on the connection yet
+
+      # A later stream is what makes the wait cost anything, and its arrival is what notices.
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/free")), Frame::END_HEADERS))
+      settle
+      rig.to_origin.map(&.stream_id).should eq([1_u32, 3_u32])
+    end
+  end
+
+  it "records the body that ARRIVED when a head+body hold is dropped" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/nope", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.drop(ic.pending.first.id)
+      settle
+
+      rig.to_origin.should be_empty
+      String.new(rig.sink.requests.first.body.not_nil!).should eq("hello")
+      rig.sink.responses.first.error.should eq(Gate::DROP_REQUEST_REASON)
     end
   end
 

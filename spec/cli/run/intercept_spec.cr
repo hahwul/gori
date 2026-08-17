@@ -191,9 +191,10 @@ describe "held-item edit refusal on the read surfaces" do
     detail["edit_refusal"].as_s.should contain("x-evil")
   end
 
-  # EVERY h2 hold is head-only (`H2::StreamGate` passes `head_only: true` on both legs), so
-  # folding that into `edit_refusal` would mark every held HTTP/2 message uneditable — head
-  # edits DO apply, only a body has nowhere to go. Two statements, two fields.
+  # An h2 hold whose body the gate could not buffer is head-only (no declared content-length,
+  # or one over `H2::StreamGate::MAX_HOLD_BODY`), so folding that into `edit_refusal` would mark
+  # such a message uneditable — head edits DO apply, only a body has nowhere to go. Two
+  # statements, two fields.
   it "does not report a head-only hold as a refusal" do
     row = refusing_row(nil, head_only: true)
     row.edit_refusal.should be_nil

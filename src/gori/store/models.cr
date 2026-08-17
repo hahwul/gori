@@ -1196,15 +1196,17 @@ module Gori
 
       # The head-only CAVEAT, and deliberately NOT folded into `edit_refusal`.
       #
-      # Every h2 hold is head-only (`H2::StreamGate` passes `head_only: true` on both legs),
-      # so treating it as a refusal would mark every held HTTP/2 message uneditable — and head
-      # edits DO apply. Only a body has nowhere to go. Two different statements, so two
-      # accessors: a surface that chips "cannot be edited" must key on `edit_refusal` alone.
-      # nil when the hold covers head+body (h1), where an edit is forwarded byte-exact.
+      # Treating it as a refusal would mark the message uneditable — and head edits DO apply.
+      # Only a body has nowhere to go. Two different statements, so two accessors: a surface
+      # that chips "cannot be edited" must key on `edit_refusal` alone. nil when the hold covers
+      # head+body — every h1 hold, and since PR #6 the h2 holds whose body `H2::StreamGate`
+      # could buffer — where an edit is forwarded with its body.
       def head_only_note : String?
         return nil unless @head_only
-        "this HTTP/2 hold covers the HEAD only — an edit that ADDS A BODY will be refused " \
-        "(DATA frames stream past the intercept gate untouched); a head edit applies normally"
+        "this HTTP/2 hold covers the HEAD only — an edit that ADDS A BODY will be refused. " \
+        "gori buffers a held h2 body only when the message declares a content-length it can " \
+        "hold; this one does not, so its DATA frames stream past the intercept gate untouched " \
+        "and a head edit is the only one that applies"
       end
     end
 
