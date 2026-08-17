@@ -24,9 +24,10 @@ class Gori::Tui::RepeaterView
   # Load a GraphQL flow: envelope = full request; decoded = the operation as readable
   # query + variables (Graphql.display), re-composed into the JSON body on send.
   def load_graphql(detail : Store::FlowDetail, op : Graphql::Op) : Nil
-    # Record the binding (POST body vs GET ?query=) so the re-encode targets the right place —
-    # mirrors @saml_location. Without it a GET GraphQL edit would splice into a phantom body
-    # while the origin reads the stale URL query (the decoded edit would never reach it).
+    # Record the binding (which side, and in which grammar) so the re-encode targets the
+    # right place — mirrors @saml_location. Without it a GET GraphQL edit would splice into a
+    # phantom body while the origin reads the stale URL query (the decoded edit would never
+    # reach it), and a batch would be written back as a single JSON object.
     @graphql_location = Graphql.location(detail.request_body, detail.request_head)
     seed_decode(detail, :graphql, Graphql.display(op))
   end
@@ -190,29 +191,33 @@ class Gori::Tui::RepeaterView
   end
 
   private def graphql_splice_text(env : String) : String
-    # `:none` — a batched / persisted / multipart / `application/graphql` request. Those
-    # shapes render but do not round-trip (`Graphql::Op#editable?`), so there is nothing to
-    # splice: send the envelope the operator sees, byte for byte. The controller already
-    # declines to open them split; this is the second gate, because `refresh_decoded` can
-    # move a tab into one of those shapes mid-edit and a re-encode from a projection is a
+    # `:none` — a multipart request, a parse failure, or a decode of a chunked/compressed
+    # entity. Those render but do not round-trip (`Graphql::Op#editable?`), so there is
+    # nothing to splice: send the envelope the operator sees, byte for byte. The controller
+    # already declines to open them split; this is the second gate, because `refresh_decoded`
+    # can move a tab into one of those shapes mid-edit and a re-encode from a projection is a
     # request the operator never wrote.
-    case @graphql_location
-    when :none # see above
-      env
-    when :query # GET: rewrite the request-line query (no body), like SAML Redirect
+    return env if @graphql_location == :none
+    if @graphql_location == :query # GET: rewrite the request-line query, like SAML Redirect
       lines = env.split('\n')
       lines[0] = graphql_query_line(lines[0], @decoded.text) if lines[0]?
-      lines.join('\n')
-    when :form_body
-      # A `query=…&variables=…` urlencoded body: the same grammar as the GET binding, so it
-      # is rewritten in the same way — NOT recomposed as JSON, which would leave a JSON body
-      # under a Content-Type still declaring urlencoded.
-      sep = env.index("\n\n") || return env
-      "#{env[0, sep]}\n\n#{Graphql.recompose_form(env[(sep + 2)..], @decoded.text)}"
-    else # POST: recompose the JSON body, preserving other fields
-      sep = env.index("\n\n") || return env
-      "#{env[0, sep]}\n\n#{Graphql.recompose(env[(sep + 2)..], @decoded.text)}"
+      return lines.join('\n')
     end
+    # Every remaining binding writes the BODY, and each has its own inverse in `Graphql` —
+    # one branch per `location` answer, so the grammar the pane is written back in is never
+    # guessed here. A urlencoded body is rewritten as `k=v` pairs, NOT recomposed as JSON,
+    # which would leave a JSON body under a Content-Type still declaring urlencoded; a batch
+    # goes back as the array it was; an `application/graphql` document IS the body.
+    sep = env.index("\n\n") || return env
+    body = env[(sep + 2)..]
+    encoded = case @graphql_location
+              when :form_body      then Graphql.recompose_form(body, @decoded.text)
+              when :batch_body     then Graphql.recompose_batch(body, @decoded.text)
+              when :persisted_body then Graphql.recompose_persisted(body, @decoded.text)
+              when :document_body  then Graphql.recompose_document(@decoded.text)
+              else                      Graphql.recompose(body, @decoded.text)
+              end
+    "#{env[0, sep]}\n\n#{encoded}"
   end
 
   # Rewrite a request line's query with the edited GraphQL op re-encoded (GET binding),
@@ -228,8 +233,10 @@ class Gori::Tui::RepeaterView
     "#{rl[0, sp1]} #{path}?#{query} #{rl[(sp2 + 1)..]}"
   end
 
-  # Rewrite the Content-Length header (if present) to the envelope body's byte size —
-  # the LF-joined body has no embedded newlines (form/JSON), so it matches the wire.
+  # Rewrite the Content-Length header (if present) to the envelope body's byte size. The
+  # LF-joined body is byte-identical to the wire body: `expand_wire` normalizes the HEAD to
+  # CRLF and leaves the body alone, so an `application/graphql` document's own newlines are
+  # counted here exactly as they are sent (a form/JSON body has none to begin with).
   private def sync_cl_text(env : String) : String
     sep = env.index("\n\n") || return env
     body = env[(sep + 2)..]

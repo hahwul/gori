@@ -29,10 +29,17 @@ module Gori
     # was the shape gori showed as an ordinary form POST.
     #
     # The distinction is not cosmetic: it decides whether the Repeater may RE-ENCODE the
-    # request from the edited pane. `display`/`recompose` round-trip an operationName + query
-    # + variables triple, which is a faithful inverse for Json, Query and Urlencoded (all three
-    # store the triple as three named slots) and for nothing else — so the remaining four are
-    # projections only. See `editable?`.
+    # request from the edited pane, and each shape needs its OWN inverse. Json, Query and
+    # Urlencoded round-trip an operationName + query + variables triple through three named
+    # slots. Batch round-trips that same triple per indexed element back into the JSON array.
+    # Document needs no inverse at all — the pane IS the body. Persisted has no document to
+    # write back, so its pane is the JSON ENVELOPE itself and the inverse just re-minifies it,
+    # which is how the extensions/persistedQuery block becomes editable without gori inventing
+    # a `query` the client never sent.
+    #
+    # Multipart is the one parsed shape left display-only: the pane shows the `operations`
+    # part of a body whose other parts (`map`, the file blobs, the boundaries) are not in it,
+    # so writing the pane back would have to reconstruct bytes it never saw. See `editable?`.
     enum Form
       Json       # POST {"query": …}
       Query      # GET ?query=…
@@ -60,19 +67,28 @@ module Gori
       # literally carry, so it is display-only however invertible its shape is: recomposing
       # plain JSON into an envelope whose head still declares `Content-Encoding: gzip` sends a
       # request the origin cannot read.
-      projected : Bool = false do
-      # Whether `display(op)` → edit → `recompose` can put the operator's edit back into the
-      # exact request it came from. True ONLY for the three shapes that round-trip — a plain
-      # POST JSON body, a GET `?query=`, a `query=…` urlencoded body — and only when the bytes
-      # shown are the bytes sent (see `projected`).
+      projected : Bool = false,
+      # A Batch whose display cannot be parsed back into what the array sent: at least one
+      # element was a persisted query, so it renders as its own JSON envelope while its
+      # siblings render as the query triple, and one pane cannot be read back as both. A
+      # re-encode would have to drop or invent a document, so the whole batch stays read-only.
+      # An all-documents batch — the shape a batching-abuse test actually builds — is
+      # unaffected.
+      lossy : Bool = false do
+      # Whether `display(op)` → edit → the shape's `recompose*` can put the operator's edit
+      # back into the exact request it came from. Every shape that HAS an inverse says yes,
+      # but only when the bytes shown are the bytes sent (see `projected`) and the display can
+      # be read back as everything that was sent (see `lossy`).
       #
-      # For the rest the display text is a rendering, not an inverse — re-encoding a batch
-      # from it would collapse the array into one object, a persisted query has no document
-      # to write back, and a multipart/`application/graphql` body is not JSON at all. Sending
-      # a request the operator did not write is worse than showing a read-only pane, so the
-      # projection exists and the re-encode does not.
+      # Two shapes stay no. `Multipart` renders one part of a body whose other parts are not
+      # on screen. `Invalid` has no parse to invert — its pane is the REASON the parse failed,
+      # and writing that back would put an error message on the wire. Sending a request the
+      # operator did not write is worse than a read-only pane, so for those two the projection
+      # exists and the re-encode does not.
       def editable? : Bool
-        !projected && (form.json? || form.query? || form.urlencoded?)
+        return false if projected || lossy
+        form.json? || form.query? || form.urlencoded? ||
+          form.batch? || form.document? || form.persisted?
       end
     end
 
@@ -315,19 +331,25 @@ module Gori
       # No document. A `persistedQuery` extension says so explicitly — the server resolves
       # the hash to a stored document — and nothing else in the wild carries that key, so it
       # is a safe positive where a bare `{"variables":…}` would not be.
-      pq = h["extensions"]?.try(&.as_h?).try(&.["persistedQuery"]?).try(&.as_h?) || return nil
-      Op.new(name, persisted_text(pq), vars_text, Form::Persisted)
+      return nil unless h["extensions"]?.try(&.as_h?).try(&.["persistedQuery"]?).try(&.as_h?)
+      # The WHOLE envelope, not just the extension: the pane is the request now, not a
+      # rendering of one, so what it holds is every field the server will read.
+      Op.new(name, persisted_text(h), vars_text, Form::Persisted)
     end
 
-    # The read-only rendering of a persisted query: there is no document on the wire, so the
-    # pane shows what WAS sent — the version and the hash the server will look up.
-    private def persisted_text(pq : Hash(String, JSON::Any)) : String
-      String.build do |io|
-        io << "# persisted query — no document was sent"
-        pq.each do |k, v|
-          io << "\n# " << k << ": " << (v.as_s? || v.to_json)
-        end
-      end
+    # The pane for a persisted query. There is no document to show and none to edit — the
+    # server resolves a hash to a stored document — so the pane is the JSON ENVELOPE itself,
+    # pretty-printed: the hash, its version, the operationName and the variables, which is
+    # exactly the set of fields an allowlist-bypass test changes. `recompose_persisted`
+    # re-minifies whatever comes back, so the operator edits the request rather than a
+    # rendering of it and gori never has to invent a `query` the client did not send.
+    #
+    # The leading `#` line is not JSON; `recompose_persisted` drops the leading comment lines
+    # before parsing. It earns the special case: a bare envelope under the GraphQL heading
+    # reads as "gori failed to decode this", which is the answer this module exists to avoid.
+    private def persisted_text(h : Hash(String, JSON::Any)) : String
+      "# persisted query — no document was sent; this is the envelope, edit it directly\n" +
+        h.to_pretty_json
     end
 
     # A batched request. Every element must be an object that is itself an op — one stray
@@ -336,15 +358,21 @@ module Gori
     private def from_batch(arr : Array(JSON::Any)) : Op?
       return nil if arr.empty?
       ops = [] of Op
+      lossy = false
       arr.each do |item|
         h = item.as_h? || return nil
-        ops << (single_op(h) || return nil)
+        op = single_op(h) || return nil
+        lossy = true unless op.form.json? # a persisted element — see `Op#lossy`
+        ops << op
       end
-      Op.new(nil, batch_text(ops), nil, Form::Batch)
+      Op.new(nil, batch_text(ops), nil, Form::Batch, lossy: lossy)
     end
 
-    # The read-only rendering of a batch: each operation in order, under its index, so the
-    # operator can see how many calls one request carries and what each of them asks for.
+    # The rendering of a batch: each operation in order, under its index, so the operator can
+    # see how many calls one request carries and what each of them asks for. `# --- [i] ---`
+    # is the sentinel `recompose_batch` splits the edited pane on, and it is always written
+    # after a BLANK line — that is what tells it apart from a GraphQL comment that happens to
+    # be spelled the same way, the disambiguation `# variables` and `# operationName:` get.
     private def batch_text(ops : Array(Op)) : String
       String.build do |io|
         io << "# batch of " << ops.size << " operation" << (ops.size == 1 ? "" : "s")
@@ -393,6 +421,11 @@ module Gori
       # than at each of the five call sites (History detail, the Fuzzer pane, `gori run show`,
       # `get_flow`, the Repeater's read-only view) so none of them can render an empty box.
       return "# GraphQL parse failed: #{op.note}" if op.form.invalid?
+      # A persisted query's `query` slot already holds the WHOLE envelope (`persisted_text`),
+      # operationName and variables included, so the triple layout below would render both of
+      # them twice — once as a header/footer and once inside the JSON the pane edits. The Op
+      # keeps the two fields set anyway because `decoded_view` reports them separately.
+      return op.query if op.form.persisted?
       String.build do |io|
         if name = op.operation
           io << "# operationName: " << name << "\n\n"
@@ -452,8 +485,16 @@ module Gori
     # persisted-query `extensions`) survive. Invalid edited variables fall back to the
     # original. Returns minified JSON (wire form).
     def recompose(envelope_body : String, decoded_text : String) : String
-      op, query, vars_text = parse_display(decoded_text)
       base = (JSON.parse(strip(envelope_body)).as_h? rescue nil)
+      overlay(base, *parse_display(decoded_text)).to_json
+    end
+
+    # One edited {operationName?, query, variables?} triple laid over the JSON object it came
+    # out of. Extracted so the single envelope and each element of a BATCH cannot drift on the
+    # two rules below — a batch is N of these, and re-deriving them per element is exactly how
+    # "the deleted header means unset" would have come back only on the single-envelope path.
+    private def overlay(base : Hash(String, JSON::Any)?, op : String?, query : String,
+                        vars_text : String?) : Hash(String, JSON::Any)
       obj = {} of String => JSON::Any
       obj["operationName"] = JSON::Any.new(op) if op
       obj["query"] = JSON::Any.new(query)
@@ -467,7 +508,99 @@ module Gori
       # set, so an operator who deleted the header meant to unset it, and overlaying the base
       # back silently ignored the deletion. Absence here is a decision, not "unchanged".
       base.try &.each { |k, v| obj[k] = v unless obj.has_key?(k) || k == "operationName" }
-      obj.to_json
+      obj
+    end
+
+    # Re-encode the edited DECODED pane of a BATCH back into the JSON array. Each
+    # `# --- [i] ---` block is one element, parsed by the same `parse_display` the single
+    # envelope uses and laid over the ORIGINAL element at that index, so an element's other
+    # fields survive exactly as they do for a lone envelope. Returns minified JSON.
+    #
+    # The index comes off the MARKER, not from the block's position, because the operator
+    # edits the pane freely: deleting `[0]` leaves `[1]` sitting first, and overlaying the
+    # original element 0 under it would graft element 0's `extensions` onto element 1's query.
+    # A block whose marker names an index the original array does not have simply gets no base
+    # — a batch the operator grew is a batch of exactly what they wrote.
+    #
+    # An edit that removed every marker is read as ONE operation rather than refused: the
+    # blocks are the only structure the pane has, and a pane with none is a single document.
+    # A pane that is empty after that keeps the original body — there is no request in it.
+    def recompose_batch(orig_body : String, decoded_text : String) : String
+      base = (JSON.parse(strip(orig_body)).as_a? rescue nil)
+      segments = batch_segments(decoded_text)
+      return orig_body if segments.empty? # verbatim: a fallback must not even re-trim (P7)
+      elements = segments.map do |(idx, text)|
+        el = idx.try { |i| base.try(&.[i]?).try(&.as_h?) }
+        overlay(el, *parse_display(text))
+      end
+      elements.to_json
+    end
+
+    # `# --- [i] ---`, the batch element marker `batch_text` writes. Anchored and strict: a
+    # GraphQL comment has to be spelled exactly this way, and be preceded by a blank line
+    # (checked by the caller), before it is allowed to cut a document in half.
+    BATCH_MARK_RE = /\A#\s*---\s*\[(\d+)\]\s*---\z/
+
+    # The edited batch pane split into {declared index, block text} pairs. Anything before the
+    # first marker is the `# batch of N operations` preamble and is dropped; blocks that are
+    # blank after an edit carry no operation and are dropped too.
+    private def batch_segments(text : String) : Array({Int32?, String})
+      lines = text.split('\n')
+      segs = [] of {Int32?, String}
+      cur = nil.as(Array(String)?)
+      idx = nil.as(Int32?)
+      lines.each_with_index do |line, i|
+        if (m = BATCH_MARK_RE.match(line.strip)) && (i == 0 || lines[i - 1].strip.empty?)
+          if c = cur
+            segs << {idx, c.join('\n')}
+          end
+          cur = [] of String
+          idx = m[1].to_i?
+          next
+        end
+        cur.try &.<< line
+      end
+      if c = cur
+        segs << {idx, c.join('\n')}
+      end
+      segs.reject!(&.[1].strip.empty?)
+      return segs unless segs.empty?
+      rest = drop_batch_preamble(text)
+      rest.strip.empty? ? segs : [{nil.as(Int32?), rest}]
+    end
+
+    # Drop the `# batch of N operations` header line, which is a count gori wrote and not
+    # something the operator can mean — only reached when no marker survived the edit.
+    private def drop_batch_preamble(text : String) : String
+      lines = text.split('\n')
+      lines.shift if lines.first?.try(&.strip.starts_with?("# batch of"))
+      lines.join('\n')
+    end
+
+    # Re-encode the edited DECODED pane of a PERSISTED query. The pane is the JSON envelope
+    # itself (`persisted_text`), so the inverse is: drop the leading `#` banner and minify
+    # what is left. Nothing is added — if the operator wants to turn a hash-only request into
+    # a document one (the allowlist bypass), they type the `query` field and gori sends it;
+    # if they do not, gori does not invent one.
+    #
+    # An edit that does not parse as JSON keeps the ORIGINAL body, the same fallback invalid
+    # variables get in `overlay`: a half-typed envelope must not go on the wire as a body the
+    # server reads as something else.
+    def recompose_persisted(orig_body : String, decoded_text : String) : String
+      lines = strip(decoded_text).split('\n')
+      while lines.first?.try(&.lstrip.starts_with?('#'))
+        lines.shift
+      end
+      (JSON.parse(lines.join('\n')).to_json rescue orig_body) # verbatim on a bad edit (P7)
+    end
+
+    # Re-encode the edited DECODED pane of an `application/graphql` request: the body IS the
+    # document, so the pane holds the request's own bytes and the inverse is the identity.
+    # It exists as a named method anyway — the splice reads which inverse a form gets from one
+    # place, and a reader looking for Document's finds it here instead of concluding it has
+    # none. Nothing is stripped: leading whitespace in a document is the operator's bytes (P7).
+    def recompose_document(decoded_text : String) : String
+      decoded_text
     end
 
     # Re-encode the edited DECODED pane back into a GET request's query string, overlaying
@@ -514,32 +647,40 @@ module Gori
       recompose_query(orig_body, decoded_text)
     end
 
-    # Where a flow carries its op: `:body` (a POST JSON body that parses as GraphQL),
-    # `:form_body` (an `x-www-form-urlencoded` body), `:query` (a GET `?query=…`), or
-    # `:none`. Drives which side — and in which GRAMMAR — the Repeater re-encode targets.
+    # Where a flow carries its op AND in which grammar the edit is written back: `:body` (a
+    # POST JSON envelope), `:form_body` (an `x-www-form-urlencoded` body), `:batch_body` (the
+    # JSON array), `:persisted_body` (the hash-only envelope), `:document_body` (an
+    # `application/graphql` body, which IS the document), `:query` (a GET `?query=…`), or
+    # `:none`. One answer per inverse in this module, because that is what the Repeater
+    # splice dispatches on.
     #
-    # `:form_body` is its own answer rather than a flavour of `:body` because the two are not
-    # the same write: `:body` recomposes a JSON object, `:form_body` rewrites `k=v` pairs.
-    # Answering `:body` for a form-encoded request would replace the operator's form body
-    # with JSON while the Content-Type still said urlencoded — a request they never wrote.
+    # Each is its own answer rather than a flavour of `:body` because none of them is the same
+    # WRITE: `:body` recomposes a JSON object, `:form_body` rewrites `k=v` pairs, `:batch_body`
+    # rebuilds an array, `:document_body` writes the pane verbatim. Answering `:body` for a
+    # form-encoded request would replace the operator's form body with JSON while the
+    # Content-Type still said urlencoded — a request they never wrote — and answering it for a
+    # batch would collapse the array into one object.
     #
-    # `:none` is the answer for every shape `display` renders but `recompose` cannot invert
-    # (batch, persisted, multipart, raw document — see `Op#editable?`). It has to exist:
-    # once those shapes parse as GraphQL, answering `:body` would recompose a batch array
-    # into a single object and answering `:query` would rewrite the query STRING of a request
-    # whose payload is in the body. Either one sends a request the operator never wrote, on
-    # the strength of a projection.
+    # `:none` is the answer for every shape `display` renders but nothing can invert (multipart,
+    # a parse failure, a decoded entity, a batch carrying a persisted element). It follows
+    # `Op#editable?` exactly rather than re-deriving the list: a second copy of that decision
+    # is a second place for it to get a shape wrong, and getting it wrong means re-encoding
+    # from a projection.
     def location(req_body : Bytes?, req_head : Bytes? = nil) : Symbol
       entity, projected = Entity.of(req_head, req_body, MAX_BODY)
       op = ((b = entity) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, MediaType.of(req_head)) : nil
       return :query unless op # no body op at all — the GET `?query=` binding
       # A decoded entity is a projection (see `Op#projected`): the envelope holds the wire
-      # bytes, so there is no side to write an edit back into. Second gate for the same
-      # decision `editable?` makes, because `refresh_decoded` can move a tab onto one.
-      return :none if projected
+      # bytes, so there is no side to write an edit back into. `from_body` cannot know that —
+      # it is handed the already-decoded bytes — so `projected` is applied here, and then the
+      # ONE gate, because `refresh_decoded` can move a tab onto a projection mid-edit.
+      return :none if projected || !op.editable?
       case op.form
       when .json?       then :body
       when .urlencoded? then :form_body
+      when .batch?      then :batch_body
+      when .persisted?  then :persisted_body
+      when .document?   then :document_body
       else                   :none
       end
     end

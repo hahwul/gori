@@ -270,7 +270,7 @@ module Gori::Tui
       @saml_param = "SAMLResponse"
       @saml_binding = :post       # :post (base64) | :redirect (deflate+base64)
       @saml_location = :body      # :body (form) | :query (request line)
-      @graphql_location = :body   # :body (POST JSON) | :query (GET ?query=) — where the op lives
+      @graphql_location = :body   # `Graphql.location` — which side the op lives on, in which grammar
       @inflight = false           # a repeater round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
