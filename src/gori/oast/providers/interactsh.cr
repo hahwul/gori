@@ -86,7 +86,9 @@ module Gori::Oast
 
     def deregister(http : Http, session : Session) : Nil
       body = {"correlation-id" => session.correlation_id, "secret-key" => session.secret}.to_json
-      http.request("POST", "#{session.server_url}/deregister", json_headers, body)
+      resp = http.request("POST", "#{session.server_url}/deregister", json_headers, body)
+      return if {200, 201, 204, 404, 409}.includes?(resp.status)
+      raise Gori::Error.new("interactsh deregister failed: HTTP #{resp.status}")
     end
 
     # ---- internals ----

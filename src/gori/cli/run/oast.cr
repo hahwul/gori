@@ -490,10 +490,7 @@ module Gori
         # interval sleep swallows Ctrl-C until the next tick. (--once polls exactly once, so it
         # keeps the default Ctrl-C = immediate-exit behavior and installs no trap.)
         stop = Channel(Nil).new(1)
-        unless once
-          Signal::INT.trap { stop.send(nil) rescue nil }
-          Signal::TERM.trap { stop.send(nil) rescue nil }
-        end
+        install_oast_stop_trap(stop) unless once
         once_failed = false
         loop do
           interactions = begin
@@ -533,7 +530,7 @@ module Gori
       private def self.cmd_oast_session_release(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        id_arg : String? = nil
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run oast release <id>\n\n" \
@@ -542,13 +539,14 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id_arg = (before + after).first? }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run oast release: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast release: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
-        id = oast_session_id(id_arg, "release")
+        id = oast_session_id(leftover.first?, "release")
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           bound = oast_bind_session(store, id, "release")
@@ -640,10 +638,7 @@ module Gori
         # than only at the next tick. (--once polls exactly once and returns, so it keeps the
         # default Ctrl-C = immediate-exit behavior and installs no trap.)
         stop = Channel(Nil).new(1)
-        unless once
-          Signal::INT.trap { stop.send(nil) rescue nil }
-          Signal::TERM.trap { stop.send(nil) rescue nil }
-        end
+        install_oast_stop_trap(stop) unless once
         once_failed = false
         begin
           loop do
@@ -686,6 +681,25 @@ module Gori
       # INT/TERM trap sends to `stop`) so the poll loop breaks promptly, or false on timeout
       # to poll again. Split out both to keep oast_listen readable and to be unit-testable
       # without delivering a real signal.
+      # Second signal exits 130 instead of blocking in a full Channel#send (the
+      # same hole install_interrupt_trap closed). Shared by listen and resume.
+      private def self.install_oast_stop_trap(stop : Channel(Nil)) : Nil
+        stopped = false
+        escalate = -> {
+          if stopped
+            STDERR.puts "\ninterrupted again — exiting without finishing"
+            exit 130
+          end
+          stopped = true
+          select
+          when stop.send(nil)
+          else
+          end
+        }
+        Signal::INT.trap { escalate.call }
+        Signal::TERM.trap { escalate.call }
+      end
+
       private def self.oast_wait_or_stop(stop : Channel(Nil), interval : Time::Span) : Bool
         select
         when stop.receive
