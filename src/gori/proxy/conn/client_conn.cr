@@ -836,7 +836,17 @@ module Gori::Proxy
           # frames until close
           WS::Relay.run(@io, upstream, flow_id, @sink, @rewriter, ws_ctx, @interceptor, notice: ws_notice)
         else
-          Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
+          # A 101 that is NOT a WebSocket — kubectl exec/attach/port-forward speaks
+          # `Upgrade: SPDY/3.1` and the Docker Engine API `Upgrade: tcp` — is relayed
+          # byte-exact and deliberately NOT decoded (see `Pump`). That decision used to be
+          # invisible: the WebSocket branch above carries `notice:` and this one said nothing
+          # anywhere, so a `101 / complete / empty transcript` flow could not be told from one
+          # gori simply failed to capture (#736). Recorded AFTER the tunnel returns, because
+          # `blind_tunnel` only comes back when both directions are closed and the byte counts
+          # are what make this a report rather than a guess. Exactly one per connection —
+          # this branch `return false`s immediately below, so there is nothing to rate-limit.
+          moved = Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
+          record_opaque_upgrade(flow_id, resp, req, host, sent_req.target, moved)
         end
         return false
       end
@@ -1355,6 +1365,41 @@ module Gori::Proxy
 
     private def websocket_upgrade?(resp : Codec::RawResponse) : Bool
       resp.status == 101 && resp.headers.get?("Upgrade").try(&.downcase) == "websocket"
+    end
+
+    # What gori did with a 101 that is NOT a WebSocket, put on the record (#736).
+    #
+    # Same seam the WebSocket branch's handshake advisory uses (`WS::Relay.record_notice`): one
+    # `NOTICE_PREFIX`-marked `ws_messages` row on the flow. That table is read for ANY status-101
+    # flow and not only WebSocket ones — History's MESSAGES pane, `gori run show`, MCP
+    # `get_flow`, a HAR export — so the sentence travels wherever the flow does, and
+    # `NOTICE_PREFIX` is what keeps a repeater seed from replaying gori's own prose as traffic.
+    # The `gori.log` line is the SECOND copy, not the only one: it reaches only an operator who
+    # already knew to tail it.
+    #
+    # The protocol named is the ORIGIN's — a 101 echoes `Upgrade` (RFC 9110 §15.2.2) and that is
+    # what the connection actually became — falling back to what the CLIENT offered when the
+    # origin left it out. `.inspect` for the same reason `settle_ws_extensions` uses it: the
+    # token is unvalidated wire bytes and must not be pasted raw into a stored sentence.
+    # `NOTICE_DIRECTION` is one column that cannot say which way the bytes went, so the sentence
+    # does (see the constant's own doc). Best-effort, like its WebSocket sibling: a capture write
+    # that fails must never take down a connection that has already finished its work.
+    private def record_opaque_upgrade(flow_id : Int64, resp : Codec::RawResponse,
+                                      req : Codec::RawRequest, host : String, target : String,
+                                      moved : {a_to_b: Int64, b_to_a: Int64}) : Nil
+      token = resp.headers.get?("Upgrade").try(&.presence) || req.headers.get?("Upgrade").try(&.presence)
+      named = token ? "protocol #{token.inspect}" : "a protocol neither the request nor the 101 named"
+      note = "101 switched this connection to #{named}; gori does not decode it and relayed it " \
+             "as an opaque byte tunnel, so nothing after this response is captured — " \
+             "#{moved[:a_to_b]} bytes client→server, #{moved[:b_to_a]} bytes server→client"
+      # `Url.location` and not `host + target`: on the plaintext forward-proxy path the target is
+      # absolute-form and already names the authority — the one home for that rule, and the same
+      # one `ws_log_label` exists to route its callers to.
+      ::Log.info { "upgrade #{Gori::Url.location(host, target)}: #{note}" }
+      @sink.on_ws_message(flow_id, WS::Relay::NOTICE_DIRECTION, WS::OP_TEXT.to_i,
+        "#{WS::NOTICE_PREFIX}#{note}".to_slice)
+    rescue
+      nil
     end
 
     # An interim 1xx informational response (100 Continue / 102 / 103 Early Hints /
