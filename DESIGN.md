@@ -1197,6 +1197,42 @@ Not changed, and not by omission: `permessage-deflate` stays unnegotiated and
 `Sec-WebSocket-Extensions` stays stripped, and a WebSocket message is still held only when the
 catch condition names `proto:ws`.
 
+### 2026-08-17: a declared length is not a deadline
+
+Refines: [P6](#p6). Extends the h2-intercept-buffers-a-body entry above. PR #11.
+
+That entry called the buffering wait bounded, and named its bounds: the declared-length gate
+(`holdable_body`), `check_ceiling`, and toggle-off. Two of those three count **bytes that
+arrived**, and the third needs a human. So the shape none of them saw was the peer that sends
+*nothing*: `POST` with `content-length: 4096` and then silence. No byte arrives, so the ceiling
+has nothing to measure; no queue row exists, so `Interceptor#toggle`'s release has nothing to
+hand back; and in the request direction that slot sits at the head of `@opens` with every later
+stream on the connection parked behind it. A `content-length` promises how big a body is, not
+that it is coming.
+
+The wait now has a clock as well as a ceiling. `Slot#waiting_since` is stamped when the hold
+starts buffering, and `check_waiting_locked` — which already ran on every inbound frame, for
+toggle-off — gives the wait up past `H2::StreamGate::HOLD_WAIT_DEADLINE` (5 seconds) **with
+intercept still on**. The exit is the one that was already there rather than a new refusal:
+`queue_hold_locked(slot, held, nil)`, i.e. the head-only hold every h2 intercept had before
+PR #6. The operator gets a row to forward or drop, the streams behind it move as soon as they
+do, and the DATA that eventually turns up streams past untouched.
+
+Still frame-driven, still no timer fiber, and that is the same argument the toggle-off check
+makes rather than a weaker version of it: a waiting slot with nothing behind it costs nobody
+anything, and the frame that makes a second stream *blocked* — its own HEADERS — is itself an
+arrival at this gate, which checks before it defers. A fiber per buffering hold would buy only
+the case where the wait is free, and would buy it on the pump's own path ([P6](#p6)).
+
+The cost is stated rather than hidden: a genuinely slow upload that takes more than five
+seconds between its head and its last DATA frame is shown to the operator head-only, and its
+body goes out unedited. That is a real regression against "the row carries the entity" for slow
+honest peers, and it is the trade — gori cannot tell a stalled peer from a slow one without
+waiting, and the thing on the other side of the wait is every other stream on the connection.
+Nothing else moves: `MAX_HOLD_BODY`, `check_ceiling`'s blasting-peer disposition, and the
+"the row appears when the message is complete" timing for bodies that arrive in time are all
+unchanged.
+
 ---
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
