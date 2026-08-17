@@ -89,6 +89,12 @@ module Gori
         # `split_ql_negations` reclassified it out of argv on their behalf.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("probe", dropped)
+        # `--project=X delete 5` lands here because reserved verbs are recognised only
+        # as args.first?. `delete 5` is not a QL filter; it is the discarded mutation.
+        if err = Run.reserved_query_verb_error(positional, "probe",
+             PROBE_SUBCOMMANDS.keys.to_a, "issues, dismiss, promote, delete/rm, rules, mode")
+          abort err
+        end
 
         filter : QL::Filter? = nil
         if q = query
@@ -178,6 +184,7 @@ module Gori
         host : String? = nil
         include_closed = false
         format = :text
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run probe issues [options]\n\n" \
@@ -192,10 +199,12 @@ module Gori
           p.on("--host=HOST", "Only show findings for this exact host") { |v| host = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run probe issues: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run probe issues: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "probe issues", "dismiss, promote, delete/rm, list")
 
         store = open_store(resolve_read_project(project_name, db_path))
         issues = begin
@@ -238,6 +247,7 @@ module Gori
         end
         parser.parse(args)
 
+        abort "gori run probe dismiss: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe dismiss")
         selectors = [id, code, host].count { |v| !v.nil? }
         if selectors != 1
@@ -283,6 +293,7 @@ module Gori
         end
         parser.parse(args)
 
+        abort "gori run probe promote: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
@@ -329,6 +340,7 @@ module Gori
         end
         parser.parse(args)
 
+        abort "gori run probe delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe delete")
         abort "gori run probe delete: pass <id> or --all" if id.nil? && !all
         abort "gori run probe delete: <id> and --all are mutually exclusive" if id && all
@@ -536,7 +548,7 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           abort "gori run probe rules delete: no custom rule with id '#{id}'" unless store.probe_custom_rules.any? { |r| r.id == row_id }
-          store.delete_probe_custom_rule(row_id)
+          abort "gori run probe rules delete: custom rule '#{id}' NOT deleted (project busy)" unless store.delete_probe_custom_rule(row_id)
           puts "Custom rule '#{id}' deleted."
         ensure
           store.close

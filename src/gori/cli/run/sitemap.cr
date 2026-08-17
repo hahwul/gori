@@ -155,6 +155,9 @@ module Gori
         # STDERR to say a term had gone.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap", dropped)
+        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag"], "tag")
+          abort err
+        end
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.

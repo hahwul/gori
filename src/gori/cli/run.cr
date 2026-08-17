@@ -708,7 +708,17 @@ module Gori
       def self.compose_history_query(query : String?, positional : Array(String),
                                      neg_terms : Array(String)) : {String?, String?}
         if q = query
-          combined = neg_terms.empty? ? q : ([q] + neg_terms).join(' ')
+          # Parenthesize the flag value when a negation is appended. QL is
+          # `NOT > AND > OR`, so `host:a OR host:b -path:/admin` is
+          # `host:a OR (host:b AND NOT path:/admin)` — every `/admin` hit on host
+          # `a` stays, which is the silently BROADER set this helper exists to
+          # prevent. AND-only `--query` is unchanged in meaning: `(host:x) -path:/b`
+          # is the same filter as `host:x -path:/b`.
+          combined = if neg_terms.empty?
+                       q
+                     else
+                       "(#{q}) #{neg_terms.join(' ')}"
+                     end
           {combined, positional.empty? ? nil : positional.join(' ')}
         else
           pq = (positional + neg_terms).join(' ')
@@ -765,7 +775,11 @@ module Gori
         # ArgumentError. Same remedy as `read_token_list` in ./run/sequence.cr. `scrub` returns
         # self for valid UTF-8, and it is `a` (not `a.scrub`) that is kept, so the operator's
         # query bytes reach QL exactly as typed.
-        args.each { |a| a.scrub.matches?(/\A-[A-Za-z]+[:~]/) ? (neg << a) : (rest << a) }
+        # Dotted field names (`-resp.body:x`, `-req.header:Cookie`) are the documented
+        # QL spelling. `[A-Za-z]+` stops at the first `.`, so those stayed in argv and
+        # OptionParser aborted them as unknown options — the positional form the
+        # splitter was written for, and the one the TUI bar / docs teach.
+        args.each { |a| a.scrub.matches?(/\A-[A-Za-z]+(?:\.[A-Za-z]+)*[:~]/) ? (neg << a) : (rest << a) }
         {neg, rest}
       end
 
@@ -837,6 +851,18 @@ module Gori
         "the subcommand (`gori run #{sub} #{leftover[0]} … --project=NAME`). Verbs: #{verbs}"
       end
 
+      # History / probe / sitemap take a positional QL, so `refuse_list_leftovers` cannot sit
+      # on their list/scan command — `history host:x` is the operator's filter. A leftover
+      # that IS a reserved verb is still the flag-before-verb discard: `history --project=X
+      # delete 42` listed instead of deleting, `probe --project=X dismiss 5` scanned with
+      # the free-text `dismiss 5`. Same sentence as `list_leftover_error`.
+      def self.reserved_query_verb_error(leftover : Array(String), sub : String,
+                                         reserved : Array(String), verbs : String) : String?
+        first = leftover.first?
+        return nil unless first && reserved.includes?(first)
+        list_leftover_error(leftover, sub, verbs)
+      end
+
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
         abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
@@ -872,6 +898,14 @@ module Gori
         # ArgumentError. Treat an out-of-range duration as a clean usage error.
         n = m[1].to_i? || abort("gori run: --for '#{v}' is out of range")
         abort "gori run: --for must be greater than 0 (got '#{v}')" if n == 0
+        # `n.hours` / `n.minutes` build a Span in nanoseconds. An Int32-fitting value
+        # like 2562048h still overflows Int64 and wraps to a tiny/negative sleep.
+        unit_ns = case m[2]?
+                  when "m" then 60_000_000_000_i64
+                  when "h" then 3_600_000_000_000_i64
+                  else          1_000_000_000_i64
+                  end
+        abort "gori run: --for '#{v}' is out of range" if n.to_i64 > Int64::MAX // unit_ns
         case m[2]?
         when "m" then n.minutes
         when "h" then n.hours

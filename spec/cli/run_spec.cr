@@ -979,7 +979,7 @@ end
 describe "CLI::Run.compose_history_query" do
   it "ANDs negation terms into an explicit --query instead of dropping them" do
     q, dropped = Gori::CLI::Run.compose_history_query("host:x", [] of String, ["-path:/b"])
-    q.should eq("host:x -path:/b")
+    q.should eq("(host:x) -path:/b")
     dropped.should be_nil
   end
 
@@ -999,8 +999,14 @@ describe "CLI::Run.compose_history_query" do
 
   it "ANDs negations AND reports the swallowed positional when both are present" do
     q, dropped = Gori::CLI::Run.compose_history_query("host:x", ["status:404"], ["-path:/b", "-method~PO"])
-    q.should eq("host:x -path:/b -method~PO")
+    q.should eq("(host:x) -path:/b -method~PO")
     dropped.should eq("status:404")
+  end
+
+  it "parenthesizes --query so a trailing negation cannot bind only the last OR arm" do
+    q, dropped = Gori::CLI::Run.compose_history_query("host:a OR host:b", [] of String, ["-path:/admin"])
+    q.should eq("(host:a OR host:b) -path:/admin")
+    dropped.should be_nil
   end
 
   it "joins positionals and negations when there is no --query (unchanged)" do

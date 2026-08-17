@@ -61,6 +61,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         yes = false
+        leftover = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run history clear --yes\n\n" \
@@ -69,10 +70,16 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run history clear: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run history clear: missing value for #{f}" }
         end
         parser.parse(args)
+        unless leftover.empty?
+          abort "gori run history clear: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
+                "#{leftover.join(" ").inspect} — this deletes ALL flows, not those ids. " \
+                "To delete one flow: `gori run history delete <id>`"
+        end
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -114,6 +121,13 @@ module Gori
         args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
+        # `--project=X delete 42` lands here because the dispatcher keys on args.first?.
+        # `delete` is not QL; it is the discarded verb. Refuse it rather than search
+        # for the free-text "delete 42" and exit 0 with the flow still on disk.
+        if err = Run.reserved_query_verb_error(positional, "history",
+             ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
+          abort err
+        end
         # Accept a positional QL too ("gori run history status:404" / "-status:404"),
         # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
         # and EVERY flow dumped.

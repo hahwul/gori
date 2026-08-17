@@ -72,4 +72,30 @@ describe Gori::CLI::Run do
       msg.should contain("Verbs: add, update, delete/rm, list")
     end
   end
+
+  describe ".reserved_query_verb_error" do
+    it "proceeds for a positional QL term" do
+      Gori::CLI::Run.reserved_query_verb_error(["host:x"], "history",
+        ["delete", "rm", "clear", "show"], "delete/rm, clear, show").should be_nil
+    end
+
+    it "proceeds when there is no leftover" do
+      Gori::CLI::Run.reserved_query_verb_error([] of String, "history",
+        ["delete", "rm", "clear", "show"], "delete/rm, clear, show").should be_nil
+    end
+
+    it "refuses a discarded mutation verb and names the ordering that works" do
+      msg = Gori::CLI::Run.reserved_query_verb_error(["delete", "42"], "history",
+        ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
+      msg.should eq("gori run history: unknown subcommand 'delete' — global flags go AFTER " \
+                    "the subcommand (`gori run history delete … --project=NAME`). Verbs: delete/rm, clear, show")
+    end
+
+    it "refuses probe's reserved scan-dispatcher verbs" do
+      msg = Gori::CLI::Run.reserved_query_verb_error(["dismiss", "5"], "probe",
+        ["issues", "dismiss", "promote", "delete", "rm", "rules", "mode"],
+        "issues, dismiss, promote, delete/rm, rules, mode")
+      msg.not_nil!.should contain("unknown subcommand 'dismiss'")
+    end
+  end
 end

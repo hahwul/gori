@@ -47,16 +47,19 @@ module Gori
 
       private def self.cmd_colormarker_color_list(args : Array(String)) : Nil
         format = :text
+        leftover = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker color list [--format=text|json]\n\n" \
                      "The GLOBAL custom colours, offered in every project's picker alongside the\n" \
                      "six built-ins. A built-in tracks the active theme; a custom is an absolute hex."
-          p.on("--format=FMT", "text (default) | json") { |v| format = v == "json" ? :json : :text }
+          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run colormarker color list: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker color list: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "colormarker color", "add, update/edit, rm/delete, list")
         colors = Settings.colormarker_colors
         if format == :json
           puts(JSON.build do |j|
@@ -263,7 +266,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
-          p.on("--format=FMT", "text (default) | json") { |v| format = v == "json" ? :json : :text }
+          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker: missing value for #{f}" }
@@ -272,7 +275,7 @@ module Gori
         # silently and a typo'd subcommand would list instead of erroring.
         parser.unknown_args { |before, after| leftover = before + after }
         parser.parse(args)
-        refuse_list_leftovers(leftover, "colormarker", "add, rm/delete, enable, disable, move, preview")
+        refuse_list_leftovers(leftover, "colormarker", "add, rm/delete, enable, disable, move, preview, color")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
@@ -557,8 +560,8 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-wFILTER", "--when=FILTER", "Condition to test (required)") { |v| filter = v }
-          p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = v.to_i? || limit }
-          p.on("--format=FMT", "text (default) | json") { |v| format = v == "json" ? :json : :text }
+          p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
+          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker preview: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker preview: missing value for #{f}" }

@@ -51,4 +51,11 @@ describe "CLI::Run.split_ql_negations — non-UTF-8 argv" do
     neg.should eq(["-path:/b"])
     rest.should eq(["host:x", "-n50", "-k"])
   end
+
+  it "classifies a dotted-field negation as a QL term, not an unknown option" do
+    neg, rest = Gori::CLI::Run.split_ql_negations_for_spec(
+      ["host:x", "-resp.body:secret", "-req.header:Cookie", "-n50"])
+    neg.should eq(["-resp.body:secret", "-req.header:Cookie"])
+    rest.should eq(["host:x", "-n50"])
+  end
 end

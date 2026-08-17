@@ -124,6 +124,7 @@ module Gori
         project_name : String? = nil
         format = :text
         show_values = false
+        leftover = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run session [list] [options]\n\n" \
                      "The project's session slots: named identities, each a header overlay plus the\n" \
@@ -137,10 +138,12 @@ module Gori
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run session: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run session: missing value for #{f}" }
         end
         parser.parse(args)
+        refuse_list_leftovers(leftover, "session", "add, edit, rm/delete, baseline, show, list")
 
         store, slots = session_slots(project_name, db_path)
         begin
@@ -182,6 +185,7 @@ module Gori
           p.missing_option { |f| abort "gori run session show: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run session show: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session show: name a slot (`gori run session list` shows them)" if name.nil?
 
@@ -300,6 +304,7 @@ module Gori
           p.missing_option { |f| abort "gori run session rm: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run session rm: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session rm: name the slot to delete (`gori run session list`)" if name.nil?
 
@@ -330,6 +335,7 @@ module Gori
           p.missing_option { |f| abort "gori run session baseline: missing value for #{f}" }
         end
         parser.parse(args)
+        abort "gori run session baseline: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session baseline: name the slot (`gori run session list`)" if name.nil?
 
