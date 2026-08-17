@@ -34,14 +34,23 @@ module Gori::Proxy
   # read a line that did not exist. A refusal that names the wrong reason costs more time than
   # one that names none.
   enum H2Offer
-    # No tunnel made this decision (the plaintext listener, a blind CONNECT). Says nothing
-    # about a cause, on purpose.
+    # Nothing observed a cause. Says nothing about one, on purpose — the honest answer for a
+    # caller that has no observation to stamp.
+    #
+    # It has no producer today, and that is the point of #731 rather than dead weight: the only
+    # sites that stamped nothing were the three CLEARTEXT listeners (`server.cr`), where the
+    # cause IS knowable and `Cleartext` below already spells it out. `ClientConn`'s parameter
+    # therefore defaults to `Cleartext`, not to this. Keep it for the next caller that genuinely
+    # cannot say — a causeless sentence beats a confident wrong one, which is the whole reason
+    # this enum exists.
     Unknown
     # h2 was offered to the client and the client did not select it at ALPN (curl --http1.1,
     # an old browser). Nothing is wrong; the client chose.
     Offered
-    # A cleartext origin. ALPN lives inside a TLS handshake, so there was nothing to reflect
-    # and gori has no h2c of its own to offer.
+    # No TLS handshake on the leg that would have carried an ALPN offer: a cleartext ORIGIN
+    # inside a tunnel (`tls/tunnel.cr`), or a cleartext LISTENER, where the client itself
+    # arrived without one. ALPN lives inside a TLS handshake, so there was nothing to reflect,
+    # and gori has no h2c of its own to offer instead.
     Cleartext
     # The four `h2_candidate?` downgrades. Each one DID write a `gori.log` line, so each one
     # may point at it.
@@ -62,7 +71,7 @@ module Gori::Proxy
       case self
       in Unknown             then "HTTP/2 was not negotiated on this connection"
       in Offered             then "HTTP/2 was offered to this client and it selected HTTP/1.1 at ALPN, then spoke the HTTP/2 preface anyway"
-      in Cleartext           then "this origin is cleartext, and ALPN — the only way gori offers HTTP/2 — exists inside a TLS handshake; gori does not serve h2c prior-knowledge here"
+      in Cleartext           then "this connection has a cleartext leg that carried no ALPN — and ALPN, inside a TLS handshake, is the only way gori offers HTTP/2; gori does not serve h2c prior-knowledge here"
       in DisabledBySetting   then "HTTP/2 is switched off (settings network.http2; set it back to \"auto\" to keep h2) — gori.log has the matching \"h2 downgrade: <host> ...\" line"
       in BodyRule            then "a Match&Replace BODY rule is live for this host and body rewriting on HTTP/2 is not implemented yet — gori.log has the matching \"h2 downgrade: <host> ...\" line"
       in ShortCircuitRule    then "a Match&Replace short-circuit rule is live for this host and the h2 relay cannot answer a request locally — gori.log has the matching \"h2 downgrade: <host> ...\" line"
@@ -130,7 +139,13 @@ module Gori::Proxy
                    @origin_dst : {String, Int32}? = nil,
                    @rewrite_fixed_host : Bool = false,
                    @extractor : ResponseExtract? = nil,
-                   @h2_offer : H2Offer = H2Offer::Unknown)
+                   # Defaulted rather than required because the only callers that do not pass it
+                   # are the three CLEARTEXT listeners in `server.cr` (plaintext forward,
+                   # transparent, reverse-cleartext) — every tunnel-built ClientConn stamps what
+                   # it observed. A client leg with no TLS handshake carried no ALPN, so
+                   # `Cleartext` is what those three observed, and the h2-preface refusal names
+                   # the true cause there instead of declining to name one (#731).
+                   @h2_offer : H2Offer = H2Offer::Cleartext)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -1252,32 +1267,70 @@ module Gori::Proxy
       true
     end
 
-    # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the
-    # CONNECT authority, so we dial it plaintext and run the same h2 relay (no
-    # :authority routing / HPACK coupling needed). The origin must speak h2c.
-    # A rule kind this tunnel cannot serve, or nil. Mirrors `tls/tunnel.cr#h2_candidate?`'s
-    # three rule gates — a body Match&Replace rule, a short-circuit stub, a body-scoped
-    # extract rule — all of which live on `ClientConn`'s h1 path and are unreachable from the
-    # h2 relay. On the TLS path they earn a downgrade to h1; here the client has already sent
-    # the preface, so the only honest answers are refuse or lie.
-    private def h2c_unservable?(host : String) : Bool
-      reason =
-        if @rewriter.try(&.rewrites_body_for_host?(host))
-          "a Match&Replace BODY rule is live and body rewriting on HTTP/2 is not implemented yet"
-        elsif @rewriter.try(&.short_circuits_for_host?(host))
-          "a Match&Replace short-circuit rule is live and the h2 relay cannot answer a request locally"
-        elsif @extractor.try(&.extracts_body_for_host?(host))
-          "a body-scoped session-binding extract rule is live and the h2 relay never holds a body"
-        end
-      return false unless reason
-      ::Log.warn do
-        "h2c CONNECT to #{host}: refused because #{reason}. The client committed to HTTP/2 by " \
-        "sending the preface, so there is nothing to downgrade — disable the rule for this host " \
-        "to allow the tunnel, or reach it over TLS where gori can downgrade the connection"
+    # Why gori will not serve this h2c-in-CONNECT tunnel, or nil for one it will.
+    #
+    # `http2_disabled?` first, then `tls/tunnel.cr#h2_candidate?`'s three rule gates — a body
+    # Match&Replace rule, a short-circuit stub, a body-scoped extract rule — all of which live
+    # on `ClientConn`'s h1 path and are unreachable from the h2 relay. On the TLS path each
+    # earns a downgrade to h1; here the client has already sent the preface, so the only honest
+    # answers are refuse or lie.
+    #
+    # The SANDBOX is deliberately absent from this list (#731). It used to head it, because the
+    # h2c relay really was wired with no gates at all — until #549 threaded `interceptor:` into
+    # `intercept_h2c`'s relay call, which is what builds both `H2::StreamGate`s (`h2/relay.cr`),
+    # and #492 step 4 had already put the per-STREAM blocking gate in them. So the sandbox now
+    # reaches this tunnel exactly as it reaches the TLS h2 one, and the blanket refusal was
+    # short-circuiting ahead of a gate that fails closed.
+    private def h2c_refusal(host : String) : String?
+      if Settings.http2_disabled?
+        # Silently relaying would make "force HTTP/1.1" quietly untrue for this path, which is
+        # worse than a visible refusal.
+        "HTTP/2 is switched off (settings network.http2)"
+      elsif @rewriter.try(&.rewrites_body_for_host?(host))
+        "a Match&Replace BODY rule is live and body rewriting on HTTP/2 is not implemented yet"
+      elsif @rewriter.try(&.short_circuits_for_host?(host))
+        "a Match&Replace short-circuit rule is live and the h2 relay cannot answer a request locally"
+      elsif @extractor.try(&.extracts_body_for_host?(host))
+        "a body-scoped session-binding extract rule is live and the h2 relay never holds a body"
       end
-      true
     end
 
+    # Refuse an h2c-in-CONNECT tunnel, VISIBLY (#731). Two of these refusals used to be a bare
+    # `return false`: the client had already been told `200 Connection Established`, so the
+    # tunnel appeared to open and then died with nothing in History and nothing in `gori.log`.
+    #
+    # ## What is deliverable here, and what is not
+    #
+    # NOT the h1 sandbox path's `403 + X-Gori-Sandbox: blocked`. The client committed to HTTP/2
+    # the moment it sent the preface byte this branch peeked, and an h2 client cannot parse an
+    # HTTP/1.1 response — the same reason the h2-preface-on-the-h1-path refusal above writes
+    # nothing back, and the reason `write_framing_reject`'s precedent stops at record + close.
+    #
+    # Nor a synthesized SETTINGS + GOAWAY, which is the only thing this client COULD parse. gori
+    # is not an h2 producer anywhere: `H2::StreamGate#refuse_locked` turns down exactly that
+    # trade for the per-stream sandbox refusal, and gori has not read this client's preface at
+    # all (one byte was peeked), so answering as an h2 endpoint would mean becoming one on a
+    # path whose whole job is to relay. If that changes, it changes there first.
+    #
+    # So the refusal is delivered where an operator actually looks: a `gori.log` line, and an
+    # error flow for the CONNECT itself. CONNECT is otherwise never a captured flow — the
+    # reserved-host and self-loop refusals above record nothing — but those refuse BEFORE the
+    # 200, where the client still gets an answer it can read. This one cannot, so the record is
+    # the only thing left, and a row saying which rule or setting refused the tunnel is worth
+    # more than a socket that closes for no stated reason.
+    private def refuse_h2c(req : Codec::RawRequest, host : String, port : Int32,
+                           reason : String) : Nil
+      advice = "The client committed to HTTP/2 by sending the preface, so there is nothing to " \
+               "downgrade — clear what refused it for this host, or reach it over TLS where " \
+               "gori can downgrade the connection instead"
+      ::Log.warn { "h2c CONNECT to #{host}: refused because #{reason}. #{advice}" }
+      record_error(req, "http", host, port, now_us,
+        "h2c CONNECT tunnel refused: #{reason}. #{advice}")
+    end
+
+    # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the CONNECT authority, so
+    # we dial it plaintext and run the same h2 relay (no :authority routing / HPACK coupling
+    # needed). The origin must speak h2c.
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
       upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
       return unless upstream
@@ -1394,22 +1447,17 @@ module Gori::Proxy
         return false if first.nil?
         stream = PrefixIO.new(Bytes[first], @io)
         if first == 0x50_u8
-          # Cleartext h2 (h2c) tunnelled inside CONNECT runs the raw h2 relay, which bypasses
-          # ClientConn's per-request block. Under the sandbox we can't gate it per request, so
-          # (the host having already cleared the coarse gate above) refuse the whole tunnel —
-          # h2c-in-CONNECT is rare, and a blocking mode must not leave an ungated path open.
-          return false if (ic = @interceptor) && ic.sandbox_enabled?
-          # With HTTP/2 switched off, refuse rather than relay. The client has already
-          # committed to h2 by sending the preface, so there is nothing to downgrade — and
-          # silently relaying it would make "force HTTP/1.1" quietly untrue for this path,
-          # which is worse than a visible refusal.
-          return false if Settings.http2_disabled?
-          # The other three gates `tls/tunnel.cr#h2_candidate?` applies, which had no h2c
-          # equivalent. Same reasoning as the line above, and the same disposition: there is
-          # nothing to downgrade here, so a rule the relay structurally cannot apply gets a
-          # VISIBLE refusal rather than a tunnel that looks like it honours the rule table
-          # while a stub rule quietly lets the request reach the origin.
-          return false if h2c_unservable?(host)
+          # Cleartext h2 (h2c) tunnelled inside CONNECT. `h2c_refusal` is the whole gate:
+          # the setting, and the three rule kinds the h2 relay structurally cannot apply — a
+          # tunnel that looked like it honoured the rule table while a stub rule quietly let
+          # the request reach the origin would be worse than a visible refusal. The SANDBOX is
+          # not among them and no longer refuses this tunnel outright (#731): `intercept_h2c`
+          # wires the interceptor into the relay, so `H2::StreamGate` blocks out-of-scope
+          # streams here per stream, exactly as it does on the TLS h2 path.
+          if reason = h2c_refusal(host)
+            refuse_h2c(req, host, port, reason)
+            return false
+          end
           intercept_h2c(host, port, stream)
         else
           tls.intercept(host, port, stream, @sink, dial_addr: dial_pin)
