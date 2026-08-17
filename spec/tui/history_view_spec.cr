@@ -875,6 +875,62 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "renders truncation banner with N of M bytes and settings hint when request or response body is capped" do
+    tmp_store do |store|
+      req_body = "captured-req-body".to_slice
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/upload", http_version: "HTTP/1.1",
+        head: "POST /upload HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+        body: req_body,
+        body_truncated: true,
+        body_size: 50_000_i64))
+
+      resp_body = "captured-resp-body".to_slice
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: resp_body,
+        body_truncated: true,
+        body_size: 150_000_i64))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      # Request pane
+      backend_req = MemoryBackend.new(140, 20)
+      view.render_detail(Screen.new(backend_req), Rect.new(0, 0, 140, 20))
+      backend_req.contains?("body truncated at capture cap, 17 of 50000 bytes").should be_true
+      backend_req.contains?("Settings → Network / capture_max_mib").should be_true
+
+      # Response pane
+      view.toggle_pane
+      backend_resp = MemoryBackend.new(140, 20)
+      view.render_detail(Screen.new(backend_resp), Rect.new(0, 0, 140, 20))
+      backend_resp.contains?("body truncated at capture cap, 18 of 150000 bytes").should be_true
+      backend_resp.contains?("Settings → Network / capture_max_mib").should be_true
+    end
+  end
+
+  it "does not render truncation banner for intact bodies" do
+    tmp_store do |store|
+      add_flow(store, "POST", "/intact", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(140, 20)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 140, 20))
+      backend.contains?("body truncated at capture cap").should be_false
+
+      view.toggle_pane
+      backend_resp = MemoryBackend.new(140, 20)
+      view.render_detail(Screen.new(backend_resp), Rect.new(0, 0, 140, 20))
+      backend_resp.contains?("body truncated at capture cap").should be_false
+    end
+  end
+
   it "bounds the in-memory window during long live capture (drops oldest, keeps newest)" do
     tmp_store do |store|
       view = HistoryView.new(max_rows: 10, trim_slack: 4)

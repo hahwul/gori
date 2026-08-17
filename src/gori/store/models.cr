@@ -203,6 +203,23 @@ module Gori
                      @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
                      @request_body_truncated = false, @response_body_truncated = false, @error = nil, @sni = nil)
       end
+
+      # The TRUE wire request body size (recovered by subtracting head size from request total).
+      def request_wire_body_size : Int64
+        stored = request_body.try(&.size.to_i64) || 0_i64
+        req_total = row.size - (row.response_size || 0_i64)
+        n = req_total - request_head.size
+        n > stored ? n : stored
+      end
+
+      # The TRUE wire response body size (recovered by subtracting head size from response total).
+      def response_wire_body_size : Int64
+        stored = response_body.try(&.size.to_i64) || 0_i64
+        return stored unless resp_total = row.response_size
+        head_size = (response_head.try(&.size) || 0).to_i64
+        n = resp_total - head_size
+        n > stored ? n : stored
+      end
     end
 
     # The frame-shape columns V7 added, shared with the proxy that fills them in. Aliased

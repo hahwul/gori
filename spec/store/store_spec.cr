@@ -314,6 +314,8 @@ describe Gori::Store do
       detail = store.get_flow(id).not_nil!
       detail.request_body_truncated?.should be_true
       detail.response_body_truncated?.should be_true
+      detail.request_wire_body_size.should eq(5_000_000_i64)
+      detail.response_wire_body_size.should eq(9_000_000_i64)
       detail.request_body.should eq(stored) # only the capped bytes are stored
       # the list size column reflects the TRUE wire size, not the truncated BLOB
       detail.row.size.should eq(("POST /up HTTP/1.1\r\n\r\n".bytesize + 5_000_000) +

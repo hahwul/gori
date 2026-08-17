@@ -2776,12 +2776,16 @@ module Gori::Tui
         return DetailView.new([[span]], EMPTY_BODY, :text, EMPTY_LINES)
       end
       head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
-      truncated = request ? detail.request_body_truncated? : detail.response_body_truncated?
+      stored_bytes = body.try(&.size.to_i64) || 0_i64
+      wire_bytes = request ? detail.request_wire_body_size : detail.response_wire_body_size
+      truncated = stored_bytes < wire_bytes
 
       trailer = [] of Highlight::Line
       if truncated
         trailer << Highlight::Line.new
-        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Settings.effective_capture_max_mib} MiB); full size in the list —", Theme.yellow)]
+        trailer << [Highlight::Span.new(
+          "— body truncated at capture cap, #{stored_bytes} of #{wire_bytes} bytes — raise in Settings → Network / capture_max_mib —",
+          Theme.yellow)]
       end
       # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
       # In the TRAILER, beside the truncation notice, and not spliced into the head: this is
