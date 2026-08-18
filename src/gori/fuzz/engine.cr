@@ -227,11 +227,20 @@ module Gori::Fuzz
     # request goes to the same origin, and a caller that closes the backend when it is done.
     #
     # Whoever turns it on OWNS calling `close`, or the parked sockets outlive the run.
+    # Whether the ACTIVE SESSION SLOT's header overlay applies to what this sender puts on
+    # the wire. True everywhere but one caller, and the exception is the point: `Authorize`
+    # supplies the identity ITSELF, one per send, and comparing them is the whole measurement.
+    # With the active slot also writing its headers over the top, every identity goes out
+    # wearing the same credential, every response matches the baseline by construction, and
+    # the tab reports a bypass on every row — the exact false positive `Engine.live` gives up
+    # keep-alive to avoid. See `Authorize::Engine.live`.
+    getter? slot_overlay : Bool
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
-                   @evidence : Bool = false)
+                   @evidence : Bool = false, @slot_overlay : Bool = true)
       # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
       # a separate change with its own stream-state rules.
       @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
@@ -284,7 +293,11 @@ module Gori::Fuzz
       # slot also sets is overwritten by the slot — which is the operator's own instruction
       # ("send as this identity"), not a substitution behind their back, and is exactly what
       # selecting `as-captured` or no slot at all switches off.
-      bytes = Gori::Env.overlay_slot(bytes)
+      #
+      # `slot_overlay?` is the one way out, for the one caller that carries its own identity
+      # per send (`Authorize`). Since `verbatim` cannot express "leave the headers alone",
+      # a sender that MEANS a specific identity has to be able to say so at construction.
+      bytes = Gori::Env.overlay_slot(bytes) if @slot_overlay
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect

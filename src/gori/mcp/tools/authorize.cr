@@ -64,7 +64,9 @@ module Gori
       # The whole run on one fiber. `Plan#run` owns the loop (stop polled between requests AND
       # handed to the engine so it is polled between identities); this only accumulates.
       private def run_authorize_job(ajob : AuthorizeJob) : Nil
-        ajob.plan.run(-> { ajob.stop_requested? }) do |_, target|
+        ajob.plan.run(-> { ajob.stop_requested? }, ->(detail : Store::FlowDetail, ex : Exception) {
+          record_authorize_failure(ajob, detail, ex)
+        }) do |_, target|
           apply_authorize_target(ajob, target)
         end
         # A drain rescue may already have failed the job; a clean loop must not revert that
@@ -101,6 +103,34 @@ module Gori
         ajob.error_msg ||= ex.message || "internal authorize drain error"
       end
 
+      # One flow that could not be replayed at all. NOT a job failure: the run goes on and the
+      # count travels in every payload, because a selection that quietly shrank and one that
+      # was fully replayed must not read the same.
+      private def record_authorize_failure(ajob : AuthorizeJob, detail : Store::FlowDetail,
+                                           ex : Exception) : Nil
+        ajob.failed += 1
+        msg = ex.message || ex.class.name
+        Log.warn { "authorize job #{ajob.id} could not replay flow #{detail.row.id}: #{msg}" }
+        ajob.failures << {detail.row.id, detail.row.url, msg} if ajob.failures.size < AUTHORIZE_MAX_STORED
+      end
+
+      # The flows a run reached and could not replay. Always emitted (an empty array when there
+      # were none), the same contract `emit_authorize_skipped` states for the same reason.
+      private def emit_authorize_failures(j : JSON::Builder, ajob : AuthorizeJob) : Nil
+        j.field "failed_count", ajob.failed
+        j.field("failed") do
+          j.array do
+            ajob.failures.each do |(flow_id, url, msg)|
+              j.object do
+                j.field "flow_id", flow_id
+                j.field "url", Serialize.text(url)
+                j.field "error", Serialize.text(msg)
+              end
+            end
+          end
+        end
+      end
+
       private def authorize_status(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
@@ -110,7 +140,9 @@ module Gori
             j.field "status", ajob.status.to_s
             j.field "requests_total", ajob.planned
             j.field "requests_replayed", ajob.replayed
-            j.field "requests_remaining", {0, ajob.planned - ajob.replayed}.max
+            # Minus the flows that could not be replayed at all: they are not still coming,
+            # and a `remaining` that never reaches zero reads as a job that never finished.
+            j.field "requests_remaining", {0, ajob.planned - ajob.replayed - ajob.failed}.max
             j.field "sends_planned", ajob.sends_planned
             j.field "sent", ajob.sent
             j.field "errors", ajob.errors
@@ -126,6 +158,7 @@ module Gori
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "error", Serialize.text(ajob.error_msg)
             emit_authorize_skipped(j, ajob.skipped)
+            emit_authorize_failures(j, ajob)
             emit_audit(j, ajob.audit, ajob.ended_at_ms)
           end
         end)
@@ -156,6 +189,7 @@ module Gori
             j.field "results_truncated", ajob.truncated?
             j.field "error", Serialize.text(ajob.error_msg)
             emit_authorize_skipped(j, ajob.skipped)
+            emit_authorize_failures(j, ajob)
           end
         end)
       end
@@ -205,15 +239,7 @@ module Gori
 
       private def authorize_summary(ajob : AuthorizeJob, verdict : String) : String
         case verdict
-        when "nothing_sent"
-          if ajob.blocked > 0
-            why = ajob.blocked_reason
-            "nothing was sent — #{ajob.blocked} request#{ajob.blocked == 1 ? "" : "s"} were refused before the socket" \
-            "#{why ? " (#{Serialize.text(why)})" : ""}; this is NOT evidence that access control works"
-          else
-            "nothing was replayed#{ajob.skipped.empty? ? "" : " — every selected flow was skipped"}; " \
-            "this is NOT evidence that access control works"
-          end
+        when "nothing_sent" then authorize_nothing_sent_summary(ajob)
         when "BYPASS"
           "BROKEN ACCESS CONTROL: #{ajob.bypasses} identity result#{ajob.bypasses == 1 ? "" : "s"} across " \
           "#{ajob.results.count { |t| t.same_count > 0 }} request#{ajob.results.count { |t| t.same_count > 0 } == 1 ? "" : "s"} " \
@@ -226,6 +252,23 @@ module Gori
           "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed · no identity matched the baseline " \
           "(access control appears enforced for the identities tested)"
         end
+      end
+
+      # WHY nothing was sent, which is the half that decides what the caller does next: the
+      # gate refused it, the flows could not be replayed, or the selection was skipped away.
+      # Every arm ends in the same sentence, because none of them is evidence of anything.
+      private def authorize_nothing_sent_summary(ajob : AuthorizeJob) : String
+        tail = "; this is NOT evidence that access control works"
+        if ajob.blocked > 0
+          why = ajob.blocked_reason
+          return "nothing was sent — #{ajob.blocked} request#{ajob.blocked == 1 ? "" : "s"} were refused " \
+                 "before the socket#{why ? " (#{Serialize.text(why)})" : ""}#{tail}"
+        end
+        if ajob.failed > 0
+          return "nothing was replayed — #{ajob.failed} selected flow#{ajob.failed == 1 ? "" : "s"} could " \
+                 "not be replayed at all (see `failed`)#{tail}"
+        end
+        "nothing was replayed#{ajob.skipped.empty? ? "" : " — every selected flow was skipped"}#{tail}"
       end
 
       # The bypasses alone, flat and complete (never paged) — the rows worth acting on, so a

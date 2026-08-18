@@ -40,6 +40,24 @@ module Gori
         skip_reason(detail, identities).nil?
       end
 
+      # `skip_reason` for a request a HUMAN named — the TUI's manual queue, `gori run authorize
+      # 42 --unsafe-methods`, MCP `unsafe_methods:true`. The only rung lifted is
+      # `:unsafe_method`: there a person chose the request and accepted that the side effect
+      # runs again, which is not a decision an unattended replay ever gets to make.
+      #
+      # Lifting that rung must NOT lift what comes after it. `skip_reason` is an ORDERED chain
+      # and `:unsafe_method` is the third rung, so returning nil here would also skip the
+      # fourth — `:no_effect` — and replay a flow no identity changes. Every trial then sends
+      # byte-identical bytes, every verdict comes back `Same`, and the run reports a bypass it
+      # manufactured; on an unsafe method that is the expensive version of the mistake, since
+      # the POST runs again once per identity to prove nothing.
+      def self.manual_skip_reason(detail : Store::FlowDetail,
+                                  identities : Array(Identity)) : Symbol?
+        reason = skip_reason(detail, identities)
+        return reason unless reason == :unsafe_method
+        any_identity_changes?(detail, identities) ? nil : :no_effect
+      end
+
       # Does at least one NON-baseline identity produce different bytes than the baseline does?
       # Compared against the baseline rather than against the raw capture, because the baseline
       # may itself carry an overlay — what a run compares is baseline-vs-other, so that is what

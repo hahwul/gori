@@ -531,6 +531,12 @@ module Gori
         property bypasses = 0
         property reviews = 0
         property error_msg : String? = nil
+        # Flows that RAISED before any send — a stored h2 pseudo-header head is the reachable
+        # one. Counted and named per flow rather than failing the job: one unreplayable
+        # capture in a fifty-flow selection is not a reason to throw away the other
+        # forty-nine, and a caller still has to be able to tell that its selection shrank.
+        property failed = 0
+        getter failures = [] of {Int64, String, String}
         getter results = [] of Authorize::Target
         property? truncated = false
         property ended_at_ms : Int64? = nil

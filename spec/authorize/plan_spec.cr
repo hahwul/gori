@@ -80,6 +80,21 @@ private class FakeBackend < Gori::Fuzz::Backend
   end
 end
 
+# A capture whose stored request head is an h2 FIELD DUMP rather than a request line. It
+# passes every skip test — complete, GET, and an identity that drops `cookie` changes it — and
+# then `FlowRequest.build` refuses it, which is the point.
+private def pseudo_header_seed(store : Gori::Store) : Int64
+  head = ":method: GET\r\n:path: /admin\r\n:authority: acme.test\r\ncookie: session=ADMIN\r\n\r\n"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: "/admin", http_version: "HTTP/1.1", head: head.to_slice))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+    body: "ok".to_slice, duration_us: 1_000_i64))
+  store.flush
+  id
+end
+
 private def fake_engine(backend : FakeBackend) : Gori::Authorize::Engine
   Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { backend.as(Gori::Fuzz::Backend) })
 end
@@ -387,6 +402,52 @@ describe Gori::Authorize::Plan do
         sent.should eq(1)
         seen.should eq(1)
         backend.sent.size.should eq(2) # only the first request's two identities
+      end
+    end
+
+    # A few flows RAISE before any send — a stored h2 pseudo-header head is the reachable one
+    # (`FlowRequest::PseudoHeaderHead`). Letting that escape the loop cost the whole selection:
+    # `gori run authorize` lost every remaining flow AND its buffered `--format json` array,
+    # and an MCP job went `:error` holding results it had already collected. The TUI never had
+    # the problem, because its own loop rescues per request.
+    describe "a flow that cannot be replayed at all" do
+      it "reports it through on_error and replays the rest" do
+        with_store do |store|
+          bad = pseudo_header_seed(store)
+          good = seed(store, target: "/orders")
+          built = Plan.build(options(store, flow_ids: [bad, good]), ungated_outbound)
+          built.targets.size.should eq(2) # nothing about it is a SKIP — it looks replayable
+          backend = FakeBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443))
+          plan = Plan.new(engine: fake_engine(backend), identities: built.identities,
+            targets: built.targets, skipped: built.skipped)
+
+          failures = [] of {Int64, String}
+          replayed = [] of String
+          sent = plan.run(nil, ->(d : Gori::Store::FlowDetail, ex : Exception) {
+            failures << {d.row.id, ex.class.name}
+            nil
+          }) { |d, _t| replayed << d.row.target }
+
+          sent.should eq(1)
+          replayed.should eq(["/orders"])
+          failures.map(&.[0]).should eq([bad])
+          failures.first[1].should eq("Gori::Repeater::FlowRequest::PseudoHeaderHead")
+        end
+      end
+
+      # Absent a handler the raise still escapes: a surface has to DECIDE what to do with an
+      # unreplayable flow rather than inherit silence from the seam.
+      it "still raises when the caller passed no on_error" do
+        with_store do |store|
+          bad = pseudo_header_seed(store)
+          built = Plan.build(options(store, flow_ids: [bad]), ungated_outbound)
+          backend = FakeBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443))
+          plan = Plan.new(engine: fake_engine(backend), identities: built.identities,
+            targets: built.targets, skipped: built.skipped)
+          expect_raises(Gori::Repeater::FlowRequest::PseudoHeaderHead) do
+            plan.run { |_d, _t| }
+          end
+        end
       end
     end
   end

@@ -119,7 +119,16 @@ module Gori
         # (see `Authorize::Plan#run`), so the emit below covers the interrupted path too.
         interrupted = Run.install_interrupt_trap("authorize-interrupt",
           "interrupted — stopping and reporting the requests already compared…") { stopping = true }
-        sent = plan.run(-> { stopping }) do |_detail, target|
+        # One flow that cannot be replayed is not the end of the selection. Reported per flow,
+        # on STDERR, as it happens — the alternative was the raise escaping `plan.run`, which
+        # took every remaining flow AND the whole buffered `--format json` array with it.
+        failed = 0
+        on_error = ->(detail : Store::FlowDetail, ex : Exception) {
+          failed += 1
+          STDERR.puts "  #{authorize_failure_text(detail, ex)}"
+          nil
+        }
+        sent = plan.run(-> { stopping }, on_error) do |_detail, target|
           bypasses += 1 if CLI::Output.authorize_verdict(target) == :bypass
           if target.fully_blocked?
             blocked_runs += 1
@@ -130,7 +139,7 @@ module Gori
           authorize_progress(done, total, bypasses, format)
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
-        authorize_done(sent, total, ids, bypasses)
+        authorize_done(sent, total, ids, bypasses, failed)
         # Before the all-refused check below — see `Run.report_interrupted` for why the order
         # matters: a run stopped early has not demonstrated that every send was refused.
         Run.report_interrupted(sent, "request", "replayed") if interrupted.call
@@ -141,6 +150,21 @@ module Gori
           STDERR.puts "authorize: every send was refused before the socket — " \
                       "#{blocked_reason || "blocked by the project's Sandbox or an exclude rule"}"
           exit 1
+        end
+        # Nothing was replayed and the reason was not a stop or the gate: every selected flow
+        # raised. Same rule as the block above — a run that sent nothing must not exit 0 with a
+        # summary that reads like a clean result.
+        exit 1 if sent == 0 && failed > 0 && !interrupted.call
+      end
+
+      # "  #12  GET     acme.test/orders   — could not be replayed: <why>"
+      private def self.authorize_failure_text(detail : Store::FlowDetail, ex : Exception) : String
+        row = detail.row
+        String.build do |io|
+          io << '#' << row.id.to_s.ljust(6)
+          io << CLI::Output.term_safe(row.method).ljust(7)
+          io << CLI::Output.term_safe(row.url)
+          io << "  — could not be replayed: " << CLI::Output.term_safe(ex.message || ex.class.name)
         end
       end
 
@@ -186,13 +210,17 @@ module Gori
         STDERR.flush
       end
 
-      private def self.authorize_done(sent : Int32, total : Int32, ids : Int32, bypasses : Int32) : Nil
+      private def self.authorize_done(sent : Int32, total : Int32, ids : Int32, bypasses : Int32,
+                                      failed : Int32) : Nil
         STDERR.print "\r\e[K" if STDERR.tty? # clear the in-place meter before the summary
         # "1 of 3 requests" — the noun agrees with the SELECTION, not with how much of it ran, so
         # an interrupted run does not read as "1 of 3 request".
         of = sent == total ? "" : " of #{total}"
+        # The flows that could not be replayed ride on the summary line too: a selection that
+        # shrank mid-run and one that was fully replayed must not read the same.
+        unreplayable = failed > 0 ? " · #{failed} could not be replayed" : ""
         STDERR.puts "done · #{sent}#{of} request#{total == 1 ? "" : "s"} replayed · #{sent * ids} sends · " \
-                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}"
+                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreplayable}"
       end
 
       # Refuse a selection that cannot become a run, listing what it reached first: `skipped` is

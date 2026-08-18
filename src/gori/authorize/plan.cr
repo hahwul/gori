@@ -174,18 +174,36 @@ module Gori::Authorize
     end
 
     # Replay every target under every identity, yielding each finished `Target` as it lands.
-    # Returns the number of requests actually replayed.
+    # Returns the number of FLOWS replayed (each one is `identities.size` requests).
     #
     # THE send loop, here rather than once per surface: `stop` is polled between requests
     # AND handed to the engine so it is also polled between identities, and a request the
     # stop cut short yields NOTHING — a partial set of trials must not become a Target (see
     # `Engine#run`). A surface that re-implemented this loop is one `if target` away from
     # reporting "enforced" for identities it never sent.
-    def run(stop : Proc(Bool)? = nil, & : Store::FlowDetail, Target ->) : Int32
+    #
+    # `on_error` is how ONE unreplayable flow stops being fatal to the whole selection. A
+    # send failure is already a `Trial` with an error, but a few things RAISE before any send:
+    # a stored h2 pseudo-header head (`FlowRequest::PseudoHeaderHead`) is the reachable one.
+    # Escaping here killed the run at that flow — `gori run authorize` lost every remaining
+    # flow AND its buffered `--format json` array, and an MCP job went `:error` with the
+    # results it already had. The TUI survived it because its own loop rescues per request;
+    # a headless run has no reason to be less robust than the tab. Absent an `on_error` the
+    # raise still escapes, so a surface has to decide rather than inherit silence.
+    def run(stop : Proc(Bool)? = nil,
+            on_error : Proc(Store::FlowDetail, Exception, Nil)? = nil,
+            & : Store::FlowDetail, Target ->) : Int32
       sent = 0
       @targets.each do |detail|
         break if stop.try(&.call)
-        next unless target = @engine.run(detail, @identities, stop)
+        begin
+          target = @engine.run(detail, @identities, stop)
+        rescue ex
+          raise ex unless handler = on_error
+          handler.call(detail, ex)
+          next
+        end
+        next unless target
         sent += 1
         yield detail, target
       end
@@ -330,21 +348,13 @@ module Gori::Authorize
     # `Passive.skip_reason`, with the unsafe-method refusal lifted when the surface asked for
     # it. One implementation of "can this flow be replayed at all" rather than a second copy
     # of the rules here: `:incomplete`, `:short_circuited` and `:no_effect` are properties of
-    # the flow and the identity set, and they hold whoever is asking.
+    # the flow and the identity set, and they hold whoever is asking. The lifted form lives in
+    # `Passive.manual_skip_reason` — the TUI's manual queue asks the same question and has to
+    # get the same answer, or one surface refuses a flow another one replays.
     private def self.skip_reason(detail : Store::FlowDetail, identities : Array(Identity),
                                  options : PlanOptions) : Symbol?
-      reason = Passive.skip_reason(detail, identities)
-      # Lifting `:unsafe_method` must not lift what comes AFTER it. `Passive.skip_reason` is
-      # an ordered chain and `:unsafe_method` is the third rung, so returning nil here would
-      # also skip the fourth — `:no_effect` — and replay a flow no identity changes. Every
-      # trial would then send byte-identical bytes, every verdict would come back `Same`, and
-      # the run would report a bypass it manufactured (see the comment above
-      # `Passive.skip_reason`). On an unsafe method that is the expensive version of the
-      # mistake: the POST runs again, once per identity, to prove nothing.
-      if reason == :unsafe_method && options.unsafe_methods?
-        return Passive.any_identity_changes?(detail, identities) ? nil : :no_effect
-      end
-      reason
+      return Passive.manual_skip_reason(detail, identities) if options.unsafe_methods?
+      Passive.skip_reason(detail, identities)
     end
 
     # The per-reason tally: the `NothingToSend` detail AND what `Plan#skip_summary` renders,

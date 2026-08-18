@@ -81,9 +81,18 @@ module Gori
         # not the message: reusing the socket would serve an identity that DROPS Cookie /
         # Authorization the baseline's content anyway, and the run would report a bypass that
         # does not exist. A handshake per identity is the price of the property under test.
+        #
+        # slot_overlay: FALSE, for the same property and the same failure. Every other send
+        # seam wears the ACTIVE session slot; this one supplies the identity itself, once per
+        # send, and the comparison IS the measurement. With the active slot writing over the
+        # top, the "anonymous" identity keeps the slot's Cookie, the baseline stops carrying
+        # its own, every response matches, and the tab reports a bypass on every queued row —
+        # a finding manufactured entirely out of the operator having picked a send context in
+        # another tab. `Fuzz::Backend.all_verbatim` cannot express this: it excludes bytes
+        # from SUBSTITUTION, and the overlay writes whole header lines.
         new(->(origin : Fuzz::Origin, http2 : Bool) {
-          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout)
-            .as(Fuzz::Backend)
+          Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
+            slot_overlay: false).as(Fuzz::Backend)
         })
       end
 

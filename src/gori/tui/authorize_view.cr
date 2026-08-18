@@ -5,6 +5,7 @@ require "./fmt"
 require "./url"
 require "./traffic_empty_state"
 require "../authorize/engine"
+require "../authorize/passive"
 require "../repeater/message_lines"
 require "../store/models"
 
@@ -27,8 +28,13 @@ module Gori::Tui
       getter id : Int32
       getter detail : Store::FlowDetail
       property target : Authorize::Target?
-      property state : Symbol # :pending | :running | :done | :error
+      property state : Symbol # :pending | :running | :done | :error | :skipped
       property error : String?
+      # Why a run declined to send this request at all — a `Passive.reason_label` symbol, the
+      # same vocabulary `gori run authorize` and MCP report skips in. Distinct from `error`
+      # because "gori sent nothing for this one" and "the send failed" are opposite facts, and
+      # a row that reads `error` for the first sends the operator hunting a network problem.
+      property skip_reason : Symbol?
       # The identity revision `target` was produced under. A result from an older set is not
       # wrong — it is what those identities saw — but it no longer describes the current ones,
       # so it counts as pending again.
@@ -38,6 +44,7 @@ module Gori::Tui
         @target = nil
         @state = :pending
         @error = nil
+        @skip_reason = nil
         @result_rev = -1
       end
 
@@ -163,20 +170,24 @@ module Gori::Tui
       e.state != :running && !e.current?(@identity_rev)
     end
 
-    # What PASSIVE's unattended re-run may pick up: pending work that has not already blown up
-    # under this identity set.
+    # What PASSIVE's unattended re-run may pick up: pending work that has not already been
+    # answered under this identity set.
     #
     # The split matters because the two callers mean different things by "unfinished". A manual
-    # ^R is the operator asking again, and a request that raised is exactly what they might
-    # want retried. Passive asks on every drain tick with nobody watching, so an entry that
-    # raises — a stored h2 pseudo-header head, say, which raises every time by construction —
-    # would be re-dispatched forever, one fiber and one Jobs row per tick.
+    # ^R is the operator asking again, and a request that raised — or that no identity changes
+    # — is exactly what they might want to try again after a fix. Passive asks on every drain
+    # tick with nobody watching, so an entry that raises (a stored h2 pseudo-header head, say,
+    # which raises every time by construction) or one a run keeps declining would be
+    # re-dispatched forever, one fiber and one Jobs row per tick.
     def auto_pending_entries : Array(Entry)
-      @entries.select { |e| pending?(e) && !errored_this_rev?(e) }
+      @entries.select { |e| pending?(e) && !answered_this_rev?(e) }
     end
 
-    private def errored_this_rev?(e : Entry) : Bool
-      !e.error.nil? && e.result_rev == @identity_rev
+    # A run already gave this entry an answer OTHER than a result — it raised, or it was
+    # declined — under the identity set now configured. Changing that set bumps the revision,
+    # which is exactly when a retry could plausibly go differently.
+    private def answered_this_rev?(e : Entry) : Bool
+      (!e.error.nil? || !e.skip_reason.nil?) && e.result_rev == @identity_rev
     end
 
     # Remove the cursor entry. Returns false (and changes nothing) while that row is mid-run —
@@ -249,6 +260,23 @@ module Gori::Tui
       e.target = target
       e.state = :done
       e.error = nil
+      e.skip_reason = nil
+      e.result_rev = @identity_rev
+    end
+
+    # A run DECLINED to send this request — no identity would change it, the capture never
+    # completed, gori answered it itself. Stamped with `result_rev` for the same reason
+    # `apply_error` is: the refusal holds for THIS identity set, and adding an identity that
+    # sets a session is precisely what makes it worth trying again.
+    #
+    # Not `apply_error`: a skip is a statement about the request, an error is a statement about
+    # the network, and the operator acts on them differently. The master row says `skipped` and
+    # the detail pane names the reason in the same words `gori run authorize` prints.
+    def apply_skip(id : Int32, reason : Symbol) : Nil
+      return unless e = entry_by_id(id)
+      e.state = :skipped
+      e.skip_reason = reason
+      e.error = nil
       e.result_rev = @identity_rev
     end
 
@@ -263,6 +291,7 @@ module Gori::Tui
       return unless e = entry_by_id(id)
       e.state = :error
       e.error = message
+      e.skip_reason = nil
       e.result_rev = @identity_rev
     end
 
@@ -408,8 +437,7 @@ module Gori::Tui
       return if y >= bottom
       t = e.target
       unless t
-        note = e.state == :running ? "running…" : (e.error || "not run yet — press r")
-        screen.text(x, y, note, Theme.muted, Theme.bg)
+        screen.text(x, y, no_result_note(e), Theme.muted, Theme.bg, width: right - x)
         return
       end
       y = render_trials(screen, x, y, right, bottom, t, focused)
@@ -465,6 +493,18 @@ module Gori::Tui
 
     # ── labels / colours ────────────────────────────────────────────────────────
 
+    # Why this request has no result yet, in the words the operator can act on. A skip is
+    # NAMED (`Passive.reason_label`, the same sentence `gori run authorize` prints) rather than
+    # left as a blank row: "gori declined to send this" and "this has not run yet" are
+    # different facts, and the second one is what an unexplained empty pane reads as.
+    private def no_result_note(e : Entry) : String
+      return "running…" if e.state == :running
+      if reason = e.skip_reason
+        return "skipped — #{Authorize::Passive.reason_label(reason)}"
+      end
+      e.error || "not run yet — ^R runs it"
+    end
+
     private def master_verdict_label(e : Entry) : String
       case e.verdict
       when :bypass   then "⚠ #{same_count(e)} same"
@@ -473,6 +513,7 @@ module Gori::Tui
       when :running  then "running…"
       when :pending  then "pending"
       when :error    then "error"
+      when :skipped  then "skipped"
       else                "—"
       end
     end

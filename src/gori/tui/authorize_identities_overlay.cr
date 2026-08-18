@@ -184,7 +184,11 @@ module Gori::Tui
       # the card no longer has room for. A glyph nobody can look up is not a label.
       tag = id.baseline? ? "baseline" : ""
       tag_x = box.right - 2 - tag.size
-      screen.text(sx, py, id.summary, Theme.muted, bg, width: {tag_x - 1 - sx, 1}.max)
+      # The rule membership rides along with the overlay summary, exactly as the session slot
+      # picker draws it: it is state this card PRESERVES but does not edit, and state a card
+      # keeps without showing is state the operator cannot know they still have.
+      detail = id.rules.empty? ? id.summary : "#{id.summary} · rules #{Gori::Env.token_list(id.rules)}"
+      screen.text(sx, py, detail, Theme.muted, bg, width: {tag_x - 1 - sx, 1}.max)
       screen.text(tag_x, py, tag, Theme.focus_gold, bg) unless tag.empty?
     end
   end
