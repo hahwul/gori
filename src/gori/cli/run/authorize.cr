@@ -125,8 +125,7 @@ module Gori
         failed = 0
         on_error = ->(detail : Store::FlowDetail, ex : Exception) {
           failed += 1
-          STDERR.puts "  #{authorize_failure_text(detail, ex)}"
-          nil
+          report_authorize_failure(detail, ex)
         }
         sent = plan.run(-> { stopping }, on_error) do |_detail, target|
           bypasses += 1 if CLI::Output.authorize_verdict(target) == :bypass
@@ -155,6 +154,15 @@ module Gori
         # raised. Same rule as the block above — a run that sent nothing must not exit 0 with a
         # summary that reads like a clean result.
         exit 1 if sent == 0 && failed > 0 && !interrupted.call
+      end
+
+      # One flow that could not be replayed, as it happens. The in-place meter is cleared
+      # first, exactly as `authorize_done` does: `--format json`/`jsonl` leave
+      # `[authorize] 3/10 requests …` on this line with no newline after it, and the failure
+      # would otherwise be appended to the end of it.
+      private def self.report_authorize_failure(detail : Store::FlowDetail, ex : Exception) : Nil
+        STDERR.print "\r\e[K" if STDERR.tty?
+        STDERR.puts "  #{authorize_failure_text(detail, ex)}"
       end
 
       # "  #12  GET     acme.test/orders   — could not be replayed: <why>"
@@ -266,9 +274,10 @@ module Gori
             "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
           end
         in Authorize::PlanError::Reason::DuplicateIdentity
-          "two identities are called #{(ex.detail || "?").inspect} — the name is what tells the " \
-          "rows of the results table apart, so give one of them a different one. Names are " \
-          "compared case-insensitively (`admin` and `Admin` are one identity here)"
+          "two identities are called #{(ex.detail || "?").inspect} — in --identities, or in the " \
+          "project's saved set when you passed none (`gori run session list`). The name is what " \
+          "tells the rows of the results table apart, so give one of them a different one. Names " \
+          "are compared case-insensitively (`admin` and `Admin` are one identity here)"
         in Authorize::PlanError::Reason::NothingToSend
           "every selected flow was skipped (#{ex.detail}), so nothing was sent — replay " \
           "POST/PUT/PATCH/DELETE with --unsafe-methods, reach a host outside the project scope " \

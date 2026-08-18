@@ -177,6 +177,22 @@ describe AuthorizeIdentitiesOverlay do
       be.contains?("slot-1 ").should be_false # scrolled off the top
     end
 
+    # The card's own chrome is not a row. Unscrolled, the border and title sat at negative
+    # indices and fell out on their own; scrolled, they map onto real identities — a click on
+    # the top border selected row 4 — and `handle_click` moves the cursor, so the next `d`
+    # deletes an identity nobody pointed at.
+    it "does not read the card's chrome as a row" do
+      ov = AuthorizeIdentitiesOverlay.new(many)
+      11.times { ov.move(1) }
+      area = Rect.new(0, 0, 100, 12)
+      ov.render(Screen.new(MemoryBackend.new(100, 12)), area)
+      box = ov.overlay_box(area).not_nil!
+      ov.row_at(box, box.x + 5, box.y).should be_nil          # top border
+      ov.row_at(box, box.x + 5, box.y + 1).should be_nil      # title
+      ov.row_at(box, box.x + 5, box.bottom - 2).should be_nil # the actions / note row
+      ov.row_at(box, box.x + 5, box.y + 2).should_not be_nil  # the first drawn identity
+    end
+
     # A click has to invert the SAME window the draw used, without moving it.
     it "hit-tests against the scrolled window" do
       ov = AuthorizeIdentitiesOverlay.new(many)

@@ -413,10 +413,12 @@ module Gori
               "INVALID_ARGUMENT", field: "identities")
           end
         in Authorize::PlanError::Reason::DuplicateIdentity
-          err("two identities are called #{(ex.detail || "?").inspect}. The name is the only thing " \
-              "that tells the per-identity rows apart — `bypasses[].identities` would name a string " \
-              "you could not resolve back to one — so rename one of them. Compared " \
-              "case-insensitively: 'admin' and 'Admin' are one identity here",
+          err("two identities are called #{(ex.detail || "?").inspect} — in the 'identities' you " \
+              "passed, or in this project's saved set when you passed none (list_session_slots). " \
+              "The name is the only thing that tells the per-identity rows apart — " \
+              "`bypasses[].identities` would name a string you could not resolve back to one — so " \
+              "rename one of them. Compared case-insensitively: 'admin' and 'Admin' are one " \
+              "identity here",
             "INVALID_ARGUMENT", field: "identities")
         in Authorize::PlanError::Reason::NothingToSend
           authorize_nothing_to_send(ex, ob)
@@ -578,8 +580,10 @@ module Gori
         tool j, "authorize_status",
           "Counts + state of an authorize job (running|done|stopped|error): the access_control " \
           "verdict so far (BYPASS|enforced|review|nothing_sent), bypass_count, requests replayed, " \
-          "sends, errors, sends refused before the socket, and the flows that were SKIPPED with " \
-          "the reason for each (a run that sends nothing says so)." do |s|
+          "sends, errors, sends refused before the socket, the flows that were SKIPPED with the " \
+          "reason for each, and the ones that could not be replayed at all (`failed_count` / " \
+          "`failed[]` — a stored head gori cannot put on the wire; the run continues past them). " \
+          "A run that sends nothing says so." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
         end
 
@@ -587,8 +591,9 @@ module Gori
           "The verdicts for an authorize job. Read `access_control` and `bypasses` FIRST: " \
           "`bypasses` lists every request where a non-baseline identity was served the same " \
           "response as the baseline — the access-control failures this tool exists to find. " \
-          "`results` pages the full per-identity detail (verdict, status, size, delta, error) and " \
-          "`skipped` names every selected flow that was not replayed." do |s|
+          "`results` pages the full per-identity detail (verdict, status, size, delta, error), " \
+          "`skipped` names every selected flow that was not replayed, and `failed[]` the ones " \
+          "that could not be replayed at all." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max requests per page (default 50, max 500)")
@@ -621,7 +626,9 @@ module Gori
                "Each is a static header overlay: `set` upserts headers, `remove` strips them. " \
                "Exactly one may carry \"baseline\":true — the identity the others are judged against; " \
                "with none, the request AS CAPTURED (its own session) is the baseline. At least one " \
-               "identity besides the baseline is required, or there is nothing to compare. " \
+               "identity besides the baseline is required, or there is nothing to compare. Names " \
+               "must be UNIQUE (compared case-insensitively) — the name is what tells the " \
+               "per-identity result rows apart, so a duplicate is refused rather than run. " \
                "Omit to use the identities saved in this project (TUI Authorize tab)."
         JSON.parse(%({"description":#{desc.to_json},"oneOf":[{"type":"array","items":{"type":"object"}},{"type":"string"}]}))
       end

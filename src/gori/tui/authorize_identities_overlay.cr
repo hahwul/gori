@@ -155,7 +155,15 @@ module Gori::Tui
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2) + window(box)
+      # The ROW BAND, not just the card. An unscrolled window made the chrome harmless — the
+      # border and title rows sat at negative indices and fell out below — but the moment the
+      # window scrolls they map onto real identities: at an offset of 6, a click on the top
+      # border selects row 4 and the title row selects row 5, neither of which is painted
+      # there. `handle_click` moves the cursor, so the next `d` deletes, or `b` re-baselines,
+      # an identity the operator never pointed at.
+      first = box.y + 2
+      return nil unless first <= my < box.bottom - 2
+      i = my - first + window(box)
       (0 <= i < @identities.size) ? i : nil
     end
 

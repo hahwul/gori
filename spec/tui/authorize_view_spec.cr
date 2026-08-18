@@ -45,6 +45,36 @@ private def verdict_col(be : MemoryBackend, header_row : Int32) : Int32
 end
 
 describe AuthorizeView do
+  # A master row and its detail pane must not contradict each other — the rule `settle_running`
+  # states. The detail pane draws a trials table whenever a target is there, so a state that
+  # means "no result" has to drop the one the run before it left.
+  describe "a row that stops having a result" do
+    it "drops the previous trials when a run declines it" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(false))
+      v.apply_skip(id, :no_effect)
+      e = v.entries.first
+      e.state.should eq(:skipped)
+      e.target.should be_nil
+      v.pending_entries.size.should eq(1) # ^R can still ask again
+      be = render_to(v)
+      (0...30).any? { |y| be.row(y).includes?("IDENTITY") }.should be_false
+      be.contains?("no identity changes them").should be_true
+    end
+
+    it "drops them when a re-run raises" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(true))
+      v.apply_error(id, "connection refused")
+      v.entries.first.target.should be_nil
+      be = render_to(v)
+      (0...30).any? { |y| be.row(y).includes?("IDENTITY") }.should be_false
+      be.contains?("connection refused").should be_true
+    end
+  end
+
   # Every column here is placed by MEASURING the text before it, and a Hangul or CJK glyph is
   # one character and TWO display columns. Measured in characters, a name or a path of them
   # pushed VERDICT off its column and over the text to its left.

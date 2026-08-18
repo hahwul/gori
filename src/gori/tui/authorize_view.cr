@@ -277,6 +277,12 @@ module Gori::Tui
       e.state = :skipped
       e.skip_reason = reason
       e.error = nil
+      # And the previous run's result GOES. Two reasons, and `settle_running` states the first
+      # one: the detail pane renders a trials table whenever a target is there, so a master row
+      # reading `skipped` over the verdicts of an earlier identity set is the contradiction that
+      # rule exists to prevent. The second is that `current?` is target-based — a declined row
+      # that kept one counted as answered, so ^R stopped offering to retry it.
+      e.target = nil
       e.result_rev = @identity_rev
     end
 
@@ -292,6 +298,10 @@ module Gori::Tui
       e.state = :error
       e.error = message
       e.skip_reason = nil
+      # Same rule as `apply_skip`: an `error` row must not paint the trials of the run before
+      # it. ⇧R re-runs a row that already had a result, so this is reachable whenever a retry
+      # raises — and the stale table said the request had been compared when it had not.
+      e.target = nil
       e.result_rev = @identity_rev
     end
 

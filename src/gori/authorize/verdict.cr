@@ -1,3 +1,4 @@
+require "uri"
 require "../repeater/engine"
 require "../discover/fingerprint"
 require "../proxy/codec/content_decode"
@@ -133,14 +134,31 @@ module Gori
       # did not send the header, so there is nothing to compare and the body logic below is
       # still the best available answer.
       #
-      # An exact string compare, not a URL normalisation: what matters is whether the origin
-      # is steering the two identities to the same place, and `/login` vs `/login/` is a
-      # difference worth showing the operator rather than one worth deciding for them.
+      # Three outcomes, not two, and the middle one is the point. A byte-exact match is `Same`
+      # and a different DESTINATION is `Different` — `/dashboard` against `/login` is access
+      # control engaging. But two redirects to the same resource that differ in their query
+      # (`/dashboard?sid=A` against `/dashboard?sid=B`, a per-session token in the URL) sent
+      # BOTH identities into the protected area, and calling that `Different` aggregates the
+      # row to `enforced` and makes the finding vanish. A missed bypass is the one direction
+      # this tool must not fail in, so a same-resource difference is `Review` — the verdict
+      # whose whole meaning is "the operator judges".
       private def self.redirect_verdict(baseline : ResponseSummary,
                                         other : ResponseSummary) : Verdict?
         b, o = baseline.location, other.location
         return nil if b.nil? || o.nil?
-        b == o ? Verdict::Same : Verdict::Different
+        return Verdict::Same if b == o
+        same_destination?(b, o) ? Verdict::Review : Verdict::Different
+      end
+
+      # Do two `Location` values name the same resource, differing only in query or fragment?
+      # Scheme/host/port/path, compared as written — no normalisation beyond what `URI` does,
+      # since `/login` and `/login/` are two paths to an origin and guessing otherwise is
+      # deciding for the operator. An unparseable value is not the same as anything.
+      private def self.same_destination?(a : String, b : String) : Bool
+        ua, ub = URI.parse(a), URI.parse(b)
+        ua.scheme == ub.scheme && ua.host == ub.host && ua.port == ub.port && ua.path == ub.path
+      rescue URI::Error
+        false
       end
 
       # Whether two decoded bodies count as the same content — both empty, or within SimHash

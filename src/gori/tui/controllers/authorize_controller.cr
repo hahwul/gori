@@ -322,6 +322,9 @@ module Gori::Tui
     # and "nothing matched" are the same picture, which is how this mode read as broken.
     private def passive_readout : String
       return "passive replay on — add a scope include rule to replay anything" if no_scope?
+      if why = identity_problem(identities)
+        return "passive replay on — #{why}"
+      end
       return "passive replay on — waiting for traffic" if @passive_seen_count.zero?
       queued = @passive_seen.size
       top = @passive_skips.max_by? { |(_, n)| n }
@@ -347,6 +350,10 @@ module Gori::Tui
       # Cleared by the next explicit run, or by switching passive off and on.
       return if @view.stop_requested?
       return if @view.auto_pending_entries.empty?
+      # The set itself, asked here rather than discovered inside `run`: a refusal there marks
+      # nothing, so the rows stay unanswered and this fires again on the very next tick. The
+      # readout carries the reason; the loop does not.
+      return if identity_problem(identities)
       run(:pending)
     end
 
@@ -486,22 +493,36 @@ module Gori::Tui
     # used to send anyway. Then the per-request question, below.
     private def comparable_batch(batch : Array(AuthorizeView::Entry),
                                  idents : Array(Authorize::Identity)) : Array(AuthorizeView::Entry)?
-      if idents.size < 2
-        @host.status("authorize: #{idents.size} identity compares nothing — press i and add " \
-                     "at least one besides the baseline")
-        return nil
-      end
-      # The form refuses a duplicate as you type one, which covers the name an operator adds
-      # HERE and nothing else: a set that arrived already holding two — a hand-edited settings
-      # row, `gori run session add` twice, an older build — reached the results table as two
-      # rows under one label, with no way to say which session produced which verdict. `Plan`
-      # refuses it for the headless surfaces; this is the same rule for the queue.
-      if dup = duplicate_name(idents)
-        @host.status("authorize: two identities are called #{dup.inspect} — press i and rename " \
-                     "one; the name is what tells the result rows apart")
+      if why = identity_problem(idents)
+        @host.status("authorize: #{why}")
         return nil
       end
       decline_unchanged(batch, idents)
+    end
+
+    # Why this identity SET cannot produce a comparison, as the sentence to show, or nil when
+    # it can. A property of the set and not of any request, which is what makes it the wrong
+    # thing to mark rows with — and the reason `maybe_autorun` has to ask it BEFORE it calls
+    # `run`. Without that, passive found the same unanswered rows on every drain tick, called
+    # `run`, was refused, and rewrote the status line with the refusal for as long as the mode
+    # stayed on. `passive_readout` reads it too, because "why is nothing happening" is the one
+    # question an unattended mode must always be able to answer.
+    private def identity_problem(idents : Array(Authorize::Identity)) : String?
+      if idents.size < 2
+        return "#{idents.size} identity compares nothing — press i and add at least one " \
+               "besides the baseline"
+      end
+      # The form refuses a duplicate as you type one, which covers the name an operator adds
+      # HERE and nothing else: a set that arrived already holding two — a hand-edited settings
+      # row, `gori run session add admin` and then `Admin` (`SessionSlots#find` is
+      # case-sensitive, so both take), an older build — reached the results table as two rows
+      # under one label, with no way to say which session produced which verdict. `Plan`
+      # refuses it for the headless surfaces; this is the same rule for the queue.
+      if dup = duplicate_name(idents)
+        return "two identities are called #{dup.inspect} — press i and rename one; the name " \
+               "is what tells the result rows apart"
+      end
+      nil
     end
 
     # The first name a second identity repeats, or nil. Case-insensitive, matching the form's

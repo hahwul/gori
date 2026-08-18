@@ -260,6 +260,32 @@ describe Gori::Tui::AuthorizeController do
     end
   end
 
+  # A pre-flight refusal marks nothing — the rows stay unanswered — so an unattended replay
+  # that only looks at "is there pending work?" found them again on the very next drain tick,
+  # called `run`, was refused, and rewrote the status line for as long as passive stayed on.
+  # The set is a property of the SET, so the autorun has to ask about it before it calls `run`.
+  it "does not re-fire a refused run on every passive tick" do
+    with_authorize_controller do |ctrl, host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "a=1"}], baseline: true),
+        Gori::SessionSlot.new("Admin", set_headers: [{"Cookie", "b=2"}]),
+      ]).should be_true
+      ctrl.seed_flows([seed_capture(session.store, "/admin", "session=A")])
+      # A scope include rule, so the readout is past the gate it names first — passive with no
+      # scope replays nothing at all, and that is the answer it should give there.
+      session.scope.add("include", "host", "acme.test").should be_true
+      ctrl.toggle_passive # ON
+      before = host.statuses.size
+
+      5.times { ctrl.drain_events }
+
+      ctrl.running?.should be_false
+      host.statuses.size.should eq(before) # not one line per tick
+      # …and the tab SAYS why, where an operator looking at it can read it.
+      ctrl.view.passive_note.not_nil!.should contain("two identities are called")
+    end
+  end
+
   # …and the refusal is scoped to the identity set that produced it. Adding an identity that
   # sets a session is exactly what makes the row worth trying again, so it must come back as
   # pending rather than staying declined for the session.

@@ -92,6 +92,25 @@ describe Gori::Authorize::Judge do
       Judge.verdict(redirect(301, "/x"), redirect(302, "/x")).should eq(Verdict::Same)
     end
 
+    # A per-session token in the URL sent BOTH identities into the protected area. Reading
+    # that as `Different` aggregates the row to `enforced` and the finding disappears — the one
+    # direction this tool must not fail in.
+    it "is Review when they differ only in the query" do
+      base = redirect(302, "/dashboard?sid=AAA")
+      other = redirect(302, "/dashboard?sid=BBB")
+      Judge.verdict(base, other).should eq(Verdict::Review)
+    end
+
+    it "is still Different when the path differs" do
+      Judge.verdict(redirect(302, "/dashboard?next=1"), redirect(302, "/login?next=1"))
+        .should eq(Verdict::Different)
+    end
+
+    it "is Different across hosts, even on the same path" do
+      Judge.verdict(redirect(302, "https://app.acme.test/x"), redirect(302, "https://www.acme.test/x"))
+        .should eq(Verdict::Different)
+    end
+
     # No Location on one side and there is nothing to compare — fall back to the body, which
     # is what every non-redirect pair uses.
     it "falls back to the body when a Location is missing" do
