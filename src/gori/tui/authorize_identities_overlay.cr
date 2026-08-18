@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./viewport"
 require "../hotkeys"
 require "../authorize/identity"
 
@@ -35,6 +36,7 @@ module Gori::Tui
       @selected = (cursor || 0).clamp(0, {identities.size - 1, 0}.max)
       @pending = nil.as(Pending?)
       @note = nil.as(String?)
+      @scroll = 0
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -137,9 +139,23 @@ module Gori::Tui
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
+    # How many identity rows the card has room for. The card grows to fit the list, so this
+    # only bites on a short terminal or a long list — which is exactly when a card that
+    # silently stopped drawing at the bottom edge, with the cursor walking on past it into
+    # rows nothing painted, was at its most confusing.
+    private def visible_rows(box : Rect) : Int32
+      {(box.bottom - 2) - (box.y + 2), 0}.max
+    end
+
+    # The window, derived and NOT stored — a hit-test has to invert the same arithmetic the
+    # renderer uses without moving it (`Viewport`'s own note on this pair).
+    private def window(box : Rect) : Int32
+      Viewport.scroll_to_show(@selected, @scroll, visible_rows(box), @identities.size)
+    end
+
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
+      i = my - (box.y + 2) + window(box)
       (0 <= i < @identities.size) ? i : nil
     end
 
@@ -154,8 +170,10 @@ module Gori::Tui
       if @identities.empty?
         screen.text(box.x + 3, first, "no identities — a adds one", Theme.muted, Theme.panel)
       else
+        @scroll = window(box)
         @identities.each_with_index do |id, i|
-          py = first + i
+          next if i < @scroll
+          py = first + (i - @scroll)
           break if py >= box.bottom - 2
           draw_row(screen, box, id, i, py)
         end

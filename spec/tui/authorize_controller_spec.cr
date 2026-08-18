@@ -222,6 +222,24 @@ describe Gori::Tui::AuthorizeController do
     end
   end
 
+  # The identity form refuses a duplicate as you type one; a set that arrived already holding
+  # two reached the results table as two rows under one label. `Plan` refuses it headlessly.
+  it "refuses to run a set with two identities under one name" do
+    with_authorize_controller do |ctrl, host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "a=1"}], baseline: true),
+        Gori::SessionSlot.new("Admin", set_headers: [{"Cookie", "b=2"}]),
+      ]).should be_true
+      ctrl.seed_flows([seed_capture(session.store, "/admin", "session=A")]).should eq({1, 0})
+
+      ctrl.run(:all)
+
+      ctrl.running?.should be_false
+      host.statuses.last.should contain("two identities are called")
+      ctrl.view.entries.first.state.should eq(:pending)
+    end
+  end
+
   # A public page and the built-in "anonymous" identity: removing headers that are not there
   # changes nothing, so every trial would ship byte-identical bytes, every response would match
   # by construction, and the row would read `⚠ 1 same` — a finding manufactured out of nothing.

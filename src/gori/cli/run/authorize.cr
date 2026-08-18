@@ -265,6 +265,10 @@ module Gori
             "Authorize tab, or pass --identities FILE with at least one, e.g. " \
             "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
           end
+        in Authorize::PlanError::Reason::DuplicateIdentity
+          "two identities are called #{(ex.detail || "?").inspect} — the name is what tells the " \
+          "rows of the results table apart, so give one of them a different one. Names are " \
+          "compared case-insensitively (`admin` and `Admin` are one identity here)"
         in Authorize::PlanError::Reason::NothingToSend
           "every selected flow was skipped (#{ex.detail}), so nothing was sent — replay " \
           "POST/PUT/PATCH/DELETE with --unsafe-methods, reach a host outside the project scope " \

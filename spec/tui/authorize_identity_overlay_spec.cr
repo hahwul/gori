@@ -160,6 +160,36 @@ describe AuthorizeIdentitiesOverlay do
     list[0].baseline?.should be_false
   end
 
+  # The card grows to fit the list, so it only clips on a short terminal or a long set — and
+  # there it drew the first N rows and stopped, while ↑/↓ walked the cursor on past the last
+  # painted one into rows nothing rendered. The window follows the cursor now, through the
+  # same `Viewport` derivation every other list in the UI uses.
+  describe "a list taller than the card" do
+    many = (1..12).map { |i| Identity.new("slot-#{i}", baseline: i == 1) }
+
+    it "scrolls the window to keep the cursor drawn" do
+      ov = AuthorizeIdentitiesOverlay.new(many)
+      11.times { ov.move(1) } # walk to the last row
+      ov.selected.should eq(11)
+      be = MemoryBackend.new(100, 12) # 12 rows of terminal: the card cannot hold all 12 slots
+      ov.render(Screen.new(be), Rect.new(0, 0, 100, 12))
+      be.contains?("slot-12").should be_true
+      be.contains?("slot-1 ").should be_false # scrolled off the top
+    end
+
+    # A click has to invert the SAME window the draw used, without moving it.
+    it "hit-tests against the scrolled window" do
+      ov = AuthorizeIdentitiesOverlay.new(many)
+      11.times { ov.move(1) }
+      area = Rect.new(0, 0, 100, 12)
+      ov.render(Screen.new(MemoryBackend.new(100, 12)), area)
+      box = ov.overlay_box(area).not_nil!
+      # The first drawn row is not row 0 of the list any more.
+      ov.row_at(box, box.x + 5, box.y + 2).should_not eq(0)
+      ov.row_at(box, box.x + 5, box.y + 2).not_nil!.should be > 0
+    end
+  end
+
   it "promotes a survivor when the baseline row is deleted" do
     ov = AuthorizeIdentitiesOverlay.new(private_ids, 0) # cursor on the baseline
     saved = nil.as(Array(Identity)?)

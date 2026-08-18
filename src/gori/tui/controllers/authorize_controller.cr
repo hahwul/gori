@@ -491,7 +491,25 @@ module Gori::Tui
                      "at least one besides the baseline")
         return nil
       end
+      # The form refuses a duplicate as you type one, which covers the name an operator adds
+      # HERE and nothing else: a set that arrived already holding two — a hand-edited settings
+      # row, `gori run session add` twice, an older build — reached the results table as two
+      # rows under one label, with no way to say which session produced which verdict. `Plan`
+      # refuses it for the headless surfaces; this is the same rule for the queue.
+      if dup = duplicate_name(idents)
+        @host.status("authorize: two identities are called #{dup.inspect} — press i and rename " \
+                     "one; the name is what tells the result rows apart")
+        return nil
+      end
       decline_unchanged(batch, idents)
+    end
+
+    # The first name a second identity repeats, or nil. Case-insensitive, matching the form's
+    # own check: `admin` and `Admin` are two rows a person reads as one.
+    private def duplicate_name(idents : Array(Authorize::Identity)) : String?
+      seen = Set(String).new
+      idents.each { |id| return id.name unless seen.add?(id.name.downcase) }
+      nil
     end
 
     # Drop the entries this identity set cannot say anything about, MARKING each one, and
@@ -562,6 +580,11 @@ module Gori::Tui
       @passive_capped = false
       @passive_seen_count = 0
       @passive_skips.clear
+      # The per-host "outside scope" notice goes with them. It is capped so a browse cannot
+      # take the status line, and a cap that outlives the queue it was counting made the
+      # notice a once-per-session event — silence for every host reached after an operator
+      # cleared the tab and fixed the scope.
+      @passive_unscoped.clear
       @view.passive_note = passive_readout if @passive
       @host.status("authorize: cleared")
     end

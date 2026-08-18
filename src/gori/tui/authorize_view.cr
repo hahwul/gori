@@ -409,9 +409,9 @@ module Gori::Tui
         bg = (selected && focused) ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected && focused
         screen.text(rect.x, y, selected ? "▎" : " ", Theme.focus_gold, bg)
-        cols = sprintf(" %-3d %-6s %-38s ", i + 1, e.method, truncate(e.host_path, 38))
+        cols = " #{fit((i + 1).to_s, 3)} #{fit(e.method, 6)} #{fit(e.host_path, 38)} "
         screen.text(rect.x + 1, y, cols, Theme.text, bg)
-        vx = rect.x + 1 + cols.size
+        vx = rect.x + 1 + Screen.draw_width(cols)
         v = e.verdict
         screen.text(vx, y, master_verdict_label(e), master_verdict_color(v), bg,
           Attribute::Bold, width: rect.right - vx)
@@ -458,10 +458,10 @@ module Gori::Tui
         screen.fill(Rect.new(x, y, right - x, 1), bg) if sub && focused
         screen.text(x, y, sub ? "▎" : " ", Theme.focus_gold, bg)
         size = trial.meta.size.try { |s| Repeater::ExchangeMeta::Format.bytes(s) } || "—"
-        cols = sprintf(" %-14s %-7s %-9s %-22s ",
-          truncate(trial.identity, 14), trial.meta.status_text, size, truncate(trial.delta || "—", 22))
+        cols = " #{fit(trial.identity, 14)} #{fit(trial.meta.status_text, 7)} " \
+               "#{fit(size, 9)} #{fit(trial.delta || "—", 22)} "
         screen.text(x + 1, y, cols, Theme.text, bg)
-        vx = x + 1 + cols.size
+        vx = x + 1 + Screen.draw_width(cols)
         screen.text(vx, y, trial_verdict_label(trial.verdict), trial_verdict_color(trial.verdict), bg,
           Attribute::Bold, width: right - vx)
         y += 1
@@ -552,8 +552,24 @@ module Gori::Tui
       end
     end
 
-    private def truncate(s : String, w : Int32) : String
-      s.size <= w ? s : s[0, w - 1] + "…"
+    # One column, cut and padded to `w` DISPLAY COLUMNS — never characters. The rows here are
+    # laid out by measuring the text before them (`vx = … + draw_width(cols)`), so a name or a
+    # path of Hangul or CJK, which is one char and TWO columns per glyph, used to push VERDICT
+    # off its column and over the text to its left. `column_for` is the exact inverse of
+    # `draw_width` at cluster boundaries, so the cut can never split a wide glyph — the same
+    # idiom `sitemap_view`'s tag stub and `comparer_view#slot_short` use.
+    #
+    # It also PADS, which `sprintf("%-14s")` did in characters and did not do at all when the
+    # value was over budget: a long `Δ vs baseline` or an unexpected status text overflowed its
+    # field and shifted the column after it.
+    private def fit(s : String, w : Int32) : String
+      return "" if w <= 0
+      width = Screen.draw_width(s)
+      if width > w
+        s = "#{s[0, Screen.column_for(s, w - 1)]}…"
+        width = Screen.draw_width(s)
+      end
+      width < w ? s + " " * (w - width) : s
     end
   end
 end

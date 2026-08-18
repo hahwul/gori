@@ -14,10 +14,12 @@ module Gori::Authorize
   # contract. So `reason` is the machine-readable fact and the `message` here is only a
   # fallback for a caller that has nothing better to say.
   #
-  # EVERY MEMBER ADDED HERE OBLIGATES THREE `case` ARMS — `gori run authorize`, the MCP
-  # `authorize_*` tools, and the TUI tab all switch on this exhaustively. Keep the set as
-  # small as the real failure modes require; a new member is a change to three surfaces,
-  # not to this file.
+  # EVERY MEMBER ADDED HERE OBLIGATES AN ARM IN `gori run authorize` AND ONE IN THE MCP
+  # `authorize_*` TOOLS — both switch on this exhaustively (`case … in`), so a new member is
+  # a compile error until each has an answer and a next thing to type. (The TUI tab does not
+  # appear here: its queue is live view state rather than an options set, so it makes the same
+  # refusals against the view — see `AuthorizeController#comparable_batch`.) Keep the set as
+  # small as the real failure modes require.
   class PlanError < Exception
     enum Reason
       # No selection at all: neither a flow id nor a query. (A usage mistake, not an empty
@@ -37,6 +39,13 @@ module Gori::Authorize
       # about a test that compared nothing. `detail` = where the set came from ("json" /
       # "project"), for a surface that wants to name the file or the tab to fix.
       NoIdentities
+      # Two identities in the resolved set share a name (case-insensitively). Refused rather
+      # than run, because the name is the ONLY thing that tells the rows of the results table
+      # apart: two "admin" rows leave no way to say which session produced which verdict, and
+      # `bypasses[].identities` names a string a caller then cannot resolve back to a slot.
+      # The TUI's identity form has always refused it; this is the same rule for a `--identities`
+      # file, an MCP `identities` array, and a hand-edited settings row. `detail` = the name.
+      DuplicateIdentity
       # Flows were selected, and every one of them was skipped — unsafe method, incomplete,
       # answered by gori, no identity changes it, out of scope, duplicate. `detail` = the
       # per-reason tally; `PlanError#skipped` carries the full per-flow list, because "a run
@@ -244,12 +253,39 @@ module Gori::Authorize
       # `Authorize.parse_json`. That is right on the project-open path and wrong here, so
       # the emptiness is what gets named, with `detail` saying which source produced it.
       list = Authorize.parse_json(raw)
-      list = [Identity.as_captured] + list unless list.any?(&.baseline?)
+      reject_duplicate_names(list)
+      list = [Identity.as_captured(baseline_name(list))] + list unless list.any?(&.baseline?)
       if list.size < 2
         raise PlanError.new(PlanError::Reason::NoIdentities,
           "need at least one identity besides the baseline to compare against", source)
       end
       list
+    end
+
+    # Refuse a set whose rows cannot be told apart. Case-insensitive, matching the TUI form's
+    # own check — `$Session` and `$SESSION` are two binding names everywhere in gori, but two
+    # IDENTITIES called `admin` and `Admin` are two rows a person reads as one.
+    private def self.reject_duplicate_names(list : Array(Identity)) : Nil
+      seen = Set(String).new
+      list.each do |id|
+        next if seen.add?(id.name.downcase)
+        raise PlanError.new(PlanError::Reason::DuplicateIdentity,
+          "two identities are called #{id.name.inspect}", id.name)
+      end
+    end
+
+    # A name for the prepended baseline that the operator's own set has not already used.
+    # Without it, a set containing a non-baseline identity called "as-captured" would collide
+    # with the row gori adds — a duplicate gori created, which the check above would then
+    # report as the operator's mistake.
+    private def self.baseline_name(list : Array(Identity)) : String
+      taken = list.map(&.name.downcase).to_set
+      return "as-captured" unless taken.includes?("as-captured")
+      n = 2
+      while taken.includes?("as-captured #{n}")
+        n += 1
+      end
+      "as-captured #{n}"
     end
 
     # The selection, resolved to flows in the order the operator expressed it: explicit ids

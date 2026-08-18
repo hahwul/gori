@@ -13,8 +13,13 @@ module Gori
       getter size : Int64?    # decoded body size (nil = no body / send error)
       getter simhash : UInt64 # 0 when there is no body to hash
       getter error : String?  # send failure (TLS/DNS/timeout/refused); nil on a real reply
+      # `Location`, when the response carried one. A redirect's WHOLE content is this header:
+      # its body is usually empty, so two 3xx replies compare as identical no matter where
+      # they send the client. See `Judge.redirect_verdict`.
+      getter location : String?
 
-      def initialize(@status : Int32?, @size : Int64?, @simhash : UInt64, @error : String? = nil)
+      def initialize(@status : Int32?, @size : Int64?, @simhash : UInt64, @error : String? = nil,
+                     @location : String? = nil)
       end
 
       # From a live send. Decodes the body for the fingerprint; `Repeater::Result` carries the
@@ -22,12 +27,13 @@ module Gori
       def self.of(result : Repeater::Result) : ResponseSummary
         return new(nil, nil, 0_u64, error: result.error) unless result.ok?
         status = status_of(result.head)
+        location = result.response.try(&.headers.get?("location"))
         decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body)
         body = decoded || result.body
         if body && !body.empty?
-          new(status, body.size.to_i64, Discover::Fingerprint.simhash(body))
+          new(status, body.size.to_i64, Discover::Fingerprint.simhash(body), location: location)
         else
-          new(status, 0_i64, 0_u64)
+          new(status, 0_i64, 0_u64, location: location)
         end
       end
 
@@ -101,14 +107,40 @@ module Gori
         # engaged: a 200 baseline turning into a 401/403 for this identity is `Different`.
         return Verdict::Different if bs != os
 
-        # Same status class. Now the body decides. No body on either side (a 204/redirect with
-        # an empty entity) → same class + same emptiness is a match.
+        # BOTH REDIRECTS: where they point is the answer, and it is the only part of a redirect
+        # that carries one. The body is empty, so `content_matches?` matched every 3xx pair
+        # against every other — and the textbook enforcement pattern, an authenticated
+        # `302 → /dashboard` against an anonymous `302 → /login`, came back `Same`. That is not
+        # a noisy verdict, it is the finding inverted: the row an operator most needs to read as
+        # "access control engaged" was the one painted red as a bypass.
+        if bs == 3
+          verdict = redirect_verdict(baseline, other)
+          return verdict if verdict
+        end
+
+        # Same status class. Now the body decides. No body on either side (a 204 with an empty
+        # entity, a redirect neither side gave a Location) → same class + same emptiness is a
+        # match.
         same_content = content_matches?(baseline, other)
         return Verdict::Same if same_content
 
         # Same status, divergent body: could be a per-user page that legitimately differs, or a
         # tailored "access denied" rendered at 200. The operator judges.
         Verdict::Review
+      end
+
+      # Two 3xx responses, judged on their `Location`. Nil when they cannot be — one of them
+      # did not send the header, so there is nothing to compare and the body logic below is
+      # still the best available answer.
+      #
+      # An exact string compare, not a URL normalisation: what matters is whether the origin
+      # is steering the two identities to the same place, and `/login` vs `/login/` is a
+      # difference worth showing the operator rather than one worth deciding for them.
+      private def self.redirect_verdict(baseline : ResponseSummary,
+                                        other : ResponseSummary) : Verdict?
+        b, o = baseline.location, other.location
+        return nil if b.nil? || o.nil?
+        b == o ? Verdict::Same : Verdict::Different
       end
 
       # Whether two decoded bodies count as the same content — both empty, or within SimHash

@@ -193,6 +193,39 @@ describe Gori::Authorize::Plan do
         plan.identities.map(&.name).should eq(["admin", "user"])
       end
     end
+
+    # The name is the only column that tells the per-identity rows apart, and the TUI's form
+    # has always refused a duplicate. The headless surfaces took one and produced a table (and
+    # a `bypasses[].identities` array) with two rows under one label.
+    it "refuses two identities under one name" do
+      with_store do |store|
+        id = seed(store)
+        json = <<-JSON
+          [{"name": "admin", "baseline": true, "set": [{"name": "Cookie", "value": "a=1"}]},
+           {"name": "Admin", "set": [{"name": "Cookie", "value": "b=2"}]}]
+          JSON
+        ex = expect_raises(PlanError) do
+          Plan.build(PlanOptions.new(store, flow_ids: [id], identities_json: json), ungated_outbound)
+        end
+        ex.reason.should eq(Reason::DuplicateIdentity)
+        ex.detail.should eq("Admin") # the second one — the row that collided
+      end
+    end
+
+    # …and the baseline gori PREPENDS must not be the collision. An operator whose own set has
+    # a non-baseline "as-captured" would otherwise be told off for a duplicate gori created.
+    it "names the prepended baseline around an operator's own as-captured" do
+      with_store do |store|
+        id = seed(store)
+        json = <<-JSON
+          [{"name": "as-captured", "set": [], "remove": ["Cookie"]}]
+          JSON
+        plan = Plan.build(PlanOptions.new(store, flow_ids: [id], identities_json: json), ungated_outbound)
+        plan.identities.map(&.name).should eq(["as-captured 2", "as-captured"])
+        plan.identities.first.baseline?.should be_true
+        plan.identities.first.passthrough?.should be_true
+      end
+    end
   end
 
   describe "PlanError" do

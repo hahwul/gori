@@ -412,6 +412,12 @@ module Gori
                 "in the TUI Authorize tab (i) and they become the default here",
               "INVALID_ARGUMENT", field: "identities")
           end
+        in Authorize::PlanError::Reason::DuplicateIdentity
+          err("two identities are called #{(ex.detail || "?").inspect}. The name is the only thing " \
+              "that tells the per-identity rows apart — `bypasses[].identities` would name a string " \
+              "you could not resolve back to one — so rename one of them. Compared " \
+              "case-insensitively: 'admin' and 'Admin' are one identity here",
+            "INVALID_ARGUMENT", field: "identities")
         in Authorize::PlanError::Reason::NothingToSend
           authorize_nothing_to_send(ex, ob)
         end

@@ -33,7 +33,7 @@ Press `i` on the tab to open the identities card. A fresh project starts with tw
 | `b` | Make this one the baseline |
 | `esc` | Close |
 
-The add / edit form has three fields: a **name** (unique — two rows under one label would make the results table unreadable), the headers to **set**, one `Name: value` per line, and the headers to **remove**, comma-separated. `⇥` moves between fields, `↵` saves. A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
+The add / edit form has three fields: a **name** (unique — two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to **set**, one `Name: value` per line, and the headers to **remove**, comma-separated. `⇥` moves between fields, `↵` saves. A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
 
 Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header *names* only — a session cookie is a credential, and a list that paints it on screen leaks it to anyone glancing at your terminal. The form shows values, because that is what editing means.
 
@@ -88,10 +88,12 @@ Each identity's response is reduced to three facts — status, decoded body size
 | Verdict | Means |
 |---------|-------|
 | `baseline` | This row *is* the baseline |
-| `different` | A different status **class** (2xx vs 4xx vs 3xx) — the clearest sign access control engaged |
-| `same` | Same status class, and the body matches: within a SimHash distance of 3 **and** within 10% in size |
+| `different` | A different status **class** (2xx vs 4xx vs 3xx) — the clearest sign access control engaged. Or two redirects that point somewhere else |
+| `same` | Same status class, and the body matches: within a SimHash distance of 3 **and** within 10% in size. Or two redirects to the same place |
 | `review` | Same status class, divergent body — or the baseline itself errored, so there was nothing to anchor against |
 | `error` | This identity's send failed (TLS, DNS, timeout, refused); nothing was compared |
+
+Two redirects are judged on their **`Location`**, before the body is looked at. A redirect's body is empty, so on the three facts above every `3xx` matched every other `3xx` — and an authenticated `302 → /dashboard` against an anonymous `302 → /login`, which is the clearest *enforcement* there is, came back `same`. Where the origin steers each identity is the only thing a redirect says, so that is what gets compared: an exact string match, because `/login` and `/login/` are a difference worth showing you rather than one worth deciding for you.
 
 The per-request row aggregates them: **BYPASS** when any non-baseline identity came back `same`, **enforced** when every one clearly differed, **review** otherwise.
 
