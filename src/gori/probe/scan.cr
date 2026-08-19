@@ -8,6 +8,9 @@ require "./active"
 require "./out_of_band"
 require "./from_repeater"
 require "./group"
+# For `Analyzer::WS_MSG_CAP`: the headless WS read pages in the SAME batch size as the live
+# analyzer, so the two readers cannot drift into different coverage (see `scan_ws_frames`).
+require "./analyzer"
 
 module Gori
   module Probe
@@ -201,9 +204,11 @@ module Gori
           begin
             detail = store.get_flow(id)
             if detail && detail.response_head
-              ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
               # passive is request-free — NEVER capped
-              detections.concat(Passive.analyze(detail, ws, disabled: cfg.disabled, custom: cfg.custom))
+              detections.concat(Passive.analyze(detail, disabled: cfg.disabled, custom: cfg.custom))
+              # WS frames come from `scan_ws_frames`, a page at a time, rather than as one array
+              # handed to `Passive.analyze` above (the only rule that reads them is the WS one).
+              detections.concat(scan_ws_frames(store, detail, id, cfg)) if detail.row.status == 101
               # `!cfg.degraded`: the disabled-rule set could not be read, so gori does not
               # know which ACTIVE rules the operator switched off — see `RuleConfig`.
               # Gate on the port-less scope URL Layer 2 / History / SQL already share —
@@ -229,6 +234,32 @@ module Gori
           progress.try &.call(i, ids.size)
         end
         detections
+      end
+
+      # EVERY captured frame of one 101 flow, a PAGE at a time — the shape `Analyzer#rescan_ws`
+      # already uses, and the only one of the three that is neither wrong bound. `ws_messages(id,
+      # 200)` returns the NEWEST 200 (that limit exists to bound the detail VIEW), so a secret in
+      # frame 20 of 5,000 was reported by the live analyzer and missed here; `ws_messages(id)`
+      # reads the whole log into memory INSIDE the per-flow loop, so one long-lived socket's
+      # million frames all land at once — and then again for the next flow. Paging forward from
+      # the oldest unscanned id covers every frame exactly once at a bounded cost.
+      private def scan_ws_frames(store : Store, detail : Store::FlowDetail, flow_id : Int64,
+                                 cfg : RuleConfig) : Array(Detection)
+        dets = [] of Detection
+        after = 0_i64
+        loop do
+          msgs = store.ws_messages_after(flow_id, after, Analyzer::WS_MSG_CAP)
+          break if msgs.empty?
+          after = msgs.last.id # ordered asc ⇒ the last id is the newest scanned; page past it
+          dets.concat(Passive.analyze_ws(detail, msgs, disabled: cfg.disabled))
+          break if msgs.size < Analyzer::WS_MSG_CAP # a partial page ⇒ the log is drained
+        end
+        # `WsPayloads` dedups its type labels per Context, which is now per PAGE rather than per
+        # flow, and this array goes to `Probe.group` — which counts every observation into
+        # hit_count. Fold here so paging changed coverage and memory only, not what an operator
+        # reads: one finding per (code, label) for the flow, exactly as the one-shot read gave.
+        dets.uniq! { |d| {d.code, d.evidence} }
+        dets
       end
 
       # Scan Repeater tabs. Stamps sample_repeater_id.

@@ -240,6 +240,107 @@ describe "Bindings × session slots" do
     end
   end
 
+  # `Bindings` keys its per-slot tables by slot NAME, and a name is reusable: delete an
+  # identity, create a different one under the same name, and the dead identity's credential
+  # would resolve for it — a live token from a session the operator deliberately discarded,
+  # sent under a slot that never observed it. So the registry tells `Bindings` which names
+  # survive every list edit, and the tables of the ones that did not are dropped.
+  describe "a deleted slot's name" do
+    it "does not resolve a deleted slot's value under a NEW slot that reuses its name" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        b.values["SESSION"].should eq("ADMINTOKEN")
+
+        # The operator rotates identities: delete "admin", create a DIFFERENT identity that
+        # happens to reuse the name, activate it, and send before anything has re-bound.
+        slots.remove("admin").should be_true
+        slots.add(Slot.new("admin", rules: ["SESSION"])).should be_true
+        slots.activate("admin").should be_true
+
+        b.values["SESSION"]?.should be_nil
+        b.values.should be_empty
+        b.bound?("SESSION").should be_false
+      end
+    end
+
+    # The guard on the other side: a list edit that KEEPS a slot must not touch its table.
+    # `add`/`set_baseline` hand `save` freshly-constructed `SessionSlot` objects carrying the
+    # same names, so a prune keyed on object identity would wipe a live token on an unrelated
+    # edit.
+    it "keeps a surviving slot's value across an unrelated list edit" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+
+        slots.add(Slot.new("user", rules: ["SESSION"])).should be_true
+        slots.set_baseline("user").should be_true
+        slots.activate("admin").should be_true
+        b.values["SESSION"].should eq("ADMINTOKEN")
+      end
+    end
+
+    # The OUT-OF-PROCESS shape of the same rotation, and the reason a surviving name is not a
+    # key a `reload` can use: a peer's `gori run session remove admin` and `session add admin`
+    # are two writes, and this process only ever sees the row they land on. `admin` is present
+    # on both sides of a write that discarded the identity, so the name set says "nothing to
+    # prune" about the exact case the prune exists for. What DID move is the persisted row.
+    it "does not resolve it after a peer deleted and re-created the slot between reloads" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        b.values["SESSION"].should eq("ADMINTOKEN")
+
+        # Two peer writes, one net row: `admin` is gone and then back for a DIFFERENT identity.
+        store.set_setting(Gori::Store::SESSION_SLOTS_KEY, Slot.serialize([] of Slot))
+        store.set_setting(Gori::Store::SESSION_SLOTS_KEY,
+          Slot.serialize([Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}],
+            remove_headers: ["Authorization"], rules: ["SESSION"])]))
+        slots.reload
+        slots.activate("admin").should be_true
+
+        # The dead identity's live credential must not be what this slot's `$SESSION` resolves
+        # to: nothing has been observed under the new admin, so nothing resolves.
+        b.values["SESSION"]?.should be_nil
+        b.bound?("SESSION").should be_false
+      end
+    end
+
+    # The other half, and what makes the reload safe to call on the TUI's `data_version` tick
+    # (`Runner#apply_external_change`, ~1×/sec, own captures included): a reload that finds the
+    # row exactly as this process last read or wrote it is not a list edit at all. It must
+    # neither drop a table nor move the revision `Rules#subst_snapshot` memoises against on the
+    # proxy path — an unconditional prune on that cadence would wipe every live token.
+    it "keeps every table across a reload that finds the row unmoved" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        before = b.rev
+
+        slots.reload
+        slots.reload
+        b.values["SESSION"].should eq("ADMINTOKEN")
+        b.rev.should eq(before)
+      end
+    end
+  end
+
   describe "the Env::Layer overlay hook" do
     it "writes the active slot's headers, resolving that slot's own binding" do
       with_store do |store|

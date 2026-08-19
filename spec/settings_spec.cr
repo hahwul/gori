@@ -29,6 +29,47 @@ private def with_net_store(&)
   end
 end
 
+# The same fixture the "refuses to write back a settings file it could only half read"
+# example below uses: valid JSON that is not an object, so `apply_sections` raises at its
+# first section and `load` latches the partial-read flag, which makes every later
+# `Settings.save` return false without touching the disk.
+private def with_refused_save(&)
+  dir = File.tempname("gori-settings-refused")
+  Dir.mkdir_p(dir)
+  prev_home = ENV["GORI_HOME"]?
+  prev_rules = Gori::Settings.rewriter_rules
+  prev_next = Gori::Settings.rewriter_next_rule_id
+  prev_theme = Gori::Settings.theme
+  begin
+    ENV["GORI_HOME"] = dir
+    Gori::Settings.warning_io = nil
+    Gori::Settings.reset_load_warning_guard
+    File.write(Gori::Settings.path, %([{"theme":"dracula"}]))
+    Gori::Settings.load
+    Gori::Settings.load_degraded?.should be_true
+    Gori::Settings.save.should be_false
+    yield
+  ensure
+    # Clear the latch BEFORE restoring the properties: this load resets them.
+    File.write(Gori::Settings.path, %({"theme":"goridark"}))
+    Gori::Settings.load
+    Gori::Settings.rewriter_rules = prev_rules
+    Gori::Settings.rewriter_next_rule_id = prev_next
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(dir)
+    # That clearing load also reset every other section to a factory default; put back the
+    # two the partial-read example restores, so this helper cannot decide a later
+    # example's result.
+    Gori::Settings.theme = prev_theme
+    Gori::Settings.bind_port = 8070
+  end
+end
+
+private def seed_rewriter_rule : Gori::Settings::RewriterRule
+  Gori::Settings::RewriterRule.new(7_i64, true, "seed", "request", "head",
+    "X-Seed", "v", "set_header", "literal", "", "")
+end
+
 describe Gori::Settings do
   # Driven through `upstream_route` — the one decision point `Upstream.dial` actually calls —
   # rather than a scalar-only helper beside it. The scalar's parse is what is under test here;
@@ -1205,6 +1246,75 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
       Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
       Gori::Settings.rewriter_next_rule_id = 1_i64
+    end
+  end
+
+  # The negative twin of the round-trip above. A global rewriter-rule mutation must leave
+  # memory agreeing with the answer it returns. The mutators replace `rewriter_rules` BEFORE
+  # they ask `save`, so a refused save left the new/edited/deleted rule live in memory while
+  # every caller was told the write did not commit: the TUI lists a rule its own toast says
+  # was not added, and the proxy rewrites traffic with it.
+  describe "global rewriter CRUD on a refused save" do
+    it "does not leave the rule in the list when add reports 0" do
+      with_refused_save do
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule]
+        Gori::Settings.rewriter_next_rule_id = 8_i64
+
+        Gori::Settings.add_rewriter_rule("request", "head", "Authorization", "Bearer x",
+          "set_header", "literal", "", "", "").should eq(0_i64)
+        Gori::Settings.rewriter_rules.size.should eq(1)
+        Gori::Settings.rewriter_rules.map(&.pattern).should_not contain("Authorization")
+      end
+    end
+
+    it "does not burn a rule id when add reports 0" do
+      with_refused_save do
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule]
+        Gori::Settings.rewriter_next_rule_id = 8_i64
+
+        Gori::Settings.add_rewriter_rule("request", "head", "Authorization", "Bearer x",
+          "set_header", "literal", "", "", "").should eq(0_i64)
+        Gori::Settings.rewriter_next_rule_id.should eq(8_i64)
+      end
+    end
+
+    it "keeps the rule rewriting when delete reports false" do
+      with_refused_save do
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule]
+
+        Gori::Settings.delete_rewriter_rule(7_i64).should be_false
+        Gori::Settings.rewriter_rules.map(&.id).should contain(7_i64)
+      end
+    end
+
+    it "keeps the old field values when update reports false" do
+      with_refused_save do
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule]
+
+        Gori::Settings.update_rewriter_rule(7_i64, "request", "head", "X-Edited", "w",
+          "set_header", "literal", "edited", "", "").should be_false
+        Gori::Settings.rewriter_rules.first.pattern.should eq("X-Seed")
+      end
+    end
+
+    it "keeps the old default state when set-enabled reports false" do
+      with_refused_save do
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule]
+
+        Gori::Settings.set_rewriter_rule_enabled(7_i64, false).should be_false
+        Gori::Settings.rewriter_rules.first.enabled.should be_true
+      end
+    end
+
+    it "keeps the old apply order when move reports false" do
+      with_refused_save do
+        other = Gori::Settings::RewriterRule.new(9_i64, true, "other", "request", "head",
+          "X-Other", "v", "set_header", "literal", "", "")
+        Gori::Settings.rewriter_rules = [seed_rewriter_rule, other]
+
+        Gori::Settings.move_rewriter_rule(7_i64, 1).should be_false
+        Gori::Settings.rewriter_rules.map(&.id).should eq([7_i64, 9_i64])
+      end
     end
   end
 

@@ -459,3 +459,148 @@ describe "Gori::Fuzz::Plan --mark over bytes" do
     String.new(kplan.template.render(["P"])).should contain("q=P리자")
   end
 end
+
+private def mark_plan(raw : String, marks : Array(String), auto : Bool = false) : F::Plan
+  # `evidence: true` for the same reason as the block above: `Env.expand_wire` stays out of the
+  # way, so the mark step is the only thing under test.
+  F::Plan.build(F::PlanOptions.new(raw, evidence: true, target: "http://t.test",
+    auto_mark: auto, marks: marks,
+    sources: [F::InlineList.new(["P"])] of F::PayloadSource,
+    config: F::Config.new(keep_bodies: :none), verify: false), ungated)
+end
+
+# IDEMPOTENCE, on the same `--mark` step.
+#
+# `--mark TOKEN` wraps every occurrence of TOKEN in `§…§`, and it runs AFTER `--auto` and after
+# every earlier `--mark`. Occurrences that are already inside a marker span are not candidates:
+# re-wrapping one produces a nested `§§token§§`, which the template parser reads as an empty
+# span plus literal text — the position count goes wrong and the rendered request no longer
+# matches the capture the operator seeded it from.
+#
+# The scan therefore has to know where the spans are, and it has to read `§§` as the ESCAPE for
+# one literal `§` (what the `--flow` seed makes of a capture that carried a `§` of its own)
+# rather than as an empty span.
+describe "Gori::Fuzz::Plan --mark over already-marked text" do
+  raw = "GET /?role=admin&x=1 HTTP/1.1\r\nHost: t.test\r\n\r\n"
+
+  it "does not re-wrap a token --auto already marked" do
+    plan = mark_plan(raw, ["admin"], auto: true)
+    plan.template.position_count.should eq(2)
+    plan.template.default_payloads.should eq(["admin", "1"])
+    String.new(plan.template.render(plan.template.default_payloads)).should eq(raw)
+    plan.mark_matches.should eq([{"admin", 0}])
+    # …and the run SAYS so: a count of 0 here is a token that made no position, exactly like a
+    # token that is not in the text at all, and no other report distinguishes them (the CLI's
+    # note fires above 1, and NoPositions cannot fire while --auto's positions exist).
+    plan.shadowed_marks.should eq(["admin"])
+  end
+
+  it "does not re-wrap a token an earlier --mark already wrapped" do
+    plan = mark_plan(raw, ["role=admin", "admin"])
+    plan.template.position_count.should eq(1)
+    plan.template.default_payloads.should eq(["role=admin"])
+    String.new(plan.template.render(plan.template.default_payloads)).should eq(raw)
+    plan.mark_matches.should eq([{"role=admin", 1}, {"admin", 0}])
+    plan.shadowed_marks.should eq(["admin"]) # the one that landed is not listed
+  end
+
+  it "wraps the occurrences outside the markers and leaves the ones inside alone" do
+    mixed = "GET /?role=§admin§&other=admin HTTP/1.1\r\nHost: t.test\r\n\r\n"
+    plan = mark_plan(mixed, ["admin"])
+    plan.mark_matches.should eq([{"admin", 1}])
+    plan.template.position_count.should eq(2)
+    plan.template.default_payloads.should eq(["admin", "admin"])
+    String.new(plan.template.render(plan.template.default_payloads))
+      .should eq("GET /?role=admin&other=admin HTTP/1.1\r\nHost: t.test\r\n\r\n")
+    # It LANDED — one occurrence was inside a marker, but the mark still made a position, so
+    # there is nothing to report. The count is the report.
+    plan.shadowed_marks.should be_empty
+  end
+
+  # REGRESSION: an ESCAPED `§§` (what the --flow seed makes of a capture's own §) is
+  # literal text, not a span — a token next to it must still be wrapped.
+  it "still wraps a token adjacent to an escaped literal §" do
+    esc = "GET /?q=a§§b HTTP/1.1\r\nHost: t.test\r\n\r\n"
+    plan = mark_plan(esc, ["b"])
+    plan.mark_matches.should eq([{"b", 1}])
+    plan.template.position_count.should eq(1)
+    plan.template.default_payloads.should eq(["b"])
+    # `§§` is the escape for ONE literal `§`, so the rendering carries a single one.
+    String.new(plan.template.render(plan.template.default_payloads))
+      .should eq("GET /?q=a§b HTTP/1.1\r\nHost: t.test\r\n\r\n")
+  end
+
+  # A token that is not in the text is NOT a shadowed mark: it has nothing to report beyond
+  # the 0 count, and conflating the two would make the note fire for a plain typo.
+  it "does not report a token that simply does not occur" do
+    plan = mark_plan("GET /?role=§admin§ HTTP/1.1\r\nHost: t.test\r\n\r\n", ["ZZZ"])
+    plan.mark_matches.should eq([{"ZZZ", 0}])
+    plan.shadowed_marks.should be_empty
+  end
+
+  # TOUCHING an existing marker corrupts the template just as straddling one does, so it is
+  # skipped too — on EITHER side. `parse` applies the `§§` escape INSIDE an interior as well, so
+  # `?a=§x§b` + `--mark b` splices `§x§§b§`, which comes back as the SINGLE position `x§b`: the
+  # operator's `b` is swallowed (the sweep sends `?a=P`, not `?a=Pb`) and a `§` (0xC2 0xA7)
+  # nobody typed goes out on the wire — the two harms the skip exists to prevent, one byte
+  # outside a strict-overlap test. Skipped AND reported, never silently dropped.
+  it "does not wrap a token flush against a marker on either side" do
+    after = mark_plan("GET /?a=§x§b HTTP/1.1\r\nHost: t.test\r\n\r\n", ["b"])
+    after.template.default_payloads.should eq(["x"]) # NOT ["x§b"] — one merged position
+    String.new(after.template.render(after.template.default_payloads))
+      .should eq("GET /?a=xb HTTP/1.1\r\nHost: t.test\r\n\r\n")
+    after.template.position_count.should eq(1)
+    after.mark_matches.should eq([{"b", 0}])
+    after.shadowed_marks.should eq(["b"])
+
+    before = mark_plan("GET /?a=b§x§ HTTP/1.1\r\nHost: t.test\r\n\r\n", ["b"])
+    before.template.default_payloads.should eq(["x"])
+    String.new(before.template.render(before.template.default_payloads))
+      .should eq("GET /?a=bx HTTP/1.1\r\nHost: t.test\r\n\r\n")
+    before.mark_matches.should eq([{"b", 0}])
+    before.shadowed_marks.should eq(["b"])
+  end
+
+  # …and ONE byte of separation is enough — `§x§Z§b§` is two clean positions. This is the
+  # boundary the advancing span cursor has to land on exactly: it retires a span only once the
+  # occurrence starts PAST the span's end, and a cursor that retires one byte early (or a touch
+  # test that only checks overlap) shows up here as a mark that silently does not land. The
+  # escaped-`§§` case above cannot catch either, because it yields no span at all.
+  it "wraps a token one byte clear of a marker on either side" do
+    after = mark_plan("GET /?a=§x§Zb HTTP/1.1\r\nHost: t.test\r\n\r\n", ["b"])
+    after.mark_matches.should eq([{"b", 1}])
+    after.shadowed_marks.should be_empty
+    after.template.default_payloads.should eq(["x", "b"])
+    String.new(after.template.render(after.template.default_payloads))
+      .should eq("GET /?a=xZb HTTP/1.1\r\nHost: t.test\r\n\r\n")
+
+    before = mark_plan("GET /?a=bZ§x§ HTTP/1.1\r\nHost: t.test\r\n\r\n", ["b"])
+    before.mark_matches.should eq([{"b", 1}])
+    before.template.default_payloads.should eq(["b", "x"])
+    String.new(before.template.render(before.template.default_payloads))
+      .should eq("GET /?a=bZx HTTP/1.1\r\nHost: t.test\r\n\r\n")
+  end
+
+  # …and the same boundary over a CAPTURE's bytes, which is the provenance that matters: the
+  # spans are BYTE offsets (`marked_byte_spans`) precisely because a `--flow` body may not be
+  # valid UTF-8, so the cursor has to land on the same offsets the scan walks.
+  it "wraps a token clear of a marker in a non-UTF-8 body" do
+    bin = Bytes[0xFF, 0xFE, 0x01, 0x02]
+    plain = String.build do |io|
+      io << "a=x&b=2&bin="
+      io.write(bin)
+    end
+    marked = String.build do |io|
+      io << "a=§x§&b=2&bin="
+      io.write(bin)
+    end
+    head = "POST /f HTTP/1.1\r\nHost: t.test\r\nContent-Length: #{plain.bytesize}\r\n\r\n"
+    plan = mark_plan("#{head}#{marked}", ["2"])
+    plan.mark_matches.should eq([{"2", 1}])
+    plan.shadowed_marks.should be_empty
+    plan.template.position_count.should eq(2)
+    plan.template.default_payloads.should eq(["x", "2"])
+    # The capture's non-UTF-8 bytes are still there, byte for byte.
+    plan.template.render(plan.template.default_payloads).to_a.should eq("#{head}#{plain}".to_slice.to_a)
+  end
+end

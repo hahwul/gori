@@ -85,9 +85,15 @@ module Gori
       }
     end
 
+    # `exec_task_ok`, not `exec_task`: for the same reason `set_probe_custom_rule_enabled` below
+    # is — an UPDATE reports nothing through last_insert_rowid, so the commit flag is the only
+    # way a caller can tell a persisted edit from a rolled-back one. Here the stake is the rule
+    # BODY rather than its enabled bit: an operator told a re-written `pattern` was saved over a
+    # batch that rolled back keeps scanning with the OLD pattern, so the finding it was widened
+    # to catch is a false negative they have been told not to expect.
     def update_probe_custom_rule(id : Int64, title : String, description : String, side : String,
-                                 region : String, kind : String, pattern : String, severity : Severity) : Nil
-      exec_task ->(c : DB::Connection) {
+                                 region : String, kind : String, pattern : String, severity : Severity) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE probe_custom_rules SET title = ?, description = ?, side = ?, region = ?, kind = ?, pattern = ?, severity = ? WHERE id = ?",
           title, description, side, region, kind, pattern, severity.label, id)
         nil

@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -50,5 +51,42 @@ describe Gori::Tui::ChainPane do
     pane.value.should eq("base64-encode > ") # accepted + chain separator, ready for the next step
     # Popup now closed → Tab reverts to a focus-exit key (false), so there's still a way out.
     pane.handle_key(key(Termisu::Input::Key::Tab)).should be_false
+  end
+end
+
+# The modal that owns the pane above: stateless, so the owning view (Fuzzer, Repeater `^Q`)
+# hands it the marker's value and this ChainPane and it renders both halves.
+describe Gori::Tui::ChainOverlay do
+  # #124 — a §…§ marker seeded from a capture holds raw wire bytes (a latin-1 form field, a
+  # protobuf body), and `oneline` regexed that value verbatim: `ArgumentError: Regex match
+  # error: UTF-8 error: illegal byte` mid-paint. On the RENDER path, where there is no rescue
+  # between here and `Runner#run`, so a re-raise every frame trips the tick-error breaker.
+  it "renders a marker value carrying a raw wire byte rather than raising mid-paint" do
+    value = String.new(Bytes[0x61, 0xff, 0x62]) # `a` <0xff> `b`, straight off the wire
+    value.valid_encoding?.should be_false
+
+    backend = MemoryBackend.new(80, 24)
+    ChainOverlay.render(Screen.new(backend), Rect.new(0, 0, 80, 24), "CHAIN · §1", value, ChainPane.new)
+
+    # The modal must actually have painted — an overlay_box that bailed would make the
+    # "did not raise" above vacuous.
+    backend.contains?("CHAIN · §1").should be_true
+    backend.contains?("value").should be_true
+    backend.contains?("PREVIEW").should be_true
+    backend.contains?("a�b").should be_true # scrubbed FOR THE SCREEN — not blanked, not dropped
+  end
+
+  # A separate example because a loaded chain reaches `oneline` from the other call site: the
+  # preview's `in` row and one row per step, all of them drawn from the same wire bytes.
+  it "renders those bytes through a loaded chain, previewing the chain over the REAL value" do
+    value = String.new(Bytes[0x61, 0xff, 0x62])
+    pane = ChainPane.new
+    pane.load("hex-encode")
+
+    backend = MemoryBackend.new(80, 24)
+    ChainOverlay.render(Screen.new(backend), Rect.new(0, 0, 80, 24), "CHAIN · §1", value, pane)
+
+    backend.contains?("PREVIEW").should be_true
+    backend.contains?("61ff62").should be_true # `Decoder.run` got the wire bytes, not a scrubbed copy
   end
 end

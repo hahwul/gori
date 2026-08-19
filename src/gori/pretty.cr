@@ -501,6 +501,12 @@ module Gori
       # 2. Format using the standard formatter
       res = format(head.to_slice, temp_body.to_slice)
       return nil unless res
+      # The module header's display-only contract: this is the ONE write-back consumer of
+      # `format`, so it may only take a rendering that is still the body's own grammar. A
+      # non-nil `kind` marks a display listing (graphql/jwt/form/multipart) whose bytes do
+      # not re-parse as the request body — writing one back replaces a sendable body with
+      # something un-sendable, irreversibly (`TextArea#set_text` clears undo).
+      return nil unless res.kind.nil?
 
       formatted = String.new(res.bytes)
 

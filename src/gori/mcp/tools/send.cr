@@ -475,6 +475,10 @@ module Gori
         store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
+          # `set_repeater_name` answers whether it committed, and the answer is deliberately
+          # not propagated HERE (unlike create_repeater/update_repeater, which echo the name):
+          # this reply carries `saved_repeater_id` and no name field, so a rolled-back label
+          # leaves the row saved and unlabelled rather than a claim the caller can act on.
           store.set_repeater_name(repeater_id, Env.mask_secrets(name))
         end
 

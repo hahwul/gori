@@ -35,9 +35,9 @@ module Gori
       # Does answering this filter read the trigram index? `body:` is the only term that
       # compiles to a `flows_fts` subquery — and only when compiled with `fts: true`, the
       # default (see `body_cond`) — and nothing else mentions that table, so matching the name
-      # is exact rather than heuristic. (Free text does NOT: it compiles to a LIKE over
-      # method/host/target. This comment claimed otherwise for a while; the test was always
-      # right and only its explanation was wrong.)
+      # is exact rather than heuristic. (Free text does NOT: it compiles to a substring test
+      # over method/host/target. This comment claimed otherwise for a while; the test was
+      # always right and only its explanation was wrong.)
       # Callers use it to decide whether a stale index would corrupt their answer:
       # indexing is off-commit (Store V4), so a one-shot surface drains the backlog first
       # (Store#index_pending!) while a live one reports Store#fts_backlog instead of stalling.
@@ -377,8 +377,10 @@ module Gori
     # no-op that reads like a fix.
     CONTENT_FIELDS = %w[header body]
 
-    # One field named by a query, and whether it was written with the regex operator.
-    record FieldUse, name : String, regex : Bool
+    # One field named by a query, its value as written, and whether it was written with the
+    # regex operator. The value is carried because a caller routing a term to a backend may
+    # need it: `Colormarker.row_answerable?` refuses a transport-suffixed `proto:` value.
+    record FieldUse, name : String, regex : Bool, value : String
 
     # The fields `query` names, in order of appearance, one entry per TERM (so `host:a host~b`
     # reports both). A bare free-text word contributes nothing. Tokenized through exactly the
@@ -388,8 +390,8 @@ module Gori
     def self.fields_used(query : String) : Array(FieldUse)
       FilterAst.terms(FilterAst.parse(query)).compact_map do |term|
         next nil unless split = split_field(term.text)
-        field, _value, op = split
-        FieldUse.new(field, op == :regex)
+        field, value, op = split
+        FieldUse.new(field, op == :regex, value)
       end
     end
 
@@ -432,9 +434,9 @@ module Gori
       # below (and `size_cond`'s own three-way switch) sees one name per concept.
       field = FIELD_ALIASES.fetch(field, field)
       case field
-      when "host"                                then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "url"                                 then {"#{URL_EXPR} LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "path"                                then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "host"                                then contains_cond("host", value)
+      when "url"                                 then contains_cond(URL_EXPR, value)
+      when "path"                                then contains_cond("target", value)
       when "method"                              then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme"                              then {"scheme = ?", [value.downcase] of DB::Any}
       when "proto"                               then proto_cond(value)
@@ -894,16 +896,43 @@ module Gori
       false
     end
 
+    # Same folding rule as `field_cond`'s substring arms — see `contains_cond`.
     private def self.free_text(word : String) : {String, Array(DB::Any)}
-      pattern = like(word)
-      {"(lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\')",
-       [pattern, pattern, pattern] of DB::Any}
+      method_sql, method_args = contains_cond("method", word)
+      host_sql, host_args = contains_cond("host", word)
+      target_sql, target_args = contains_cond("target", word)
+      {"(#{method_sql} OR #{host_sql} OR #{target_sql})", method_args + host_args + target_args}
     end
 
     # Build a LIKE pattern, neutralising the LIKE metacharacters % and _ (and the
     # escape char itself) so a user's literal % / _ matches literally. Pair every
     # use with `ESCAPE '\'` in the SQL. Backslash MUST be escaped first. Public so
     # Scope's string-match rules reuse the one escaper (no second hand-rolled copy).
+    # A case-insensitive substring test on `expr`, picking the folding implementation by what
+    # the NEEDLE contains.
+    #
+    # `lower(col) LIKE ?` folds the haystack with SQLite's built-in `lower()`, which is
+    # ASCII-only, while `like` folds the needle with Crystal's full-Unicode `downcase`. For a
+    # needle carrying a non-ASCII letter the two never meet: a captured `/Überweisung` was
+    # unreachable by `path:` in EVERY spelling, and `InterceptFilter` — the in-memory
+    # implementation of this same predicate — matched the row while History did not. Those
+    # needles go through `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF), which is
+    # the same fix `scope.cr` already applies to a `string` rule.
+    #
+    # An ASCII needle keeps the native LIKE, because the UDF costs a Crystal callback and two
+    # String allocations PER ROW and both forms full-scan either way: measured over 100k flows,
+    # `host:` answers in 7ms through LIKE and 71ms through the UDF, and History recompiles this
+    # filter on every keystroke (P6 — never stall the data path). Every ASCII character folds
+    # identically in the two implementations, so the fast path is exact for the needles that
+    # take it. The residue it accepts: a haystack character that folds INTO ASCII under Unicode
+    # but not under `lower()` (`İ`→`i`, `K`→`k`, `ſ`→`s`) stays unreachable by an ASCII needle.
+    # All three columns are NOT NULL, so the arms cannot disagree under `NOT` the way a NULL
+    # haystack would (`NOT (NULL)` drops the row, `NOT (0)` keeps it).
+    private def self.contains_cond(expr : String, value : String) : {String, Array(DB::Any)}
+      return {"gori_ci_contains(#{expr}, ?)", [value] of DB::Any} unless value.ascii_only?
+      {"lower(#{expr}) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+    end
+
     def self.like(value : String) : DB::Any
       "%#{like_escape(value.downcase)}%"
     end

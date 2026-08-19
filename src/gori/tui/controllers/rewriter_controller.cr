@@ -662,7 +662,27 @@ module Gori::Tui
       # Only follow the rule when it actually moved: ⇧J on the last GLOBAL rule cannot push it
       # into the project block (that is a scope change, `s`), and walking the cursor there
       # anyway would read as a swap that never happened.
-      move_sel(dir) if rules_engine.move(rule.id, dir, rule.scope)
+      if rules_engine.move(rule.id, dir, rule.scope)
+        move_sel(dir)
+      elsif !at_scope_edge?(rule, dir)
+        # Not an edge, so the reorder was refused by the store / settings write. Say so: a
+        # silent no-op here reads exactly like "the rule is already at the end of its block",
+        # and precedence decides which of two rules touching the same header wins — so an
+        # operator who stops trying keeps testing against an order that reverts at next start.
+        @host.status("precedence NOT changed (project busy or settings not writable)")
+      end
+    end
+
+    # Whether the rule already sits at the first/last slot of its own SCOPE block, where `move`
+    # legitimately answers false without attempting a write. The slice matters: the list renders
+    # globals then project rules, so the merged index would read the last global as mid-list and
+    # report a busy store for the one refusal that is by design.
+    private def at_scope_edge?(rule : Store::MatchRule, dir : Int32) : Bool
+      scoped = rule_list.select { |r| r.scope == rule.scope }
+      i = scoped.index { |r| r.id == rule.id }
+      return true unless i
+      j = i + (dir < 0 ? -1 : 1)
+      j < 0 || j >= scoped.size
     end
 
     def rewriter_duplicate : Nil

@@ -39,6 +39,18 @@ private class BlockedBackend < F::Backend
   end
 end
 
+private def run_blocked(reason : String) : Q::DoneEvent
+  backend = BlockedBackend.new(F::Origin.new("http", "h", 80), reason)
+  config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 2, concurrency: 1,
+    retries: 2, retry_pause: 1.millisecond)
+  req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+  done = nil.as(Q::DoneEvent?)
+  Q::Engine.new(req, http2: false, backend: backend, config: config).run do |ev|
+    done = ev if ev.is_a?(Q::DoneEvent)
+  end
+  done.not_nil!
+end
+
 private def drain(engine : Q::Engine) : Array(Q::Sample)
   samples = [] of Q::Sample
   engine.run { |ev| samples << ev.sample if ev.is_a?(Q::SampleEvent) }
@@ -144,6 +156,22 @@ describe Gori::Sequencer::Engine do
     d = done.not_nil!
     d.requests.should eq((d.sent * 3).to_i64) # 1 attempt + 2 retries per replay
     d.requests.should be > d.sent.to_i64
+  end
+
+  # …but the retry only makes sense for a transient error. A sandbox or exclude refusal is
+  # Layer 2 saying no before a socket is ever opened, so the second and third attempt cannot
+  # come out differently — they only triple the load gori aims at a target the operator has
+  # already put off limits. Both refusals used to be retried like any other error string.
+  it "does not retry a sandbox refusal" do
+    d = run_blocked(Gori::Outbound::SANDBOX_SWEEP_ERROR)
+    d.sent.should be > 0 # guard: without this, `requests == sent` passes vacuously as 0 == 0
+    d.requests.should eq(d.sent.to_i64)
+  end
+
+  it "does not retry a scope-exclude refusal" do
+    d = run_blocked(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+    d.sent.should be > 0
+    d.requests.should eq(d.sent.to_i64)
   end
 
   # A run that collects nothing because every replay was REFUSED is a failure, not a clean

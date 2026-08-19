@@ -96,7 +96,13 @@ module Gori::Tui
       when key.enter?     then return :commit
       when key.backspace? then backspace
       else
-        if c = ev.char
+        # `Event::Key#char` falls back to `key.to_char`, so a Ctrl/Alt chord still carries
+        # its plain letter ('p' for ^P) — query_char's `ch.control?` guard never sees a C0
+        # byte to drop. Without the modifier check every chord an operator presses over an
+        # open picker (^P for the palette, ^C/^D to leave — quit_chord_claimed? yields both
+        # to a modal) would silently type into the filter instead. Same guard every other
+        # ev.char consumer in the TUI carries.
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
           query_char(c)
         end
       end

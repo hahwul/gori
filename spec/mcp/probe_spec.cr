@@ -13,6 +13,45 @@ private def with_store(&)
   end
 end
 
+# --- a store whose custom-rule UPDATE answers false --------------------------------------
+#
+# `store.close` is the lever spec/commit_confirmation_spec.cr uses, and it cannot reach this
+# guard: `update_probe_rule` reads `probe_custom_rules` first to reject an unknown id, and that
+# read rescues to `[]` on a closed store — so a closed store comes back NOT_FOUND and the write
+# never runs. This injects the other shape `exec_task_ok` answers false for, and the one the
+# guard exists for: a cross-process SQLite lock (a capturing TUI on the same project) taking
+# hold for this one writer batch while the read pool still serves the id check.
+private class RuleUpdateFailingStore < Gori::Store
+  property fail_update = false
+
+  # No return annotation on purpose. With src/gori/store/probe_rules.cr reverted this infers
+  # `Bool | Nil` and still COMPILES, so the example below fails on its assertion instead of
+  # taking the whole spec run down with a type error.
+  def update_probe_custom_rule(id : Int64, title : String, description : String, side : String,
+                               region : String, kind : String, pattern : String, severity : Gori::Store::Severity)
+    return false if @fail_update
+    super
+  end
+end
+
+# Opened the long way round (the `Store.open` recipe minus the subclass), like
+# spec/probe/persist_failure_spec.cr's `open_failing_store`.
+private def with_rule_update_failing_store(&)
+  path = File.tempname("gori-mcp-probeupd", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = RuleUpdateFailingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
 private def call_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error
@@ -349,6 +388,29 @@ describe "MCP probe rules + mode tools" do
       row.side.should eq("request")
       row.region.should eq("header")
       row.severity.should eq(Gori::Store::Severity::Low)
+    end
+  end
+
+  # A custom probe rule IS a detection. Reporting the new title over a rolled-back batch tells
+  # the agent the rule now carries its widened pattern while every later scan still runs the OLD
+  # one — a false negative it was told not to expect. PROJECT_BUSY/retryable, like the
+  # `set_probe_rule_enabled` twin, because calling again is the right move.
+  it "refuses to report an edit the store did not commit" do
+    with_rule_update_failing_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
+
+      store.fail_update = true
+      r = tools.call("update_probe_rule", JSON.parse(%({"id":"#{id}","title":"b","pattern":"BBB"})))
+      r.is_error.should be_true
+      r.error_code.should eq("PROJECT_BUSY")
+      r.retryable.should be_true
+      r.text.should contain("NOT updated")
+
+      # And the rule the next scan runs is still the one it was.
+      row = store.probe_custom_rules.first
+      row.title.should eq("a")
+      row.pattern.should eq("AAA")
     end
   end
 

@@ -918,7 +918,14 @@ module Gori::Tui
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
-        @host.session.store.set_fuzz_session_name(id, view.name)
+        # The store answers whether the UPDATE committed. The chip above already reads the new
+        # name, so a rolled-back batch (another instance holding the project's writer) is
+        # otherwise a SILENT no-op: nothing on screen changes back until the session reloads,
+        # and the operator concludes the rename took. Mirrors close_tab's orphaned refusal
+        # below and RepeaterController#apply_rename.
+        unless @host.session.store.set_fuzz_session_name(id, view.name)
+          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+        end
       end
     end
 

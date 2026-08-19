@@ -276,7 +276,14 @@ module Gori
         fields = custom_rule_fields(h)
         return fields if fields.is_a?(Result)
         title, description, side, region, kind, pattern, severity = fields
-        store.update_probe_custom_rule(row_id, title, description, side, region, kind, pattern, severity)
+        # The store answers whether the edit COMMITTED, same as the `set_probe_rule_enabled`
+        # twin above. Echoing the new title over a rolled-back batch tells an agent the rule
+        # now carries its new pattern while every later scan still runs the OLD one — a
+        # false negative it was told not to expect. `busy`, not a bare `err`: a rolled-back
+        # batch is transient, so the Result carries `retryable: true`.
+        unless store.update_probe_custom_rule(row_id, title, description, side, region, kind, pattern, severity)
+          return busy("custom rule '#{id}' NOT updated (store busy or unwritable); it keeps its previous pattern")
+        end
         Result.new({"id" => id, "title" => title}.to_json)
       end
 

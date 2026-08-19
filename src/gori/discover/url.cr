@@ -332,7 +332,14 @@ module Gori::Discover
       # by the unconditional call that followed — running the whole split/Array-of-segments/join
       # chain twice for an identical result, on the commonest href shape there is.
       abs_path =
-        if h.starts_with?('/')
+        if h.empty?
+          # RFC 3986 5.3: an EMPTY reference path keeps the base path and replaces only the
+          # query. Resolving `<a href="?page=2">` against the base's DIRECTORY instead spends
+          # the request on a URL nobody published and puts its visit_key in `@seen`, so the
+          # page that WAS linked never gets crawled. `base.path` needs no normalize_path: it
+          # comes out of `parse_path` already dot-segment-collapsed and encode_unsafe'd.
+          base.path
+        elsif h.starts_with?('/')
           normalize_path(h)
         elsif scheme_prefixed?(lower)
           return nil # some other scheme (ftp:, ws:, …)

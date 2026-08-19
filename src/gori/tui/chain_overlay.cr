@@ -120,8 +120,14 @@ module Gori::Tui
 
     # Collapse whitespace to single spaces (multi-line values/outputs render on one row)
     # and let screen.text ellipsize to width — keeps the preview to exactly one line/row.
+    # A marker seeded from a capture holds raw wire bytes, so `s` can be invalid UTF-8 and
+    # the regex would raise mid-paint — with no rescue between here and `Runner#run`.
+    # SCRUBBED, not refused, because this result is only drawn and never written back or
+    # sent — `Decoder.run` above still previews the chain over the REAL `value.to_slice`
+    # (P7). Same display-only split `text_area.cr` takes for its `$KEY` value peek; the
+    # `valid_encoding?` guard keeps the common path allocation-free.
     private def self.oneline(s : String, _w : Int32) : String
-      s.gsub(/[\r\n\t]+/, " ")
+      (s.valid_encoding? ? s : s.scrub).gsub(/[\r\n\t]+/, " ")
     end
   end
 end

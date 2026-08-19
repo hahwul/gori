@@ -144,6 +144,37 @@ describe "Fuzz::Engine redirect following" do
     ])
   end
 
+  # The third form of a `Location`, and the one that slipped past the same-origin comparison
+  # entirely. A scheme-relative `//evil.test/x` (RFC 3986 §4.2 network-path reference) names
+  # ANOTHER host, but `resolve_redirect_path` returned it verbatim because it starts with `/`,
+  # so it never reached the cross-origin check — and the follower asked the ORIGIN for the
+  # literal path `//evil.test/x`, burning a hop and replacing the 302 an open-redirect probe is
+  # hunting with whatever that path answers.
+  it "does not follow a scheme-relative cross-origin Location" do
+    results = [] of F::Result
+    wire = wire_of([redirect_to("//evil.test/x"), OK_RESPONSE]) { |port| results = run_fuzz(port) }
+
+    request_lines(wire).should eq(["GET /start?q=one HTTP/1.1"])
+    wire.size.should eq(1)
+    wire.join.should_not contain("evil.test")
+    # The 302 is the finding; it has to survive to the operator's row.
+    results.size.should eq(1)
+    results[0].status.should eq(302)
+    results[0].error.should be_nil
+  end
+
+  it "still follows a scheme-relative SAME-origin Location, resolved to a path" do
+    # The discriminator: refusing every `//` outright would break this, and asserting only the
+    # hop COUNT would pass at HEAD (which does send a second request — for the literal path
+    # `//127.0.0.1:PORT/next`). The exact request line is what pins the resolution.
+    wire = wire_of([redirect_to("//127.0.0.1:{PORT}/next"), OK_RESPONSE]) { |port| run_fuzz(port) }
+
+    request_lines(wire).should eq([
+      "GET /start?q=one HTTP/1.1",
+      "GET /next HTTP/1.1",
+    ])
+  end
+
   it "reports the refused 3xx rather than dropping or erroring the row" do
     results = [] of F::Result
     wire = wire_of([redirect_to("/a b"), OK_RESPONSE]) { |port| results = run_fuzz(port) }

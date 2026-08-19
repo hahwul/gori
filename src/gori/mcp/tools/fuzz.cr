@@ -16,7 +16,7 @@ module Gori
 
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total, http2 = build_fuzz_job(h, ob)
+        engine, origin, total, http2, shadowed_marks = build_fuzz_job(h, ob)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
@@ -38,10 +38,20 @@ module Gori
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, optional_int_arg(h, "max_requests"))
+        # A `marks` token that occurs ONLY inside `§…§` that were already there — or flush
+        # against one, where a second pair would merge into it — makes no position of its own,
+        # and the builder can neither refuse the run (those earlier positions are real) nor
+        # report it in a count that is legitimately 0. Said here for the same reason as
+        # `budget_warning`: the job runs either way, and an agent told nothing concludes its
+        # token is being swept. See `Fuzz::Plan#shadowed_marks`.
+        marks_warn = shadowed_marks.empty? ? nil : "#{shadowed_marks.map(&.inspect).join(", ")}: added no position — " \
+                                                   "every occurrence is inside a §…§ that was already there (`auto`, an " \
+                                                   "earlier mark, or the flow_id capture's own), or flush against one; " \
+                                                   "those positions are swept, this token added none"
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field "record_history", fjob.record_history.to_s; j.field("budget_warning", warn) if warn; emit_scope(j, sc) } })
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field "record_history", fjob.record_history.to_s; j.field("budget_warning", warn) if warn; j.field("marks_warning", marks_warn) if marks_warn; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -299,9 +309,11 @@ module Gori
         job_project_mismatch(job) || job
       end
 
-      # Build a ready-to-run engine + its origin + total + effective http2 from the
-      # tool args. Raises FuzzArgError (clean message) on any malformed input.
-      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool}
+      # Build a ready-to-run engine + its origin + total + effective http2 + the `marks`
+      # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
+      # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
+      # input.
+      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String)}
         text, default_target, src_h2, evidence = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -323,7 +335,7 @@ module Gori
           sni: str(h, "sni"),
           overrides: HostOverrides.load(store))
         plan = Fuzz::Plan.build(options, ob)
-        {plan.engine, plan.origin, plan.total, use_h2}
+        {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -845,7 +857,7 @@ module Gori
           s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
-          s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
+          s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template. An occurrence already inside a §…§ (or flush against one) is skipped — re-wrapping it would merge the two positions — and a token left with none of its own is named in `marks_warning`")
           s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. A payload containing a raw space, CRLF, or other characters unsafe in the position it's marking (a query/body param value has no encoding applied by default — auto-mark finds the position but does NOT encode for it) will otherwise corrupt the request line/framing instead of reaching the app. Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))

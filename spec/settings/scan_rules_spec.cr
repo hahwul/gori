@@ -36,6 +36,45 @@ private def write_settings(json : String) : Nil
   File.write(Gori::Settings.path, json)
 end
 
+# The same latch spec/settings_spec.cr's `with_refused_save` uses, for the negative half of the
+# CRUD above: valid JSON that is not an object, so `apply_sections` raises at its first section
+# and `load` latches the partial-read flag — after which every `Settings.save` answers false
+# without touching the disk. Not nested inside `with_scan_home`: the clearing load in the ensure
+# resets every section, so the restore has to happen after it, once.
+private def with_refused_scan_save(&)
+  dir = File.tempname("gori-scan-rules-refused")
+  Dir.mkdir_p(dir)
+  prev_home = ENV["GORI_HOME"]?
+  prev_rules = Gori::Settings.scan_rules
+  prev_theme = Gori::Settings.theme
+  begin
+    ENV["GORI_HOME"] = dir
+    Gori::Settings.warning_io = nil
+    Gori::Settings.reset_load_warning_guard
+    File.write(Gori::Settings.path, %([{"theme":"dracula"}]))
+    Gori::Settings.load
+    Gori::Settings.load_degraded?.should be_true
+    # The anti-vacuity guard: if the latch ever stops latching, every example below would pass
+    # on unfixed source.
+    Gori::Settings.save.should be_false
+    yield
+  ensure
+    # Clear the latch BEFORE restoring the properties: this load resets them.
+    File.write(Gori::Settings.path, %({"theme":"goridark"}))
+    Gori::Settings.load
+    Gori::Settings.scan_rules = prev_rules
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(dir)
+    Gori::Settings.theme = prev_theme
+    Gori::Settings.bind_port = 8070
+  end
+end
+
+private def seed_scan_rule : Gori::Settings::ScanRule
+  Gori::Settings::ScanRule.new("s1", "leaky", "finds a debug header", "response", "header",
+    "string", "X-Debug", "info", true)
+end
+
 describe Gori::Settings do
   describe "scan_rules — the parse a hand-edited file crosses" do
     it "reads a complete rule field for field" do
@@ -319,6 +358,60 @@ describe Gori::Settings do
         write_settings(%({"theme":"goridark"}))
         Gori::Settings.load
         Gori::Settings.scan_rules.map(&.title).should eq(["a"])
+      end
+    end
+  end
+
+  # The negative twin of the persistence block above. `Probe.custom_rules` maps `scan_rules`
+  # straight into the runtime match list, so a mutation that answered nothing and rolled nothing
+  # back left the edited rule LIVE in this process while settings.json still held the old one:
+  # the operator scanned with a pattern that silently reverts at next start, and the next
+  # unrelated save that did succeed wrote it out anyway. Every mutator now answers "did it
+  # COMMIT" and memory agrees with the answer (mirrors "global rewriter CRUD on a refused save"
+  # in spec/settings_spec.cr).
+  #
+  # Each example seeds `scan_rules` INSIDE the block: the latching load resets the section, and a
+  # by-id mutation against an empty library would answer false from not-found — passing for the
+  # wrong reason.
+  describe "scan_rules — the global library CRUD on a refused save" do
+    it "does not leave the rule in the library when add reports no id" do
+      with_refused_scan_save do
+        Gori::Settings.scan_rules = [seed_scan_rule]
+
+        Gori::Settings.add_scan_rule("Leaked key", "d", "request", "header",
+          "regex", "sk_live_", "critical").should eq("")
+        Gori::Settings.scan_rules.map(&.id).should eq(["s1"])
+      end
+    end
+
+    it "keeps the OLD pattern live when update reports false" do
+      with_refused_scan_save do
+        Gori::Settings.scan_rules = [seed_scan_rule]
+
+        Gori::Settings.update_scan_rule("s1", "leaky", "finds a debug header", "response",
+          "header", "string", "X-Debug|X-Trace", "high").should be_false
+        r = Gori::Settings.scan_rules.first
+        {r.pattern, r.severity}.should eq({"X-Debug", "info"})
+      end
+    end
+
+    it "keeps the old default state when set-enabled reports false" do
+      with_refused_scan_save do
+        Gori::Settings.scan_rules = [seed_scan_rule]
+
+        Gori::Settings.set_scan_rule_enabled("s1", false).should be_false
+        Gori::Settings.scan_rules.first.enabled.should be_true
+      end
+    end
+
+    # This one fails the other way round: the caller is told the rule is still scanning, so it
+    # had better still be in the library.
+    it "keeps the rule scanning when delete reports false" do
+      with_refused_scan_save do
+        Gori::Settings.scan_rules = [seed_scan_rule]
+
+        Gori::Settings.delete_scan_rule("s1").should be_false
+        Gori::Settings.scan_rules.map(&.id).should eq(["s1"])
       end
     end
   end

@@ -63,8 +63,15 @@ module Gori
     # Set (or clear, with nil) a fuzz session's custom sub-tab name — its own UPDATE,
     # separate from update_fuzz_session so a rename never rewrites the template/config
     # (mirrors set_repeater_name).
-    def set_fuzz_session_name(id : Int64, name : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+    #
+    # Returns whether the write committed (false = store busy/locked/closing), like
+    # `set_repeater_name` next door: this went through `exec_task`, whose Int64 reply is
+    # `last_insert_rowid` and so says nothing at all about an UPDATE. The caller
+    # (`FuzzerController#apply_rename`) has already put the new label on the view, so a
+    # rolled-back batch leaves the chip reading a name the project never took — silently,
+    # until the session reloads. It needs the answer to say so.
+    def set_fuzz_session_name(id : Int64, name : String?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE fuzz_sessions SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
         nil
       }

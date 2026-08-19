@@ -547,6 +547,39 @@ describe Gori::Discover::Engine do
     urls.should contain("http://t/api/v2/invoices")
   end
 
+  # The page under test: `/docs/index.html` declares `<base href="/">` (the stock Angular/Vue
+  # shape) and carries one relative link. Per HTML 4.2.3 / RFC 3986 5.1.1 the document's own
+  # base wins, so `user/list` is `http://t/user/list`, NOT `http://t/docs/user/list`.
+  describe "a page that declares <base href>" do
+    it "resolves a page's relative links against its declared <base href>" do
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+      findings, _ = run_discover("http://t/", %w(), cfg) do |t|
+        case t
+        when "/"                then html(%(<a href="/docs/index.html">docs</a>))
+        when "/docs/index.html" then html(%(<base href="/"><a href="user/list">u</a>))
+        when "/user/list"       then html("the real user list page")
+        else                         notfound
+        end
+      end
+      findings.map(&.url).should contain("http://t/user/list")
+    end
+
+    it "does not spend a request on the page-relative resolution a <base href> overrides" do
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
+      sent = [] of String
+      run_discover("http://t/", %w(), cfg) do |t|
+        sent << t
+        case t
+        when "/"                then html(%(<a href="/docs/index.html">docs</a>))
+        when "/docs/index.html" then html(%(<base href="/"><a href="user/list">u</a>))
+        when "/user/list"       then html("the real user list page")
+        else                         notfound
+        end
+      end
+      sent.should_not contain("/docs/user/list")
+    end
+  end
+
   # ── what an INFERRED link may spend ─────────────────────────────────────────────────────
   # Seeding a directory sweep costs the whole wordlist. `consider_link` spends it on a link the
   # target DECLARED; a literal recovered from text has to be confirmed first. These three pin the

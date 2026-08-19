@@ -696,3 +696,38 @@ describe "MCP fuzz_results — the stored page is not matched-only, and says so"
     end
   end
 end
+
+# A `marks` token that lands on nothing new must SAY so.
+#
+# `marks` wraps every occurrence of a literal token in `§…§`, skipping the occurrences that
+# already sit inside — or flush against — a `§…§` that `auto` (or an earlier mark, or the
+# `flow_id` capture itself) had already made: re-wrapping one splices `§§`, which `Template
+# .parse` reads as an escaped literal, so the position silently disappears and a `§` nobody
+# typed goes on the wire. The skip is right; its SILENCE was not. `fuzz_start` echoed nothing
+# about it, the run is not refusable (the earlier positions are real and the sweep is
+# legitimate), and the count is legitimately 0 — indistinguishable from a token that is simply
+# not in the template. So an agent that asked for a position on `admin` was told the job was
+# running and concluded `admin` was being swept.
+describe "MCP fuzz_start — a 'marks' token that made no position" do
+  it "warns when every occurrence was already marked, and stays quiet when the mark lands" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      # Port 9 (discard) — this asserts on the START reply, so nothing needs to answer.
+      base = {"url" => "http://127.0.0.1:9/", "payloads" => %([{"list":["a"]}]),
+              "allow_unscoped" => true, "record_history" => false}
+      shadowed = call_json(tools, "fuzz_start",
+        base.merge({"template" => "GET /?role=§admin§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                    "marks"    => ["admin"]}).to_json)
+      warned = shadowed["marks_warning"]?.try(&.as_s) || ""
+      warned.should contain(%("admin"))
+      warned.should contain("added no position")
+
+      # CONTROL: the same template, a mark that DOES make a position (`role` is one byte clear
+      # of the marker) — no warning, or the field would cry wolf on every ordinary run.
+      landed = call_json(tools, "fuzz_start",
+        base.merge({"template" => "GET /?role=§admin§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                    "marks"    => ["role"]}).to_json)
+      landed["marks_warning"]?.should be_nil
+    end
+  end
+end

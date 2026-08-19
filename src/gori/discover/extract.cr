@@ -67,6 +67,26 @@ module Gori::Discover
     # requests that find nothing. See `Engine#confirm_bruteforce_dir`.
     record Found, href : String, declared : Bool
 
+    # The document's own base URI (HTML 4.2.3), which RFC 3986 5.1.1 ranks above the
+    # document's URL. A page that declares one resolves EVERY relative href against it, so a
+    # spider that ignores it spends its requests on paths the target never serves: the stock
+    # SPA `<base href="/">` on a page under `/docs/` sends every relative link exactly one
+    # directory too deep, and the real endpoints are never derived from that page at all.
+    # A wrong answer, not a policy choice, unlike the AJAX/SPA false negatives above.
+    #
+    # `[^>]` cannot cross a `>`, so a `<base target="_blank">` carrying no href falls through
+    # to the next candidate instead of shadowing it; `[\s"']` before `href` is what keeps
+    # `data-href` (whose `-` supplies a `\b`) from reading as one. `{0,256}` bounds the
+    # attribute run for the same reason every scan in this file is bounded: unbounded, each
+    # `<base` in a body with no closing `>` backtracks across the whole 2 MiB of MAX_SCAN.
+    BASE = /<base\b[^>]{0,256}[\s"']href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
+
+    # FIRST match only: HTML 4.2.3 ignores every `<base href>` after the first one.
+    def self.base_href(body : Bytes) : String?
+      return nil unless m = BASE.match(scan_text(body))
+      (m[1]? || m[2]? || m[3]?).presence
+    end
+
     def self.from_html(body : Bytes) : Array(Found)
       # `acc`, not `out`: `out` is a Crystal keyword in ARGUMENT position, so a local named
       # that cannot be passed to `endpoints` below (it parses as an out-parameter).

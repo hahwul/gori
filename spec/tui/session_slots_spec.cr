@@ -97,6 +97,24 @@ describe "the identities card's write path" do
   end
 end
 
+describe "the data_version tick" do
+  it "reloads the slot list, so a peer's `session add/remove` is not invisible all session" do
+    # `Runner#apply_external_change` is the only place this process notices another gori's
+    # writes. Scope, the host overrides and the env table are all reloaded there because the
+    # send path reads the ONE live object; the slot registry is read by the same path
+    # (`Env.overlay_slot` at every seam, and `Bindings` for which table `$SESSION` resolves
+    # out of), so leaving it out left the session sending as an identity a peer had deleted.
+    # Asserted inside the method body rather than anywhere in the file: `Runner.new` appears
+    # nowhere under spec/ (see the header above), and the reload is only worth anything on the
+    # tick.
+    body = slot_code("tui", "runner.cr").join('\n')
+    tick = body[/def apply_external_change.*?\n    end/m]
+    tick.should_not be_nil
+    tick.should contain("host_overrides.reload")
+    tick.should contain("slots.reload")
+  end
+end
+
 describe "the Repeater's send line" do
   it "names the active slot, because the overlay is invisible in the editor" do
     # A slot's headers are applied at `Repeater::Sender`, AFTER the pane's bytes — so the

@@ -64,15 +64,19 @@ module Gori
     # current order, swaps the two neighbours, and rewrites every position 0..n-1 so the
     # order is stable and tie-free afterwards (the table is tiny — a full renumber is
     # cheaper than reasoning about legacy position-0 ties). No-op at an edge / unknown id.
-    def move_rule(id : Int64, dir : Int32) : Nil
+    # Returns whether the reorder committed (false = nothing to move, or store
+    # busy/locked/closing), like the identical `move_color_rule`. Rule PRECEDENCE decides which
+    # of two rules touching the same header wins, so a caller that reports a swap the store
+    # dropped leaves the operator believing an order that reverts at next start.
+    def move_rule(id : Int64, dir : Int32) : Bool
       ids = [] of Int64
       @db.query("SELECT id FROM match_rules ORDER BY position, id") { |rs| rs.each { ids << rs.read(Int64) } }
       i = ids.index(id)
-      return unless i
+      return false unless i
       j = i + (dir < 0 ? -1 : 1)
-      return unless 0 <= j < ids.size
+      return false unless 0 <= j < ids.size
       ids.swap(i, j)
-      exec_task ->(c : DB::Connection) {
+      exec_task_ok ->(c : DB::Connection) {
         ids.each_with_index { |rid, pos| c.exec("UPDATE match_rules SET position = ? WHERE id = ?", pos, rid) }
         nil
       }

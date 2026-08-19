@@ -853,7 +853,12 @@ module Gori
               @inserts_since_prune = 0
             end
           else
-            ops.each { |op| fail_reply(op) }
+            # NOT the IndexBatch ops: `index_replies` (collected from this same `ops` array) is
+            # answered just below, outside the if/else, on both branches. Answering them here too
+            # puts a second value in a buffered(1) channel whose caller receives exactly once, so
+            # `index_pending!` would read this 0, take its `break if n == 0` and return with the
+            # FTS backlog still dirty — the silent under-report `#flush`'s barrier exists to stop.
+            ops.each { |op| fail_reply(op) unless op.is_a?(IndexBatch) }
           end
           # Outside the batch transaction, and after it, so an explicit drain
           # (Store#index_pending!) also picks up rows this very batch just dirtied.

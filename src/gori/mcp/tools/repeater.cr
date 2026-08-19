@@ -238,14 +238,23 @@ module Gori
             Store::LinkRefKind::Repeater, id)
         end
 
+        # Checked, like the row insert above: the reply names the session's `name` and its
+        # `ws_out_message_count`, so a rolled-back batch would report a label and a frame count
+        # the row does not have. The row — and any `issue_id` link written just above it — is
+        # already committed here, so the error says what EXISTS rather than claiming nothing
+        # was created; a retry of the whole call would otherwise mint a second session.
         if name && !name.empty?
-          store.set_repeater_name(id, name)
+          unless store.set_repeater_name(id, name)
+            return busy("repeater ##{id} exists (with any issue link this call made), but its NAME was NOT saved (store busy or unwritable); set it with update_repeater")
+          end
         end
 
         # WebSocket messages handling
         ws_count = ws_messages.try(&.size)
         if (messages = ws_messages) && !messages.empty?
-          store.update_repeater_ws_messages(id, messages)
+          unless store.update_repeater_ws_messages(id, messages)
+            return busy("repeater ##{id} exists (with any issue link this call made), but its WS FRAMES were NOT saved (store busy or unwritable); it holds none — set them with update_repeater")
+          end
         end
 
         # Derive summary from the MASKED request — the raw request may carry a secret
@@ -466,20 +475,34 @@ module Gori
           return busy("repeater NOT updated (store busy or unwritable); it is unchanged")
         end
 
+        # These three are checked, but NOT with :466's wording: by the time they run the
+        # request-side update has already COMMITTED, so "it is unchanged" would be a lie. Each
+        # is its own writer batch, so the first rollback also means the ones after it were
+        # never attempted — the error names which half landed instead of reporting a partial
+        # write as one outcome (the rule `create_repeater`'s pre-insert parse states above).
         if present?(h, "name")
-          store.set_repeater_name(id, name)
+          unless store.set_repeater_name(id, name)
+            return busy("request updated, but the NAME was NOT saved (store busy or unwritable) — the row keeps its previous name, and any tags/ws frames in this call were not attempted; retry")
+          end
         end
 
         # Tags are the TUI's subtab labels (the `t` key) — the grouping a human uses to keep a
         # long session navigable. An explicit blank clears them.
         if present?(h, "tags")
           tags = str(h, "tags").try { |t| Env.mask_secrets(t).strip }
-          store.set_repeater_tags(id, tags.presence)
+          unless store.set_repeater_tags(id, tags.presence)
+            return busy("request updated, but the TAGS were NOT saved (store busy or unwritable) — the row keeps its previous tags, and any ws frames in this call were not attempted; retry")
+          end
         end
 
         # WebSocket messages handling
         ws_count = ws_msgs.try(&.size)
-        store.update_repeater_ws_messages(id, ws_msgs) if ws_msgs
+        if ws_msgs && !store.update_repeater_ws_messages(id, ws_msgs)
+          # That write opens with `DELETE FROM ws_messages`, so a rollback leaves the session
+          # on its PREVIOUS frames — reporting a `ws_out_message_count` for it would send the
+          # old bytes on the next send while the caller believed the new ones were stored.
+          return busy("request updated, but the WS FRAMES were NOT saved (store busy or unwritable) — the session still holds its previous frames; retry")
+        end
 
         # Derive the summary from the MASKED request, like create_repeater: the raw request may
         # carry a secret in the request-target (e.g. ?token=…) and this field goes to the LLM.

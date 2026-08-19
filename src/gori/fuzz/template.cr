@@ -137,6 +137,35 @@ module Gori::Fuzz
       @positions.size
     end
 
+    # The BYTE twin of `marked_spans`: the `[start, end)` BYTE offsets of every CLOSED
+    # `§…§` region in `bytes`, INCLUDING both delimiters, under `parse`'s exact escape
+    # rules (`§§` is a literal, never an opener nor a closer; an unbalanced trailing `§`
+    # yields no span and ends the scan). The chain separator `¦` is irrelevant here —
+    # only `§` opens or closes a region.
+    #
+    # It exists because `marked_spans` walks `text.chars`, and a caller working on a
+    # CAPTURE's bytes (`--flow`, MCP `flow_id`) may not hold valid UTF-8 — the exact
+    # U+FFFD corruption the BYTE-SAFETY note under `split_raw_interior` is about. Used by
+    # `Plan.wrap_token` to leave an occurrence that is already inside a marker alone.
+    def self.marked_byte_spans(bytes : Bytes) : Array({Int32, Int32})
+      spans = [] of {Int32, Int32}
+      n = bytes.size
+      i = 0
+      while i < n
+        if !marker_at?(bytes, i)
+          i += 1
+        elsif marker_at?(bytes, i + 2) # escaped literal § — not an opener
+          i += 4
+        else
+          s = scan_interior(bytes, i, n)
+          break unless s.closed # unbalanced trailing § opens no position (parse folds it)
+          spans << {i, s.next_i}
+          i = s.next_i
+        end
+      end
+      spans
+    end
+
     # The `[start, end)` CHARACTER offsets (into `text`) of every CLOSED `§…§`
     # region, in marker order, INCLUDING both `§` delimiters. 1:1 with
     # `parse(text).positions` — same `§§`-escape and unbalanced-trailing-§ rules — so

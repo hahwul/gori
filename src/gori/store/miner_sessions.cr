@@ -56,8 +56,13 @@ module Gori
 
     # Set (or clear, with nil) a miner session's custom sub-tab name — its own UPDATE so a
     # rename never rewrites the request/config (mirrors set_fuzz_session_name).
-    def set_miner_session_name(id : Int64, name : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+    #
+    # Returns whether the write committed (false = store busy/locked/closing), for
+    # `set_fuzz_session_name`'s reason: `exec_task`'s `last_insert_rowid` reply says nothing
+    # about an UPDATE, so `MinerController#apply_rename` — which has already set the label on
+    # the view — could not tell a commit from a rolled-back batch and told the operator nothing.
+    def set_miner_session_name(id : Int64, name : String?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE miner_sessions SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
         nil
       }

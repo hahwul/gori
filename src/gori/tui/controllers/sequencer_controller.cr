@@ -514,7 +514,11 @@ module Gori::Tui
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
-        @host.session.store.set_sequencer_session_name(id, view.name)
+        # See FuzzerController#apply_rename: the view already carries the new label, so a
+        # refused write is a silent no-op unless the store's answer is reported.
+        unless @host.session.store.set_sequencer_session_name(id, view.name)
+          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+        end
       end
     end
 
@@ -566,13 +570,37 @@ module Gori::Tui
     # Expanding at seed time as well would resolve a var whose value itself contains a
     # `$TOKEN` twice, and would freeze the resolved value into the persisted session — a
     # sequenced request keeps its `$TOKEN`s like the Repeater editor does.
+    #
+    # A BYTE walk rather than `gsub(/\r?\n/, "\r\n")` for the reason spelled out over
+    # `MinerController#text_to_request`: the Repeater buffer this arrives from is routinely raw
+    # captured bytes, and PCRE2 raises `ArgumentError` on a non-UTF-8 subject — the raise
+    # reached `Runner#run`. Byte-equivalent to the regex, `"a\r\r\n"` included.
     private def text_to_request(text : String) : Bytes
-      text.gsub(/\r?\n/, "\r\n").to_slice
+      bytes = text.to_slice
+      io = IO::Memory.new(bytes.size + 16)
+      i = 0
+      while i < bytes.size
+        b = bytes[i]
+        if b == 0x0D_u8 && i + 1 < bytes.size && bytes[i + 1] == 0x0A_u8
+          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
+          i += 2
+        elsif b == 0x0A_u8
+          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
+          i += 1
+        else
+          io.write_byte(b)
+          i += 1
+        end
+      end
+      io.to_slice
     end
 
     # --- send-selection: selected text becomes manual sample(s) ---
     def sequence_from_text(payload : String) : Nil
-      tokens = payload.split(/\r?\n/).map(&.strip).reject(&.empty?)
+      # `split('\n')` (a Char, byte-safe) and not `split(/\r?\n/)`: the payload is a band the
+      # operator selected in a pane whose lines can be raw captured bytes, and PCRE2 raises on
+      # a non-UTF-8 subject. The `.strip` already drops the CR the regex used to consume.
+      tokens = payload.split('\n').map(&.strip).reject(&.empty?)
       return @host.status("nothing to analyze") if tokens.empty?
       # Append into the current manual session only when it is NOT still collecting — starting
       # a run under a live fiber would spawn a second concurrent engine feeding the same view

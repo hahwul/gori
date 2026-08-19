@@ -88,7 +88,12 @@ module Gori::Tui
       elsif key.enter?
         edit_start
       else
-        handle_list_char(ev.char || key.to_char)
+        # Only an UNMODIFIED letter is a mnemonic. `Event::Key#char` is `@char || key.to_char`,
+        # so `^D` reports 'd' — and the shell no longer claims that chord: the quit arm yields
+        # ^C/^D while a modal is up (Runner.quit_chord_claimed?, so ^D can reach the Fuzzer's
+        # payload editor). Unguarded, the operator's quit press deleted a global env var and
+        # wrote settings.json. Same guard, same reason, as notifications_overlay.cr:103.
+        handle_list_char(ev.ctrl? || ev.alt? ? nil : (ev.char || key.to_char))
       end
       :stay
     end

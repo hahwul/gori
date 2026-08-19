@@ -572,6 +572,45 @@ describe Gori::Rules do
       end
     end
 
+    # The other way `move` can fail to move anything: the position guard is happy, the swap is
+    # attempted, and `Settings.move_rewriter_rule` refuses it because settings.json will not
+    # take the write. Precedence decides which of two rules touching the same header wins, so
+    # answering true here leaves the operator believing an order that reverts at next start —
+    # and walks the cursor across a swap that never happened.
+    it "answers false when the global reorder does not reach disk" do
+      with_globals do
+        with_store do |store|
+          rules = Gori::Rules.load(store)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "A", "1", scope: Gori::Store::RuleScope::Global)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "B", "2", scope: Gori::Store::RuleScope::Global)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "C", "3", scope: Gori::Store::RuleScope::Global)
+
+          # Three globals, and the MIDDLE one: neither edge of its own block, so the position
+          # guard above cannot answer for it and the refusal has to come from the store.
+          middle = rules.rules[1]
+
+          # Same blocker as the refused-delete example: a settings path whose parent is a
+          # plain file, so `save` fails.
+          blocker = File.tempname("gori-settings-blocked", "")
+          File.write(blocker, "")
+          before = Gori::Settings.path_override
+          begin
+            Gori::Settings.path_override = File.join(blocker, "settings.json")
+            rules.move(middle.id, -1, Gori::Store::RuleScope::Global).should be_false
+          ensure
+            Gori::Settings.path_override = before
+            File.delete?(blocker)
+          end
+
+          # settings.json still holds the old precedence, so the live list must too.
+          rules.rules.map(&.pattern).should eq(["A", "B", "C"])
+        end
+      end
+    end
+
     it "drops this project's override when the global rule is deleted" do
       with_globals do
         with_store do |store|

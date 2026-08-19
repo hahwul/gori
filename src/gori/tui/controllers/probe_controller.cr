@@ -563,17 +563,34 @@ module Gori::Tui
       end
     end
 
-    # Persist an add/edit from the overlay. Returns false (keep the form open) when invalid. A
-    # scope change on edit moves the rule between the global library and the project DB.
+    # Persist an add/edit from the overlay. Returns false (keep the form open) when invalid, or
+    # when the writer for the rule's scope refused the edit — the operator's fields are the only
+    # remaining copy of it. A scope change on edit moves the rule between the global library and
+    # the project DB.
     def apply_custom_rule(ov : CustomRuleOverlay) : Bool
       return false unless ov.valid?
       store = @host.session.store
       if id = ov.edit_id
         if ov.scope == ov.edit_scope
           if ov.scope == "global"
-            Settings.update_scan_rule(id, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+            # settings.json answers the same "did it COMMIT" question as the project writer
+            # below: `Settings.save` refuses outright after a half-read load, and a rolled-back
+            # edit no longer stays live in `Settings.scan_rules` — so the rule the operator just
+            # widened still matches on the old pattern, and saying otherwise is the same false
+            # negative the project branch refuses. Same refusal, same open form.
+            unless Settings.update_scan_rule(id, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+              @host.status("rule \"#{ov.rule_title}\" NOT updated (settings not writable) — it still matches on the old pattern")
+              return false
+            end
           else
-            store.update_probe_custom_rule(id.to_i64, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+            # The project writer reports whether the edit COMMITTED. Saying "updated custom
+            # rule" over a rolled-back batch leaves the operator scanning with the OLD pattern
+            # believing it is the new one — a false negative they were told not to expect — so
+            # refuse, and return false to keep the form open with the edits intact for a retry.
+            unless store.update_probe_custom_rule(id.to_i64, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+              @host.status("rule \"#{ov.rule_title}\" NOT updated (project busy) — it still matches on the old pattern")
+              return false
+            end
           end
         else
           ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)

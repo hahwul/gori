@@ -414,7 +414,11 @@ module Gori::Discover
     confidence : Float64,
     exchange : Exchange? = nil,
     # The `DirState#generation` the verdict above was reached under. Probes only.
-    generation : Int32 = 0
+    generation : Int32 = 0,
+    # The `<base href>` the fetched document declared, verbatim. Only an html-like body can
+    # carry one; `expand_links` resolves it against the page URL before using it as the base
+    # for that page's own links (`Extract.base_href`).
+    doc_base : String? = nil
 
   # The spider + brute-force engine. Single-threaded fiber scheduler (no -Dpreview_mt), so
   # the ORCHESTRATOR fiber owns all bookkeeping state (frontier/seen/templates/dirs/clusters)
@@ -955,7 +959,18 @@ module Gori::Discover
         # Parse the page's own URL ONCE for the whole link set: it is loop-invariant, and
         # consider_link used to re-run URI.parse (plus the host downcase and the scheme/path
         # substrings) for every href on the page.
-        if base = Url.parse(task.url)
+        if page = Url.parse(task.url)
+          # A document that declares `<base href>` resolves its relative links against THAT,
+          # not against its own URL (HTML 4.2.3 / RFC 3986 5.1.1) — see `Extract.base_href`.
+          # Falling back to the page URL is load-bearing, not defensive: `Url.resolve` returns
+          # nil for `<base href="">`, which is legal HTML meaning "the page URL", and for a
+          # junk/`mailto:` base the page's own links are still worth having.
+          base = page
+          if b = oc.doc_base
+            if (abs = Url.resolve(page, b)) && (bp = Url.parse(abs))
+              base = bp
+            end
+          end
           oc.links.each { |lnk| consider_link(task, base, lnk) }
         end
       end
@@ -1461,8 +1476,8 @@ module Gori::Discover
       raw = send_with_retries(task.url)
       body = decode_body(raw)
       fetched = distill(raw, body)
-      links = raw.error.nil? ? extract_links(task, fetched, body) : EMPTY_LINKS
-      Outcome.new(task, fetched, links, nil, false, 0.0, capture_exchange(task.url, raw))
+      links, doc_base = raw.error.nil? ? extract_links(task, fetched, body) : {EMPTY_LINKS, nil}
+      Outcome.new(task, fetched, links, nil, false, 0.0, capture_exchange(task.url, raw), 0, doc_base)
     end
 
     # Pick the link extractor from the RESPONSE, not from how the URL was found. Only the
@@ -1479,9 +1494,13 @@ module Gori::Discover
     # `application/javascript` is not html-like. The same held for every JSON document,
     # including each of the `.well-known/` ones this run now fetches, whose entire value IS
     # the URLs they list.
-    private def extract_links(task : Task, fetched : Calibrate::Fetched, body : Bytes) : Array(RawLink)
+    #
+    # Returns the document's `<base href>` alongside the links, because only this method knows
+    # whether the body was parsed as HTML at all — and a `<base>` in a robots.txt, a sitemap or
+    # a JS bundle is not a document base (`Extract.base_href`, `Engine#expand_links`).
+    private def extract_links(task : Task, fetched : Calibrate::Fetched, body : Bytes) : {Array(RawLink), String?}
       if task.kind.fetch? && task.source.robots?
-        return Extract.from_robots(body).map { |h| RawLink.new(h, Source::Robots) }
+        return {Extract.from_robots(body).map { |h| RawLink.new(h, Source::Robots) }, nil}
       end
       # What a well-known document DECLARES is a guess too — the origin's word for it, at a
       # path gori chose — so it inherits the source that keeps it behind the soft-404 gate
@@ -1500,7 +1519,7 @@ module Gori::Discover
       # published does not.
       src = task.kind.fetch? && task.source.well_known? ? Source::WellKnown : Source::Crawled
       if Extract.sitemap_body?(body)
-        return Extract.from_sitemap(body).map { |h| RawLink.new(h, Source::Sitemap) }
+        return {Extract.from_sitemap(body).map { |h| RawLink.new(h, Source::Sitemap) }, nil}
       end
       ct = fetched.content_type
       # No content type at all stays html-like, which is where it has always gone — and now
@@ -1508,13 +1527,13 @@ module Gori::Discover
       if ct.nil? || html_like?(ct)
         # The one MIXED source: `from_html` runs both the attribute passes and the endpoint pass,
         # and only it can say which found what.
-        Extract.from_html(body).map { |f| RawLink.new(f.href, src, f.declared) }
+        {Extract.from_html(body).map { |f| RawLink.new(f.href, src, f.declared) }, Extract.base_href(body)}
       elsif text_like?(ct)
         # A bundle, a JSON document, a `.map`: not markup, so it declares no links at all and
         # every literal here is inferred.
-        Extract.from_text(body).map { |h| RawLink.new(h, src, false) }
+        {Extract.from_text(body).map { |h| RawLink.new(h, src, false) }, nil}
       else
-        EMPTY_LINKS
+        {EMPTY_LINKS, nil}
       end
     end
 

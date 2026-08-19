@@ -199,6 +199,42 @@ describe "Fuzz::Sender#send_race" do
     capped.sent.should eq(n) # charged per job, network-independent — stays exact
     origin.close
   end
+
+  it "refuses the whole group when the race WARM-UP is carved out by an exclude rule" do
+    # The race request is allowed; only the warm-up is excluded. Every other send in
+    # `fuzz/engine.cr` asks `sweep_block` before the socket — the warm-up must too, or an
+    # operator's carve-out silently stops holding for `--race-warmup` / `fuzz_start{race_warmup}`.
+    # The gate IS the subject here, so this is the one example that cannot use `race_sender`'s
+    # `ungated_outbound`.
+    store = Gori::Store.open(File.tempname("gori-race-warm", ".db"))
+    origin = RaceOrigin.new
+    begin
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "127.0.0.1").should be_true
+      # sandbox deliberately OFF: a sweep's excludes hold anyway (Outbound::EXCLUDE_SWEEP_ERROR).
+      # Matches the warm-up's url and NOT the race's, so a failure here can only be the warm-up gate.
+      scope.add("exclude", "string", "/warmup").should be_true
+      n = 3
+      sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", origin.port),
+        Gori::Outbound.agent(scope, true), false, false, timeout: 2.seconds)
+      warmup = "GET /warmup HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+
+      results = sender.send_race(race_jobs(n), warmup: warmup)
+
+      results.size.should eq(n)
+      results.all? { |r| r.error.try(&.includes?("exclude")) }.should be_true
+      # Nothing reached the wire — not the warm-up, and not the race it would have warmed. This
+      # one stays EXACT rather than one-sided (see the note above): the refusal happens before
+      # any dial, so there is no connection for the harness to drop.
+      origin.events.should be_empty
+      # A refused group is `blocked`, not N errors (see the blocked-tally case below).
+      sender.blocked.should eq(n.to_i64)
+      sender.blocked_reason.should_not be_nil
+    ensure
+      origin.close
+      store.close
+    end
+  end
 end
 
 describe "Fuzz::Engine race_count" do

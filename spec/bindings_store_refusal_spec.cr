@@ -30,6 +30,28 @@ describe Gori::Bindings do
     end
   end
 
+  # The other cause of the same refusal: not a closed store but a STALE in-memory list, so
+  # `validate`'s "one name, one writer" (pinned in bindings_spec.cr) cannot see the collision
+  # and only the store's answer can refuse. `insert_extract_rule` returns 0 there because it
+  # reads `changes()`; `last_insert_rowid()` alone is not reset by an ignored `INSERT OR
+  # IGNORE`, so it answered this connection's PREVIOUS insert — the peer's row below — and the
+  # operator's discarded rule was reported saved.
+  it "reports a refused insert when a peer already took the name, list still stale" do
+    bindings_store do |store|
+      # Loaded while the table was empty: this is the operator's table as it stood before its
+      # next `PRAGMA data_version` poll, so it never saw the peer's row.
+      bindings = Gori::Bindings.load(store)
+      store.insert_extract_rule("TOKEN", "", Gori::ExtractKind::Cookie, "peer-sid")
+      store.flush
+
+      bindings.add("TOKEN", "", Gori::ExtractKind::Cookie, "mine")
+        .should eq(Gori::Bindings::STORE_REFUSED)
+
+      # And the refusal is the truth: the peer's descriptor is what `$TOKEN` still expands.
+      store.extract_rules.find { |r| r.name == "TOKEN" }.not_nil!.selector.should eq("peer-sid")
+    end
+  end
+
   it "reports a refused update and leaves the rule exactly as it was" do
     path = File.tempname("gori-bindings-refusal2", ".db")
     begin

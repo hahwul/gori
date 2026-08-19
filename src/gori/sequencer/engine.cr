@@ -259,10 +259,20 @@ module Gori::Sequencer
       attempts = 0
       loop do
         raw = backend.send(bytes)
-        return raw if raw.error.nil? || raw.error == Fuzz::CappedBackend::CAP_ERROR || attempts >= @config.retries
+        return raw if raw.error.nil? || permanent_refusal?(raw.error) || attempts >= @config.retries
         attempts += 1
         sleep @config.retry_pause
       end
+    end
+
+    # Refusals no retry can change: the request budget is spent, or Layer 2 said no. Only the
+    # cap was exempt here, so a sandboxed or excluded target burned `retries` attempts and the
+    # collection slept its way to `max_sends` with nothing collected. The Layer-2 half of the
+    # rule lives once, on `Outbound.permanent_refusal?` (read its comment for why the cap is
+    # not folded in there); the cap is asked here because `CappedBackend#send` charges it
+    # BEFORE the gate refuses, so a re-ask costs a second request for a fixed answer.
+    private def permanent_refusal?(err : String?) : Bool
+      err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
     end
 
     # ── counters / pacing ───────────────────────────────────────────────────────────

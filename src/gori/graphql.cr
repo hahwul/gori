@@ -95,12 +95,12 @@ module Gori
     # Parse the operation, or nil if the flow isn't GraphQL. Tries the POST JSON body
     # first, then the GET query string.
     #
-    # The query-string fallback is NOT reached for a body-bearing method that actually sent a
-    # body: there, the body IS the payload the server reads, so falling through made any
-    # `POST /upload?query=%7Bx%7D` with an unrelated (even binary) body report as GraphQL. That
-    # is not merely a wrong pane — `location` then answers `:query`, so sending it from the
-    # Repeater re-encodes the whole query string, rewriting the operator's request on the
-    # strength of a misdetection. A GET carrying a stray body still falls through, which is
+    # The query-string fallback is NOT reached for a request that actually sent a body under a
+    # method that reads one: there, the body IS the payload the server reads, so falling
+    # through made any `POST /upload?query=%7Bx%7D` with an unrelated (even binary) body
+    # report as GraphQL. That is not merely a wrong pane — `location` then answers `:query`,
+    # so sending it from the Repeater re-encodes the whole query string, rewriting the
+    # operator's request on the strength of a misdetection. A GET carrying a stray body still falls through, which is
     # what the fallback was written for.
     def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Op?
       ct = MediaType.of(req_head)
@@ -121,7 +121,7 @@ module Gori
           return Op.new(nil, "", nil, Form::Invalid, reason, projected)
         end
       end
-      return nil if (b = entity) && !b.empty? && body_bearing?(req_head)
+      return nil if (b = entity) && !b.empty? && body_is_payload?(req_head)
       from_query(target)
     end
 
@@ -279,16 +279,27 @@ module Gori
       nil
     end
 
-    # Whether the request line names a method whose BODY carries the payload. Read off the
-    # head, which `from_flow` has always been handed and never looked at. nil (no head, as in
-    # a unit call) keeps the permissive fallback.
-    private def body_bearing?(req_head : Bytes?) : Bool
+    # Whether a body this request carried is the payload the origin reads — so the `?query=`
+    # fallback has nothing to fall back to. Read off the head, which `from_flow` has always
+    # been handed and never looked at.
+    #
+    # A DENYLIST, not an allowlist of POST/PUT/PATCH: the two methods whose GraphQL binding is
+    # the query string are GET and HEAD, and every other method that sent a body sent it to be
+    # read. An allowlist left `QUERY` — the method GraphQL-over-HTTP defines for exactly this
+    # request, and already in `InterceptFilter::METHOD_VAL` — plus `SEARCH`, a body-carrying
+    # `DELETE` and every extension method answering `:query`, which splices the `Form::Invalid`
+    # pane's parse-failure sentence into the request LINE (`unparsed_reason` has no method gate,
+    # so those all reach it).
+    #
+    # nil (no head, as in a unit call) and a request line with no space at all keep the
+    # permissive fallback: with no method to judge, the GET binding is still the only offer.
+    private def body_is_payload?(req_head : Bytes?) : Bool
       head = req_head || return false
       line = String.new(head[0, {head.size, 64}.min])
       sp = line.index(' ') || return false
       case line[0, sp].upcase
-      when "POST", "PUT", "PATCH" then true
-      else                             false
+      when "GET", "HEAD" then false
+      else                    true
       end
     end
 
@@ -669,7 +680,15 @@ module Gori
     def location(req_body : Bytes?, req_head : Bytes? = nil) : Symbol
       entity, projected = Entity.of(req_head, req_body, MAX_BODY)
       op = ((b = entity) && !b.empty? && b.size <= MAX_BODY) ? from_body(b, MediaType.of(req_head)) : nil
-      return :query unless op # no body op at all — the GET `?query=` binding
+      unless op
+        # The same rule `from_flow` carries (see its comment): a request that actually sent a
+        # body under a method that reads one has no GET binding to fall back to — the body IS
+        # what the origin reads, so a failed parse (or a body past MAX_BODY) leaves nothing to
+        # write an edit back into. Without this the `Invalid` pane, whose text is the REASON the
+        # parse failed, was answered `:query` and spliced into the request LINE.
+        return :none if (b = entity) && !b.empty? && body_is_payload?(req_head)
+        return :query # a GET carrying a stray body still falls through — the `?query=` binding
+      end
       # A decoded entity is a projection (see `Op#projected`): the envelope holds the wire
       # bytes, so there is no side to write an edit back into. `from_body` cannot know that —
       # it is handed the already-decoded bytes — so `projected` is applied here, and then the

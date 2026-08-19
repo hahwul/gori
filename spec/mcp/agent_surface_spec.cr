@@ -306,6 +306,204 @@ describe "MCP repeater request read-back" do
   end
 end
 
+# --- a store whose repeater-metadata writes answer false ---------------------------------
+#
+# `store.close` is the lever spec/commit_confirmation_spec.cr uses, and it cannot reach the
+# guards below: the row insert (`create_repeater`) and the request-side `update_repeater` run
+# FIRST, so a closed store comes back with the earlier refusal and the metadata branches never
+# execute. This injects the other shape `exec_task_ok` answers false for, and the one these
+# guards exist for: each metadata write is its own writer batch, so a cross-process SQLite lock
+# (a capturing TUI on the same project) can take hold between two batches of one call.
+private class MetadataFailingStore < Gori::Store
+  property fail_name = false
+  property fail_tags = false
+  property fail_ws = false
+
+  # No return annotations on purpose. With src/gori/store/repeater_sessions.cr reverted these
+  # infer `Bool | Nil` and still COMPILE, so the examples below fail on their assertions
+  # instead of taking the whole spec run down with a type error.
+  def set_repeater_name(id : Int64, name : String?)
+    return false if @fail_name
+    super
+  end
+
+  def set_repeater_tags(id : Int64, tags : String?)
+    return false if @fail_tags
+    super
+  end
+
+  def update_repeater_ws_messages(id : Int64, messages : Array(Gori::Store::WsOutMessage))
+    return false if @fail_ws
+    super
+  end
+end
+
+# Opened the long way round (the `Store.open` recipe minus the subclass), like
+# spec/probe/persist_failure_spec.cr's `open_failing_store`.
+private def with_metadata_failing_store(&)
+  path = File.tempname("gori-mcp-repmeta", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = MetadataFailingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private REPMETA_REQUEST   = "GET /a HTTP/1.1\r\nHost: h\r\n\r\n"
+private REPMETA_REPLACED  = "GET /replaced HTTP/1.1\r\nHost: h\r\n\r\n"
+private REPMETA_HANDSHAKE = "GET /socket HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n" \
+                            "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                            "Sec-WebSocket-Version: 13\r\n\r\n"
+
+# A persisted WS session with a label, a tag set and one frame — the "previous" state each
+# refusal below claims the row keeps.
+private def seed_repmeta_session(store) : Int64
+  id = store.insert_repeater("ws://ws.test/socket", REPMETA_HANDSHAKE.to_slice, false, true, nil, 0)
+  store.set_repeater_name(id, "old")
+  store.set_repeater_tags(id, "oldtag")
+  store.update_repeater_ws_messages(id, [Gori::Store::WsOutMessage.text("seed")])
+  id
+end
+
+private def repmeta_error(resp : JSON::Any) : String
+  resp["result"]["isError"].as_bool.should be_true
+  # PROJECT_BUSY/retryable is the whole point of telling a rollback from a commit: it is the
+  # one store failure where calling again is the right move.
+  resp["result"]["structuredContent"]["error_code"].as_s.should eq("PROJECT_BUSY")
+  resp["result"]["structuredContent"]["retryable"].as_bool.should be_true
+  result_text(resp)
+end
+
+private def repmeta_frames(store, id : Int64) : Array(String)
+  store.ws_messages_for_repeater(id).map { |m| String.new(m.payload) }
+end
+
+# #210: `set_repeater_name`, `set_repeater_tags` and `update_repeater_ws_messages` ran through
+# `exec_task`, whose Int64 reply is `last_insert_rowid` — nothing at all for an UPDATE/DELETE.
+# Both tools reported the label and the `ws_out_message_count` of a batch that rolled back, and
+# `update_repeater_ws_messages` opens with `DELETE FROM ws_messages`, so the session an agent
+# was told now holds three frames would put its OLD bytes on the wire on the next send.
+#
+# What each refusal has to name is which half landed, because these calls are not atomic: the
+# row (and any `issue_id` link) is already committed by the time the label is written, and each
+# metadata write is its own batch, so the first rollback also means the ones after it were never
+# attempted. "nothing happened" and "everything happened" are both lies an agent would act on —
+# it would either mint a second session or believe frames it does not have.
+describe "MCP repeater metadata writes that did not commit" do
+  it "create_repeater names the session it already made when the NAME rolled back" do
+    with_metadata_failing_store do |store|
+      store.fail_name = true
+      text = repmeta_error(drive(store, call_line("create_repeater",
+        %({"target":"http://127.0.0.1:1","request":#{REPMETA_REQUEST.to_json},"name":"login"})))[0])
+      text.should contain("NAME was NOT saved")
+
+      # The message says the row EXISTS, and that is the load-bearing half: an agent that read
+      # this as "nothing was created" and retried would mint a SECOND session.
+      store.repeaters.size.should eq(1)
+      store.repeaters.first.name.should be_nil
+    end
+  end
+
+  it "create_repeater says a fresh WS session holds NO frames when they rolled back" do
+    with_metadata_failing_store do |store|
+      store.fail_ws = true
+      text = repmeta_error(drive(store, call_line("create_repeater",
+        %({"target":"ws://ws.test/socket","request":#{REPMETA_HANDSHAKE.to_json},) +
+        %("name":"wstab","ws_out_messages":["hi","there"]})))[0])
+      text.should contain("WS FRAMES were NOT saved")
+      text.should contain("holds none")
+
+      # "holds none" rather than update_repeater's "previous frames" — the row is new, so there
+      # is nothing behind the DELETE. Both of these are asserted, since the two messages differ
+      # only in that claim.
+      id = store.repeaters.first.id
+      repmeta_frames(store, id).should be_empty
+      store.repeaters.first.name.should eq("wstab") # the checked write AHEAD of it did commit
+    end
+  end
+
+  it "update_repeater reports the request landing and the NAME not, and stops there" do
+    with_metadata_failing_store do |store|
+      id = seed_repmeta_session(store)
+      store.fail_name = true
+      text = repmeta_error(drive(store, call_line("update_repeater",
+        %({"id":#{id},"request":#{REPMETA_REPLACED.to_json},"name":"new",) +
+        %("tags":"newtag","ws_out_messages":["one","two"]})))[0])
+      text.should contain("NAME was NOT saved")
+      text.should contain("not attempted")
+
+      row = store.repeaters.find! { |r| r.id == id }
+      String.new(row.request).should eq(REPMETA_REPLACED) # the half that DID land
+      row.name.should eq("old")
+      # The strongest assertion here: tags and frames were passed in the same call and this
+      # store would have taken both, so their previous values prove the early return happened
+      # rather than a partial write being reported as one outcome.
+      row.tags.should eq("oldtag")
+      repmeta_frames(store, id).should eq(["seed"])
+    end
+  end
+
+  it "update_repeater reports the TAGS not saved, with the ws frames left unattempted" do
+    with_metadata_failing_store do |store|
+      id = seed_repmeta_session(store)
+      store.fail_tags = true
+      text = repmeta_error(drive(store, call_line("update_repeater",
+        %({"id":#{id},"name":"new","tags":"newtag","ws_out_messages":["one","two"]})))[0])
+      text.should contain("TAGS were NOT saved")
+      text.should contain("ws frames in this call were not attempted")
+
+      row = store.repeaters.find! { |r| r.id == id }
+      row.name.should eq("new") # the checked write ahead of it committed
+      row.tags.should eq("oldtag")
+      repmeta_frames(store, id).should eq(["seed"])
+    end
+  end
+
+  it "update_repeater says the session still holds its PREVIOUS frames" do
+    with_metadata_failing_store do |store|
+      id = seed_repmeta_session(store)
+      store.fail_ws = true
+      text = repmeta_error(drive(store, call_line("update_repeater",
+        %({"id":#{id},"name":"new","tags":"newtag","ws_out_messages":["one","two"]})))[0])
+      text.should contain("WS FRAMES were NOT saved")
+      text.should contain("previous frames")
+
+      # Exactly what the sentence claims, and the reason this one is worse than a lost label:
+      # the DELETE rolled back with it, so the next send replays "seed".
+      repmeta_frames(store, id).should eq(["seed"])
+      row = store.repeaters.find! { |r| r.id == id }
+      row.name.should eq("new")
+      row.tags.should eq("newtag")
+    end
+  end
+
+  it "reports the label and the frame count when every batch DID commit" do
+    # The complement: the guards key on the store's answer, not on the arguments being present,
+    # so the ordinary call still comes back a success naming what the row now holds.
+    with_metadata_failing_store do |store|
+      id = seed_repmeta_session(store)
+      resp = drive(store, call_line("update_repeater",
+        %({"id":#{id},"name":"new","tags":"newtag","ws_out_messages":["one","two"]})))[0]
+      resp["result"]["isError"].as_bool.should be_false # asserted before `payload` parses it
+      p = payload(resp)
+      p["name"].as_s.should eq("new")
+      p["ws_out_message_count"].as_i.should eq(2)
+
+      row = store.repeaters.find! { |r| r.id == id }
+      row.name.should eq("new")
+      row.tags.should eq("newtag")
+      repmeta_frames(store, id).should eq(["one", "two"])
+    end
+  end
+end
+
 describe "MCP boolean arguments" do
   # `bool(h, "x") || false` erased the difference between "absent" and "unintelligible":
   # `verbatim: 1` silently selected the mode that PROMOTES a bare-LF header terminator to

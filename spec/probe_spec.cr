@@ -116,6 +116,14 @@ private def codes(store) : Array(String)
   store.probe_issues.map(&.code)
 end
 
+# Flip one built-in probe rule on/off the way the Rules sub-tab does. `Probe.set_rule_enabled`
+# (never a bare add/delete) is the single place the DEFAULT-OFF flip lives.
+private def set_probe_rule_enabled(store, id : String, enabled : Bool) : Nil
+  dis = store.probe_disabled_rules
+  Gori::Probe.set_rule_enabled(dis, id, enabled)
+  store.set_probe_disabled_rules(dis)
+end
+
 describe Gori::Probe::Passive do
   it "flags missing security headers, cookie flags, and a server fingerprint" do
     with_store do |store|
@@ -618,6 +626,64 @@ describe Gori::Probe::Analyzer do
       sleep 250.milliseconds
       store.probe_issues.count(&.code.== "secret_in_ws").should eq(1)
       a.stop
+    end
+  end
+
+  # The WS high-water mark must never advance over frames no rule READ. With ws_payloads off the
+  # rescan still paged the buffer and moved the mark, so re-enabling the built-in could never
+  # reach the frames captured while it was off — they were permanently invisible.
+  it "detects a WS secret while ws_payloads is enabled (control for the disabled-rule case)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      store.probe_disabled_rules_strict.includes?("ws_payloads").should be_false
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Passive, true)
+      a.start
+      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice)
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated))
+      sleep 200.milliseconds
+      a.stop
+      store.probe_issues.find(&.code.== "secret_in_ws").should_not be_nil
+    end
+  end
+
+  it "re-enabling ws_payloads still scans the frames captured while it was off" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      # Rule OFF before Analyzer.new — initialize reads the disabled set once.
+      set_probe_rule_enabled(store, "ws_payloads", false)
+      store.probe_disabled_rules_strict.includes?("ws_payloads").should be_true
+
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Passive, true)
+      a.start
+
+      # The secret rides a frame captured while the rule was OFF — nothing reads it.
+      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice)
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated))
+      sleep 200.milliseconds
+      store.probe_issues.find(&.code.== "secret_in_ws").should be_nil # rule is off — expected
+
+      # Operator re-enables the built-in; the TUI calls reload_rule_config.
+      set_probe_rule_enabled(store, "ws_payloads", true)
+      a.reload_rule_config
+      # Recovery is driven by the NEXT rescan_ws, not by reload_rule_config itself. No NEW
+      # ws_message: the secret exists only in the frame written while the rule was off.
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated))
+      sleep 200.milliseconds
+      a.stop
+
+      store.probe_issues.find(&.code.== "secret_in_ws").should_not be_nil
     end
   end
 

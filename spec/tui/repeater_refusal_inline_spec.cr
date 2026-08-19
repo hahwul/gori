@@ -319,3 +319,43 @@ describe "Gori::Tui::RepeaterController — minimize stop seam wiring" do
     end
   end
 end
+
+# The other end of the same controller: an EXIT path, sharing the Session + FakeHost harness
+# above (a save touches no socket, so the sandbox this file leaves on is irrelevant here).
+#
+# #210: the three repeater-metadata store writes ran through `exec_task`, whose Int64 reply is
+# `last_insert_rowid` and so says nothing about an UPDATE/DELETE — see
+# spec/commit_confirmation_spec.cr for the answer itself. `save_current_repeater` cleared the
+# tab's dirty flag regardless, and `update_repeater_ws_messages` opens with
+# `DELETE FROM ws_messages`: a rolled-back batch leaves the session on its PREVIOUS frames, so
+# marking the tab clean loses the authored ones outright. It runs on EVERY path that leaves the
+# editor (`Runner`'s pane/tab/subtab changes, the palette, close), so there is no later save to
+# retry from — which is why the dirty flag has to survive rather than the status line alone.
+describe "Gori::Tui::RepeaterController#save_current_repeater — a frame write that did not commit" do
+  it "leaves the WS tab dirty and says so" do
+    with_refused_tab(WS_REQUEST, target: "ws://127.0.0.1:9/socket") do |controller, host|
+      view = controller.current_view.should_not be_nil
+      view.ws_content?.should be_true # else this drives the plain-HTTP branch, which has no frames
+
+      view.mark_dirty
+      host.session.store.close # the batch carrying this save rolls back
+
+      controller.save_current_repeater
+
+      view.dirty?.should be_true
+      host.statuses.last.should contain("NOT saved")
+      host.statuses.last.should contain("the next save retries")
+    end
+  end
+
+  it "still clears the flag when the write DID commit" do
+    # The complement: the guard keys on the store's answer, not on "the tab holds frames" —
+    # an editor that could never go clean would re-write on every keystroke's pane change.
+    with_refused_tab(WS_REQUEST, target: "ws://127.0.0.1:9/socket") do |controller, _|
+      view = controller.current_view.should_not be_nil
+      view.mark_dirty
+      controller.save_current_repeater
+      view.dirty?.should be_false
+    end
+  end
+end

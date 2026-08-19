@@ -43,6 +43,16 @@ private def collide_scope_update(store : Gori::Store) : Bool
   store.update_scope_rule(first, "include", "host", "peer.test")
 end
 
+# A flow with a body-searchable target, so inserting a pile of them leaves a pile of `fts_dirty`
+# rows — the backlog the IndexBatch examples below measure the drain against.
+private def searchable_pair(i : Int32) : {Gori::Store::CapturedRequest, Gori::Store::CapturedResponse?}
+  req = Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
+    target: "/p#{i}", http_version: "HTTP/1.1",
+    head: "GET /p#{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil)
+  {req, nil.as(Gori::Store::CapturedResponse?)}
+end
+
 describe "Gori::Store writer after a constraint violation" do
   it "reports the collision without failing the batch it was in" do
     constraint_store do |store|
@@ -132,6 +142,46 @@ end
 # raising from `await_op` or the connection release, neither of which a spec can inject without
 # a seam that would itself be the change. So pin it at the source: every WriteOp that HAS a
 # reply channel must appear in `fail_reply`.
+# The MIRROR of the guard below, and the reason the two live together: `fail_reply` must have an
+# `IndexBatch` branch (for the writer-death drain), and the per-batch ROLLBACK must not use it.
+# An `IndexBatch` riding in a batch that rolls back was answered TWICE — once by the rollback
+# fan-out (`fail_reply` → 0) and once by the unconditional `index_replies.each` after the batch,
+# which runs on both branches because the rows it indexes were dirtied by earlier, already
+# committed batches. The reply channel is buffered(1) and its caller receives exactly once, so
+# `index_pending!` read the 0, took its `break if n == 0` and returned with the FTS backlog still
+# dirty — the silent under-report `Store#flush`'s barrier exists to prevent.
+describe "Store#index_pending! when the writer batch it rode in on rolls back" do
+  it "drains the whole FTS backlog instead of stopping at the rollback's reply" do
+    constraint_store do |store|
+      conn_id = store.insert_h2_connection("h2.test", 443, "h2")
+      conn_id.should be > 0
+
+      # More than FTS_BATCH (32) so one index slice cannot finish the backlog: an early break
+      # leaves rows dirty, which is the observable under-report.
+      pairs = (1..40).map { |i| searchable_pair(i) }
+      store.insert_import_batch_ids(pairs).size.should eq(40)
+      store.fts_backlog.should eq(40)
+
+      # No yield between these two calls, so both ops land in ONE writer batch: the frame is
+      # taken as `first`, the IndexBatch is drained in behind it. Nothing may be inserted between
+      # them — an assertion or a `flush` here lets the writer take the frame alone and the example
+      # goes vacuous. A zero-length SETTINGS ACK (type 0x4, not DATA, so it misses
+      # `insert_h2_frame_one`'s X'' branch) binds Bytes.empty → SQL NULL into `payload BLOB NOT
+      # NULL`, which raises inside the transaction and rolls the batch back.
+      store.insert_h2_frame(conn_id, "out", 0x4_u8, 0x1_u8, 0_u32, Bytes.empty)
+      n = store.index_pending!
+
+      # Precondition: the batch really did roll back (if it ever commits, this example is
+      # vacuous and must say so rather than pass).
+      store.write_failures.should be > 0
+
+      n.should be > 0                # HEAD: 0 — the `fail_reply` reply, read instead of the real count
+      store.fts_backlog.should eq(0) # HEAD: 8 — the drain broke after a single 32-row slice
+      close_within(store, 20.seconds).should be_true
+    end
+  end
+end
+
 describe "Store#fail_reply" do
   it "answers every WriteOp that has a reply channel" do
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "store.cr"))

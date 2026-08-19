@@ -89,7 +89,9 @@ module Gori::Tui
       elsif key.enter?
         edit_start
       else
-        handle_list_char(ev.char || key.to_char)
+        # Unmodified letters only — `^D` reports 'd' and would delete a global override.
+        # See the note at env_overlay.cr's matching arm.
+        handle_list_char(ev.ctrl? || ev.alt? ? nil : (ev.char || key.to_char))
       end
       :stay
     end

@@ -1095,7 +1095,9 @@ module Gori::Tui
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
-        @host.session.store.set_repeater_name(id, view.name)
+        unless @host.session.store.set_repeater_name(id, view.name)
+          @host.status("rename NOT saved (project busy) — the chip reads the new name until the tab reloads")
+        end
       end
     end
 
@@ -1106,7 +1108,9 @@ module Gori::Tui
       return unless tab = @repeaters.find(&.view.same?(view))
       view.tags = Repeater::Tags.parse(raw)
       if id = tab.db_id
-        @host.session.store.set_repeater_tags(id, Repeater::Tags.serialize(view.tags))
+        unless @host.session.store.set_repeater_tags(id, Repeater::Tags.serialize(view.tags))
+          @host.status("tags NOT saved (project busy) — the chip reads the new tags until the tab reloads")
+        end
       end
     end
 
@@ -1465,7 +1469,9 @@ module Gori::Tui
       end
       db_id = persist_new_repeater(view, nil)
       if (id = db_id) && (chip = view.name)
-        @host.session.store.set_repeater_name(id, chip)
+        unless @host.session.store.set_repeater_name(id, chip)
+          @host.status("repeater opened, but its “#{chip}” label was NOT saved (project busy)")
+        end
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
@@ -1484,13 +1490,25 @@ module Gori::Tui
               else
                 persist_new_repeater(view, nil)
               end
+      frames_lost = false
       if (id = db_id) && view.ws_content? # the frames come along even on an HTTP-mode duplicate
-        @host.session.store.update_repeater_ws_messages(id, view.ws_out_messages_raw)
-        view.ws_out_persisted
+        if @host.session.store.update_repeater_ws_messages(id, view.ws_out_messages_raw)
+          view.ws_out_persisted
+        else
+          # The new ROW committed; only its frames rolled back. Skipping `ws_out_persisted`
+          # is what leaves something to retry from: `duplicate_from` already marks the view
+          # dirty, so the next `save_current_repeater` writes the frames again — declaring
+          # them persisted here would have finished a duplicate that holds none.
+          frames_lost = true
+        end
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
-      @host.status("duplicated repeater (#{@repeaters.size} open)")
+      if frames_lost
+        @host.status("duplicated repeater (#{@repeaters.size} open) — ws frames NOT saved (project busy), the tab stays dirty so a later save retries")
+      else
+        @host.status("duplicated repeater (#{@repeaters.size} open)")
+      end
     end
 
     # Insert a freshly-opened repeater tab into the store so it has a stable row id (the
@@ -2019,7 +2037,15 @@ module Gori::Tui
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
           v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?)
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
-        @host.session.store.update_repeater_ws_messages(id, v.ws_out_messages_raw)
+        # Checked, and BEFORE `ws_out_persisted`/`clear_dirty`: that write opens with
+        # `DELETE FROM ws_messages`, so a rolled-back batch (a busy store, a live capture
+        # holding the writer) leaves the session on its PREVIOUS frames. Marking the tab
+        # clean over that loses the authored ones outright — this runs on every path that
+        # LEAVES the editor, so there is no later save to retry from.
+        unless @host.session.store.update_repeater_ws_messages(id, v.ws_out_messages_raw)
+          @host.status("ws frames NOT saved (project busy) — leaving the tab dirty so the next save retries")
+          return
+        end
         v.ws_out_persisted
       else
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,

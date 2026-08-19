@@ -399,7 +399,11 @@ module Gori::Tui
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
-        @host.session.store.set_miner_session_name(id, view.name)
+        # See FuzzerController#apply_rename: the view already carries the new label, so a
+        # refused write is a silent no-op unless the store's answer is reported.
+        unless @host.session.store.set_miner_session_name(id, view.name)
+          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+        end
       end
     end
 
@@ -430,8 +434,37 @@ module Gori::Tui
     # alone: Miner::Plan expands the request at build time, so expanding here too would be
     # a second pass, and a var whose value contains a token would resolve one level deeper
     # for a hand-authored request than for a flow-seeded one.
+    #
+    # Done in BYTE space, not as `gsub(/\r?\n/, "\r\n")`: this text is the Repeater editor's
+    # buffer, which is routinely RAW CAPTURED BYTES (a multipart JPEG upload, a protobuf/gzip
+    # body), and PCRE2 raises `ArgumentError` on a subject that is not valid UTF-8 — with no
+    # `rescue` between here and `Runner#run`, so `space ▸ m` silently did nothing and the third
+    # press inside TICK_ERROR_WINDOW took the session down. `.scrub`bing to appease the regex
+    # is not the fix: these bytes are about to go on the wire (P7). Same reasoning, same walk
+    # as `MCP::RequestBuilder.normalize_raw`, minus its head-only boundary — the regex promoted
+    # a bare LF anywhere, body included, and this keeps doing that.
+    #
+    # Byte-equivalent to the regex on every input, `"a\r\r\n"` included: a CRLF pair copies
+    # through, a lone LF is promoted, and any other byte — the FIRST CR of that pathological
+    # shape, which `TextArea#split_wire` exists to preserve — is copied untouched.
     private def text_to_request(text : String) : Bytes
-      text.gsub(/\r?\n/, "\r\n").to_slice
+      bytes = text.to_slice
+      io = IO::Memory.new(bytes.size + 16)
+      i = 0
+      while i < bytes.size
+        b = bytes[i]
+        if b == 0x0D_u8 && i + 1 < bytes.size && bytes[i + 1] == 0x0A_u8
+          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
+          i += 2
+        elsif b == 0x0A_u8
+          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
+          i += 1
+        else
+          io.write_byte(b)
+          i += 1
+        end
+      end
+      io.to_slice
     end
 
     # --- start a session (called by the Runner after the config overlay confirms) ---

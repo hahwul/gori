@@ -327,17 +327,20 @@ module Gori
     # project one, so "past the end of the global block" means "become a project rule", which
     # is `set_scope`'s job and a different decision.
     #
-    # False when nothing moved (an unknown rule, or an edge of its own block), so the caller
-    # can leave the cursor on the rule instead of walking it across a swap that never happened.
+    # False when nothing moved — an unknown rule, an edge of its own block, or a reorder the
+    # backing store refused — so the caller can leave the cursor on the rule instead of walking
+    # it across a swap that never happened. Precedence decides which of two rules that touch the
+    # same header wins, so reporting a reorder that did not reach disk leaves the operator
+    # believing an order that reverts at next start.
     def move(id : Int64, dir : Int32, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
       scoped = rules.select { |r| r.scope == scope }
       i = scoped.index { |r| r.id == id }
       return false unless i
       j = i + (dir < 0 ? -1 : 1)
       return false if j < 0 || j >= scoped.size
-      scope.global? ? Settings.move_rewriter_rule(id, dir) : @store.move_rule(id, dir)
+      ok = scope.global? ? Settings.move_rewriter_rule(id, dir) : @store.move_rule(id, dir)
       refresh
-      true
+      ok
     end
 
     # Re-read the snapshot (e.g. after an external MCP / other-instance edit). Same work

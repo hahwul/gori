@@ -137,8 +137,12 @@ module Gori
 
     # Set (or clear, with nil) a repeater tab's custom name — its own UPDATE, separate
     # from the request-side update_repeater so a rename never rewrites the request.
-    def set_repeater_name(id : Int64, name : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+    #
+    # Returns whether the write committed (false = store busy/locked/closing), like
+    # update_repeater above: every surface that reports the new name back has to be able to
+    # tell a commit from a rolled-back batch, which exec_task's rowid reply cannot.
+    def set_repeater_name(id : Int64, name : String?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
         nil
       }
@@ -147,8 +151,11 @@ module Gori
     # Set (or clear, with nil) a repeater tab's flat tags (V31) — its own narrow UPDATE,
     # like set_repeater_name, so tagging never rewrites the request. `tags` is the
     # space-joined token set; nil/blank clears it.
-    def set_repeater_tags(id : Int64, tags : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+    #
+    # Returns whether the write committed (false = store busy/locked/closing), like
+    # set_repeater_name.
+    def set_repeater_tags(id : Int64, tags : String?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET tags = ?, updated_at = ? WHERE id = ?", tags, now_us, id)
         nil
       }
@@ -207,8 +214,13 @@ module Gori
     # uses. A session is the only place a `declared_len` can live at all — a length header
     # that disagrees with its payload cannot be read back off a wire, so it is authored once
     # and has to survive the round trip through here or it is not expressible twice.
-    def update_repeater_ws_messages(id : Int64, messages : Array(WsOutMessage)) : Nil
-      exec_task ->(conn : DB::Connection) {
+    #
+    # Returns whether the write committed (false = store busy/locked/closing). It matters
+    # more here than on the two label writes: the batch opens with `DELETE FROM ws_messages`,
+    # so a rollback leaves the session holding its PREVIOUS frames while the caller has
+    # already reported the new count — the next send puts the old bytes on the wire.
+    def update_repeater_ws_messages(id : Int64, messages : Array(WsOutMessage)) : Bool
+      exec_task_ok ->(conn : DB::Connection) {
         conn.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
         messages.each do |msg|
           ts = now_us

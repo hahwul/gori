@@ -56,32 +56,70 @@ module Gori::Settings
   end
 
   # --- global scan-rule library CRUD (settings:probe rules → global scope) -----------------
-  # Each mutation rewrites the array and persists via save (atomic + 3-way merge). add returns
-  # the new rule's generated id so the caller can select it.
+  # Each mutation rewrites the array and persists via save (atomic + 3-way merge). The array
+  # ORDER is the list order; add appends.
+  #
+  # Every one of these returns a COMMIT answer, so memory has to agree with it: `save` refuses
+  # the write outright when the last load only got half the file in (`@@load_partial`), and it
+  # returns false on any transient write failure too. Mutating first and answering false left
+  # the rule live in `scan_rules` — folded straight into the runtime match list by
+  # `Probe.custom_rules`, so the operator kept scanning with a pattern that reverts at next
+  # start — and written to disk by the next unrelated save that did succeed. So snapshot the
+  # array and put it back when the write did not commit. The array is replaced wholesale
+  # everywhere and never mutated in place, so the old reference IS the snapshot. Same shape as
+  # `add_rewriter_rule`, minus the burned-counter restore it needs: ids here are
+  # `Random::Secure.hex`, so a refused add has no counter to put back.
+
+  # Returns the new rule's generated id so the caller can select it, or "" when the write did
+  # not reach disk — the `0_i64` of `add_rewriter_rule` in this family's id type.
   def self.add_scan_rule(title : String, description : String, side : String, region : String,
                          kind : String, pattern : String, severity : String, enabled : Bool = true) : String
+    prev = scan_rules
     id = Random::Secure.hex(4)
     self.scan_rules = scan_rules + [ScanRule.new(id, title, description, side, region, kind, pattern, severity, enabled)]
-    save
-    id
+    return id if save
+    self.scan_rules = prev
+    ""
   end
 
   def self.update_scan_rule(id : String, title : String, description : String, side : String,
-                            region : String, kind : String, pattern : String, severity : String) : Nil
+                            region : String, kind : String, pattern : String, severity : String) : Bool
+    prev = scan_rules
+    found = false
     self.scan_rules = scan_rules.map do |r|
-      r.id == id ? ScanRule.new(id, title, description, side, region, kind, pattern, severity, r.enabled) : r
+      next r unless r.id == id
+      found = true
+      ScanRule.new(id, title, description, side, region, kind, pattern, severity, r.enabled)
     end
-    save
+    ok = found && save
+    self.scan_rules = prev unless ok
+    ok
   end
 
-  def self.set_scan_rule_enabled(id : String, enabled : Bool) : Nil
-    self.scan_rules = scan_rules.map { |r| r.id == id ? r.copy_with(enabled: enabled) : r }
-    save
+  def self.set_scan_rule_enabled(id : String, enabled : Bool) : Bool
+    prev = scan_rules
+    found = false
+    self.scan_rules = scan_rules.map do |r|
+      next r unless r.id == id
+      found = true
+      r.copy_with(enabled: enabled)
+    end
+    ok = found && save
+    self.scan_rules = prev unless ok
+    ok
   end
 
-  def self.delete_scan_rule(id : String) : Nil
-    self.scan_rules = scan_rules.reject { |r| r.id == id }
-    save
+  def self.delete_scan_rule(id : String) : Bool
+    prev = scan_rules
+    kept = scan_rules.reject { |r| r.id == id }
+    return false if kept.size == scan_rules.size
+    self.scan_rules = kept
+    # This one fails the OTHER way round: a dropped-then-unsaved rule has stopped matching
+    # while the caller reports "not deleted — it is still scanning". An operator removing a
+    # noisy rule has to be able to trust that sentence.
+    return true if save
+    self.scan_rules = prev
+    false
   end
 
   # Omit when empty so an untouched install never writes "scan_rules": [].

@@ -29,6 +29,61 @@ private def with_globals(&)
   end
 end
 
+# A store whose `color_rules` writes ABORT, standing in for the cross-process case the engine
+# actually has to survive: a peer holds the write lock past busy_timeout, the batch rolls back
+# and `exec_task`/`exec_task_ok` answer 0/false. Reads are untouched — which is why `with_store`
+# above cannot stand in for it here: `add`/`update` both `refresh` after the write.
+private def trigger_store(&)
+  path = File.tempname("gori-colormarker-commit", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+  Gori::Store::Schema.migrate!(db)
+  store = Gori::Store.new(db, nil)
+  begin
+    yield store, db
+  ensure
+    # NEVER a bare `store.close` after a raising statement: that is the stmt-poisoning shape
+    # whose error fires at connection RELEASE, so a regression would HANG instead of failing.
+    close_bounded(store, 20.seconds)
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private def close_bounded(store : Gori::Store, span : Time::Span) : Bool
+  done = Channel(Nil).new(1)
+  spawn do
+    store.close
+    done.send(nil)
+  end
+  select
+  when done.receive
+    true
+  when timeout(span)
+    false
+  end
+end
+
+# `Settings.save` refusing every write, reached without any lock contention and without
+# touching Settings' in-memory state: an unwritable config dir (the `File.chmod` lever
+# spec/durable_file_spec.cr:70 already uses).
+private def with_unwritable_settings(&)
+  jail = File.tempname("gori-colormarker-settings")
+  Dir.mkdir_p(jail)
+  dir = File.join(jail, "home") # never created: the parent below refuses it
+  prev_home = ENV["GORI_HOME"]?
+  begin
+    ENV["GORI_HOME"] = dir
+    File.chmod(jail, 0o500)
+    Gori::Settings.save.should be_false # the lever works
+    yield
+  ensure
+    File.chmod(jail, 0o700)
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(jail)
+  end
+end
+
 # A REAL flow in the store, handed back as the `FlowRow` `match` is asked about. Store-tier
 # rules resolve by flow id, so the synthetic `row` below — whose id names no flow — would answer
 # "no" for the wrong reason and pin nothing.
@@ -272,6 +327,46 @@ describe Gori::Colormarker do
       end
     end
 
+    # A `proto:` value naming a TRANSPORT is the one spelling the tier split has to refuse. QL
+    # accepts `proto:wss` and compiles it, but the ROW tier's one-field-per-leaf
+    # `InterceptFilter` cannot express a transport at all — routed there, `proto:wss` painted
+    # nothing and `-proto:wss` painted EVERY row.
+    it "does not route a transport-suffixed proto: term into the row tier" do
+      Gori::Colormarker.row_answerable?("proto:ws").should be_true # the bare kind still is
+      Gori::Colormarker.row_answerable?("proto:wss").should be_false
+      Gori::Colormarker.row_answerable?("proto:https").should be_false
+      Gori::Colormarker.row_answerable?("-proto:grpcs").should be_false
+      Gori::Colormarker.row_answerable?("host:acme proto:sses").should be_false
+    end
+
+    # The negated half, and the one that fails LOUDLY once the term reaches the store tier:
+    # an exclusion that used to paint everything now excludes exactly the class it names.
+    it "excludes exactly the rows a negated TLS proto names, and paints the rest" do
+      with_globals do
+        with_store do |store|
+          ws = captured(store, "acme.test", "/", status: 101)
+          plain = captured(store, "acme.test", "/", status: 200)
+          cm = Gori::Colormarker.load(store)
+          cm.add("-proto:wss", RED, FULL).should be_true
+          cm.match(ws).should be_nil        # the excluded class
+          cm.match(plain).should_not be_nil # everything else still paints
+        end
+      end
+    end
+
+    it "paints a TLS proto rule's rows" do
+      with_globals do
+        with_store do |store|
+          ws = captured(store, "acme.test", "/", status: 101)
+          plain = captured(store, "acme.test", "/", status: 200)
+          cm = Gori::Colormarker.load(store)
+          cm.add("proto:https", RED, FULL).should be_true
+          cm.match(plain).should_not be_nil
+          cm.match(ws).should be_nil
+        end
+      end
+    end
+
     # An in-flight row has no status yet. This is the case History's per-row memo has to evict
     # on `:updated`, so the engine half of it is pinned here.
     it "does not match a status rule until the response lands" do
@@ -508,6 +603,139 @@ describe Gori::Colormarker do
           # the only global rule cannot move down into the project block
           cm.move(cm.rules.first.id, 1, GLOBAL).should be_false
           cm.rules.map(&.scope).should eq([GLOBAL, Gori::Store::RuleScope::Project])
+        end
+      end
+    end
+  end
+
+  # The same "did this COMMIT" class `#move` above carries, on the two mutations that create and
+  # edit a rule — in BOTH scopes, because each has its own writer and its own way to fail.
+  describe "write-commit reporting" do
+    it "answers false when the PROJECT insert did not commit" do
+      with_globals do
+        trigger_store do |store, db|
+          db.exec("CREATE TRIGGER color_rules_no_insert BEFORE INSERT ON color_rules " \
+                  "BEGIN SELECT RAISE(ABORT, 'busy'); END")
+          cm = Gori::Colormarker.load(store)
+          cm.add("host:acme", RED, FULL).should be_false
+          cm.rules.should be_empty
+        end
+      end
+    end
+
+    it "answers false when the PROJECT update did not commit" do
+      with_globals do
+        trigger_store do |store, db|
+          id = store.insert_color_rule("host:acme", RED, FULL)
+          id.should_not eq(0)
+          db.exec("CREATE TRIGGER color_rules_no_update BEFORE UPDATE ON color_rules " \
+                  "BEGIN SELECT RAISE(ABORT, 'busy'); END")
+          cm = Gori::Colormarker.load(store)
+          cm.update(id, "host:other", RED, FULL).should be_false
+          cm.rules.map(&.match_filter).should eq(["host:acme"]) # the row is untouched
+        end
+      end
+    end
+
+    # The answer is not the only thing that has to be right: `add_colormarker_rule` mutates
+    # `colormarker_rules` before it asks `save`, and `add` refreshes unconditionally, so a rule
+    # left behind by a refused save is folded into `@compiled` and paints History rows in EVERY
+    # project for the rest of the process — while the operator was told it was not added, and
+    # the next unrelated save that DOES commit writes it to disk. So the rollback is what these
+    # pin; the false answer alone was the state that shipped the phantom.
+    it "leaves no phantom rule behind when the GLOBAL add never reached disk" do
+      with_globals do
+        with_unwritable_settings do
+          with_store do |store|
+            cm = Gori::Colormarker.load(store)
+            cm.add("host:acme", RED, FULL, scope: GLOBAL).should be_false
+            Gori::Settings.colormarker_rules.should be_empty
+            cm.rules.should be_empty # nothing painting in this project either
+          end
+        end
+      end
+    end
+
+    # A burned id is not cosmetic: a project's colormarker-override key names a global rule by
+    # id, so handing a refused rule's number to the next one created leaves a project silently
+    # overriding a rule it never saw.
+    it "does not burn a rule id when the GLOBAL add never reached disk" do
+      with_globals do
+        Gori::Settings.colormarker_next_rule_id = 8_i64
+        with_unwritable_settings do
+          with_store do |store|
+            Gori::Colormarker.load(store).add("host:acme", RED, FULL, scope: GLOBAL).should be_false
+            Gori::Settings.colormarker_next_rule_id.should eq(8_i64)
+          end
+        end
+      end
+    end
+
+    it "keeps the OLD condition live when the GLOBAL update never reached disk" do
+      with_globals do
+        with_unwritable_settings do
+          Gori::Settings.colormarker_rules = [
+            Gori::Settings::ColormarkerRule.new(1_i64, true, "", "host:acme", "red", "full"),
+          ]
+          with_store do |store|
+            cm = Gori::Colormarker.load(store)
+            cm.update(1_i64, "host:other", RED, FULL, scope: GLOBAL).should be_false
+            Gori::Settings.colormarker_rules.map(&.match_filter).should eq(["host:acme"])
+            cm.rules.map(&.match_filter).should eq(["host:acme"])
+          end
+        end
+      end
+    end
+
+    # The sharpest of the five, because colour rules RESOLVE rather than compose: a swap left
+    # live over a refused write means a DIFFERENT rule paints the row than the operator was just
+    # told, in every project.
+    it "keeps the OLD precedence when the GLOBAL move never reached disk" do
+      with_globals do
+        with_unwritable_settings do
+          Gori::Settings.colormarker_rules = [
+            Gori::Settings::ColormarkerRule.new(1_i64, true, "", "host:acme", "red", "full"),
+            Gori::Settings::ColormarkerRule.new(2_i64, true, "", "host:acme", "blue", "full"),
+          ]
+          with_store do |store|
+            cm = Gori::Colormarker.load(store)
+            cm.move(1_i64, 1, GLOBAL).should be_false
+            Gori::Settings.colormarker_rules.map(&.id).should eq([1_i64, 2_i64])
+            cm.rules.map(&.id).should eq([1_i64, 2_i64])
+            cm.match(row).try(&.color).should eq(RED) # still the rule the operator was told wins
+          end
+        end
+      end
+    end
+
+    it "keeps the rule painting when the GLOBAL delete never reached disk" do
+      with_globals do
+        with_unwritable_settings do
+          Gori::Settings.colormarker_rules = [
+            Gori::Settings::ColormarkerRule.new(1_i64, true, "", "host:acme", "red", "full"),
+          ]
+          with_store do |store|
+            cm = Gori::Colormarker.load(store)
+            cm.remove(1_i64, GLOBAL).should be_false
+            Gori::Settings.colormarker_rules.map(&.id).should eq([1_i64])
+            cm.rules.map(&.id).should eq([1_i64])
+          end
+        end
+      end
+    end
+
+    it "keeps the OLD default state when the GLOBAL enabled flip never reached disk" do
+      with_globals do
+        with_unwritable_settings do
+          Gori::Settings.colormarker_rules = [
+            Gori::Settings::ColormarkerRule.new(1_i64, true, "", "host:acme", "red", "full"),
+          ]
+          with_store do |store|
+            cm = Gori::Colormarker.load(store)
+            cm.toggle_default(1_i64, GLOBAL).should be_false
+            Gori::Settings.colormarker_rules.first.enabled.should be_true
+            cm.rules.first.enabled?.should be_true
+          end
         end
       end
     end

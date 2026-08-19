@@ -177,6 +177,18 @@ private def seed_capture(store : Gori::Store, target : String, cookie : String? 
   id
 end
 
+# A SECOND process editing the same project db — `gori run session add`, MCP
+# `create_session_slot`, a second TUI — reaching the row through its own `SessionSlots`.
+private def peer_add(session : Gori::Session, slot : Gori::SessionSlot) : Nil
+  Gori::SessionSlots.load(session.store).add(slot).should be_true
+end
+
+# The other half of the same peer: `gori run session remove`, MCP `delete_session_slot`, a
+# second TUI's card — a name the card is still holding leaving the row under it.
+private def peer_remove(session : Gori::Session, name : String) : Nil
+  Gori::SessionSlots.load(session.store).remove(name).should be_true
+end
+
 describe Gori::Tui::AuthorizeController do
   # An identity IS a session slot, and a slot carries the extract rules whose bound values
   # belong to it. The form edits the OVERLAY half and knows nothing about the rule half, so
@@ -202,6 +214,147 @@ describe Gori::Tui::AuthorizeController do
       saved[0].baseline?.should be_true
       # Through the LIVE registry, so the send seams see both halves.
       Gori::SessionSlots.load(session.store).slots[0].rules.should eq(["SESSION", "CSRF"])
+    end
+  end
+
+  # The same write, against the other half of the row it does not own. The card
+  # read-modify-WRITES the whole session-slot row from a list cached at its first read
+  # (`@identities_loaded`), and the process's `SessionSlots` object is never re-read — so a
+  # slot a PEER process added between the two is deleted by the next card write, silently.
+  it "keeps a slot a peer process added when the identity form saves an edit" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true),
+      ]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin"]) # the card's list is now cached
+
+      peer_add(session, Gori::SessionSlot.new("staff", set_headers: [{"Cookie", "s=1"}]))
+
+      edited = Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "session=B"}])
+      ctrl.apply_identity(0, edited).should be_true
+
+      saved = Gori::SessionSlots.load(session.store).slots
+      saved.map(&.name).should eq(["admin", "staff"]) # staff survived the card's write
+      # …and the edit the operator actually made landed.
+      saved[0].set_headers.should eq([{"Cookie", "session=B"}])
+      saved.count(&.baseline?).should eq(1)
+    end
+  end
+
+  # Carrying a peer's slot across cannot become "never delete anything": the card's own list
+  # is what the delete is expressed in, so a name it holds must still go when it is dropped.
+  it "keeps a peer's slot while still honouring the card's delete" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true),
+        Gori::SessionSlot.new("guest", set_headers: [{"Cookie", "session=G"}]),
+      ]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
+
+      peer_add(session, Gori::SessionSlot.new("staff", set_headers: [{"Cookie", "s=1"}]))
+
+      # What the list card publishes after deleting `guest`.
+      ctrl.replace_identities([ctrl.identities[0]]).should be_true
+
+      Gori::SessionSlots.load(session.store).slots.map(&.name).should eq(["admin", "staff"])
+
+      # A SECOND write, now that `staff` is part of the card's own list: deleting it must
+      # delete it, not carry it back in as if the peer had just added it.
+      ctrl.replace_identities([ctrl.identities[0]]).should be_true
+      Gori::SessionSlots.load(session.store).slots.map(&.name).should eq(["admin"])
+    end
+  end
+
+  # …and with an empty project row, where the card's list is the built-in as-captured +
+  # anonymous pair rather than anything read from the store.
+  it "materialises the built-in defaults without dropping a peer's slot" do
+    with_authorize_controller do |ctrl, _host, session|
+      ctrl.identities.map(&.name).should eq(["as-captured", "anonymous"]) # project row empty
+
+      peer_add(session, Gori::SessionSlot.new("staff", set_headers: [{"Cookie", "s=1"}]))
+
+      edited = Gori::Authorize::Identity.new("anonymous", remove_headers: ["Cookie"])
+      ctrl.apply_identity(1, edited).should be_true
+
+      Gori::SessionSlots.load(session.store).slots.map(&.name)
+        .should eq(["as-captured", "anonymous", "staff"])
+    end
+  end
+
+  # And the mirror of the carry-over: a peer's DELETE is as much a peer edit as its add. The
+  # card's cached list still holds the name, so a whole-list save built from it writes the slot
+  # back — the peer's delete silently reverted and its overlay selectable again. The merge is
+  # three-way: seeded base, the card's list, the freshly reloaded row.
+  it "drops a slot a peer deleted instead of writing it back" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true),
+        Gori::SessionSlot.new("guest", set_headers: [{"Cookie", "session=G"}]),
+      ]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin", "guest"]) # the card's list is now cached
+
+      peer_remove(session, "guest")
+
+      edited = Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "session=B"}])
+      ctrl.apply_identity(0, edited).should be_true
+
+      saved = Gori::SessionSlots.load(session.store).slots
+      saved.map(&.name).should eq(["admin"])                    # the delete stayed a delete
+      saved[0].set_headers.should eq([{"Cookie", "session=B"}]) # …and the edit landed
+      # The card reads the row it just wrote, so the deleted identity is gone from the tab too.
+      ctrl.identities.map(&.name).should eq(["admin"])
+    end
+  end
+
+  # The one case that leaves the set with no anchor: the slot the peer deleted was the card's
+  # baseline. A set judged against no baseline is a run with no verdict, so the first survivor
+  # is promoted — the same rule `AuthorizeIdentitiesOverlay#delete_selected` applies.
+  it "promotes the first survivor when the peer deleted the card's baseline" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true),
+        Gori::SessionSlot.new("guest", set_headers: [{"Cookie", "session=G"}]),
+      ]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
+
+      peer_remove(session, "admin")
+
+      edited = Gori::Authorize::Identity.new("guest", set_headers: [{"Cookie", "session=H"}])
+      ctrl.apply_identity(1, edited).should be_true
+
+      saved = Gori::SessionSlots.load(session.store).slots
+      saved.map(&.name).should eq(["guest"])
+      saved.count(&.baseline?).should eq(1)
+      # The operator's edit, not the copy the reload brought back.
+      saved[0].set_headers.should eq([{"Cookie", "session=H"}])
+    end
+  end
+
+  # The three caches (`@view.identities`, `@identities_loaded`, `@identities_base`) are what the
+  # NEXT write is built and merged against, so they may only advance over a write that
+  # committed. Advancing them first took the just-deleted name out of the base while it was
+  # still in the row: the operator's next edit reloaded it, found it in neither the base nor the
+  # list, and appended it as a peer ADD — the refused delete silently undone.
+  it "does not advance the card's caches over a write that did not commit" do
+    with_authorize_controller do |ctrl, _host, session|
+      session.slots.save([
+        Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=A"}], baseline: true),
+        Gori::SessionSlot.new("guest", set_headers: [{"Cookie", "session=G"}]),
+      ]).should be_true
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
+
+      session.store.close # every write from here answers "did not commit"
+
+      # What the list card publishes after deleting `guest` — refused, so `guest` is still the
+      # row's, and the card must go on showing what the project holds.
+      ctrl.replace_identities([ctrl.identities[0]]).should be_false
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
+      ctrl.view.identities.map(&.name).should eq(["admin", "guest"])
+
+      # The cost of advancing the base: a SECOND refused edit must still be the same delete,
+      # not an edit against a list `guest` has been resurrected into.
+      ctrl.replace_identities([ctrl.identities[0]]).should be_false
+      ctrl.identities.map(&.name).should eq(["admin", "guest"])
     end
   end
 

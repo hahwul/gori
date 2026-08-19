@@ -691,12 +691,26 @@ module Gori::Proxy
       # time, which the retention cap (counted in rows) cannot reclaim and lowering
       # `capture_max` did not shrink.
       resp_stored, resp_trunc, resp_size = capped(send_body ? stub.body : nil)
+      # A 1xx stub answers nothing: 100/102/103 promise a final status that never follows, and
+      # a 101 hands the connection to a protocol a stub has no relay for. Either way the client
+      # sends no next request, so keeping the connection would only stall both sides until
+      # CLIENT_IO_TIMEOUT. Deliberately the WHOLE 1xx range, unlike `interim_response?` — that
+      # predicate excludes 101 because an ORIGIN's 101 is forwarded as an upgrade, and here
+      # there is no upgrade to forward.
+      non_final = resp.status < 200
       @sink.on_response(FlowMapper.response(resp,
         flow_id: flow_id, body: resp_stored,
         body_truncated: resp_trunc, body_size: resp_size,
-        state: written ? Store::FlowState::Complete : Store::FlowState::Aborted,
-        error: written ? stub.error : "client closed before the short-circuit response was written"))
+        state: written && !non_final ? Store::FlowState::Complete : Store::FlowState::Aborted,
+        error: if !written
+          "client closed before the short-circuit response was written"
+        elsif non_final
+          "short-circuit stub answered with a non-final #{resp.status}; no final response follows"
+        else
+          stub.error
+        end))
       return false unless written
+      return false if non_final
       keep_alive?(req, resp, omit_length ? Codec::BodyFraming::None : Codec::BodyFraming::Length)
     end
 
@@ -1708,7 +1722,7 @@ module Gori::Proxy
     end
 
     private def websocket_upgrade?(resp : Codec::RawResponse) : Bool
-      resp.status == 101 && resp.headers.get?("Upgrade").try(&.downcase) == "websocket"
+      resp.status == 101 && WS::Handshake.upgrades_to_websocket?(resp.headers)
     end
 
     # What gori did with a 101 that is NOT a WebSocket, put on the record (#736).

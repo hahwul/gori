@@ -57,9 +57,20 @@ module Gori::Proxy::WS
     # `Upgrade` is a comma-separated protocol list (RFC 7230 §6.7), so match the TOKEN
     # rather than the whole field-value: `Upgrade: websocket, h2c` is still a WebSocket
     # handshake. Both lookups are allocation-free on the miss, which is every non-WS
-    # request on the hot path.
+    # request on the hot path (the `EXTENSIONS_NAME` test stays first for that reason).
     def self.offers_extensions?(headers : Codec::HeaderList) : Bool
       return false unless headers.has?(EXTENSIONS_NAME)
+      upgrades_to_websocket?(headers)
+    end
+
+    # Does this head's `Upgrade` field name WebSocket? The one home for that question.
+    #
+    # `ClientConn` used to compare the whole field-value to `"websocket"`, so an origin
+    # answering the RFC 7230 §6.7 list form (`Upgrade: websocket, h2c`) fell out of the
+    # WebSocket branch entirely and was relayed as an opaque byte tunnel — no frames
+    # captured, no `part: ws` rule, no `proto:ws` hold — on a socket gori can decode.
+    # Two predicates for one field-value is what let that disagreement exist.
+    def self.upgrades_to_websocket?(headers : Codec::HeaderList) : Bool
       upgrade = headers.get?("Upgrade")
       return false unless upgrade
       upgrade.split(',').any? { |token| token.strip.compare("websocket", case_insensitive: true) == 0 }

@@ -39,7 +39,7 @@ module Gori
     # would silently orphan every one of them on upgrade.
     KEY = Store::SESSION_SLOTS_KEY
 
-    def initialize(@store : Store, slots : Array(SessionSlot))
+    def initialize(@store : Store, slots : Array(SessionSlot), @raw : String? = nil)
       @mutex = Mutex.new
       @slots = slots
       @active = nil.as(String?)
@@ -48,10 +48,27 @@ module Gori
       # skips every namespacing test and behaves exactly as it did before slots existed.
       # Same pattern and the same reason as `Bindings`' own `@enabled_count`.
       @scoped_count = Atomic(Int32).new(count_scoped(slots))
+      # Set by `Bindings` (a `Proc`, not a typed reference: core's dependency runs
+      # bindings → session_slots and must not run back). Fired with the SURVIVING slot names
+      # after every list write so a per-slot binding table whose slot is gone can be dropped —
+      # a name is the only key `Bindings` has, so a new slot reusing a deleted one's name
+      # would otherwise resolve the deleted identity's live credential. `nil` is the stronger
+      # signal "no name can be vouched for" — see `reload`.
+      @on_slots_changed = nil.as(Proc(Array(String)?, Nil)?)
+    end
+
+    # Called by `Bindings#initialize`. One proc, replaced rather than accumulated: a second
+    # `Bindings` over the same registry supersedes the first.
+    def on_slots_changed=(cb : Proc(Array(String)?, Nil)?)
+      @on_slots_changed = cb
     end
 
     def self.load(store : Store) : SessionSlots
-      new(store, SessionSlot.parse_json(store.setting(KEY)))
+      # The raw blob travels with the parsed list: `reload` compares it to decide whether the
+      # persisted row moved at all, and a re-serialization of the parsed list is not the same
+      # string (an older or hand-written blob round-trips through `parse_json` lossily).
+      raw = store.setting(KEY)
+      new(store, SessionSlot.parse_json(raw), raw)
     end
 
     def slots : Array(SessionSlot)
@@ -78,27 +95,71 @@ module Gori
     # context, and leaving a dangling name would make `overlay` a silent no-op that the
     # readout still reports as active.
     def save(list : Array(SessionSlot)) : Bool
-      return false unless @store.set_setting(KEY, SessionSlot.serialize(list))
+      blob = SessionSlot.serialize(list)
+      return false unless @store.set_setting(KEY, blob)
       @mutex.synchronize do
         @slots = list
+        # This process's own write is not an external edit: remembering the bytes it committed
+        # is what keeps the next `reload` from reading them back as somebody else's rotation
+        # and pruning the tables this list's slots just bound into.
+        @raw = blob
         @active = nil unless (a = @active) && list.any?(&.name.==(a))
         @rev &+= 1
       end
       @scoped_count.set(count_scoped(list))
+      # OUTSIDE the synchronize block, in the same position `bump_highlight_rev` holds: the
+      # callback takes `Bindings`' mutex, and bindings.cr's `values` states the two must never
+      # nest. Keyed on the NAME SET, never on object identity — `with_one_baseline` rebuilds
+      # every element, so a baseline move must prune nothing.
+      @on_slots_changed.try &.call(list.map(&.name))
       Env.bump_highlight_rev
       true
     end
 
     # Re-read the persisted list (an MCP / other-instance edit), keeping the active pointer
     # when the slot it names survived. Same shape as `Bindings#reload`.
+    #
+    # Keyed on the persisted BLOB, and both halves of that are load-bearing.
+    #
+    # A row this process last read or wrote itself is not an edit: returning early is what lets
+    # the TUI's `data_version` tick (`Runner#apply_external_change`) call this on every commit
+    # — own captures included — without moving `@rev`, which `Bindings#rev` folds and
+    # `Rules#subst_snapshot` memoises against on the proxy path. The neighbouring reloads in
+    # that method make the same bargain (`Env.load_project` publishes only on a real delta,
+    # `colormarker.reload` bails on an unchanged rule set).
+    #
+    # A row that DID move drops EVERY per-slot table, not the ones whose name is gone: a peer's
+    # `session remove admin` and `session add admin` are two writes and this process sees only
+    # the row they land on, so `admin` is present on both sides of a write that discarded the
+    # identity — the surviving-name key `save` can use (it fires mid-delete, with the list the
+    # delete produced) says "nothing to prune" about the exact case the prune exists for. There
+    # is no persisted slot id to tell one `admin` from the next, so no name can be vouched for.
+    # The cost of over-pruning is a `$SESSION` that resolves to nothing — the failure this
+    # class's doc already chose ("a slot with nothing bound in it is a slot that resolves
+    # nothing"); the cost of under-pruning is a discarded identity's live credential going out
+    # in an authorization test.
+    #
+    # The row is the ONLY signal here, and that bounds what this catches: a re-add whose
+    # persisted definition is byte-identical to what this process last read is indistinguishable
+    # from no write at all. Closing that would need a persisted per-slot id, which the blob
+    # deliberately does not carry (an old build has to read it — see `SessionSlot.serialize`).
+    # In-process the identical case IS caught, because `save` fires mid-delete with the list the
+    # delete produced (spec/bindings_slots_spec.cr).
     def reload : Nil
-      fresh = SessionSlot.parse_json(@store.setting(KEY))
+      raw = @store.setting(KEY)
+      return if raw == @raw
+      fresh = SessionSlot.parse_json(raw)
       @mutex.synchronize do
+        @raw = raw
         @slots = fresh
         @active = nil unless (a = @active) && fresh.any?(&.name.==(a))
         @rev &+= 1
       end
       @scoped_count.set(count_scoped(fresh))
+      # nil, not the surviving names — see above. The MCP path reloads before every write
+      # (`fresh_slots`), and the TUI's on every tick, so this is where an out-of-process
+      # rotation is caught at all.
+      @on_slots_changed.try &.call(nil)
       Env.bump_highlight_rev
     end
 

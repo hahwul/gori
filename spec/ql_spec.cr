@@ -587,6 +587,62 @@ describe "Gori::Store#search (QL)" do
     Gori::QL.analyze("respond").applied.should eq(["respond"])
   end
 
+  # A substring field folds BOTH sides — needle and haystack — and folding is only a fold if it
+  # covers the whole alphabet. SQLite's built-in `lower()` is ASCII-only, so `lower(target) LIKE
+  # '%überweisung%'` left the haystack's `Ü` uppercase and answered nothing; a non-ASCII needle
+  # takes `gori_ci_contains` (Crystal's `downcase.includes?` as a UDF) instead.
+  it "folds a non-ASCII needle on both sides for path:, url: and free text" do
+    tmp_store do |store|
+      id = capture(store, "acme.test", "GET", "/Überweisung")
+      other = capture(store, "acme.test", "GET", "/other")
+
+      store.search(Gori::QL.parse("path:Überweisung"), 50).map(&.id).should eq([id])
+      store.search(Gori::QL.parse("path:überweisung"), 50).map(&.id).should eq([id])
+      store.search(Gori::QL.parse("url:Überweisung"), 50).map(&.id).should eq([id])
+      store.search(Gori::QL.parse("Überweisung"), 50).map(&.id).should eq([id])
+
+      # Polarity: the UDF answers 0 (not NULL) for a non-match, so negation still keeps
+      # exactly the other row rather than the three-valued-logic drop `NOT (NULL)` would give.
+      store.search(Gori::QL.parse("-path:Überweisung"), 50).map(&.id).should eq([other])
+    end
+  end
+
+  it "folds a non-ASCII needle for host: and free text too" do
+    tmp_store do |store|
+      id = capture(store, "Über.test", "GET", "/x")
+      capture(store, "acme.test", "GET", "/x")
+
+      store.search(Gori::QL.parse("host:Über"), 50).map(&.id).should eq([id])
+      store.search(Gori::QL.parse("host:über"), 50).map(&.id).should eq([id])
+      store.search(Gori::QL.parse("über.test"), 50).map(&.id).should eq([id])
+    end
+  end
+
+  # The ASCII needle keeps the native `lower(col) LIKE ?` path, so the LIKE-metacharacter
+  # escaping that path depends on must still hold over real rows, not just in the compiled SQL.
+  it "still treats a literal % / _ in the needle literally" do
+    tmp_store do |store|
+      pct = capture(store, "acme.test", "GET", "/a%b")
+      capture(store, "acme.test", "GET", "/axb")
+
+      store.search(Gori::QL.parse("path:a%b"), 50).map(&.id).should eq([pct])
+      store.search(Gori::QL.parse("path:a_b"), 50).map(&.id).should be_empty
+    end
+  end
+
+  # Two implementations of one predicate: the SQL one here and `InterceptFilter`'s in-memory one.
+  # A fold that only one of them performs black-holes a rule that the other's UI says matches.
+  it "agrees with the in-memory implementation of the same predicate" do
+    subject = Gori::InterceptFilter::Subject.new(
+      method: "GET", host: "acme.test", target: "/Überweisung", scheme: "http")
+    Gori::InterceptFilter.new("path:Überweisung").matches?(subject).should be_true
+
+    tmp_store do |store|
+      id = capture(store, "acme.test", "GET", "/Überweisung")
+      store.search(Gori::QL.parse("path:Überweisung"), 50).map(&.id).should eq([id])
+    end
+  end
+
   # The pin that makes "a field is added when its explanation is added" true rather than a wish.
   # Every hint string that used to be written by hand beside a widget is generated from these two
   # now, so a field with no entry would render as a blank description column somewhere.

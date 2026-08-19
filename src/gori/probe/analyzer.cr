@@ -379,6 +379,13 @@ module Gori
       # from a dropped-event burst is covered without skipping a band, and an evicted-then-re-
       # scanned flow doesn't re-detect old frames); the first pass (no hwm) reads the last window.
       private def rescan_ws(flow_id : Int64, detail : Store::FlowDetail? = nil) : Nil
+        # A mark must never advance over frames no rule READ. With every WS rule disabled the
+        # loop below would still page the buffer and note it scanned, so re-enabling the built-in
+        # could never reach those frames: reload_rule_config's @analyzed.clear recovers HTTP
+        # flows, but the catch-up sweep's WS leg re-enters here and pages forward from the
+        # unreset hwm. Skipping outright leaves the hwm where it was, so the next rescan after a
+        # re-enable covers exactly the missed band and re-detects nothing already scanned.
+        return if Passive::WS_RULES.all? { |r| Probe.rule_disabled?(r.info.id, @disabled) }
         # Reuse a detail the caller already loaded, else the per-flow cache, else read it once
         # and cache it — the 101 handshake is immutable, so subsequent frames skip the DB read.
         d = detail || @ws_detail[flow_id]? || @store.get_flow(flow_id)

@@ -56,6 +56,8 @@ module Gori::Tui
       @batch_declined = 0
       @batch_declined_reason = nil.as(Symbol?)
       @identities_loaded = nil.as(Array(Authorize::Identity)?)
+      # The PERSISTED names the cached list was seeded against — see `merge_peer_slots`.
+      @identities_base = Set(String).new
       @passive = false
       @passive_started = false
       @passive_seen = Set(String).new
@@ -101,6 +103,10 @@ module Gori::Tui
       list = stored.empty? ? AuthorizeView.default_identities : stored
       @view.identities = list
       @identities_loaded = list
+      # The PERSISTED names, not `list`: with an empty row `list` is the built-in pair, which
+      # was never in the row — reading it as the base would make every default look like a slot
+      # a peer had just deleted, and `merge_peer_slots` would drop it.
+      @identities_base = stored.map(&.name).to_set
       list
     end
 
@@ -136,13 +142,54 @@ module Gori::Tui
     # than swallowed, since the operator would otherwise lose the identity on restart with no
     # word.
     def replace_identities(list : Array(Authorize::Identity)) : Bool
-      @view.identities = list
-      @identities_loaded = list
+      # Re-read the persisted list BEFORE this read-modify-write. `list` was built from
+      # `identities`, which caches, over a registry filled once at project open — so a slot
+      # `gori run session add`, MCP `create_session_slot` or a second TUI wrote since would be
+      # deleted by this whole-list save, with no error and no row that ever showed it existed.
+      # Same refresh and the same reason as MCP's `fresh_slots`.
+      @host.session.slots.reload
+      merged = merge_peer_slots(list, @host.session.slots.slots)
       # Through the live registry, not `set_setting`: `SessionSlots#save` persists the same row
       # AND updates the object every send seam consults, dropping the active pointer when the
       # slot it named is gone. Writing the row by hand left the two out of step — the tab
       # showed the edit, `Env.overlay_slot` kept applying the old overlay.
-      @host.session.slots.save(list)
+      return false unless @host.session.slots.save(merged)
+      # ONLY over a committed write. These three are what the NEXT write is built and merged
+      # against, so advancing them over a refused one took the just-deleted name out of the
+      # base while the row still held it: the operator's next edit reloaded that name, found it
+      # in neither the base nor the list, and appended it as a peer ADD — the delete the store
+      # had refused silently undone, overlay and all.
+      @view.identities = merged
+      @identities_loaded = merged
+      @identities_base = merged.map(&.name).to_set
+      true
+    end
+
+    # Reconcile three lists: the names this card was SEEDED with (`@identities_base`), the list
+    # the write carries, and the row as it stands NOW. Every difference between the base and
+    # `fresh` is a peer's edit, and both directions have to be honoured — a merge that only
+    # ADDS re-persists a slot a peer deleted, which is the same clobber from the other side.
+    #
+    #   in `fresh`, in neither base nor `list` -> a peer ADDED it: carry it over
+    #   in base and in `list`, not in `fresh`  -> a peer DELETED it: drop it
+    #   in base, not in `list`                 -> the OPERATOR deleted it: stays deleted
+    private def merge_peer_slots(list : Array(Authorize::Identity),
+                                 fresh : Array(Authorize::Identity)) : Array(Authorize::Identity)
+      base = @identities_base
+      live = fresh.map(&.name).to_set
+      kept = list.reject { |s| base.includes?(s.name) && !live.includes?(s.name) }
+      added = fresh.reject { |s| base.includes?(s.name) || kept.any?(&.name.==(s.name)) }
+      return list if added.empty? && kept.size == list.size # no peer edit either way
+      # The card is the surface the operator is reading, so ITS baseline stands: a peer slot
+      # arriving with the flag must not make a second one. `SessionSlots#save` takes the list
+      # as given — only the per-slot edits go through `with_one_baseline`.
+      added = added.map(&.with_baseline(false)) if kept.any?(&.baseline?)
+      merged = kept + added
+      # A peer's delete can take the baseline with it, and a set judged against no baseline is
+      # a run with no verdict. Promote the first survivor — the rule
+      # `AuthorizeIdentitiesOverlay#delete_selected` already applies to the card's own delete.
+      merged[0] = merged[0].with_baseline(true) if !merged.empty? && merged.none?(&.baseline?)
+      merged
     end
 
     # Editing while a batch is in flight would change the set the running requests are being

@@ -140,6 +140,56 @@ describe Gori::Tui::FilterPickerOverlay do
     OverlayHarness.new(ov).rendered?("filter:").should be_true
   end
 
+  it "does not type a Ctrl chord's letter into the filter query" do
+    # ^P over an open filter picker: Event::Key#char falls back to key.to_char, so the
+    # event carries 'p' even though nothing printable was typed. query_char's own
+    # `return if ch.control?` cannot see it — the char is the plain letter, not the C0 byte.
+    ov = FlowPicker.new(flow_rows, :a)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerP,
+      Termisu::Input::Modifier::Ctrl)).should eq(:stay)
+    OverlayHarness.new(ov).rendered?("filter:").should be_false
+  end
+
+  it "does not type a Ctrl chord's letter under the CSI-u / Kitty parse either" do
+    # There @char is attached explicitly, so the fallback is not what delivers the letter.
+    kitty = FlowPicker.new(flow_rows, :a)
+    kitty.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerP,
+      Termisu::Input::Modifier::Ctrl, 'p')).should eq(:stay)
+    OverlayHarness.new(kitty).rendered?("filter:").should be_false
+  end
+
+  it "does not filter the list away when the operator presses the quit chord" do
+    # quit_chord_claimed?(modal: true) is false, so ^C/^D reach the modal. 'c' appears in
+    # no haystack ("get hN.test/pN 200"), so typing it empties the list under the operator.
+    ov = FlowPicker.new(flow_rows, :a)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC,
+      Termisu::Input::Modifier::Ctrl))
+    ov.entry_count.should eq(3)
+  end
+
+  it "still types a plain printable, and an Alt chord's letter is inert too" do
+    ov = FlowPicker.new(flow_rows, :a)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC, char: 'c'))
+    ov.entry_count.should eq(0) # a real keystroke still filters
+    OverlayHarness.new(ov).rendered?("filter:").should be_true
+
+    alt = FlowPicker.new(flow_rows, :a)
+    alt.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerC,
+      Termisu::Input::Modifier::Alt))
+    alt.entry_count.should eq(3)
+  end
+
+  it "keeps LibraryPicker's own ^X delete working" do
+    # LibraryPicker claims ^X before calling super, so the base's guard must not shadow it —
+    # the subclass half of this base's contract, the way every_picker is the geometry half.
+    deleted = [] of Int32
+    ov = LibraryPicker.new("SAVED", [LibraryPicker::Row.new(0, "alpha", "spec")], "chain")
+    ov.on_delete = ->(i : Int32) { deleted << i; nil }
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerX,
+      Termisu::Input::Modifier::Ctrl)).should eq(:stay)
+    deleted.should eq([0])
+  end
+
   it "a committed character ends an in-progress IME composition" do
     # Otherwise the preedit underline lingers next to text that already committed.
     h = OverlayHarness.new(FlowPicker.new(flow_rows, :a))

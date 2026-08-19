@@ -365,7 +365,9 @@ module Gori::Tui
     def colormarker_duplicate : Nil
       rule = selected_rule || return @host.status("no colour rule selected")
       name = rule.name.empty? ? "" : "#{rule.name} copy"
-      engine.add(rule.match_filter, rule.color, rule.style, name, scope: rule.scope)
+      unless engine.add(rule.match_filter, rule.color, rule.style, name, scope: rule.scope)
+        return @host.status("colour rule NOT duplicated (project busy or settings not writable)")
+      end
       @host.status(rule.global? ? "global colour rule duplicated" : "colour rule duplicated")
     end
 
@@ -386,11 +388,23 @@ module Gori::Tui
     end
 
     # Commit the rule editor overlay: add a new rule or update the edited one, then re-select it.
+    #
+    # False KEEPS THE FORM OPEN — `Runner#dispatch_overlay_key` closes the overlay only on a true
+    # commit — so a refused write answers false, not merely a status line: the condition, colour
+    # and name in the fields are the operator's only copy of what they just typed, and a closed
+    # form leaves them retyping it from a one-line toast. Same contract, same reason, as
+    # `ProbeController#apply_custom_rule`.
     def apply_color_rule(ov : ColormarkerRuleOverlay) : Bool
       return false unless ov.valid?
       if id = ov.edit_id
         from = ov.edit_scope || Store::RuleScope::Project
-        engine.update(id, ov.condition, ov.color, ov.style, ov.name, scope: from)
+        unless engine.update(id, ov.condition, ov.color, ov.style, ov.name, scope: from)
+          # Return rather than fall through: `rule_list` still holds the PRE-EDIT row, so the
+          # re-home below would move that stale rule to the other scope and succeed, dropping
+          # the edit while reporting nothing.
+          @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
+          return false
+        end
         if from != ov.scope
           moved = rule_list.find { |r| r.scope == from && r.id == id }
           if moved && !engine.set_scope(moved, ov.scope)
@@ -398,7 +412,12 @@ module Gori::Tui
           end
         end
       else
-        engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
+        unless engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
+          # Report rather than re-select: with nothing added, `last_index_of_scope` would move
+          # the highlight onto whatever already sat at the end of that block.
+          @host.status("rule NOT added (project busy or settings not writable)")
+          return false
+        end
         @sel = last_index_of_scope(ov.scope)
       end
       true

@@ -983,6 +983,27 @@ describe "Gori::Store — extract_rules" do
     end
   end
 
+  # A duplicate `name` is an ignored write, and the id it answers is the caller's only signal.
+  # The insert's own `rows_affected` is what makes it 0: SQLite does NOT reset
+  # `last_insert_rowid()` when an `INSERT OR IGNORE` is ignored, and neither does the driver's
+  # `last_insert_id`, so reading that alone answered the rowid of whatever this long-lived writer
+  # connection inserted last — non-zero, so `Bindings#add`'s `== 0` guard never fired and a
+  # peer's UNIQUE(name) row came back to the operator as their own rule saved.
+  it "answers 0 for a rule whose name collided, not the previous insert's rowid" do
+    with_store do |store|
+      # The anti-vacuity pin, and it has to be this store handle inside this example:
+      # `last_insert_rowid()` is per-connection, so a fresh writer would sit at 0 and the
+      # buggy read would be accidentally right.
+      first = store.insert_extract_rule("TOKEN", "", Gori::ExtractKind::Cookie, "sid")
+      first.should be > 0
+      # And it is THIS row's id, not merely some positive number: the id is read off the insert's
+      # own `DB::ExecResult`, so a committed write still hands back the row it created.
+      store.extract_rules.find { |r| r.name == "TOKEN" }.not_nil!.id.should eq(first)
+
+      store.insert_extract_rule("TOKEN", "", Gori::ExtractKind::Cookie, "other").should eq(0)
+    end
+  end
+
   it "marks body-scoped kinds, which is what slice 2 will count to buffer a response" do
     with_store do |store|
       mk = ->(k : Gori::ExtractKind) { Gori::Store::ExtractRule.new(1_i64, true, "N", "", k) }

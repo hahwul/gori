@@ -226,6 +226,43 @@ describe Gori::Pretty do
     end
   end
 
+  # `format_request` is the ONE write-back consumer of `format`: both callers
+  # (repeater_view/send.cr, fuzzer_view.cr) push its return value straight into the send editor
+  # via `set_text` (which also clears undo). A display rendering that is not the body's own
+  # grammar — the form field listing, the multipart part listing, the decoded JWT, the GraphQL
+  # document — therefore replaces a sendable body with something un-sendable.
+  describe "format_request — only renderings that stay the request's own grammar" do
+    it "refuses the form-urlencoded field listing" do
+      head = "POST /login HTTP/1.1\r\nHost: x\r\nContent-Type: application/x-www-form-urlencoded"
+      Gori::Pretty.format_request(head, "user=admin&pass=secret%21").should be_nil
+    end
+
+    it "refuses the multipart part listing" do
+      head = "POST /u HTTP/1.1\r\nHost: x\r\nContent-Type: multipart/form-data; boundary=X"
+      Gori::Pretty.format_request(head, "--X\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nhello\r\n--X--\r\n").should be_nil
+    end
+
+    it "refuses the decoded JWT" do
+      head = "POST /t HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain"
+      Gori::Pretty.format_request(head, jwt_token).should be_nil
+    end
+
+    it "refuses the GraphQL document rendered out of its JSON envelope" do
+      head = "POST /g HTTP/1.1\r\nHost: x\r\nContent-Type: application/json"
+      Gori::Pretty.format_request(head, %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }"})).should be_nil
+    end
+
+    # Positive control: the guard must not be a blanket `return nil`.
+    it "still formats the branches whose output re-parses as the same document" do
+      json = "POST /x HTTP/1.1\r\nHost: x\r\nContent-Type: application/json"
+      out = Gori::Pretty.format_request(json, %({"a":1,"b":[1,2]})).not_nil!
+      out.should contain("\"b\": [")
+
+      xml = "POST /x HTTP/1.1\r\nHost: x\r\nContent-Type: application/xml"
+      Gori::Pretty.format_request(xml, "<a><b>1</b></a>").should_not be_nil
+    end
+  end
+
   # Pretty used to carry its OWN idea of what a GraphQL body is — a hand-rolled
   # `{"query": …}` object check — beside the decoded pane's. The two drifted exactly as
   # duplicated detectors do: a batched request was GraphQL to the pane and anonymous JSON to

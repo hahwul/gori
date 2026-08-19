@@ -196,6 +196,35 @@ module Gori
       # — see `report_miss?`.
       @miss_reported = Set(Int64).new
       @miss_reported_rev = 0_u64
+      # A per-slot table is keyed by the slot's NAME and nothing else, so a deleted slot's
+      # table has to go with the slot: an operator who deletes `admin` and creates a new
+      # `admin` for a different identity would otherwise send the DELETED identity's live
+      # credential, out of a table the new slot never wrote.
+      @slots.try &.on_slots_changed = ->prune_slots(Array(String)?)
+    end
+
+    # Drop every per-slot table whose slot is gone, keyed on the surviving NAMES — the same
+    # shape `refresh` uses for rule names. Called by `SessionSlots` after a list write, from
+    # OUTSIDE its mutex (see `values` on why the two must never nest).
+    #
+    # Prune only: a RENAME lands here as a delete plus an add, and the renamed slot correctly
+    # starts empty for the same reason a freshly created one does — `SessionSlots#save` has
+    # already dropped the active pointer for it (spec/session_slots_spec.cr).
+    #
+    # `nil` means the caller cannot vouch for ANY name and every table goes. That is the
+    # out-of-process case: a peer's delete plus re-add collapse into one row by the time
+    # `SessionSlots#reload` reads it, so a name present on both sides proves nothing about
+    # whether it is still the same identity (see the reasoning there).
+    def prune_slots(surviving : Array(String)?) : Nil
+      @mutex.synchronize do
+        next if @slot_values.empty?
+        if surviving
+          @slot_values.reject! { |name, _| !surviving.includes?(name) }
+        else
+          @slot_values.clear
+        end
+        @rev &+= 1
+      end
     end
 
     def self.load(store : Store, slots : SessionSlots? = nil) : Bindings

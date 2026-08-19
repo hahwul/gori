@@ -292,26 +292,33 @@ module Gori
             style : Store::MarkerStyle = Store::MarkerStyle::Full, name : String = "",
             scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true) : Bool
       return false if Colormarker.unusable_reason(match_filter)
-      if scope.global?
-        Settings.add_colormarker_rule(match_filter, color, style.label, name, enabled)
-      else
-        @store.insert_color_rule(match_filter, color, style, name, enabled)
-      end
+      # The writer's answer, not a bare `true`: both branches already report whether the write
+      # reached disk (0 = rolled back / settings not saved), and throwing it away told the
+      # operator a rule was created over a write the store dropped — the same defect `remove`,
+      # `toggle`, `move` and `set_scope` below already carry the fix for.
+      ok =
+        if scope.global?
+          Settings.add_colormarker_rule(match_filter, color, style.label, name, enabled) != 0
+        else
+          @store.insert_color_rule(match_filter, color, style, name, enabled) != 0
+        end
       refresh
-      true
+      ok
     end
 
     def update(id : Int64, match_filter : String, color : String,
                style : Store::MarkerStyle, name : String = "",
                scope : Store::RuleScope = Store::RuleScope::Project) : Bool
       return false if Colormarker.unusable_reason(match_filter)
-      if scope.global?
-        Settings.update_colormarker_rule(id, match_filter, color, style.label, name)
-      else
-        @store.update_color_rule(id, match_filter, color, style, name)
-      end
+      # False = the rule still carries its OLD condition and colour; see `add`.
+      ok =
+        if scope.global?
+          Settings.update_colormarker_rule(id, match_filter, color, style.label, name)
+        else
+          @store.update_color_rule(id, match_filter, color, style, name)
+        end
       refresh
-      true
+      ok
     end
 
     # Move a rule to the OTHER scope, keeping its fields and its state in this project. Not an
@@ -359,8 +366,10 @@ module Gori
           #                        override would drop this project back to the library default:
           #                        a rule the operator switched off here starts painting again
           #
-          # Which one it was has to be captured BEFORE the call: the delete drops the rule from
-          # the in-memory list and only then saves, so asking afterwards reports "gone" for both.
+          # Which one it was is captured BEFORE the call, and stays captured now that a refused
+          # save rolls the list back (`settings/colormarker.cr`): the two are only tellable
+          # apart after the fact BECAUSE the mutator restores memory, and an override that a
+          # project's operator switched off by hand should not hang on that.
           existed = Settings.colormarker_rules.any? { |r| r.id == id }
           deleted = Settings.delete_colormarker_rule(id)
           @store.clear_colormarker_override(id) if deleted || !existed
@@ -426,9 +435,10 @@ module Gori
     #
     # This changes WHICH rule paints a row, not merely the order two effects apply in — so
     # false means the order is UNCHANGED, whether because the rule was already at the edge of
-    # its block or because the write did not commit. `Rules#move` cannot draw that second
-    # distinction (`Store#move_rule` returns Nil); this one can, and a caller that reports a
-    # reorder it did not get tells the operator the wrong rule paints the row.
+    # its block or because the write did not commit. `Rules#move` now answers the same two
+    # (`Store#move_rule` reports its commit through `exec_task_ok`, and the global branch
+    # through `save`), and here the stake is sharper: a caller that reports a reorder it did not
+    # get tells the operator the wrong rule paints the row.
     def move(id : Int64, dir : Int32, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
       scoped = rules.select { |r| r.scope == scope }
       i = scoped.index { |r| r.id == id }
@@ -488,8 +498,18 @@ module Gori
     # tokenizer that compiles them — a bare free-text word names no field and stays row-answerable
     # (both backends free-text over method/host/target and agree), and a `~` term never is,
     # because only QL implements the regex operator.
+    #
+    # A `proto:` value naming a TRANSPORT (`https`/`wss`/`grpcs`/`sses`) is the one exception
+    # a field name alone cannot express: `InterceptFilter` has one field per leaf and
+    # `Proto::Kind.parse?` deliberately does not fold the transport away (proto.cr:43-48,
+    # because folding it would WIDEN a hold gate to cleartext), so such a term can never be
+    # true there — `proto:wss` paints nothing and `-proto:wss` paints EVERYTHING. `QL.proto_cond`
+    # already answers it exactly, so the term falls to the store tier.
     def self.row_answerable?(match_filter : String) : Bool
-      QL.fields_used(match_filter).all? { |u| !u.regex && ROW_FIELDS.includes?(u.name) }
+      QL.fields_used(match_filter).all? do |u|
+        next false if u.regex || !ROW_FIELDS.includes?(u.name)
+        !(u.name == "proto" && !Proto.split_transport(u.value)[1].nil?)
+      end
     end
 
     # Why this condition cannot be used, or nil if it can.

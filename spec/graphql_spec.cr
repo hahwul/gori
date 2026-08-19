@@ -293,6 +293,69 @@ describe Gori::Graphql do
       big = Bytes.new(Gori::Graphql::MAX_BODY + 1, 0x7b_u8) # all '{'
       GQL.location(big).should eq(:query)
     end
+
+    # The `?query=` fallback is only a fallback for a request that HAS a GET binding. A
+    # body-bearing method that actually sent a body has none: the body is what the origin
+    # reads, so a body that did not parse leaves nothing to write an edit back into.
+    describe "a body-bearing request whose body did not parse" do
+      # A truncated envelope: `from_flow` reports it as `Form::Invalid` — a pane that holds the
+      # REASON the parse failed. Nothing can invert that, so `location` must answer `:none`;
+      # answering `:query` puts the error text (or whatever the operator retyped over it) into
+      # the request LINE while the body the origin actually reads goes out untouched.
+      it "answers :none, not the GET ?query= binding" do
+        head = ct_head("application/json")
+        bad = %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }").to_slice
+
+        op = GQL.from_flow("/graphql", head, bad).not_nil!
+        op.form.invalid?.should be_true
+        op.editable?.should be_false
+
+        GQL.location(bad, head).should eq(:none)
+      end
+
+      # Same defect, other arm: over MAX_BODY skips `from_body` entirely.
+      it "answers :none for a body larger than MAX_BODY" do
+        head = ct_head("application/json")
+        big = (%({"query":"query Me { me { id } }","pad":") +
+               ("x" * (Gori::Graphql::MAX_BODY + 64)) + %("})).to_slice
+        GQL.location(big, head).should eq(:none)
+      end
+
+      # The ordinary GET: no body at all, so the fallback is exactly right.
+      it "still gives an ordinary GET the :query binding" do
+        head = "GET /graphql?query=%7Bx%7D HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice
+        GQL.location(nil, head).should eq(:query)
+      end
+
+      # The fallback still does what it was written for.
+      it "still gives a GET carrying a stray body the :query binding" do
+        head = "GET /graphql?query=%7Bx%7D HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice
+        GQL.location("not json at all".to_slice, head).should eq(:query)
+      end
+
+      # The gate started life as a POST/PUT/PATCH allowlist, which left every OTHER method
+      # that carries a body still answering `:query`: `QUERY` (the method GraphQL-over-HTTP
+      # defines for exactly this request, and already in `InterceptFilter::METHOD_VAL`),
+      # `SEARCH`, a `DELETE` with a body, an extension method. `unparsed_reason` has no method
+      # gate, so those all reach `Form::Invalid` — and the pane whose text is the REASON the
+      # parse failed was spliced into the request LINE. A body the origin reads is the payload
+      # whatever the method is spelled; only GET/HEAD have a `?query=` binding to fall back to.
+      it "answers :none for every method that sent a body, not just POST/PUT/PATCH" do
+        bad = %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }").to_slice
+        {"QUERY", "SEARCH", "DELETE", "OPTIONS", "PROPFIND"}.each do |m|
+          head = "#{m} /graphql?query=%7Bx%7D HTTP/1.1\r\nContent-Type: application/json\r\n\r\n".to_slice
+          op = GQL.from_flow("/graphql?query=%7Bx%7D", head, bad).not_nil!
+          op.form.invalid?.should be_true
+          GQL.location(bad, head).should eq(:none)
+        end
+      end
+
+      # The other half of the denylist: HEAD has the same GET binding GET does.
+      it "still gives a HEAD carrying a stray body the :query binding" do
+        head = "HEAD /graphql?query=%7Bx%7D HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice
+        GQL.location("not json at all".to_slice, head).should eq(:query)
+      end
+    end
   end
 
   describe ".from_flow" do
@@ -324,6 +387,16 @@ describe Gori::Graphql do
 
     it "does not fall through for PUT or PATCH either" do
       {"PUT", "PATCH"}.each do |m|
+        head = "#{m} /u?query=%7Bx%7D HTTP/1.1\r\n\r\n".to_slice
+        GQL.from_flow("/u?query=%7Bx%7D", head, %({"not":"graphql"}).to_slice).should be_nil
+      end
+    end
+
+    # Nor for the methods the allowlist forgot. `QUERY`/`SEARCH`/`DELETE` read their payload
+    # out of the body exactly as a POST does, so a stray `?query=` param must not be promoted
+    # into the op — the Repeater would then re-encode the whole query string on send.
+    it "does not fall through to a ?query= param for any other body-carrying method" do
+      {"QUERY", "SEARCH", "DELETE"}.each do |m|
         head = "#{m} /u?query=%7Bx%7D HTTP/1.1\r\n\r\n".to_slice
         GQL.from_flow("/u?query=%7Bx%7D", head, %({"not":"graphql"}).to_slice).should be_nil
       end

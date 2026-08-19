@@ -194,6 +194,15 @@ module Gori::Fuzz
     # {token, occurrence count} per `--mark`, in the order the marks were applied — the
     # CLI warns when one token silently matched several spots (including in headers).
     getter mark_matches : Array({String, Int32})
+    # The `--mark` / MCP `marks` tokens that DID occur but made no position, because every
+    # occurrence was already inside a `§…§` region — or flush against one — that `--auto` or an
+    # earlier `--mark` had made. `wrap_token` must skip those (see the harm it enumerates) but
+    # a skip is indistinguishable from `{token, 0}` for a token that is simply not in the
+    # text, and neither the CLI's `occ > 1` note nor the `NoPositions` refusal (auto_mark's
+    # positions exist) says anything. So the operator's explicit mark silently did nothing.
+    # Reported here for the same reason `rewrites_content_length?` is: a fact about the run
+    # that only the builder can see, said ONCE, up front, by whichever surface asked.
+    getter shadowed_marks : Array(String)
     # The `update_content_length` pass will REWRITE a Content-Length the operator authored —
     # i.e. the template's declared CL already disagrees with its own body BEFORE any payload
     # is substituted, which only happens on purpose. Computed here rather than discovered per
@@ -205,7 +214,8 @@ module Gori::Fuzz
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
                    @mark_matches : Array({String, Int32}), @pool : ConnPool? = nil,
-                   @rewrites_content_length : Bool = false)
+                   @rewrites_content_length : Bool = false,
+                   @shadowed_marks : Array(String) = [] of String)
     end
 
     # Candidate request count, or nil when unknown / Int64-overflowing. Reads the payload
@@ -249,8 +259,12 @@ module Gori::Fuzz
           String.new(Env.expand_wire(options.template))
         end
       text = Template.auto_mark(text) if options.auto_mark?
+      shadowed_marks = [] of String
       mark_matches = options.marks.map do |tok|
-        text, count = wrap_token(text, tok)
+        text, count, shadowed = wrap_token(text, tok)
+        # It occurred, and every occurrence was already marked — see `shadowed_marks`. A token
+        # that DID make positions is not listed: it landed, and the count says so.
+        shadowed_marks << tok if shadowed && count.zero?
         {tok, count}
       end
       template = Template.parse(text, options.http2?)
@@ -320,7 +334,8 @@ module Gori::Fuzz
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
         pool: sender.pool,
         rewrites_content_length: config.update_content_length? &&
-                                 generator.baseline_request != generator.baseline_raw)
+                                 generator.baseline_request != generator.baseline_raw,
+        shadowed_marks: shadowed_marks)
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent
@@ -423,8 +438,20 @@ module Gori::Fuzz
     end
 
     # Wrap every non-overlapping occurrence of a literal `--mark` / MCP `marks` token in
-    # `§…§`, returning {new text, occurrence count} — one pass, so the count a surface warns
-    # with is by construction the number of positions that were actually made.
+    # `§…§` that does not touch an ALREADY-marked `§…§` region, returning {new text, occurrence
+    # count, was any occurrence SKIPPED for that} — one pass, so the count a surface warns with
+    # is the number of occurrences this call WRAPPED, and the skip is reported rather than
+    # folded into the same `0` a missing token gets (`Plan#shadowed_marks`).
+    #
+    # That count is the number of positions made except for ADJACENT occurrences, where the
+    # pass's OWN closing marker abuts the next opener: `--mark ab` over `?q=abab` splices
+    # `§ab§§ab§`, and `parse` folds that into the single position `ab§ab` — the same `§§` seam
+    # the skip below is about, from the other direction. Pre-existing and left alone here (the
+    # span list is empty for that text, so the skip never runs): closing it turns a corrupt
+    # template into a SILENT partial landing, because a token that wrapped one of its two
+    # occurrences is reported by neither `shadowed_marks` (count is not 0) nor the CLI's
+    # `occ > 1` note — i.e. it would trade this defect for the silence `shadowed_marks` exists
+    # to end.
     #
     # BYTE SAFETY — read before reaching for `String#gsub` here. `text` can be a CAPTURE's
     # own bytes (`--flow`, MCP `flow_id`), which may legitimately not be valid UTF-8: a
@@ -445,31 +472,62 @@ module Gori::Fuzz
     #
     # Returns `text` ITSELF when the token does not occur, so the common case is
     # byte-identical and allocation-free.
-    private def self.wrap_token(text : String, token : String) : {String, Int32}
-      return {text, 0} if token.empty?
+    private def self.wrap_token(text : String, token : String) : {String, Int32, Bool}
+      return {text, 0, false} if token.empty?
       hay = text.to_slice
       needle = token.to_slice
-      return {text, 0} if needle.size > hay.size
+      return {text, 0, false} if needle.size > hay.size
       marker = Template::MARKER_BYTES
+      # The already-marked regions of THIS text. `auto_mark` runs before the marks, and each
+      # mark rewrites the text the next one sees, so an occurrence can already be inside a
+      # `§…§` pair — wrapping it again makes `§§`, which `Template.parse` reads as the
+      # ESCAPED-LITERAL form: the position the operator named silently disappears from the
+      # sweep and a literal `§` (0xC2 0xA7) it never typed goes out on the wire. Spans are
+      # re-derived per call for that reason, and by BYTE offset because the subject may be a
+      # capture's non-UTF-8 bytes (see the note above).
+      spans = Template.marked_byte_spans(hay)
       io = IO::Memory.new(hay.size + 8)
       count = 0
+      shadowed = false
       i = 0
+      # ONE advancing cursor into `spans`, not a scan of all of them per byte (P6): both `i`
+      # and the spans are monotonic, so a span that ends BEFORE `i` can never touch a later
+      # window either, and the first span left is then the only candidate. The `spans.none?`
+      # this replaces ran at every byte offset, i.e. O(bytes × spans) — a 512 KiB `--flow`
+      # body with 40 `--auto` positions and 5 marks is ~100M comparisons before the first dial.
+      si = 0
       last = hay.size - needle.size
       while i <= last
         if hay[i, needle.size] == needle
-          io.write(marker)
-          io.write(needle)
-          io.write(marker)
-          count += 1
-          i += needle.size
-        else
-          io.write_byte(hay[i])
-          i += 1
+          while si < spans.size && spans[si][1] < i
+            si += 1
+          end
+          # TOUCHING, not just overlapping, and not containment. A run straddling a marker
+          # boundary would be wrapped into structurally corrupt text — and so would one merely
+          # FLUSH against a marker, because `parse` applies the `§§` escape inside an interior
+          # too: on `?a=§x§b`, `--mark b` splices `§x§§b§`, which comes back as the SINGLE
+          # position `x§b`. The operator's `b` is swallowed (the sweep sends `?a=P`, not
+          # `?a=Pb`) and a `§` nobody typed goes out on the wire — the same two harms this
+          # skip exists to prevent. One byte of separation is enough: `§x§Z§b§` is two
+          # positions. (The advance above is therefore `<`, not `<=`: a span ending AT `i`
+          # still touches an occurrence starting there.)
+          if si < spans.size && i + needle.size >= spans[si][0]
+            shadowed = true
+          else
+            io.write(marker)
+            io.write(needle)
+            io.write(marker)
+            count += 1
+            i += needle.size
+            next
+          end
         end
+        io.write_byte(hay[i])
+        i += 1
       end
-      return {text, 0} if count.zero?
+      return {text, 0, shadowed} if count.zero?
       io.write(hay[i..]) if i < hay.size
-      {String.new(io.to_slice), count}
+      {String.new(io.to_slice), count, shadowed}
     end
   end
 end

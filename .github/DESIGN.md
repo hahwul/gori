@@ -1347,3 +1347,36 @@ silently reframing bytes the operator never asked to repair.
 
 *Keep this document honest against the code. When you change a subsystem it describes, update
 the matching section; when you cite a principle inline, use the labels above.*
+
+### 2026-08-19: a case fold that costs 10x is bought only where it is needed
+
+Refines: [P6](#p6). PR: source audit.
+
+QL's substring fields (`host:` / `path:` / `url:` and bare free text) folded the NEEDLE with
+Crystal's full-Unicode `downcase` and the HAYSTACK with SQLite's built-in `lower()`, which is
+ASCII-only. For a needle carrying a non-ASCII letter the two never met: a captured
+`/Überweisung` was unreachable by `path:` in EVERY spelling, and `InterceptFilter` — the
+in-memory implementation of the same predicate — matched the row while History did not. That is
+the SQL-vs-memory divergence the 2026-08-13 scope entry already ruled against.
+
+`gori_ci_contains` (Crystal's `downcase.includes?` as a per-connection UDF, `Store::ScopeMatch`)
+answers it exactly, and `scope.cr` already routes a `string` rule through it. Routing EVERY
+substring term through it does not: measured over 100k flows, `host:` answers in **7ms** through
+`lower(col) LIKE ?` and **71ms** through the UDF. Both forms full-scan, so the 10x is not a lost
+index — it is a Crystal callback plus two String allocations per row, and History recompiles this
+filter on every keystroke. P6 says never stall the data path, and 71ms per keystroke is a stall.
+
+**So the fold is chosen by what the NEEDLE contains** (`QL.contains_cond`): an ASCII needle keeps
+the native LIKE, a non-ASCII needle takes the UDF. Every ASCII character folds identically in the
+two implementations, so the fast path is exact for the needles that take it — and the whole
+pre-existing `spec/ql_spec.cr` SQL corpus is unchanged, which is the evidence for that claim.
+
+Two things this deliberately accepts, recorded rather than hidden:
+
+1. **A residue on the fast path.** A haystack character that folds INTO ASCII under Unicode but
+   not under `lower()` — `İ`→`i`, `K`(U+212A)→`k`, `ſ`→`s` — stays unreachable by an ASCII needle.
+   Closing it means paying the 10x on every query to serve a case nobody has reported.
+2. **Two spellings of one predicate**, which the scope entry warns about. It is safe here only
+   because `host`, `method` and `target` are all `NOT NULL`: a NULL haystack would make the arms
+   disagree under `NOT` (`NOT (NULL)` drops the row, `NOT (0)` keeps it). A nullable column added
+   to this set must re-derive that, not inherit it.

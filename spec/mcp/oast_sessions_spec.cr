@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "http/server"
 
 # The MCP half of "resume a listener". `oast_start` mints an ad-hoc registration that dies with
 # the process; these tools reach the sessions the PROJECT persists — the same rows the TUI's
@@ -18,8 +19,8 @@ private def with_store(&)
   end
 end
 
-private def tools_for(store, allow_actions = true) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: false)
+private def tools_for(store, allow_actions = true, verify_upstream = false) : Gori::MCP::Tools
+  Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
 end
 
 private def ok_json(tools, name, args : String) : JSON::Any
@@ -34,6 +35,48 @@ private def custom_http_session(store, host = "https://oob.example/hits") : Int6
   id = store.insert_oast_session(nil, "custom-http", host, "corr-#{host.size}", "", nil, nil)
   store.flush
   id
+end
+
+# A port nothing listens on: `Socket::ConnectError` is instant, so the client's connect
+# timeout never engages.
+private def closed_loopback_port : Int32
+  s = TCPServer.new("127.0.0.1", 0)
+  port = s.local_address.port
+  s.close
+  port
+end
+
+# The mirror image of `custom_http_session`: a KNOWN kind (so `bind` succeeds and we reach the
+# deregister) pointed at a provider that is not there, so `Oast::Sessions.release` returns false.
+private def dead_interactsh_session(store) : Int64
+  id = store.insert_oast_session(nil, "interactsh", "http://127.0.0.1:#{closed_loopback_port}",
+    "corr25", "secret25", nil, nil)
+  store.flush
+  id
+end
+
+# A stub interactsh server that ACCEPTS /register, answers an EMPTY /poll, and REFUSES
+# /deregister. That register/deregister pair is what reaches the release refusal with a LIVE
+# handle on the row, and only interactsh can get there: it is the one provider that overrides
+# `deregister` (the base one is a no-op that cannot fail), and its `resume` is the one that
+# needs a server to answer at all.
+private def stub_interactsh(&)
+  server = HTTP::Server.new do |ctx|
+    case ctx.request.path
+    when "/register"   then ctx.response.print "{}"
+    when "/poll"       then ctx.response.print %({"data":[]})
+    when "/deregister" then ctx.response.status = HTTP::Status::INTERNAL_SERVER_ERROR
+    else                    ctx.response.status = HTTP::Status::NOT_FOUND
+    end
+  end
+  port = server.bind_unused_port("127.0.0.1").port
+  spawn { server.listen }
+  sleep 10.milliseconds # let the accept loop come up before the first call
+  begin
+    yield "http://127.0.0.1:#{port}"
+  ensure
+    server.close rescue nil
+  end
 end
 
 describe "MCP OAST sessions" do
@@ -117,6 +160,27 @@ describe "MCP OAST sessions" do
     end
   end
 
+  it "reports an error instead of {released} when the deregister fails" do
+    with_store do |store|
+      id = dead_interactsh_session(store)
+      store.insert_oast_callback(id, "u1", "dns", nil, "198.51.100.4", "a.oast.lab",
+        "q".to_slice, nil, Time.utc.to_unix_ms * 1000)
+      store.flush
+
+      tools = tools_for(store)
+      r = tools.call("oast_release", JSON.parse(%({"id":#{id}})))
+
+      # The correlation id is still registered server-side; saying "released" tells the agent
+      # (and the report it writes) that the engagement teardown completed.
+      r.is_error.should be_true
+      r.text.should_not contain(%("released":#{id}))
+
+      # This releases the LISTENER, not the evidence — the row and its callbacks stay either way.
+      store.oast_sessions.map(&.id).should contain(id)
+      store.oast_callback_count(id).should eq(1)
+    end
+  end
+
   it "releasing a live session drops its handle too (its correlation id is dead)" do
     with_store do |store|
       id = custom_http_session(store)
@@ -124,6 +188,31 @@ describe "MCP OAST sessions" do
       handle = ok_json(tools, "oast_resume", %({"id":#{id}}))["session_id"].as_s
       ok_json(tools, "oast_release", %({"id":#{id}}))
       tools.call("oast_poll", JSON.parse(%({"session_id":#{handle.to_json}}))).is_error.should be_true
+    end
+  end
+
+  it "KEEPS the handle when the deregister was refused (the id is still live)" do
+    with_store do |store|
+      stub_interactsh do |base|
+        id = store.insert_oast_session(nil, "interactsh", base, "c" * 20, "s" * 13,
+          Gori::Oast::RsaKeyPair.generate_2048.private_pem, nil)
+        store.flush
+        # verify_upstream: `HttpClient` reads `HTTP::Client#tls` when verification is waived,
+        # and that getter RAISES on a plaintext client — so the stub is only reachable with
+        # verification left on, which costs nothing over http://.
+        tools = tools_for(store, verify_upstream: true)
+        handle = ok_json(tools, "oast_resume", %({"id":#{id}}))["session_id"].as_s
+
+        r = tools.call("oast_release", JSON.parse(%({"id":#{id}})))
+        r.is_error.should be_true
+
+        # The refusal's own sentence says the correlation id may still resolve — so the handle
+        # that polls it has to survive. Dropping it strands the agent on the one session it was
+        # just told is still live and still receiving callbacks.
+        ok_json(tools, "oast_poll", %({"session_id":#{handle.to_json}}))["count"].as_i.should eq(0)
+        ok_json(tools, "list_oast_sessions", "{}")["sessions"].as_a.first["session_id"]
+          .as_s?.should eq(handle)
+      end
     end
   end
 

@@ -199,10 +199,16 @@ module Gori
       # tag are the TUI's tab and subtab captions and never reach a socket, so masking them is
       # a display choice with no wire consequence. The rule is "does this field become bytes
       # the origin sees", not "did the operator type it".
+      #
+      # Returns whether every write it made COMMITTED — the caller prints a success line, and
+      # both writes are `exec_task_ok`, so a rolled-back batch (a busy store, a TUI capturing
+      # into the same project) would otherwise be reported as a labelled session.
       private def self.apply_repeater_metadata(store : Store, id : Int64,
-                                               name : String?, tags : String?) : Nil
-        store.set_repeater_name(id, Env.mask_secrets(name)) if name
-        store.set_repeater_tags(id, Env.mask_secrets(tags).strip.presence) if tags
+                                               name : String?, tags : String?) : Bool
+        ok = true
+        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name))
+        ok = false if tags && !store.set_repeater_tags(id, Env.mask_secrets(tags).strip.presence)
+        ok
       end
 
       private def self.cmd_repeater_create(args : Array(String)) : Nil
@@ -340,10 +346,17 @@ module Gori
 
           abort "gori run repeater create: failed to create repeater session" if id == 0
 
-          apply_repeater_metadata(store, id, name, tags)
+          unless apply_repeater_metadata(store, id, name, tags)
+            abort "gori run repeater create: session ##{id} was created, but its name/tags were NOT saved (store busy or unwritable)"
+          end
 
           if is_ws && !ws_messages.empty?
-            store.update_repeater_ws_messages(id, ws_messages)
+            # A rollback here leaves the fresh session holding NO frames (the batch opens with
+            # `DELETE FROM ws_messages`), so the success line below would name a WebSocket
+            # session that cannot replay anything.
+            unless store.update_repeater_ws_messages(id, ws_messages)
+              abort "gori run repeater create: session ##{id} was created, but its WebSocket messages were NOT saved (store busy or unwritable)"
+            end
           end
 
           puts "Repeater session ##{id} created successfully."

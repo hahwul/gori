@@ -386,6 +386,29 @@ module Gori::Fuzz
         return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
       end
 
+      # The WARM-UP is a second, DIFFERENT request on every one of these sockets, so it needs
+      # its own decision: both Layer-2 predicates are path-sensitive, and gating only the race
+      # request above let an operator's `--race-warmup` reach a path their EXCLUDE rule (or the
+      # Sandbox allowlist) carves out — the one send in this file that reached the socket with
+      # no `sweep_block` answer. Read off the RAW bytes because raw is exactly what the socket
+      # gets: the warm-up is documented as sent verbatim (no `§…§`, no Env expansion), so the
+      # target gated here is the target actually sent, the rule the gate above follows too.
+      #
+      # Refuses the WHOLE group, like `send_pipeline`'s "one blocked member refuses the batch":
+      # a race is one unit, and a partially-warmed race proves nothing.
+      #
+      # `Array(Repeater::Result).new` rather than the gate above's `jobs.map`: a caller that
+      # omits the warm-up instantiates this method with `warmup : Nil`, so this branch is dead
+      # code there and a block whose type has to be INFERRED cannot be typed inside it. The
+      # explicit element type gives the compiler the answer without one.
+      if w = warmup
+        if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(w))
+          @blocked += jobs.size
+          @blocked_reason ||= err
+          return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+        end
+      end
+
       head = expanded[0, expanded.size - 1]
       tail = expanded[expanded.size - 1, 1]
       n = jobs.size
@@ -989,9 +1012,12 @@ module Gori::Fuzz
     # A send the SCOPE GATE refused before the socket, told apart from a network error by the
     # two exact strings `Outbound#sweep_block` returns (via `Sender#send`/`GatedBackend#send`).
     # Kept a string compare rather than a new `Repeater::Result` flag: that struct is shared with
-    # every other engine and must not grow a fuzz-only field — the constants ARE the contract.
+    # every other engine and must not grow a fuzz-only field — the constants ARE the contract,
+    # and they are matched in ONE place, `Outbound.permanent_refusal?`. The name stays local
+    # because a gate refusal is a `@blocked` PAYLOAD UNIT on this path, which a cap stop is not
+    # (see `run_one`) — so unlike the Miner/Sequencer wrappers this one must not fold the cap in.
     private def gate_refused?(err : String?) : Bool
-      err == Gori::Outbound::SANDBOX_SWEEP_ERROR || err == Gori::Outbound::EXCLUDE_SWEEP_ERROR
+      Gori::Outbound.permanent_refusal?(err)
     end
 
     # Follow up to max_redirects SAME-ORIGIN redirects (relative, or absolute to the
@@ -1096,6 +1122,14 @@ module Gori::Fuzz
 
     # The same-origin path to follow a Location to, or nil for cross-origin / unparsable.
     private def resolve_redirect_path(loc : String, o : Origin) : String?
+      # `//host/x` is a network-path reference (RFC 3986 §4.2) — it names ANOTHER authority, and
+      # is the canonical open-redirect answer. It starts with `/`, so the next line used to hand
+      # it back as a same-origin path and the follower asked the ORIGIN for the literal
+      # `//evil.test/x`, burning a hop and replacing the 302 the operator was hunting with that
+      # path's 404. Resolved against the origin's scheme rather than refused outright, so the
+      # absolute-form branch below decides: a cross-origin authority is dropped there like any
+      # other, while a same-origin `//host:port/next` is still followed, as this method promises.
+      loc = "#{o.scheme}:#{loc}" if loc.starts_with?("//")
       return loc if loc.starts_with?('/')
       return nil unless loc.starts_with?("http://") || loc.starts_with?("https://")
       uri = URI.parse(loc) rescue nil

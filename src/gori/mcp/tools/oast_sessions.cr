@@ -99,12 +99,23 @@ module Gori
         return row if row.is_a?(Result)
         bound = Oast::Sessions.bind(store, row)
         return oast_session_problem(bound, row) if bound.is_a?(Oast::Sessions::Problem)
-        # Drop a live handle on it first: after the deregister its correlation id is dead, so
-        # leaving one pollable would answer an agent with an endless empty poll.
+        # `release` returns false when the deregister raised (the server is down, or answered
+        # a status outside interactsh's accepted set): the correlation id is still registered
+        # and its payloads still resolve, so an agent must not be told the teardown happened.
+        # Same refusal `gori run oast release` makes (cli/run/oast.cr).
+        unless Oast::Sessions.release(bound, Oast::HttpClient.new(@verify_upstream))
+          return Result.new("could not deregister OAST session ##{row} (provider error) — " \
+                            "payloads minted from it may still resolve; its " \
+                            "#{store.oast_callback_count(row)} callback(s) stay", is_error: true)
+        end
+        # Only NOW drop a live handle on it: after the deregister its correlation id is dead, so
+        # leaving one pollable would answer an agent with an endless empty poll. Before it, the
+        # id is still live and still collecting — which is exactly what the refusal above says —
+        # so dropping the handle there would strand the agent with no way to poll the session it
+        # was just told is still active, short of another oast_resume.
         if live = @oast_mcp.find { |_, s| s.store_session_id == row }
           @oast_mcp.delete(live[0])
         end
-        Oast::Sessions.release(bound, Oast::HttpClient.new(@verify_upstream))
         Result.new({released: row, callbacks_kept: store.oast_callback_count(row)}.to_json)
       end
 

@@ -86,7 +86,8 @@ module Gori::Tui
     #
     # ^X and not a bare `d`: every printable key belongs to the filter here (the base
     # FilterPickerOverlay routes them to `query_char`), so a letter cannot be an action.
-    # ^C/^D are claimed by the shell's quit-arm before a modal ever sees them, and ⌫ edits
+    # ^C/^D reach a modal (`Runner.quit_chord_claimed?` yields the quit-arm to one), but the
+    # base drops every unclaimed Ctrl/Alt chord rather than typing its letter, and ⌫ edits
     # the query — ^X is the free chord, and it is the same "delete a set" key the Fuzzer's
     # config pane uses.
     def handle_key(ev : Termisu::Event::Key) : Symbol

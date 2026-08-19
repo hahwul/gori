@@ -50,6 +50,15 @@ private def ctrl_p(h : OverlayHarness) : Symbol
   h.press(Termisu::Input::Key::LowerP, ctrl: true)
 end
 
+# A Ctrl chord as the terminal delivers it, aimed STRAIGHT at the overlay. `Event::Key#char`
+# is `@char || key.to_char`, so a Ctrl+D event reports 'd' — and `Runner.quit_chord_claimed?`
+# yields ^C/^D whenever a modal is up (quit_chord_spec.cr), so that 'd' really does arrive at
+# a mnemonic arm here. `handle_key` rather than `press` because OverlayHarness's own header
+# says it does not model the shell's pre-filter, and because `:stay` is what has to be pinned.
+private def ctrl_chord(k : Termisu::Input::Key) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::Ctrl, nil)
+end
+
 # ---------------------------------------------------------------------------------------
 # TAB BAR
 # ---------------------------------------------------------------------------------------
@@ -312,6 +321,30 @@ describe "C5 · HostsOverlay on the Overlay seam" do
     end
   end
 
+  it "does NOT delete on ^D — the quit chord must not reach the `d` mnemonic" do
+    # The chord the operator presses to leave gori, landing on the destructive delete one
+    # example up because the mnemonic arm reads `ev.char` with no modifier guard. Nothing
+    # may be removed, and nothing may be written to disk on the way out.
+    with_hosts([{"app.test", "127.0.0.1"}, {"api.test", "10.0.0.1"}]) do
+      saves = [] of Int32
+      ov = hosts_editor(saves)
+
+      ov.handle_key(ctrl_chord(Termisu::Input::Key::LowerD)).should eq(:stay)
+      ov.to_overrides.should eq([{"app.test", "127.0.0.1"}, {"api.test", "10.0.0.1"}])
+      saves.should be_empty
+    end
+  end
+
+  it "still hands ^P to the palette — the ctrl arm sits above the char read" do
+    with_hosts([{"app.test", "127.0.0.1"}]) do
+      jumps = 0
+      ov = hosts_editor
+      ov.on_palette = -> { jumps += 1; nil }
+      ov.handle_key(ctrl_chord(Termisu::Input::Key::LowerP)).should eq(:stay)
+      jumps.should eq(1)
+    end
+  end
+
   it "navigates with k/j (the key, not the char) and the wheel" do
     with_hosts([{"a.test", "10.0.0.1"}, {"b.test", "10.0.0.2"}, {"c.test", "10.0.0.3"}]) do
       ov = hosts_editor
@@ -492,6 +525,29 @@ describe "C5 · EnvOverlay on the Overlay seam" do
       # `<noun> deleted: <name>` — the shape every delete-success toast uses now, so it reads
       # in parallel with its own failure line.
       toasts.last.should eq("env var deleted: TOKEN")
+    end
+  end
+
+  it "does NOT delete on ^D — the quit chord must not reach the `d` mnemonic" do
+    # Same arm as the hostnames editor's, and the same cost: a var the operator never asked
+    # to lose, deleted and persisted by the first half of a two-press quit.
+    with_env("$", [{"TOKEN", "abc"}, {"HOST", "x"}]) do
+      saves = [] of Int32
+      ov = env_editor(saves)
+
+      ov.handle_key(ctrl_chord(Termisu::Input::Key::LowerD)).should eq(:stay)
+      ov.to_config[1].should eq([{"TOKEN", "abc"}, {"HOST", "x"}])
+      saves.should be_empty
+    end
+  end
+
+  it "still hands ^P to the palette — the ctrl arm sits above the char read" do
+    with_env("$", [{"TOKEN", "abc"}]) do
+      jumps = 0
+      ov = env_editor
+      ov.on_palette = -> { jumps += 1; nil }
+      ov.handle_key(ctrl_chord(Termisu::Input::Key::LowerP)).should eq(:stay)
+      jumps.should eq(1)
     end
   end
 

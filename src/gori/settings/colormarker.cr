@@ -179,41 +179,72 @@ module Gori::Settings
   # Returns the new rule's id, or 0 when the write did not reach disk.
   def self.add_colormarker_rule(match_filter : String, color : String, style : String,
                                 name : String = "", enabled : Bool = true) : Int64
+    # The answer below is a COMMIT answer, so memory has to agree with it — the same snapshot
+    # `add_rewriter_rule` takes, for the same reason: `save` refuses the write outright when the
+    # last load only got half the file in (`@@load_partial`), and returns false on any transient
+    # write failure too. Mutating first and answering 0 left the rule in `colormarker_rules`,
+    # folded into `@compiled` by `Colormarker#refresh`'s unconditional call, so it painted
+    # History rows in EVERY project for the rest of the process while the operator was told it
+    # was not added — and the next unrelated save that DID succeed wrote it to disk. The array
+    # is replaced wholesale everywhere and never mutated in place, so the old reference IS the
+    # snapshot.
+    prev_rules = colormarker_rules
+    prev_next = colormarker_next_rule_id
     id = colormarker_next_rule_id
     self.colormarker_next_rule_id = next_id_after(id) # saturating — see `next_id_after`
     self.colormarker_rules = colormarker_rules + [ColormarkerRule.new(id, enabled, name, match_filter, color, style)]
-    save ? id : 0_i64
+    return id if save
+    self.colormarker_rules = prev_rules
+    # The counter too: a burned id is not cosmetic — a project's `colormarker_overrides` key
+    # outlives the rule it names, which is the whole reason ids are never reused.
+    self.colormarker_next_rule_id = prev_next
+    0_i64
   end
 
   # Field update only — `enabled` is untouched, because it is the rule's default across
   # projects and an edit made in one of them is not a statement about the others.
   def self.update_colormarker_rule(id : Int64, match_filter : String, color : String,
                                    style : String, name : String = "") : Bool
+    prev_rules = colormarker_rules
     found = false
     self.colormarker_rules = colormarker_rules.map do |r|
       next r unless r.id == id
       found = true
       ColormarkerRule.new(id, r.enabled, name, match_filter, color, style)
     end
-    found && save
+    # See `add_colormarker_rule`: a false answer means the edit did not commit, so the edited
+    # condition and colour must not stay live in every project's list either.
+    ok = found && save
+    self.colormarker_rules = prev_rules unless ok
+    ok
   end
 
   # The rule's DEFAULT state, which every project without an override follows.
   def self.set_colormarker_rule_enabled(id : Int64, enabled : Bool) : Bool
+    prev_rules = colormarker_rules
     found = false
     self.colormarker_rules = colormarker_rules.map do |r|
       next r unless r.id == id
       found = true
       r.copy_with(enabled: enabled)
     end
-    found && save
+    # See `add_colormarker_rule`.
+    ok = found && save
+    self.colormarker_rules = prev_rules unless ok
+    ok
   end
 
   def self.delete_colormarker_rule(id : Int64) : Bool
+    prev_rules = colormarker_rules
     kept = colormarker_rules.reject { |r| r.id == id }
     return false if kept.size == colormarker_rules.size
     self.colormarker_rules = kept
-    save
+    # See `add_colormarker_rule`. This one fails the OTHER way round: a dropped-then-unsaved rule
+    # has stopped painting while the caller reports "not deleted — it is still there", and it
+    # comes BACK at the next restart from the file that still holds it.
+    return true if save
+    self.colormarker_rules = prev_rules
+    false
   end
 
   # Swap the rule one slot earlier (dir < 0) / later (dir > 0) among the GLOBAL rules. Never
@@ -226,8 +257,14 @@ module Gori::Settings
     j = i + (dir < 0 ? -1 : 1)
     return false if j < 0 || j >= list.size
     list[i], list[j] = list[j], list[i]
+    prev_rules = colormarker_rules
     self.colormarker_rules = list
-    save
+    # See `add_colormarker_rule`. Under first-match-wins the stakes are precedence: a swap left
+    # live over a refused write means a DIFFERENT rule paints the row than the operator was just
+    # told, in every project.
+    return true if save
+    self.colormarker_rules = prev_rules
+    false
   end
 
   # --- custom colour CRUD ----------------------------------------------------------------

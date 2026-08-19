@@ -46,6 +46,28 @@ module Gori
     # is the only rule that stops these (see `send_block`), and the TUI/CLI show it verbatim.
     SANDBOX_ERROR = "blocked by sandbox (out of scope)"
 
+    # True for a Layer-2 refusal — the two strings `sweep_block` returns above and nothing
+    # else does. Such a refusal is PERMANENT for a retrying caller: the scope does not move
+    # between two attempts a `retry_pause` apart (a reload is throttled to `RELOAD_INTERVAL`),
+    # and `CappedBackend#send` charges the request cap BEFORE the gate refuses — so re-asking
+    # spends a second request for an answer that is already fixed.
+    #
+    # ONE HOME, the same rule AGENTS.md states for `Codec::Http1.request_token_safe?`: this
+    # predicate had three private copies (`Sequencer::Engine`/`Miner::Engine`'s
+    # `permanent_refusal?`, `Fuzz::Engine#gate_refused?`), which is exactly how the Sequencer
+    # came to be missing two of the constants while its siblings had all of them. A new
+    # Layer-2 refusal is now added here once.
+    #
+    # `Fuzz::CappedBackend::CAP_ERROR` is deliberately NOT folded in, even though two of the
+    # three callers also treat it as permanent: it is a tool's constant, and `outbound.cr`
+    # requires only `scope`/`store`/the codec — a core chokepoint reaching into `fuzz/` would
+    # invert the layering (DESIGN.md §2.1). It is also counted differently on the Fuzzer path
+    # (a cap stop is not a `@blocked` payload unit — see `Fuzz::Engine#run_one`), so the cap
+    # question stays with the callers that ask it.
+    def self.permanent_refusal?(err : String?) : Bool
+      err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR
+    end
+
     # A running job's rules would otherwise be a start-time snapshot. A per-send DB read is
     # too heavy at high concurrency, so the in-place reload is time-throttled to this.
     RELOAD_INTERVAL = 1.second

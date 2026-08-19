@@ -146,6 +146,23 @@ describe Gori::Discover::Url do
       U.resolve(base, "/root?y=2&z=3").should eq("http://h/root?y=2&z=3")
     end
 
+    # RFC 3986 §5.3: an EMPTY reference path keeps the base path unchanged and replaces only
+    # the query. `<a href="?page=2">` is the commonest paginated-listing shape there is, and
+    # resolving it against the base's DIRECTORY dropped the last segment of every one.
+    it "keeps the base path for a query-only href" do
+      base = U.parse("http://h/a/b/page").not_nil!
+      U.resolve(base, "?x=1").should eq("http://h/a/b/page?x=1")
+      U.resolve(U.parse("http://h/search").not_nil!, "?page=2").should eq("http://h/search?page=2")
+      # control: a directory base was always right, so this must keep passing
+      U.resolve(U.parse("http://h/docs/").not_nil!, "?page=2").should eq("http://h/docs/?page=2")
+      # a bare "?" keeps the base path too: `hq` is "" (truthy in Crystal), so the '?' stays
+      U.resolve(base, "?").should eq("http://h/a/b/page?")
+      # control: a non-empty reference path still resolves against the directory
+      U.resolve(base, "c?x=1").should eq("http://h/a/b/c?x=1")
+      # control: an href with no '?' at all is unaffected
+      U.resolve(base, "").should be_nil
+    end
+
     it "returns nil for non-http pseudo-schemes and empty href" do
       base = U.parse("http://h/p").not_nil!
       U.resolve(base, "data:text/html,<b>").should be_nil

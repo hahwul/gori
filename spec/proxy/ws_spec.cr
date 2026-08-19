@@ -1407,6 +1407,60 @@ describe "WebSocket through the proxy (end-to-end)" do
     proxy.stop
   end
 
+  it "decodes the tunnel when the 101's Upgrade is a protocol LIST, not one value" do
+    # `ClientConn` compared the WHOLE `Upgrade` field-value to "websocket", so an origin
+    # answering the RFC 7230 §6.7 list form (`Upgrade: websocket, h2c`) fell out of the
+    # WebSocket branch and was relayed as an opaque byte tunnel — no frames captured, no
+    # `part: ws` rule, no `proto:ws` hold — on a socket gori can decode. The question now has
+    # one home, `WS::Handshake.upgrades_to_websocket?`, which matches the TOKEN.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      conn = origin.accept
+      conn.read_timeout = 5.seconds
+      Gori::Proxy::Codec::Http1.read_head(conn) # the upgrade GET
+      # `Upgrade` is a comma-separated protocol list: this is still a WebSocket handshake.
+      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket, h2c\r\nConnection: Upgrade\r\n\r\n"
+      conn.flush
+      frame = Gori::Proxy::WS.read_frame(conn).not_nil!    # client's (masked) frame
+      conn.write(Bytes[0x81_u8, frame.payload.size.to_u8]) # unmasked echo
+      conn.write(frame.payload)
+      conn.flush
+    rescue
+    end
+
+    ws_chan = Channel(Nil).new(8)
+    sink = IntegSink.new(ws_chan)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+              "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    client.flush
+    String.new(Gori::Proxy::Codec::Http1.read_head(client).not_nil!).should contain("101")
+
+    client.write(masked_frame("ping"))
+    client.flush
+    echoed = Gori::Proxy::WS.read_frame(client).not_nil!
+    String.new(echoed.payload).should eq("ping")
+
+    # Both directions must reach the store as decoded frames, not as an opaque tunnel.
+    receive_within(ws_chan, 5, "the client->server frame row")
+    receive_within(ws_chan, 5, "the server->client frame row")
+
+    client.close
+    proxy.stop
+    origin.close rescue nil
+
+    sink.ws.should contain({"out", "ping"})
+    sink.ws.should contain({"in", "ping"})
+    # An opaque relay leaves a `[gori]` notice row instead of traffic; there must be none.
+    sink.ws.any? { |(_, text)| text.starts_with?(Gori::Proxy::WS::NOTICE_PREFIX) }.should be_false
+  end
+
   it "blind-tunnels a NON-WebSocket 101 upgrade instead of parsing the post-upgrade bytes as HTTP (desync)" do
     # origin: accept the upgrade, answer 101 with a non-websocket Upgrade, then speak a
     # raw post-upgrade protocol (read the client's bytes, answer with SRV:<echo>).

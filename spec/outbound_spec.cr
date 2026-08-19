@@ -239,6 +239,66 @@ describe Gori::Outbound do
     end
   end
 
+  describe ".permanent_refusal?" do
+    # The retry rule every automated sweep needs: a Layer-2 refusal is settled, so re-asking
+    # only burns `retry_pause` and one more charge against the request cap.
+    it "is true for the two Layer-2 refusals and for nothing else" do
+      Gori::Outbound.permanent_refusal?(Gori::Outbound::SANDBOX_SWEEP_ERROR).should be_true
+      Gori::Outbound.permanent_refusal?(Gori::Outbound::EXCLUDE_SWEEP_ERROR).should be_true
+      Gori::Outbound.permanent_refusal?(nil).should be_false
+      # A real network error still retries as configured.
+      Gori::Outbound.permanent_refusal?("Connection refused").should be_false
+      # The request cap is a TOOL's constant, deliberately outside this predicate (a core
+      # chokepoint must not reach into `fuzz/`), so the callers that treat it as permanent
+      # ask about it themselves — see the method comment.
+      Gori::Outbound.permanent_refusal?(Gori::Fuzz::CappedBackend::CAP_ERROR).should be_false
+      # And the ONE-deliberate-send refusal is not a sweep refusal (`send_block`, not
+      # `sweep_block`): a Repeater send has no retry loop to exempt.
+      Gori::Outbound.permanent_refusal?(Gori::Outbound::SANDBOX_ERROR).should be_false
+    end
+
+    # ONE HOME, executable — the same shape as `spec/layering_spec.cr`, and the same rule
+    # AGENTS.md states for `Codec::Http1.request_token_safe?`. This predicate had THREE private
+    # copies (`Fuzz::Engine#gate_refused?`, `Miner::Engine#permanent_refusal?`,
+    # `Sequencer::Engine#permanent_refusal?`), which is exactly how the Sequencer came to be
+    # missing two of the constants its siblings had: the next Layer-2 refusal must be added
+    # once, not at three call sites that drift.
+    it "matches the Layer-2 refusal strings in exactly one place in src/" do
+      root = File.expand_path(File.join(__DIR__, ".."))
+      names = /\b(?:SANDBOX_SWEEP_ERROR|EXCLUDE_SWEEP_ERROR)\b/
+
+      # A comment line is one whose `lstrip` starts with `#` — layering_spec's definition,
+      # verbatim, and load-bearing here: the Miner and Sequencer comments legitimately name
+      # EXCLUDE_SWEEP_ERROR in prose while their code no longer does.
+      offenders = [] of String
+      Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
+        rel = Path[path].relative_to(root).to_s
+        next if rel == File.join("src", "gori", "outbound.cr")
+        File.read_lines(path).each_with_index do |line, i|
+          next unless line.matches?(names)
+          next if line.lstrip.starts_with?('#')
+          offenders << "#{rel}:#{i + 1}: #{line.strip}"
+        end
+      end
+      fail(<<-MSG) unless offenders.empty?
+        the Layer-2 refusal rule has ONE home, `Outbound.permanent_refusal?` — no other file \
+        may test SANDBOX_SWEEP_ERROR / EXCLUDE_SWEEP_ERROR in code (a comment naming one is \
+        fine). Offending lines:
+        #{offenders.join("\n")}
+        MSG
+
+      # …and the three retry loops must still ASK the shared predicate — in CODE, not merely
+      # in a comment: deleting the check outright would also empty the list above.
+      {"fuzz", "miner", "sequencer"}.each do |tool|
+        calls = File.read_lines(File.join(root, "src", "gori", tool, "engine.cr")).any? do |line|
+          line.includes?("Outbound.permanent_refusal?") && !line.lstrip.starts_with?('#')
+        end
+        calls.should(be_true,
+          "src/gori/#{tool}/engine.cr must route its retry loop through Outbound.permanent_refusal?")
+      end
+    end
+  end
+
   describe "the senders that carry it" do
     # `Fuzz::Sender` is the ONE production backend behind Fuzzer / Miner / Sequencer /
     # Repeater-minimize / Probe-active on all three surfaces, and `Repeater::Sender` the one

@@ -282,59 +282,100 @@ module Gori
     # (rules.cr) so an operator who learned the dialect there reads the same behaviour here;
     # kept as its own small copy rather than reaching into the Rewriter's hot proxy path.
 
-    # CRLF for real HTTP, LF as a fallback so a hand-authored / test head round-trips.
+    # CRLF for real HTTP, LF as a fallback so a hand-authored / test head round-trips. Only a
+    # head with NO line terminator at all still needs this guess; every other decision is made
+    # from the terminator the line itself carries (see `split_head_lines`).
     private def self.eol_of(text : String) : String
       text.includes?("\r\n") ? "\r\n" : "\n"
     end
 
+    # The head as {content, own terminator} pairs — concatenating them is byte-identical to
+    # the input. Per-line rather than one `split(eol)` for the whole head, because a send seam
+    # takes the operator's bytes verbatim (MCP `send_request(verbatim: true)`, a replayed
+    # import) and those may mix CRLF and bare LF: picking ONE terminator folds a bare-LF
+    # header into its predecessor, so the overlay reads the wrong name and silently applies to
+    # nothing. Malformed framing is the payload here (DESIGN.md P7) — the operator's own
+    # overlay instruction must still land on it. Byte-level, since a head need not be valid
+    # UTF-8 for the same reason `index_of` is.
+    private def self.split_head_lines(head : String) : Array({String, String})
+      out = [] of {String, String}
+      bytes = head.to_slice
+      start = 0
+      i = 0
+      while i < bytes.size
+        if bytes[i] == 0x0a_u8
+          if i > start && bytes[i - 1] == 0x0d_u8
+            out << {String.new(bytes[start, i - 1 - start]), "\r\n"}
+          else
+            out << {String.new(bytes[start, i - start]), "\n"}
+          end
+          start = i + 1
+        end
+        i += 1
+      end
+      out << {String.new(bytes[start, bytes.size - start]), ""} if start < bytes.size
+      out
+    end
+
+    private def self.join_head_lines(pairs : Array({String, String})) : String
+      String.build { |io| pairs.each { |(content, term)| io << content << term } }
+    end
+
     # Append `Name: value` as the last header, before the terminating blank line.
     private def self.head_add_header(head : String, name : String, value : String) : String
-      eol = eol_of(head)
       line = "#{name}: #{value}"
-      term = eol + eol
-      if idx = head.rindex(term)
-        "#{head[0, idx]}#{eol}#{line}#{head[idx..]}"
-      elsif head.ends_with?(eol)
-        "#{head}#{line}#{eol}"
+      pairs = split_head_lines(head)
+      return line if pairs.empty?
+      # The LAST blank line at index >= 1 is the head's terminator — the same one the old
+      # `rindex(eol + eol)` found, but recognised whatever terminator it carries.
+      idx = pairs.rindex { |(content, _)| content.empty? }
+      idx = nil if idx == 0 # index 0 is the start line, never the terminator
+      if idx
+        pairs.insert(idx, {line, pairs[idx][1]})
       else
-        "#{head}#{eol}#{line}"
+        last = pairs[-1]
+        if last[1].empty?
+          pairs[-1] = {last[0], eol_of(head)}
+          pairs << {line, ""}
+        else
+          pairs << {line, last[1]}
+        end
       end
+      join_head_lines(pairs)
     end
 
     # Replace the value of every header named `name` (case-insensitive, original casing kept);
     # append it when absent (upsert). The start line and blank line are left untouched.
     private def self.head_set_header(head : String, name : String, value : String) : String
-      eol = eol_of(head)
       target = name.downcase
       found = false
-      out = head.split(eol).map_with_index do |ln, i|
-        next ln if i == 0 || ln.empty?
+      rewritten = split_head_lines(head).map_with_index do |(ln, term), i|
+        next({ln, term}) if i == 0 || ln.empty?
         if (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
           found = true
-          "#{ln[0, ci]}: #{value}"
+          {"#{ln[0, ci]}: #{value}", term}
         else
-          ln
+          {ln, term}
         end
       end
-      found ? out.join(eol) : head_add_header(head, name, value)
+      found ? join_head_lines(rewritten) : head_add_header(head, name, value)
     end
 
     # Drop every header line named `name` (case-insensitive). The start line and blank lines
     # are always kept, so the head stays well-formed.
     private def self.head_remove_header(head : String, name : String) : String
-      eol = eol_of(head)
       target = name.downcase
-      kept = [] of String
-      head.split(eol).each_with_index do |ln, i|
+      kept = [] of {String, String}
+      split_head_lines(head).each_with_index do |(ln, term), i|
         if i == 0 || ln.empty?
-          kept << ln
+          kept << {ln, term}
         elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
-          # drop this header
+          # drop this header, its own terminator with it
         else
-          kept << ln
+          kept << {ln, term}
         end
       end
-      kept.join(eol)
+      join_head_lines(kept)
     end
   end
 end

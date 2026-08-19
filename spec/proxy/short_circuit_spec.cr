@@ -4,7 +4,8 @@ require "socket"
 # The proxy half of the short-circuit rule op (#511): gori answers the request itself and
 # `Upstream.dial` is never reached. What is pinned here is everything the engine cannot check
 # on its own — that no origin is contacted, that the framing gori emits matches the bytes it
-# sends, that the connection survives, and that the flow is recorded AS a stub.
+# sends, that the connection survives — or is closed, when a 1xx stub means no request will
+# ever follow — and that the flow is recorded AS a stub.
 
 private class RecordingSink < Gori::Proxy::FlowSink
   getter requests = [] of Gori::Store::CapturedRequest
@@ -70,6 +71,26 @@ private def start_counting_origin(accepts : Channel(Nil)) : Int32
     end
   end
   port
+end
+
+# Read to EOF with a bound. A bare `gets_to_end` on a connection gori wrongly kept alive does
+# not fail the example, it HANGS for the full 30 s client timeout — so the 1xx reproductions
+# below read through a spawn + timed receive instead.
+private def read_bounded(client : TCPSocket, seconds : Int32 = 5) : String?
+  got = Channel(String).new(1)
+  spawn do
+    begin
+      got.send(client.gets_to_end)
+    rescue
+      got.send("")
+    end
+  end
+  select
+  when body = got.receive
+    body
+  when timeout(seconds.seconds)
+    nil
+  end
 end
 
 describe "proxy — short-circuit rule" do
@@ -269,6 +290,62 @@ describe "proxy — short-circuit rule" do
       response.should contain("ORIGIN") # the real origin answered
       accepts.receive                   # ...and it really was dialed
       sink.requests.first.short_circuited?.should be_false
+    end
+  end
+
+  # A stub whose status is 1xx is not a final response: `stub_framing` already knows a 1xx
+  # carries no Content-Length, but that same flag used to be handed to `keep_alive?`, which
+  # never consults the status. gori then waited for a request the client will never send —
+  # it is still waiting for a final status — so both sides blocked until CLIENT_IO_TIMEOUT
+  # (30 s) and the flow was recorded Complete.
+  it "closes after an interim 1xx stub instead of awaiting a request, and records it aborted" do
+    with_rules do |rules|
+      add_stub(rules, "/hints", "103 Early Hints\nLink: </a.css>; rel=preload\n")
+      done = Channel(Nil).new(1)
+      sink = RecordingSink.new(done)
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+      proxy.start
+
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      # No `Connection: close` — curl's default. The keep-alive decision is gori's to make.
+      client << "GET /hints HTTP/1.1\r\nHost: 127.0.0.1:#{dead_port}\r\n\r\n"
+      client.flush
+
+      response = read_bounded(client)
+      client.close rescue nil
+      done.receive
+      proxy.stop
+
+      fail "gori held the connection open after a 1xx stub — no final response follows one" if response.nil?
+      response.should contain("103 Early Hints")
+
+      resp = sink.responses.first
+      resp.status.should eq(103)
+      resp.state.aborted?.should be_true
+      resp.error.should_not be_nil
+    end
+  end
+
+  it "closes after a 101 stub rather than parsing the switched protocol as HTTP" do
+    with_rules do |rules|
+      add_stub(rules, "/ws", "101 Switching Protocols\nUpgrade: websocket\n")
+      done = Channel(Nil).new(1)
+      sink = RecordingSink.new(done)
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+      proxy.start
+
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{dead_port}\r\nUpgrade: websocket\r\n\r\n"
+      client.flush
+
+      response = read_bounded(client)
+      client.close rescue nil
+      done.receive
+      proxy.stop
+
+      fail "gori kept reading HTTP on a connection its own stub declared upgraded" if response.nil?
+      response.should contain("101 Switching Protocols")
+      sink.responses.first.state.aborted?.should be_true
     end
   end
 end

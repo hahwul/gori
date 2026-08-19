@@ -845,6 +845,16 @@ module Gori::Tui
       # own inline add/edit row is a separate buffer and is untouched by this (only the
       # underlying list changes), so there is nothing to clobber — same as Scope above.
       @session.host_overrides.reload
+      # And the session slot list, which is read on the SAME send path: `Env.overlay_slot`
+      # applies the active slot's headers at every seam and `Bindings` decides from this list
+      # which table `$SESSION` resolves out of. Without this the registry stayed at whatever
+      # `Session.open` read, so a peer's `gori run session add/remove` / MCP
+      # `create_session_slot` was invisible for the rest of the session — and the slot the
+      # operator deleted elsewhere went on being sent from here, out of a binding table only
+      # this reload can drop. `SessionSlots#reload` returns early when the persisted row has
+      # not moved, which is what makes it cheap enough for a per-commit tick (it prunes every
+      # per-slot table when the row DID move — see the reasoning there).
+      @session.slots.reload
       # The per-project `$KEY` table, for the same reason and one more. Env vars live in a
       # process global (`Settings.project_env_vars`) that `Session.open` fills ONCE, so an
       # external `gori run project env set` / MCP `set_env_var` was invisible here for the rest

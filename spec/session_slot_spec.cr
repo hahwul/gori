@@ -120,6 +120,34 @@ describe Gori::SessionSlot do
       slot = Slot.new("admin", set_headers: [{"X-Role", "admin"}])
       String.new(Gori::SessionSlot.overlay_wire(wire, slot)).should contain("X-Role: admin")
     end
+
+    # A head whose lines do not share ONE terminator. A send seam hands `overlay_wire` bytes
+    # the operator authored (MCP `send_request` with `verbatim: true`) or a captured/imported
+    # flow replayed byte-exact, and either can carry a bare LF among CRLFs. That is a
+    # first-class payload here (DESIGN.md P7), not something to repair — so picking one
+    # terminator for the whole head is not allowed, and the overlay must still land on the
+    # header block it names.
+    it "strips a header from a head whose lines do not share one terminator" do
+      wire = "GET /admin HTTP/1.1\r\nHost: t\nCookie: victim=1\r\n\r\n".to_slice
+      slot = Slot.new("anon", remove_headers: ["Cookie"])
+      String.new(Gori::SessionSlot.overlay_wire(wire, slot)).should_not contain("victim=1")
+    end
+
+    it "adds a header inside a mixed-EOL head, never past its terminator" do
+      wire = ("POST /p HTTP/1.1\r\nHost: t\nContent-Length: 3\n\n" + "a=1").to_slice
+      slot = Slot.new("admin", set_headers: [{"Cookie", "admin=1"}])
+      sent = String.new(Gori::SessionSlot.overlay_wire(wire, slot))
+      sent.index("Cookie: admin=1").not_nil!.should be < sent.index("\n\n").not_nil!
+      sent.should end_with("a=1")
+    end
+
+    it "replaces the value of a bare-LF-terminated header instead of appending a duplicate" do
+      wire = "GET /a HTTP/1.1\r\nHost: t\nCookie: victim=1\r\n\r\n".to_slice
+      slot = Slot.new("admin", set_headers: [{"Cookie", "admin=1"}])
+      sent = String.new(Gori::SessionSlot.overlay_wire(wire, slot))
+      sent.should_not contain("victim=1")
+      sent.scan(/Cookie:/).size.should eq(1)
+    end
   end
 
   describe "#resolve_values" do

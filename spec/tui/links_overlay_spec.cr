@@ -131,6 +131,21 @@ describe Gori::Tui::LinksOverlay do
     end
   end
 
+  it "browse: ^D is the quit chord, not the `d` remove mnemonic" do
+    # `Runner.quit_chord_claimed?` yields ^C/^D while a modal is up so the modal's own
+    # binding can run (quit_chord_spec.cr), and `Event::Key#char` is `@char || key.to_char`
+    # — so a Ctrl+D event reports 'd' and the remove arm above fires on the way out of gori.
+    # Dispatched straight at the overlay: OverlayHarness's header says it does not model the
+    # shell's pre-filter, and `:stay` is the raw outcome `press` would collapse.
+    removes = 0
+    lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 7_i64)
+    lo.on_remove = -> { removes += 1; nil }
+
+    lo.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerD,
+      Termisu::Input::Modifier::Ctrl, nil)).should eq(:stay)
+    removes.should eq(0)
+  end
+
   it "↵ and `o` are the same open action" do
     with_store do |store|
       id = store.insert_issue("target", Gori::Store::Severity::High, "app.test", nil)

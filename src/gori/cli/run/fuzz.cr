@@ -240,6 +240,16 @@ module Gori
           next unless occ > 1
           STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)"
         end
+        # …and the other end of the same count: the token occurs, but only inside — or flush
+        # against — `§…§` that `--auto` or an earlier `--mark` had already made, so it added NO
+        # position of its own. Nothing else says so: the note above only fires above 1, and the
+        # NoPositions refusal cannot fire while those earlier positions exist. See
+        # `Fuzz::Plan#shadowed_marks`.
+        plan.shadowed_marks.each do |tok|
+          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} added no position — every occurrence is inside " \
+                      "a §…§ that was already there (--auto, or an earlier --mark), or flush against one " \
+                      "(a second pair there would merge with it); those positions are still swept"
+        end
       end
 
       # The template declares a Content-Length that disagrees with its own body BEFORE any

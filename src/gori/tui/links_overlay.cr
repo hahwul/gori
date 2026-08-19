@@ -107,7 +107,10 @@ module Gori::Tui
     # Adding: f/r/z/m choose the source, which hands off through on_close.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      ch = ev.char || key.to_char
+      # Unmodified letters only — `^D` reports 'd' and `on_remove` DELETEs the link row.
+      # See the note at env_overlay.cr's matching arm. Read before the add-mode fork so
+      # handle_add_key's f/r/z/m gets the same guard.
+      ch = (ev.ctrl? || ev.alt?) ? nil : (ev.char || key.to_char)
       return handle_add_key(key, ch) if adding?
       case
       when key.escape?             then return :cancel

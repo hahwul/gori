@@ -598,6 +598,63 @@ describe "gori run repeater send (WebSocket)" do
   end
 end
 
+# `apply_repeater_metadata` is private CLI glue (the optional post-insert labels `insert_repeater`
+# does not take) — reopen the module for a bare-call wrapper, like the shims above.
+#
+# Deliberately NOT annotated `: Bool`: the shim has to keep compiling against the pre-fix `: Nil`
+# body so the examples below fail on their assertions rather than on a type error.
+module Gori::CLI::Run
+  def self.apply_repeater_metadata_for_spec(store : Gori::Store, id : Int64,
+                                            name : String?, tags : String?)
+    apply_repeater_metadata(store, id, name, tags)
+  end
+end
+
+# #210: both writes it makes are now `exec_task_ok`, and it threw the answer away — so
+# `cmd_repeater_create` printed "Repeater session #N created successfully." over a rolled-back
+# batch (a busy store, or a TUI capturing into the same project), naming a session that carries
+# neither the name nor the tags the operator passed. It now answers whether every write it made
+# COMMITTED and the caller `abort`s on false.
+#
+# The DECISION is what is pinned here. `abort` calls `exit`, so neither the abort message nor
+# `cmd_repeater_create`'s second new guard (the `update_repeater_ws_messages` on a `--flow`-seeded
+# WebSocket session) is reachable in-process — the same limit every other `gori run` spec in this
+# tree works under, and the reason the decision is a function of its own.
+describe "gori run repeater create — did the name/tags write commit? (#210)" do
+  it "answers true for the writes it made, and false once the store cannot be written" do
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      Gori::CLI::Run.apply_repeater_metadata_for_spec(store, id, "login", "auth idor").should be_true
+      store.repeaters.first.name.should eq("login")
+      store.repeaters.first.tags.should eq("auth idor")
+
+      store.close # every write from here answers false
+      Gori::CLI::Run.apply_repeater_metadata_for_spec(store, id, "login", "auth idor").should be_false
+    end
+  end
+
+  it "answers false when EITHER half alone was asked for and failed" do
+    # Both flags are optional and independent, so a run that passed only `--tags` has to refuse
+    # too — an `ok` that only ever watched the name would report that one as a success.
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.close
+      Gori::CLI::Run.apply_repeater_metadata_for_spec(store, id, "login", nil).should be_false
+      Gori::CLI::Run.apply_repeater_metadata_for_spec(store, id, nil, "auth").should be_false
+    end
+  end
+
+  it "answers true when it was asked for nothing, even on a dead store" do
+    # The overwhelmingly common `gori run repeater create` passes neither flag. Answering false
+    # for a function that attempted no write would abort every one of those runs.
+    with_store do |store|
+      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      store.close
+      Gori::CLI::Run.apply_repeater_metadata_for_spec(store, id, nil, nil).should be_true
+    end
+  end
+end
+
 # `intercept_bridge_state` / `intercept_live?` are private CLI glue (mirror MCP's
 # identically-named helpers in src/gori/mcp/tools/intercept.cr) — reopen the module
 # for bare-call wrappers.
