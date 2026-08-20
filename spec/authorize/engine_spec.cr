@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../../src/gori/authorize/engine"
+require "../../src/gori/cli/output"
 
 private alias Identity = Gori::Authorize::Identity
 private alias Verdict = Gori::Authorize::Verdict
@@ -120,6 +121,70 @@ describe Gori::Authorize::Engine do
     target.trials.size.should eq(1)
     target.trials[0].baseline?.should be_true
     target.baseline.should_not be_nil
+  end
+
+  # A run that compared NOTHING must not be readable as a run that found nothing. Every
+  # surface builds its headline out of `same_count` and the review tally, both of which are
+  # zero when every send failed — so the fact has to live on the Target itself.
+  describe "a request nothing answered" do
+    it "is `uncompared?` when every non-baseline send errored" do
+      responses = {"*" => ok_resp(200, "page"), "X-Id: anon" => err_resp}
+      target = engine(responses).run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anon", set_headers: [{"X-Id", "anon"}]),
+      ]).not_nil!
+      target.uncompared?.should be_true
+      target.unanswered?.should be_true
+      target.same_count.should eq(0) # …which is why the count alone reads as "enforced"
+      Gori::CLI::Output.authorize_verdict(target).should eq(:error)
+    end
+
+    it "is not `uncompared?` while one identity still answered" do
+      responses = {
+        "*"          => ok_resp(200, "page"),
+        "X-Id: anon" => err_resp,
+        "X-Id: user" => ok_resp(403, "no"),
+      }
+      target = engine(responses).run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anon", set_headers: [{"X-Id", "anon"}]),
+        Identity.new("user", set_headers: [{"X-Id", "user"}]),
+      ]).not_nil!
+      target.uncompared?.should be_false
+      target.unanswered?.should be_false
+    end
+
+    # The gate refusing to send is the more specific fact, and the one an operator fixes with
+    # a scope rule rather than a route — so `fully_blocked?` keeps it and `unanswered?` yields.
+    it "defers to fully_blocked? when the refusal came from the gate" do
+      trials = [] of Gori::Authorize::Trial
+      blocked = Gori::Authorize::Target.new(1_i64, "GET", "https://acme.test/a", trials, 2_i64, "sandbox")
+      blocked.fully_blocked?.should be_true
+      blocked.unanswered?.should be_false
+    end
+  end
+
+  # An identity IS a `SessionSlot`, and a run whose set claims no baseline gets one PROMOTED.
+  it "promotes the first identity when nothing claims the baseline" do
+    responses = {"*" => ok_resp(200, "page")}
+    ids = [Identity.new("admin", set_headers: [{"Cookie", "session=A"}], rules: ["SESSION"]),
+           Identity.new("anon", remove_headers: ["Cookie"])]
+    target = engine(responses).run(detail, ids).not_nil!
+    target.trials[0].identity.should eq("admin")
+    target.trials[0].baseline?.should be_true
+    ids[0].baseline?.should be_false # the caller's list is not mutated
+  end
+
+  # …and a SOURCE guard for what that promotion must not lose. `Trial` carries the identity's
+  # NAME and nothing else, so no behavioural assertion here can see `rules` — the field that
+  # decides which binding table this identity's `$NAME` resolves out of, and which a
+  # hand-rolled `Identity.new(name, set, remove, baseline: true)` drops in silence. The same
+  # copy-by-hand bug hit the TUI form (`AuthorizeController#apply_identity`); the rule is that
+  # the struct owns its copies, so a sixth field cannot be forgotten in either place.
+  it "copies a slot through with_baseline rather than rebuilding it field by field" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "authorize", "engine.cr"))
+    src.should_not match(/Identity\.new\(/)
+    src.should contain("with_baseline(true)")
   end
 
   # A stop has to land BETWEEN IDENTITIES, not only between requests: with several identities

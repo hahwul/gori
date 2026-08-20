@@ -151,7 +151,7 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송, 리트라이, 잘린 응답)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
-| `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 — 접근 제어 결함. 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
+| `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 — 접근 제어 결함. 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
 | `discover_start` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스(`discover_status` / `discover_results`로 폴링) |
 | `oast_start` / `oast_stop` | 즉석 OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다 — 콜백은 남습니다 |

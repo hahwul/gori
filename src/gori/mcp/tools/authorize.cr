@@ -90,6 +90,10 @@ module Gori
         ajob.blocked += target.blocked
         ajob.blocked_reason ||= target.blocked_reason
         ajob.fully_blocked += 1 if target.fully_blocked?
+        if target.unanswered?
+          ajob.unanswered += 1
+          ajob.unanswered_reason ||= target.trials.each.compact_map(&.summary.error).first?
+        end
         ajob.bypasses += target.same_count
         ajob.reviews += target.trials.count { |t| !t.baseline? && t.verdict.review? }
         if ajob.results.size < AUTHORIZE_MAX_STORED
@@ -179,6 +183,11 @@ module Gori
             emit_authorize_identities(j, ajob)
             j.field("bypasses") { j.array { ajob.results.each { |t| authorize_bypass_json(j, t) } } }
             j.field("results") { j.array { page.each { |t| authorize_target_json(j, t) } } }
+            # The send-level failure total, here as well as in `authorize_status`: a caller
+            # that jumps straight to the verdicts should not have to make a second call to
+            # learn how many of the sends behind them never got an answer.
+            j.field "errors", ajob.errors
+            j.field "blocked", ajob.blocked
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", ajob.results.size
@@ -226,20 +235,39 @@ module Gori
         j.field "bypass", verdict == "BYPASS"
         j.field "bypass_count", ajob.bypasses
         j.field "review_count", ajob.reviews
+        # In the HEADLINE, beside the two counts a caller acts on, and not only in
+        # `authorize_status`: a request whose every send failed contributes to neither of
+        # them, so a caller that read `authorize_results` alone had no field at all saying
+        # part of its selection produced nothing.
+        j.field "unanswered_count", ajob.unanswered
         j.field "summary", authorize_summary(ajob, verdict)
       end
 
+      # `unanswered` is the third refusal to call a run clean, and it sits AFTER the finding
+      # arms on purpose: a job where nine requests compared fine and the tenth timed out has
+      # a real verdict, and `unanswered_count` carries the tenth. Only when the requests that
+      # produced nothing account for the WHOLE run is there no verdict to give — and the word
+      # for that is not `enforced`, which is what this returned before: `bypasses` and
+      # `reviews` are both zero when every send failed, so a target that answered nothing came
+      # back as "access control appears enforced".
       private def authorize_verdict(ajob : AuthorizeJob) : String
         return "nothing_sent" if ajob.replayed.zero?
         return "nothing_sent" if ajob.fully_blocked == ajob.replayed
         return "BYPASS" if ajob.bypasses > 0
         return "review" if ajob.reviews > 0
+        return "error" if ajob.unanswered > 0 && ajob.unanswered + ajob.fully_blocked == ajob.replayed
         "enforced"
       end
 
       private def authorize_summary(ajob : AuthorizeJob, verdict : String) : String
         case verdict
         when "nothing_sent" then authorize_nothing_sent_summary(ajob)
+        when "error"
+          why = ajob.unanswered_reason
+          "nothing came back — every send failed for #{ajob.unanswered} of " \
+          "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed" \
+          "#{why ? " (#{Serialize.text(why)})" : ""}. Nothing was compared, so this is NOT " \
+          "evidence that access control works — check the host is reachable from here and re-run"
         when "BYPASS"
           "BROKEN ACCESS CONTROL: #{ajob.bypasses} identity result#{ajob.bypasses == 1 ? "" : "s"} across " \
           "#{ajob.results.count { |t| t.same_count > 0 }} request#{ajob.results.count { |t| t.same_count > 0 } == 1 ? "" : "s"} " \
@@ -249,8 +277,13 @@ module Gori
           "no identity matched the baseline outright, but #{ajob.reviews} result#{ajob.reviews == 1 ? "" : "s"} " \
           "need review (same status class, divergent body — a tailored denial and a per-user page look alike)"
         else
+          # The requests that answered NOTHING are named right here rather than left to a
+          # count further down the payload: "enforced" is a claim about what a target did,
+          # and it must not be read as covering requests the target never answered.
+          unreached = ajob.unanswered > 0 ? " · #{ajob.unanswered} of them could not be reached at all " \
+                                            "and is evidence of nothing (see `unanswered_count`)" : ""
           "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed · no identity matched the baseline " \
-          "(access control appears enforced for the identities tested)"
+          "(access control appears enforced for the identities tested)#{unreached}"
         end
       end
 
@@ -579,7 +612,9 @@ module Gori
 
         tool j, "authorize_status",
           "Counts + state of an authorize job (running|done|stopped|error): the access_control " \
-          "verdict so far (BYPASS|enforced|review|nothing_sent), bypass_count, requests replayed, " \
+          "verdict so far (BYPASS|enforced|review|error|nothing_sent — the last two mean NOTHING " \
+          "was compared and are never a clean bill of health), bypass_count, unanswered_count, " \
+          "requests replayed, " \
           "sends, errors, sends refused before the socket, the flows that were SKIPPED with the " \
           "reason for each, and the ones that could not be replayed at all (`failed_count` / " \
           "`failed[]` — a stored head gori cannot put on the wire; the run continues past them). " \
@@ -593,7 +628,9 @@ module Gori
           "response as the baseline — the access-control failures this tool exists to find. " \
           "`results` pages the full per-identity detail (verdict, status, size, delta, error), " \
           "`skipped` names every selected flow that was not replayed, and `failed[]` the ones " \
-          "that could not be replayed at all." do |s|
+          "that could not be replayed at all. `unanswered_count` is the requests whose every " \
+          "send failed at the socket: they compared nothing, so they are evidence of neither " \
+          "a bypass nor enforcement." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max requests per page (default 50, max 500)")

@@ -722,26 +722,47 @@ module Gori::Tui
     private def run_summary(stopped : Bool) : String
       done = @view.completed_in(@batch_ids)
       bypasses = @view.bypasses_in(@batch_ids)
-      # A run the gate refused outright is NOT a clean bill of health. Sandbox mode or an
-      # EXCLUDE rule stops every send before the socket, and reporting that as "no identity
-      # matched the baseline" claims a result for traffic that never left.
-      blocked = @view.blocked_in(@batch_ids)
+      unanswered = @view.unanswered_in(@batch_ids)
       # What the batch DECLINED to send rides on every summary. A run that skipped half its
       # batch and reported only what it replayed is a run whose selection quietly shrank.
       skips = @batch_declined > 0 ? " · #{skip_phrase(@batch_declined, @batch_declined_reason)}" : ""
-      if blocked > 0 && blocked == done
-        why = @view.blocked_reason_in(@batch_ids)
-        return "authorize: nothing was sent — #{blocked} request#{blocked == 1 ? "" : "s"} refused before the socket#{why ? " (#{why})" : ""}#{skips}"
+      if empty_handed = empty_handed_summary(done, unanswered)
+        return "#{empty_handed}#{skips}"
       end
+      # A PARTIAL failure still has to travel: the counts below are drawn from the requests
+      # that answered, so without this "no identity matched the baseline" would speak for the
+      # ones that never did.
+      unreached = unanswered > 0 ? " · #{unanswered} could not be reached" : ""
       if stopped
         tail = bypasses > 0 ? " · #{bypasses} bypass#{bypasses == 1 ? "" : "es"}" : ""
-        return "authorize: stopped — #{done} of #{@batch_size} replayed#{tail}#{skips}"
+        return "authorize: stopped — #{done} of #{@batch_size} replayed#{tail}#{unreached}#{skips}"
       end
       if bypasses > 0
-        "authorize: ran #{done} · #{bypasses} identity result#{bypasses == 1 ? "" : "s"} matched the baseline — review for access-control bypass#{skips}"
+        "authorize: ran #{done} · #{bypasses} identity result#{bypasses == 1 ? "" : "s"} matched the baseline — review for access-control bypass#{unreached}#{skips}"
       else
-        "authorize: ran #{done} · no identity matched the baseline#{skips}"
+        "authorize: ran #{done} · no identity matched the baseline#{unreached}#{skips}"
       end
+    end
+
+    # The batch produced NO evidence at all, as the sentence to show — or nil when at least
+    # one request was actually compared.
+    #
+    # Both arms exist for one reason: with nothing compared, `bypasses` is zero and so is the
+    # review count, which is indistinguishable from a target that held. The summary below
+    # would then read "no identity matched the baseline" — a clean bill of health for traffic
+    # that never left the machine, or for a host that never answered. They are kept apart
+    # because the operator fixes them differently: a scope rule, or a route.
+    private def empty_handed_summary(done : Int32, unanswered : Int32) : String?
+      blocked = @view.blocked_in(@batch_ids)
+      if blocked > 0 && blocked == done
+        why = @view.blocked_reason_in(@batch_ids)
+        return "authorize: nothing was sent — #{blocked} request#{blocked == 1 ? "" : "s"} " \
+               "refused before the socket#{why ? " (#{why})" : ""}"
+      end
+      return nil unless unanswered > 0 && unanswered == done
+      why = @view.unanswered_reason_in(@batch_ids)
+      "authorize: nothing came back — every send failed for #{unanswered} " \
+      "request#{unanswered == 1 ? "" : "s"}#{why ? " (#{why})" : ""} · this is not a result"
     end
 
     # --- render / input ------------------------------------------------------

@@ -64,12 +64,19 @@ module Gori::Tui
       # The one-word verdict for the master row: the state while it is not done, else the
       # aggregate across non-baseline identities — :bypass if ANY matched the baseline (the
       # row worth a look), :enforced if every one clearly differed, :review otherwise.
+      #
+      # `:error` covers the run that finished having compared NOTHING: every identity's send
+      # failed at the socket (or the gate refused it), which leaves `same_count` at zero and
+      # no `different?` verdict either, so this row used to paint `review` — the word whose
+      # whole meaning is "there is something here to judge". `gori run authorize` has always
+      # called that `[x] error`; the tab now agrees. See `Authorize::Target#uncompared?`.
       def verdict : Symbol
         return @state unless @state == :done
         t = @target
         return :error unless t
         non = t.trials.reject(&.baseline?)
         return :review if non.empty?
+        return :error if t.uncompared?
         return :bypass if non.any?(&.verdict.same?)
         return :enforced if non.all?(&.verdict.different?)
         :review
@@ -311,6 +318,26 @@ module Gori::Tui
     # these has to say so — silence there reads as "tested, nothing found".
     def blocked_in(ids : Set(Int32)) : Int32
       @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.fully_blocked? }
+    end
+
+    # Requests in `ids` that reached the socket and got nothing back — every non-baseline
+    # identity's send failed. Counted apart from `blocked_in` because the two have different
+    # fixes, and counted at all because a batch made of these must not summarise as "no
+    # identity matched the baseline" (see `Authorize::Target#unanswered?`).
+    def unanswered_in(ids : Set(Int32)) : Int32
+      @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.unanswered? }
+    end
+
+    # The first send error any unanswered batch entry recorded, for the summary line — the
+    # operator's actual next step is in that string ("Connection refused", "no such host").
+    def unanswered_reason_in(ids : Set(Int32)) : String?
+      @entries.each do |e|
+        next unless ids.includes?(e.id)
+        t = e.target
+        next unless t && t.unanswered?
+        t.trials.each { |tr| (err = tr.summary.error) && (return err) }
+      end
+      nil
     end
 
     # The first refusal any batch entry recorded, for the summary line.

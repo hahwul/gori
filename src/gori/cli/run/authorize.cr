@@ -113,6 +113,12 @@ module Gori
         bypasses = 0
         blocked_runs = 0
         blocked_reason : String? = nil
+        # Requests that reached the socket and got nothing back. Counted for the same reason
+        # `blocked_runs` is: with no bypass and no review to report, a run made of these ends
+        # in "0 possible bypasses", which reads as a clean result for a host this machine
+        # could not reach. See `Authorize::Target#unanswered?`.
+        unanswered = 0
+        unanswered_reason : String? = nil
         stopping = false
         # `--format json` buffers every target and prints ONCE after the loop, so a bare SIGINT
         # threw away the whole run. The stop is polled between requests AND handed to the engine
@@ -132,28 +138,50 @@ module Gori
           if target.fully_blocked?
             blocked_runs += 1
             blocked_reason ||= target.blocked_reason
+          elsif target.unanswered?
+            unanswered += 1
+            unanswered_reason ||= target.trials.each.compact_map(&.summary.error).first?
           end
           emit_authorize_target(target, format, done, buffered)
           done += 1
           authorize_progress(done, total, bypasses, format)
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
-        authorize_done(sent, total, ids, bypasses, failed)
+        authorize_done(sent, total, ids, bypasses, failed, unanswered)
         # Before the all-refused check below — see `Run.report_interrupted` for why the order
         # matters: a run stopped early has not demonstrated that every send was refused.
         Run.report_interrupted(sent, "request", "replayed") if interrupted.call
-        # Every request's every send was refused before the socket. Without this the run reports
-        # `0 possible bypasses` — a clean bill of health for traffic that never left the machine,
-        # which `Authorize::Target#blocked` names as the worst way this can fail.
-        if sent > 0 && blocked_runs == sent
+        exit 1 if report_authorize_empty_handed(sent, blocked_runs, blocked_reason,
+                    unanswered, unanswered_reason)
+        # Nothing was replayed and the reason was not a stop or the gate: every selected flow
+        # raised. Same rule as `report_authorize_empty_handed` — a run that sent nothing must
+        # not exit 0 with a summary that reads like a clean result.
+        exit 1 if sent == 0 && failed > 0 && !interrupted.call
+      end
+
+      # A run that produced NO evidence, reported as such — and answered `true`, which the
+      # caller turns into a non-zero exit. Nothing was compared, so `0 possible bypasses` is a
+      # statement about responses that never arrived, and a script gating on the exit code
+      # must not read a Sandbox refusal or a dead host as an endpoint that held.
+      #
+      # Two arms, kept apart because they are fixed differently: the gate refused to send (a
+      # scope rule), or gori sent and got nothing back (a route). `Authorize::Target#blocked`
+      # names the first as the worst way this tool can fail; the second fails the same way.
+      private def self.report_authorize_empty_handed(sent : Int32, blocked_runs : Int32,
+                                                     blocked_reason : String?,
+                                                     unanswered : Int32,
+                                                     unanswered_reason : String?) : Bool
+        return false if sent.zero?
+        if blocked_runs == sent
           STDERR.puts "authorize: every send was refused before the socket — " \
                       "#{blocked_reason || "blocked by the project's Sandbox or an exclude rule"}"
-          exit 1
+          return true
         end
-        # Nothing was replayed and the reason was not a stop or the gate: every selected flow
-        # raised. Same rule as the block above — a run that sent nothing must not exit 0 with a
-        # summary that reads like a clean result.
-        exit 1 if sent == 0 && failed > 0 && !interrupted.call
+        return false unless unanswered + blocked_runs == sent
+        STDERR.puts "authorize: nothing came back — every send failed" \
+                    "#{unanswered_reason ? " (#{unanswered_reason})" : ""}. Nothing was compared, " \
+                    "so this is not evidence that access control works"
+        true
       end
 
       # One flow that could not be replayed, as it happens. The in-place meter is cleared
@@ -219,7 +247,7 @@ module Gori
       end
 
       private def self.authorize_done(sent : Int32, total : Int32, ids : Int32, bypasses : Int32,
-                                      failed : Int32) : Nil
+                                      failed : Int32, unanswered : Int32) : Nil
         STDERR.print "\r\e[K" if STDERR.tty? # clear the in-place meter before the summary
         # "1 of 3 requests" — the noun agrees with the SELECTION, not with how much of it ran, so
         # an interrupted run does not read as "1 of 3 request".
@@ -227,8 +255,12 @@ module Gori
         # The flows that could not be replayed ride on the summary line too: a selection that
         # shrank mid-run and one that was fully replayed must not read the same.
         unreplayable = failed > 0 ? " · #{failed} could not be replayed" : ""
+        # And the requests that went out and got nothing back. Without this the bypass count
+        # speaks for them: "0 possible bypasses" is a statement about responses, and these
+        # requests produced none.
+        unreached = unanswered > 0 ? " · #{unanswered} could not be reached" : ""
         STDERR.puts "done · #{sent}#{of} request#{total == 1 ? "" : "s"} replayed · #{sent * ids} sends · " \
-                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreplayable}"
+                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreached}#{unreplayable}"
       end
 
       # Refuse a selection that cannot become a run, listing what it reached first: `skipped` is
