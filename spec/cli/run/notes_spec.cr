@@ -57,7 +57,7 @@ describe "gori run notes show --format json" do
     parsed = JSON.parse(doc)
     parsed["title"].as_s.should eq("hi\u{FFFD}")
     parsed["text"].as_s.should contain('\n') # a note is multi-line BY DESIGN — not collapsed
-    parsed["bytes"].as_i.should eq(5)         # the STORED size, not the scrubbed one
+    parsed["bytes"].as_i.should eq(5)        # the STORED size, not the scrubbed one
 
     arr = Gori::CLI::Output.notes_array_json(
       Gori::Notes::Doc.new(0, [entry], 2_i64), with_text: true)

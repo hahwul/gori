@@ -83,6 +83,11 @@ describe "MCP issue tools — JSON-RPC UTF-8" do
         res.valid_encoding?.should be_true
         JSON.parse(res)
       end
+
+      # `list_links` resolves the SAME Links::Resolved pair onto the same transport.
+      links = tools.call("list_links", JSON.parse(%({"owner_kind":"issue","owner_id":#{iid}}))).text
+      links.valid_encoding?.should be_true
+      JSON.parse(links)["links"][0]["url"].as_s.valid_encoding?.should be_true
     ensure
       store.close
       File.delete?(path)

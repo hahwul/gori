@@ -1,6 +1,7 @@
 require "json"
 require "../../store"
 require "../../links"
+require "../../issues_export" # Issues::Export.one_line
 require "../../notes"
 
 module Gori
@@ -28,8 +29,14 @@ module Gori
                     j.field "id", r.link.id
                     j.field "ref_kind", r.link.ref_kind.label
                     j.field "ref_id", r.link.ref_id
-                    j.field "label", r.label
-                    j.field "url", r.url
+                    # `one_line`, like every other captured value MCP emits (see
+                    # `Serialize.text`'s contract). Both are built from wire bytes —
+                    # `Links.resolve_flow` composes them from the flow's method/host/target,
+                    # which `Codec::Http1.parse_request_head` builds with a plain `String.new`
+                    # — so an h2 `:path` carrying a raw 0x80 made this whole JSON-RPC response
+                    # line invalid UTF-8. Same pair, same fix as `Issues::Export.append_links_json`.
+                    j.field "label", Issues::Export.one_line(r.label)
+                    j.field "url", Issues::Export.one_line(r.url)
                     # A link whose target was pruned/deleted. Kept (not hidden) so the caller
                     # can tell "no evidence" from "evidence that no longer exists".
                     j.field "stale", true if r.stale?
