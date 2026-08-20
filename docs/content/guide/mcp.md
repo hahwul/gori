@@ -57,6 +57,8 @@ By default the server also exposes action tools that send live requests and writ
 gori mcp --read-only
 ```
 
+A read-only server also keeps no writer. Past the schema check every open performs, it never writes the project database and runs no background indexing. That matters when a TUI is capturing into the same project: SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes the two contend.
+
 ## Installing Into an Agent
 
 gori can write the MCP configuration for common clients for you:

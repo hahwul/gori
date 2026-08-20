@@ -57,6 +57,8 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 gori mcp --read-only
 ```
 
+읽기 전용 서버는 라이터도 두지 않습니다. 열 때 한 번 수행하는 스키마 확인을 제외하면 프로젝트 데이터베이스에 쓰지 않고, 백그라운드 인덱싱도 돌리지 않습니다. 같은 프로젝트로 TUI가 캡처 중일 때 이 차이가 중요합니다. SQLite는 라이터를 하나만 허용하는데, 두 번째 gori가 자기 뒷정리 작업만을 위해 그 자리를 붙들고 있으면 둘이 경합하게 됩니다.
+
 ## 에이전트에 설치하기 {#installing-into-an-agent}
 
 gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍니다.

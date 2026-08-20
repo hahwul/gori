@@ -371,12 +371,14 @@ module Gori
         false
       end
 
-      # Flow + issue counts for the delete preview, from a short-lived handle of its own.
+      # Flow + issue counts for the delete preview, from a short-lived READ-ONLY handle of its
+      # own — two aggregates never needed a writer fiber, and the project being previewed for
+      # deletion may well have a live capture on the other end of it (#752).
       # Best-effort: a locked or corrupt DB reports nil rather than failing the preview
       # (mirrors MCP delete_project's dry run).
       private def self.project_object_counts(project : Project) : {Int64?, Int32?}
         return {nil, nil} unless File.exists?(project.db_path)
-        store = Store.open(project.db_path, retention_flows: Store::RETENTION_UNLIMITED)
+        store = Store.open(project.db_path, retention_flows: Store::RETENTION_UNLIMITED, read_only: true)
         begin
           {store.count, store.count_issues}
         ensure

@@ -229,16 +229,28 @@ module Gori
     # single-consumer, so each watcher of the live flow stream needs its own — the TUI history
     # refresh, Probe and Authorize cannot share one. Same best-effort drop-on-full semantics.
     @authorize_events : Channel(FlowEvent)?
+    # The writer fiber's connection. Taken from the pool with `checkout` rather than borrowed
+    # for the fiber's whole lifetime with `using_connection`, because a write that fails can
+    # leave a SQLite connection unusable and the loop has to be able to throw it away (#752 —
+    # see `writer_conn`). Nil before the loop takes its first one and after it gives the last
+    # one back; the writer fiber is the only reader or writer of this field.
+    @writer_conn : DB::Connection?
 
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
     # headless mode (no consumer => nothing to publish). `probe_events` is the parallel
     # feed for the Probe analyzer (nil when Probe isn't running). `retention_flows` caps
     # the kept history (0 = unlimited).
+    #
+    # `read_only` opens a store that never writes: no writer fiber, and so no background FTS
+    # indexer either. SQLite allows exactly one writer, so a second gori process that opens the
+    # same project only to READ it (`gori mcp --read-only`, a count for a delete preview) should
+    # not be contending for that slot at all — see the note on @read_only in #initialize (#752).
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT,
-                  authorize_events : Channel(FlowEvent)? = nil) : Store
+                  authorize_events : Channel(FlowEvent)? = nil,
+                  read_only : Bool = false) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -308,7 +320,8 @@ module Gori
         raise ex
       end
       # Past this point the Store owns the pool and closes it in #close.
-      new(db, events, probe_events, retention_flows, authorize_events: authorize_events, open_lock: open_lock)
+      new(db, events, probe_events, retention_flows, authorize_events: authorize_events,
+        open_lock: open_lock, read_only: read_only)
     end
 
     # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
@@ -479,7 +492,8 @@ module Gori
                    @authorize_events : Channel(FlowEvent)? = nil,
                    @prune_interval : Int32 = PRUNE_INTERVAL,
                    @events_retention : Int32 = EVENTS_RETENTION,
-                   @open_lock : OpenLock? = nil)
+                   @open_lock : OpenLock? = nil,
+                   @read_only : Bool = false)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
       @closed = false # see #close: a second drain would park forever on @done
@@ -503,6 +517,20 @@ module Gori
       # Set by `writer_connection_loop` once its loop has returned, so `writer_loop`'s rescue can
       # tell "the connection release raised" from "the loop itself died".
       @writer_loop_exited = false
+      # Set when a write on the writer's connection failed, so the NEXT use of that connection
+      # takes a fresh one instead (see `writer_conn`). Writer-fiber-only, like @fts_backlog_hint.
+      @writer_conn_suspect = false
+      # A read-only store starts no writer fiber — and that fiber is the whole reason a
+      # second gori process contends for SQLite's one writer slot. `gori mcp --read-only`
+      # opened a fully writable store, whose idle FTS indexer then ran a write transaction
+      # every few ms against the very database the TUI beside it was capturing into (#752).
+      #
+      # Closing @writes here, before anything can send, is what makes the rest of the class
+      # need no read-only branches: every write API already treats a closed channel as "the
+      # store is going away" and degrades (0 / false / nil / dropped) rather than raising into
+      # a proxy fiber, and a caller can no longer park forever on a reply nobody will send.
+      # The fiber below is still spawned so `#close` keeps its one `@done` sender.
+      @writes.close if @read_only
       spawn(name: "gori-store-writer") do
         # `ensure`, not a bare sequence. `#close` parks on `@done.receive` for a value this
         # fiber sends exactly once as it exits, so ANY escape from `writer_loop` leaves that
@@ -513,10 +541,16 @@ module Gori
         # rescue inside `writer_loop`). Making the send unconditional means a writer that dies
         # for any future reason degrades to "writes stop" instead of "gori never exits".
 
-        writer_loop
+        writer_loop unless @read_only
       ensure
         @done.send(nil)
       end
+    end
+
+    # Does this store refuse to write? (`gori mcp --read-only`, a count-only open.) Every
+    # write API no-ops on one; nothing here contends for SQLite's single writer slot.
+    def read_only? : Bool
+      @read_only
     end
 
     # Monotonic counter of committed probe_issues writes. Single-threaded fiber
@@ -723,7 +757,17 @@ module Gori
         @open_lock.try(&.close)
         return
       end
-      @db.close
+      begin
+        @db.close
+      rescue ex
+        # The same hazard as the guard above, reached by the other door: the pool walk closes
+        # each connection, and a statement whose deferred error only surfaces at
+        # `sqlite3_finalize` raises out of it. There is nothing further to do about the pool —
+        # but this must not escape `close`, because the open-lock release below would be skipped
+        # and the project would then answer "open in another gori instance" to every delete and
+        # compact for the rest of the host's uptime, with the process that held it already gone.
+        ::Log.warn { "store: the connection pool did not close cleanly: #{ex.message}" }
+      end
       @open_lock.try(&.close)
     end
 
@@ -781,18 +825,93 @@ module Gori
       end
     end
 
+    # The writer's connection, guaranteed usable.
+    #
+    # `using_connection` used to pin ONE connection here for the whole life of the store, and
+    # that is what turned a recoverable collision into a dead capture pipeline (#752). When a
+    # write fails against a peer process holding the write lock, the driver leaves the failed
+    # statement un-reset (crystal-sqlite3 resets BEFORE `sqlite3_step`, never after a failed
+    # one), SQLite then refuses the ROLLBACK — "cannot rollback transaction - SQL statements in
+    # progress" — and crystal-db, whose `TopLevelTransaction` only clears its in-transaction
+    # flag once ROLLBACK *returns*, leaves the connection marked as still in a transaction. From
+    # there every later write on it fails the same way, the open transaction keeps the WAL write
+    # lock away from the peer, and only restarting the process cleared it: the TUI stayed up and
+    # silently stopped saving flows.
+    #
+    # So the writer no longer keeps a connection it cannot let go of. Anything that fails a
+    # write sets @writer_conn_suspect, and the next use retires that connection and continues on
+    # a fresh one — the collision costs one rolled-back batch, which the callers already handle,
+    # instead of the session.
+    private def writer_conn : DB::Connection
+      conn = @writer_conn
+      if conn && @writer_conn_suspect
+        retire_writer_conn(conn)
+        conn = nil
+      end
+      @writer_conn_suspect = false
+      conn || begin
+        fresh = @db.checkout
+        # Bound the WAL file so it doesn't grow without limit under sustained writes (the
+        # default is 1000 pages; set it explicitly on the writer). Per CONNECTION, so it has to
+        # be re-issued on every one the writer takes, not once at startup.
+        fresh.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
+        @writer_conn = fresh
+      end
+    end
+
+    # Throw away a connection a failed write may have left mid-statement or mid-transaction.
+    #
+    # Order matters: `@db.discard` FIRST, so the pool has already let go of it before `close`
+    # gets a chance to raise partway through. A statement whose deferred error only surfaces at
+    # `sqlite3_finalize` aborts `Connection#do_close` mid-cache, leaving the connection neither
+    # marked closed nor removed — and `Store#close` then walks the pool and finalizes freed
+    # statements a second time. That is a segfault, and the guard in #close documents measuring
+    # it. Leaking one connection is the correct trade against that.
+    private def retire_writer_conn(conn : DB::Connection) : Nil
+      @writer_conn = nil
+      ::Log.info { "store: discarding the writer's connection after a failed write" }
+      @db.discard(conn)
+      conn.close
+    rescue ex
+      # gori.log, not STDERR (#411). Not fatal: the connection is out of the pool either way,
+      # and the caller already has a replacement coming.
+      ::Log.warn { "store: writer connection did not close cleanly (leaked, not reused): #{ex.message}" }
+    end
+
+    # One write transaction on the writer's connection, opened with BEGIN IMMEDIATE.
+    #
+    # Deliberately NOT `DB::Connection#transaction`, which issues a plain — deferred — BEGIN.
+    # A deferred transaction takes only a read lock at BEGIN and upgrades on its first write,
+    # and in WAL that upgrade is exactly where a second gori process collides. The upgrade does
+    # NOT go through the busy handler: once a peer has committed since our snapshot was taken,
+    # SQLite answers SQLITE_BUSY_SNAPSHOT immediately and `busy_timeout=5000` never applies, so
+    # a collision a five-second wait would have absorbed surfaces as "database is locked"
+    # instead (#752). IMMEDIATE takes the write lock up front, where the busy handler DOES
+    # apply, so two writers queue rather than race. `Schema.migrate!` already opens this way and
+    # documents the same property for concurrent openers.
+    #
+    # Hand-rolling it also keeps crystal-db's per-connection in-transaction flag out of the
+    # picture, which is the half of #752 that made a collision permanent rather than momentary.
+    private def write_transaction(conn : DB::Connection, & : DB::Connection ->) : Nil
+      conn.exec("BEGIN IMMEDIATE")
+      begin
+        yield conn
+        conn.exec("COMMIT")
+      rescue ex
+        conn.exec("ROLLBACK") rescue nil
+        raise ex
+      end
+    end
+
     private def writer_connection_loop : Nil
-      @db.using_connection do |conn|
-        # Reset per connection; `writer_loop` reads it to tell a loop death from a release failure.
-        @writer_loop_exited = false
-        # Bound the WAL file so it doesn't grow without limit under sustained
-        # writes (the default is 1000 pages; set it explicitly on the writer).
-        conn.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
+      # Reset per connection; `writer_loop` reads it to tell a loop death from a release failure.
+      @writer_loop_exited = false
+      begin
         loop do
           # Wait for capture work, but spend an idle wait on the FTS backlog instead of just
           # parking (see await_op). Capture ALWAYS wins: an op arriving mid-wait is taken
           # immediately, and indexing only ever runs between batches, never inside one.
-          first = await_op(conn)
+          first = await_op
           break if first.nil? # channel closed: drained, exit
 
           ops = [first]
@@ -810,11 +929,17 @@ module Gori
           # IndexBatch) and they must be answered whether or not the batch itself committed —
           # the rows they index were dirtied by EARLIER, already-committed batches.
           index_replies = ops.compact_map { |op| op.as?(IndexBatch).try(&.reply) }
-          committed = false
+          # …which is why a batch of NOTHING BUT index requests has no transaction to open. It
+          # matters now that the transaction is IMMEDIATE (see write_transaction): an empty
+          # deferred BEGIN/COMMIT was free, whereas an empty IMMEDIATE one takes the write lock,
+          # and against a peer holding it that failure would be counted as lost capture in the
+          # TUI's write_failures. `index_pending!` sends one IndexBatch per round-trip, so this
+          # is the shape every `flush` produces, not a corner case.
+          batched = ops.reject(IndexBatch)
+          committed = batched.empty?
           begin
-            conn.transaction do |tx|
-              c = tx.connection
-              ops.each do |op|
+            write_transaction(writer_conn) do |c|
+              batched.each do |op|
                 case op
                 when InsertFlow
                   ins_reply = op.reply
@@ -879,13 +1004,16 @@ module Gori
                   }
                 end
               end
-            end
+            end unless committed # `committed` starts true only when there is nothing to persist
             committed = true
           rescue ex
             # gori.log, not STDERR: in TUI mode STDERR is the alternate screen and a write there
             # garbles the frame (#411). The count below is what the TUI actually surfaces.
             ::Log.error { "store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}" }
             @write_failures.add(ops.size) # surfaced in the TUI so the operator knows capture stopped
+            # The rollback above may itself have been refused, so this connection can still be
+            # holding an open transaction — and the WAL write lock with it. Retire it (#752).
+            @writer_conn_suspect = true
           end
           # publish never raises (see #publish); replies are buffered — so neither
           # branch can block or throw back into the loop.
@@ -899,7 +1027,7 @@ module Gori
             # retention sweep, keeping the DB far over its cap until enough live captures accrue.
             @inserts_since_prune += ops.sum { |op| op.is_a?(InsertFlow) ? 1 : (op.is_a?(InsertImportBatch) ? op.pairs.size : 0) }
             if @inserts_since_prune >= @prune_interval
-              prune(conn)
+              prune(writer_conn)
               @inserts_since_prune = 0
             end
           else
@@ -908,13 +1036,31 @@ module Gori
             # puts a second value in a buffered(1) channel whose caller receives exactly once, so
             # `index_pending!` would read this 0, take its `break if n == 0` and return with the
             # FTS backlog still dirty — the silent under-report `#flush`'s barrier exists to stop.
-            ops.each { |op| fail_reply(op) unless op.is_a?(IndexBatch) }
+            # `batched` is `ops` minus exactly those; the two exclusions are one and the same.
+            batched.each { |op| fail_reply(op) }
           end
           # Outside the batch transaction, and after it, so an explicit drain
           # (Store#index_pending!) also picks up rows this very batch just dirtied.
-          index_replies.each(&.send(index_pending_batch(conn)))
+          # `writer_conn`, not a captured local: the batch or the prune above may have retired
+          # the connection they ran on, and indexing must not inherit a dead one.
+          index_replies.each(&.send(index_pending_batch(writer_conn)))
         end
         @writer_loop_exited = true # the loop is done; anything that raises now is the release
+      ensure
+        # Give the connection back, exactly as `using_connection` used to — UNLESS the last
+        # write on it failed. Releasing a suspect connection puts it back in the pool for
+        # `#close` to walk, and finalizing its poisoned statement raises there instead: the
+        # exception escapes `Store#close` itself, so the caller never gets its store closed and
+        # the project's open lock is never released. Measured, with a peer holding the write
+        # lock across a shutdown. Retiring it here is the same disposal the loop would have
+        # done on its next write, just reached by the teardown door.
+        #
+        # The plain release is NOT swallowed: a release that raises is how `writer_loop` learns
+        # the connection is half-closed and `#close` must not re-close the pool (see there).
+        if last = @writer_conn
+          @writer_conn = nil
+          @writer_conn_suspect ? retire_writer_conn(last) : last.release
+        end
       end
     end
 
@@ -959,8 +1105,7 @@ module Gori
       cutoff = oldest_kept - 1  # everything strictly below the oldest survivor goes
       return if cutoff <= 0
       dropped = 0_i64
-      conn.transaction do |tx|
-        c = tx.connection
+      write_transaction(conn) do |c|
         # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
         # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
         # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
@@ -999,6 +1144,9 @@ module Gori
       log_retention_drop(dropped) if dropped > 0
     rescue ex
       ::Log.warn { "retention prune failed (will retry): #{ex.message}" } # gori.log, not STDERR (#411)
+      # The sweep's transaction may not have rolled back, so this connection can still be
+      # holding the write lock (#752).
+      @writer_conn_suspect = true
     end
 
     # Frames whose connection row does not exist at all. The guard in `insert_h2_frame` stops new
@@ -1013,6 +1161,9 @@ module Gori
       conn.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT id FROM h2_connections)")
     rescue ex
       ::Log.warn { "unattributed h2-frame reap failed (will retry): #{ex.message}" } # gori.log (#411)
+      # A failed statement outlives the call that issued it — the driver leaves it un-reset,
+      # so the connection has to go rather than the next write inheriting it (#752).
+      @writer_conn_suspect = true
     end
 
     # Keep the newest EVENTS_RETENTION rows. Shaped like the flows sweep — find the oldest
@@ -1031,6 +1182,8 @@ module Gori
       conn.exec("DELETE FROM events WHERE id <= ?", cutoff)
     rescue ex
       ::Log.warn { "event-log trim failed (will retry): #{ex.message}" } # gori.log (#411)
+      # Same as the reap above: the failed DELETE's statement is left un-reset (#752).
+      @writer_conn_suspect = true
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that
@@ -1099,15 +1252,18 @@ module Gori
     # strict priority (an op arriving during the wait is returned at once, and a batch is
     # never interrupted), so under sustained load indexing simply falls behind and the
     # backlog drains in the gaps — which is what `fts_backlog` exists to make visible.
-    private def await_op(conn : DB::Connection) : WriteOp?
+    private def await_op : WriteOp?
       loop do
         tick = @fts_backlog_hint ? FTS_IDLE_TICK_FAST : FTS_IDLE_TICK_SLOW
         select
         when op = @writes.receive
           return op
         when timeout(tick)
-          # No capture work waiting: index a slice of the backlog and re-check.
-          @fts_backlog_hint = false if index_pending_batch(conn) == 0
+          # No capture work waiting: index a slice of the backlog and re-check. Asking
+          # `writer_conn` each tick (rather than holding one) is what stops an index batch that
+          # failed against a peer process from being retried on the same poisoned connection
+          # every 250 ms for the rest of the session — the shape #752 was reported as.
+          @fts_backlog_hint = false if index_pending_batch(writer_conn) == 0
         end
       end
     rescue Channel::ClosedError
@@ -1140,8 +1296,7 @@ module Gori
           end
         end
         return 0 if rows.empty?
-        conn.transaction do |tx|
-          c = tx.connection
+        write_transaction(conn) do |c|
           rows.each do |(id, req_head, req_body, resp_head, resp_body, resp_ct)|
             # The request side has no content_type column, so its marker comes from its head —
             # exactly what the old path did for the request body.
@@ -1161,6 +1316,9 @@ module Gori
         # gori.log, not STDERR (#411). The rows stay dirty, so this self-heals; fts_backlog
         # keeps reporting them so a persistent failure is visible rather than silent.
         ::Log.warn { "FTS index batch failed (#{rows.size} flow(s), will retry): #{ex.message}" }
+        # "Self-heals" is only true if the retry gets a usable connection: a failed write can
+        # leave this one holding a transaction it could not roll back (#752). Retire it.
+        @writer_conn_suspect = true
         0
       end
     end

@@ -32,7 +32,7 @@ module Gori::CLI
       p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
       p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
-      p.on("--read-only", "Disable action tools (send_request, create/update_issue)") { read_only = true }
+      p.on("--read-only", "Disable action tools (send_request, create/update_issue) and never write the database") { read_only = true }
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
@@ -106,7 +106,11 @@ module Gori::CLI
     # one that kills the server before the handshake.
     store =
       begin
-        Store.open(resolved, events: nil, retention_flows: Store::RETENTION_UNLIMITED) # never prune the user's history
+        # never prune the user's history; and under --read-only, never WRITE it either —
+        # a store that only reads starts no writer fiber, so this process stops competing
+        # for SQLite's single writer slot with the TUI capturing into the same db (#752).
+        Store.open(resolved, events: nil, retention_flows: Store::RETENTION_UNLIMITED,
+          read_only: read_only)
       rescue ex : DB::Error | SQLite3::Exception | Error
         reason = "cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         Log.error { "mcp: #{reason}; starting unbound" }
