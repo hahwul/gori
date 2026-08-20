@@ -342,6 +342,10 @@ describe Gori::Outbound do
         # A blocked group refuses as a whole — one connection carries the whole sequence.
         sender.send_group([REQ, REQ]).map(&.error).should eq([Gori::Outbound::SANDBOX_ERROR] * 2)
         sender.send_ws(REQ, [] of Gori::Repeater::WsEngine::OutMsg).error.should eq(Gori::Outbound::SANDBOX_ERROR)
+        # `send_wire` is the second door into the same engine — a surface that must RECORD the
+        # exact bytes it sends takes them from `wire` and hands them here — so the gate has to
+        # stand on it too, or "record what went out" would be a way to walk past the sandbox.
+        sender.send_wire(sender.wire(REQ)).error.should eq(Gori::Outbound::SANDBOX_ERROR)
       end
     end
   end

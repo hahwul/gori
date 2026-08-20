@@ -121,6 +121,8 @@ gori run fuzz <flow-id> \
 
 워크벤치와 증거 저장소는 분리되어 있습니다. Repeater나 Fuzzer 전송은 기본적으로 History 플로우를 남기지 않습니다. `get_flow`·`compare`·다음 도구에 넘길 `flow_id`가 필요할 때는 명시적으로 뚫으세요. `gori run repeater send --record-history`는 전송을 플로우로 기록하고 그 id를 출력하며, `gori run fuzz --record-history=none|matched|all`은 전송한 각 요청+응답을 기록합니다(`matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한). 기본값은 워크벤치 전용으로 유지됩니다.
 
+기록된 Repeater 플로우는 **와이어에 나간 그대로의 요청**입니다. 활성 세션 슬롯의 헤더 오버레이와 전송 시점에 치환된 `$NAME` 값이 그 안에 들어 있으므로, 그 플로우를 재전송·비교·스캔하면 조립 전 초안이 아니라 실제 전송을 재현합니다.
+
 ## 다음 단계 {#next-steps}
 
 - [Decoder](/ko/guide/decoder/): 로컬 인코드/디코드/해시 체인
