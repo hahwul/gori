@@ -39,6 +39,8 @@ module Gori::Tui
       # message before and after a rule, so they have to agree about what a row is.
       @out = ReadPane.new(wrap: true)
       @last_body = Rect.new(0, 0, 0, 0) # last content rect — click/wheel geometry
+      # The host the last transform scoped rules on — see `preview_host`.
+      @preview_host = ""
     end
 
     def tab : Symbol
@@ -146,9 +148,10 @@ module Gori::Tui
       list = rule_list
       @sel = @sel.clamp(0, {list.size - 1, 0}.max)
       ensure_visible(inner, list.size)
-      sync_preview_out
+      target = preview_target
+      sync_preview_out(target)
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
-        @focus, body_focused, rules_engine.active?, @preview_input, @out)
+        @focus, body_focused, rules_engine.active?, @preview_input, @out, target, @preview_host)
     end
 
     private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil
@@ -194,20 +197,45 @@ module Gori::Tui
     end
 
     # Point the OUTPUT pane at the current transform. Recomputed rather than cached, exactly as
-    # the old per-frame `preview_output` call was — `transform_message` over one sample is cheap
-    # next to a frame, and any cache key would have to track the sample AND every enabled rule.
-    # Called from `render_rules` and from each selection/copy delegator, so a verb never reads a
-    # pane pointed at a stale transform.
-    private def sync_preview_out : Nil
-      text = preview_output
-      @out.source(text.empty? ? ["(empty)"] : text.split('\n'))
+    # the old per-frame call was — `transform_message` over one sample is cheap next to a frame,
+    # and any cache key would have to track the sample AND every enabled rule. Called from
+    # `render_rules` and from each selection/copy delegator, so a verb never reads a pane
+    # pointed at a stale transform.
+    #
+    # `target` is passed in by the render (which needs it for the badge anyway) so the frame
+    # asks the sample which side it is exactly once. The sample is joined ONCE here and the
+    # host read off the same String: `TextArea#text` has no cache, and this is the pane an
+    # operator pastes a multi-MB captured message into.
+    private def sync_preview_out(target : Store::RuleTarget = preview_target) : Nil
+      text = @preview_input.text
+      @preview_host = host_from_sample(text)
+      transformed = rules_engine.transform_message(text, target, @preview_host)
+      @out.source(transformed.empty? ? ["(empty)"] : transformed.split('\n'))
     end
 
-    # Enabled rules applied to the sample (request side; host from Host: header).
-    private def preview_output : String
-      text = @preview_input.text
-      host = host_from_sample(text)
-      rules_engine.transform_message(text, Store::RuleTarget::Request, host)
+    # WHICH SIDE the sample is, read off the sample itself: a message whose first line is a
+    # status line is a response, everything else is a request.
+    #
+    # This pane used to pass `Request` unconditionally. Half the rule list is `RES` — the row
+    # draws the badge — and every one of those rules previewed as "nothing happened", with
+    # nothing on screen to say the pane could not test them. The preview is the only place a
+    # rule can be tried before it is rewriting live traffic, so a side it silently cannot
+    # reach is the half of the feature that most needs one.
+    #
+    # `first_nonblank_line`, not `text`: this runs per frame and `text` joins the whole buffer.
+    def preview_target : Store::RuleTarget
+      first = @preview_input.first_nonblank_line || ""
+      first.starts_with?("HTTP/") ? Store::RuleTarget::Response : Store::RuleTarget::Request
+    end
+
+    # The host the last transform scoped rules on, which the OUTPUT badge names. Empty matches
+    # ONLY an unscoped rule (`Rules.host_matches?`), and a RESPONSE head structurally carries no
+    # `Host:` line — so a rule scoped `*.example.com` previews as a rule that did nothing. Naming
+    # the host on the pane is what keeps the `RES rules` badge from asserting the opposite; an
+    # operator who wants that rule previewed can put a `Host:` line in the sample, which
+    # `host_from_sample` reads wherever it appears.
+    def preview_host : String
+      @preview_host
     end
 
     private def host_from_sample(text : String) : String
@@ -685,14 +713,22 @@ module Gori::Tui
       j < 0 || j >= scoped.size
     end
 
+    # The copy inherits the ORIGINAL's on/off state, which `add`'s default (enabled, because
+    # "add" means "start rewriting") would have overridden. Duplicating is not adding: the
+    # operator is copying a rule they can see, and the row they pressed the key on says `·`
+    # or `✓`. A disabled rule silently coming back armed is a live traffic rewrite nobody
+    # asked for — and for a `stub` rule it is an endpoint that stops reaching the origin at
+    # all. For a global rule `enabled?` is its state HERE, which is the state on that row.
     def rewriter_duplicate : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
-               rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope)
+               rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
+               enabled: rule.enabled?)
         return @host.status("rule NOT duplicated (project busy or settings not writable)")
       end
-      @host.status(rule.global? ? "global rule duplicated" : "rule duplicated")
+      state = rule.enabled? ? "" : " (disabled, like the original)"
+      @host.status(rule.global? ? "global rule duplicated#{state}" : "rule duplicated#{state}")
     end
 
     # `s`: move the selected rule between the global library and this project. The rule keeps

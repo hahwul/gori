@@ -67,15 +67,16 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, rules : Array(Store::MatchRule), sel : Int32,
                scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
-               live : Bool, preview_input : TextArea, preview_out : ReadPane) : Nil
+               live : Bool, preview_input : TextArea, preview_out : ReadPane,
+               target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "") : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules, body_focused)
       list_r, pin_r, pout_r = layout(rect)
       render_list(screen, list_r, rules, sel, scroll, enabled_count,
         body_focused && focus == :list, live)
       unless pin_r.empty?
-        render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in)
-        render_preview_output(screen, pout_r, preview_out, body_focused && focus == :preview_out)
+        render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in, target)
+        render_preview_output(screen, pout_r, preview_out, body_focused && focus == :preview_out, target, host)
       end
     end
 
@@ -340,20 +341,41 @@ module Gori::Tui
       x + 3
     end
 
-    private def render_preview_input(screen : Screen, rect : Rect, ed : TextArea, focused : Bool) : Nil
+    # The sample. Its badge is the SIDE the controller read off the sample's own first line
+    # (`RewriterController#preview_target`), because that is what decides which half of the
+    # rule list runs — and the pane that silently ran only the REQ half is exactly why it is
+    # spelled out here rather than left to be inferred from the text.
+    private def render_preview_input(screen : Screen, rect : Rect, ed : TextArea, focused : Bool,
+                                     target : Store::RuleTarget) : Nil
       return if rect.w < 4 || rect.h < 2
       Frame.card(screen, rect, "PREVIEW INPUT", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.border_meta(screen, rect, "PREVIEW INPUT", target.request? ? "REQ" : "RES")
       body = rect.inset(1, 1)
       return if body.empty?
-      ed.render(screen, body, cursor: focused, highlight: :request, gauge: true, gauge_focused: focused)
+      # …and the syntax overlay follows it too: a pasted response painted with the REQUEST
+      # highlighter reads its status line as a request line.
+      ed.render(screen, body, cursor: focused, highlight: target.request? ? :request : :response,
+        gauge: true, gauge_focused: focused)
     end
 
     # The transformed sample. The pane owns its scroll, caret, selection and gauge — this used
     # to be a plain windowed draw over a `String` with no caret at all, so the one pane that
     # shows what a rule DID to a message was the one you could not copy a line out of.
-    private def render_preview_output(screen : Screen, rect : Rect, pane : ReadPane, focused : Bool) : Nil
+    private def render_preview_output(screen : Screen, rect : Rect, pane : ReadPane, focused : Bool,
+                                      target : Store::RuleTarget, host : String) : Nil
       return if rect.w < 4 || rect.h < 2
       Frame.card(screen, rect, "PREVIEW OUTPUT", bg: Theme.bg, border: Frame.pane_border(focused))
+      # Which half of the list ran, and WHICH HOST it ran them for — the two questions that
+      # decide whether a rule fires here. `REQ`/`RES` is the same badge every rule ROW carries.
+      #
+      # The host half is not decoration. An empty host matches ONLY an unscoped rule
+      # (`Rules.host_matches?`), and a response head carries no `Host:` line, so a rule scoped
+      # `*.example.com` previews as a rule that changed nothing — indistinguishable from a
+      # pattern that missed. Saying "unscoped only" is the difference between the pane
+      # reporting a result and the pane reporting one it could not produce.
+      side = target.request? ? "REQ" : "RES"
+      Frame.border_meta(screen, rect, "PREVIEW OUTPUT",
+        host.empty? ? "#{side} rules · unscoped only" : "#{side} rules @#{host}")
       body = rect.inset(1, 1)
       return if body.empty?
       pane.render(screen, body, focused)
