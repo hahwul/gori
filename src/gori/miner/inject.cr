@@ -605,13 +605,32 @@ module Gori::Miner
     # line by line: a multipart body routinely carries a binary file part, and both `String`
     # regexes (PCRE2 raises on a subject that is not valid UTF-8) and a naive `name="` scan
     # over the whole body (which would read a match out of the file's own bytes) are wrong here.
+    #
+    # Only lines inside a PART HEADER BLOCK count — after a `--boundary` delimiter, before the
+    # blank line that opens the part's content. Scanning every line instead broke the one
+    # invariant `existing_names` promises (it may test a name it could have skipped, never the
+    # reverse): a part whose CONTENT is a pasted HTTP dump, a forwarded mail, an uploaded
+    # capture — anything carrying its own `Content-Disposition: … name="admin"` line — would
+    # contribute `admin` as a phantom, and a genuinely hidden `admin` would then go untested
+    # while both surfaces reported it as already-in-request.
     private def self.multipart_names(request : Bytes) : Set(String)
-      _, body, _ = split(request)
       found = Set(String).new
+      raw_ct = header_value(request, "content-type")
+      return found unless raw_ct
+      boundary = MIME::Multipart.parse_boundary(raw_ct)
+      return found if boundary.nil? || boundary.empty?
+      _, body, _ = split(request)
+      delim = "--#{boundary}"
+      in_headers = false
       each_ascii_line(body) do |line|
-        next unless (colon = line.index(':')) && line[0...colon].strip.downcase == "content-disposition"
-        if name = quoted_param(line[(colon + 1)..], "name")
-          found << name
+        if line.starts_with?(delim)
+          in_headers = true # a delimiter opens the next part's headers (the close one ends the body)
+        elsif in_headers
+          if line.empty?
+            in_headers = false # the blank line that ends this part's headers
+          elsif (colon = line.index(':')) && line[0...colon].strip.downcase == "content-disposition"
+            (name = quoted_param(line[(colon + 1)..], "name")) && (found << name)
+          end
         end
       end
       found
@@ -679,7 +698,9 @@ module Gori::Miner
     end
 
     # Yield each CRLF/LF-delimited line of `bytes` as a String, skipping any line that is not
-    # valid UTF-8 (a binary multipart part) rather than scrubbing it into one.
+    # valid UTF-8 (a binary multipart part) rather than scrubbing it into one. EMPTY lines are
+    # yielded: `multipart_names` reads the blank line as the end of a part's header block, and
+    # the head walkers ignore a line with no colon anyway.
     private def self.each_ascii_line(bytes : Bytes, & : String ->) : Nil
       start = 0
       i = 0
@@ -687,10 +708,8 @@ module Gori::Miner
         if i == bytes.size || bytes[i] == 0x0a_u8
           stop = i
           stop -= 1 if stop > start && bytes[stop - 1] == 0x0d_u8
-          if stop > start
-            line = String.new(bytes[start, stop - start])
-            yield line if line.valid_encoding?
-          end
+          line = String.new(bytes[start, stop - start])
+          yield line if line.valid_encoding?
           start = i + 1
         end
         i += 1

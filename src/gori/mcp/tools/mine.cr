@@ -92,10 +92,12 @@ module Gori
             j.field "found", mjob.found
             j.field "errors", mjob.errors
             j.field "baseline_stable", mjob.baseline_stable?
-            # WHY the baseline is unstable (status varied, the endpoint echoes any input, it
-            # never answered at all). `baseline_stable: false` alone told an agent that every
-            # finding is tentative without telling it what to do about it, and the CLI has
-            # printed this sentence since the miner shipped.
+            # Anything that makes this run's findings tentative — the status varied, the endpoint
+            # echoes any input (reflection detection is then OFF at those locations), or it never
+            # answered at all. NOT a gloss on `baseline_stable`: the echo note is raised off
+            # `reflects_all` alone, so it accompanies a perfectly STABLE baseline. `baseline_stable:
+            # false` on its own told an agent every finding was tentative without telling it what to
+            # do about it, and the CLI has printed this sentence (stable or not) since the miner shipped.
             j.field "baseline_warning", Serialize.text(mjob.baseline_warning)
             j.field "results_truncated", mjob.truncated?
             j.field "job_complete", mjob.status != :running
@@ -325,7 +327,9 @@ module Gori
                                "an RFC 7230 token, and framing headers are never injected) or `already-in-request` (a name the " \
                                "request already carries there is a VISIBLE parameter, not a hidden one). names_total counts only " \
                                "the names that survived both filters, so without `skipped` an incomplete sweep reads as a clean " \
-                               "one. `baseline_warning` says why baseline_stable is false." do |s|
+                               "one. `baseline_warning` names anything that makes findings tentative — READ IT even when " \
+                               "baseline_stable is true: the endpoint-echoes-any-input note (reflection findings are disabled " \
+                               "at those locations) is independent of stability." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
         end
 

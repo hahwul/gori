@@ -82,7 +82,7 @@ module Gori::Miner
       first_error = nil.as(String?)
       in_parallel(rounds) do |i|
         next if @stopped.call
-        raw = @backend.send(@base)
+        raw = send_with_retries(@base)
         if err = raw.error
           first_error ||= err
         else
@@ -125,6 +125,28 @@ module Gori::Miner
         base.metrics.length, base.metrics.words, base.metrics.lines,
         stable, reflection_only, reflects_all, baseline_warning(stable, statuses, reflects_all),
         reachable: true)
+    end
+
+    # Calibration was the miner's ONE un-retried send path, and an empty calibration is now
+    # FATAL to the run (`Engine#orchestrate` refuses to mine against a `Report` of placeholders)
+    # — so a blip that `@config.retries` absorbs anywhere else would have killed the whole run
+    # rather than one bucket. It matters more here than anywhere else, not less: `in_parallel`
+    # dispatches the stability wave CONCURRENTLY, so its probes are not independent samples in
+    # time. One full accept backlog, TLS-handshake burst limit or ephemeral-port stall at t=0
+    # fails every one of them at once, which is exactly the shape a retry exists for.
+    #
+    # Same rules as `Engine#send_with_retries`: a permanent refusal (budget spent, Layer 2 says
+    # no) is not retried, and a stop ends the attempts — the operator asked gori to stop
+    # touching the target, and a `retry_pause` nap followed by another probe is still touching it.
+    private def send_with_retries(bytes : Bytes) : Repeater::Result
+      attempts = 0
+      loop do
+        raw = @backend.send(bytes)
+        return raw if raw.error.nil?
+        return raw if attempts >= @config.retries || Miner.permanent_refusal?(raw.error) || @stopped.call
+        attempts += 1
+        sleep @config.retry_pause
+      end
     end
 
     # Call the block for `0...count` through at most `concurrency` fibers, and return only
@@ -184,7 +206,7 @@ module Gori::Miner
     private def control_signals(loc : Location, base : Probe,
                                 ltol : Int64, wtol : Int32, lntol : Int32) : {Bool, Bool}
       bogus = Array.new(8) { {Canary.bogus_name, Canary.fresh} }
-      raw = @backend.send(Inject.apply(@base, loc, bogus, @config.add_content_length_when_missing?))
+      raw = send_with_retries(Inject.apply(@base, loc, bogus, @config.add_content_length_when_missing?))
       return {false, false} unless raw.error.nil?
       p = Fingerprint.probe(raw)
       reacts = p.metrics.status != base.metrics.status ||
@@ -212,6 +234,14 @@ module Gori::Miner
         error ? "baseline unreachable — #{error}" : "baseline unreachable",
         reachable: false, error: error)
     end
+  end
+
+  # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
+  # decided from state that does not move between two calls a `retry_pause` apart. Module-level
+  # because BOTH send paths need it — `Engine#send_with_retries` and `Baseline`'s own — and a
+  # second copy is how the Layer-2 half came to be missing from one of them before.
+  def self.permanent_refusal?(err : String?) : Bool
+    err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
   end
 
   # Compare a probe to the baseline: which canaries reflected, and the strongest metric

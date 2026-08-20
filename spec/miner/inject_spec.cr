@@ -508,6 +508,20 @@ describe "Gori::Miner::Inject.existing_names" do
     M::Inject.existing_names(base.to_slice, M::Location::Multipart).should eq(Set{"note", "f"})
   end
 
+  # The stated invariant — it may test a name it could have skipped, never the reverse. A part
+  # whose CONTENT is a pasted HTTP dump carries its own `Content-Disposition` line; reading that
+  # as a field name would drop a genuinely hidden `admin` from the run and report it as
+  # already-in-request.
+  it "ignores a Content-Disposition line inside a part's CONTENT" do
+    body = "--B\r\nContent-Disposition: form-data; name=\"report\"\r\n\r\n" \
+           "here is the request I captured:\r\n" \
+           "Content-Disposition: form-data; name=\"admin\"\r\n" \
+           "\r\n--B--\r\n"
+    base = req("POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n" \
+               "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    M::Inject.existing_names(base, M::Location::Multipart).should eq(Set{"report"})
+  end
+
   # Best-effort, and it fails in the SAFE direction: a body gori cannot parse yields nothing to
   # protect, so the miner tests a name it might have skipped — never the reverse.
   it "is empty for a body it cannot parse" do

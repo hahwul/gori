@@ -724,12 +724,12 @@ module Gori::Miner
     end
 
     # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
-    # decided from state that does not move between two calls a `retry_pause` apart. The
-    # Layer-2 half is `Outbound.permanent_refusal?` — ONE home for the rule, because an
-    # exclude was once omitted from this list and an EXCLUDE_SWEEP_ERROR was then retried
-    # `retries` times, burning the request cap and stalling the run for nothing.
+    # decided from state that does not move between two calls a `retry_pause` apart. The rule
+    # itself is `Miner.permanent_refusal?` — ONE home for it, shared with `Baseline`'s own send
+    # path, because an exclude was once omitted from this list and an EXCLUDE_SWEEP_ERROR was
+    # then retried `retries` times, burning the request cap and stalling the run for nothing.
     private def permanent_refusal?(err : String?) : Bool
-      err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
+      Miner.permanent_refusal?(err)
     end
 
     private def park_if_paused : Nil
