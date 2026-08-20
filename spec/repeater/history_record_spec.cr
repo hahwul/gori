@@ -70,7 +70,6 @@ describe Gori::Repeater::HistoryRecord do
         id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 7_i64, wire: wire)
         detail = store.get_flow(id).not_nil!
         String.new(detail.request_head).should eq(String.new(wire))
-
       ensure
         Gori::Env.layer = previous
         slots.activate(nil)
