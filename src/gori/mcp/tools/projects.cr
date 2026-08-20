@@ -247,10 +247,9 @@ module Gori
 
       # Flow + issue counts for a project other than the one we serve — opened in its own
       # read-only Store handle and closed immediately. Best-effort: a locked/corrupt DB
-      # reports nil rather than failing the dry run. `read_only` is what the comment used to
-      # say ("read-only-ish") and now is: two aggregate reads never needed a writer fiber, and
-      # a project OTHER than the one we serve is the one most likely to have a live capture
-      # on the other end of it (#752).
+      # reports nil rather than failing the dry run. Two aggregate reads never needed a
+      # writer fiber, and a project OTHER than the one we serve is the one most likely to
+      # have a live capture on the other end of it.
       private def count_project_objects(proj : Project) : {Int64?, Int32?}
         return {nil, nil} unless File.exists?(proj.db_path)
         s = Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED, read_only: true)

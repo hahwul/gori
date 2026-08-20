@@ -19,7 +19,7 @@ private def contended_store(&)
   store = Gori::Store.new(db, nil)
   peer = DB.open(url)
   begin
-    yield store, peer
+    yield store, peer, path
   ensure
     # The store too, not just the peer. Each example ends with its own `close_within`
     # assertion, but a FAILED expectation raises straight past it — and then the files below
@@ -149,6 +149,50 @@ describe "Gori::Store writer against a second writer on the same database" do
         lock.release rescue nil
       end
       close_within(store, 20.seconds).should be_true
+    end
+  end
+
+  it "closes every sqlite handle after a recovered collision, so the WAL checkpoints" do
+    contended_store do |store, peer, path|
+      store.insert_flow(capture(1)).should be > 0
+      store.flush
+      store.insert_flow(capture(2)).should be > 0
+
+      while_peer_writes(peer) do
+        store.index_pending!.should eq(0)
+      end
+      store.insert_flow(capture(3)).should be > 0
+      store.flush
+
+      peer.close
+      close_within(store, 20.seconds).should be_true
+      # Last-connection close checkpoints. A leaked live handle from `retire_writer_conn`
+      # leaving sqlite3_close un-run leaves a non-empty -wal beside a tiny .db.
+      wal = "#{path}-wal"
+      File.size(wal).should eq(0) if File.exists?(wal)
+    end
+  end
+
+  it "does not leak a handle per idle FTS collision either" do
+    contended_store do |store, peer, path|
+      store.insert_flow(capture(1)).should be > 0
+      store.flush
+      store.insert_flow(capture(2)).should be > 0 # dirty row so idle ticks try to index
+
+      while_peer_writes(peer) do
+        # Several FAST idle ticks (5 ms) against a held write lock. try-lock skips the
+        # slice; without it each tick retired a connection whose close leaked the C handle.
+        sleep 40.milliseconds
+      end
+      store.insert_flow(capture(3)).should be > 0
+      store.fts_backlog.should be > 0 # idle skip must not pretend the backlog is empty
+      store.flush
+      store.fts_backlog.should eq(0)
+
+      peer.close
+      close_within(store, 20.seconds).should be_true
+      wal = "#{path}-wal"
+      File.size(wal).should eq(0) if File.exists?(wal)
     end
   end
 end
