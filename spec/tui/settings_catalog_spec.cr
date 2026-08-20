@@ -2,12 +2,13 @@ require "../spec_helper"
 
 include Gori::Tui
 
-# The full set of symbols Runner#open_settings knows how to dispatch (form sections +
-# the four dedicated overlays). If a catalog entry named a symbol outside this set, the
-# palette verb and the tab opener would both land on the "coming soon (TODO)" toast.
+# The full set of symbols Runner#open_settings knows how to dispatch (form sections, the four
+# dedicated overlays, and :reset_all, which raises the factory-reset confirm rather than
+# opening anything). If a catalog entry named a symbol outside this set, the palette verb and
+# the tab opener would both land on the "coming soon (TODO)" toast.
 KNOWN_SETTINGS_SECTIONS = [
   :network, :editor, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
-  :general, :tabs, :hosts, :env, :hotkeys,
+  :general, :tabs, :hosts, :env, :hotkeys, :reset_all,
 ]
 
 # SettingsCatalog is the single source of truth both the Ctrl-P palette and the Settings
@@ -49,6 +50,15 @@ describe Gori::Tui::SettingsCatalog do
       members.empty?.should be_false
       members.all?(&.in_tab).should be_true
     end
+  end
+
+  # ^R in the Preferences modal advertises itself on every row. `resettable` is what makes
+  # that honest for the OPENER rows, which have no working copy there: false means "there is
+  # nothing to restore here", and the view says so instead of falling through to silence. The
+  # two false ones hold operator DATA (typed env values, a hand-built hostname map) rather
+  # than preferences — only the full factory reset clears those, and it warns first.
+  it "marks exactly the data-holding openers as having no factory default" do
+    SettingsCatalog.all.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts])
   end
 
   it "keeps the Hostnames section out of the tab (reachable via Network's opener field)" do

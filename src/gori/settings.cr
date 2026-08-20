@@ -648,6 +648,79 @@ module Gori
       selected
     end
 
+    # Factory reset: every persisted setting back to the value a fresh install ships with,
+    # then written to disk. The reverse of `serialize` — and deliberately built as its
+    # mirror, one `reset_*` per `serialize_*` in the same order, because "what a factory
+    # reset covers" and "what gets written" have to be the SAME list or the reset quietly
+    # leaves a section behind. spec/settings/reset_spec.cr greps the two dispatchers below
+    # and fails when they diverge.
+    #
+    # This drops operator DATA as well as preferences — global env var VALUES, the hostname
+    # map, OAST provider tokens, saved decoder chains, rewriter/colormarker rules. That is
+    # what a factory reset means here (every one of those lives in settings.json, and the
+    # only alternative is a reset that lies about its scope), so the surfaces offering it
+    # name them in the confirm.
+    #
+    # NOT covered, because `serialize` does not write them: project overrides
+    # (`project_bind_*`, `project_env_vars`) and the `cli_*` invocation overlay. Those belong
+    # to the open project and to this process's argv — a settings reset does not speak for
+    # either, and clearing them would silently move a pinned listener.
+    # What a factory reset actually achieved. Three outcomes, not two, because the two
+    # failures are opposites and a caller has to tell them apart: `Refused` touched NOTHING
+    # (so re-applying settings live, or saying "reset" at all, would be a lie), while
+    # `Applied` cleared memory and only the write failed.
+    enum ResetResult
+      Saved   # in memory and on disk
+      Applied # in memory; the write failed
+      Refused # nothing touched at all
+    end
+
+    def self.reset_to_factory : ResetResult
+      # `save` refuses outright when the last load only got half the file in
+      # (see @@load_partial). Clearing memory first and only then discovering the write is
+      # refused would leave the session running on defaults while the file still holds
+      # everything — i.e. a "factory reset" that undoes itself at the next start. Ask before
+      # the side effect, not after it.
+      return ResetResult::Refused if @@load_partial
+      reset_sections
+      save ? ResetResult::Saved : ResetResult::Applied
+    end
+
+    # Restore the in-memory state, section by section. Mirrors `serialize` below — same
+    # helpers, same order, same file for each one.
+    private def self.reset_sections : Nil
+      reset_appearance
+      reset_layout
+      reset_statusline
+      reset_display
+      reset_companion
+      reset_notifications
+      reset_general
+      reset_update
+      reset_network
+      reset_upstream_rules
+      reset_outbound_tls
+      reset_retention
+      reset_listeners
+      reset_editor
+      reset_tabs
+      reset_hostname_overrides
+      reset_env
+      reset_scan_rules
+      reset_oast_providers
+      reset_hotkeys
+      reset_mine
+      reset_fuzzer
+      reset_probe
+      reset_discover
+      reset_decoder
+      reset_rewriter
+      reset_colormarker
+      # `$KEY` highlighting is cached against this revision, exactly as apply_sections does
+      # after a load — the env block just changed underneath every editor showing it.
+      Env.bump_highlight_rev
+    end
+
     # Builds the full settings.json document by dispatching to each section's
     # serialize_* helper (defined alongside that section's class_property/parse_*
     # in src/gori/settings/*.cr), in the SAME ORDER the monolithic serialize used to

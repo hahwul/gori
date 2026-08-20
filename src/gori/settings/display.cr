@@ -206,10 +206,32 @@ module Gori::Settings
     DEFAULT_SITEMAP_EXPAND_DEPTH
   end
 
+  # --- factory reset (dispatched by Settings.reset_to_factory) ------------------------
+  #
+  # One `reset_*` per `serialize_*` below, restoring exactly the fields that method writes.
+  # A source-grep spec (spec/settings/reset_spec.cr) guards the SECTION list — add a
+  # `serialize_x` with no `reset_x` and it fails. It cannot see inside these bodies, so a new
+  # FIELD is on you: add it to the `serialize_*` and to the `reset_*` in the same edit, or a
+  # factory reset will leave that one field at whatever the operator set.
+
+  private def self.reset_appearance : Nil
+    self.theme = DEFAULT_THEME
+    self.mouse = DEFAULT_MOUSE
+    self.pretty_bodies_default = DEFAULT_PRETTY_BODIES
+  end
+
   private def self.serialize_appearance(j : JSON::Builder) : Nil
     j.field "theme", theme
     j.field "mouse", mouse
     j.field "pretty_bodies", pretty_bodies_default
+  end
+
+  private def self.reset_layout : Nil
+    self.history_preview = DEFAULT_HISTORY_PREVIEW
+    self.probe_preview = DEFAULT_PROBE_PREVIEW
+    self.issues_preview = DEFAULT_ISSUES_PREVIEW
+    self.history_list_order = DEFAULT_HISTORY_LIST_ORDER
+    self.sitemap_expand_depth = DEFAULT_SITEMAP_EXPAND_DEPTH
   end
 
   # Omit layout when every pref is factory default (quiet install; merge-safe section).
@@ -231,6 +253,13 @@ module Gori::Settings
     end
   end
 
+  private def self.reset_statusline : Nil
+    self.statusline_enabled = DEFAULT_STATUSLINE_ENABLED
+    self.statusline_command = DEFAULT_STATUSLINE_COMMAND
+    self.statusline_interval = DEFAULT_STATUSLINE_INTERVAL
+    self.statusline_timeout = DEFAULT_STATUSLINE_TIMEOUT
+  end
+
   # Omit statusline when every field is factory default (quiet install; merge-safe).
   private def self.serialize_statusline(j : JSON::Builder) : Nil
     unless statusline_enabled? == DEFAULT_STATUSLINE_ENABLED &&
@@ -246,6 +275,16 @@ module Gori::Settings
         end
       end
     end
+  end
+
+  private def self.reset_display : Nil
+    self.default_detail_pane = DEFAULT_DETAIL_PANE
+    self.history_time_format = DEFAULT_HISTORY_TIME_FORMAT
+    self.show_gutter = DEFAULT_SHOW_GUTTER
+    self.wrap_lines = DEFAULT_WRAP_LINES
+    self.preview_body_kib = DEFAULT_PREVIEW_BODY_KIB
+    self.resource_meter = DEFAULT_RESOURCE_METER
+    self.terminal_title = DEFAULT_TERMINAL_TITLE
   end
 
   # Omit each opt-in section when every field is factory default (quiet install; merge-safe).
@@ -271,6 +310,12 @@ module Gori::Settings
     end
   end
 
+  private def self.reset_notifications : Nil
+    self.notify_bell = DEFAULT_NOTIFY_BELL
+    self.notify_toast = DEFAULT_NOTIFY_TOAST
+    self.notify_retention = DEFAULT_NOTIFY_RETENTION
+  end
+
   private def self.serialize_notifications(j : JSON::Builder) : Nil
     unless notify_bell? == DEFAULT_NOTIFY_BELL &&
            notify_toast? == DEFAULT_NOTIFY_TOAST &&
@@ -285,6 +330,11 @@ module Gori::Settings
     end
   end
 
+  private def self.reset_general : Nil
+    self.clipboard_osc52 = DEFAULT_CLIPBOARD_OSC52
+    self.confirm_quit = DEFAULT_CONFIRM_QUIT
+  end
+
   private def self.serialize_general(j : JSON::Builder) : Nil
     unless clipboard_osc52? == DEFAULT_CLIPBOARD_OSC52 &&
            confirm_quit? == DEFAULT_CONFIRM_QUIT
@@ -295,6 +345,11 @@ module Gori::Settings
         end
       end
     end
+  end
+
+  private def self.reset_editor : Nil
+    self.editor = DEFAULT_EDITOR
+    self.editor_markdown = DEFAULT_EDITOR_MARKDOWN
   end
 
   private def self.serialize_editor(j : JSON::Builder) : Nil

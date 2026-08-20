@@ -48,6 +48,12 @@ module Gori::Settings
     end
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory).
+  private def self.reset_fuzzer : Nil
+    self.fuzz_recent_wordlists = [] of String
+    self.fuzz_favorite_wordlists = [] of String
+  end
+
   # Omit the whole block when there's nothing worth persisting, so an install that
   # never touches the wordlist field never grows a "fuzzer" section.
   private def self.serialize_fuzzer(j : JSON::Builder) : Nil

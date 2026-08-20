@@ -29,10 +29,12 @@ The modal has a group strip across the top (four groups) and the focused group's
 | `↓` / `↵` | Drop from the strip into the fields |
 | `↑` / `↓` | Move between fields; `↑` from the first field returns to the strip |
 | `↵` | Save the current section, or open a section's editor |
-| `Ctrl-R` | Reset the current section to its defaults (still needs `↵` to persist) |
+| `Ctrl-R` | Reset the focused section to its defaults |
 | `Esc` | Close, discarding unsaved edits |
 
 Edits are a working copy: nothing is written until you press `↵`, and `Esc` throws them away. Saving applies live, with no restart.
+
+`Ctrl-R` follows the same rule on a field row — it restores that section's defaults into the working copy, and still needs `↵`. On an **opener** row there is no working copy to edit, so it asks first and then writes immediately: the tab bar, the theme, and your hotkeys can each be put back that way. **Env** and **Hostname overrides** hold entries you typed rather than preferences, so `Ctrl-R` there says so instead of quietly emptying them — the factory reset below is what clears those, and it warns you.
 
 ## Field Types
 
@@ -54,8 +56,13 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 | **General** | Clipboard (OSC 52), Confirm before quit |
 | **Notifications** | Bell on result, Toast on result, Retention (count) |
 | **Statusline** | Statusline on/off, Command, Interval (s) |
+| **Reset** | Action: restore every setting to its factory default |
 
 Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/reference/config/#statusline) runs a shell command on an interval and renders its stdout as the bottom row.
+
+**Reset** is the whole file, not one section — `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file — your global env values, hostname overrides, OAST provider tokens, saved decoder chains, and global rewriter and colormarker rules. Projects and their captures are untouched, and so are a project's own pinned bind and env.
+
+One thing survives on purpose: the global rule-id counters. A project can override a global rewriter or colormarker rule by id, and those overrides live in the project's own database, which a settings reset never opens. Rewinding the counter would hand a fresh rule an id an old override still names, so it keeps counting up and `settings.json` keeps a rules-less block to remember where it got to.
 
 ### Appearance
 
@@ -100,7 +107,7 @@ Network here is the **global default**. A project can pin its own bind address, 
 
 ## In the Project Picker
 
-`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Only **Theme** is editable there. The sections that need a live project (Tabs, Env, Hotkeys, and hostname overrides) stay hidden or report that you need to open a project first.
+`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Only **Theme** is editable there. The sections that need a live project (Tabs, Env, Hotkeys, and hostname overrides) stay hidden or report that you need to open a project first, and so does **Reset** — a factory reset has to be applied to a running session.
 
 ## Where Settings Live
 

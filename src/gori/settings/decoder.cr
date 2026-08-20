@@ -110,6 +110,16 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). `chains` goes
+  # through the SETTER so the Decoder engine's library is emptied with it — a chain left
+  # callable as a step after the library it came from was dropped would be a ghost. The
+  # legacy `sessions` block is cleared too: it is never written back, but an unadopted
+  # pre-upgrade block would otherwise survive a factory reset in memory.
+  private def self.reset_decoder : Nil
+    self.decoder_sessions = [] of {String, String, String}
+    self.decoder_chains = [] of {String, String}
+  end
+
   # Omit the whole block when there are no saved chains, so an untouched OR cleared Decoder
   # workbench never writes a "decoder" section. Open sub-tabs are NOT written here any more
   # (they belong to the project store): a save that re-emitted them would put the

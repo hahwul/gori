@@ -321,6 +321,15 @@ module Gori::Settings
     colormarker_colors.to_h { |c| {c.name, c.hex} }
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Rules and custom
+  # colours go; `colormarker_next_rule_id` stays, for the same reason `reset_rewriter` keeps
+  # its counter — a project store's `colormarker_overrides` are keyed by global rule id and
+  # survive this reset, so reusing an id would silently attach a stale override to a new rule.
+  private def self.reset_colormarker : Nil
+    self.colormarker_rules = [] of ColormarkerRule
+    self.colormarker_colors = [] of ColormarkerColor
+  end
+
   # Omit the whole block when there is nothing to say, so an untouched install never writes a
   # "colormarker" section. The counter is written even with an empty rule list — it is what keeps
   # a deleted rule's id from being handed out again after the last rule is removed. Custom
