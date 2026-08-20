@@ -236,14 +236,6 @@ module Gori::Miner
     end
   end
 
-  # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
-  # decided from state that does not move between two calls a `retry_pause` apart. Module-level
-  # because BOTH send paths need it — `Engine#send_with_retries` and `Baseline`'s own — and a
-  # second copy is how the Layer-2 half came to be missing from one of them before.
-  def self.permanent_refusal?(err : String?) : Bool
-    err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
-  end
-
   # Compare a probe to the baseline: which canaries reflected, and the strongest metric
   # diff (suppressed when the location is reflection-only).
   def self.decide(report : Baseline::Report, probe : Probe,

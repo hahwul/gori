@@ -8,6 +8,20 @@ require "../fuzz/matcher"
 require "../pacing"
 
 module Gori::Miner
+  # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
+  # decided from state that does not move between two calls a `retry_pause` apart, and the
+  # Layer-2 half is `Outbound.permanent_refusal?` — ONE home for the rule, because an exclude
+  # was once omitted from a private copy and an EXCLUDE_SWEEP_ERROR was then retried `retries`
+  # times, burning the request cap and stalling the run for nothing.
+  #
+  # Module-level, and in THIS file, because the miner has TWO retry loops that must not drift —
+  # `Engine#send_with_retries` and `Baseline#send_with_retries` (calibration) — and because
+  # `spec/outbound_spec.cr`'s executable one-home guard reads `src/gori/<tool>/engine.cr` for
+  # the call. Both loops ask this; neither names a refusal constant of its own.
+  def self.permanent_refusal?(err : String?) : Bool
+    err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
+  end
+
   # The hard-cap wrapper (baseline calibration + bucket probes + confirmation rounds all
   # count against `--max-requests`) lives with the send seam it wraps: Fuzz::CappedBackend.
 
@@ -723,11 +737,6 @@ module Gori::Miner
       end
     end
 
-    # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
-    # decided from state that does not move between two calls a `retry_pause` apart. The rule
-    # itself is `Miner.permanent_refusal?` — ONE home for it, shared with `Baseline`'s own send
-    # path, because an exclude was once omitted from this list and an EXCLUDE_SWEEP_ERROR was
-    # then retried `retries` times, burning the request cap and stalling the run for nothing.
     private def permanent_refusal?(err : String?) : Bool
       Miner.permanent_refusal?(err)
     end
