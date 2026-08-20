@@ -122,6 +122,11 @@ module Gori::Settings
     false
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory).
+  private def self.reset_scan_rules : Nil
+    self.scan_rules = [] of ScanRule
+  end
+
   # Omit when empty so an untouched install never writes "scan_rules": [].
   private def self.serialize_scan_rules(j : JSON::Builder) : Nil
     unless scan_rules.empty?

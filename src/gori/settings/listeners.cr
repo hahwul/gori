@@ -182,6 +182,13 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Only the
+  # persisted LIST is cleared here — the sockets those entries opened are the caller's to
+  # reconcile, exactly as they are after a hand edit of this section (see Session#reload_listeners).
+  private def self.reset_listeners : Nil
+    self.listeners = [] of Listener
+  end
+
   private def self.serialize_listeners(j : JSON::Builder) : Nil
     return if listeners.empty?
     j.field "listeners" do

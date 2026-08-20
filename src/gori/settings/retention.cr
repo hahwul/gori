@@ -31,6 +31,11 @@ module Gori::Settings
     int_field(h, "max_flows").try { |v| self.retention_max_flows = v < 0 ? 0 : v }
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory).
+  private def self.reset_retention : Nil
+    self.retention_max_flows = DEFAULT_RETENTION_FLOWS
+  end
+
   # Omitted at the factory default, like the other optional sections, so an untouched install
   # keeps a settings.json free of values nobody chose.
   private def self.serialize_retention(j : JSON::Builder) : Nil

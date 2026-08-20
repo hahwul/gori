@@ -304,6 +304,16 @@ module Gori::Tui
       @feedback = "all bindings reset to default"
     end
 
+    # Back to the "auto" OS profile. Deliberately NOT folded into `reset_all`, whose footer
+    # promises the BINDINGS ("⇧R reset all") and has never claimed the profile pin — an
+    # operator who pinned Linux on a mac did so on purpose. The Preferences modal's ^R does
+    # claim it ("drop every rebinding and the OS profile pin"), so that arm calls both.
+    def reset_profile : Nil
+      @profile = Settings::DEFAULT_KEYMAP_OS
+      @feedback_kind = :ok
+      @feedback = "OS profile back to #{Hotkeys.profile_label(Settings::DEFAULT_KEYMAP_OS)}"
+    end
+
     def cycle_profile(d : Int32) : Nil
       i = Hotkeys::PROFILES.index(@profile) || 0
       @profile = Hotkeys::PROFILES[(i + d) % Hotkeys::PROFILES.size]

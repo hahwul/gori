@@ -65,6 +65,19 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for these two sections (dispatched by Settings.reset_to_factory). Both
+  # hold operator DATA rather than preferences, so a factory reset really does drop the
+  # hostname map and every global env var — token values included. That is why the only
+  # surface offering it puts it behind a confirm that names them.
+  private def self.reset_hostname_overrides : Nil
+    self.hostname_overrides = [] of {String, String}
+  end
+
+  private def self.reset_env : Nil
+    self.env_vars = [] of {String, String}
+    self.env_prefix = DEFAULT_ENV_PREFIX
+  end
+
   # Omit when empty so an untouched install never writes "hostname_overrides": [].
   private def self.serialize_hostname_overrides(j : JSON::Builder) : Nil
     unless hostname_overrides.empty?

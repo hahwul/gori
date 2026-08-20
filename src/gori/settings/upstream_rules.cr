@@ -171,6 +171,12 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Through the
+  # SETTER, so the compiled host patterns are dropped with the rules.
+  private def self.reset_upstream_rules : Nil
+    self.upstream_rules = [] of UpstreamRule
+  end
+
   # Omit when empty so an untouched install never writes "upstream_rules": [].
   private def self.serialize_upstream_rules(j : JSON::Builder) : Nil
     return if upstream_rules.empty?

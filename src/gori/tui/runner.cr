@@ -1677,23 +1677,28 @@ module Gori::Tui
       Settings.tab_prefs = ov.to_prefs
       ok = Settings.save
       @resized = true
-      # Snap off a now-hidden active tab. Use the GENUINE visibility (no force:) for this
-      # decision — effective_tabs force-includes the active tab, which would mask the hide.
-      vis = Chrome.visible_tabs(Settings.tab_prefs)
-      unless vis.any? { |(s, _)| s == @active_tab }
-        # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
-        # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
-        # (Notes/Fuzzer/Issues/Miner included), unlike the old project/repeater/decoder-only
-        # flush which silently dropped the others at hide-time.
-        flush_active_tab_edits
-        @active_tab = vis.first[0]
-        on_enter_tab
-        @focus = :menu
-      end
+      settle_hidden_active_tab
       # The layout is applied to the live session regardless (like theme/network); only the
       # disk write can fail, so say so honestly rather than implying nothing happened.
       @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
       true
+    end
+
+    # Snap off a now-hidden active tab, after anything that changed Settings.tab_prefs (the
+    # editor's save, and the factory reset — which puts the DEFAULT_HIDDEN set back and can
+    # therefore hide the tab you are standing on). Use the GENUINE visibility (no force:) for
+    # this decision — effective_tabs force-includes the active tab, which would mask the hide.
+    private def settle_hidden_active_tab : Nil
+      vis = Chrome.visible_tabs(Settings.tab_prefs)
+      return if vis.any? { |(s, _)| s == @active_tab }
+      # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
+      # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
+      # (Notes/Fuzzer/Issues/Miner included), unlike the old project/repeater/decoder-only
+      # flush which silently dropped the others at hide-time.
+      flush_active_tab_edits
+      @active_tab = vis.first[0]
+      on_enter_tab
+      @focus = :menu
     end
 
     # Persist the hostname-overrides working copy. Returns Settings.save's success so the
@@ -4573,6 +4578,11 @@ module Gori::Tui
       when :hosts   then open_overlay(hosts_editor(back))
       when :env     then open_overlay(env_editor(back))
       when :hotkeys then open_overlay(hotkeys_editor(back))
+      when :reset_all
+        # The palette's "Settings: Reset" entry. Same verb the modal's Reset row runs, so it
+        # goes through the same confirm rather than a second copy of the wording. `back` is
+        # the modal to re-pull afterwards when there is one (nil from the palette).
+        confirm_factory_reset(back)
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
@@ -4590,6 +4600,7 @@ module Gori::Tui
       # identically from the modal and the dedicated settings card — one seam, no drift.
       ov.on_saved = ->(sec : Symbol, msg : String) { @toast = apply_settings_saved(sec, msg); nil }
       ov.on_open_editor = ->(sec : Symbol) { open_settings_section(sec, ov) }
+      ov.on_reset = ->(sec : Symbol) { confirm_preferences_reset(sec, ov) }
       open_overlay(ov)
     end
 
@@ -4677,6 +4688,111 @@ module Gori::Tui
         apply_theme_preview(ov.theme_value) # :theme live-previews the restored default theme
         @toast = "#{section} settings reset to defaults — ↵ to save"
       end
+    end
+
+    # ^R on a Preferences OPENER row, and ↵ on its Reset row. A form row's ^R edits a working
+    # copy and waits for ↵; these rows have no working copy in the modal, so the restore is a
+    # disk write — hence the confirm, and hence the live-apply that follows it.
+    #
+    # Each arm reuses the editor's OWN reset + save path rather than reaching into Settings:
+    # the tab bar goes through TabsOverlay#reset_to_defaults + save_tabs, the theme through
+    # the shared SettingsView field engine, the hotkeys through HotkeysOverlay#reset_all +
+    # save_hotkeys. So "reset from the modal" and "reset inside the editor" cannot drift into
+    # meaning two different things.
+    #
+    # `prefs` is the modal the confirm is raised from and restored into. Every arm re-pulls it
+    # afterwards: it built one working copy per form section when it OPENED, those copies are
+    # now older than settings.json, and a ↵ on any of them would write the pre-reset values
+    # back — and `apply_settings_saved` would push them at the live proxy. (`dirty?` compares
+    # the working copy to its own equally-stale baseline, so esc would not warn either.)
+    private def confirm_preferences_reset(section : Symbol, prefs : PreferencesOverlay) : Nil
+      case section
+      when :reset_all then confirm_factory_reset(prefs)
+      when :tabs
+        confirm("RESET TAB BAR",
+          "Reset the tab bar to its default order and\n" \
+          "visibility? This is saved immediately.",
+          confirm_label: "reset", danger: true, return_to: :preferences) do
+          ov = TabsOverlay.new # reconciled from the persisted prefs, then reverted
+          ov.reset_to_defaults
+          save_tabs(ov)
+          prefs.reload_from_settings
+        end
+      when :theme
+        confirm("RESET THEME",
+          "Switch back to the default #{Settings::DEFAULT_THEME} theme?\n" \
+          "This is saved immediately.",
+          confirm_label: "reset", danger: true, return_to: :preferences) do
+          v = SettingsView.new
+          v.reload(:theme)
+          v.reset_to_defaults
+          @toast = apply_settings_saved(:theme, v.save)
+          prefs.reload_from_settings
+        end
+      when :hotkeys
+        confirm("RESET HOTKEYS",
+          "Drop every rebinding and the OS profile pin,\n" \
+          "back to gori's defaults? This is saved immediately.",
+          confirm_label: "reset", danger: true, return_to: :preferences) do
+          ov = HotkeysOverlay.new(@session.registry)
+          ov.reset_all     # the rebindings…
+          ov.reset_profile # …and the OS pin, which reset_all deliberately leaves alone
+          save_hotkeys(ov)
+          prefs.reload_from_settings
+        end
+      end
+    end
+
+    # The whole settings file back to a fresh install's state — the palette's
+    # "Settings: Reset" and the modal's Reset row. Named in the body, not summarised: this is
+    # the one reset that also drops operator DATA (env VALUES, the hostname map, OAST tokens,
+    # saved decoder chains, global rewriter/colormarker rules), and an operator who reads
+    # "every setting" alone would not expect their tokens to go with it.
+    private def confirm_factory_reset(prefs : PreferencesOverlay? = nil) : Nil
+      confirm("FACTORY RESET",
+        "Restore every setting to its factory default?\n" \
+        "This also drops your global env values, hostname\n" \
+        "overrides, OAST tokens, saved decoder chains and\n" \
+        "global rewriter/colormarker rules. Projects are kept.",
+        confirm_label: "reset", danger: true, return_to: :preferences) do
+        # `Refused` means NOTHING was touched — not the file, not memory — so it must not run
+        # the live re-apply (which would rebind the proxy and reconcile listeners off the back
+        # of a reset that did not happen) and must not report one either. That is the whole
+        # reason `reset_to_factory` answers with three states rather than a Bool.
+        case Settings.reset_to_factory
+        in .refused? then @toast = "settings not reset — #{Settings.path} could not be read in full"
+        in .saved?   then @toast = apply_factory_reset("settings reset to defaults")
+        in .applied? then @toast = apply_factory_reset("settings reset — could not save to #{Settings.path}")
+        end
+        prefs.try(&.reload_from_settings)
+      end
+    end
+
+    # Re-apply EVERY section live after a factory reset, since one is not addressed to any
+    # single section: the palette, the keymap, the tab bar, the list/preview prefs, the
+    # mascot and the proxy bind can all have moved in the same write. Deliberately the union
+    # of what `apply_settings_saved`'s per-section arms do, run unconditionally — a reset
+    # that left the old theme on screen would read as "nothing happened".
+    private def apply_factory_reset(msg : String) : String
+      Theme.apply(Settings.theme)
+      @theme_restore = Settings.theme # nothing to revert on the next esc — this IS the theme now
+      @keymap = Hotkeys.build_keymap(@session.registry)
+      help_controller.reload_help(@session.registry) # Help rows name the chords that just moved
+      reconcile_mouse
+      @pretty = Settings.pretty_bodies_default
+      @session.set_verify_upstream(Settings.verify_upstream?)
+      @session.set_serve_landing(Settings.serve_landing?)
+      history_controller.view.reload(@session.store)
+      history_controller.refresh_preview
+      sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
+      @companion.wake_on_input
+      project_controller.refresh_network
+      settle_hidden_active_tab # tab_prefs is empty now — the default hidden set applies again
+      @resized = true          # theme + tab strip changed behind the modal
+      # Through apply_settings for the same reason a :network save is: the bind address moved
+      # back to the default, and that has to reach the running accept socket (or say why it
+      # did not) instead of only the file.
+      apply_settings(msg)
     end
 
     private def confirm_tabs_reset(ov : TabsOverlay) : Nil

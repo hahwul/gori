@@ -4,14 +4,24 @@ require "json"
 # data). See settings.cr for the module-level overview and the load/save/serialize
 # orchestration.
 module Gori::Settings
+  # Factory values, named rather than inlined so `reset_discover` restores the same
+  # numbers the properties below start at instead of a second copy that can drift.
+  DEFAULT_DISCOVER_CONTAINMENT = "scope-aware"
+  DEFAULT_DISCOVER_MAX_DEPTH   =  4
+  DEFAULT_DISCOVER_CONCURRENCY = 20
+  DEFAULT_DISCOVER_SPIDER      = true
+  DEFAULT_DISCOVER_BRUTEFORCE  = true
+  DEFAULT_DISCOVER_EXTENSIONS  = false
+  DEFAULT_DISCOVER_KEEP_ALIVE  = true
+
   # Last Discover overlay choices (global scratch — not project data).
-  class_property discover_containment : String = "scope-aware"
-  class_property discover_max_depth : Int32 = 4
-  class_property discover_concurrency : Int32 = 20
-  class_property? discover_spider : Bool = true
-  class_property? discover_bruteforce : Bool = true
-  class_property? discover_extensions : Bool = false
-  class_property? discover_keep_alive : Bool = true
+  class_property discover_containment : String = DEFAULT_DISCOVER_CONTAINMENT
+  class_property discover_max_depth : Int32 = DEFAULT_DISCOVER_MAX_DEPTH
+  class_property discover_concurrency : Int32 = DEFAULT_DISCOVER_CONCURRENCY
+  class_property? discover_spider : Bool = DEFAULT_DISCOVER_SPIDER
+  class_property? discover_bruteforce : Bool = DEFAULT_DISCOVER_BRUTEFORCE
+  class_property? discover_extensions : Bool = DEFAULT_DISCOVER_EXTENSIONS
+  class_property? discover_keep_alive : Bool = DEFAULT_DISCOVER_KEEP_ALIVE
   class_property? discover_prefs_saved : Bool = false
 
   private def self.parse_discover_prefs(node : JSON::Any?) : Nil
@@ -50,6 +60,21 @@ module Gori::Settings
     self.discover_keep_alive = keep_alive
     self.discover_prefs_saved = true
     save
+  end
+
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Clearing
+  # `discover_prefs_saved` is what actually drops the key from the file — serialize_discover
+  # writes nothing without it — but the values are restored too, because they are what the
+  # Discover overlay opens on for the rest of THIS process.
+  private def self.reset_discover : Nil
+    self.discover_containment = DEFAULT_DISCOVER_CONTAINMENT
+    self.discover_max_depth = DEFAULT_DISCOVER_MAX_DEPTH
+    self.discover_concurrency = DEFAULT_DISCOVER_CONCURRENCY
+    self.discover_spider = DEFAULT_DISCOVER_SPIDER
+    self.discover_bruteforce = DEFAULT_DISCOVER_BRUTEFORCE
+    self.discover_extensions = DEFAULT_DISCOVER_EXTENSIONS
+    self.discover_keep_alive = DEFAULT_DISCOVER_KEEP_ALIVE
+    self.discover_prefs_saved = false
   end
 
   private def self.serialize_discover(j : JSON::Builder) : Nil

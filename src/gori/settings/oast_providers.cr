@@ -64,6 +64,12 @@ module Gori::Settings
     save
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Provider TOKENS
+  # live in these entries, so this is one of the drops the reset confirm has to name.
+  private def self.reset_oast_providers : Nil
+    self.oast_providers = [] of OastProvider
+  end
+
   # Omit when empty so an untouched install never writes "oast_providers": [].
   private def self.serialize_oast_providers(j : JSON::Builder) : Nil
     unless oast_providers.empty?

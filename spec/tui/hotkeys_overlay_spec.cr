@@ -22,6 +22,22 @@ describe HotkeysOverlay do
     reset_settings
   end
 
+  # `reset_all` is what ⇧R runs, and its footer promises the BINDINGS — an operator who pinned
+  # an OS profile did so on purpose, so it leaves the pin. The Preferences modal's ^R promises
+  # both ("drop every rebinding and the OS profile pin"), which is why `reset_profile` exists
+  # separately for that arm to call; folding it into reset_all would make ⇧R lie instead.
+  it "keeps the OS profile pin on reset_all, and drops it only on reset_profile" do
+    Gori::Settings.keymap_os = "linux"
+    o = HotkeysOverlay.new(Gori::Verbs.registry)
+    o.reset_all
+    o.to_working[1].should eq("linux")
+
+    o.reset_profile
+    o.to_working[1].should eq(Gori::Settings::DEFAULT_KEYMAP_OS)
+  ensure
+    reset_settings
+  end
+
   it "selects only binding rows (headers are skipped) and row_at ignores headers" do
     o = fresh_overlay
     box = o.overlay_box(Rect.new(0, 0, 80, 50)).not_nil!

@@ -13,11 +13,14 @@ module Gori::Settings
   # the one place the alias is applied.
   DEFAULT_COMMAND_MODIFIER = "ctrl"
 
+  # "auto" tracks the build's platform — the profile an install that never picked one uses.
+  DEFAULT_KEYMAP_OS = "auto"
+
   # Hotkey customization (settings:hotkeys). `keymap_os` pins an OS default profile —
   # "auto" tracks the build's platform; "darwin"/"linux"/"windows" force one.
   # `keymap_overrides` is SPARSE: verb-id → chord-label strings ("ctrl-p", "shift-s").
   # An empty list = explicit unbind; an absent id = use the profile default.
-  class_property keymap_os : String = "auto"
+  class_property keymap_os : String = DEFAULT_KEYMAP_OS
   class_property keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
   class_property command_modifier : String = DEFAULT_COMMAND_MODIFIER
 
@@ -71,11 +74,19 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Drops every
+  # rebinding and the OS profile pin; the caller rebuilds the live keymap from what is left.
+  private def self.reset_hotkeys : Nil
+    self.keymap_os = DEFAULT_KEYMAP_OS
+    self.keymap_overrides = {} of String => Array(String)
+    self.command_modifier = DEFAULT_COMMAND_MODIFIER
+  end
+
   # Omit when untouched (default profile + default modifier + no overrides) so an
   # untouched install never writes a "hotkeys" block. Every field in the block must
   # appear in this guard — a modifier-only change would otherwise be dropped.
   private def self.serialize_hotkeys(j : JSON::Builder) : Nil
-    unless keymap_overrides.empty? && keymap_os == "auto" && command_modifier == DEFAULT_COMMAND_MODIFIER
+    unless keymap_overrides.empty? && keymap_os == DEFAULT_KEYMAP_OS && command_modifier == DEFAULT_COMMAND_MODIFIER
       j.field "hotkeys" do
         j.object do
           j.field "os", keymap_os

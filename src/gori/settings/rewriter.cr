@@ -298,6 +298,19 @@ module Gori::Settings
     false
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). The rules go;
+  # `rewriter_next_rule_id` deliberately does NOT go back to 1. Its monotonicity is not about
+  # the global list at all — a PROJECT store keeps `rewriter_overrides` keyed by global rule
+  # id (Store#rewriter_overrides), and those rows live in a database this reset never opens
+  # and cannot clear. Rewinding the counter would hand id 1 to the next rule created, and a
+  # project that had disabled the OLD id 1 would silently apply that override to a rule it
+  # has never seen. So the counter is the one thing here that outlives a factory reset — a
+  # bookkeeping number nobody reads as a setting, and the file keeps a rules-less `rewriter`
+  # block for it, exactly as it does after deleting the last rule by hand.
+  private def self.reset_rewriter : Nil
+    self.rewriter_rules = [] of RewriterRule
+  end
+
   # Omit the whole block when there is nothing to say, so an untouched install never writes a
   # "rewriter" section. The counter is written even with an empty list — it is what keeps a
   # deleted rule's id from being handed out again after the last rule is removed.

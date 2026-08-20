@@ -381,6 +381,23 @@ module Gori::Settings
     self.tls_passthrough = arr.compact_map(&.as_s?.try(&.strip).presence)
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Only the GLOBAL
+  # defaults: the `project_*` and `cli_*` overlays are not written by serialize_network and
+  # are not this section's to clear — they belong to the open project and to this invocation's
+  # argv, neither of which a settings reset speaks for.
+  private def self.reset_network : Nil
+    self.bind_host = DEFAULT_BIND_HOST
+    self.bind_port = DEFAULT_BIND_PORT
+    self.upstream_proxy = DEFAULT_UPSTREAM_PROXY
+    self.verify_upstream = DEFAULT_VERIFY_UPSTREAM
+    self.serve_landing = DEFAULT_SERVE_LANDING
+    self.connect_timeout_secs = DEFAULT_CONNECT_TIMEOUT_SECS
+    self.io_timeout_secs = DEFAULT_IO_TIMEOUT_SECS
+    self.capture_max_mib = DEFAULT_CAPTURE_MAX_MIB
+    self.tls_passthrough = DEFAULT_TLS_PASSTHROUGH.dup
+    self.http2 = DEFAULT_HTTP2
+  end
+
   private def self.serialize_network(j : JSON::Builder) : Nil
     j.field "network" do
       j.object do

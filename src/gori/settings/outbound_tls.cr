@@ -124,6 +124,13 @@ module Gori::Settings
     TLS_VERSIONS.includes?(v) ? v : ""
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Through the
+  # SETTER, so the compiled host patterns go with the rules and `outbound_tls_for` falls
+  # back to DEFAULT_OUTBOUND_TLS again.
+  private def self.reset_outbound_tls : Nil
+    self.outbound_tls = [] of OutboundTlsRule
+  end
+
   # Omit when empty so an untouched install never writes "outbound_tls": [].
   private def self.serialize_outbound_tls(j : JSON::Builder) : Nil
     return if outbound_tls.empty?

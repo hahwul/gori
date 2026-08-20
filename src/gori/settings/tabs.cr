@@ -25,6 +25,13 @@ module Gori::Settings
     out
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Empty is the
+  # "never customized" state Chrome.reconcile reads as "use the catalog order with only
+  # DEFAULT_HIDDEN hidden" — the same thing the TAB BAR editor's own `r` restores.
+  private def self.reset_tabs : Nil
+    self.tab_prefs = [] of {String, Bool}
+  end
+
   # Omit when empty so an untouched install never writes an ambiguous "tabs": []
   # (a human reader might misread it as "all hidden").
   private def self.serialize_tabs(j : JSON::Builder) : Nil

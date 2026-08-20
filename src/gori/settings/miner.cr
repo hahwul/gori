@@ -4,15 +4,21 @@ require "json"
 # data). See settings.cr for the module-level overview and the load/save/serialize
 # orchestration.
 module Gori::Settings
+  # Factory values, named rather than inlined so `reset_mine` restores the same numbers
+  # the properties below start at instead of a second copy that can drift.
+  DEFAULT_MINE_CONCURRENCY = 10
+  DEFAULT_MINE_NOTIFY      = "when-found"
+  DEFAULT_MINE_KEEP_ALIVE  = true
+
   # Last Mine-parameters overlay choices (global scratch — not project data).
   # locations: checked location labels; concurrency/notify mirror the overlay.
   class_property mine_locations : Array(String) = [] of String
-  class_property mine_concurrency : Int32 = 10
-  class_property mine_notify : String = "when-found"
+  class_property mine_concurrency : Int32 = DEFAULT_MINE_CONCURRENCY
+  class_property mine_notify : String = DEFAULT_MINE_NOTIFY
   # Reuse one connection across the mine's probes. Mirrors `Settings.discover_keep_alive?`,
   # including the `!= false` read below: a settings file written before this key existed must
   # come back as the default ON, not as an opt-out the operator never chose.
-  class_property? mine_keep_alive : Bool = true
+  class_property? mine_keep_alive : Bool = DEFAULT_MINE_KEEP_ALIVE
   class_property? mine_prefs_saved : Bool = false
 
   private def self.parse_mine_prefs(node : JSON::Any?) : Nil
@@ -44,6 +50,17 @@ module Gori::Settings
     self.mine_keep_alive = keep_alive
     self.mine_prefs_saved = true
     save
+  end
+
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). Same shape as
+  # reset_discover: clearing `mine_prefs_saved` drops the key, the values are what the Mine
+  # overlay opens on for the rest of this process.
+  private def self.reset_mine : Nil
+    self.mine_locations = [] of String
+    self.mine_concurrency = DEFAULT_MINE_CONCURRENCY
+    self.mine_notify = DEFAULT_MINE_NOTIFY
+    self.mine_keep_alive = DEFAULT_MINE_KEEP_ALIVE
+    self.mine_prefs_saved = false
   end
 
   private def self.serialize_mine(j : JSON::Builder) : Nil

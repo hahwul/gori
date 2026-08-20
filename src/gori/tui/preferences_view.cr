@@ -22,8 +22,11 @@ module Gori::Tui
   # + fire: nil = all (in-app); the picker passes a small set (just :theme, which it can
   # host as a card) so tabs/hosts/env/hotkeys stay hidden there.
   class PreferencesView
-    # What a keystroke asks the host to do. :saved / :open carry the section symbol;
-    # :saved also carries the toast the host shows after its own live-apply.
+    # What a keystroke asks the host to do. :saved / :open / :reset carry the section
+    # symbol; :saved also carries the toast the host shows after its own live-apply.
+    # :reset is the one the view CANNOT perform itself: an opener row has no working copy
+    # here (unlike a form row, whose ^R edits one and waits for ↵), so restoring it means
+    # writing to disk — which needs a confirm, and confirms belong to the host.
     record Outcome, kind : Symbol, section : Symbol? = nil, message : String? = nil
     NONE = Outcome.new(:none)
 
@@ -80,6 +83,15 @@ module Gori::Tui
         return
       end
       open_default
+    end
+
+    # Re-pull EVERY section from Settings, unconditionally. `refresh` is the polite version
+    # (it yields to unsaved edits); this is the one for after a RESET, where the working
+    # copies are not "unsaved edits" worth protecting but stale values that would be written
+    # straight back over the defaults the operator just asked for.
+    def reload_from_settings : Nil
+      reload_all
+      sync_focus
     end
 
     private def reload_all : Nil
@@ -157,7 +169,7 @@ module Gori::Tui
       when key.delete?
         focused_form.try(&.delete)
       when ev.ctrl? && key.lower_r?
-        reset_focused
+        return reset_focused
       when c && !ev.ctrl? && !ev.alt?
         # Printable (incl. space) → into the focused field, exactly like the overlay:
         # space toggles a bool / cycles a choice / types into text.
@@ -249,6 +261,8 @@ module Gori::Tui
     private def activate_focus : Outcome
       return NONE unless ft = focused_target
       sec = ft[0]
+      # An :action row IS its verb — ↵ and ^R ask for the same thing.
+      return reset_outcome(sec) if sec.kind == :action
       return open_or_block(sec.sym) if sec.kind == :opener
       form = @forms[sec.sym]
       if opener = form.focused_opener
@@ -278,7 +292,7 @@ module Gori::Tui
       (ao = @allowed_openers).nil? || ao.includes?(sym)
     end
 
-    private def reset_focused : Nil
+    private def reset_focused : Outcome
       if f = focused_form
         f.reset_to_defaults # working copy only — still needs ↵ to persist, so no confirm
         # reset_to_defaults snaps the FORM's own cursor back to field 0, but the modal
@@ -286,7 +300,34 @@ module Gori::Tui
         # row that actually receives edits drift apart until the next ↑/↓/click.
         sync_focus
         @status = "section reset to defaults — ↵ to save"
+        return NONE
       end
+      # Not a form row, so there is nothing here to revert in place. The footer advertises
+      # ^R on every row, and it used to fall through to silence on exactly these — the Tabs,
+      # Theme and Hotkeys openers, each of which HAS a factory default, just not one this
+      # view holds.
+      return NONE unless ft = focused_target
+      reset_outcome(ft[0])
+    end
+
+    # Hand the reset to the host, or say why there is nothing to hand over. `resettable` is
+    # false for the two openers holding operator data (Env, Hostnames): "restore the default"
+    # there would mean deleting what the operator typed, which is the full factory reset's
+    # job to offer and to warn about — not a quiet side effect of a chord.
+    private def reset_outcome(sec : SettingsCatalog::Section) : Outcome
+      # Same gate as `open_or_block`, and for the same reason: a restricted host (the project
+      # picker) has no shell to confirm in or live-apply into, and its outcome handler has no
+      # :reset arm — so without this the picker's Theme row would answer ^R with exactly the
+      # silence this whole change set exists to remove.
+      unless @allowed_openers.nil?
+        @status = "open a project to reset this"
+        @status_warn = true
+        return NONE
+      end
+      return Outcome.new(:reset, sec.sym) if sec.resettable
+      @status = "#{sec.title} holds your own entries — nothing to restore (^R resets defaults)"
+      @status_warn = true
+      NONE
     end
 
     # --- rendering ---
@@ -385,17 +426,30 @@ module Gori::Tui
       screen.fill(Rect.new(content.x, y, content.w, 1), bg)
       screen.cell(content.x, y, focused ? '▎' : ' ', Theme.accent, bg)
       lx = content.x + 2
-      cue = "↵ open"
-      cx = {content.right - cue.size, lx + sec.title.size + 1}.max
-      screen.text(lx, y, sec.title, focused ? Theme.text_bright : Theme.text, bg)
+      # An :action row's label is its `desc`: the subheader above already says the title, and
+      # "Reset / Reset" would read as a stutter where the row has to say what it will do.
+      label = sec.kind == :action ? sec.desc : sec.title
+      cue = sec.kind == :action ? "↵ reset" : "↵ open"
+      # The cue is pinned to the right edge of the CARD and the label is clipped to what is
+      # left of it. It used to be `{content.right - cue.size, lx + title.size + 1}.max`, which
+      # pushed the cue PAST the card whenever the label did not fit — `screen.text` clips at
+      # the screen, not at the card, so the row overwrote the right border and lost the cue
+      # entirely. A 43-character :action label does that under ~61 columns, well above the
+      # `box.w < 24` render guard.
+      cx = {content.right - cue.size, lx + 1}.max
+      screen.text(lx, y, label, focused ? Theme.text_bright : Theme.text, bg, width: {cx - lx - 1, 1}.max)
       # Theme row: preview the CURRENT theme inline — its name + a swatch of its palette —
-      # so you see what's selected without opening the card.
+      # so you see what's selected without opening the card. Both are extras: on a card too
+      # narrow to seat them after the label they are dropped rather than drawn over the title
+      # or the cue.
       if sec.sym == :theme
         name = Theme.canonical(Settings.theme)
-        sx = {cx - 1 - SWATCH_W, lx + sec.title.size + 2}.max
-        name_x = lx + sec.title.size + 2
-        screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)
-        draw_swatch(screen, sx, y, name)
+        name_x = lx + label.size + 2
+        sx = cx - 1 - SWATCH_W
+        if sx >= name_x
+          screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)
+          draw_swatch(screen, sx, y, name)
+        end
       end
       screen.text(cx, y, cue, focused ? Theme.accent : Theme.muted, bg, width: {content.right - cx, 1}.max)
     end
@@ -438,6 +492,7 @@ module Gori::Tui
         fld = flds ? flds[field]? : nil
         return fld ? fld.hint : ""
       end
+      return "restores every section to its factory default — asks before it writes" if sec.kind == :action
       "↵ opens the #{sec.title} editor"
     end
 
@@ -454,7 +509,8 @@ module Gori::Tui
     end
 
     # The group's sections, honouring allowed_openers (the picker hides :opener rows it has
-    # no editor for).
+    # no editor for — and the :action row with them: the picker has no shell to live-apply a
+    # factory reset into, so offering the verb there would half-work).
     private def sections_of(gsym : Symbol) : Array(SettingsCatalog::Section)
       SettingsCatalog.sections_in(gsym).select { |s| s.kind == :form || opener_allowed?(s.sym) }
     end
@@ -571,6 +627,10 @@ module Gori::Tui
     property on_palette : Proc(Nil)?
     property on_saved : Proc(Symbol, String, Nil)?
     property on_open_editor : Proc(Symbol, Nil)?
+    # ^R on an opener row / ↵ on the Reset row. Persists on confirm (see PreferencesView's
+    # Outcome doc for why the view cannot do it), so the host owns both the dialog and the
+    # live-apply that follows.
+    property on_reset : Proc(Symbol, Nil)?
 
     getter view : PreferencesView
 
@@ -585,6 +645,14 @@ module Gori::Tui
     # the Hostnames editor moves Network's "N entries" row. Called on the way back in.
     def refresh(section : Symbol) : Nil
       @view.refresh(section)
+    end
+
+    # Re-pull every section after a reset the HOST performed behind this modal. Not `refresh`
+    # per section: that one protects unsaved edits, and here they are the problem — the modal
+    # is restored on top of a settings.json that no longer matches the working copies it built
+    # when it opened, so a later ↵ would write the pre-reset values back and re-apply them.
+    def reload_from_settings : Nil
+      @view.reload_from_settings
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -632,6 +700,7 @@ module Gori::Tui
       when :palette then on_palette.try(&.call)
       when :saved   then on_saved.try(&.call(outcome.section.not_nil!, outcome.message || ""))
       when :open    then on_open_editor.try(&.call(outcome.section.not_nil!))
+      when :reset   then on_reset.try(&.call(outcome.section.not_nil!))
       end
       :stay
     end

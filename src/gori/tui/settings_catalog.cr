@@ -13,6 +13,9 @@ module Gori::Tui
     #   :form   → editable inline via the shared SettingsView field engine
     #   :opener → a single row whose ↵ opens the section's dedicated overlay
     #             (theme list, tabs/env/hotkeys editors) — reusing open_settings.
+    #   :action → a single row whose ↵ asks the HOST to run one verb (the factory reset).
+    #             Neither a form to edit nor an editor to open; the row shows `desc`, since
+    #             the group subheader already carries `title`.
     # `sym` is the argument passed to open_settings (also the section's identity);
     # `id`/`desc` are the palette verb's id + description (kept verbatim); `title` is
     # the short label used for the sub-tab group members and section subheaders.
@@ -25,7 +28,13 @@ module Gori::Tui
       desc : String,
       group : Symbol,
       kind : Symbol,
-      in_tab : Bool = true
+      in_tab : Bool = true,
+      # Whether ^R on this row has a factory default to restore. False for the two openers
+      # that hold operator DATA rather than preferences — Env's values and the hostname map
+      # have no "default" beyond empty, and silently emptying them from a row that only says
+      # "↵ open" is not a reset anyone asked for. They are still cleared by the FULL factory
+      # reset, which says so.
+      resettable : Bool = true
 
     # The Settings tab's sub-tab strip, in display order. Each group gathers the
     # catalog sections tagged with its symbol (see `sections_in`).
@@ -46,6 +55,10 @@ module Gori::Tui
         "Terminal bell + toast on background results, and how many notifications are kept", :general, :form),
       Section.new(:statusline, "settings.statusline", "Statusline",
         "Run a command periodically and show its output as a bottom status line", :general, :form),
+      # Last row of the first group: reachable without hunting, but not sitting between two
+      # fields where a stray ↵ finds it.
+      Section.new(:reset_all, "settings.reset", "Reset",
+        "Restore every setting to its factory default", :general, :action),
       # Appearance
       Section.new(:theme, "settings.theme", "Theme",
         "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)", :appearance, :opener),
@@ -65,7 +78,7 @@ module Gori::Tui
       Section.new(:keys, "settings.keys", "Keys",
         "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9)", :editor, :form),
       Section.new(:env, "settings.env", "Env",
-        "Global environment variables for $KEY substitution in requests", :editor, :opener),
+        "Global environment variables for $KEY substitution in requests", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",
         "Rebind keyboard shortcuts (press a key) + pick an OS default profile", :editor, :opener),
       # Network & Tabs
@@ -76,7 +89,7 @@ module Gori::Tui
       # Reachable via the Network section's "Hostname overrides" opener field, so it
       # keeps its palette verb but is not given its own tab row (in_tab: false).
       Section.new(:hosts, "settings.host-overrides", "Hostnames",
-        "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false),
+        "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials", :network, :opener, in_tab: false, resettable: false),
     ]
 
     # Every section, in registration order — drives the palette verb loop.

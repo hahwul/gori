@@ -59,6 +59,17 @@ module Gori::Settings
     o["placement"]?.try(&.as_s?).try { |v| self.companion_placement = normalize_companion_placement(v) }
   end
 
+  # Factory reset for this section (dispatched by Settings.reset_to_factory). One assignment
+  # per field serialize_companion writes. The source-grep guard only checks that this method
+  # EXISTS and is dispatched (see display.cr's block) — keeping the two field lists in step is
+  # a hand job, so add to both in the same edit.
+  private def self.reset_companion : Nil
+    self.companion = DEFAULT_COMPANION
+    self.companion_placement = DEFAULT_COMPANION_PLACEMENT
+    self.companion_motion = DEFAULT_COMPANION_MOTION
+    self.companion_notices = DEFAULT_COMPANION_NOTICES
+  end
+
   # Omitted entirely while every field is at its factory default, so a default install's
   # settings.json stays quiet and the 3-way merge has nothing to reconcile.
   private def self.serialize_companion(j : JSON::Builder) : Nil
