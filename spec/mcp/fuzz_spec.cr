@@ -857,3 +857,53 @@ describe "MCP fuzz_results — a failed row is stored, not silently dropped" do
     end
   end
 end
+
+# …and a run's FAILURES must never crowd its FINDINGS out of the buffer.
+#
+# Rows are stored in send order under a hard `FUZZ_MAX_STORED` (10 000), so ONE shared FIFO
+# lets a target that starts resetting — or a Sandbox that refuses every send — fill every slot
+# with errored rows before the first match lands. `fuzz_results{matched_only:true}` would then
+# return zero findings for a run that had them, with only `results_truncated` hinting at it:
+# the same false-negative-that-reads-clean the widened keep-list exists to prevent, arriving
+# from the other side. Non-matched rows get their own `FUZZ_MAX_STORED_UNMATCHED` sub-budget.
+#
+# Driven end to end against a CLOSED port: connect-refused is immediate and involves no
+# network, so a run wide enough to cross the sub-budget is still fast.
+describe "MCP fuzz — failures cannot crowd matches out of the stored set" do
+  it "stops storing errored rows at the unmatched sub-budget, not at the total cap" do
+    probe = TCPServer.new("127.0.0.1", 0)
+    port = probe.local_address.port
+    probe.close
+    cap = Gori::MCP::Tools::FUZZ_MAX_STORED_UNMATCHED
+    # The sub-budget is what leaves room for the matches; a run of `cap + 5` failures must
+    # stop at `cap` and NOT keep climbing toward FUZZ_MAX_STORED.
+    cap.should be < Gori::MCP::Tools::FUZZ_MAX_STORED
+
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"numbers":"1-#{cap + 5}"}]),
+         "concurrency"    => 50,
+         "retries"        => 0,
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      start["total"].as_i.should eq(cap + 5)
+
+      done = false
+      600.times do
+        sleep 0.05.seconds
+        next if call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))["status"].as_s == "running"
+        done = true
+        break
+      end
+      done.should be_true
+
+      st = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+      st["sent"].as_i.should eq(cap + 5)
+      st["stored_results"].as_i.should eq(cap) # …and NOT cap + 5
+      st["results_truncated"].as_bool.should be_true
+    end
+  end
+end

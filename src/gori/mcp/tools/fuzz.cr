@@ -56,8 +56,9 @@ module Gori
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
 
-      # Background drain (runs during the stdio loop's blocking read). Stores
-      # matched results only, capped, never touches STDOUT. Robustness: a per-event
+      # Background drain (runs during the stdio loop's blocking read). Stores results
+      # under the two caps `store_fuzz_result` describes (matches, plus a bounded set of the
+      # rows that FAILED — it is not matched-only), never touches STDOUT. Robustness: a per-event
       # rescue keeps the drain alive on a callback failure (so the engine's worker
       # fibers, parked on @events.send, still finish and exit instead of leaking),
       # and the ensure GUARANTEES a terminal state — a fiber that dies here must
@@ -175,15 +176,35 @@ module Gori
         # / TLS-failure row: `fuzz_status` counts those in `errors` and `blocked`, but the count
         # names no PAYLOAD, so an agent could see `errors: 40` and have no way to ask which
         # forty. The CLI prints both (`emit_fuzz_result`) and the TUI renders every row; this
-        # was the one surface where they vanished. Still bounded by FUZZ_MAX_STORED, which is
-        # what keeps an all-errored sweep from growing the job without end.
+        # was the one surface where they vanished.
         return unless r.matched? || r.retried? || r.resent? || r.incomplete? || r.chain_error || r.error
-        if fjob.results.size < FUZZ_MAX_STORED
-          fjob.results << r
-          fjob.result_flow_ids << flow_id
-        else
+        # TWO budgets, because one FIFO over `FUZZ_MAX_STORED` lets the exceptions EVICT the
+        # findings. Rows arrive in send order and the cap is a hard stop, so a sweep against a
+        # target that starts resetting — or one the Sandbox refuses outright, where every row
+        # is errored — fills all 10,000 slots with failures, and every match that lands
+        # afterwards is dropped. `fuzz_results{matched_only:true}` then returns ZERO findings
+        # for a run that had them, with only `results_truncated` hinting at it: the exact
+        # false-negative-that-reads-clean this whole gate exists to prevent, arriving from the
+        # other side. The hazard predates `chain_error`/`error` (a 10,000-row `--retries` sweep
+        # could already do it); widening the keep-list is what made it reachable in one run.
+        #
+        # So a MATCH is never displaced by a non-match: non-matched rows get their own
+        # `FUZZ_MAX_STORED_UNMATCHED` sub-budget, which is generous for the job it has (naming
+        # WHICH payloads failed — a thousand named examples is a diagnosis, not a sample), and
+        # matches keep the full cap. `results_truncated` is set by either stop, honestly.
+        if fjob.results.size >= FUZZ_MAX_STORED
           fjob.truncated = true
+          return
         end
+        unless r.matched?
+          if fjob.unmatched_stored >= FUZZ_MAX_STORED_UNMATCHED
+            fjob.truncated = true
+            return
+          end
+          fjob.unmatched_stored += 1
+        end
+        fjob.results << r
+        fjob.result_flow_ids << flow_id
       end
 
       private def fuzz_status(h) : Result
@@ -937,7 +958,7 @@ module Gori
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max rows (default 100, max 1000)")
-          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row whose request was re-sent, retried, or answered with a truncated response is kept too, so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way.")
+          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row that FAILED is kept too — the send errored (dead target, TLS, refused by scope), a §…§ position's ¦chain could not run on that payload so it went out UNTRANSFORMED (`chain_error`), the request was re-sent or retried, or the response came back truncated — so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way, and failures can never crowd matches out of the buffer.")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

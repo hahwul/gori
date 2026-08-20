@@ -241,7 +241,7 @@ module Gori
         # order it this way — MCP checks FUZZ_MAX_REQUESTS in `fuzz_start` before spawning the
         # job fiber that calibrates, and the TUI's confirm dialog gates `start_run`, which is
         # what hands the engine over and calibrates.
-        total = fuzz_preflight(plan.engine, mode, race, origin.scheme, origin.host, origin.port, force)
+        total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force)
         # A store held open across the sweep ONLY when recording — each matched/all Result is
         # written as a flow as it arrives (#749). Opened here, after the plan proved the target
         # is valid, so a refused run never touches the DB.
@@ -518,11 +518,18 @@ module Gori
       end
 
       # Resolve + announce the request count; gate huge/unknown runs behind --force.
-      private def self.fuzz_preflight(engine : Fuzz::Engine, mode : Fuzz::Mode, race : Int32?, scheme : String,
+      # `outbound` is held only so both aborts below can release it first — the rule
+      # `guard_outbound` and the bad-scheme abort one screen up already follow, and one this
+      # method did not when the gate moved out of `run_fuzz_stream` and above the `begin …
+      # ensure outbound.close` block that used to cover it. A refused run would otherwise exit
+      # with the project store connection open and its `-wal`/`-shm` uncheckpointed.
+      private def self.fuzz_preflight(engine : Fuzz::Engine, outbound : Gori::Outbound,
+                                      mode : Fuzz::Mode, race : Int32?, scheme : String,
                                       host : String, port : Int32, force : Bool) : Int64?
         total = begin
           engine.total
         rescue ex
+          outbound.close
           abort "gori run fuzz: #{ex.message}"
         end
         # Show the CLAMPED group size the engine will actually run (`engine.race_count`), not the
@@ -536,6 +543,7 @@ module Gori
         label = race ? "race ×#{effective_race || race}" : mode.label
         STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}"
         if (total.nil? || total > FUZZ_AUTO_CAP) && !force
+          outbound.close
           abort "gori run fuzz: refusing to send #{total ? total.to_s : "an unbounded number of"} requests without --force (narrow positions/payloads or pass --force)"
         end
         total
