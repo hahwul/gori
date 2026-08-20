@@ -26,14 +26,15 @@ module Gori
       # the send it just made, and so this stays free of a wall-clock read on the hot path.
       #
       # `wire` is the request AS IT WENT OUT — `Plan#wire_bytes`, taken by the caller and handed
-      # to `Plan#send_wire`, so the row holds the same slice the socket got. Passed in rather
-      # than re-derived here for exactly that reason: the seam it comes through substitutes
-      # session bindings, whose values can rotate between two reads. Nil falls back to the
-      # plan's assembled draft, which is what this recorder used to write unconditionally — and
-      # what left the active session slot's `Authorization` line out of every recorded flow.
+      # to `Plan#send_wire`, so the row holds the same slice the socket got. REQUIRED, not a
+      # defaulted `plan.wire_bytes`: re-deriving it here is precisely what the parameter exists
+      # to stop, because the seam it comes through substitutes session bindings and those values
+      # can rotate between two reads. A caller that has not been threaded through is a compile
+      # error rather than a row that silently differs from the send — the same argument
+      # `Sender` makes for requiring an `Outbound` in its constructor.
       def record(store : Store, plan : Plan, result : Result, created_at : Int64,
-                 wire : Bytes? = nil) : Int64
-        head, body, method, target, version = request_projection(plan, wire || plan.wire_bytes)
+                 wire : Bytes) : Int64
+        head, body, method, target, version = request_projection(plan, wire)
         captured = Store::CapturedRequest.new(
           created_at: created_at,
           scheme: plan.scheme,

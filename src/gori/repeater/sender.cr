@@ -120,6 +120,11 @@ module Gori
       # the request that was sent: replay it, fuzz from it, or scan it and the identity gori
       # actually used is nowhere in the evidence. A caller now takes these bytes once, hands
       # them to `send_wire`, and records exactly what went out.
+      #
+      # The Fuzzer reaches the same seam through `Fuzz::Sender#send`, which runs the two passes
+      # itself; its answer travels back on `Repeater::Result#wire` because a fuzz ROW must keep
+      # showing the template (see `Fuzz::Result#wire`). Two shapes, one rule: what is recorded
+      # is what was written.
       def wire(bytes : Bytes) : Bytes
         bytes = Gori::Env.expand_bindings(bytes) unless @evidence
         Gori::Env.overlay_slot(bytes)
@@ -130,12 +135,17 @@ module Gori
       end
 
       # Send bytes that are ALREADY through `wire` — for a surface that has to hold the exact
-      # slice the socket gets (to record it as a flow, or to report it back). The scope gate
-      # runs HERE, on those final bytes, which is the same verdict `refusal` takes one step
-      # earlier: the `$NAME` pass is what `refusal` already expands for its own check, and the
-      # slot overlay is header-only, so neither can move the request line the gate reads.
+      # slice the socket gets (to record it as a flow, or to report it back).
+      #
+      # Still through `refusal`, not a hand-rolled `send_block` beside it: this is the door
+      # `gori run repeater send` and MCP `send_request` now use, and "may these bytes go out"
+      # has to keep ONE implementation — `refusal` used to carry a second rule (see its
+      # comment), and a copy here would walk past the next one added. Asking it about the
+      # final bytes is the same verdict it takes one step earlier: its own expansion is a
+      # no-op on an already-expanded buffer, and the slot overlay is header-only, so neither
+      # pass can move the request line the gate reads.
       def send_wire(wire : Bytes) : Result
-        if reason = @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(wire))
+        if reason = refusal(wire)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         result =

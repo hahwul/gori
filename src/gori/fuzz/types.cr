@@ -95,6 +95,18 @@ module Gori
       getter head : Bytes?
       getter body : Bytes?
       getter request : Bytes?
+      # The bytes this variation actually PUT ON THE WIRE, when they differ from `request`.
+      #
+      # `request` is the rendered TEMPLATE — what the generator produced — and stays that way
+      # on purpose: it is the row a surface prints and the bytes "send to Repeater" seeds a tab
+      # from, where a session slot's header overlay must NOT be baked in (the slot applies per
+      # send, so a seed carrying one would pin an identity the operator can no longer change).
+      # `Fuzz::Sender` then substitutes `$NAME` and writes the active slot's overlay at the send
+      # seam, and THOSE are the bytes History has to hold: `--record-history` was writing the
+      # template, so a sweep run as a slot recorded up to 5000 flows missing the very header
+      # that produced the responses stored beside them. Retained on the same `keep_bodies` axis
+      # as `request`; nil when nothing rewrote the template.
+      getter wire : Bytes?
       # The declared `¦chain` for one of this request's positions did NOT run on that payload
       # (it raised on these bytes, or its output exceeded MAX_OUT), so the payload went out
       # untransformed — a different test than the operator asked for. Carried per row and
@@ -149,7 +161,7 @@ module Gori
                      @duration_us, @error, @matched, @incomplete, @extracted,
                      @head = nil, @body = nil, @request = nil, @retried = false,
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
-                     @timed_out = false, @resent_count = 0)
+                     @timed_out = false, @resent_count = 0, @wire = nil)
       end
     end
 

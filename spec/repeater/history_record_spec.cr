@@ -32,7 +32,8 @@ describe Gori::Repeater::HistoryRecord do
     with_store do |store|
       plan = plan_for("POST /login HTTP/1.1\r\nHost: t.test\r\nContent-Length: 5\r\n\r\nhello")
       result = result_for("HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\n", "ok")
-      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 123_i64)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 123_i64,
+        wire: plan.wire_bytes)
       id.should be > 0
 
       detail = store.get_flow(id).not_nil!
@@ -70,11 +71,6 @@ describe Gori::Repeater::HistoryRecord do
         detail = store.get_flow(id).not_nil!
         String.new(detail.request_head).should eq(String.new(wire))
 
-        # And with no `wire:` handed in, the recorder takes the seam's own output rather than
-        # the draft — the fallback a caller that has not been threaded through yet lands on.
-        fallback = store.get_flow(
-          Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 8_i64)).not_nil!
-        String.new(fallback.request_head).should contain("Authorization: Bearer ADMIN-TOKEN")
       ensure
         Gori::Env.layer = previous
         slots.activate(nil)
@@ -86,7 +82,8 @@ describe Gori::Repeater::HistoryRecord do
     with_store do |store|
       plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
       failed = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 100_i64, "connection refused")
-      id = Gori::Repeater::HistoryRecord.record(store, plan, failed, created_at: 1_i64)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, failed, created_at: 1_i64,
+        wire: plan.wire_bytes)
       store.get_flow(id).not_nil!.row.state.error?.should be_true
     end
   end

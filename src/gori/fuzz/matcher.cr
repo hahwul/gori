@@ -341,6 +341,7 @@ module Gori::Fuzz
         incomplete: raw.incomplete?, extracted: extracted,
         head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil,
         request: keep ? present(job.bytes) : nil, retried: raw.retried?,
+        wire: keep ? raw.wire.try { |w| present(w) } : nil,
         chain_error: job.chain_error,
         grpc_status: grpc_status, grpc_message: grpc_message,
         timed_out: raw.timed_out?, resent_count: resent_count)

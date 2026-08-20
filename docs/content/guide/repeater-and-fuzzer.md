@@ -121,7 +121,7 @@ Sources can be a captured flow (`--flow`), a saved HTTP repeater session (`--rep
 
 The workbench and the evidence store stay separate: a Repeater or Fuzzer send leaves no History flow by default. When you want one — a `flow_id` for `get_flow`, `compare`, or the next tool — punch through explicitly. `gori run repeater send --record-history` writes the send as a flow and prints its id; `gori run fuzz --record-history=none|matched|all` records each sent request+response (`matched` only the rows that matched, `all` every send, capped at 5000). The default stays workbench-only.
 
-A recorded Repeater flow is the request **as it went on the wire**: the active session slot's header overlay and any `$NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft it was assembled from.
+A recorded flow — from either tool — is the request **as it went on the wire**: the active session slot's header overlay and any `$NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from — the slot applies per send.)
 
 ## Next Steps
 
