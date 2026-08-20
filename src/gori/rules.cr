@@ -86,14 +86,32 @@ module Gori
       @unbound_reported_rev = 0_u64
     end
 
+    # Whether this rule is a live REWRITE rule for {target, part} — the ONE shape test the
+    # counts, the per-host gates and `apply`'s own select all share. A nil `target` asks about
+    # both sides.
+    #
+    # `op.header? && !part.head?` is the clause that has to be here rather than only in
+    # `apply`. A header op names a header, so it can only act on a head, and every CRUD
+    # surface forces that shape (`normalize_shape`) — but a hand-edited settings.json is a
+    # supported way to write a global rule, and `parse_rewriter_rules` clamps the four enum
+    # fields INDEPENDENTLY, so `{op: set_header, part: ws}` used to parse. `apply` filtered
+    # it out, and the counts did not: the rule landed in `@ws_out_count`, which is what
+    # decides whether `WS::Relay` keeps its byte-exact pump — so a rule that can never fire
+    # took every message on that socket off frame-exact forwarding (P7). `part: body` is the
+    # same defect one notch louder: it makes `rewrites_body_for_host?` true, which buffers
+    # every body AND costs the host HTTP/2 (`tls/tunnel.cr`). Counting on the same predicate
+    # that applies is what keeps "a rule is live" from meaning two different things.
+    private def rewrites?(rule : Store::MatchRule, target : Store::RuleTarget?,
+                          part : Store::RulePart) : Bool
+      rule.enabled? && rule.op.rewrite? && !rule.pattern.empty? && rule.part == part &&
+        !(rule.op.header? && !part.head?) && (target.nil? || rule.target == target)
+    end
+
     # Count enabled, non-empty-pattern REWRITE rules matching an optional target + a part.
     # Short-circuit rules are never counted here — see `stub_count`.
     private def active_count(rules : Array(Store::MatchRule), target : Store::RuleTarget? = nil,
                              *, part : Store::RulePart) : Int32
-      rules.count do |r|
-        r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part == part &&
-          (target.nil? || r.target == target)
-      end
+      rules.count { |r| rewrites?(r, target, part) }
     end
 
     # Count enabled short-circuit rules whose stub is usable. A rule with an unparseable head
@@ -430,7 +448,7 @@ module Gori
       return false if @req_body_count.get == 0 && @resp_body_count.get == 0 # lock-free fast path
       @mutex.synchronize do
         @rules.any? do |r|
-          r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part.body? && host_matches?(r.host, host)
+          rewrites?(r, nil, Store::RulePart::Body) && host_matches?(r.host, host)
         end
       end
     end
@@ -465,8 +483,7 @@ module Gori
       return false if count.get == 0 # lock-free fast path
       @mutex.synchronize do
         @rules.any? do |r|
-          r.enabled? && r.op.rewrite? && !r.pattern.empty? && r.part.ws? &&
-            r.target == target && host_matches?(r.host, host)
+          rewrites?(r, target, Store::RulePart::Ws) && host_matches?(r.host, host)
         end
       end
     end
@@ -611,10 +628,7 @@ module Gori
                       count : Atomic(Int32), host : String, report : Bool = true) : Bytes
       return bytes if count.get == 0 # lock-free fast path: no rules to apply
       active = @mutex.synchronize do
-        @rules.select do |r|
-          r.enabled? && r.op.rewrite? && r.target == target && r.part == part && !r.pattern.empty? &&
-            !(r.op.header? && !part.head?) && host_matches?(r.host, host)
-        end
+        @rules.select { |r| rewrites?(r, target, part) && host_matches?(r.host, host) }
       end
       return bytes if active.empty? # nothing in scope → same bytes, byte-fidelity preserved
       text = String.new(bytes)

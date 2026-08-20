@@ -669,4 +669,46 @@ describe Gori::Rules do
       end
     end
   end
+  # `normalize_shape` above is what every CRUD surface applies BEFORE a rule is written. A
+  # hand-edited settings.json goes around all of them — it is a supported way to write a global
+  # rule, which is why the enum fields read as the labels `gori run rewriter` prints — and
+  # `parse_rewriter_rules` used to clamp the four of them INDEPENDENTLY. So `{op: "set_header",
+  # part: "ws"}`, a pair the CLI and the MCP tools both refuse outright, parsed.
+  #
+  # It is not merely inert once parsed. `part` is what the FAST-PATH counts key on, and those
+  # counts are not "which rules apply" — they are "which of gori's byte-fidelity shortcuts this
+  # connection loses": `part: ws` takes `WS::Relay` off its byte-exact pump (frame boundaries,
+  # mask keys, fragmentation), `part: body` buffers every body AND costs the host HTTP/2. A rule
+  # that can never fire was paying all of that.
+  describe "a rule whose op and part disagree" do
+    it "does not take a WebSocket direction off the byte-exact pump" do
+      with_globals do
+        Gori::Settings.rewriter_rules = [
+          Gori::Settings::RewriterRule.new(1_i64, true, "hand-edited", "request", "ws",
+            "X-Bad", "v", "set_header", "literal", "", ""),
+        ]
+        with_store do |store|
+          rules = Gori::Rules.load(store)
+          rules.rewrites_ws_out_for_host?("a.test").should be_false
+          # …and it never could have fired: `apply` filtered it out all along.
+          payload = "hello".to_slice
+          rules.rewrite_ws_out(payload, "a.test").should eq(payload)
+        end
+      end
+    end
+
+    it "does not buy a body buffer (or cost the host HTTP/2) for a head-only op" do
+      with_globals do
+        Gori::Settings.rewriter_rules = [
+          Gori::Settings::RewriterRule.new(1_i64, true, "hand-edited", "request", "body",
+            "X-Bad", "v", "add_header", "literal", "", ""),
+        ]
+        with_store do |store|
+          rules = Gori::Rules.load(store)
+          rules.rewrites_request_body?.should be_false
+          rules.rewrites_body_for_host?("a.test").should be_false
+        end
+      end
+    end
+  end
 end

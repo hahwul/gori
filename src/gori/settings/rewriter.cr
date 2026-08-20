@@ -91,7 +91,8 @@ module Gori::Settings
 
   # Tolerant global-rule parse: a non-array (or absent) node keeps the current value; entries
   # missing a pattern are dropped (a rule with no pattern can never match, and `Rules#add`
-  # refuses it anyway); the four enum fields are clamped to their allowed sets.
+  # refuses it anyway), as is a header op on a non-head part (`impossible_shape?`, same
+  # reasoning); the four enum fields are clamped to their allowed sets.
   #
   # Clamping rather than `from_label` is the point: those raise on an unknown label, and a
   # single typo in a hand-edited settings.json would take the whole file down through `load`'s
@@ -109,20 +110,42 @@ module Gori::Settings
       next unless o = e.as_h?
       pattern = o["pattern"]?.try(&.as_s?)
       next if pattern.nil? || pattern.empty?
+      op = clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
+      target = clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
+      part = clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
+      next if impossible_shape?(op, part)
       list << RewriterRule.new(
         claim_id(o["id"]?.try(&.as_i64?), seen),
         o["enabled"]?.try(&.as_bool?) || false,
         o["name"]?.try(&.as_s?) || "",
-        clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request"),
-        clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head"),
+        target, part,
         pattern,
         o["replacement"]?.try(&.as_s?) || "",
-        clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace"),
+        op,
         clamp_field(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal"),
         o["host"]?.try(&.as_s?) || "",
         o["body_file"]?.try(&.as_s?) || "")
     end
     list
+  end
+
+  # Whether this op/part pair names a rule that could never rewrite anything: a header op
+  # (add/set/remove) on a part that is not the head. A header op acts by header NAME, and only
+  # a head has header lines.
+  #
+  # DROPPED, not coerced onto the head, and the distinction is the whole point. The pair cannot
+  # arrive through any CRUD surface — the CLI and MCP REFUSE it outright rather than normalize
+  # it, and `Rules.normalize_shape` says why: moving a rule off WebSocket messages and onto
+  # HTTP heads is "a different protocol, not a narrower shape". Coercing it HERE would do
+  # exactly that behind the operator's back, and worse: the rule is inert today (`Rules`'
+  # `rewrites?` filters it from both the counts and the select), so the coercion would take a
+  # rule that does nothing and put it on every request head in every project, live, on the
+  # strength of a parse.
+  #
+  # Same disposition, and the same sentence, as the entry with no pattern above: a rule that
+  # can never match, which `Rules#add` refuses anyway.
+  private def self.impossible_shape?(op : String, part : String) : Bool
+    part != "head" && (op == "add_header" || op == "set_header" || op == "remove_header")
   end
 
   # The id this parsed entry gets to keep, recording it in `seen`. A missing, non-positive or
@@ -159,13 +182,16 @@ module Gori::Settings
       name = o["name"]?.try(&.as_s?)
       pattern = o["pattern"]?.try(&.as_s?)
       next if name.nil? || name.empty? || pattern.nil? || pattern.empty?
+      op = clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
+      target = clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
+      part = clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
+      next if impossible_shape?(op, part)
       list << RewriterRule.new(
         (list.size + 1).to_i64, false, name,
-        clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request"),
-        clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head"),
+        target, part,
         pattern,
         o["replacement"]?.try(&.as_s?) || "",
-        clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace"),
+        op,
         clamp_field(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal"),
         o["host"]?.try(&.as_s?) || "",
         o["body_file"]?.try(&.as_s?) || "")
