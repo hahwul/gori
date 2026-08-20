@@ -56,8 +56,9 @@ module Gori
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
 
-      # Background drain (runs during the stdio loop's blocking read). Stores
-      # matched results only, capped, never touches STDOUT. Robustness: a per-event
+      # Background drain (runs during the stdio loop's blocking read). Stores results
+      # under the two caps `store_fuzz_result` describes (matches, plus a bounded set of the
+      # rows that FAILED — it is not matched-only), never touches STDOUT. Robustness: a per-event
       # rescue keeps the drain alive on a callback failure (so the engine's worker
       # fibers, parked on @events.send, still finish and exit instead of leaking),
       # and the ensure GUARANTEES a terminal state — a fiber that dies here must
@@ -166,13 +167,44 @@ module Gori
         # `--retries` config re-send) and `incomplete?` (the captured response was truncated) join
         # for the same reason — each is a fact the run OBSERVED, and a matched-only gate would
         # drop the unmatched row that carries it, so an agent reads `stored_results` as clean.
-        return unless r.matched? || r.retried? || r.resent? || r.incomplete?
-        if fjob.results.size < FUZZ_MAX_STORED
-          fjob.results << r
-          fjob.result_flow_ids << flow_id
-        else
+        #
+        # `chain_error` and `error` complete that list, by the same argument the four above
+        # already make. Both were missing, and the first one was the sharper miss: a position's
+        # `¦chain` that did not run means the payload went out UNTRANSFORMED — a different test
+        # than the caller declared — and `Serialize.fuzz_result` has a field and a paragraph for
+        # it, which no unmatched row could ever reach. `error` is the scope-refused / dead-target
+        # / TLS-failure row: `fuzz_status` counts those in `errors` and `blocked`, but the count
+        # names no PAYLOAD, so an agent could see `errors: 40` and have no way to ask which
+        # forty. The CLI prints both (`emit_fuzz_result`) and the TUI renders every row; this
+        # was the one surface where they vanished.
+        return unless r.matched? || r.retried? || r.resent? || r.incomplete? || r.chain_error || r.error
+        # TWO budgets, because one FIFO over `FUZZ_MAX_STORED` lets the exceptions EVICT the
+        # findings. Rows arrive in send order and the cap is a hard stop, so a sweep against a
+        # target that starts resetting — or one the Sandbox refuses outright, where every row
+        # is errored — fills all 10,000 slots with failures, and every match that lands
+        # afterwards is dropped. `fuzz_results{matched_only:true}` then returns ZERO findings
+        # for a run that had them, with only `results_truncated` hinting at it: the exact
+        # false-negative-that-reads-clean this whole gate exists to prevent, arriving from the
+        # other side. The hazard predates `chain_error`/`error` (a 10,000-row `--retries` sweep
+        # could already do it); widening the keep-list is what made it reachable in one run.
+        #
+        # So a MATCH is never displaced by a non-match: non-matched rows get their own
+        # `FUZZ_MAX_STORED_UNMATCHED` sub-budget, which is generous for the job it has (naming
+        # WHICH payloads failed — a thousand named examples is a diagnosis, not a sample), and
+        # matches keep the full cap. `results_truncated` is set by either stop, honestly.
+        if fjob.results.size >= FUZZ_MAX_STORED
           fjob.truncated = true
+          return
         end
+        unless r.matched?
+          if fjob.unmatched_stored >= FUZZ_MAX_STORED_UNMATCHED
+            fjob.truncated = true
+            return
+          end
+          fjob.unmatched_stored += 1
+        end
+        fjob.results << r
+        fjob.result_flow_ids << flow_id
       end
 
       private def fuzz_status(h) : Result
@@ -734,6 +766,11 @@ module Gori
           m.match_size = c[:size]
           m.match_words = c[:words]
           m.match_lines = c[:lines]
+          # A case-insensitive substring of the response HEAD. `regex` only ever sees the
+          # BODY, so until this was wired an agent had no way to name `Set-Cookie`,
+          # `X-Powered-By: PHP` or the `Location:` an open-redirect probe produces — the one
+          # place a target that answers 200 to everything actually differs.
+          m.match_header = c[:header]
           m.match_regex = fuzz_regex(c[:regex], "match")
         end
         if c = fuzz_conditions(h["filter"]?, "filter")
@@ -742,13 +779,14 @@ module Gori
           m.filter_size = c[:size]
           m.filter_words = c[:words]
           m.filter_lines = c[:lines]
+          m.filter_header = c[:header]
           m.filter_regex = fuzz_regex(c[:regex], "filter")
         end
         m.extract = fuzz_regex(str(h, "extract"), "extract")
         m
       end
 
-      private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, regex: String?)
+      private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, header: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
         return nil unless raw
@@ -763,6 +801,9 @@ module Gori
           end
         {status: jstr(obj, "status"), grpc: jstr(obj, "grpc"), size: jstr(obj, "size"),
          words: jstr(obj, "words"), lines: jstr(obj, "lines"),
+         # `jstr`, not `demanded_jstr`: `header` is a plain substring, so the same scalar
+         # leniency `status: 500` gets is right here too (`header: 200` reads as "200").
+         header: jstr(obj, "header"),
          regex: demanded_jstr(obj, "regex", which)}
       end
 
@@ -879,7 +920,7 @@ module Gori
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. Giving this pipeline REPLACES the default encoding (it applies to every position, so it is not stacked on top). Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW — turns off the default percent-encoding for those positions (path, JSON body, header and cookie positions are raw either way). For a payload that IS the raw byte: parameter pollution with a bare &, a request-line CRLF probe. Also for a payload that is ALREADY a percent-escape and aims at the origin's own decoder — %00, %c0%af, %2e%2e%2f — which the default encodes again (%00 -> %2500) so it arrives as text, testing something else. An explicit 'processors' pipeline already replaces the default.")
-          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message))
+          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
           s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
@@ -917,7 +958,7 @@ module Gori
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max rows (default 100, max 1000)")
-          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row whose request was re-sent, retried, or answered with a truncated response is kept too, so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way.")
+          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row that FAILED is kept too — the send errored (dead target, TLS, refused by scope), a §…§ position's ¦chain could not run on that payload so it went out UNTRANSFORMED (`chain_error`), the request was re-sent or retried, or the response came back truncated — so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way, and failures can never crowd matches out of the buffer.")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

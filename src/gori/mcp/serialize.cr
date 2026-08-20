@@ -321,7 +321,8 @@ module Gori
           j.field "index", r.index
           # Did the MATCHER accept this row? Always emitted, unlike the exception flags below,
           # because the stored set is not matched-only: `store_fuzz_result` also keeps a row
-          # that was re-sent, retried, or came back truncated. Without this bit a "matched and
+          # that FAILED — an errored send, a `¦chain` that could not run, a re-send, a retry or
+          # a truncated response. Without this bit a "matched and
           # resent" row and an "unmatched, resent" row are the same shape, so an agent reading
           # `fuzz_results` as its findings counted requests the matcher had rejected.
           j.field "matched", r.matched?

@@ -118,6 +118,14 @@ module Gori
           p.on("--fl=SPEC", "Filter out line count") { |v| matcher.filter_lines = v }
           p.on("--mr=REGEX", "Match response-body regex") { |v| matcher.match_regex = parse_regex(v) }
           p.on("--fr=REGEX", "Filter out response-body regex") { |v| matcher.filter_regex = parse_regex(v) }
+          # The response HEAD dimension. `Fuzz::Matcher` has carried the predicate since the
+          # Fuzzer landed and no surface could set it, so a run could match on the body but
+          # never on `Set-Cookie:` / `X-Powered-By: PHP` / a `Location:` an open-redirect probe
+          # produced — the one place a 200-on-everything target actually differs. A plain
+          # case-insensitive substring over the raw head (not a regex): the head is short and
+          # ASCII, and `Name: value` is what an operator types.
+          p.on("--mh=TEXT", "Match a case-insensitive substring of the response HEAD (e.g. 'x-powered-by: php')") { |v| matcher.match_header = v }
+          p.on("--fh=TEXT", "Filter out a case-insensitive substring of the response HEAD") { |v| matcher.filter_header = v }
           p.on("--extract=REGEX", "Grep-extract a value from each response (capture group 1)") { |v| matcher.extract = parse_regex(v) }
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
@@ -223,6 +231,17 @@ module Gori
           abort "gori run fuzz: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
         end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run fuzz")
+        # THE SIZE REFUSAL, and it has to be HERE — before the two things below that put real
+        # requests on the wire. It used to be the first line of `run_fuzz_stream`, i.e. after
+        # `--ac`'s CALIBRATION_SAMPLES synthetic sends and after `--bind-from`'s replay: a
+        # `gori run fuzz --brute 'abcdefgh:1-8' --ac` printed "refusing to send 19173960
+        # requests without --force" with six requests already at the target, measured. A
+        # refusal that fires after the traffic is not a refusal, and this is the gate a tester
+        # working inside an agreed request budget relies on. The other two surfaces already
+        # order it this way — MCP checks FUZZ_MAX_REQUESTS in `fuzz_start` before spawning the
+        # job fiber that calibrates, and the TUI's confirm dialog gates `start_run`, which is
+        # what hands the engine over and calibrates.
+        total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force)
         # A store held open across the sweep ONLY when recording — each matched/all Result is
         # written as a flow as it arrives (#749). Opened here, after the plan proved the target
         # is valid, so a refused run never touches the DB.
@@ -235,7 +254,7 @@ module Gori
           # it ships literally (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
           plan.engine.calibrate_baseline if auto_cal
-          run_fuzz_stream(plan.engine, mode, race, origin.scheme, origin.host, origin.port, format, force,
+          run_fuzz_stream(plan.engine, total, race, origin.scheme, origin.host, origin.port, format,
             fail_if_no_matches, plan.pool, max_requests, plan.config.reframe_grpc?,
             record_store: record_store, record_policy: record_policy, http2: http2)
         ensure
@@ -418,14 +437,16 @@ module Gori
         {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni}
       end
 
-      private def self.run_fuzz_stream(engine : Fuzz::Engine, mode : Fuzz::Mode, race : Int32?, scheme : String,
-                                       host : String, port : Int32, format : Symbol, force : Bool,
+      # `total` is the candidate count `fuzz_preflight` already resolved and gated — the caller
+      # runs that preflight BEFORE anything sends (see cmd_fuzz), so this method never decides
+      # whether the run may proceed; it only streams it.
+      private def self.run_fuzz_stream(engine : Fuzz::Engine, total : Int64?, race : Int32?, scheme : String,
+                                       host : String, port : Int32, format : Symbol,
                                        fail_if_no_matches : Bool, pool : Fuzz::ConnPool? = nil,
                                        max_requests : Int64? = nil,
                                        reframe_grpc : Bool = false,
                                        record_store : Store? = nil, record_policy : Symbol = :none,
                                        http2 : Bool = false) : Nil
-        total = fuzz_preflight(engine, mode, race, scheme, host, port, force)
         matched = 0
         errored = 0
         recorded = 0
@@ -497,11 +518,18 @@ module Gori
       end
 
       # Resolve + announce the request count; gate huge/unknown runs behind --force.
-      private def self.fuzz_preflight(engine : Fuzz::Engine, mode : Fuzz::Mode, race : Int32?, scheme : String,
+      # `outbound` is held only so both aborts below can release it first — the rule
+      # `guard_outbound` and the bad-scheme abort one screen up already follow, and one this
+      # method did not when the gate moved out of `run_fuzz_stream` and above the `begin …
+      # ensure outbound.close` block that used to cover it. A refused run would otherwise exit
+      # with the project store connection open and its `-wal`/`-shm` uncheckpointed.
+      private def self.fuzz_preflight(engine : Fuzz::Engine, outbound : Gori::Outbound,
+                                      mode : Fuzz::Mode, race : Int32?, scheme : String,
                                       host : String, port : Int32, force : Bool) : Int64?
         total = begin
           engine.total
         rescue ex
+          outbound.close
           abort "gori run fuzz: #{ex.message}"
         end
         # Show the CLAMPED group size the engine will actually run (`engine.race_count`), not the
@@ -515,6 +543,7 @@ module Gori
         label = race ? "race ×#{effective_race || race}" : mode.label
         STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}"
         if (total.nil? || total > FUZZ_AUTO_CAP) && !force
+          outbound.close
           abort "gori run fuzz: refusing to send #{total ? total.to_s : "an unbounded number of"} requests without --force (narrow positions/payloads or pass --force)"
         end
         total

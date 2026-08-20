@@ -15,7 +15,13 @@ module Gori::Fuzz
     CALIBRATION_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
     @has_chains : Bool
-    @reframe_grpc : Bool
+    # Whether this run's rendered requests really get their gRPC length prefix recomputed —
+    # `Config#reframe_grpc?` AND a template `GrpcVerdict.reframable_template?` accepted, the
+    # decision taken once in the ctor. Exposed because it is a pass BETWEEN the splice and the
+    # wire, so a surface that RECONSTRUCTS a request it did not retain (the TUI's request
+    # pane, `FuzzerView#result_request`) has to reproduce it or show bytes no socket carried —
+    # the same reason `auto_encode` and the Content-Length knobs are frozen per run there.
+    getter? reframe_grpc : Bool
 
     # `registry` (when given) applies each marked position's inline Decoder chain to
     # its payload at render time — see Template#apply_chains. nil = no transforms

@@ -181,6 +181,13 @@ module Gori
       FUZZ_MAX_REQUESTS    = 100_000_i64
       FUZZ_MAX_CONCURRENCY =         100
       FUZZ_MAX_STORED      =      10_000
+      # …of which at most this many may be NON-MATCHED rows (errored, chain-swallowed,
+      # re-sent, truncated). A sub-budget, not a second cap: rows arrive in send order and
+      # `FUZZ_MAX_STORED` is a hard stop, so one shared FIFO lets a target that starts
+      # resetting — or a Sandbox that refuses every send — fill all 10,000 slots with failures
+      # before the first match lands, and `fuzz_results{matched_only:true}` then reports zero
+      # findings for a run that had them. Matches are never displaced; see `store_fuzz_result`.
+      FUZZ_MAX_STORED_UNMATCHED = 1_000
       # Ceiling on History flows recorded per run (record_history), so `all` on a
       # huge run can't unboundedly grow the project database. An ALIAS of the engine constant,
       # not a second 5_000: `gori run fuzz --record-history` reads the same one, and two copies
@@ -372,8 +379,10 @@ module Gori
         started_at_ms : Int64
 
       # A background fuzz run, polled by fuzz_status / fuzz_results. The runner fiber
-      # only mutates these fields (single-threaded scheduler → no lock needed); the
-      # stored results are matched-only and capped at FUZZ_MAX_STORED.
+      # only mutates these fields (single-threaded scheduler → no lock needed); the stored
+      # results are capped at FUZZ_MAX_STORED and are NOT matched-only — see
+      # `store_fuzz_result` for the six things a row can be kept for. `fuzz_results
+      # {matched_only:true}` is the filter for a caller that wants only the matches.
       class FuzzJob
         getter id : String
         getter total : Int64?
@@ -409,8 +418,13 @@ module Gori
         # the true count in `error_msg`; only the LOGGING is capped (see LOG_CAP).
         property drain_errors = 0
         getter results = [] of Fuzz::Result
-        # History flow ids for the stored (matched) results, index-aligned with
-        # `results`; nil when record_history was off or the record failed.
+        # How many of `results` the matcher REJECTED — the counter `FUZZ_MAX_STORED_UNMATCHED`
+        # is enforced against, so a run's failures can never crowd its findings out of the
+        # buffer. Kept as a count rather than derived with `results.count(&.matched?)`, which
+        # would walk up to 10,000 rows on every stored result.
+        property unmatched_stored = 0
+        # History flow ids for the stored results, index-aligned with `results`; nil when
+        # record_history was off, the record failed, or the row was not one it records.
         getter result_flow_ids = [] of Int64?
         property? truncated = false
         property? history_truncated = false

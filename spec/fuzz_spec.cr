@@ -466,6 +466,28 @@ describe F::Matcher do
     m.build(job, res).matched?.should be_true
   end
 
+  it "drops --fh on a head substring, and counts the header dimension as a constraint" do
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    head = "HTTP/1.1 200 OK\r\nServer: nginx/1.25\r\nContent-Length: 2\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    res = Gori::Repeater::Result.new(head, "ok".to_slice, resp, 1_i64)
+    m = F::Matcher.new
+    # The half that did not exist: every other dimension has a filter twin, and MCP feeds
+    # `match`/`filter` off the SAME parsed shape — so a `filter: {header: …}` would have been
+    # accepted and silently done nothing.
+    m.filter_header = "SERVER: NGINX"
+    m.build(job, res).matched?.should be_false
+    m.filter_header = "x-frame-options" # absent → the filter never fires
+    m.build(job, res).matched?.should be_true
+    m.filter_header = nil
+    m.build(job, res).matched?.should be_true
+    # `constrained?` is what tells a race run whether `matched` means anything; a run whose
+    # ONLY predicate is a header one is constrained.
+    F::Matcher.new.tap(&.match_header = "server").constrained?.should be_true
+    F::Matcher.new.tap(&.filter_header = "server").constrained?.should be_true
+    F::Matcher.new.constrained?.should be_false
+  end
+
   it "survives a catastrophic-backtracking user regex instead of killing the worker" do
     # A user --mr/--fr/--extract regex like /(a+)+$/ raises Regex::Error ('match limit
     # exceeded') on a pathological body rather than returning false; unrescued it killed the
