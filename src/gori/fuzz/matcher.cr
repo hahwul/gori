@@ -212,6 +212,7 @@ module Gori::Fuzz
 
     property match_regex : Regex?
     property filter_regex : Regex?
+
     # Substring over the response head. Cache the lowercased needle ONCE on assignment
     # (like the num_spec/status_spec setters) so the per-response check neither re-lowercases
     # the needle nor materializes a downcased head String — it byte-scans the raw head.

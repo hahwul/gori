@@ -877,9 +877,9 @@ module Gori::Tui
 
     def begin_run(total : Int64?) : Nil
       @results.clear
-      @run_template = @pending_template       # freeze the template these results are rendered against
-      @run_policy = @pending_policy           # ...and the CL knobs + retention its generator ran under
-      @run_auto_encode = @pending_auto_encode # ...and the positions it percent-encoded for
+      @run_template = @pending_template         # freeze the template these results are rendered against
+      @run_policy = @pending_policy             # ...and the CL knobs + retention its generator ran under
+      @run_auto_encode = @pending_auto_encode   # ...and the positions it percent-encoded for
       @run_reframe_grpc = @pending_reframe_grpc # ...and whether it re-length-prefixed gRPC
       @results_rev += 1
       # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
