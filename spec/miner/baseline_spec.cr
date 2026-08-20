@@ -55,15 +55,39 @@ private class DeadBackend < F::Backend
   end
 end
 
+# Fails the first `fail_first` sends and answers everything after — the transient blip that
+# takes out a whole CONCURRENT stability wave at once, which is what `@config.retries` absorbs.
+private class FailFirstBackend < F::Backend
+  getter origin : F::Origin
+  getter sent = 0
+
+  def initialize(@fail_first : Int32)
+    @origin = F::Origin.new("http", "h", 80)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    if @sent <= @fail_first
+      return Gori::Repeater::Result.new(Bytes.empty, nil, nil, 0_i64, "connection reset by peer")
+    end
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
 # An empty typed candidate list (name => canary pairs). A file-local helper so the tuple
 # element type never has to be spelled inline as a call argument.
 private def no_candidates : Array({String, String})
   Array({String, String}).new
 end
 
-private def calibrate_cfg(stability_rounds = 2) : M::Config
+private def calibrate_cfg(stability_rounds = 2, retries = 1) : M::Config
   c = M::Config.new
   c.stability_rounds = stability_rounds
+  c.retries = retries
+  c.retry_pause = 0.milliseconds # the suite must not nap through a deliberate failure
   c
 end
 
@@ -298,7 +322,34 @@ describe "Gori::Miner::Baseline#calibrate" do
     report = b.calibrate(Array(M::Location).new)
     report.status.should be_nil
     report.stable.should be_false
-    report.warning.should eq("baseline unreachable")
+    # The reason is carried, not discarded: "unreachable" alone sends the operator hunting for
+    # a target problem gori already has the name of.
+    report.warning.should eq("baseline unreachable — connection refused")
+    report.error.should eq("connection refused")
+    report.reachable?.should be_false
+  end
+
+  # Calibration was the one un-retried send path in the miner, and an empty calibration is now
+  # FATAL (`Engine#orchestrate` refuses to mine against placeholders) — so a blip the operator's
+  # own `--retries` absorbs everywhere else would have killed the whole run before a single
+  # candidate was tried. The stability wave goes out CONCURRENTLY, so its probes are not
+  # independent in time: one accept-backlog moment at t=0 fails all of them at once.
+  it "retries a probe that failed, instead of declaring the baseline unreachable" do
+    # fail_first == the whole wave: without the retry there is no probe left to build a report
+    # from and `calibrate` reports the baseline unreachable.
+    backend = FailFirstBackend.new(fail_first: 2)
+    b = M::Baseline.new(backend, "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      calibrate_cfg(stability_rounds: 2, retries: 1))
+    report = b.calibrate([M::Location::Query])
+    report.reachable?.should be_true
+    report.status.should eq(200)
+    report.warning.should be_nil
+  end
+
+  it "still gives up when the retry fails too" do
+    b = M::Baseline.new(DeadBackend.new, "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      calibrate_cfg(stability_rounds: 2, retries: 2))
+    b.calibrate(Array(M::Location).new).reachable?.should be_false
   end
 
   it "warns 'baseline status varies (200/500)' when statuses differ across rounds" do

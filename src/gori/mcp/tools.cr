@@ -462,6 +462,9 @@ module Gori
         property found = 0
         property errors = 0_i64
         property? baseline_stable = true
+        # The baseline's own sentence when it is not stable — status varied, the endpoint echoes
+        # any input, or it never answered (see `Miner::Baseline::Report#warning`).
+        property baseline_warning : String? = nil
         property error_msg : String? = nil
         getter results = [] of Miner::Finding
         property? truncated = false
@@ -470,9 +473,10 @@ module Gori
         getter audit : JobAudit
 
         getter db_path : String?
-        # The run's engine. Exposed for its two PURE reporting queries (`skipped_names` /
-        # `candidate_names`), which are derived from the loaded wordlist and the config's
-        # locations and so are safe to read from the status fiber while the run is live.
+        # The run's engine. Exposed for its PURE reporting queries (`skipped_names` /
+        # `present_names` / `candidate_names`), which are derived from the loaded wordlist, the
+        # base request and the config's locations — so they are safe to read from the status
+        # fiber while the run is live.
         getter engine
 
         def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit,

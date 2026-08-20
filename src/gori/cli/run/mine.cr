@@ -226,6 +226,14 @@ module Gori
                       "#{loc.label} and were skipped (a name there must be an RFC 7230 token, " \
                       "and framing headers are never injected)"
         end
+        # The other half of the same count: a name the request ALREADY carries there is not a
+        # hidden parameter, and injecting it would overwrite (json) or duplicate (query/cookie)
+        # the operator's own value. Named separately because the operator can see these in
+        # their own request, where the line above is about what gori refused to encode.
+        engine.present_names.each do |(loc, n)|
+          STDERR.puts "gori run mine: #{n} of #{engine.candidate_names} names are already in the " \
+                      "request at #{loc.label} and were skipped (a visible parameter is not a hidden one)"
+        end
         findings = [] of Miner::Finding
         had_error = false
         # `--format json` buffers every finding and prints once after the drain, so a bare

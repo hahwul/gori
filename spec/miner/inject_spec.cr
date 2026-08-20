@@ -457,3 +457,77 @@ describe Gori::Miner::Detect do
     M::Detect.detect(req(scalar)).applicable.should_not contain(M::Location::Json)
   end
 end
+
+# A candidate name the request already carries is a VISIBLE parameter, and at Json injecting it
+# OVERWRITES the operator's own value. `Engine#valid_names_for` drops these; this is the set it
+# drops them by.
+describe "Gori::Miner::Inject.existing_names" do
+  it "reads query keys, URL-DECODED so they compare against a raw wordlist name" do
+    base = req("GET /a?q=hi&v%2Fx=1&empty&=nokey HTTP/1.1\r\nHost: h\r\n\r\n")
+    names = M::Inject.existing_names(base, M::Location::Query)
+    names.should eq(Set{"q", "v/x", "empty"}) # a valueless key counts; a nameless pair does not
+  end
+
+  it "reads urlencoded form keys, and only when the body IS one" do
+    body = "n=jay&role=admin"
+    base = req("POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-urlencoded\r\n" \
+               "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    M::Inject.existing_names(base, M::Location::Form).should eq(Set{"n", "role"})
+    json = req("POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\nContent-Length: 9\r\n\r\n{\"n\":\"j\"}")
+    M::Inject.existing_names(json, M::Location::Form).should be_empty
+  end
+
+  it "reads every object node's keys for json, nested and inside a root array" do
+    body = %([{"id":1,"meta":{"tag":"x"}}])
+    base = req("POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n" \
+               "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    M::Inject.existing_names(base, M::Location::Json).should eq(Set{"id", "meta", "tag"})
+  end
+
+  it "reads header field names down-cased, and cookie names verbatim" do
+    base = req("GET /a HTTP/1.1\r\nHost: h\r\nX-Api-Key: k\r\nCookie: sid=1; Theme=dark\r\n\r\n")
+    M::Inject.existing_names(base, M::Location::Headers).should contain("x-api-key")
+    M::Inject.existing_names(base, M::Location::Cookies).should eq(Set{"sid", "Theme"})
+  end
+
+  # The multipart body routinely carries a binary part, so the scan is a BYTE-level line walk:
+  # a `String` regex would raise on a subject that is not valid UTF-8, and a whole-body scan for
+  # `name="` would read a match out of the file's own bytes.
+  it "reads multipart field names past a binary part, and ignores filename=" do
+    marker = Bytes[0xff_u8, 0xfe_u8, 0x00_u8, 0x10_u8]
+    b = IO::Memory.new
+    b << "--B\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\nhi\r\n"
+    b << "--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.bin\"\r\n\r\n"
+    b.write(marker)
+    b << "\r\n--B--\r\n"
+    body = b.to_slice
+    base = IO::Memory.new
+    base << "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n" \
+            "Content-Length: #{body.size}\r\n\r\n"
+    base.write(body)
+    M::Inject.existing_names(base.to_slice, M::Location::Multipart).should eq(Set{"note", "f"})
+  end
+
+  # The stated invariant — it may test a name it could have skipped, never the reverse. A part
+  # whose CONTENT is a pasted HTTP dump carries its own `Content-Disposition` line; reading that
+  # as a field name would drop a genuinely hidden `admin` from the run and report it as
+  # already-in-request.
+  it "ignores a Content-Disposition line inside a part's CONTENT" do
+    body = "--B\r\nContent-Disposition: form-data; name=\"report\"\r\n\r\n" \
+           "here is the request I captured:\r\n" \
+           "Content-Disposition: form-data; name=\"admin\"\r\n" \
+           "\r\n--B--\r\n"
+    base = req("POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n" \
+               "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    M::Inject.existing_names(base, M::Location::Multipart).should eq(Set{"report"})
+  end
+
+  # Best-effort, and it fails in the SAFE direction: a body gori cannot parse yields nothing to
+  # protect, so the miner tests a name it might have skipped — never the reverse.
+  it "is empty for a body it cannot parse" do
+    body = "not json at all"
+    base = req("POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n" \
+               "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    M::Inject.existing_names(base, M::Location::Json).should be_empty
+  end
+end

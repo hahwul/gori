@@ -43,7 +43,9 @@ module Gori
 
       private def drain_mine_event(mjob : MineJob, ev : Miner::Event) : Nil
         case ev
-        when Miner::BaselineEvent then mjob.baseline_stable = ev.stable
+        when Miner::BaselineEvent
+          mjob.baseline_stable = ev.stable
+          mjob.baseline_warning = ev.warning
         when Miner::ProgressEvent then apply_mine_progress(mjob, ev.progress)
         when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
         when Miner::DoneEvent
@@ -90,6 +92,13 @@ module Gori
             j.field "found", mjob.found
             j.field "errors", mjob.errors
             j.field "baseline_stable", mjob.baseline_stable?
+            # Anything that makes this run's findings tentative — the status varied, the endpoint
+            # echoes any input (reflection detection is then OFF at those locations), or it never
+            # answered at all. NOT a gloss on `baseline_stable`: the echo note is raised off
+            # `reflects_all` alone, so it accompanies a perfectly STABLE baseline. `baseline_stable:
+            # false` on its own told an agent every finding was tentative without telling it what to
+            # do about it, and the CLI has printed this sentence (stable or not) since the miner shipped.
+            j.field "baseline_warning", Serialize.text(mjob.baseline_warning)
             j.field "results_truncated", mjob.truncated?
             j.field "job_complete", mjob.status != :running
             j.field "incomplete_reason", incomplete_reason(mjob.status)
@@ -113,13 +122,20 @@ module Gori
         j.field "candidate_names", engine.candidate_names
         j.field "skipped" do
           j.array do
-            engine.skipped_names.each do |(loc, n)|
-              j.object do
-                j.field "location", loc.label
-                j.field "names", n
-              end
-            end
+            # Both reasons a name goes untested, in ONE array, each row saying which: the two
+            # together are exactly `candidate_names - names_total` per location, so a caller
+            # can still reconcile the count it was given against the wordlist it supplied.
+            engine.skipped_names.each { |(loc, n)| mine_skip_row(j, loc, n, "invalid-at-location") }
+            engine.present_names.each { |(loc, n)| mine_skip_row(j, loc, n, "already-in-request") }
           end
+        end
+      end
+
+      private def mine_skip_row(j : JSON::Builder, loc : Miner::Location, n : Int32, reason : String) : Nil
+        j.object do
+          j.field "location", loc.label
+          j.field "names", n
+          j.field "reason", reason
         end
       end
 
@@ -306,10 +322,14 @@ module Gori
 
         tool j, "mine_status", "Counts + state of a mine job (running|done|budget_exhausted|stopped|error). " \
                                "budget_exhausted means max_requests halted the run before every name was tried; see incomplete_reason. " \
-                               "`skipped` lists wordlist names a location cannot carry (a header/cookie name must be an RFC 7230 " \
-                               "token, and framing headers are never injected) against `candidate_names`, the wordlist's own size — " \
-                               "names_total counts only the names that survived that filter, so without `skipped` an incomplete " \
-                               "sweep reads as a clean one." do |s|
+                               "`skipped` lists wordlist names that were NOT tested, per location, against `candidate_names` " \
+                               "(the wordlist's own size), each with a reason: `invalid-at-location` (a header/cookie name must be " \
+                               "an RFC 7230 token, and framing headers are never injected) or `already-in-request` (a name the " \
+                               "request already carries there is a VISIBLE parameter, not a hidden one). names_total counts only " \
+                               "the names that survived both filters, so without `skipped` an incomplete sweep reads as a clean " \
+                               "one. `baseline_warning` names anything that makes findings tentative — READ IT even when " \
+                               "baseline_stable is true: the endpoint-echoes-any-input note (reflection findings are disabled " \
+                               "at those locations) is independent of stability." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
         end
 

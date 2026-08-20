@@ -8,6 +8,20 @@ require "../fuzz/matcher"
 require "../pacing"
 
 module Gori::Miner
+  # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
+  # decided from state that does not move between two calls a `retry_pause` apart, and the
+  # Layer-2 half is `Outbound.permanent_refusal?` — ONE home for the rule, because an exclude
+  # was once omitted from a private copy and an EXCLUDE_SWEEP_ERROR was then retried `retries`
+  # times, burning the request cap and stalling the run for nothing.
+  #
+  # Module-level, and in THIS file, because the miner has TWO retry loops that must not drift —
+  # `Engine#send_with_retries` and `Baseline#send_with_retries` (calibration) — and because
+  # `spec/outbound_spec.cr`'s executable one-home guard reads `src/gori/<tool>/engine.cr` for
+  # the call. Both loops ask this; neither names a refusal constant of its own.
+  def self.permanent_refusal?(err : String?) : Bool
+    err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
+  end
+
   # The hard-cap wrapper (baseline calibration + bucket probes + confirmation rounds all
   # count against `--max-requests`) lives with the send seam it wraps: Fuzz::CappedBackend.
 
@@ -72,6 +86,8 @@ module Gori::Miner
     # answer — see `drain` / `wait_for_worker`.
     @inflight : Int32
     @idle : Channel(Nil)
+    # Per-location cache of the names the base request already carries — see `present_at`.
+    @present : Hash(Location, Set(String))
 
     # The first per-send failure reason of the run. `@errors` counts refusals and drops the
     # string, which is how a scope-blocked run could report "0 found" and exit 0 with the
@@ -122,6 +138,7 @@ module Gori::Miner
       @last_dispatch = Time.instant
       @inflight = 0
       @idle = Channel(Nil).new(1)
+      @present = Hash(Location, Set(String)).new
     end
 
     # The number of distinct (name × location) tests this run will perform — the stable
@@ -192,6 +209,25 @@ module Gori::Miner
       end
       @report = report
       @events.send(BaselineEvent.new(report.stable, report.warning))
+      # A baseline that never answered is not a baseline. Its `Report` carries placeholders —
+      # `status: nil`, every tolerance 0 — and `decide` reads them literally, so mining on one
+      # made EVERY candidate a Status finding (nil != 200) and every bucket bisect down to its
+      # names: a target where nothing is hidden came back as one finding per name, `errors: 0`,
+      # exit 0. Measured: 20 names → 20 "findings" over 64 requests. Refuse instead, and name
+      # the reason the calibration wave already collected (`report.warning`).
+      #
+      # `cap_reached?` first: when `--max-requests` is what refused those probes, the run is
+      # BUDGET-exhausted, not blind — the surfaces already say so off `Progress` (and
+      # `mine_all_refused?` deliberately exempts a cap), so it must not be reported as a failure.
+      if !report.reachable? && !@backend.cap_reached?
+        # The RAW send reason, not the wrapped sentence: `first_error` is what
+        # `mine_all_refused?` prints, and "every request failed — baseline unreachable —
+        # blocked by sandbox" says the same thing three times.
+        @first_error ||= report.error
+        @events.send(ErrorEvent.new(report.warning || "baseline unreachable"))
+        @events.send(DoneEvent.new(snapshot, @state.stopped?))
+        return
+      end
 
       work = Deque(Task).new
       @config.locations.each { |loc| initial_buckets(loc, valid_names_for(loc)).each { |t| work << t } }
@@ -474,7 +510,18 @@ module Gori::Miner
         # `confirm_rounds` extra unpaced requests for every candidate that shows signal.
         pace(interval)
         raw = send_with_retries(bytes, spans)
-        next if raw.error
+        if err = raw.error
+          # A confirm round is a REQUEST like any other, and this was the one send path that
+          # swallowed its failure whole: a candidate whose confirmation never reached the origin
+          # was dropped with no finding, no error counted and no reason retained, so a target
+          # that died right after the bucket probes ended "0 found · 0 errors". Same cap
+          # exemption `process_bucket` makes — a budget refusal is not a network failure.
+          unless err == Fuzz::CappedBackend::CAP_ERROR
+            @errors += 1
+            @first_error ||= err
+          end
+          next
+        end
         probe = Fingerprint.probe(raw)
         decision = Miner.decide(r, probe, [{name, c}], location)
         if matches_evidence?(decision, evidence, name)
@@ -567,13 +614,38 @@ module Gori::Miner
       buckets
     end
 
+    # The names this run actually tests at `loc`: the wordlist, minus what the location cannot
+    # carry, minus what the request ALREADY carries there (see `Inject.existing_names` for why
+    # the second filter is a correctness fix and not a saving — at Json the injector OVERWRITES
+    # the operator's own value, so testing a visible name corrupted the request AND reported it
+    # back as a hidden parameter).
     private def valid_names_for(loc : Location) : Array(String)
+      present = present_at(loc)
+      return carriable_names_for(loc) if present.empty?
+      # Header field names are case-insensitive, so `X-Api-Key` in the request rules out a
+      # wordlist's `x-api-key`; every other location's namespace is byte-exact.
+      cased = loc.headers?
+      carriable_names_for(loc).reject { |n| present.includes?(cased ? n.downcase : n) }
+    end
+
+    # Wordlist names the location can carry at all (a header/cookie name must be an RFC 7230
+    # token; a framing header is never injected).
+    private def carriable_names_for(loc : Location) : Array(String)
       case loc
       when Location::Headers   then @names.select { |n| Inject.valid_header_name?(n) }
       when Location::Cookies   then @names.select { |n| Inject.valid_cookie_name?(n) }
       when Location::Multipart then @names.select { |n| Inject.valid_multipart_name?(n) }
       else                          @names
       end
+    end
+
+    # Memoized per location — derived from `@base`, which never changes during a run, and read
+    # once per name by the filter above. The memo write is safe from the surfaces' reporting
+    # fibers (MCP `mine_status` calls `present_names` while the run is live): the whole
+    # derivation is pure computation over bytes with no yield point in it, which is the same
+    # single-threaded-scheduler reasoning the counters rely on.
+    private def present_at(loc : Location) : Set(String)
+      @present[loc] ||= Inject.existing_names(@base, loc)
     end
 
     # {location, how many wordlist names it cannot carry}, for the locations this run
@@ -587,7 +659,20 @@ module Gori::Miner
     # publishes a `skipped` count for exactly this reason; this is the same fact.
     def skipped_names : Array({Location, Int32})
       @config.locations.compact_map do |loc|
-        n = @names.size - valid_names_for(loc).size
+        n = @names.size - carriable_names_for(loc).size
+        n > 0 ? {loc, n} : nil
+      end
+    end
+
+    # {location, how many wordlist names the REQUEST ALREADY CARRIES there}, for the locations
+    # this run mines and only where something was dropped — the second half of the same
+    # coverage fact `skipped_names` reports, kept apart because the two have different answers:
+    # a name skipped here is one the operator can see in their own request, not one gori
+    # refused to encode. `names_total` excludes both, so without this the count comes up short
+    # with nothing anywhere to say why.
+    def present_names : Array({Location, Int32})
+      @config.locations.compact_map do |loc|
+        n = carriable_names_for(loc).size - valid_names_for(loc).size
         n > 0 ? {loc, n} : nil
       end
     end
@@ -652,13 +737,8 @@ module Gori::Miner
       end
     end
 
-    # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
-    # decided from state that does not move between two calls a `retry_pause` apart. The
-    # Layer-2 half is `Outbound.permanent_refusal?` — ONE home for the rule, because an
-    # exclude was once omitted from this list and an EXCLUDE_SWEEP_ERROR was then retried
-    # `retries` times, burning the request cap and stalling the run for nothing.
     private def permanent_refusal?(err : String?) : Bool
-      err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
+      Miner.permanent_refusal?(err)
     end
 
     private def park_if_paused : Nil
