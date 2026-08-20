@@ -774,3 +774,86 @@ describe "MCP fuzz_start — a 'marks' token that made no position" do
     end
   end
 end
+
+# A row an agent can never see is a row that did not happen.
+#
+# `store_fuzz_result` keeps a result for six reasons now. It used to keep four, and the two it
+# dropped were the two that carry a FAILURE:
+#
+#   * `chain_error` — a position's `¦chain` did not run on this payload, so the payload went
+#     out UNTRANSFORMED: a different test than the caller declared. `Serialize.fuzz_result`
+#     has a field and a paragraph for it, and no unmatched row could ever reach them.
+#   * `error` — the scope-refused / dead-target / TLS-failure row. `fuzz_status` counts these
+#     in `errors` and `blocked`, but a count names no PAYLOAD, so an agent could read
+#     `errors: 40` with an empty `results` page and no way to ask which forty.
+#
+# The CLI prints both (`emit_fuzz_result`) and the TUI renders every row; MCP was the one
+# surface where they vanished. `matched_only:true` is still there for a caller that wants only
+# the matches — filtering is the caller's, not the store's.
+describe "MCP fuzz_results — a failed row is stored, not silently dropped" do
+  it "keeps an errored row against a dead origin, with its payload and reason" do
+    probe = TCPServer.new("127.0.0.1", 0)
+    port = probe.local_address.port
+    probe.close
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a","b"]}]),
+         "retries"        => 0,
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      100.times do
+        sleep 0.02.seconds
+        break unless call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))["status"].as_s == "running"
+      end
+
+      st = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+      st["errors"].as_i.should eq(2)
+      st["stored_results"].as_i.should eq(2) # was 0 — the count said 2 errors and the page was empty
+
+      rows = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))["results"].as_a
+      rows.size.should eq(2)
+      rows.each { |r| r["matched"].as_bool.should be_false }
+      rows.map { |r| r["payloads"][0].as_s }.sort!.should eq(["a", "b"])
+      rows.first["error"].as_s.should_not be_empty
+      # …and the filter still filters: an agent asking for findings gets none of these.
+      matched = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json},"matched_only":true}))
+      matched["returned"].as_i.should eq(0)
+      matched["total_stored"].as_i.should eq(2)
+    end
+  end
+
+  it "keeps an unmatched row whose ¦chain could not run on its payload" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      # `gzip-decompress` over a payload that is not gzip: the chain resolves fine at template
+      # time (so `refuse_unusable_chains` lets the run start) and raises on THESE bytes, which
+      # is exactly the per-payload case `chain_error` exists for. `filter: {status: "200"}`
+      # makes every row unmatched, which is what used to erase them.
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§v¦gzip-decompress§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["notgzip"]}]),
+         "filter"         => {"status" => "200"},
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      100.times do
+        sleep 0.02.seconds
+        break unless call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))["status"].as_s == "running"
+      end
+
+      st = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+      st["matched"].as_i.should eq(0)
+      st["errors"].as_i.should eq(1) # a swallowed chain IS an error in the run's tally
+
+      rows = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))["results"].as_a
+      rows.size.should eq(1)
+      rows[0]["matched"].as_bool.should be_false
+      rows[0]["error"].raw.should be_nil # the SEND succeeded — distinct from `chain_error`
+      rows[0]["chain_error"].as_s.should contain("gzip-decompress")
+    end
+  end
+end

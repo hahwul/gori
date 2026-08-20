@@ -372,8 +372,10 @@ module Gori
         started_at_ms : Int64
 
       # A background fuzz run, polled by fuzz_status / fuzz_results. The runner fiber
-      # only mutates these fields (single-threaded scheduler → no lock needed); the
-      # stored results are matched-only and capped at FUZZ_MAX_STORED.
+      # only mutates these fields (single-threaded scheduler → no lock needed); the stored
+      # results are capped at FUZZ_MAX_STORED and are NOT matched-only — see
+      # `store_fuzz_result` for the six things a row can be kept for. `fuzz_results
+      # {matched_only:true}` is the filter for a caller that wants only the matches.
       class FuzzJob
         getter id : String
         getter total : Int64?

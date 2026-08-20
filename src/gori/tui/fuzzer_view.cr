@@ -149,6 +149,13 @@ module Gori::Tui
       # payload, so the pane would be quietly claiming the wire looked like that too.
       @run_auto_encode = nil.as(Fuzz::AutoEncode?)
       @pending_auto_encode = nil.as(Fuzz::AutoEncode?)
+      # …and whether THAT run recomputed the gRPC 5-byte length prefix
+      # (`Generator#reframe_grpc?` — the toggle AND a template the reframe can repair). Same
+      # argument once more, aimed at the OTHER length declaration a request carries: with the
+      # toggle on, the wire got a recomputed prefix and a reconstruction that skipped the pass
+      # showed the stale one — which for a gRPC sweep is exactly the byte under test.
+      @run_reframe_grpc = false
+      @pending_reframe_grpc = false
       # `Fuzz::Plan#rewrites_content_length?` as of the last plan build, plus the
       # `@editor.edits` revision it was computed at — an edit to the template invalidates
       # the answer, and a stale "your CL is being rewritten" is worse than none.
@@ -873,6 +880,7 @@ module Gori::Tui
       @run_template = @pending_template       # freeze the template these results are rendered against
       @run_policy = @pending_policy           # ...and the CL knobs + retention its generator ran under
       @run_auto_encode = @pending_auto_encode # ...and the positions it percent-encoded for
+      @run_reframe_grpc = @pending_reframe_grpc # ...and whether it re-length-prefixed gRPC
       @results_rev += 1
       # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
       # cache — otherwise an old row's lines could survive under a colliding new index.
@@ -1161,10 +1169,10 @@ module Gori::Tui
     # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
     # operator typed this target), but Sandbox mode and explicit EXCLUDE rules hard-block
     # every send — the same protection Discover already applies per-request.
-    # `overrides` is the project's hostname overrides. It defaults to nil because the
-    # Fuzzer tab has never applied them (the proxy path does, via Proxy::Upstream.dial) and
-    # closing that gap is a controller change, outside this refactor — but the parameter
-    # exists so the fix is one call-site edit rather than another re-plumbed sender.
+    # `overrides` is the project's hostname overrides — `FuzzerController#fuzz_run` passes
+    # `session.host_overrides`, so a Fuzzer sweep dials through the same override table the
+    # proxy path uses (`Proxy::Upstream.dial`). It still DEFAULTS to nil for the specs and any
+    # caller with no project to load one from, not because the tab skips them.
     def build_engine(verify : Bool, scope : Gori::Scope,
                      overrides : Gori::HostOverrides? = nil) : {Fuzz::Engine?, String?}
       commit_buffers
@@ -1194,6 +1202,10 @@ module Gori::Tui
       @pending_policy = {@config.update_content_length?, @config.add_content_length_when_missing?,
                          @matcher.keep_bodies}
       @pending_auto_encode = plan.auto_encode
+      # The generator's OWN answer, not `@config.reframe_grpc?`: the knob is only half of it —
+      # `Generator` also requires a template `GrpcVerdict.reframable_template?` accepts, and a
+      # reconstruction that reframed where the run did not would be wrong in the other direction.
+      @pending_reframe_grpc = plan.generator.reframe_grpc?
       # The template declares a Content-Length that disagrees with its own body BEFORE any
       # payload is substituted — so the auto-resync is about to rewrite framing the operator
       # authored deliberately, on every variation, and the sweep would report a clean
@@ -2950,6 +2962,10 @@ module Gori::Tui
       raw = tmpl.render(payloads)
       sync, add, _ = run_policy
       raw = Fuzz::ContentLength.sync(raw, add) if sync
+      # AFTER the Content-Length pass, the order `Generator#emit` uses and for its reason: the
+      # reframe is size-preserving, so it can neither invalidate the CL just written nor move a
+      # byte. Skipped when THAT run did not reframe (`@run_reframe_grpc`), which is the common case.
+      raw = Fuzz::GrpcVerdict.reframe(raw) if @run_reframe_grpc
       ResultRequest.new(raw, true)
     end
 

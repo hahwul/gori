@@ -215,13 +215,27 @@ module Gori::Fuzz
     # Substring over the response head. Cache the lowercased needle ONCE on assignment
     # (like the num_spec/status_spec setters) so the per-response check neither re-lowercases
     # the needle nor materializes a downcased head String — it byte-scans the raw head.
-    getter match_header : String?
-    @match_header_lc : Bytes?
+    #
+    # ONE macro for the two, and `filter_header` exists at all because a HEADER dimension with
+    # only a matcher half was the odd one out: every other dimension here (status, grpc, size,
+    # words, lines, regex) carries both, `fuzz_conditions` on MCP feeds `match` and `filter`
+    # off the SAME parsed shape, and a `filter: {header: …}` that quietly did nothing is the
+    # silent-ignore this file spends its comments avoiding. The response head is also where
+    # the noise lives on a real sweep — a `Set-Cookie` on every WAF challenge, an
+    # `X-Cache: HIT` — so filtering on it is the more useful half of the pair, not the
+    # decorative one.
+    macro header_spec(name)
+      getter {{ name.id }} : String?
+      @{{ name.id }}_lc : Bytes?
 
-    def match_header=(v : String?)
-      @match_header = v
-      @match_header_lc = (v && !v.empty?) ? v.downcase.to_slice : nil
+      def {{ name.id }}=(v : String?)
+        @{{ name.id }} = v
+        @{{ name.id }}_lc = (v && !v.empty?) ? v.downcase.to_slice : nil
+      end
     end
+
+    header_spec match_header
+    header_spec filter_header
 
     property extract : Regex?
     # The active calibration set (see Engine#calibrate_baseline). Empty = "no
@@ -362,7 +376,7 @@ module Gori::Fuzz
       return false unless raw.error.nil?
       return false if calibrated_out?(status, length, words, lines)
       matchers_pass?(raw, status, grpc_status, length, words, lines, text) &&
-        !filtered?(status, grpc_status, length, words, lines, text)
+        !filtered?(raw, status, grpc_status, length, words, lines, text)
     end
 
     # A response is "noise" when it matches ANY collected baseline sample — not just a
@@ -404,7 +418,7 @@ module Gori::Fuzz
         @match_words_c.nil? && @filter_words_c.nil? &&
         @match_lines_c.nil? && @filter_lines_c.nil? &&
         @match_regex.nil? && @filter_regex.nil? &&
-        @match_header_lc.nil?)
+        @match_header_lc.nil? && @filter_header_lc.nil?)
     end
 
     # Every active matcher dimension must pass.
@@ -418,18 +432,22 @@ module Gori::Fuzz
         # header_pass? (an allocation-free byte scan over the short head) before regex_pass?
         # (a PCRE match over the whole body): both are pure predicates, so `&&` short-circuits
         # identically either way, but this order lets a failing --mh skip the body match.
-        header_pass?(raw) &&
+        header_pass?(@match_header_lc, raw, default: true) &&
         regex_pass?(@match_regex, text, default: true)
     end
 
     # Any filter dimension that passes removes the result.
-    private def filtered?(status : Int32?, grpc_status : Int32?, length : Int64, words : Int32,
-                          lines : Int32, text : String) : Bool
+    private def filtered?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
+                          length : Int64, words : Int32, lines : Int32, text : String) : Bool
       status_pass?(@filter_status_c, status, default: false) ||
         grpc_pass?(@filter_grpc_c, grpc_status, default: false) ||
         num_pass?(@filter_size_c, length, default: false) ||
         num_pass?(@filter_words_c, words.to_i64, default: false) ||
         num_pass?(@filter_lines_c, lines.to_i64, default: false) ||
+        # Before the body regex, for the reason `matchers_pass?` orders them that way: a byte
+        # scan over the short head is cheaper than a PCRE match over the whole body, and `||`
+        # short-circuits identically either way.
+        header_pass?(@filter_header_lc, raw, default: false) ||
         regex_pass?(@filter_regex, text, default: false)
     end
 
@@ -442,9 +460,10 @@ module Gori::Fuzz
       false
     end
 
-    private def header_pass?(raw : Repeater::Result) : Bool
-      needle = @match_header_lc
-      return true unless needle
+    # `default` is what an ABSENT spec answers, exactly as on `status_pass?`/`num_pass?`: a
+    # matcher with no needle passes, a filter with no needle never fires.
+    private def header_pass?(needle : Bytes?, raw : Repeater::Result, default : Bool) : Bool
+      return default unless needle
       # ASCII case-insensitive substring scan over the raw head bytes — no per-response
       # `String.new(raw.head).scrub.downcase` allocation. Header field tokens are ASCII, so
       # this equals the old downcased-substring test for any ASCII/ISO-8859-1 head + needle.
