@@ -46,6 +46,25 @@ describe "gori run notes show --format json" do
     summary["title"].as_s.should eq("Title")
   end
 
+  it "scrubs invalid UTF-8 out of the title and body so the document stays valid" do
+    # `gori run notes create` takes its body from STDIN — piping a gzip/binary response body
+    # (or a file $EDITOR wrote) stores raw bytes the settings KV round-trips verbatim. JSON
+    # escapes control characters but passes an invalid BYTE straight through, so `--format
+    # json` was writing a document whose own valid_encoding? was false.
+    entry = Gori::Notes::NoteEntry.new(1_i64, String.new(Bytes[0x68, 0x69, 0x80, 0x0a, 0x78]))
+    doc = Gori::CLI::Output.note_object_json(0, entry, current: true, with_text: true)
+    doc.valid_encoding?.should be_true
+    parsed = JSON.parse(doc)
+    parsed["title"].as_s.should eq("hi\u{FFFD}")
+    parsed["text"].as_s.should contain('\n') # a note is multi-line BY DESIGN — not collapsed
+    parsed["bytes"].as_i.should eq(5)        # the STORED size, not the scrubbed one
+
+    arr = Gori::CLI::Output.notes_array_json(
+      Gori::Notes::Doc.new(0, [entry], 2_i64), with_text: true)
+    arr.valid_encoding?.should be_true
+    JSON.parse(arr)
+  end
+
   it "emits a null title for a blank note rather than the positional fallback" do
     # The listing's "note 3" is a DISPLAY fallback; JSON must report the absence so a
     # script can tell "untitled" from a note literally titled "note 3".

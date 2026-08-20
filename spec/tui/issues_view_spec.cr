@@ -410,6 +410,65 @@ describe Gori::Tui::IssuesView do
       view.detail_issue.try(&.id).should eq(id)
     end
   end
+
+  # A closed store is the spec-reachable stand-in for the real case: `exec_task_ok` answers
+  # false for a rolled-back batch (cross-process SQLite busy/lock) exactly as it does when the
+  # writer channel is shut. Reads still work, which is what makes the silent revert possible.
+  describe "a write that does not commit" do
+    it "save_notes keeps the typed text AND insert mode instead of discarding them" do
+      path = File.tempname("gori-fnd-busy", ".db")
+      store = Gori::Store.open(path)
+      store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store)
+      view.enter_notes_insert!
+      "writeup".each_char { |c| view.notes_insert(c) }
+      store.close
+
+      view.save_notes(store).should be_false
+      # The whole point: refresh_detail would have set_text'd the buffer back to the STORED
+      # (empty) notes, so the operator's writeup vanished with no toast and nothing to retry.
+      view.notes_copy_all.should contain("writeup")
+      view.notes_insert_mode?.should be_true
+
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+
+    it "severity_delta / status_delta report the rollback instead of silently snapping back" do
+      path = File.tempname("gori-fnd-busy2", ".db")
+      store = Gori::Store.open(path)
+      store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store)
+      store.close
+
+      view.severity_delta(1, store).should be_false
+      view.status_delta(1, store).should be_false
+      view.detail_issue.try(&.severity).should eq(Gori::Store::Severity::Low)
+
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+
+    it "save_notes still reports success on a healthy store" do
+      tmp_store do |store|
+        store.insert_issue("t", Gori::Store::Severity::Low, "h.test", nil)
+        view = IssuesView.new
+        view.reload(store)
+        view.open_detail(store)
+        view.enter_notes_insert!
+        "ok".each_char { |c| view.notes_insert(c) }
+        view.save_notes(store).should be_true
+        view.notes_insert_mode?.should be_false
+        view.detail_issue.try(&.notes).should eq("ok")
+      end
+    end
+  end
 end
 
 describe "Issues verbs" do

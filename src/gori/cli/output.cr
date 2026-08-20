@@ -9,6 +9,7 @@ require "../discover"
 require "../sitemap"
 require "../probe/group"
 require "../notes"
+require "../issues_export" # Issues::Export.one_line / .scrub_only
 require "../jwt"
 require "../authorize/engine"
 
@@ -728,16 +729,27 @@ module Gori
         JSON.build { |j| note_object_fields(j, idx, entry, current: current, with_text: with_text) }
       end
 
+      # The TEXT listing above reads `doc.texts`, which is already terminal-scrubbed. JSON is
+      # not a terminal, so ESC/CR stay (JSON escapes them and a note is multi-line BY DESIGN) —
+      # but the UTF-8 half of that guarantee still applies here, and this path had neither.
+      # A note body does not always originate inside gori: `gori run notes create` takes it from
+      # STDIN (its own banner suggests `some-tool | gori run notes create`) or from whatever the
+      # external $EDITOR wrote, so piping a gzip/binary response body stores raw non-UTF-8 bytes
+      # that the settings KV round-trips verbatim — and `--format json` then emitted a document
+      # whose `valid_encoding?` was false. Same split `Issues::Export.json` makes: `scrub_only`
+      # for the multi-line body, `one_line` for the single-line title. `title` stays NILABLE —
+      # its null for a blank note is the documented contract, distinct from the listing's
+      # positional "note 3" fallback.
       def self.note_object_fields(j : JSON::Builder, idx : Int32, entry : Notes::NoteEntry, current : Bool, with_text : Bool) : Nil
         text = entry.text
         j.object do
           j.field "id", entry.id
           j.field "index", idx + 1
-          j.field "title", Notes.title(text)
+          j.field "title", Notes.title(text).try { |t| Issues::Export.one_line(t) }
           j.field "lines", Notes.line_count(text)
           j.field "bytes", text.bytesize
           j.field "current", current
-          j.field "text", text if with_text
+          j.field "text", Issues::Export.scrub_only(text) if with_text
         end
       end
 

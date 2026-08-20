@@ -228,7 +228,7 @@ module Gori::Tui
         # is a literal character, and typing it would REPLACE the selection). ⌥⌫ and ⌥/⌃
         # motion are this editor's own and are excluded above.
         return false
-      when key.escape? then @issues.save_notes(@host.session.store)
+      when key.escape? then save_notes_or_report
       when key.enter?  then @issues.notes_newline
         # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @issues.notes_word_delete_key?(ev) then @issues.notes_motion_key(ev)
@@ -293,8 +293,27 @@ module Gori::Tui
       @issues.reload(@host.session.store)
     end
 
+    # The flush the shell runs on a tab switch and on `commit_pending_edits` (quit /
+    # leave-project). NO retry hint here, unlike the `esc` path: on a tab switch the buffer
+    # really is still there, but on the quit path the Runner is torn down immediately after —
+    # nothing more is drawn and the text goes with the session. That last case is pre-existing
+    # and deliberate (quit wins; `NotesView#save` keeps `@dirty` on a failed write and nobody
+    # blocks the exit on it either), so this reports without promising a retry that one of its
+    # three callers cannot honour.
     def commit : Nil
-      @issues.save_notes(@host.session.store) if @issues.notes_insert_mode?
+      return unless @issues.notes_insert_mode?
+      return if @issues.save_notes(@host.session.store)
+      @host.status("notes NOT saved — project busy")
+    end
+
+    # `esc` out of the notes editor. IssuesView#save_notes returns false when the write was
+    # rolled back (cross-process SQLite busy/lock) and then leaves the buffer AND insert mode
+    # exactly as they were, so the typed text is still on screen and a second `esc` is a real
+    # retry. Say so — reporting nothing is what made a busy project look like it had saved
+    # while it had discarded the writeup.
+    private def save_notes_or_report : Nil
+      return if @issues.save_notes(@host.session.store)
+      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
     end
 
     def issues_notes_read_mode? : Bool
@@ -435,12 +454,17 @@ module Gori::Tui
       end
     end
 
+    # `]`/`[` and `}`/`{`. A rolled-back write leaves the issue on its OLD value, which the
+    # re-read then paints back — indistinguishable from "the key did nothing" unless it says
+    # so. Same sentence Runner#apply_issue_choice uses for the picker path.
     def issue_severity(delta : Int32) : Nil
-      @issues.severity_delta(delta, @host.session.store)
+      return if @issues.severity_delta(delta, @host.session.store)
+      @host.status("severity NOT changed — project busy; try again")
     end
 
     def issue_status(delta : Int32) : Nil
-      @issues.status_delta(delta, @host.session.store)
+      return if @issues.status_delta(delta, @host.session.store)
+      @host.status("status NOT changed — project busy; try again")
     end
 
     def issue_edit_notes : Nil

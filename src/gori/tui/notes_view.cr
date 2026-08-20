@@ -427,7 +427,9 @@ module Gori::Tui
     def save(store : Store) : Nil
       return unless @dirty
       mine = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
-      merged = Notes.merge(Notes.load(store), mine, @deleted_ids, @current, @next_id)
+      # The active note by stable ID — `@current` is an index into THIS session's list, and
+      # the merged order is the persisted one plus our appends. See Notes.merge.
+      merged = Notes.merge(Notes.load(store), mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
       wrote = store.set_setting(DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
       # `next_id` advances either way: it only has to stay monotonic, and holding it back would
       # let a retry reuse an id the merge already handed out.

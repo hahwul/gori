@@ -84,8 +84,11 @@ module Gori
                   j.field "id", r.link.id
                   j.field "ref_kind", r.link.ref_kind.label
                   j.field "ref_id", r.link.ref_id
-                  j.field "label", r.label
-                  j.field "url", r.url
+                  # Captured bytes (see Links.resolve_flow) — `one_line` so a raw 0x80 in an
+                  # h2 `:path` can't make this document invalid UTF-8, the same guard
+                  # `Issues::Export.append_links_json` and MCP `list_links` carry.
+                  j.field "label", Issues::Export.one_line(r.label)
+                  j.field "url", Issues::Export.one_line(r.url)
                   j.field "stale", r.stale?
                 end
               end
@@ -98,7 +101,11 @@ module Gori
           return
         end
         resolved.each do |r|
-          puts "#{r.line}#{r.stale? ? "  (stale)" : ""}"
+          # `Resolved#line` is "[tag] label", and the label is `"#{row.method} #{loc}"` off the
+          # wire — so an OSC 52 / set-window-title sequence in a captured request line drove the
+          # operator's terminal on every `gori run links`. Every other CLI printer of captured
+          # text goes through `term_safe`; this one did not.
+          puts "#{CLI::Output.term_safe(r.line)}#{r.stale? ? "  (stale)" : ""}"
         end
       end
 

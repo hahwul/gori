@@ -251,10 +251,44 @@ describe Gori::Tui::NotesView do
       Gori::Notes::NoteEntry.new(2_i64, "shared-EDITED"), # I edited note 2
       Gori::Notes::NoteEntry.new(9_i64, "my-new"),        # I added note 9
     ]
-    merged = Gori::Notes.merge(persisted, mine, Set{3_i64}, 0, 4_i64) # I deleted note 3
+    merged = Gori::Notes.merge(persisted, mine, Set{3_i64}, 2_i64, 4_i64) # I deleted note 3
     merged.notes.map { |n| {n.id, n.text} }.should eq(
       [{1_i64, "peer-only"}, {2_i64, "shared-EDITED"}, {9_i64, "my-new"}])
     merged.next_id.should eq(10_i64) # past the max surviving id
+  end
+
+  it "Notes.merge keeps the ACTIVE note active across a peer's insert (id, not index)" do
+    # My list is [mine-new]; the peer meanwhile persisted a note of its own. The merge puts
+    # the peer's note first (persisted order) and appends mine — so the index I would have
+    # passed (0, "my first note") named the PEER's note in the merged list. An id can't drift.
+    persisted = Gori::Notes::Doc.new(0, [Gori::Notes::NoteEntry.new(5_i64, "peer")], 6_i64)
+    mine = [Gori::Notes::NoteEntry.new(9_i64, "mine-new")]
+    merged = Gori::Notes.merge(persisted, mine, Set(Int64).new, 9_i64, 10_i64)
+    merged.notes.map(&.id).should eq([5_i64, 9_i64])
+    merged.cur.should eq(1) # my note, not the peer's
+    merged.notes[merged.cur].text.should eq("mine-new")
+  end
+
+  it "Notes.merge falls back to the first note when the active one is gone" do
+    persisted = Gori::Notes::Doc.new(1, [
+      Gori::Notes::NoteEntry.new(1_i64, "a"),
+      Gori::Notes::NoteEntry.new(2_i64, "b"),
+    ], 3_i64)
+    merged = Gori::Notes.merge(persisted, [] of Gori::Notes::NoteEntry, Set{2_i64}, 2_i64, 3_i64)
+    merged.notes.map(&.id).should eq([1_i64])
+    merged.cur.should eq(0)
+  end
+
+  it "Doc#note_id refuses a negative position instead of wrapping to the last note" do
+    # Crystal's Array#[]? counts a negative index from the END, and the delete path walks
+    # `cur - 1` looking for the neighbour before the first slot.
+    doc = Gori::Notes::Doc.new(0, [
+      Gori::Notes::NoteEntry.new(1_i64, "a"),
+      Gori::Notes::NoteEntry.new(2_i64, "b"),
+    ], 3_i64)
+    doc.note_id(-1).should be_nil
+    doc.note_id(0).should eq(1_i64)
+    doc.note_id(2).should be_nil
   end
 
   it "migrates a legacy single-note document into the first note" do
