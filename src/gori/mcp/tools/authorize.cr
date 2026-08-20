@@ -280,8 +280,9 @@ module Gori
           # The requests that answered NOTHING are named right here rather than left to a
           # count further down the payload: "enforced" is a claim about what a target did,
           # and it must not be read as covering requests the target never answered.
-          unreached = ajob.unanswered > 0 ? " · #{ajob.unanswered} of them could not be reached at all " \
-                                            "and is evidence of nothing (see `unanswered_count`)" : ""
+          n = ajob.unanswered
+          unreached = n > 0 ? " · #{n} of them could not be reached at all and #{n == 1 ? "is" : "are"} " \
+                              "evidence of nothing (see `unanswered_count`)" : ""
           "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed · no identity matched the baseline " \
           "(access control appears enforced for the identities tested)#{unreached}"
         end

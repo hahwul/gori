@@ -747,22 +747,33 @@ module Gori::Tui
     # The batch produced NO evidence at all, as the sentence to show — or nil when at least
     # one request was actually compared.
     #
-    # Both arms exist for one reason: with nothing compared, `bypasses` is zero and so is the
-    # review count, which is indistinguishable from a target that held. The summary below
-    # would then read "no identity matched the baseline" — a clean bill of health for traffic
-    # that never left the machine, or for a host that never answered. They are kept apart
-    # because the operator fixes them differently: a scope rule, or a route.
+    # This exists because with nothing compared, `bypasses` is zero and so is the review
+    # count, which is indistinguishable from a target that held: the summary below would read
+    # "no identity matched the baseline" about traffic that never left the machine, or about a
+    # host that never answered.
+    #
+    # The test is the SUM of the two counts, not each on its own. They are disjoint —
+    # `Target#unanswered?` yields to `fully_blocked?` — and a batch that is part gate-refused
+    # and part unreachable compared exactly as little as one that is all of either, so testing
+    # them separately let that mixture fall straight through to the clean-sounding line. The
+    # other two surfaces already sum them (`report_authorize_empty_handed`, `authorize_verdict`).
+    #
+    # The reasons are still reported apart, because the operator fixes them differently: a
+    # scope rule, or a route.
     private def empty_handed_summary(done : Int32, unanswered : Int32) : String?
       blocked = @view.blocked_in(@batch_ids)
-      if blocked > 0 && blocked == done
+      return nil unless done > 0 && blocked + unanswered == done
+      parts = [] of String
+      if blocked > 0
         why = @view.blocked_reason_in(@batch_ids)
-        return "authorize: nothing was sent — #{blocked} request#{blocked == 1 ? "" : "s"} " \
-               "refused before the socket#{why ? " (#{why})" : ""}"
+        parts << "#{blocked} refused before the socket#{why ? " (#{why})" : ""}"
       end
-      return nil unless unanswered > 0 && unanswered == done
-      why = @view.unanswered_reason_in(@batch_ids)
-      "authorize: nothing came back — every send failed for #{unanswered} " \
-      "request#{unanswered == 1 ? "" : "s"}#{why ? " (#{why})" : ""} · this is not a result"
+      if unanswered > 0
+        why = @view.unanswered_reason_in(@batch_ids)
+        parts << "#{unanswered} whose every send failed#{why ? " (#{why})" : ""}"
+      end
+      "authorize: nothing was compared — #{done} request#{done == 1 ? "" : "s"} · " \
+      "#{parts.join(" · ")} · this is not a result"
     end
 
     # --- render / input ------------------------------------------------------

@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "file_utils"
+require "socket"
 require "../../src/gori/tui/controllers/authorize_controller"
 
 include Gori::Tui
@@ -175,6 +176,37 @@ private def seed_capture(store : Gori::Store, target : String, cookie : String? 
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice,
     body: "ok".to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
   id
+end
+
+# A capture aimed at a port on this machine with nothing behind it, so every send fails at
+# connect. `unreachable_port` claims a port and closes it.
+private def seed_dead_capture(store : Gori::Store, port : Int32, target : String) : Int64
+  head = "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nCookie: session=A\r\n\r\n"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice,
+    body: "ok".to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
+  id
+end
+
+private def unreachable_port : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  server.close
+  port
+end
+
+# Pump the render loop's drain until the run fiber has sent its terminal marker.
+private def drain_until_idle(ctrl : Gori::Tui::AuthorizeController) : Nil
+  200.times do
+    break unless ctrl.running?
+    ctrl.drain_events
+    Fiber.yield
+    sleep 5.milliseconds if ctrl.running?
+  end
+  ctrl.running?.should be_false
 end
 
 # A SECOND process editing the same project db — `gori run session add`, MCP
@@ -436,6 +468,37 @@ describe Gori::Tui::AuthorizeController do
       host.statuses.size.should eq(before) # not one line per tick
       # …and the tab SAYS why, where an operator looking at it can read it.
       ctrl.view.passive_note.not_nil!.should contain("two identities are called")
+    end
+  end
+
+  # A batch that compared NOTHING must not summarise as "no identity matched the baseline" —
+  # that is the finding this tool exists to give, stated about traffic that produced no
+  # response at all. The two ways to end up there are disjoint (the gate refused the send, or
+  # the send failed), and a batch can be part one and part the other: testing them separately
+  # let exactly that mixture fall through to the clean-sounding line.
+  it "says nothing was compared when the gate refused some sends and the rest failed" do
+    with_authorize_controller do |ctrl, host, session|
+      port = unreachable_port
+      session.scope.add("exclude", "string", "/gated").should be_true
+      ctrl.seed_flows([
+        seed_dead_capture(session.store, port, "/gated"),
+        seed_dead_capture(session.store, port, "/dead"),
+        seed_dead_capture(session.store, port, "/dead2"),
+      ]).should eq({3, 0})
+
+      ctrl.run(:all)
+      drain_until_idle(ctrl)
+
+      ctrl.view.blocked_in(ctrl.view.entries.map(&.id).to_set).should eq(1)
+      ctrl.view.unanswered_in(ctrl.view.entries.map(&.id).to_set).should eq(2)
+      summary = host.statuses.last
+      summary.should contain("nothing was compared")
+      summary.should contain("refused before the socket")
+      summary.should contain("every send failed")
+      summary.should_not contain("no identity matched the baseline")
+      # Every row says so on its own too — `review` is the word for "there is something here
+      # to judge", and there is not.
+      ctrl.view.entries.each(&.verdict.should(eq(:error)))
     end
   end
 
