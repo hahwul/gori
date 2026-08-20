@@ -1199,6 +1199,35 @@ module Gori
         err(message, "PROJECT_BUSY", retryable: true)
       end
 
+      # Make the off-commit FTS index safe to query, or say why it isn't.
+      #
+      # Trigram indexing runs off the capture commit (Store V4), so a `body:`/free-text query
+      # has to drain the backlog first or it answers from a partial index — and an agent gets
+      # one shot at that answer, unable to tell "no match" from "not indexed yet". Normally we
+      # simply drain. A READ-ONLY store cannot: it has no writer fiber, by design (#752), so a
+      # backlog there is permanent for this process however long the agent waits.
+      #
+      # Returning an error rather than the partial rows is the same call the stranded-cursor
+      # guard in list_history makes — silently answering "nothing matched" to a question we did
+      # not actually get to ask is the failure worth refusing. `retryable`, because whoever owns
+      # the writer will drain it. Returns nil when the query is safe to run.
+      private def drain_fts_or_error(uses_fts : Bool) : Result?
+        return nil unless uses_fts
+        s = @store
+        return nil if s.nil?
+        unless s.read_only?
+          s.index_pending!
+          return nil
+        end
+        backlog = s.fts_backlog
+        return nil if backlog.zero?
+        err("#{backlog} flow(s) are not yet indexed for free-text search, and this server is " \
+            "read-only (gori mcp --read-only) so it cannot index them — a body:/free-text " \
+            "result would silently omit them. Open the project in gori, or restart this server " \
+            "without --read-only, to drain the index; or query without a free-text term.",
+          "FTS_BACKLOG", retryable: true)
+      end
+
       # Emits scope_decision / matched scope_rule_id / effective_host onto an
       # active tool's result object so the send's scope evidence is self-contained.
       private def emit_scope(j : JSON::Builder, sc : ScopeCheck) : Nil

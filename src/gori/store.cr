@@ -313,7 +313,7 @@ module Gori
       begin
         harden_permissions(path)
         configure_connections(db)
-        Schema.migrate!(db)
+        Schema.migrate!(db, read_only: read_only)
       rescue ex
         db.close rescue nil
         open_lock.try(&.close)
@@ -547,8 +547,15 @@ module Gori
       end
     end
 
-    # Does this store refuse to write? (`gori mcp --read-only`, a count-only open.) Every
-    # write API no-ops on one; nothing here contends for SQLite's single writer slot.
+    # Does this store refuse to write? (`gori mcp --read-only`, a count-only open.)
+    #
+    # Every write API no-ops on one, and no writer fiber exists to contend for SQLite's single
+    # writer slot. The one write it can still make is the schema migration at open, and only
+    # when the database is genuinely behind this binary (see Schema.migrate!).
+    #
+    # Callers that read the FTS index must consult this: `index_pending!` cannot drain on a
+    # read-only store, so a non-zero `fts_backlog` there is permanent for this process and a
+    # `body:` query will under-report until whoever owns the writer catches up.
     def read_only? : Bool
       @read_only
     end
@@ -867,6 +874,12 @@ module Gori
     # marked closed nor removed — and `Store#close` then walks the pool and finalizes freed
     # statements a second time. That is a segfault, and the guard in #close documents measuring
     # it. Leaking one connection is the correct trade against that.
+    #
+    # KNOWN COST, upstream: `DB::Database#discard` is `Pool#delete`, which drops the connection
+    # from the pool WITHOUT the `@availability_channel` nudge `Pool#release` sends. A reader
+    # already parked in `wait_for_available` therefore sleeps out its 5 s `checkout_timeout`
+    # instead of taking the slot this just freed. There is no public API to wake it; the
+    # alternative — releasing a connection we know is bad — is the segfault above.
     private def retire_writer_conn(conn : DB::Connection) : Nil
       @writer_conn = nil
       ::Log.info { "store: discarding the writer's connection after a failed write" }
@@ -903,8 +916,34 @@ module Gori
       end
     end
 
+    # `index_pending_batch` on a healthy connection, and NEVER raising.
+    #
+    # ACQUIRING that connection can fail — `@db.checkout` raises `DB::PoolTimeout` after five
+    # seconds against a pool already at `max_pool_size`, and the connection factory can refuse
+    # outright. Both of the places this runs evaluate it as an ARGUMENT, i.e. in the writer
+    # loop rather than inside `index_pending_batch`'s own rescue, so an escape would take the
+    # whole writer fiber down — with the current batch's ops already pulled off `@writes`,
+    # which puts them out of reach of the drain `writer_loop` does on the way out. Their
+    # callers would park on a reply channel nobody can still send to. Answering 0 leaves the
+    # rows dirty for the next attempt, which is what every other index failure does.
+    private def index_batch_safely : Int32
+      index_pending_batch(writer_conn)
+    rescue ex
+      ::Log.warn { "FTS index batch skipped (no usable writer connection): #{ex.message}" } # gori.log (#411)
+      0
+    end
+
+    # `prune` likewise, and for the same reason: its own rescue cannot cover the argument.
+    private def prune_safely : Nil
+      prune(writer_conn)
+    rescue ex
+      ::Log.warn { "retention prune skipped (no usable writer connection): #{ex.message}" } # gori.log (#411)
+    end
+
     private def writer_connection_loop : Nil
-      # Reset per connection; `writer_loop` reads it to tell a loop death from a release failure.
+      # Cleared once per loop, not per connection — the loop takes and retires many. It stays
+      # the discriminator `writer_loop`'s rescue reads to tell "the loop died" from "the final
+      # release raised"; nothing about it tracks which connection is current.
       @writer_loop_exited = false
       begin
         loop do
@@ -1009,10 +1048,17 @@ module Gori
           rescue ex
             # gori.log, not STDERR: in TUI mode STDERR is the alternate screen and a write there
             # garbles the frame (#411). The count below is what the TUI actually surfaces.
-            ::Log.error { "store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}" }
-            @write_failures.add(ops.size) # surfaced in the TUI so the operator knows capture stopped
-            # The rollback above may itself have been refused, so this connection can still be
-            # holding an open transaction — and the WAL write lock with it. Retire it (#752).
+            # `batched`, not `ops`: the transaction only ever covered those, and an IndexBatch
+            # riding in the same burst is answered below with its own real result. Counting it
+            # here told the operator capture had stopped because a `flush` collided.
+            ::Log.error { "store write batch failed (#{batched.size} op(s), rolled back): #{ex.message}" }
+            @write_failures.add(batched.size) # surfaced in the TUI so the operator knows capture stopped
+            # Deliberately unconditional, not narrowed to "the ROLLBACK was refused". A statement
+            # the driver left un-reset survives the call that issued it, and finalizing one raises
+            # — which, on a connection handed back to the pool, comes out of `Store#close` and
+            # costs the last-connection WAL checkpoint (see #close). Retiring on every failure is
+            # cheaper than that: SQLite reopens in well under a millisecond, and with IMMEDIATE
+            # most collisions now WAIT rather than fail, so this is a rare path (#752).
             @writer_conn_suspect = true
           end
           # publish never raises (see #publish); replies are buffered — so neither
@@ -1027,7 +1073,7 @@ module Gori
             # retention sweep, keeping the DB far over its cap until enough live captures accrue.
             @inserts_since_prune += ops.sum { |op| op.is_a?(InsertFlow) ? 1 : (op.is_a?(InsertImportBatch) ? op.pairs.size : 0) }
             if @inserts_since_prune >= @prune_interval
-              prune(writer_conn)
+              prune_safely
               @inserts_since_prune = 0
             end
           else
@@ -1041,9 +1087,11 @@ module Gori
           end
           # Outside the batch transaction, and after it, so an explicit drain
           # (Store#index_pending!) also picks up rows this very batch just dirtied.
-          # `writer_conn`, not a captured local: the batch or the prune above may have retired
-          # the connection they ran on, and indexing must not inherit a dead one.
-          index_replies.each(&.send(index_pending_batch(writer_conn)))
+          # Asked per reply, not once: each call drains its own slice, so two callers that
+          # landed in one batch both make progress. `index_batch_safely` re-asks `writer_conn`
+          # each time — the batch or the prune above may have retired the connection they ran
+          # on, and indexing must not inherit a dead one.
+          index_replies.each(&.send(index_batch_safely))
         end
         @writer_loop_exited = true # the loop is done; anything that raises now is the release
       ensure
@@ -1091,11 +1139,20 @@ module Gori
       # Still on the prune cadence (once per PRUNE_INTERVAL inserts), so a project that never
       # inserts another flow heals only via `compact` — which reaps the same rows.
       reap_unattributed_h2_frames(conn)
+      # Each of the three sweeps below runs on the SAME connection, and the suspect flag is only
+      # read back when the loop next asks for one — i.e. after this method returns. So a sweep
+      # that has already condemned this connection must stop rather than let the next two burn a
+      # full `busy_timeout` apiece on it: three sweeps against a peer holding the write lock is
+      # up to fifteen seconds of writer stall, and the scheduler is single-threaded (#752). The
+      # rows they would have swept keep for the next sweep — that is what every rescue here
+      # already assumes.
+      return if @writer_conn_suspect
       # BEFORE the retention early-return, for the reason the reap above is: `events` growth
       # has nothing to do with the FLOW cap, and the surface that writes the most of them —
       # the MCP server — opens with RETENTION_UNLIMITED, so gating this on `@retention_flows`
       # would exempt exactly the case it exists for.
       trim_events(conn)
+      return if @writer_conn_suspect # as above: do not run the retention sweep on a dead connection
       return if @retention_flows <= 0
       # Served by the primary key: a rightmost-leaf descending scan of @retention_flows rows.
       oldest_kept = conn.query_one?(
@@ -1259,11 +1316,11 @@ module Gori
         when op = @writes.receive
           return op
         when timeout(tick)
-          # No capture work waiting: index a slice of the backlog and re-check. Asking
-          # `writer_conn` each tick (rather than holding one) is what stops an index batch that
+          # No capture work waiting: index a slice of the backlog and re-check. Asking for the
+          # connection each tick (rather than holding one) is what stops an index batch that
           # failed against a peer process from being retried on the same poisoned connection
           # every 250 ms for the rest of the session — the shape #752 was reported as.
-          @fts_backlog_hint = false if index_pending_batch(writer_conn) == 0
+          @fts_backlog_hint = false if index_batch_safely == 0
         end
       end
     rescue Channel::ClosedError
@@ -1281,22 +1338,36 @@ module Gori
     private def index_pending_batch(conn : DB::Connection) : Int32
       rows = [] of {Int64, Bytes, Bytes?, Bytes?, Bytes?, String?}
       begin
-        # `content_type` comes from the COLUMN, not from re-parsing response_head: it is the
-        # value the proxy already extracted from that head, and it is what the old on-commit
-        # path skipped binary bodies on. A synthesised response (an import, a test double) can
-        # carry a content type that never appeared in its head bytes, and deriving the marker
-        # from the head would silently start indexing a binary body those callers marked.
-        conn.query(
-          "SELECT id, request_head, substr(request_body, 1, ?), response_head, substr(response_body, 1, ?), " \
-          "content_type FROM flows WHERE fts_dirty = 1 ORDER BY id LIMIT ?",
-          FTS_INDEX_MAX, FTS_INDEX_MAX, FTS_BATCH) do |rs|
-          rs.each do
-            rows << {rs.read(Int64), rs.read(Bytes), rs.read(Bytes?),
-                     rs.read(Bytes?), rs.read(Bytes?), rs.read(String?)}
-          end
-        end
-        return 0 if rows.empty?
+        # Cheap lock-free probe first, served by the partial index on `fts_dirty`. An idle
+        # writer runs this every FTS_IDLE_TICK, and an empty backlog must not open a write
+        # transaction at all — under BEGIN IMMEDIATE that would claim the WAL write lock several
+        # times a second on a project with nothing left to index.
+        return 0 unless conn.query_one?("SELECT 1 FROM flows WHERE fts_dirty = 1 LIMIT 1", as: Int32)
         write_transaction(conn) do |c|
+          # SELECTed INSIDE the transaction, and the placement is load-bearing rather than
+          # tidiness. Read outside it, these rows are a snapshot taken BEFORE the write lock is
+          # held — and taking that lock can block for the whole `busy_timeout` while a peer
+          # process commits an `update_one` for one of these very flows. The batch would then
+          # index the PRE-update text and clear `fts_dirty` on the row the peer had just
+          # re-dirtied, leaving that response permanently unfindable by `body:` while
+          # `fts_backlog` reports 0 — a silent index hole, reachable only with two gori on one
+          # project. Inside the transaction the write lock is already held, so nothing can
+          # commit between the read and the clear.
+          #
+          # `content_type` comes from the COLUMN, not from re-parsing response_head: it is the
+          # value the proxy already extracted from that head, and it is what the old on-commit
+          # path skipped binary bodies on. A synthesised response (an import, a test double) can
+          # carry a content type that never appeared in its head bytes, and deriving the marker
+          # from the head would silently start indexing a binary body those callers marked.
+          c.query(
+            "SELECT id, request_head, substr(request_body, 1, ?), response_head, substr(response_body, 1, ?), " \
+            "content_type FROM flows WHERE fts_dirty = 1 ORDER BY id LIMIT ?",
+            FTS_INDEX_MAX, FTS_INDEX_MAX, FTS_BATCH) do |rs|
+            rs.each do
+              rows << {rs.read(Int64), rs.read(Bytes), rs.read(Bytes?),
+                       rs.read(Bytes?), rs.read(Bytes?), rs.read(String?)}
+            end
+          end
           rows.each do |(id, req_head, req_body, resp_head, resp_body, resp_ct)|
             # The request side has no content_type column, so its marker comes from its head —
             # exactly what the old path did for the request body.

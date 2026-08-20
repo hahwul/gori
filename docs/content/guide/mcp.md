@@ -57,7 +57,9 @@ By default the server also exposes action tools that send live requests and writ
 gori mcp --read-only
 ```
 
-A read-only server also keeps no writer. Past the schema check every open performs, it never writes the project database and runs no background indexing. That matters when a TUI is capturing into the same project: SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes the two contend.
+A read-only server also keeps no writer. It never writes the project it serves and runs no background indexing — SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes it contend with the TUI capturing into the same project. The one exception is a database written by an older gori, which is migrated on open because this build cannot read it otherwise.
+
+One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index — open the project in gori, or drop `--read-only`, to drain it.
 
 ## Installing Into an Agent
 

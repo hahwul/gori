@@ -21,6 +21,12 @@ private def contended_store(&)
   begin
     yield store, peer
   ensure
+    # The store too, not just the peer. Each example ends with its own `close_within`
+    # assertion, but a FAILED expectation raises straight past it — and then the files below
+    # are unlinked while SQLite still holds them and the `gori-store-writer` fiber is still
+    # parked, leaking both into every example that runs after. Closed here on a timeout for
+    # the same reason the examples use one: a wedged writer must fail, never hang the run.
+    close_within(store, 10.seconds)
     peer.close rescue nil
     File.delete?(path)
     File.delete?("#{path}-wal")
@@ -147,6 +153,97 @@ describe "Gori::Store writer against a second writer on the same database" do
   end
 end
 
+describe "Gori::Store writer when it cannot get a connection at all" do
+  it "answers the index request instead of dying with it off the channel" do
+    path = File.tempname("gori-nopool", ".db")
+    # A pool of exactly one, and a short checkout timeout so the failure is fast.
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1&max_pool_size=1&checkout_timeout=0.2"
+    db = DB.open(url)
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil)
+    hog = nil.as(DB::Connection?)
+    begin
+      # Taken before the writer fiber has run, so every `@db.checkout` it makes times out. The
+      # writer now acquires its connection lazily and re-acquires after retiring one, which is
+      # what put a raising `checkout` in the loop body — in ARGUMENT position, outside the
+      # rescue that `index_pending_batch` carries for its own failures.
+      hog = db.checkout
+
+      answered = Channel(Int32).new(1)
+      spawn { answered.send(store.index_pending!) }
+      select
+      when n = answered.receive
+        # Nothing could be indexed, and saying so is the contract: the rows stay dirty.
+        n.should eq(0)
+      when timeout(10.seconds)
+        fail "index_pending! was never answered — the writer died holding its caller's reply"
+      end
+    ensure
+      hog.try(&.release)
+      close_within(store, 10.seconds)
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end
+
+describe "Gori::Store::Schema.migrate! on a read-only open" do
+  it "takes no write lock when the schema is already current" do
+    path = File.tempname("gori-romig", ".db")
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+    seed = DB.open(url)
+    begin
+      Gori::Store::Schema.migrate!(seed)
+    ensure
+      seed.close
+    end
+
+    # A peer holds the write lock, exactly as a capturing gori would. With `busy_timeout=1`
+    # the unconditional BEGIN IMMEDIATE this used to open would fail within milliseconds —
+    # which in `gori mcp --read-only` means the server gives up on the project and starts
+    # unbound, in the one situation the mode was added for (#752).
+    peer = DB.open(url)
+    db = DB.open(url)
+    begin
+      lock = peer.checkout
+      lock.exec("BEGIN IMMEDIATE")
+      begin
+        Gori::Store::Schema.migrate!(db, read_only: true)
+      ensure
+        lock.exec("ROLLBACK") rescue nil
+        lock.release rescue nil
+      end
+    ensure
+      db.close
+      peer.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "still migrates a database this binary is ahead of" do
+    path = File.tempname("gori-romig-old", ".db")
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+    db = DB.open(url)
+    begin
+      # An unmigrated file stands in for one an older gori wrote: `user_version` is behind, so
+      # the fast exit must NOT be taken. Read-only is about not competing for the writer slot,
+      # not about refusing to open — a schema this build cannot read is the worse failure.
+      db.scalar("PRAGMA user_version").as(Int64).to_i.should eq(0)
+      Gori::Store::Schema.migrate!(db, read_only: true)
+      db.scalar("PRAGMA user_version").as(Int64).to_i.should eq(Gori::Store::Schema::VERSION)
+      db.scalar("SELECT COUNT(*) FROM flows").as(Int64).should eq(0)
+    ensure
+      db.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end
+
 describe "a read-only Gori::Store" do
   it "reads normally, persists nothing, and leaves the write lock alone" do
     path = File.tempname("gori-ro", ".db")
@@ -182,8 +279,23 @@ describe "a read-only Gori::Store" do
         peer.close
       end
 
+      # It also cannot DRAIN the FTS backlog, and `index_pending!` says so by not moving it —
+      # the surfaces that query that index have to consult `read_only?` rather than trust a
+      # drain that silently did nothing (MCP's list_history/list_sitemap refuse with
+      # FTS_BACKLOG). Dirty the row from outside, since this store cannot.
+      seed2 = DB.open(url)
+      begin
+        seed2.exec("UPDATE flows SET fts_dirty = 1")
+      ensure
+        seed2.close
+      end
+      store.fts_backlog.should be > 0
+      store.index_pending!.should eq(0)
+      store.fts_backlog.should be > 0 # unchanged: nothing here can index it
+
       close_within(store, 20.seconds).should be_true
     ensure
+      close_within(store, 10.seconds) # idempotent; covers an example that failed before the assert
       File.delete?(path)
       File.delete?("#{path}-wal")
       File.delete?("#{path}-shm")
