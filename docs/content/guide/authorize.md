@@ -95,7 +95,9 @@ Each identity's response is reduced to three facts — status, decoded body size
 
 Two redirects are judged on their **`Location`**, before the body is looked at. A redirect's body is empty, so on the three facts above every `3xx` matched every other `3xx` — and an authenticated `302 → /dashboard` against an anonymous `302 → /login`, which is the clearest *enforcement* there is, came back `same`. Where the origin steers each identity is the only thing a redirect says, so that is what gets compared: an exact string match, because `/login` and `/login/` are a difference worth showing you rather than one worth deciding for you.
 
-The per-request row aggregates them: **BYPASS** when any non-baseline identity came back `same`, **enforced** when every one clearly differed, **review** otherwise.
+The per-request row aggregates them: **BYPASS** when any non-baseline identity came back `same`, **enforced** when every one clearly differed, **error** when every one of their sends *failed*, **review** otherwise.
+
+That fourth word is not a formality. A request nothing answered has no `same` verdict and no `different` one either, so an aggregate built from those two alone calls it **enforced** — a clean bill of health for a host gori could not reach. "The server held" and "we never got a reply" are opposite findings, and every surface reports them apart: the tab paints the row `error`, `gori run authorize` prints `[x] error` for it, and the MCP verdict is `error` with an `unanswered_count` beside it. When *nothing* in the run was compared — every request either refused by the gate or unanswered — the CLI says so on its summary line and exits non-zero, so a script that gates on the exit code cannot read a dead host as an endpoint that held.
 
 Both halves of the `same` test matter. SimHash skips numeric and hex tokens, so two differently-sized pages can hash close; the size band catches that. The 10% tolerance exists because real pages carry per-request noise — CSRF tokens, timestamps — and an exact match would flag all of it.
 
@@ -201,7 +203,7 @@ There is no `gori run session activate`: a `gori run` process sends and exits, s
 
 Four MCP tools drive the same engine as a background job: `authorize_start` (returns a `job_id`, the planned send count, the identity names, the scope gate, and everything it skipped), `authorize_status`, `authorize_results`, and `authorize_stop`.
 
-`authorize_results` puts the answer first. `access_control` names the outcome in one token — `BYPASS`, `enforced`, `review`, or `nothing_sent` — `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.
+`authorize_results` puts the answer first. `access_control` names the outcome in one token — `BYPASS`, `enforced`, `review`, `error`, or `nothing_sent` (the last two both mean nothing was compared) — `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.
 
 Five more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, and `set_active_session_slot` — which picks the identity every *other* tool's sends go out as, for the life of that server process.
 

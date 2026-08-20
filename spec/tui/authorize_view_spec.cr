@@ -28,6 +28,19 @@ private def target(bypass : Bool) : Gori::Authorize::Target
   ])
 end
 
+# A request whose every non-baseline send failed: the trials exist, none of them compared
+# anything, and `same_count` is zero exactly as it is for an endpoint that held.
+private def unanswered_target : Gori::Authorize::Target
+  meta = Gori::Repeater::ExchangeMeta.of(nil, nil, 0_i64, "connection refused")
+  summary = Gori::Authorize::ResponseSummary.new(nil, nil, 0_u64, error: "connection refused")
+  failed = Gori::Authorize::Trial.new("anonymous", false, meta, Gori::Authorize::Verdict::Error,
+    nil, summary, "req".to_slice, nil, nil)
+  Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/admin", [
+    trial("as-captured", true, 200, Gori::Authorize::Verdict::Baseline),
+    failed,
+  ])
+end
+
 private def render(v : AuthorizeView, w = 120, h = 30) : Nil
   v.render(Screen.new(MemoryBackend.new(w, h)), Rect.new(0, 0, w, h), true)
 end
@@ -132,6 +145,30 @@ describe AuthorizeView do
     v.entry_by_id(b).not_nil!.verdict.should eq(:enforced)
     v.bypass_total.should eq(1)
     render(v)
+  end
+
+  # `review` is the word for "there is something here to judge"; a request nothing answered
+  # has nothing. It used to land there because the row only asked "did any match?" and "did
+  # all differ?" — both false when every send errored.
+  it "reports a request whose every send failed as error, not review" do
+    v = AuthorizeView.new
+    a = v.add(flow("GET", "/admin"))
+    v.apply_result(a, unanswered_target)
+    v.entry_by_id(a).not_nil!.state.should eq(:done)
+    v.entry_by_id(a).not_nil!.verdict.should eq(:error)
+    v.unanswered_in(Set{a}).should eq(1)
+    v.unanswered_reason_in(Set{a}).should eq("connection refused")
+    # …and it is not counted as a finding either way.
+    v.bypass_total.should eq(0)
+    render(v)
+  end
+
+  it "does not call a request unanswered while one identity still replied" do
+    v = AuthorizeView.new
+    a = v.add(flow("GET", "/admin"))
+    v.apply_result(a, target(bypass: false))
+    v.unanswered_in(Set{a}).should eq(0)
+    v.unanswered_reason_in(Set{a}).should be_nil
   end
 
   it "marks queued entries running and clears the flag on result" do

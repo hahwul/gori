@@ -47,6 +47,15 @@ private def start_authz_origin(enforce : Bool) : Int32
   port
 end
 
+# A port with nothing behind it: bound to claim it, then closed, so a connect there is
+# refused rather than answered. Used for the run where every send fails at the socket.
+private def dead_authz_port : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  server.close
+  port
+end
+
 # A completed capture pointing at the local origin. `cookie` decides whether any identity that
 # REMOVES Cookie would change the request — without it `Passive.skip_reason` answers
 # `:no_effect` and the flow is (correctly) never replayed.
@@ -398,6 +407,32 @@ describe "MCP authorize tools" do
         results = call_json(tools, "authorize_results", %({"job_id":#{start["job_id"].as_s.to_json}}))
         results["results"][0]["fully_blocked"].as_bool.should be_true
         results["bypasses"].as_a.should be_empty
+      end
+    end
+
+    # The other way a run comes back empty-handed: the sends went out and every one of them
+    # failed. `bypasses` and `reviews` are both zero then, exactly as they are for a target
+    # that held — so this reported `enforced`, a clean bill of health for a host the machine
+    # could not reach at all.
+    it "says nothing came back when every send failed at the socket, rather than 'enforced'" do
+      port = dead_authz_port
+      with_store do |store|
+        flow = seed_authz_flow(store, port)
+        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        start = call_json(tools, "authorize_start",
+          {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
+        status = drain_job(tools, start["job_id"].as_s)
+        status["access_control"].as_s.should eq("error")
+        status["bypass"].as_bool.should be_false
+        status["unanswered_count"].as_i.should eq(1)
+        status["blocked"].as_i.should eq(0) # not the gate — the network
+        status["summary"].as_s.should contain("NOT evidence")
+        # And the count travels on the results payload too, which is where a caller that
+        # skipped `authorize_status` reads its verdict.
+        results = call_json(tools, "authorize_results", %({"job_id":#{start["job_id"].as_s.to_json}}))
+        results["access_control"].as_s.should eq("error")
+        results["unanswered_count"].as_i.should eq(1)
+        results["errors"].as_i.should be > 0
       end
     end
 

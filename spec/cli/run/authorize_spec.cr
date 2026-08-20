@@ -266,4 +266,25 @@ describe "gori run authorize — output" do
     ])
     Gori::CLI::Output.authorize_verdict(review).should eq(:review)
   end
+
+  # `[x] error` is the per-request word for "nothing was compared", and it holds whichever
+  # end the refusal came from — the gate or the socket. The run SUMMARY is where the two
+  # part company, because they are fixed differently.
+  it "says error for a request nothing answered, from the gate or from the network" do
+    gated = A::Target.new(12_i64, "GET", "https://acme.test/admin",
+      [trial("as-captured", A::Verdict::Baseline, nil, nil, baseline: true, error: "blocked"),
+       trial("anonymous", A::Verdict::Error, nil, nil, error: "blocked")],
+      2_i64, "sandbox")
+    Gori::CLI::Output.authorize_verdict(gated).should eq(:error)
+    gated.uncompared?.should be_true
+    gated.fully_blocked?.should be_true
+    gated.unanswered?.should be_false # the gate's report is the specific one
+
+    dead = A::Target.new(13_i64, "GET", "https://acme.test/admin", [
+      trial("as-captured", A::Verdict::Baseline, 200, 10_i64, baseline: true),
+      trial("anonymous", A::Verdict::Error, nil, nil, error: "connect failed"),
+    ])
+    Gori::CLI::Output.authorize_verdict(dead).should eq(:error)
+    dead.unanswered?.should be_true
+  end
 end

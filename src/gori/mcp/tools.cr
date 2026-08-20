@@ -529,6 +529,13 @@ module Gori
         # refused otherwise reports as "no identity matched the baseline" — a clean bill of
         # health for traffic that never left.
         property fully_blocked = 0
+        # Requests that reached the socket and got NOTHING back — every non-baseline
+        # identity's send failed (DNS, TLS, refused, timeout). Tracked for the same reason
+        # `fully_blocked` is, one door over: with no bypass and no review to count, a job made
+        # of these reported `enforced`, which is a clean bill of health for a host gori could
+        # not reach. See `Authorize::Target#unanswered?`.
+        property unanswered = 0
+        property unanswered_reason : String? = nil
         # Non-baseline identities served the same response as the baseline: the finding.
         property bypasses = 0
         property reviews = 0

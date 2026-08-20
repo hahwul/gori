@@ -51,6 +51,29 @@ module Gori
         @blocked > 0 && @trials.all?(&.meta.errored?)
       end
 
+      # NOT ONE non-baseline identity produced a comparison: every one of their sends failed,
+      # so this request is evidence of nothing.
+      #
+      # This needs saying because the absence of a finding looks exactly like a clean one. A
+      # request whose every trial errored has `same_count == 0` and no `review` verdict, so a
+      # summary built out of those two counts calls it ENFORCED — "no identity matched the
+      # baseline · access control appears enforced" — about a target that answered nothing at
+      # all. It is the false negative `blocked` exists to keep out of the report, arriving
+      # through the other door: "the server held" and "we could not reach the server" are
+      # opposite findings and must never share a word.
+      def uncompared? : Bool
+        non = @trials.reject(&.baseline?)
+        !non.empty? && non.all?(&.verdict.error?)
+      end
+
+      # `uncompared?` for the reason a NETWORK gives — the socket-level twin of
+      # `fully_blocked?`. The two are split because an operator fixes them differently (a
+      # scope rule versus a route), and `fully_blocked?` wins when both apply: gori refusing
+      # to send is the more specific fact about a send that never happened.
+      def unanswered? : Bool
+        !fully_blocked? && uncompared?
+      end
+
       def baseline : Trial?
         @trials.find(&.baseline?)
       end
@@ -182,9 +205,14 @@ module Gori
         if base_idx
           [identities[base_idx]] + identities[...base_idx] + identities[(base_idx + 1)..]
         else
-          first = identities[0]
-          anchored = Identity.new(first.name, first.set_headers, first.remove_headers, baseline: true)
-          [anchored] + identities[1..]
+          # `with_baseline`, not a re-`new` from three of the five fields: an identity IS a
+          # `SessionSlot` and a hand-rolled copy silently drops whatever the constructor call
+          # does not name — `rules`, the extract-rule membership that decides which binding
+          # table this identity's `$NAME` resolves out of. That is the same field the TUI form
+          # dropped (see `AuthorizeController#apply_identity`), and it fails the same silent
+          # way: the run goes out under an identity that looks right and is missing half of
+          # itself. The struct owns the copy so a sixth field cannot be forgotten here.
+          [identities[0].with_baseline(true)] + identities[1..]
         end
       end
     end

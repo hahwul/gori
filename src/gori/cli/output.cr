@@ -577,13 +577,14 @@ module Gori
       #
       # Same rule as the TUI master row (`AuthorizeView::Entry#verdict`): `:bypass` when ANY
       # identity was served the baseline's answer — the finding this tool exists to surface —
-      # `:enforced` when every one clearly differed, `:review` otherwise. The one addition is
-      # `:error`: every identity's send failed, so nothing was compared. The TUI paints that
-      # state on the row itself and cannot reach this method; a headless run has only this
-      # word, and calling a set of failed sends "review" would read as a result.
+      # `:enforced` when every one clearly differed, `:review` otherwise, and `:error` when
+      # every identity's send failed so nothing was compared (`Target#uncompared?`, the one
+      # place that rule is written — calling a set of failed sends "enforced" is a clean bill
+      # of health for a target that answered nothing). WHY they failed is the run summary's
+      # job; per request the answer is the same either way.
       def self.authorize_verdict(t : Authorize::Target) : Symbol
         non = t.trials.reject(&.baseline?)
-        return :error if non.empty? || non.all?(&.verdict.error?)
+        return :error if non.empty? || t.uncompared?
         return :bypass if non.any?(&.verdict.same?)
         return :enforced if non.all?(&.verdict.different?)
         :review
