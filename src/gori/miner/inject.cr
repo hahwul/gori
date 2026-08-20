@@ -538,6 +538,165 @@ module Gori::Miner
       {io.to_slice, [{start, stop}]}
     end
 
+    # ── names the request ALREADY carries ────────────────────────────────────────────
+
+    # The parameter names `request` already carries at `location` — the ones a mine must NOT
+    # test, because a name that is visible in the request is by definition not a HIDDEN one.
+    #
+    # Testing them is not merely redundant, it is destructive at Json: `inject_json_text`
+    # writes `node[name] = canary`, which OVERWRITES the operator's own value. Measured on
+    # `{"user":"alice","q":"hi"}` with `user` in the wordlist — the miner sent
+    # `{"user":"gq28707e5e","q":"hi"}`, the page changed because a REQUIRED parameter had been
+    # replaced, and `user` came back as a CONFIRMED "hidden parameter" that was in the request
+    # all along. When the clobbered value is what authorises the request, every other name
+    # sharing that bucket rides the same altered response and pays a full bisection to be
+    # cleared again. The other locations duplicate rather than replace (`?user=a&user=canary`,
+    # a second `X-Api-Key:` line, a repeated cookie) — no corruption, but the same false
+    # finding, decided by whichever copy the origin happens to prefer.
+    #
+    # Header names come back DOWN-CASED (field names are case-insensitive); query/form/
+    # multipart/json/cookie names are byte-exact, because those namespaces are case-sensitive.
+    # Best-effort by design: a body this cannot parse yields an empty set, which only means the
+    # miner tests a name it might have skipped — never that it skips one it should have tested.
+    def self.existing_names(request : Bytes, location : Location) : Set(String)
+      case location
+      in Location::Query     then query_names(request)
+      in Location::Form      then form_names(request)
+      in Location::Multipart then multipart_names(request)
+      in Location::Json      then json_names(request)
+      in Location::Headers   then header_names(request)
+      in Location::Cookies   then cookie_names(request)
+      end
+    end
+
+    private def self.query_names(request : Bytes) : Set(String)
+      nl = request.index(0x0a_u8)
+      return Set(String).new unless nl
+      target = String.new(request[0, nl]).rstrip('\r').split(' ')[1]? || ""
+      qi = target.index('?')
+      return Set(String).new unless qi
+      form_pair_names(target[(qi + 1)..])
+    end
+
+    private def self.form_names(request : Bytes) : Set(String)
+      _, body, _ = split(request)
+      return Set(String).new if body.empty?
+      ct = (header_value(request, "content-type") || "").downcase
+      return Set(String).new unless ct.includes?("x-www-form-urlencoded")
+      text = String.new(body)
+      return Set(String).new unless text.valid_encoding?
+      form_pair_names(text)
+    end
+
+    # `a=1&b=2` → {"a", "b"}, each key URL-DECODED so it is comparable to a raw wordlist name
+    # (the injector encodes on the way out, so `v%2Fx` in the request IS the candidate `v/x`).
+    private def self.form_pair_names(query : String) : Set(String)
+      found = Set(String).new
+      query.split('&') do |pair|
+        next if pair.empty?
+        key = pair.partition('=')[0]
+        next if key.empty?
+        found << (URI.decode_www_form(key) rescue key)
+      end
+      found
+    end
+
+    # Field names off each `Content-Disposition: form-data; name="…"` line. Walked as BYTES,
+    # line by line: a multipart body routinely carries a binary file part, and both `String`
+    # regexes (PCRE2 raises on a subject that is not valid UTF-8) and a naive `name="` scan
+    # over the whole body (which would read a match out of the file's own bytes) are wrong here.
+    private def self.multipart_names(request : Bytes) : Set(String)
+      _, body, _ = split(request)
+      found = Set(String).new
+      each_ascii_line(body) do |line|
+        next unless (colon = line.index(':')) && line[0...colon].strip.downcase == "content-disposition"
+        if name = quoted_param(line[(colon + 1)..], "name")
+          found << name
+        end
+      end
+      found
+    end
+
+    # `…; name="q"; filename="a.txt"` → the value of `param`, or nil. Quoted form only — that is
+    # what `build_multipart_parts` writes and what every real multipart client sends.
+    private def self.quoted_param(attrs : String, param : String) : String?
+      needle = "#{param}=\""
+      i = 0
+      while at = attrs.index(needle, i)
+        # Only a real attribute boundary counts, so `filename="…"` is not read as `name`.
+        before = at == 0 ? ';' : attrs[at - 1]
+        if before == ';' || before == ' ' || before == '\t'
+          rest = attrs[(at + needle.size)..]
+          close = rest.index('"')
+          return close ? rest[0, close] : nil
+        end
+        i = at + needle.size
+      end
+      nil
+    end
+
+    # Keys of every object node the Json injector would write into — the node set is the same
+    # capped BFS `inject_json_text` walks, so this cannot disagree with what gets clobbered.
+    private def self.json_names(request : Bytes) : Set(String)
+      _, body, _ = split(request)
+      found = Set(String).new
+      return found if body.empty?
+      text = String.new(body)
+      return found unless text.valid_encoding?
+      begin
+        nodes = collect_object_nodes(JSON.parse(text), MAX_JSON_NODES)
+      rescue JSON::ParseException
+        # A body that does not parse takes the `{`-splice road, which appends rather than
+        # replaces — nothing to protect, so nothing to report.
+        return found
+      end
+      nodes.each { |node| node.each_key { |k| found << k } }
+      found
+    end
+
+    private def self.header_names(request : Bytes) : Set(String)
+      head, _, _ = split(request)
+      found = Set(String).new
+      each_ascii_line(head) do |line|
+        if (colon = line.index(':')) && colon > 0
+          found << line[0...colon].strip.downcase
+        end
+      end
+      found
+    end
+
+    private def self.cookie_names(request : Bytes) : Set(String)
+      found = Set(String).new
+      head, _, _ = split(request)
+      each_ascii_line(head) do |line|
+        next unless (colon = line.index(':')) && colon > 0 && line[0...colon].strip.downcase == "cookie"
+        line[(colon + 1)..].split(';') do |pair|
+          name = pair.partition('=')[0].strip
+          found << name unless name.empty?
+        end
+      end
+      found
+    end
+
+    # Yield each CRLF/LF-delimited line of `bytes` as a String, skipping any line that is not
+    # valid UTF-8 (a binary multipart part) rather than scrubbing it into one.
+    private def self.each_ascii_line(bytes : Bytes, & : String ->) : Nil
+      start = 0
+      i = 0
+      while i <= bytes.size
+        if i == bytes.size || bytes[i] == 0x0a_u8
+          stop = i
+          stop -= 1 if stop > start && bytes[stop - 1] == 0x0d_u8
+          if stop > start
+            line = String.new(bytes[start, stop - start])
+            yield line if line.valid_encoding?
+          end
+          start = i + 1
+        end
+        i += 1
+      end
+    end
+
     # ── name/value validity ──────────────────────────────────────────────────────────
 
     def self.valid_header_name?(name : String) : Bool

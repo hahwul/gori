@@ -298,7 +298,11 @@ describe "Gori::Miner::Baseline#calibrate" do
     report = b.calibrate(Array(M::Location).new)
     report.status.should be_nil
     report.stable.should be_false
-    report.warning.should eq("baseline unreachable")
+    # The reason is carried, not discarded: "unreachable" alone sends the operator hunting for
+    # a target problem gori already has the name of.
+    report.warning.should eq("baseline unreachable — connection refused")
+    report.error.should eq("connection refused")
+    report.reachable?.should be_false
   end
 
   it "warns 'baseline status varies (200/500)' when statuses differ across rounds" do

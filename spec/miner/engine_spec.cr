@@ -239,6 +239,43 @@ private class StopAtBackend < F::Backend
   end
 end
 
+# Records every request it is handed, and answers a fixed baseline — for asserting what the
+# miner actually put on the wire.
+private class EchoRequestBackend < F::Backend
+  getter origin : F::Origin
+  getter wire = [] of String
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @wire << String.new(bytes)
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
+# Errors the first `fail_first` sends, then answers a stable baseline — a target that was
+# unreachable for the calibration wave and healthy by the time the buckets went out.
+private class DeadThenAliveBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin, @fail_first : Int32, @reason : String = "connection refused")
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, @reason) if @sent <= @fail_first
+    body = "BASELINE BODY CONTENT"
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
 private def mine(backend : F::Backend, names : Array(String), config : M::Config) : Array(M::Finding)
   base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
   engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: config)
@@ -519,6 +556,82 @@ describe Gori::Miner::Engine do
   # operator's only signal was that one wordlist produced "444 names" against the query and
   # "435 names" against headers, and only if they ran both and compared. `probe` publishes a
   # `skipped` count for exactly this reason.
+  # A `Report` whose every field is a placeholder is not a baseline. `status` is nil and each
+  # tolerance is 0, and `decide` reads them literally — so a run that mined on one called EVERY
+  # candidate a Status finding (nil != 200) and bisected every bucket down to its names.
+  # Measured before the guard: 20 names on a target where NOTHING is hidden came back as 20
+  # findings over 64 requests, with `errors: 0` and exit 0 behind them.
+  describe "a baseline that never answered" do
+    it "refuses the run instead of mining against placeholders" do
+      c = cfg
+      c.stability_rounds = 4
+      backend = DeadThenAliveBackend.new(F::Origin.new("http", "h", 80), fail_first: 5)
+      base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      names = (1..20).map { |i| "p#{i}" }
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: c)
+      findings = [] of M::Finding
+      errors = [] of String
+      done = nil.as(M::DoneEvent?)
+      baseline = nil.as(M::BaselineEvent?)
+      engine.run do |ev|
+        case ev
+        when M::FindingEvent  then findings << ev.finding
+        when M::ErrorEvent    then errors << ev.message
+        when M::BaselineEvent then baseline = ev
+        when M::DoneEvent     then done = ev
+        end
+      end
+      findings.should be_empty
+      # …and it stopped there rather than spending the wordlist on it.
+      backend.sent.should eq(4)
+      errors.size.should eq(1)
+      errors[0].should eq("baseline unreachable — connection refused")
+      # The baseline event still goes out first (a surface renders it), and the run still ends
+      # with exactly one Done, so no consumer is left waiting on a job that will never finish.
+      baseline.try(&.stable).should be_false
+      done.should_not be_nil
+      done.not_nil!.stopped.should be_false
+      # The reason a consumer re-reports is the RAW send failure, not the wrapped sentence.
+      engine.first_error.should eq("connection refused")
+    end
+  end
+
+  # A name the request already carries is a VISIBLE parameter, so testing it can only produce a
+  # false finding — and at Json it also CORRUPTS the request: `inject_json_text` assigns into
+  # the node, replacing the operator's own value. Measured on `{"user":"alice"}` with `user` in
+  # the wordlist: gori sent `{"user":"gq28707e5e"}`, the page changed because a required
+  # parameter had been overwritten, and `user` came back CONFIRMED as a hidden parameter.
+  describe "names the request already carries" do
+    it "never overwrites an existing json key, and never reports it as hidden" do
+      c = cfg
+      c.locations = [M::Location::Json]
+      backend = EchoRequestBackend.new(F::Origin.new("http", "h", 80))
+      body = %({"user":"alice","q":"hi"})
+      base = "POST /api HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n" \
+             "Content-Length: #{body.bytesize}\r\n\r\n#{body}".to_slice
+      engine = M::Engine.new(base, http2: false, names: ["user", "zzhidden"], backend: backend, config: c)
+      engine.run { }
+      engine.total_names.should eq(1_i64)
+      engine.present_names.should eq([{M::Location::Json, 1}])
+      # Every probe of the run kept the operator's own value.
+      backend.wire.each(&.should(contain(%("user":"alice"))))
+    end
+
+    it "matches a header name case-insensitively, and a query/cookie name exactly" do
+      c = cfg
+      c.locations = [M::Location::Headers, M::Location::Cookies, M::Location::Query]
+      base = "GET /api?q=hi&Page=2 HTTP/1.1\r\nHost: h\r\nX-Api-Key: k\r\n" \
+             "Cookie: sid=1; theme=dark\r\n\r\n".to_slice
+      names = ["x-api-key", "sid", "q", "Page", "page", "zzhidden"]
+      engine = M::Engine.new(base, http2: false, names: names,
+        backend: HiddenParamBackend.new(F::Origin.new("http", "h", 80)), config: c)
+      # headers: x-api-key (the request spells it X-Api-Key) · cookies: sid · query: q and Page
+      # — but NOT `page`, whose spelling the query does not carry.
+      engine.present_names.should eq([{M::Location::Headers, 1}, {M::Location::Cookies, 1}, {M::Location::Query, 2}])
+      engine.total_names.should eq((6 - 1) + (6 - 1) + (6 - 2))
+    end
+  end
+
   describe "#skipped_names" do
     wl_names = ["normalname", "my param", "x=y", "arr[]", "Content-Length", "semi;colon"]
 

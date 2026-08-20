@@ -152,9 +152,13 @@ describe Gori::Miner::Plan do
     plan.config.locations.should eq([M::Location::Query, M::Location::Form])
     plan.names.should contain("is_admin") # the compiled-in list, not an empty run
     plan.names.uniq.size.should eq(plan.names.size)
-    # Query and Form accept every name (only headers/cookies/multipart filter names),
-    # so the progress denominator is the whole list once per location.
-    plan.total_names.should eq(plan.names.size.to_i64 * 2)
+    # Query and Form accept every name (only headers/cookies/multipart filter names), so the
+    # progress denominator is the whole list once per location — MINUS the names the request
+    # already carries there, which are not hidden parameters and are never tested. This
+    # fixture's query is `?q=hi` and `q` is in the compiled-in list, so the Query side is one
+    # short; the form body's `n=jay` names nothing the list carries.
+    plan.names.should contain("q")
+    plan.total_names.should eq(plan.names.size.to_i64 * 2 - 1)
   end
 
   it "wires the origin, protocol and TLS settings into the dial seam" do

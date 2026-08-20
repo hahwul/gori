@@ -36,7 +36,22 @@ module Gori::Miner
       stable : Bool,
       reflection_only : Hash(Location, Bool),
       reflects_all : Hash(Location, Bool),
-      warning : String?
+      warning : String?,
+      # Did ANY calibration probe come back? False means every stability round errored, so
+      # every field above is a placeholder rather than a measurement — `status` is nil and the
+      # three tolerances are 0. `decide` compares against those placeholders literally, so a
+      # run that mined on one reported EVERY candidate as a Status finding (nil != 200) at full
+      # bisection cost, with `errors: 0` and exit 0 behind it. There is no baseline here to
+      # diff against; `Engine#orchestrate` refuses the run instead of inventing one.
+      reachable : Bool = true,
+      # The RAW send failure behind `reachable: false` (`connection refused`, a scope refusal),
+      # unwrapped — `warning` is the sentence, this is the reason a consumer re-reports as its
+      # own first error. nil whenever the baseline answered.
+      error : String? = nil do
+      def reachable? : Bool
+        reachable
+      end
+    end
 
     # `stopped` is the engine's stop flag, read before every calibration probe. Calibration is
     # real requests at the target and it runs entirely inside one `calibrate` call, so without
@@ -61,13 +76,21 @@ module Gori::Miner
       # Indexed writes, not appends: `probes.first` is the round the whole report is built
       # from, so the answer must not depend on which fiber finished first.
       slots = Array(Probe?).new(rounds, nil)
+      # The first round's failure reason, kept for the `unreachable` report: when NO round
+      # answered, "baseline unreachable" alone sends the operator looking for a target problem
+      # that gori already has the name of (`connection refused`, a scope refusal, a timeout).
+      first_error = nil.as(String?)
       in_parallel(rounds) do |i|
         next if @stopped.call
         raw = @backend.send(@base)
-        slots[i] = Fingerprint.probe(raw) if raw.error.nil?
+        if err = raw.error
+          first_error ||= err
+        else
+          slots[i] = Fingerprint.probe(raw)
+        end
       end
       probes = slots.compact
-      return unreachable if probes.empty?
+      return unreachable(first_error) if probes.empty?
 
       base = probes.first
       lengths = probes.map(&.metrics.length)
@@ -100,7 +123,8 @@ module Gori::Miner
 
       Report.new(base.metrics.status, length_tol, words_tol, lines_tol,
         base.metrics.length, base.metrics.words, base.metrics.lines,
-        stable, reflection_only, reflects_all, baseline_warning(stable, statuses, reflects_all))
+        stable, reflection_only, reflects_all, baseline_warning(stable, statuses, reflects_all),
+        reachable: true)
     end
 
     # Call the block for `0...count` through at most `concurrency` fibers, and return only
@@ -180,9 +204,13 @@ module Gori::Miner
       "#{notes.join("; ")} — findings tentative"
     end
 
-    private def unreachable : Report
+    # No round answered: `reachable: false` marks every field below it as a placeholder rather
+    # than a measurement, which is what `Engine#orchestrate` refuses to mine against.
+    private def unreachable(error : String? = nil) : Report
       Report.new(nil, 0_i64, 0, 0, 0_i64, 0, 0, false,
-        Hash(Location, Bool).new, Hash(Location, Bool).new, "baseline unreachable")
+        Hash(Location, Bool).new, Hash(Location, Bool).new,
+        error ? "baseline unreachable — #{error}" : "baseline unreachable",
+        reachable: false, error: error)
     end
   end
 
