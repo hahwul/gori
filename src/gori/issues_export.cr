@@ -138,8 +138,20 @@ module Gori
           j.object do
             j.field "kind", res.link.ref_kind.label
             j.field "ref_id", res.link.ref_id
-            j.field "url", res.url
-            j.field "label", res.label
+            # `one_line`, exactly like the title/host fields of the object this array sits in —
+            # and like `append_related_links`, the Markdown sibling twenty lines up, which has
+            # always one_line'd this same pair. Both values are built from CAPTURED bytes
+            # (`Links.resolve_flow` composes them from the flow's method/host/target, which
+            # `Codec::Http1.parse_request_head` builds with a plain `String.new` over the wire),
+            # so an h2 `:path` carrying a raw 0x80 landed here verbatim: `Export.json` returned a
+            # string whose `valid_encoding?` was FALSE, and `Serialize.issue` — which delegates
+            # this array — put that byte on a JSON-RPC line, breaking the WHOLE response for a
+            # strict client. That is the very gap `Serialize.issue`'s own comment claims to close
+            # for title/host/notes one field earlier, and `Serialize.text`'s contract ("every
+            # string that ORIGINATED OUTSIDE gori must pass through here before it reaches
+            # JSON::Builder") names as mandatory.
+            j.field "url", one_line(res.url)
+            j.field "label", one_line(res.label)
             j.field "stale", res.stale?
           end
         end

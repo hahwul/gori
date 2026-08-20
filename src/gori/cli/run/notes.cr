@@ -102,8 +102,11 @@ module Gori
           # so every persisted note is kept and just the delta is added.
           persisted = Notes.load(store)
           new_id = persisted.next_id
+          # `cur` = the note just created, named by its id: `gori run notes create` is the
+          # operator saying "this is what I am working on now", the same thing `^N` means in
+          # the TUI, and an index would have to guess where the merge appended it.
           merged = Notes.merge(persisted, [Notes::NoteEntry.new(new_id, body)], Set(Int64).new,
-            persisted.size, persisted.next_id + 1)
+            new_id, persisted.next_id + 1)
           # set_setting returns false when the write didn't commit (store busy/locked):
           # don't claim success then — same guard as issues/rewriter/project mutations.
           unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
@@ -147,8 +150,15 @@ module Gori
           # Delete by the note's STABLE id (not its list position) and merge, so a concurrent
           # writer's other notes aren't clobbered by a blind overwrite. See Notes.merge.
           target_id = persisted.notes[n - 1].id
+          # Keep the ACTIVE note active across the delete, by id. `persisted.cur` is a
+          # position, and removing a note ahead of it slides every later one up — so deleting
+          # note 1 while note 3 was active left `cur` on 3, which is now the note that used to
+          # be 4. When the active note is the one being deleted, fall to its neighbour (next,
+          # else previous), which is what closing a sub-tab does in the TUI.
+          keep_id = persisted.note_id(persisted.cur)
+          keep_id = persisted.note_id(persisted.cur + 1) || persisted.note_id(persisted.cur - 1) if keep_id == target_id
           merged = Notes.merge(persisted, [] of Notes::NoteEntry, Set{target_id},
-            persisted.cur, persisted.next_id)
+            keep_id, persisted.next_id)
           unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
             store.close
             abort "gori run notes delete: project is busy (write did not commit) — try again"

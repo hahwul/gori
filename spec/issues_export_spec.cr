@@ -93,6 +93,50 @@ describe Gori::Issues::Export do
     end
   end
 
+  describe ".json" do
+    it "scrubs a linked flow's url/label so the report stays valid UTF-8" do
+      with_store do |store|
+        # `target` is built by a plain `String.new` over the wire (h2 `:path` included), so a
+        # raw 0x80 round-trips through SQLite into Links.resolve's `url`/`label`. Unscrubbed it
+        # made Export.json's own return value invalid UTF-8 — and Serialize.issue delegates
+        # this very array, so the same byte went out on an MCP JSON-RPC line.
+        primary = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/a", http_version: "HTTP/1.1",
+          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        linked = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: String.new(Bytes[0x2f, 0x80, 0x61]), http_version: "HTTP/1.1",
+          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
+        store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
+
+        json = Gori::Issues::Export.json(store.issues, store)
+        json.valid_encoding?.should be_true
+        JSON.parse(json) # and it is still parseable
+      end
+    end
+
+    it "keeps a linked flow's url on one line" do
+      with_store do |store|
+        primary = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/a", http_version: "HTTP/1.1",
+          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        linked = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 2_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/b\nX", http_version: "HTTP/1.1",
+          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
+        store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
+
+        link = JSON.parse(Gori::Issues::Export.json(store.issues, store))[0]["links"][0]
+        link["url"].as_s.should_not contain('\n')
+        link["label"].as_s.should_not contain('\n')
+      end
+    end
+  end
+
   describe ".markdown" do
     it "keeps an attacker-controlled body (``` + headings) inside its code fence" do
       with_store do |store|

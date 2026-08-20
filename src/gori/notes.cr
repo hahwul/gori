@@ -39,7 +39,13 @@ module Gori
         notes.map { |n| Issues::Export.scrub_controls(n.text) }
       end
 
+      # The stable id at sub-tab position `idx`, or nil when there is no such position.
+      # The explicit `idx < 0` guard is not belt-and-braces: Crystal's `Array#[]?` counts a
+      # NEGATIVE index from the END, so a bare `notes[-1]?` answers "the last note" for a
+      # caller that meant "the slot before the first one" — and every caller here is walking
+      # neighbours around a position it is about to remove.
       def note_id(idx : Int32) : Int64?
+        return nil if idx < 0
         notes[idx]?.try(&.id)
       end
     end
@@ -123,8 +129,16 @@ module Gori
     #   - a note only THIS session has (new)      → appended
     # (`mine` carry cross-session-unique ids, so a peer's new note can't be mistaken
     # for an edit of ours.) next_id advances past every surviving id.
+    #
+    # The active note arrives as `cur_id`, a STABLE ID, not as an index. The merged order is
+    # the persisted one (minus this session's deletes) with this session's new notes appended,
+    # which is NOT the caller's own list order — so an index meant "my note #2" and landed on
+    # whatever the merge happened to put there. Two ways that bit: a peer adding a note ahead
+    # of ours parked the persisted `cur` on the PEER's note instead of the one being typed in,
+    # and `gori run notes delete 1` left `cur` on its old number, i.e. one note further down
+    # than the one that was active. An id cannot drift. Unresolvable (a peer deleted it) → 0.
     def self.merge(persisted : Doc, mine : Array(NoteEntry), deleted : Set(Int64),
-                   cur : Int32, next_id : Int64) : Doc
+                   cur_id : Int64?, next_id : Int64) : Doc
       mine_by_id = {} of Int64 => String
       mine.each { |n| mine_by_id[n.id] = n.text }
       result = [] of NoteEntry
@@ -140,6 +154,7 @@ module Gori
         seen << n.id
       end
       max_id = result.max_of?(&.id) || 0_i64
+      cur = cur_id.try { |id| result.index { |n| n.id == id } } || 0
       Doc.new(cur.clamp(0, {result.size - 1, 0}.max), result, {next_id, max_id + 1}.max)
     end
 

@@ -228,7 +228,7 @@ module Gori::Tui
         # is a literal character, and typing it would REPLACE the selection). ⌥⌫ and ⌥/⌃
         # motion are this editor's own and are excluded above.
         return false
-      when key.escape? then @issues.save_notes(@host.session.store)
+      when key.escape? then save_notes_or_report
       when key.enter?  then @issues.notes_newline
         # Before plain ⌫, which would swallow the modified form as a one-character delete.
       when @issues.notes_word_delete_key?(ev) then @issues.notes_motion_key(ev)
@@ -294,7 +294,17 @@ module Gori::Tui
     end
 
     def commit : Nil
-      @issues.save_notes(@host.session.store) if @issues.notes_insert_mode?
+      save_notes_or_report if @issues.notes_insert_mode?
+    end
+
+    # `esc` out of the notes editor, and the tab-switch/quit flush. IssuesView#save_notes
+    # returns false when the write was rolled back (cross-process SQLite busy/lock) and then
+    # leaves the buffer AND insert mode exactly as they were, so the typed text is still on
+    # screen and a second `esc` is a real retry. Say so — reporting nothing is what made a busy
+    # project look like it had saved while it had discarded the writeup.
+    private def save_notes_or_report : Nil
+      return if @issues.save_notes(@host.session.store)
+      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
     end
 
     def issues_notes_read_mode? : Bool
@@ -435,12 +445,17 @@ module Gori::Tui
       end
     end
 
+    # `]`/`[` and `}`/`{`. A rolled-back write leaves the issue on its OLD value, which the
+    # re-read then paints back — indistinguishable from "the key did nothing" unless it says
+    # so. Same sentence Runner#apply_issue_choice uses for the picker path.
     def issue_severity(delta : Int32) : Nil
-      @issues.severity_delta(delta, @host.session.store)
+      return if @issues.severity_delta(delta, @host.session.store)
+      @host.status("severity NOT changed — project busy; try again")
     end
 
     def issue_status(delta : Int32) : Nil
-      @issues.status_delta(delta, @host.session.store)
+      return if @issues.status_delta(delta, @host.session.store)
+      @host.status("status NOT changed — project busy; try again")
     end
 
     def issue_edit_notes : Nil

@@ -1,5 +1,6 @@
 require "json"
 require "../../notes"
+require "../../issues_export" # Issues::Export.one_line / .scrub_only
 
 module Gori
   module MCP
@@ -14,7 +15,7 @@ module Gori
                 doc.notes.each_with_index do |entry, idx|
                   j.object do
                     j.field "id", entry.id
-                    j.field "title", Notes.title(entry.text) || "Untitled"
+                    j.field "title", note_title(entry)
                     j.field "line_count", Notes.line_count(entry.text)
                     j.field "current", doc.cur == idx
                   end
@@ -35,8 +36,16 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", entry.id
-            j.field "text", entry.text
-            j.field "title", Notes.title(entry.text) || "Untitled"
+            # A note body does NOT always originate inside gori: `gori run notes create` takes
+            # it from --text, positional args, or STDIN — and its own banner suggests
+            # `some-tool | gori run notes create`, so piping a gzip/binary response body (or a
+            # file the external $EDITOR wrote) stores raw non-UTF-8 bytes, which the settings KV
+            # round-trips verbatim. Unscrubbed, that byte reached JSON::Builder and broke this
+            # tool's whole JSON-RPC line. See `Serialize.text`'s contract; `scrub_only` (not
+            # `one_line`) because a note is multi-line BY DESIGN, the same split
+            # `Serialize.issue` makes for an issue's free-text `notes`.
+            j.field "text", Issues::Export.scrub_only(entry.text)
+            j.field "title", note_title(entry)
             j.field "current", doc.cur == idx
           end
         end)
@@ -108,6 +117,14 @@ module Gori
             j.field "message", "Note deleted successfully"
           end
         end)
+      end
+
+      # The note's display title, scrubbed for the JSON-RPC wire. `one_line` rather than
+      # `scrub_only`: `Notes.title` returns the first non-blank LINE, so it is a single-line
+      # field here exactly as an issue's `title` is — and a lone CR or a stray C0 inside that
+      # line would otherwise ride out into a field a client renders inline.
+      private def note_title(entry : Notes::NoteEntry) : String
+        Issues::Export.one_line(Notes.title(entry.text) || "").presence || "Untitled"
       end
 
       # The tools/list schemas for the note tools, kept beside the handlers that

@@ -1733,15 +1733,34 @@ module Gori::Tui
       title = "untitled issue" if title.empty?
       if id = form.edit_id
         # editing an existing issue's title + severity (from its detail view)
-        @session.store.update_issue(id, title: title, severity: form.severity)
+        # A rolled-back write (cross-process SQLite busy/lock) leaves the issue on its OLD
+        # title/severity, and `resync` re-reads exactly that — so "issue updated" was a
+        # phantom, and returning true dropped the form with the retyped title inside it.
+        # FALSE keeps the card up, which is the only place that text still exists.
+        unless @session.store.update_issue(id, title: title, severity: form.severity)
+          @toast = "issue NOT updated — project busy; the form is still here, ↵ to retry"
+          return false
+        end
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
         new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
+        # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
+        # in Crystal: the same trap `Probe::Triage.promote` and `sequencer_promote` both name.
+        # Everything below takes `new_id` as an owner id, so swallowing it filed entity_links
+        # against a nonexistent issue #0 and then reported "issue created" (or, on the
+        # create-and-link path, put up an "issue #0 created and linked" confirm). Nothing was
+        # written, so keep the form: its title is the only copy left.
+        if new_id == 0
+          @toast = "could not file the issue (store busy) — nothing was written, ↵ to retry"
+          return false
+        end
         # `insert_issue` writes notes '' — it has no notes parameter, and giving it one would
         # touch every caller. A second write is fine here: this is a one-off create, not the
         # data path, and it is skipped entirely unless the open-site supplied evidence.
-        @session.store.update_issue(new_id, notes: form.notes) if new_id != 0 && !form.notes.empty?
+        # The issue itself is already filed, so a failure here is a HALF landing, not a
+        # rollback — name which half, like `sequencer_promote` does, rather than claim both.
+        notes_lost = !form.notes.empty? && !@session.store.update_issue(new_id, notes: form.notes)
         # History's marked set beyond the primary evidence flow (#442) — one issue, N flows.
         # insert_issue already linked form.flow_id, so exclude it and never re-link. A flow the
         # store can't resolve (a stale mark) is dropped rather than filing an orphan link row, and
@@ -1762,7 +1781,8 @@ module Gori::Tui
           # Name the extra evidence too — this branch is reached from the picker's "+ New issue…",
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
-          @toast = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
+          msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
+          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
           # Ask open-vs-stay (default stay). FALSE, not true: offer_open_created has just
           # put a confirm up, and "close the overlay" would be asking the shell to close a
           # form it is no longer holding. close_active_overlay's identity check would make
@@ -1773,7 +1793,8 @@ module Gori::Tui
           @active_tab = :issues
           @focus = :body
           issues_controller.view.reload(@session.store)
-          @toast = attached > 1 ? "issue created with #{attached} flows attached" : "issue created"
+          msg = attached > 1 ? "issue created with #{attached} flows attached" : "issue created"
+          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
         end
       end
       true

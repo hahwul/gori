@@ -325,20 +325,28 @@ module Gori::Tui
     # Max link rows shown in the detail pane (the rest scroll).
     LINKS_VISIBLE = 4
 
-    def severity_delta(delta : Int32, store : Store) : Nil
+    # The hidden `]`/`[` one-step cycle. Returns whether the write COMMITTED, like the
+    # picker path (`Runner#apply_issue_choice`) and `delete_ids` beside it — an
+    # `exec_task_ok` false means a cross-process SQLite busy/lock rolled the batch back, and
+    # `refresh_detail` then re-reads the OLD row, so the chip silently snaps back to where it
+    # was with nothing said. The caller reports it.
+    def severity_delta(delta : Int32, store : Store) : Bool
       issue = @detail
-      return unless issue
+      return true unless issue
       level = (issue.severity.value + delta).clamp(0, 4)
-      store.update_issue(issue.id, severity: Store::Severity.new(level))
+      return false unless store.update_issue(issue.id, severity: Store::Severity.new(level))
       refresh_detail(store)
+      true
     end
 
-    def status_delta(delta : Int32, store : Store) : Nil
+    # ditto for the `}`/`{` triage-status cycle.
+    def status_delta(delta : Int32, store : Store) : Bool
       issue = @detail
-      return unless issue
+      return true unless issue
       level = (issue.status.value + delta).clamp(0, 3)
-      store.update_issue(issue.id, status: Store::Status.new(level))
+      return false unless store.update_issue(issue.id, status: Store::Status.new(level))
       refresh_detail(store)
+      true
     end
 
     # The issue currently open in the detail view (for title-edit / evidence
@@ -670,20 +678,30 @@ module Gori::Tui
       @notes.set_preedit(text) if notes_insert_mode?
     end
 
-    def save_notes(store : Store) : Nil
-      return unless issue = @detail
+    def save_notes(store : Store) : Bool
+      return true unless issue = @detail
       # `#text`, not `#to_bytes`. `to_bytes` joins with CRLF because it exists for WIRE text;
       # this is prose in a DB column, and the CRLF made `issues.notes` mean two different
       # things depending on the writer — the TUI stored `a\r\nb` while MCP `update_issue` and
       # `gori run issues` store the caller's LF string verbatim, so `get_issue` and the export
       # hand an agent one or the other. The TUI hid it from itself because `set_text` rstrips
       # `\r` on load. `NotesView` uses `#text` throughout for exactly this reason.
-      store.update_issue(issue.id, notes: @notes.text)
+      #
+      # Returns whether the write COMMITTED. On a rollback NOTHING local moves: the buffer
+      # keeps the typed text and the pane stays in INS. That is not cosmetic — every step
+      # below is destructive to the edit. `refresh_detail` re-reads the row and (once INS is
+      # off) `set_text`s the notes buffer back to the STORED text, so swallowing the false
+      # made a busy project silently throw away the operator's writeup and show them the old
+      # one, with no toast and nothing left to retry from. Leaving INS on is what keeps the
+      # text on screen and a second `esc` a real retry. Same correction `NotesView#save` and
+      # `ProjectView#save` already carry.
+      return false unless store.update_issue(issue.id, notes: @notes.text)
       exit_notes_insert!
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
       # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no
       # separate (unsafe) set_text here.
       refresh_detail(store)
+      true
     end
 
     # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
