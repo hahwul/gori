@@ -45,6 +45,15 @@ module Gori
       # an agent reads this, and both showed a clean single send.
       getter? retried : Bool
 
+      # The exact request bytes this exchange WROTE, when the sender that made it knows them
+      # and a consumer has to hold them — `Fuzz::Sender` sets it, because the bytes it sends
+      # are not the bytes it was handed: the send seam substitutes `$NAME` and writes the
+      # active session slot's header overlay, and `Fuzz::HistoryRecord` was recording flows
+      # from the pre-seam template (the Repeater half of that is `Repeater::Sender#wire`).
+      # nil everywhere else — the engines are handed final bytes and every other consumer
+      # already has them.
+      getter wire : Bytes?
+
       # The tail is KEYWORD-ONLY (`*`), and that is load-bearing rather than a style choice.
       # `delivered`, `timed_out` and `retried` are three same-typed Bools that were appended one
       # per round by three different fixers; twice, a call site written against the previous
@@ -56,7 +65,16 @@ module Gori
       # first. A keyword-only tail turns the whole class of mistake into a compile error, and
       # leaves the sweep to the compiler.
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
-                     @delivered = false, @timed_out = false, @retried = false)
+                     @delivered = false, @timed_out = false, @retried = false,
+                     @wire : Bytes? = nil)
+      end
+
+      # The same outcome, carrying the bytes that produced it. A struct, so this returns a
+      # copy: the seam that knows the wire (`Fuzz::Sender`) is one layer above the engine that
+      # builds the Result.
+      def with_wire(wire : Bytes) : Result
+        Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
+          delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire)
       end
 
       def ok? : Bool
@@ -73,7 +91,7 @@ module Gori
         # one spec that asserted it. The constructor now REFUSES a positional tail (see there),
         # so this shape is the only one that compiles.
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
-          delivered: @delivered, timed_out: @timed_out, retried: true)
+          delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire)
       end
     end
 

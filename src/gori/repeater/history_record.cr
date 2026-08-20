@@ -24,8 +24,17 @@ module Gori
       #
       # `created_at` is passed in (not read here) so a caller can align the stored timestamp with
       # the send it just made, and so this stays free of a wall-clock read on the hot path.
-      def record(store : Store, plan : Plan, result : Result, created_at : Int64) : Int64
-        head, body, method, target, version = request_projection(plan)
+      #
+      # `wire` is the request AS IT WENT OUT — `Plan#wire_bytes`, taken by the caller and handed
+      # to `Plan#send_wire`, so the row holds the same slice the socket got. REQUIRED, not a
+      # defaulted `plan.wire_bytes`: re-deriving it here is precisely what the parameter exists
+      # to stop, because the seam it comes through substitutes session bindings and those values
+      # can rotate between two reads. A caller that has not been threaded through is a compile
+      # error rather than a row that silently differs from the send — the same argument
+      # `Sender` makes for requiring an `Outbound` in its constructor.
+      def record(store : Store, plan : Plan, result : Result, created_at : Int64,
+                 wire : Bytes) : Int64
+        head, body, method, target, version = request_projection(plan, wire)
         captured = Store::CapturedRequest.new(
           created_at: created_at,
           scheme: plan.scheme,
@@ -64,7 +73,7 @@ module Gori
       # the wire is an HPACK block with no head text, so — exactly as MCP's recorder does — an
       # h1 PROJECTION is synthesized from the fields a receiver routes on (`:method`/`:path`),
       # so the method/target COLUMNS (list_history / QL / sitemap read them) agree with the head.
-      private def request_projection(plan : Plan) : {Bytes, Bytes?, String, String, String}
+      private def request_projection(plan : Plan, wire : Bytes) : {Bytes, Bytes?, String, String, String}
         if fields = plan.h2_fields
           authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || "#{plan.host}:#{plan.port}"
           head = Proxy::H2::HeadCodec.synth_request(fields, authority)
@@ -72,7 +81,7 @@ module Gori
           target = H2Engine.pseudo_field(fields, ":path") || "/"
           {head, plan.h2_body, method, target, "HTTP/2"}
         else
-          head, body = split_head_body(plan.bytes)
+          head, body = split_head_body(wire)
           # `authored_start_line`, not the strict parser: the bytes are the operator's and under
           # `--verbatim` a bare-LF terminator is the payload — the same call MCP's recorder makes.
           method, target, version = Proxy::Codec::Http1.authored_start_line(head)

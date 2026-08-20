@@ -61,9 +61,16 @@ module Gori
             RequestBuilder::Built.new(plan.bytes, plan.scheme, plan.host, plan.port)
           end
         http2 = plan.http2?
-        wire = wire_request(plan, built)
+        # The SEND SEAM's output, taken once: `plan.bytes` is the assembled draft, and the two
+        # passes that turn it into the message (the `$NAME` binding pass and the active session
+        # slot's header overlay) used to run out of sight inside `plan.send`. So the recorded
+        # flow and `effective_request` — this tool's "what actually went out" — described a
+        # request without the identity the socket carried. Sent through `send_wire`, so the
+        # bytes reported and the bytes written are the same slice.
+        h1_wire = plan.wire_bytes
+        wire = wire_request(plan, built, h1_wire)
         recorded_flow_id = record_history ? record_outbound_request(built, wire, http2, plan.h2_fields) : nil
-        result = plan.send
+        result = plan.send_wire(h1_wire)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -104,16 +111,21 @@ module Gori
       #
       # Falls back to the source when the encoding raises: `plan.send` hits the same refusal
       # and reports it as the error, and a report is not the place to raise a second time.
-      private def wire_request(plan : Repeater::Plan, built : RequestBuilder::Built) : Bytes
+      #
+      # `h1_wire` is `Plan#wire_bytes` — the byte path's request AFTER the send seam's binding
+      # pass and session-slot overlay, which is what `plan.send_wire` will write. Reading
+      # `built.bytes` here instead described the pre-seam draft.
+      private def wire_request(plan : Repeater::Plan, built : RequestBuilder::Built,
+                               h1_wire : Bytes) : Bytes
         # Field-native: `built.bytes` is already the faithful field dump — the fields go on the
         # wire verbatim, so there is no h1-text to re-encode and nothing to project away.
         return built.bytes if plan.h2_fields
-        return built.bytes unless plan.http2?
-        Repeater::H2Engine.encoded_request(built.bytes, scheme: built.scheme, host: built.host,
+        return h1_wire unless plan.http2?
+        Repeater::H2Engine.encoded_request(h1_wire, scheme: built.scheme, host: built.host,
           port: built.port, preserve_field_case: plan.preserve_field_case?,
           reframe_grpc: plan.reframe_grpc?)
       rescue Gori::Error
-        built.bytes
+        h1_wire
       end
 
       # The request actually put on the wire, parsed back from the encoded bytes, so

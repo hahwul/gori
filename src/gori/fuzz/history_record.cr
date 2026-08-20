@@ -30,7 +30,13 @@ module Gori
       # limit differently: MCP counts against its per-job drain budget, the CLI says it once.
       def record(store : Store, r : Result, *, scheme : String, host : String, port : Int32,
                  http2 : Bool, &on_error : Exception -> _) : Int64?
-        request = r.request
+        # `wire` FIRST: `request` is the rendered template, and the send seam rewrote it — the
+        # `$NAME` pass and the active session slot's header overlay both run below the matcher
+        # (`Fuzz::Sender#send`). Recording the template wrote flows without the identity the
+        # sweep actually sent under, which is the same defect `Repeater::Sender#wire` names for
+        # the Repeater half. Falls back to `request` for a backend that reports no wire (a spec
+        # double, a run where nothing rewrote the bytes).
+        request = r.wire || r.request
         return nil unless request
         head, body = split_head_body(request)
         method, target, version = Proxy::Codec::Http1.authored_start_line(head)

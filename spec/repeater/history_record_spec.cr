@@ -32,7 +32,8 @@ describe Gori::Repeater::HistoryRecord do
     with_store do |store|
       plan = plan_for("POST /login HTTP/1.1\r\nHost: t.test\r\nContent-Length: 5\r\n\r\nhello")
       result = result_for("HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\n", "ok")
-      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 123_i64)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 123_i64,
+        wire: plan.wire_bytes)
       id.should be > 0
 
       detail = store.get_flow(id).not_nil!
@@ -44,11 +45,44 @@ describe Gori::Repeater::HistoryRecord do
     end
   end
 
+  # The row must be the request the SOCKET got, not the draft the send seam started from.
+  # `Sender#send`'s two passes — the `$NAME` binding pass and the active session slot's header
+  # overlay — used to run out of sight inside it, so a send made under a slot was recorded
+  # WITHOUT the identity header it went out with: replay that flow, or fuzz/scan from it, and
+  # the credential gori actually used is nowhere in the evidence.
+  it "records the bytes the send seam produced, not the pre-overlay draft" do
+    with_store do |store|
+      slots = Gori::SessionSlots.load(store)
+      slots.save([Gori::SessionSlot.new("admin", set_headers: [{"Authorization", "Bearer ADMIN-TOKEN"}])])
+      bindings = Gori::Bindings.load(store, slots)
+      slots.activate("admin")
+      previous = Gori::Env.layer
+      Gori::Env.layer = bindings
+      begin
+        plan = plan_for("GET /me HTTP/1.1\r\nHost: t.test\r\n\r\n")
+        wire = plan.wire_bytes
+        String.new(wire).should contain("Authorization: Bearer ADMIN-TOKEN")
+        # The draft it came from does not carry it — the two are different bytes, which is
+        # exactly why the recorder must be handed the wire.
+        String.new(plan.bytes).should_not contain("Authorization")
+
+        result = result_for("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", "ok")
+        id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 7_i64, wire: wire)
+        detail = store.get_flow(id).not_nil!
+        String.new(detail.request_head).should eq(String.new(wire))
+      ensure
+        Gori::Env.layer = previous
+        slots.activate(nil)
+      end
+    end
+  end
+
   it "records an errored send as an Error flow" do
     with_store do |store|
       plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
       failed = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 100_i64, "connection refused")
-      id = Gori::Repeater::HistoryRecord.record(store, plan, failed, created_at: 1_i64)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, failed, created_at: 1_i64,
+        wire: plan.wire_bytes)
       store.get_flow(id).not_nil!.row.state.error?.should be_true
     end
   end

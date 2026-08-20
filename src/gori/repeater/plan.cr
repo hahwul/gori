@@ -264,6 +264,33 @@ module Gori::Repeater
       end
     end
 
+    # This plan's single request AS THE SOCKET WILL GET IT — `bytes` plus the send seam's own
+    # two passes (`Sender#wire`: the `$NAME` binding pass, then the active session slot's
+    # header overlay). `bytes` is the assembled DRAFT; this is the message.
+    #
+    # A surface that RECORDS the send as a History flow, or REPORTS what went out, must read
+    # THIS and not `bytes` — see `Sender#wire` for the flows that were written without the
+    # identity gori sent them under. Take it once and hand it to `send_wire`, so the recorded
+    # bytes and the sent bytes are the same slice rather than two runs of a seam whose binding
+    # values can rotate between them.
+    #
+    # FIELD-NATIVE (`h2_fields`) has no h1 carrier and takes no overlay (`Sender#send_fields`
+    # says why), so this is the synthetic scope line — of no use to a recorder, which reads
+    # `h2_fields` directly for that case.
+    def wire_bytes : Bytes
+      @h2_fields ? bytes : @sender.wire(bytes)
+    end
+
+    # Send bytes already taken from `wire_bytes`. Field-native ignores them, for the reason
+    # `wire_bytes` states.
+    def send_wire(wire : Bytes) : Result
+      if fields = @h2_fields
+        @sender.send_fields(fields, @h2_body)
+      else
+        @sender.send_wire(wire)
+      end
+    end
+
     def send_group : Array(Result)
       @sender.send_group(@requests)
     end

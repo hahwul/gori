@@ -92,36 +92,72 @@ module Gori
         nil
       end
 
+      # The SEND SEAM's own transform: the assembled request as the SOCKET will get it.
+      #
+      # Two passes, in this order:
+      #
+      #   * the `$NAME` binding pass, skipped for `evidence?` (see there).
+      #   * the SESSION SLOT overlay, after the `$NAME` pass and regardless of `evidence?`.
+      #     AFTER, because the slot's own header values may name a binding
+      #     (`Authorization: Bearer $SESSION`) and the layer resolves those as it applies
+      #     them, against the ACTIVE slot's table — so the order is "resolve the message,
+      #     then write this identity over it", never the reverse. REGARDLESS of `evidence?`,
+      #     because a slot is not a resolution of somebody's tokens; it is the operator
+      #     answering "send this AS WHOM" (P4), and replaying a capture under another
+      #     identity is the single most common reason to ask. The no-overlay answer has a
+      #     name and it is `as-captured` — select it, or select no slot at all, and this is
+      #     the identity function.
+      #
+      # Header-only overlay, so Content-Length cannot move and the body stays byte-exact (P7).
+      #
+      # PUBLIC, and that is the point. These two passes ran INSIDE `send`, where no caller
+      # could see their output — so every surface that RECORDS or REPORTS "the outbound
+      # request" described the pre-seam draft: `gori run repeater send --record-history` and
+      # MCP `send_request{record_history}` wrote a History flow with the slot's
+      # `Authorization` line missing (and `$SESSION` still literal in it) while the socket
+      # got both, and MCP's `effective_request` — documented as "the request actually put on
+      # the wire" — was derived from the same pre-seam bytes. A flow recorded that way is not
+      # the request that was sent: replay it, fuzz from it, or scan it and the identity gori
+      # actually used is nowhere in the evidence. A caller now takes these bytes once, hands
+      # them to `send_wire`, and records exactly what went out.
+      #
+      # The Fuzzer reaches the same seam through `Fuzz::Sender#send`, which runs the two passes
+      # itself; its answer travels back on `Repeater::Result#wire` because a fuzz ROW must keep
+      # showing the template (see `Fuzz::Result#wire`). Two shapes, one rule: what is recorded
+      # is what was written.
+      def wire(bytes : Bytes) : Bytes
+        bytes = Gori::Env.expand_bindings(bytes) unless @evidence
+        Gori::Env.overlay_slot(bytes)
+      end
+
       def send(bytes : Bytes) : Result
-        if reason = refusal(bytes)
+        send_wire(wire(bytes))
+      end
+
+      # Send bytes that are ALREADY through `wire` — for a surface that has to hold the exact
+      # slice the socket gets (to record it as a flow, or to report it back).
+      #
+      # Still through `refusal`, not a hand-rolled `send_block` beside it: this is the door
+      # `gori run repeater send` and MCP `send_request` now use, and "may these bytes go out"
+      # has to keep ONE implementation — `refusal` used to carry a second rule (see its
+      # comment), and a copy here would walk past the next one added. Asking it about the
+      # final bytes is the same verdict it takes one step earlier: its own expansion is a
+      # no-op on an already-expanded buffer, and the slot overlay is header-only, so neither
+      # pass can move the request line the gate reads.
+      def send_wire(wire : Bytes) : Result
+        if reason = refusal(wire)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
-        bytes = Gori::Env.expand_bindings(bytes) unless @evidence
-        # SESSION SLOT overlay, after the `$NAME` pass and regardless of `evidence?`. Two
-        # separate reasons for the two halves:
-        #
-        #   * AFTER, because the slot's own header values may name a binding
-        #     (`Authorization: Bearer $SESSION`) and the layer resolves those as it applies
-        #     them, against the ACTIVE slot's table — so the order is "resolve the message,
-        #     then write this identity over it", never the reverse.
-        #   * REGARDLESS of `evidence?`, because a slot is not a resolution of somebody's
-        #     tokens; it is the operator answering "send this AS WHOM" (P4), and replaying a
-        #     capture under another identity is the single most common reason to ask. The
-        #     no-overlay answer has a name and it is `as-captured` — select it, or select no
-        #     slot at all, and this is the identity function.
-        #
-        # Header-only, so Content-Length cannot move and the body stays byte-exact (P7).
-        bytes = Gori::Env.overlay_slot(bytes)
         result =
           if @http2
-            H2Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
+            H2Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
               preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
           else
-            Engine.send(bytes, scheme: @scheme, host: @host, port: @port,
+            Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
           end
-        extract(bytes, result)
+        extract(wire, result)
         result
       end
 
@@ -152,10 +188,9 @@ module Gori
         if reason = group_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
-        requests = requests.map { |b| Gori::Env.expand_bindings(b) } unless @evidence
-        # Per member, for the same reasons `send` states. A group is ONE connection carrying a
+        # Per member, through the SAME seam `send` uses — a group is ONE connection carrying a
         # deliberate sequence, and every member of it goes out as the same identity.
-        requests = requests.map { |b| Gori::Env.overlay_slot(b) }
+        requests = requests.map { |b| wire(b) }
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
         # A group is ONE connection carrying a deliberate sequence, so every member is as

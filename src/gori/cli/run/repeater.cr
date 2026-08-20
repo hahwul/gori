@@ -603,7 +603,11 @@ module Gori
 
         abort_if_blocked!(plan, "gori run repeater send")
         sent_at = Time.utc.to_unix_ms * 1000_i64
-        result = plan.send
+        # The bytes the socket gets, taken ONCE and sent as-is: `--record-history` writes this
+        # exact slice, so the recorded flow is the request that went out — session-slot overlay
+        # and send-seam `$NAME` values included — rather than the draft the seam started from.
+        wire = plan.wire_bytes
+        result = plan.send_wire(wire)
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
@@ -622,7 +626,7 @@ module Gori
         #
         # Recorded regardless of ok?: an error flow is evidence too (and matches MCP
         # send_request, which records the attempt).
-        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, result, sent_at, project_name, db_path) : nil
+        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, project_name, db_path) : nil
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id)
         persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project_name, db_path) if result.ok?
         exit 1 unless result.ok?
@@ -634,12 +638,13 @@ module Gori
       # send already happened, so aborting here would misreport a completed send as a failure.
       # The caller puts the id on the OUTPUT (a `recorded_flow_id` field in JSON, a STDERR note
       # in text) rather than this method printing — see the call site.
-      private def self.record_repeater_send_to_history(plan : Repeater::Plan, result : Repeater::Result,
+      private def self.record_repeater_send_to_history(plan : Repeater::Plan, wire : Bytes,
+                                                       result : Repeater::Result,
                                                        created_at : Int64, project_name : String?,
                                                        db_path : String?) : Int64?
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          Repeater::HistoryRecord.record(store, plan, result, created_at)
+          Repeater::HistoryRecord.record(store, plan, result, created_at, wire)
         rescue ex : Gori::Error
           STDERR.puts "gori run repeater send: #{ex.message}"
           nil

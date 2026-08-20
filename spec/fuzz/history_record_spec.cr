@@ -50,6 +50,28 @@ describe Gori::Fuzz::HistoryRecord do
       end
     end
 
+    # The row and the flow answer two different questions. `request` is the rendered TEMPLATE
+    # (what the row prints, and what "send to Repeater" seeds a tab from — a slot's overlay
+    # baked into a seed would pin an identity the operator sets per send); `wire` is what
+    # `Fuzz::Sender` actually wrote, after the `$NAME` pass and the active slot's overlay. The
+    # recorder writes the WIRE: a sweep run as a slot was writing up to 5000 flows missing the
+    # header that produced the responses stored beside them.
+    it "records the WIRE bytes when the send seam rewrote the template" do
+      with_store do |store|
+        r = Gori::Fuzz::Result.new(
+          index: 0_i64, payloads: ["p"], position: nil, status: 200, length: 2_i64, words: 1,
+          lines: 1, duration_us: 10_i64, error: nil, matched: true, incomplete: false,
+          retried: false, extracted: nil,
+          head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice, body: "ok".to_slice,
+          request: "GET /hit HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice,
+          wire: "GET /hit HTTP/1.1\r\nHost: t.test\r\nAuthorization: Bearer ADMIN\r\n\r\n".to_slice)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test",
+          port: 443, http2: false) { }.not_nil!
+        String.new(store.get_flow(id).not_nil!.request_head)
+          .should contain("Authorization: Bearer ADMIN")
+      end
+    end
+
     it "returns nil when the result kept no request bytes (keep_bodies was :none)" do
       with_store do |store|
         r = result_with(nil, "HTTP/1.1 200 OK\r\n\r\n", matched: true)

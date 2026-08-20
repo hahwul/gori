@@ -307,15 +307,22 @@ module Gori::Fuzz
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
-      if @http2
-        Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-      elsif p = @pool
-        p.send(bytes)
-      else
-        Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-          port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-      end
+      result =
+        if @http2
+          Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
+            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+        elsif p = @pool
+          p.send(bytes)
+        else
+          Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
+            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+        end
+      # `bytes` here is the message, not the template `Job` carried: the two passes above
+      # changed it. `Fuzz::Result#request` — the row a surface prints and the Repeater seeds
+      # from — deliberately keeps the TEMPLATE (an overlay baked into a seed would pin an
+      # identity the slot is supposed to apply per send), so the wire rides separately, for
+      # the recorder alone. See `Fuzz::HistoryRecord`.
+      result.with_wire(bytes)
     end
 
     def close : Nil
@@ -359,6 +366,7 @@ module Gori::Fuzz
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides)
+        .map_with_index { |r, i| reqs[i]?.try { |w| r.with_wire(w) } || r }
     end
 
     # The real transport for `Backend#send_race` (see there for the contract). All of
@@ -495,7 +503,9 @@ module Gori::Fuzz
       end
       released.size.times { done.receive }
 
-      (0...n).map { |i| results[i].not_nil! }
+      # Every member of a race writes the SAME `expanded` bytes (that is what makes it a race),
+      # so one wire answers for all of them — and it is the post-seam buffer, not `jobs[0].bytes`.
+      (0...n).map { |i| results[i].not_nil!.with_wire(expanded) }
     end
   end
 
