@@ -45,8 +45,11 @@ module Gori
           end
         end
         # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
-        # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it.
-        store.index_pending! if filter.uses_fts?
+        # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it —
+        # or refuse, when this server is read-only and therefore cannot drain (see the helper).
+        if fts_error = drain_fts_or_error(filter.uses_fts?)
+          return fts_error
+        end
         rows =
           if scope_unconfigured
             [] of Store::FlowRow

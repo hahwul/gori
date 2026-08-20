@@ -13,7 +13,9 @@ module Gori
         return filter if filter.is_a?(Result)
         # Same reason as list_history: a `body:` query reads the off-commit trigram index
         # (Store V4), and an agent can't distinguish "absent" from "not indexed yet".
-        store.index_pending! if filter.uses_fts?
+        if fts_error = drain_fts_or_error(filter.uses_fts?)
+          return fts_error
+        end
         return collapsed_sitemap(filter, limit) if bool_arg(h, "collapse_transport", false)
         entries = store.sitemap_entries_detailed(filter, limit)
         # Folded by DEFAULT, matching `gori run sitemap` and the TUI tree: an agent mapping a

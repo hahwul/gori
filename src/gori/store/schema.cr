@@ -1019,8 +1019,20 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16]
 
-      def self.migrate!(db : DB::Database) : Nil
+      def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
+          # A read-only open peeks at `user_version` WITHOUT the write lock first, and returns
+          # when there is nothing to do — which is the overwhelmingly common case. That peek is
+          # what makes `gori mcp --read-only` honest: otherwise the one write lock it still took
+          # was at startup, against whichever gori is capturing into the project, and a busy
+          # database turned "serve this project read-only" into "start unbound" five seconds
+          # later (#752). A stale schema still falls through and migrates — a database this
+          # binary cannot read is worse than a write the operator did not ask for — and a schema
+          # from a NEWER gori still has to reach the refusal below, so only `current == VERSION`
+          # may take this exit.
+          if read_only && conn.scalar("PRAGMA user_version").as(Int64).to_i == VERSION
+            next
+          end
           # Take the write lock (RESERVED) BEFORE reading user_version, so concurrent
           # openers of the same db serialize here: the loser blocks on BEGIN IMMEDIATE
           # (busy_timeout), then re-reads an already-migrated user_version and does
