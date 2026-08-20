@@ -282,6 +282,99 @@ describe "Gori::MCP::Serialize.head_and_body" do
   end
 end
 
+# A held WebSocket message is ALL body — no start line, no headers, no blank-line separator —
+# exactly as the TUI's `InterceptView#ws_window_for` already models it. Run through the HTTP
+# splitter it came back the other way round: the WHOLE payload as `head`, and `body_size: 0` for
+# every held WS message on BOTH cross-process surfaces. That is the one number a WS row is about
+# (`Item#label` ends a WS message with its byte count), and `gori run intercept list` printed
+# `(0b body)` beside it. A payload that CONTAINS a blank line was worse: the split landed inside
+# it, so the preview stopped there and `body_size` described a fragment.
+private def ws_message_held(payload : String, binary : Bool = false, kind : String = "wsout") : Gori::Store::HeldRow
+  Gori::Store::HeldRow.new(
+    session_token: "t", item_id: 9_i64, kind: kind, method: "GET", host: "h", port: 80,
+    scheme: "http", target: "/ws", raw: payload.to_slice, held_at_ms: 0_i64, binary: binary)
+end
+
+describe "Gori::MCP::Serialize.held_head_and_body" do
+  it "gives a WebSocket message an empty head and the whole payload as body" do
+    head, body = Gori::MCP::Serialize.held_head_and_body(ws_message_held(%({"cmd":"buy"})))
+    head.should eq("")
+    String.new(body).should eq(%({"cmd":"buy"}))
+  end
+
+  # The regression this exists for: a blank line inside a chat/pretty-printed payload is a
+  # BYTE, not a head terminator.
+  it "does not split a payload that contains a blank line" do
+    _, body = Gori::MCP::Serialize.held_head_and_body(ws_message_held("line one\n\nline two"))
+    body.size.should eq("line one\n\nline two".bytesize)
+  end
+
+  it "leaves an HTTP hold on the head/body splitter it always used" do
+    head, body = Gori::MCP::Serialize.held_head_and_body(
+      desync_held("POST /x HTTP/1.1\nHost: h\nContent-Length: 8\n\nSMUGGLED"))
+    head.should eq("POST /x HTTP/1.1\nHost: h\nContent-Length: 8")
+    String.new(body).should eq("SMUGGLED")
+  end
+
+  it "reports the payload size and preview on both projections, and no head field" do
+    row = ws_message_held(%({"cmd":"buy","qty":100}))
+    {
+      JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_row(j, row, true, 0_i64) }),
+      JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_detail(j, row, true, 0_i64) }),
+    }.each do |obj|
+      obj["body_size"].as_i.should eq(23)
+      obj["body_preview"].as_s.should eq(%({"cmd":"buy","qty":100}))
+      obj["head"]?.should be_nil
+      obj["head_preview"]?.should be_nil
+    end
+  end
+
+  # opcode 2 is protobuf/msgpack/CBOR: a text preview of it is a wall of U+FFFD, so the row
+  # says the size and `binary_note` names the byte channel. The TUI refuses the same case.
+  it "withholds the text preview for a BINARY frame but still reports its size" do
+    row = ws_message_held("\xff\xfe\x00\x01", binary: true)
+    obj = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_row(j, row, true, 0_i64) })
+    obj["body_size"].as_i.should eq(4)
+    obj["body_preview"]?.should be_nil
+    obj["binary"].as_bool.should be_true
+  end
+
+  # A WS payload used to reach the caller through `head`/`head_preview`, i.e. through
+  # `redact_head`. Giving it a field of its own must not also give it a way past the
+  # `include_sensitive` gate: for any text message under the preview cap `body_preview` IS the
+  # full raw payload that `raw_base64` is deliberately gated on, and the same object still
+  # reports `raw_redacted: true`.
+  it "redacts a credential line in a WS payload unless include_sensitive" do
+    row = ws_message_held("CONNECT\nauthorization:Bearer eyJhbGciOi\naccept-version:1.2")
+    guarded = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_detail(j, row, false, 0_i64) })
+    guarded["body_preview"].as_s.should_not contain("eyJhbGciOi")
+    guarded["body_preview"].as_s.should contain("[REDACTED]")
+    guarded["body_preview"].as_s.should contain("accept-version:1.2")
+    guarded["raw_redacted"].as_bool.should be_true
+
+    opened = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_detail(j, row, true, 0_i64) })
+    opened["body_preview"].as_s.should contain("eyJhbGciOi")
+  end
+
+  # `redact_head` skips line 0 (an HTTP start line) and stops at the first blank line (the end
+  # of an HTTP header block). A WebSocket message has neither, so both exemptions are holes.
+  it "redacts the FIRST line and lines after a blank one, which redact_head does not" do
+    first = Gori::MCP::Serialize.redact_message_lines("cookie: sid=secret\nx: 1", false)
+    first.should_not contain("sid=secret")
+    after = Gori::MCP::Serialize.redact_message_lines("hello\n\nauthorization: Bearer secret", false)
+    after.should_not contain("Bearer secret")
+    # The HTTP head rule is untouched — it still exempts both, because an HTTP head has both.
+    Gori::MCP::Serialize.redact_head("cookie: sid=secret\nx: 1", false).should contain("sid=secret")
+  end
+
+  it "keeps an HTTP row on head_preview" do
+    row = desync_held("POST /x HTTP/1.1\nHost: h\nContent-Length: 8\n\nSMUGGLED")
+    obj = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.intercept_item_row(j, row, true, 0_i64) })
+    obj["head_preview"].as_s.should contain("POST /x")
+    obj["body_preview"]?.should be_nil
+  end
+end
+
 # The scanner both shapes come from. `head_body_boundary` (body start) and
 # `head_body_separator` ({offset, width}) must never disagree, because a caller that renders
 # the head as TEXT needs the offset and cannot derive it by subtracting a fixed 4.

@@ -523,9 +523,26 @@ module Gori::Tui
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
     def intercept_toggle : Nil
-      on = @host.session.interceptor.toggle
+      result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
-      @host.status(on ? "intercept ON — held traffic waits (HTTPS→h1 for in-scope; gRPC may fail)" : "intercept off")
+      @host.status(toggle_status(result))
+    end
+
+    # What turning catch OFF actually did. `forward_all` names its count because "this toast is
+    # the operator's only record of how many irreversible decisions just went out"; toggle-off
+    # is the same act reached from a different key, and it said only "intercept off" — for a
+    # flip that had just put four held requests on the wire.
+    #
+    # It names the EDITOR, not the bytes. "unedited" would be a false claim: `Interceptor#toggle`
+    # still applies the active session slot's overlay, as every send seam does. What the flip
+    # drops is the one thing ⇧F carries — an open editor's in-progress changes — and that is
+    # the difference the operator has to be able to see between the two keys.
+    private def toggle_status(result : Interceptor::ToggleResult) : String
+      return "intercept ON — held traffic waits (HTTPS→h1 for in-scope; gRPC may fail)" if result.enabled?
+      return "intercept off" if result.released == 0
+      n = result.released
+      "intercept off — auto-forwarded #{n} held message#{n == 1 ? "" : "s"} " \
+      "(an open editor's changes were NOT applied — ⇧F forwards all WITH them)"
     end
 
     # Forward the effective target set: every marked hold, else the cursor row. The editor

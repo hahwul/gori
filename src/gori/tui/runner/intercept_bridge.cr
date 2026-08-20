@@ -124,13 +124,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       end
       true
     when "toggle"
-      # Desired-state (idempotent): flip only if current != requested, so a re-applied command
-      # can't oscillate. NOTE: enabling only affects NEW connections (h2→h1 downgrade gate).
-      want = cmd.arg == "true"
-      ic.toggle if ic.enabled? != want
-      store.ack_intercept_command(cmd.id, "toggled", "enabled=#{ic.enabled?}")
-      push_config_note("agent #{ic.enabled? ? "enabled" : "disabled"} intercept")
-      true
+      apply_intercept_toggle(ic, store, cmd)
     when "set_filter"
       q = cmd.arg || ""
       ic.set_filter(q)
@@ -151,6 +145,25 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       store.ack_intercept_command(cmd.id, "error", "unknown verb #{cmd.verb}")
       false
     end
+  end
+
+  # Desired-state (idempotent): flip only if current != requested, so a re-applied command
+  # can't oscillate. NOTE: enabling only affects NEW connections (h2→h1 downgrade gate).
+  #
+  # The ack names how many held messages the flip FORWARDED, for the reason
+  # `Interceptor::ToggleResult` exists: disabling catch is a bulk irreversible forward, and
+  # `enabled=false` alone told the agent nothing about the four requests it had just released.
+  # The detail names the EDITOR, not the bytes: a toggle is a fail-open release, so it carries
+  # no surface's in-progress edit — but the active session slot's overlay still applies, as it
+  # does on every forward, so calling the bytes "unedited" would be a false claim.
+  private def apply_intercept_toggle(ic : Interceptor, store : Store, cmd : Store::CommandRow) : Bool
+    want = cmd.arg == "true"
+    released = ic.enabled? == want ? 0 : ic.toggle.released
+    detail = "enabled=#{ic.enabled?}"
+    detail += ", auto-forwarded #{released} held message(s) with no in-progress edit applied" if released > 0
+    store.ack_intercept_command(cmd.id, "toggled", detail)
+    push_config_note("agent #{ic.enabled? ? "enabled" : "disabled"} intercept")
+    true
   end
 
   # An agent config action (toggle/filter/direction) has no held item, so it jumps to the
