@@ -708,3 +708,123 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
     end
   end
 end
+
+# The intercept forward is the THIRD send seam (with `Repeater::Sender` and `Fuzz::Sender`), so
+# the active session slot's header overlay applies to a held REQUEST going back on the wire —
+# `Interceptor#overlay_slot` says so. It applied on `forward`/`forward_all` and NOT on
+# `toggle`, so a project browsing as the "admin" slot had the requests released by turning
+# catch off reach the origin as a DIFFERENT identity than every other request in the session,
+# with nothing saying so.
+#
+# `release_all` is the ONE release that must NOT overlay, and its spec is below: `Session#close`
+# drops the binding layer immediately before calling it, so an overlay there is either a no-op
+# or — when the layer has since been rebound by another `Session.open` — this project's held
+# requests stamped with ANOTHER project's slot headers.
+private def with_slot_layer(store, &)
+  slots = Gori::SessionSlots.load(store)
+  slots.save([Gori::SessionSlot.new("admin", set_headers: [{"X-Who", "admin"}])])
+  bindings = Gori::Bindings.load(store, slots)
+  slots.activate("admin")
+  previous = Gori::Env.layer
+  Gori::Env.layer = bindings
+  begin
+    yield
+  ensure
+    Gori::Env.layer = previous
+  end
+end
+
+private def hold_one(ic) : Channel(Gori::Interceptor::Decision)
+  ch = Channel(Gori::Interceptor::Decision).new
+  spawn do
+    ch.send(ic.hold_request("GET /me HTTP/1.1\r\nHost: h\r\n\r\n".to_slice,
+      method: "GET", target: "/me", host: "h", port: 80, scheme: "http"))
+  end
+  Fiber.yield
+  ch
+end
+
+describe "Gori::Interceptor — the session-slot overlay on every release" do
+  it "applies it on forward, forward_all and toggle-off alike" do
+    {
+      "forward"     => ->(ic : Gori::Interceptor) { ic.forward(ic.pending.first.id); nil },
+      "forward_all" => ->(ic : Gori::Interceptor) { ic.forward_all; nil },
+      "toggle-off"  => ->(ic : Gori::Interceptor) { ic.toggle; nil },
+    }.each do |name, release|
+      with_store do |store|
+        with_slot_layer(store) do
+          ic = Gori::Interceptor.new(Gori::Scope.load(store))
+          ic.toggle
+          ch = hold_one(ic)
+          release.call(ic)
+          sent = String.new(ch.receive.bytes)
+          fail "#{name} skipped the session-slot overlay: #{sent.inspect}" unless sent.includes?("X-Who: admin")
+        end
+      end
+    end
+  end
+
+  # Shutdown is the exception, and it has to stay one. `Session#close` runs
+  # `Env.layer = nil if Env.layer.same?(@bindings)` on the line ABOVE `@interceptor.release_all`
+  # — deliberately, so a `$SESSION` cannot resolve against a closed project's table. If the
+  # guard does not fire (a second `Session.open`, or MCP's `bind_binding_layer`, rebound the
+  # layer first) the layer that survives belongs to a DIFFERENT project, and overlaying with it
+  # is the cross-project leak that drop exists to prevent.
+  it "leaves release_all byte-exact, even with a slot layer still installed" do
+    with_store do |store|
+      with_slot_layer(store) do
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        ch = hold_one(ic)
+        ic.release_all
+        String.new(ch.receive.bytes).should_not contain("X-Who")
+      end
+    end
+  end
+
+  # A held RESPONSE is travelling to the operator's own browser and a WS frame has no header
+  # lines — `overlay_slot`'s two other gates. The bulk releases inherit them by construction
+  # (one helper), and this pins that they do.
+  it "leaves a held response byte-exact on toggle-off" do
+    with_store do |store|
+      with_slot_layer(store) do
+        ic = Gori::Interceptor.new(Gori::Scope.load(store))
+        ic.toggle
+        ch = Channel(Gori::Interceptor::Decision).new
+        spawn do
+          ch.send(ic.hold_response("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_slice,
+            flow_id: 1_i64, method: "GET", target: "200 OK", host: "h", port: 80, scheme: "http"))
+        end
+        Fiber.yield
+        ic.toggle
+        String.new(ch.receive.bytes).should_not contain("X-Who")
+      end
+    end
+  end
+end
+
+# Turning catch OFF forwards every held message irreversibly, exactly as `forward_all` does —
+# and `forward_all` returns its count because "this toast is the operator's only record of how
+# many irreversible decisions just went out". `toggle` returned a bare Bool, so every surface
+# said "intercept off" for a flip that had just released four held requests.
+describe "Gori::Interceptor::ToggleResult" do
+  it "counts what the flip actually released, and reports 0 when turning ON" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      on = ic.toggle
+      on.enabled?.should be_true
+      on.released.should eq(0)
+
+      2.times { hold_one(ic) }
+      ic.pending_count.should eq(2)
+
+      off = ic.toggle
+      off.enabled?.should be_false
+      off.released.should eq(2)
+      ic.pending_count.should eq(0)
+
+      # Nothing held → nothing claimed, the same answer `forward_all` gives.
+      ic.toggle.released.should eq(0)
+    end
+  end
+end

@@ -304,9 +304,31 @@ module Gori
       @revision.add(1)
     end
 
-    # Toggle on/off. Turning OFF auto-forwards everything currently held (so
-    # traffic never wedges). Returns the new state.
-    def toggle : Bool
+    # What a `toggle` DID: the state it left intercept in, and how many held messages the
+    # flip put on the wire on its way out.
+    #
+    # The count is not decoration. Turning catch off is an operator gesture that forwards
+    # every message in the queue irreversibly, exactly as `forward_all` does — and
+    # `forward_all` returns its count for a reason it states: "this toast is the operator's
+    # only record of how many irreversible decisions just went out". A bare `Bool` left every
+    # surface saying "intercept off" for a flip that had just released four held requests.
+    #
+    # A preceding `pending_count` is NOT the same answer, which is why this rides on the
+    # release itself: a proxy fiber holding a message between the count and the flip has it
+    # forwarded too.
+    record ToggleResult, enabled : Bool, released : Int32 do
+      def enabled? : Bool
+        enabled
+      end
+    end
+
+    # Toggle on/off. Turning OFF auto-forwards everything currently held (so traffic never
+    # wedges) with NO SURFACE'S IN-PROGRESS EDIT — the fail-open disposition every involuntary
+    # release in this file takes, and the one thing that separates this from `forward_all`,
+    # which carries the editor's bytes. The bytes are not "untouched", though: the active
+    # session slot's overlay applies below, exactly as it does on `forward`. Returns what
+    # happened (see `ToggleResult`).
+    def toggle : ToggleResult
       released = [] of Item
       now_on = @mutex.synchronize do
         @enabled = !@enabled
@@ -317,8 +339,13 @@ module Gori
         @enabled
       end
       @revision.add(1) # enabled flipped (and possibly the queue cleared)
-      released.each { |it| it.reply.send(Decision.new(Action::Forward, it.raw)) }
-      now_on
+      # `overlay_slot`, not `it.raw`: these requests are going ON THE WIRE, and the active
+      # session slot is the same operator instruction `forward`/`forward_all` obey two
+      # methods down. Turning catch off is a bulk forward — a request that escaped the
+      # overlay here reached the origin as a different identity than every other request in
+      # the same session, silently.
+      released.each { |it| it.reply.send(Decision.new(Action::Forward, overlay_slot(it, it.raw))) }
+      ToggleResult.new(now_on, released.size)
     end
 
     # Conservative HOST-level gate: is holding even possible for this host? Scope rules that
@@ -630,6 +657,14 @@ module Gori
         @items.clear
         vals
       end
+      # `it.raw`, and deliberately NOT `overlay_slot` the way `toggle` and `forward` do.
+      # `Session#close` DROPS the binding layer immediately before calling this ("a `$SESSION`
+      # resolved against a closed project's table would be the worst kind of cross-project
+      # leak"), so an overlay here is a no-op in the normal case — and in the case where the
+      # guard does not fire, because another `Session.open` or MCP's `bind_binding_layer` has
+      # rebound `Env.layer` in the meantime, it would stamp THIS project's held requests with
+      # ANOTHER project's slot headers. That is precisely the leak the drop exists to prevent,
+      # reached from the one caller that runs after it.
       items.each { |it| it.reply.send(Decision.new(Action::Forward, it.raw)) }
     end
   end

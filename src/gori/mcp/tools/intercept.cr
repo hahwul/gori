@@ -302,12 +302,15 @@ module Gori
           "available:false when no bridge has ever been published; capturing:false (with a " \
           "growing heartbeat_age_seconds) when the last capturing instance is no longer live, " \
           "in which case mutating verbs refuse. Header values redacted unless " \
-          "include_sensitive:true." do |s|
+          "include_sensitive:true. An HTTP row carries head_preview + body_size; a WebSocket " \
+          "row has no head at all, so it carries body_preview (omitted for a BINARY frame) and " \
+          "body_size is the whole payload." do |s|
           s.field "include_sensitive", boolprop("show Authorization/Cookie/etc header values instead of [REDACTED] (default false)")
         end
 
         tool j, "intercept_get",
-          "Full detail for ONE held intercept item (redacted head + body size). Pass " \
+          "Full detail for ONE held intercept item (redacted head + body size; a WebSocket " \
+          "message has no head, so it returns body_preview and body_size is the payload). Pass " \
           "include_sensitive:true to ALSO get the full raw message base64 (unredacted; edit it " \
           "and send it back as intercept_forward_edit's raw_base64 for a byte-exact round " \
           "trip) — otherwise raw is withheld " \

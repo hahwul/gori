@@ -156,12 +156,73 @@ module Gori
         end
       end
 
+      # How many characters of a held message's PREVIEW any surface will render (`String#size`,
+      # matching the head preview this was lifted out of).
+      HELD_PREVIEW_MAX = 1024
+
+      # {head text, body bytes} of a HELD row, which is NOT `head_and_body(row.raw)`.
+      #
+      # A WebSocket message is ALL body — no start line, no headers, no blank-line separator —
+      # exactly as the TUI's `InterceptView#ws_window_for` already models it ("an empty head
+      # and the payload as lazy BodyLines"). Run through the HTTP splitter it came back the
+      # other way round: the WHOLE payload as `head`, and `body_size: 0` for every held WS
+      # message on both cross-process surfaces. That is the one fact a WS row IS about —
+      # `Item#label` ends a WS message with its byte count, and `gori run intercept list`
+      # prints `(0b body)` beside a 40 KB frame. A payload that happens to CONTAIN a blank
+      # line (a pretty-printed JSON message, a multi-line chat body) was worse than useless:
+      # the split landed inside it, so the preview stopped there and `body_size` described a
+      # fragment. `redact_head` then ran header redaction over a message with no headers.
+      def self.held_head_and_body(row : Store::HeldRow) : {String, Bytes}
+        return {"", row.raw} if row.ws?
+        head_and_body(row.raw)
+      end
+
+      # A held WS message's payload as previewable text, or nil when there is nothing to show
+      # (a BINARY frame — opcode 2 is protobuf/msgpack/CBOR, and rendering it is a wall of
+      # U+FFFD; `binary`/`binary_note` and `body_size` are what that row has to say). Mirrors
+      # the TUI's `ws_preview`, which refuses the same case for the same reason.
+      #
+      # `include_sensitive` is NOT optional here, and the reason is the whole of why this
+      # takes the argument at all. Before a WS payload had a field of its own it reached the
+      # caller through `head`/`head_preview` — i.e. through `redact_head`. Handing it back
+      # unredacted would put a line-oriented protocol's credential (STOMP's
+      # `CONNECT\nauthorization:Bearer …`, any framing with header-shaped lines) into an
+      # `intercept_get` that did NOT ask for sensitive values, in the same object that still
+      # reports `raw_redacted: true` — and for any text message under the preview cap this
+      # field IS the full raw payload that `raw_base64` is deliberately gated on.
+      def self.held_body_preview(row : Store::HeldRow, include_sensitive : Bool) : String?
+        return nil unless row.ws? && !row.binary?
+        text = redact_message_lines(String.new(row.raw).scrub, include_sensitive)
+        text.size > HELD_PREVIEW_MAX ? "#{text[0, HELD_PREVIEW_MAX]}…" : text
+      end
+
+      # `redact_head`'s rule applied to a message that has NO head: every line is eligible.
+      #
+      # `redact_head` skips line 0 (an HTTP start line) and stops at the first blank line (the
+      # end of an HTTP header block). A WebSocket message has neither — it is all payload — so
+      # a credential on its first line, or after a blank line inside it, would be handed back
+      # in the clear by the HTTP rule. Same `SENSITIVE_HEADERS` list, same `[REDACTED]`, same
+      # line endings preserved; only the two HTTP-shaped exemptions are dropped.
+      def self.redact_message_lines(text : String, include_sensitive : Bool) : String
+        return text if include_sensitive || !text.includes?(':')
+        text.split('\n').map do |line|
+          colon = line.index(':')
+          next line unless colon
+          name = line[0, colon]
+          next line unless sensitive_header?(name)
+          "#{name}: [REDACTED]#{"\r" if line.ends_with?('\r')}"
+        end.join('\n')
+      end
+
       # List projection: metadata + a redacted, truncated head preview (no body). age_seconds
       # is derived from the wall-clock held_at_ms (stable across snapshot republishes).
+      #
+      # `head_preview` is emitted only for a message that HAS a head; a WebSocket row carries
+      # `body_preview` instead (see `held_head_and_body`). Two names rather than one field
+      # meaning different things per kind, because an agent reading `head_preview` on a WS row
+      # was reading a body and had nothing telling it so.
       def self.intercept_item_row(j : JSON::Builder, row : Store::HeldRow, include_sensitive : Bool, now_ms : Int64) : Nil
-        head, body = head_and_body(row.raw)
-        preview = redact_head(head, include_sensitive)
-        preview = "#{preview[0, 1024]}…" if preview.size > 1024
+        head, body = held_head_and_body(row)
         j.object do
           j.field "item_id", row.item_id
           j.field "kind", text(row.kind)
@@ -177,7 +238,13 @@ module Gori
           j.field "edited", row.edited
           emit_edit_warning(j, row)
           j.field "body_size", body.size
-          j.field "head_preview", preview
+          if row.ws?
+            held_body_preview(row, include_sensitive).try { |t| j.field "body_preview", text(t) }
+          else
+            preview = redact_head(head, include_sensitive)
+            preview = "#{preview[0, HELD_PREVIEW_MAX]}…" if preview.size > HELD_PREVIEW_MAX
+            j.field "head_preview", preview
+          end
         end
       end
 
@@ -214,7 +281,7 @@ module Gori
       # Cookie header bytes the `head` field carefully redacts. Redacting inside raw is NOT an
       # option (it would corrupt the bytes the agent round-trips), so we gate instead.
       def self.intercept_item_detail(j : JSON::Builder, row : Store::HeldRow, include_sensitive : Bool, now_ms : Int64) : Nil
-        head, body = head_and_body(row.raw)
+        head, body = held_head_and_body(row)
         j.object do
           j.field "item_id", row.item_id
           j.field "kind", text(row.kind)
@@ -228,7 +295,12 @@ module Gori
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
           j.field "edited", row.edited
           emit_edit_warning(j, row)
-          j.field "head", redact_head(head, include_sensitive)
+          # `head`/`body_preview` split by kind, for the reason `held_head_and_body` states.
+          if row.ws?
+            held_body_preview(row, include_sensitive).try { |t| j.field "body_preview", text(t) }
+          else
+            j.field "head", redact_head(head, include_sensitive)
+          end
           j.field "body_size", body.size
           j.field "raw_size", row.raw.size
           if include_sensitive

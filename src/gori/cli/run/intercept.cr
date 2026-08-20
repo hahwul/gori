@@ -177,7 +177,11 @@ module Gori
             puts "No items currently held."
           else
             items.each do |r|
-              _, body = MCP::Serialize.head_and_body(r.raw)
+              # `held_head_and_body`, not `head_and_body(r.raw)`: a WebSocket message has no
+              # head to split off, so the HTTP splitter put the whole payload in `head` and
+              # this row printed `(0b body)` for every held WS message — the one number a WS
+              # row is about. See its doc comment.
+              _, body = MCP::Serialize.held_head_and_body(r)
               # method/scheme/host/target are parsed off the wire (a held request's request
               # line / Host header, or a held response) — CLI::Output.term_safe neutralizes
               # any ANSI/OSC/CSI escapes before they hit the live terminal (see its doc
@@ -194,6 +198,29 @@ module Gori
             end
           end
         end
+      end
+
+      # How much of a held WebSocket payload `intercept get` prints as text. A WS message runs
+      # to `WS::Relay::MAX_MESSAGE` (16 MiB) and this goes straight to a terminal; the HTTP
+      # branch opposite it is bounded by the head codec's own 256 KiB ceiling, so this makes
+      # the same bound explicit rather than inheriting one it does not have.
+      WS_PAYLOAD_PRINT_MAX = 256 * 1024
+
+      # The payload of a held WebSocket message, for the text `get`. No-op for anything else —
+      # an HTTP hold's head is printed by the caller and its body is deliberately not.
+      #
+      # Redacted unless `--include-sensitive`, exactly as the head branch beside it is. A WS
+      # payload used to be printed THROUGH `redact_head` (it arrived in the `head` slot), so
+      # printing it raw here would put a line-oriented protocol's credential on the terminal
+      # for a command that did not ask for one — see `Serialize.redact_message_lines`, which
+      # is the same rule without the two HTTP-shaped exemptions.
+      private def self.emit_ws_payload(row : Store::HeldRow, include_sensitive : Bool) : Nil
+        return unless row.ws? && !row.binary?
+        raw = row.raw
+        cut = raw.size > WS_PAYLOAD_PRINT_MAX
+        text = String.new(cut ? raw[0, WS_PAYLOAD_PRINT_MAX] : raw).scrub
+        puts CLI::Output.term_safe_multiline(MCP::Serialize.redact_message_lines(text, include_sensitive)).rstrip
+        puts "[… truncated at #{WS_PAYLOAD_PRINT_MAX} bytes]" if cut
       end
 
       # "gori will not apply an edit to this message, and here is why" — printed before the
@@ -271,17 +298,23 @@ module Gori
           if format == :json
             puts(JSON.build { |j| MCP::Serialize.intercept_item_detail(j, row, include_sensitive, now_ms) })
           else
-            head, body = MCP::Serialize.head_and_body(row.raw)
+            head, body = MCP::Serialize.held_head_and_body(row)
             redacted = MCP::Serialize.redact_head(head, include_sensitive)
             # ABOVE the head, because this is the reason not to start typing one: an edit gori
             # will not apply is decided when the message is HELD, and until it was carried on
             # the row this command printed an ordinary editable message and let the operator
             # find out from `intercept edit`'s exit code.
             emit_edit_warning(row)
-            puts CLI::Output.term_safe_multiline(redacted).rstrip
+            # A WebSocket message is ALL body, so `redacted` is empty for one and its PAYLOAD
+            # is what there is to print. A BINARY frame prints nothing (opcode 2 is
+            # protobuf/msgpack/CBOR — a wall of U+FFFD; the TUI answers the same case with a
+            # hex editor, and here the byte channel is `--format json --include-sensitive`).
+            puts CLI::Output.term_safe_multiline(redacted).rstrip unless redacted.empty?
+            emit_ws_payload(row, include_sensitive)
             unless body.empty?
               puts ""
-              puts "[#{body.size} bytes of body — use --format json --include-sensitive for the raw bytes]"
+              what = row.ws? ? "payload" : "body"
+              puts "[#{body.size} bytes of #{what} — use --format json --include-sensitive for the raw bytes]"
             end
           end
         ensure
