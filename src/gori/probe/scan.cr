@@ -102,11 +102,30 @@ module Gori
       end
 
       # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
+      #
+      # Raises `Gori::Error` when a `body:` filter's index could not be drained. Refusing is the
+      # only honest answer — a scan is the surface where a short input set reads as "clean" —
+      # and both callers already land somewhere that reports it: `cli/run/probe.cr` rescues this
+      # call directly, `mcp/tools/probe.cr` rides `Tools#call`'s `Gori::Error` arm.
       def flow_ids(store : Store, filter : QL::Filter?) : Array(Int64)
         # A scan that silently skipped flows because their trigram entries hadn't been written
         # yet (indexing is off-commit — Store V4) would under-report FINDINGS, so drain the
-        # backlog before selecting the set to scan.
-        store.index_pending! if filter.try(&.uses_fts?)
+        # backlog before selecting the set to scan — and then check that the drain WORKED.
+        # `drain_fts!` rather than `index_pending!`: that one reports a batch that lost SQLite's
+        # single writer slot to a capturing peer as "0 indexed" and returns with the rows still
+        # dirty, so its return says nothing, and a collision it gave up on is usually over
+        # milliseconds later. Scanning the short set anyway produced a report with FEWER findings
+        # and no marker distinguishing it from a clean one — which is the whole failure the drain
+        # above was added to prevent.
+        if filter.try(&.uses_fts?)
+          if (pending = store.drain_fts!) > 0
+            raise Gori::Error.new("#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed " \
+                                  "for free-text search (this project's writer is busy — another " \
+                                  "gori is capturing it), so a body:/free-text scan would silently " \
+                                  "skip them and under-report findings. Nothing was scanned; retry " \
+                                  "in a moment.")
+          end
+        end
         rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end

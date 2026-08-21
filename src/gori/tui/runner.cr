@@ -626,8 +626,27 @@ module Gori::Tui
             # Record what the user is currently viewing (active tab / focus / selection) to
             # the project store so a separate `gori mcp` process can report it via
             # get_current_context. Throttled + diffed so idle focus never churns the WAL.
+            #
+            # The capture-lock holder publishes, exactly as the intercept bridge above. There
+            # is ONE `ui_state` row per project and two live instances on the same db both
+            # wrote it, so `get_current_context` reported whichever window last moved its
+            # cursor — an agent asking "what is the operator looking at" got an answer from a
+            # window the operator was not in. The lock is the same tiebreak the bridge already
+            # uses, and the same one the operator understands (it is what `c` takes over).
+            #
+            # `may_publish_ui_state?` is the carve-out that keeps the lock from meaning
+            # "nobody publishes": the holder does not have to be a window at all. A headless
+            # `gori run capture` takes this project's capture lock and draws nothing, so
+            # gating on the lock alone left the operator's live view-only TUI silent and the
+            # agent told "the gori TUI may not have run against it" while it was on screen.
+            #
+            # The bookkeeping is inside the gate too: advancing `last_ui_ident` while refusing
+            # to write would leave a window that later takes capture silently unpublished
+            # until its identity happened to move again.
             ident = ui_state_identity
-            if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+            if ident != last_ui_ident &&
+               (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE) &&
+               may_publish_ui_state?
               @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
               last_ui_ident = ident
               last_ui_write = now
@@ -679,6 +698,13 @@ module Gori::Tui
     # Minimum spacing between ui-state writes (get_current_context). Coalesces a fast
     # focus/scroll burst into ≤1 write per window so the WAL never churns per frame.
     UI_STATE_THROTTLE = 300.milliseconds
+
+    # How long a view-only window leaves the capture holder's `ui_state` row alone before it
+    # publishes its own (see `may_publish_ui_state?`). Not a liveness probe — the holder writes
+    # only when its view MOVES, so this is "the holder has not looked at anything for a minute",
+    # which is the point at which the other window is the better answer to "what is the operator
+    # looking at". Long enough that a holder being read rather than driven keeps the row.
+    UI_STATE_TAKEOVER = 60.seconds
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
     SPINNER_INTERVAL = 120.milliseconds
@@ -777,6 +803,56 @@ module Gori::Tui
       "#{@active_tab}|#{@focus}|#{current_selected_flow_id}|#{current_subtab_index}"
     end
 
+    # May THIS window write the project's single `ui_state` row?
+    #
+    # The capture-lock holder always may — it is the tiebreak the intercept bridge already
+    # uses and the one the operator can move with `c`. A view-only window may only when no
+    # UI-BEARING holder is publishing, which is a different question from "does a holder
+    # exist": `gori run capture` holds the lock headless, and under a lock-only gate that
+    # deployment published nothing at all while a TUI sat on screen.
+    #
+    # Answered from the row rather than from the lock, because that is where the evidence is.
+    # `holds_capture` says the last writer was a holder; `recorded_at` says when. A row with
+    # neither (or with a writer that was view-only itself) is free to take. So:
+    #
+    #   * no row / unreadable / written by a view-only window  → take it; nobody better is here
+    #   * written by a holder within UI_STATE_TAKEOVER         → leave it; that window is live
+    #   * written by a holder longer ago than that             → take it
+    #
+    # The last clause is what bounds the ping-pong the lock gate removed. Both windows write
+    # only when their own identity CHANGES, so two idle windows never trade the row; and the
+    # holder's writes are unconditional, so any activity in it reclaims the row on the next
+    # tick. A holder that has not moved for a full minute is not what the operator is looking
+    # at, whatever it holds.
+    #
+    # Read only on a tick that is otherwise about to write, so this costs at most one small
+    # indexed SELECT per UI_STATE_THROTTLE, and none at all in the capture holder — the store
+    # is not touched before the lock question is answered.
+    private def may_publish_ui_state? : Bool
+      return true if @session.capturing_lock_held?
+      Runner.view_only_may_publish?(@session.store.setting(Store::UI_STATE_KEY), Time.utc.to_unix_ms)
+    end
+
+    # The decision above, as a function of the row and the clock, so it can be exercised
+    # without a `Runner` (which owns a terminal and is therefore unconstructible under spec/).
+    # `raw` is the stored `ui_state` value, `now_ms` the same epoch `ui_state_json` stamps.
+    def self.view_only_may_publish?(raw : String?, now_ms : Int64) : Bool
+      return true unless raw
+      obj = JSON.parse(raw).as_h?
+      return true unless obj
+      # nil (a row written before this field existed) and false (a view-only window wrote it)
+      # both mean "no UI-bearing holder is claiming this row", and both are free to take.
+      return true unless obj["holds_capture"]?.try(&.as_bool?)
+      rec = obj["recorded_at"]?.try(&.as_i64?)
+      return true unless rec
+      (now_ms - rec) > UI_STATE_TAKEOVER.total_milliseconds
+    rescue
+      # Unreadable is not a reason to stay silent — the row is a hint, and the failure mode
+      # this whole method exists to stop is "nobody publishes". Same direction as the
+      # `parsed.nil?` arm `get_current_context` already takes on the reading side.
+      true
+    end
+
     # The ui-state payload written to the project store, read cross-process by
     # `gori mcp get_current_context`. It lives in this project's own db, so the served project
     # identity is implicit — no name field (which would skew display-name vs slug).
@@ -785,6 +861,10 @@ module Gori::Tui
         j.object do
           j.field "active_tab", @active_tab.to_s
           j.field "focus_pane", @focus.to_s
+          # Who wrote this, for `may_publish_ui_state?` in a PEER window and for the agent
+          # reading it: a row from a view-only window is a weaker claim about what the
+          # operator is looking at than one from the window holding traffic.
+          j.field "holds_capture", @session.capturing_lock_held?
           if fid = current_selected_flow_id
             j.field "selected_flow_id", fid
           end
@@ -884,6 +964,12 @@ module Gori::Tui
       # external `gori run colormarker` / MCP `create_color_rule` against this db. Cheap
       # regardless — `Colormarker#refresh` bails out on an unchanged rule set, so the common
       # tick recompiles nothing and does not bump the revision History memoises against.
+      # Re-read the GLOBAL half of the library first: `Colormarker#reload` folds
+      # `Settings.colormarker_rules` as they sit in THIS process, so a peer's
+      # `create_color_rule` against settings.json is invisible until that section is
+      # re-read. Section-only — a full `Settings.load` would clobber unsaved other
+      # sections (see `Settings.reload_section`).
+      Settings.reload_colormarker_from_disk
       @session.colormarker.reload
       # Re-prime the render-side custom-mark map only when the colour set actually moved — the
       # revision bumps on a rule OR a custom-colour change, so a hex edit repaints History
@@ -892,6 +978,28 @@ module Gori::Tui
         Theme.set_custom_marks(Settings.colormarker_color_map)
         @custom_marks_rev = rev
       end
+      # Match&Replace and the extract rules, for the same reason as Scope above and one that is
+      # sharper: both are read on the proxy HOT PATH (`Rules` rewrites the bytes of every
+      # request/response that passes through, `Bindings` decides what `$KEY` expands to at every
+      # send seam), and the only refresh either had was the Rewriter tab's own `r` key /
+      # on-enter. So a peer's `gori run rewriter add` / MCP `create_rule` / `create_extract_rule`
+      # against this db did not reach the traffic this session was rewriting until somebody
+      # happened to walk into that tab — and a rule the operator DISABLED elsewhere went on
+      # rewriting live traffic here for the rest of the session. Safe in place, like the rest:
+      # the rule EDITOR is an overlay with its own buffer, and only the underlying snapshot
+      # moves. Both `#reload` calls are just `refresh` (one settings read + one table read).
+      # Global Match&Replace lives in settings.json, not the project DB, so `Rules#reload`
+      # alone would keep the process's startup snapshot of that section. Re-read it first.
+      Settings.reload_rewriter_from_disk
+      @session.rules.reload
+      @session.bindings.reload
+      # And the Probe mode, which is not a view at all — it is the authorization for sending
+      # attack payloads. A peer's `set_probe_mode` (MCP, `gori run probe`, a second TUI) commits
+      # the row and every surface reports the change as done, while THIS analyzer kept the mode
+      # it opened with; a peer switching the project to `off`/`passive` to stop active probing
+      # left this session firing. `apply_stored_mode` adopts the persisted value WITHOUT writing
+      # it back — a tick that persisted would race the peer's write and put the old mode back.
+      @session.probe.apply_stored_mode
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
@@ -1039,7 +1147,8 @@ module Gori::Tui
       if Runner.quit_chord_claimed?(ev, modal: !ov.nil?)
         # The policy is `Runner.quit_decision`, shared with `quit!` (the palette's Quit) so
         # the two entry points cannot answer "does this need a confirm?" differently again.
-        case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed)
+        case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed,
+          notes_conflict: issues_notes_conflict?)
         in .confirm?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
@@ -2367,8 +2476,11 @@ module Gori::Tui
     # chord the palette operator never pressed; ^P, typing a filter, and ↵ on a row that reads
     # "Quit gori" is already the deliberate act the arm asks for.
     def quit! : Nil
-      # chord: false — a palette dispatch can never arm, so this is Confirm or Quit.
-      if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false).confirm?
+      # chord: false — a palette dispatch can never arm, so this is Confirm or Quit, and with
+      # the confirm setting off it is Quit with nothing shown. `notes_conflict` is what turns
+      # that one into a question.
+      if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false,
+           notes_conflict: issues_notes_conflict?).confirm?
         raise_quit_confirm
       else
         finish_quit
@@ -2402,8 +2514,9 @@ module Gori::Tui
     # line, and still a non-danger confirm — closing an idle project discards nothing.
     def leave_project : Nil
       active = @jobs.active_summary
-      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size),
-        confirm_label: "leave", danger: !active.nil?, return_to: @overlay.to_sym) do
+      notes_conflict = issues_notes_conflict?
+      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
+        confirm_label: "leave", danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
         stop_all_jobs
         commit_pending_edits
@@ -2429,11 +2542,22 @@ module Gori::Tui
     end
 
     private def quit_message : String
-      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size)
+      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size, issues_notes_conflict?)
     end
 
     private def quit_arm_hint : String
-      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size, back_key: back_key_live?)
+      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size, back_key: back_key_live?,
+        notes_conflict: issues_notes_conflict?)
+    end
+
+    # Would `commit_pending_edits` refuse the open Issues writeup? Asked only when an exit
+    # prompt is being composed — one store read on an operator action, never on the tick — and
+    # swallowed on failure, because a prompt that cannot be built is worse than one that leaves
+    # a line out.
+    private def issues_notes_conflict? : Bool
+      issues_controller.notes_conflict_pending?
+    rescue
+      false
     end
 
     # Does `q` actually go back to the project picker from where the operator is standing?
@@ -2463,19 +2587,31 @@ module Gori::Tui
     # The two modal messages put the count/consequence and the per-kind inventory on
     # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
     # columns, so one combined sentence lost its own verb to the ellipsis.
-    def self.leave_confirm_message(active : String?, count : Int32) : String
+    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
       base = "Close this project and return to the picker?"
-      return base unless active
-      "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}"
+      msg = active ? "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
     # for the same reason the leave confirm does: quitting abandons them.
-    def self.quit_confirm_message(active : String?, count : Int32) : String
-      base = "Quit gori? (pending edits are committed first)"
-      return base unless active
-      "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}"
+    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
+      # The parenthetical is a PROMISE, so it only gets made when it is true. `commit_pending_edits`
+      # refuses an Issues writeup a peer has rewritten (IssuesController#commit), and saying
+      # "pending edits are committed first" over the top of that is the lie that made this the
+      # one place a writeup could disappear without the operator being told anything at all.
+      base = notes_conflict ? "Quit gori?" : "Quit gori? (pending edits are committed first)"
+      msg = active ? "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
     end
+
+    # Said the same way in all three exit prompts, because it is the same fact — and said in
+    # terms of what the operator loses and which key keeps it, not in terms of the guard.
+    # This is the LAST point at which either version can still be chosen; after it, one of the
+    # two texts is gone and nothing on screen said so.
+    NOTES_CONFLICT_LINE =
+      "An Issues writeup here was rewritten by another session — leaving DISCARDS yours " \
+      "(esc in the notes pane overwrites theirs instead)."
 
     # A status toast, not a card, so this one stays on a single line.
     #
@@ -2484,8 +2620,14 @@ module Gori::Tui
     # failure this argument exists to prevent is a hint naming a key that is dead in the focus
     # it is shown from — and a hint that says less is recoverable, one that lies is not.
     # The running-jobs sentence never offered `q` and is byte-identical to what shipped.
-    def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false) : String
+    def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false,
+                           notes_conflict : Bool = false) : String
       base = "press ^D (or ^C) again to quit"
+      # Ahead of the jobs clause, because this is the one that loses something UNRECOVERABLE.
+      # A stopped job can be started again; the writeup cannot be typed again. The double-press
+      # arm is the quit path that never raises a modal, so this hint is the operator's only
+      # warning on it.
+      return "an Issues writeup was rewritten by another session — quitting DISCARDS yours; #{base}" if notes_conflict
       return "#{job_count(count)} running (#{active}) — #{base} and stop #{count == 1 ? "it" : "them"}" if active
       back_key ? "#{base} · q: back to projects" : base
     end
@@ -2521,9 +2663,18 @@ module Gori::Tui
     # Pure + class-level for the same reason the exit prompts above are: the Runner needs a
     # live tty. `@overlay.confirm?` deliberately stays at the chord's call site — "don't stack a
     # second modal on the one already asking this question" is dispatch, not policy.
-    def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool) : QuitAction
+    def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool,
+                           notes_conflict : Bool = false) : QuitAction
       return QuitAction::Confirm if confirm_setting
-      return QuitAction::Quit if !chord || armed
+      return QuitAction::Quit if armed # the arm hint already said what this press costs
+      # The palette's "Quit gori" verb is not a chord, so it never arms — with the confirm
+      # setting off it is the ONE quit that tears down having shown nothing at all. That is
+      # fine for a quit that only drops a session; it is not fine for one that drops a writeup
+      # a peer's rewrite has already made unsaveable. "Confirm before quit" is a preference
+      # about a routine action, and this stops being one — the same reason `esc` refuses once
+      # before it will overwrite.
+      return QuitAction::Confirm if notes_conflict && !chord
+      return QuitAction::Quit if !chord
       QuitAction::Arm
     end
 

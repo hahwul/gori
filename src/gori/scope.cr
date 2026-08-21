@@ -127,15 +127,20 @@ module Gori
       # render reads are race-free, but proxy reads vs TUI writes need the lock.
       #
       # Guards those fields ONLY, and every critical section it has is a field read or a
-      # pointer swap. The store round-trips that used to sit inside it do not: `exec_task`
-      # parks the calling fiber on its reply channel, and with `busy_timeout=5000` a PEER
-      # process holding the write lock parks it for up to five seconds. `sandbox_blocks?` /
+      # pointer swap. The store round-trips that used to sit inside it do not: `exec_task` parks
+      # the calling fiber on its reply channel until the writer fiber has run the op, and with
+      # `busy_timeout=5000` a PEER process holding the write lock can put that reply five seconds
+      # away. Two stalls in that wait, and only one of them is this mutex's: SQLite's busy handler
+      # sleeps inside C on whichever fiber runs the statement and the scheduler is single-threaded
+      # (no -Dpreview_mt), so that part stalls the WHOLE process whatever this mutex does. The
+      # part the mutex added is the queue wait — the writer's backlog ahead of our op plus the
+      # reply hop, which is ordinary running time — and `sandbox_blocks?` /
       # `sandbox_blocks_host?` / `in_scope_url?` / `may_match_host?` take this same mutex on
-      # every proxied request, so holding it across a write stalled every dial, intercept
-      # gate and sandbox decision in the process for as long as the peer held the lock —
-      # and `reload`, which the TUI's data_version poll and headless capture's reload fiber
-      # call on a timer, did three store reads inside it. `HostOverrides` measured and fixed
-      # exactly this; `Scope` is the sibling that had the same shape.
+      # every proxied request, so holding it across a write serialized every dial, intercept
+      # gate and sandbox decision in the process behind that write — and `reload`, which the
+      # TUI's data_version poll and headless capture's reload fiber call on a timer, did three
+      # store reads inside it. `HostOverrides` measured and fixed exactly this; `Scope` is the
+      # sibling that had the same shape.
       @mutex = Mutex.new
       # Serialises WRITERS through this instance, so the dedupe-then-write-then-verify
       # sequences below stay atomic against each other now that they no longer hold

@@ -174,8 +174,12 @@ connection pool directly. `Scope`, `Rules`, `HostOverrides`, and `Interceptor` e
 in-memory snapshot with a `Mutex`, and `Rules` and `Interceptor` additionally keep a lock-free
 `Atomic` counter so the common no-op case on the proxy hot path takes no lock at all.
 Cross-*process* coordination (a second `gori mcp` process driving intercept decisions, or
-capture ownership of a project) goes through the flock-based `CaptureLock` and Store bridge
-tables, not shared memory.
+capture ownership of a project) goes through the flock-based `CaptureLock`/`OpenLock` and
+Store bridge tables, not shared memory. Live in-memory objects on the proxy path
+(`Rules`, `Bindings`, `Probe::Analyzer` mode, `Scope`, `HostOverrides`) are re-read from
+the store — and the global rewriter/colormarker sections from settings.json — on the
+capturer's `data_version` tick / headless reload loop. An exclusive `OpenLock` (Compact,
+project delete) makes a peer `Store.open` fail rather than proceed unannounced.
 
 <a id="s2-1"></a>
 
@@ -336,6 +340,56 @@ the comment was written.
 Format: one `### YYYY-MM-DD: title` block per decision, naming the principle it refines and
 the issue or PR that settled it. Adding an entry must not require restructuring anything
 above it.
+
+### 2026-08-21: a peer's write must reach the live proxy objects, or fail honestly
+
+Refines: [P1](#p1), [P6](#p6). TUI + MCP coexistence audit.
+
+Three surfaces share one project DB. The gap was not the WAL writer (that queues) but
+in-memory objects the capturing process built at open and never re-read: Match&Replace,
+extract rules, and probe mode sat on the proxy hot path while MCP `create_rule` /
+`set_probe_mode` reported success against the store. The tick (`Runner#apply_external_change`,
+headless `App#spawn_reload_loop`) now reloads those objects. Probe mode is adopted from the
+persisted row without writing it back, so the tick cannot race a peer's `off` back to
+`active`.
+
+Global rewriter/colormarker live in settings.json. The existing 3-way merge is section-granular
+and correct for unrelated keys; those two sections hold a list plus its id allocator, so a
+wholesale section win minted colliding ids and dropped the peer's rules. They now merge by
+rule id, and CRUD re-reads only that section before allocating.
+
+`OpenLock.try_shared` used to give up in ~20 ms and open unannounced. Compact holds the
+matching exclusive lock for a second or more, after which a later delete cannot see the
+store. `Store.open` now retries on the order of Compact and then fails; unwritable mounts
+still proceed. `busy_timeout` still blocks the whole scheduler (SQLite's handler never
+returns to Crystal); the comments that said it parked one fiber were wrong, the 5000 ms
+value is unchanged.
+
+A `body:` query that cannot drain FTS because a peer holds the writer answers retryable
+`FTS_BACKLOG` rather than a short match set. `send_request` classifies a rolled-back
+`insert_flow` as `PROJECT_BUSY`, not `INVALID_ARGUMENT`.
+
+A guard against a peer is an INTERRUPTION, not a veto. Every refusal added here is one the
+operator can answer: the Issues lost-update guard arms a second `esc` (against the version it
+showed, so a further peer write refuses again) and names the conflict in the exit prompts, which
+are the last point either version can still be chosen. The refusals that are NOT the operator's
+to answer — a `body:` query whose index could not drain — retry the contention first and only
+report what survives it, because a guard that reports a collision the process could have waited
+out is spending the operator's attention on its own scheduling.
+
+The reload tick is on the render fiber, so its cost is a frame. Both settings folds are gated on
+the file's bytes and both reloaded lists re-anchor their selection by id, for the same reason
+`IssuesView#apply_filter` gives: a list that moves under a cursor re-aims the next keypress.
+
+The single `ui_state` row goes to the capture holder, which is the tiebreak the intercept
+bridge already uses — but the holder is not necessarily a window. A headless `gori run capture`
+holds the lock and draws nothing, so a lock-ONLY gate published nothing at all while the
+operator's view-only TUI was on screen and told the agent it "may not have run". A view-only
+window therefore publishes when no UI-bearing holder is: no row, a row a view-only window
+wrote, or a holder's row older than `UI_STATE_TAKEOVER`. Both windows write only when their
+own view MOVES, so two idle windows never trade the row, and the holder's write is
+unconditional — any activity there reclaims it. The row carries `holds_capture` so the reader
+can weigh whose view it is.
 
 ### 2026-07-25: this document restored
 

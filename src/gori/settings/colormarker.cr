@@ -171,14 +171,31 @@ module Gori::Settings
     s.try(&.strip.downcase).presence || "yellow"
   end
 
+  # Re-read the `colormarker` section — rules, custom colours and the id counter — from
+  # settings.json into memory, leaving every other section alone. The twin of
+  # `reload_rewriter_from_disk`, for the same reasons and with the same contract: see it and
+  # `Settings.reload_section`. The caller owns `Colormarker#refresh` after it.
+  def self.reload_colormarker_from_disk : Nil
+    reload_section("colormarker") do |node|
+      held = colormarker_next_rule_id
+      parse_colormarker(node)
+      # Only ever upward — see `reload_rewriter_from_disk` for what a lower number on disk costs.
+      self.colormarker_next_rule_id = {colormarker_next_rule_id, held}.max
+    end
+  end
+
   # --- global rule CRUD -----------------------------------------------------------------
-  # Each mutation rewrites the array and persists via `save` (atomic + 3-way merge). The array
-  # ORDER is the precedence order among global rules — the first enabled match paints the row —
-  # which is why add appends and move swaps.
+  # Each mutation re-reads the section (see `reload_colormarker_from_disk`), rewrites the array
+  # and persists via `save` (atomic + 3-way merge, reconciled by rule id inside this section).
+  # The array ORDER is the precedence order among global rules — the first enabled match paints
+  # the row — which is why add appends and move swaps.
 
   # Returns the new rule's id, or 0 when the write did not reach disk.
   def self.add_colormarker_rule(match_filter : String, color : String, style : String,
                                 name : String = "", enabled : Bool = true) : Int64
+    # Before both the snapshot and the mint — see `add_rewriter_rule` for why the counter in
+    # particular cannot be read stale.
+    reload_colormarker_from_disk
     # The answer below is a COMMIT answer, so memory has to agree with it — the same snapshot
     # `add_rewriter_rule` takes, for the same reason: `save` refuses the write outright when the
     # last load only got half the file in (`@@load_partial`), and returns false on any transient
@@ -205,6 +222,8 @@ module Gori::Settings
   # projects and an edit made in one of them is not a statement about the others.
   def self.update_colormarker_rule(id : Int64, match_filter : String, color : String,
                                    style : String, name : String = "") : Bool
+    # A rule a peer deleted must not come back as an edit — see `update_rewriter_rule`.
+    reload_colormarker_from_disk
     prev_rules = colormarker_rules
     found = false
     self.colormarker_rules = colormarker_rules.map do |r|
@@ -221,6 +240,7 @@ module Gori::Settings
 
   # The rule's DEFAULT state, which every project without an override follows.
   def self.set_colormarker_rule_enabled(id : Int64, enabled : Bool) : Bool
+    reload_colormarker_from_disk # see `update_colormarker_rule`
     prev_rules = colormarker_rules
     found = false
     self.colormarker_rules = colormarker_rules.map do |r|
@@ -235,6 +255,7 @@ module Gori::Settings
   end
 
   def self.delete_colormarker_rule(id : Int64) : Bool
+    reload_colormarker_from_disk # see `update_colormarker_rule`
     prev_rules = colormarker_rules
     kept = colormarker_rules.reject { |r| r.id == id }
     return false if kept.size == colormarker_rules.size
@@ -251,6 +272,7 @@ module Gori::Settings
   # across the scope boundary: "past the last global rule" is not a position, it is a scope
   # change, which is its own action.
   def self.move_colormarker_rule(id : Int64, dir : Int32) : Bool
+    reload_colormarker_from_disk # a position is only meaningful against the order on disk
     list = colormarker_rules.dup
     i = list.index { |r| r.id == id }
     return false unless i
@@ -272,6 +294,12 @@ module Gori::Settings
   # picker shows, so a stable, human-typed key is what the wire format wants. Each mutation
   # persists via `save`; the boolean answer is "did the write reach disk", the contract every
   # mutator here shares.
+  #
+  # These re-read the section for a second reason on top of the one the rules have. `colors` and
+  # `rules` share the `colormarker` section, so before the merge went one level deeper, adding a
+  # COLOUR here wrote the whole section — and deleted every rule a peer had added since this
+  # process loaded. The duplicate-name refusal below is also only as honest as the list it checks
+  # against, which is the list on disk, not the one this process started with.
 
   # The reason `name`/`hex` were rejected, or nil when the colour was written. A non-nil string
   # is a message a surface can show verbatim (the CLI aborts with it, MCP returns it, the TUI
@@ -279,6 +307,7 @@ module Gori::Settings
   # same three the tolerant parser silently drops, said out loud here because the caller just
   # typed the value.
   def self.add_colormarker_color(name : String, hex : String) : String?
+    reload_colormarker_from_disk
     n = normalize_color_name(name)
     return "name can't be blank or a built-in colour (#{COLORMARKER_COLORS.join(", ")})" unless n
     return "a colour named “#{n}” already exists" if colormarker_colors.any? { |c| c.name == n }
@@ -293,6 +322,7 @@ module Gori::Settings
   # dangling — the resolver falls back rather than the rename cascading, the same way a delete
   # does. Returns nil on success or a message on refusal.
   def self.update_colormarker_color(old_name : String, name : String, hex : String) : String?
+    reload_colormarker_from_disk
     old = old_name.strip.downcase
     return "no colour named “#{old}”" unless colormarker_colors.any? { |c| c.name == old }
     n = normalize_color_name(name)
@@ -308,6 +338,7 @@ module Gori::Settings
   # it is left alone (the resolver falls back to a visible default), because this surface cannot
   # reach every project's DB to rewrite the rules that reference it.
   def self.delete_colormarker_color(name : String) : Bool
+    reload_colormarker_from_disk
     n = name.strip.downcase
     kept = colormarker_colors.reject { |c| c.name == n }
     return false if kept.size == colormarker_colors.size

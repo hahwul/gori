@@ -523,6 +523,18 @@ module Gori::Tui
 
     # --- verbs (delegated from the Runner's ExecContext; also called inline above) ---
     def intercept_toggle : Nil
+      # Only the capture-lock holder may flip catch. A view-only second instance on the same
+      # project holds no traffic of its own — the requests are blocked in the OTHER process's
+      # `Interceptor` — so toggling here flipped a local flag that gates nothing, painted the
+      # bar ON, and left the operator waiting at an empty queue for held traffic that was never
+      # coming. Worse in the other direction: the tick republishes the bridge only from the
+      # lock holder (see `Runner#run`), so this window's "intercept off" was a promise it could
+      # not keep — the real holder went on catching. Same tiebreak, and the same wording as the
+      # bind-error toast on entry, so "view-only" means one thing across the UI.
+      unless @host.session.capturing_lock_held?
+        @host.status("view-only — this window is not holding traffic; press c to take over capture")
+        return
+      end
       result = @host.session.interceptor.toggle
       @intercept.reload(@host.session.interceptor)
       @host.status(toggle_status(result))

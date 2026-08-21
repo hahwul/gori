@@ -168,16 +168,28 @@ end
 
 # The global library is process-wide state, so each example gets an empty one and hands the
 # operator's back on the way out.
+#
+# A FILE as well as memory, now that every global CRUD re-reads its own section from settings.json
+# before it mutates (so two gori processes cannot mint the same rule id): the suite-wide
+# settings.json under $GORI_HOME would otherwise carry one example's rules into the next one's
+# `add`. GORI_HOME rather than `path_override`, so the `path_override` `with_unwritable_settings` and `with_own_settings` set still takes
+# precedence over it.
 private def with_globals(&)
   before = Gori::Settings.colormarker_rules
   counter = Gori::Settings.colormarker_next_rule_id
+  prev_home = ENV["GORI_HOME"]?
+  dir = File.tempname("gori-colormarker-edit-globals")
+  Dir.mkdir_p(dir)
   begin
+    ENV["GORI_HOME"] = dir
     Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
     Gori::Settings.colormarker_next_rule_id = 1_i64
     yield
   ensure
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     Gori::Settings.colormarker_rules = before
     Gori::Settings.colormarker_next_rule_id = counter
+    FileUtils.rm_rf(dir)
   end
 end
 

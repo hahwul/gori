@@ -58,6 +58,17 @@ module Gori::Tui
       # a pasted payload or a paragraph of reproduction steps is one logical line — so the
       # `follow_x` sideways pan this used to carry showed one screenful and hid the rest.
       @notes.wrap = true
+      # The stored text the notes buffer was last SEEDED from — the common ancestor of this
+      # window's edit and whatever a peer has since written. `@detail.notes` cannot serve: the
+      # data_version tick re-reads the row while INS is open (the other detail fields have to
+      # stay live), so it moves to the peer's text and a three-way comparison against it would
+      # report "no divergence" for exactly the case that loses the peer's writeup. Kept in
+      # lock-step with every `@notes.set_text` of stored text — see `seed_notes`.
+      @notes_base = ""
+      # The peer text already announced, so the lost-update toast fires ONCE per divergence.
+      # The tick runs on this session's OWN captures too (data_version cannot say whose commit
+      # moved it), which during a live capture is ~1.3×/sec of the same warning.
+      @notes_peer_seen = nil.as(String?)
       @loaded = false
       # The `/` filter bar (mirrors History's QL bar but matches in memory).
       @query = ""
@@ -269,9 +280,32 @@ module Gori::Tui
       @selected_link = 0
       @detail_focus = :links
       @notes_mode = InputMode::Read
-      @notes.set_text(issue.notes)
-      @notes_read.sync_from(@notes)
+      seed_notes(issue.notes)
       true
+    end
+
+    # The one place the notes buffer takes stored text on. Every caller is a re-seed from a
+    # row that was just read (open, re-read, discard, post-save), so the lost-update baseline
+    # and the announce latch move with it — a seed that skipped either would leave the pane
+    # either refusing a save that has nothing to lose or accepting one that clobbers a peer.
+    private def seed_notes(text : String) : Nil
+      @notes.set_text(text)
+      @notes_read.sync_from(@notes)
+      @notes_base = notes_key(text)
+      @notes_peer_seen = nil
+    end
+
+    # A stored notes value in the form the BUFFER would hold it. `TextArea#set_text` splits on
+    # `\n` and rstrips a segment's trailing `\r` into the eol record, so `#text` hands back LF —
+    # while `issues.notes` may carry CRLF from an older TUI write (see `save_notes`). Comparing
+    # a raw column against `@notes.text` would then read every such issue as "a peer changed
+    # this" on the first tick and refuse a save that had nothing to lose. Mirrors `split_wire`'s
+    # rule rather than a blanket `\r` strip: only a segment terminator is a line ending, so a
+    # lone `\r` inside a payload pasted into the writeup is content and stays.
+    private def notes_key(text : String) : String
+      parts = text.split('\n')
+      last = parts.size - 1
+      parts.each_with_index.map { |p, i| i == last ? p : p.rstrip('\r') }.join('\n')
     end
 
     # Jump to a specific issue (create-and-link "open" path). Reloads, clears a
@@ -551,8 +585,16 @@ module Gori::Tui
     def enter_notes_insert! : Nil
       return unless issue = @detail
       @detail_focus = :notes
-      if @notes_mode == InputMode::Read
-        @notes.set_text(issue.notes)
+      if @notes_mode == InputMode::Read && !notes_dirty?
+        # Re-seeding HERE is what closes `open_detail`'s window: that one seeds from the LIST
+        # row, which the tick re-anchors but does not re-read per issue, so the baseline an
+        # edit is measured against has to be taken from the row this detail is holding now.
+        #
+        # Skipped over unsaved text. The NOR/INS chip exits INS without saving, so re-entry is
+        # the ordinary way back into an edit in progress — and a re-seed there would hand the
+        # operator the STORED notes with their own paragraph gone and nothing said. (`^W` is
+        # the discard, and it re-seeds unconditionally.)
+        seed_notes(issue.notes)
       end
       @notes_mode = InputMode::Insert
       @notes_read.sync_from(@notes)
@@ -708,7 +750,7 @@ module Gori::Tui
     # edits; the next edit re-seeds from the stored notes (enter_notes_insert!).
     def cancel_notes_edit : Nil
       return unless issue = @detail
-      @notes.set_text(issue.notes)
+      seed_notes(issue.notes)
       exit_notes_insert!
       @notes_read.sync_from(@notes)
     end
@@ -1006,7 +1048,28 @@ module Gori::Tui
 
     # A filled "chip": ` LABEL ` painted with `color` as the background. Returns the
     # x just past it so chips lay out left-to-right.
-    private def refresh_detail(store : Store) : Nil
+    # The buffer holds text no `seed_notes` put there. Deliberately mode-INDEPENDENT: the
+    # NOR/INS chip (and a click on it) leaves INS without saving, so unsaved text outlives the
+    # editor, and a "dirty" test that asked the mode instead would call that buffer clean and
+    # let the next re-seed erase it.
+    def notes_dirty? : Bool
+      @notes.text != @notes_base
+    end
+
+    # Re-read the open issue (and the list). Returns true ONCE for each distinct peer notes
+    # value that arrived over an unsaved buffer, so the controller can say so — the toast is
+    # latched here rather than there because the latch has to reset with the seed, and the seed
+    # is this pane's business.
+    #
+    # `announce` is what arms the latch, and it is off by default because the four LOCAL
+    # re-readers (a severity/status cycle, a saved notes write) ignore the verdict: latching for
+    # them would consume the one announcement the operator was owed and never print it.
+    #
+    # PUBLIC because the data_version tick is now a caller: without it, an open detail showed
+    # the severity/status/notes it was opened with for as long as it stayed open, while the
+    # LIST behind it (the only thing `on_external_change` refreshed) already showed the peer's.
+    def refresh_detail(store : Store, *, announce : Bool = false) : Bool
+      peer_notes = false
       if issue = @detail
         @detail = store.get_issue(issue.id)
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
@@ -1014,12 +1077,56 @@ module Gori::Tui
         # get_issue returns nil when the row was deleted by a peer session (supported
         # cross-session scenario) — guard the deref, mirroring ProbeView#refresh_detail.
         # When @detail is nil the render path already falls back to the list view.
-        if !notes_insert_mode? && (d = @detail)
-          @notes.set_text(d.notes)
-          @notes_read.sync_from(@notes)
+        if d = @detail
+          if notes_insert_mode? || notes_dirty?
+            # NOT a re-seed. In INS `set_text` would discard what is being typed AND reset the
+            # caret and undo stack mid-keystroke; dirty-in-READ is the chip-click case above,
+            # where the text is on screen and `y` is the only thing that can rescue it. Report
+            # instead — and only for a value the operator has not already been told about,
+            # because this tick fires on this session's OWN captures too.
+            key = notes_key(d.notes)
+            if key != @notes_base && key != @notes_peer_seen
+              @notes_peer_seen = key if announce
+              peer_notes = announce
+            end
+          else
+            seed_notes(d.notes)
+          end
         end
       end
       reload(store)
+      peer_notes
+    end
+
+    # True when saving would silently drop a peer's writeup: this window has unsaved text AND
+    # the stored notes have moved off the value the buffer was seeded from. Deliberately a
+    # PREDICATE rather than a branch inside `save_notes` — that method's `false` already means
+    # "the project was busy, your text is still here, esc to retry", and a conflict must not
+    # borrow it: retrying is exactly the wrong move, because the second esc would win.
+    #
+    # A read failure answers false. This is not the authorization kind of check — refusing to
+    # save on an unreadable row would strand the operator's text with no way out, and the write
+    # underneath is a plain UPDATE that will fail on its own if the store is really gone.
+    def notes_conflict?(store : Store) : Bool
+      !notes_conflict_key(store).nil?
+    end
+
+    # The PEER'S text (as a `notes_key`) when saving this buffer would overwrite it, else nil.
+    #
+    # The value, not just a flag, because the refusal it feeds is one the operator can decide to
+    # push through — and "push through" has to mean "through the version I was shown". Arming an
+    # overwrite against a value latches it against THAT value, so a peer who writes again between
+    # the refusal and the second `esc` gets a fresh refusal rather than being silently clobbered
+    # by an arm that was granted for text nobody has now seen.
+    def notes_conflict_key(store : Store) : String?
+      return nil unless issue = @detail
+      return nil unless notes_dirty? # nothing local to lose
+      stored = store.get_issue(issue.id)
+      return nil unless stored # deleted by a peer — a different case, and `update_issue` reports it
+      key = notes_key(stored.notes)
+      key == @notes_base ? nil : key
+    rescue DB::Error | SQLite3::Exception
+      nil
     end
 
     private def links_visible_rows : Int32

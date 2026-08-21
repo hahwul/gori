@@ -93,9 +93,42 @@ module Gori::Tui
       @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
     end
 
+    # The `data_version` tick, which since the live-reload work fires while this tab is on
+    # screen rather than only on entry. Re-anchored by ID, not left on the index, for the reason
+    # `IssuesView#apply_filter` gives for doing the same: a reload under live capture must not
+    # jump the highlight to a different row. Here it is sharper than a cosmetic jump — the next
+    # key the operator presses acts on `selected_rule`, so a peer's `delete_rule` landing one
+    # row above the cursor would silently re-aim a toggle or a delete at the rule that slid up
+    # into it.
+    #
+    # All three lists, because all three are reloaded here and all three drive an action:
+    # the rules list (`@sel`) and, on the sub-tabs, the extract rules and the binding rows
+    # (`@sub_sel` — which one it indexes depends on `@sub`, so the anchor is read and restored
+    # through the same switch the renderer uses).
+    #
+    # Falls back to CLAMPING when the anchored row is gone — the peer deleted the very rule the
+    # cursor was on — which is the one case where staying at the same index is the best answer
+    # available: it leaves the operator where they were in the list rather than at the top.
     def on_external_change : Nil
+      prev_rule_id = rule_list[@sel]?.try(&.id)
+      prev_sub_key = sub_selection_key
       rules_engine.reload
       bindings.reload
+      @sel = prev_rule_id.try { |id| rule_list.index { |r| r.id == id } } ||
+             @sel.clamp(0, {rule_list.size - 1, 0}.max)
+      @sub_sel = prev_sub_key.try { |k| sub_index_of(k) } ||
+                 @sub_sel.clamp(0, {sub_count - 1, 0}.max)
+    end
+
+    # The identity of whatever `@sub_sel` currently points at, or nil when it points at nothing.
+    # An extract rule is its row id; a binding row is its `rule_id` (the extract rule it resolves
+    # for), which is what makes a row that rule's row across a reload.
+    private def sub_selection_key : Int64?
+      @sub == :extract ? extract_list[@sub_sel]?.try(&.id) : binding_rows[@sub_sel]?.try(&.rule_id)
+    end
+
+    private def sub_index_of(key : Int64) : Int32?
+      @sub == :extract ? extract_list.index { |r| r.id == key } : binding_rows.index { |r| r.rule_id == key }
     end
 
     # Flush an edited preview sample to the project store on leave/quit. Compared against the

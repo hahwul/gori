@@ -150,20 +150,149 @@ describe "Gori::OpenLock resilience" do
     end
   end
 
-  it "gives up rather than raising while an exclusive guard is held, and works once it is not" do
+  it "refuses instead of announcing nothing while an exclusive guard is held, and works once it is not" do
     with_project do |_registry, project|
       Gori::Store.open(project.db_path).close # materialize the lock file
       guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
       begin
-        # Bounded retries, so a store open can never be parked behind a long VACUUM. Giving up
-        # is a logged degradation, never an exception.
-        Gori::OpenLock.try_shared(project.db_path).should be_nil
+        # The ONE case that does not degrade to "no lock". An exclusive holder is always a
+        # destructive operation (a compact's strip + VACUUM, a delete's rm_rf), so returning nil
+        # here — as this used to — meant the caller opened a database being rewritten or unlinked
+        # with nothing announcing it to the process doing that. Bounded, so it is a sentence and
+        # not a hang: CONTENTION_BUDGET of short sleeps, then raise.
+        expect_raises(Gori::Error, /compacting or deleting/) do
+          Gori::OpenLock.try_shared(project.db_path)
+        end
       ensure
         guard.close
       end
       shared = Gori::OpenLock.try_shared(project.db_path)
       shared.should_not be_nil
       shared.not_nil!.close
+    end
+  end
+
+  it "does not open a store unannounced while an exclusive guard is held" do
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close # materialize the lock file
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      # The refusal must not cost a descriptor per attempt: the raise path is the one place
+      # `try_shared` leaves its own lock-file handle behind if it forgets to close it, and
+      # nothing about the exception itself would show that.
+      baseline = Dir.children("/dev/fd").size
+      begin
+        # What the bug looked like from here: `Store.open` returned a live, writable Store
+        # while `Compact`/`delete` held the exclusive lock, so the compact's VACUUM (or the
+        # delete's rm_rf) ran under a writer it could not see. Reproduced as an INSERT that
+        # committed "successfully" into a directory that no longer existed.
+        # Two, not more: each refusal waits out the whole CONTENTION_BUDGET, and the spec
+        # exercises the shipped budget rather than a parameterized short one.
+        2.times do
+          ex = expect_raises(Gori::Error) { Gori::Store.open(project.db_path) }
+          # Names the path as the CALLER spelled it, which is what `Project#open_failure_reason`
+          # keys on to pass a message through to the picker verbatim.
+          ex.message.to_s.should contain(project.db_path)
+        end
+        (Dir.children("/dev/fd").size - baseline).should be < 2
+      ensure
+        guard.close
+      end
+      # Released ⇒ the open succeeds and announces itself, so this is a retryable refusal and
+      # not a project that can no longer be opened.
+      store = Gori::Store.open(project.db_path)
+      begin
+        Gori::OpenLock.in_use?(project.db_path).should be_true
+        store.count.should eq(0)
+      ensure
+        store.close
+      end
+    end
+  end
+end
+
+# `OpenLock.guarded?` — the fast probe in front of `try_shared`, for the one caller that can offer
+# a retry more cheaply than it can afford to wait.
+#
+# `try_shared` spends CONTENTION_BUDGET (~2s) before refusing, which is right for a one-shot CLI
+# or an MCP tool: nobody is there to try again, so waiting beats failing. The TUI picker is the
+# opposite. It is still the last frame on the terminal with nothing rendering a spinner over it,
+# so those two seconds are an Enter that did nothing — measured at 2.06s on the CLI path, and
+# ending in a message telling an operator to "try again in a moment" with their finger already on
+# the key that would.
+describe "Gori::OpenLock.guarded?" do
+  it "is true only while a destructive operation actually holds the lock" do
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close # materialize the lock file
+      Gori::OpenLock.guarded?(project.db_path).should be_false
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        Gori::OpenLock.guarded?(project.db_path).should be_true
+      ensure
+        guard.close
+      end
+      Gori::OpenLock.guarded?(project.db_path).should be_false
+    end
+  end
+
+  it "answers immediately rather than spending the budget to say so" do
+    # The whole point: this is what replaces the dead press.
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        t0 = Time.instant
+        Gori::OpenLock.guarded?(project.db_path).should be_true
+        (Time.instant - t0).should be < 200.milliseconds
+      ensure
+        guard.close
+      end
+    end
+  end
+
+  it "is FALSE for a database merely OPEN elsewhere, which must still open here" do
+    # Shared locks stack. Reading a live capture's project is the normal case and has nothing to
+    # do with a compact — answering true here would refuse every second window.
+    with_project do |_registry, project|
+      store = Gori::Store.open(project.db_path)
+      begin
+        # `in_use?` and `guarded?` ask DIFFERENT questions, and this is the case that separates
+        # them: someone has it open (so a delete must refuse), but nothing destructive is
+        # running (so an open must proceed without waiting).
+        Gori::OpenLock.in_use?(project.db_path).should be_true
+        Gori::OpenLock.guarded?(project.db_path).should be_false
+      ensure
+        store.close
+      end
+    end
+  end
+
+  it "is FALSE on every uncertainty, so it can only ever skip a wait — never a working open" do
+    # A wrong `true` would refuse an open `try_shared` would have completed, which is strictly
+    # worse than the wait it saves. No lock file yet, an in-memory database, a path whose
+    # directory does not exist: all "not guarded", and the caller goes on to do the careful thing.
+    with_project do |_registry, project|
+      Gori::OpenLock.guarded?(project.db_path).should be_false # nothing has ever opened it
+    end
+    Gori::OpenLock.guarded?(":memory:").should be_false
+    Gori::OpenLock.guarded?("/nonexistent-dir-#{Random::Secure.hex(4)}/gori.db").should be_false
+  end
+
+  it "shares its sentence with the raise, so the two cannot describe the state differently" do
+    # The picker refuses without ever calling `try_shared`, so the wording has one source or it
+    # drifts. It must also carry the path AS SPELLED, which is what `Project#open_failure_reason`
+    # keys on to pass a reason through verbatim.
+    msg = Gori::OpenLock.guarded_message("/tmp/whatever/gori.db")
+    msg.should contain("/tmp/whatever/gori.db")
+    msg.should contain("compacting or deleting")
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        ex = expect_raises(Gori::Error) { Gori::Store.open(project.db_path) }
+        ex.message.to_s.should eq(Gori::OpenLock.guarded_message(project.db_path))
+      ensure
+        guard.close
+      end
     end
   end
 end

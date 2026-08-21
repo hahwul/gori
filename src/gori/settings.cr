@@ -100,6 +100,12 @@ module Gori
     def self.load : Nil
       @@loaded_raw = nil
       @@load_partial = false
+      # A full load rewrites every section's class properties, including the two
+      # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
+      # these bytes" from outliving the memory it was an assertion about — a load that ends in
+      # `@@load_partial` leaves sections at their factory DEFAULTS, and a stale cache entry
+      # would then let the next tick skip the fold that repairs one.
+      forget_reloaded_sections
       @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
       raw = load_raw
       return unless raw # no file yet / unreadable — first run, keep defaults
@@ -277,6 +283,112 @@ module Gori
       nil
     end
 
+    # Re-read ONE top-level section from the file on disk into the class properties, and re-base
+    # the merge on it — leaving every other section, including one this process has edited and
+    # not yet saved, exactly as it is. A full `Settings.load` would clobber those, which is why
+    # this exists rather than a reload of everything.
+    #
+    # This is what makes a GLOBAL rewriter/colormarker mutation safe against a peer process, and
+    # it is not interchangeable with the merge in `merge_rule_section`. The merge reconciles the
+    # two rule LISTS after the fact; only a fresh read can stop the id COLLISION, because those
+    # two sections keep `next_rule_id` and the rules it numbers in one section — a process
+    # minting from a counter it read minutes ago hands out an id a peer has already used, and a
+    # project's `rewriter_overrides` / `colormarker_overrides` are keyed by exactly that id, in a
+    # database this process may never open again. An id is not recoverable after the fact.
+    #
+    # Tolerant in the same direction as `load`: a missing, unreadable or unparseable file, or a
+    # section that is not a JSON object, leaves memory exactly as it was and the mutation runs
+    # against what this process already believed — the behaviour that shipped, never worse.
+    #
+    # NOT free when it actually folds: three JSON parses and a full re-serialization of the
+    # settings, all of it on the calling fiber. Measured on the TUI's `data_version` tick, which
+    # is where the two live callers sit — 1.9 ms at 10 global rules per section, 13 ms at 100,
+    # 63 ms at 500. The tick runs ~1.3×/sec for as long as capture is committing flows, and 63 ms
+    # of it is a visible stutter in a UI that is also drawing frames and taking keys.
+    #
+    # Which is why the file's own bytes gate the work. The overwhelmingly common tick is one
+    # where nobody touched settings.json at all, and for that one there is nothing to fold: the
+    # class properties already hold what the file says. So a repeat of the same bytes costs the
+    # read and stops — and a read is what stays, deliberately, rather than an mtime or size
+    # check. Both of those miss a same-second rewrite of the same length, which is exactly the
+    # shape of a peer toggling a rule's `enabled` flag, and being fast is worth nothing if the
+    # answer is stale.
+    #
+    # Keyed by PATH as well as content: `$GORI_HOME` moves between spec examples (and between a
+    # `--db` open and the picker), and two different homes whose settings.json happen to agree
+    # byte for byte must not let one seed the other's cache.
+    #
+    # The cache is only written after a fold that reached the end, so a parse that bailed out
+    # halfway is retried on the next tick rather than remembered as done.
+    #
+    # And the CALLER still owns its compiled view (`Rules#refresh`, `Colormarker#refresh`) —
+    # including on the paths where the CRUD answers false, since a reload can have changed the
+    # list even when the write did not commit, and including when this returns early: "the file
+    # did not move" is not "your snapshot is current", because a project-scope rule lives in the
+    # store and never touches this file.
+    @@reloaded_from : Hash(String, {String, String}) = {} of String => {String, String}
+
+    protected def self.reload_section(key : String, & : JSON::Any -> Nil) : Nil
+      raw = load_raw
+      return unless raw
+      here = {path, raw}
+      return if @@reloaded_from[key]? == here
+      root = JSON.parse(raw).as_h?
+      return unless root
+      node = root[key]?
+      return unless node && node.as_h?
+      yield node
+      rebase_section(key)
+      @@reloaded_from[key] = here
+    rescue
+      nil
+    end
+
+    # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.
+    #
+    # For a caller that changed the class properties BEHIND the file — `load` re-reading
+    # everything, and a spec that assigns `rewriter_rules=` directly. Without it the cache would
+    # claim those bytes were already folded and skip a fold memory genuinely needs.
+    #
+    # Public rather than protected because the callers that need it most are outside this module:
+    # a spec fixture that hands the globals back on the way out is mutating exactly the state the
+    # cache is an assertion about, and it has no other way to say so.
+    def self.forget_reloaded_sections : Nil
+      @@reloaded_from.clear
+    end
+
+    # Re-base the merge on ONE section as it now stands in memory. Called by `reload_section`,
+    # because the base's whole job is to answer "did THIS process change this section" and after
+    # re-reading a section from disk the honest answer for it is no.
+    #
+    # Which matters for fidelity, not just tidiness: without it, the mutation that follows looks
+    # like a wholesale rewrite of a list that mostly came from the peer, so every entry in it
+    # wins the merge — and our re-serialization is LOSSY for anything the parse does not know
+    # (a field a newer gori writes, a key a hand edit added). With the re-base those untouched
+    # entries compare equal and disk's bytes are the ones kept.
+    #
+    # Our own SERIALIZATION of the section, never the raw bytes off disk — the invariant
+    # `@@loaded_raw` documents at the top of this file, for the reason it gives there.
+    private def self.rebase_section(key : String) : Nil
+      base = @@loaded_raw
+      return unless base
+      base_h = JSON.parse(base).as_h?
+      return unless base_h
+      fresh = JSON.parse(serialize).as_h?
+      return unless fresh
+      if v = fresh[key]?
+        base_h[key] = v
+      else
+        base_h.delete(key)
+      end
+      # Same builder settings as `serialize`, and assigning an existing key keeps its position,
+      # so the base stays byte-comparable with a file this process wrote (`merge_with_disk`
+      # short-circuits on `disk == base`).
+      @@loaded_raw = JSON.build(indent: "  ") do |j|
+        j.object { base_h.each { |bk, bv| j.field bk, bv } }
+      end
+    end
+
     # A settings file EXISTS but this process could not use it, so sections are sitting at their
     # factory defaults — meaning an export writes those defaults out under the operator's name.
     # Only meaningful after a `load`.
@@ -443,6 +555,8 @@ module Gori
     # file on disk now) over the top-level sections, so persisting one field doesn't
     # discard a concurrent writer's edit to an unrelated one: a section this process
     # left unchanged (mine == base) yields to disk; a section it changed wins.
+    #
+    # Two sections are merged one level DEEPER than that — see RULE_SECTION_LISTS.
     private def self.merge_with_disk(current : String) : String
       base = @@loaded_raw
       return current unless base && File.exists?(path)
@@ -461,30 +575,223 @@ module Gori
         j.object do
           keys.each do |k|
             cur_v = cur_h[k]?
-            # I changed this section (mine != base) → mine wins; else take disk's, INCLUDING
-            # when disk no longer has the key at all.
-            #
-            # That last clause is the whole point. A `disk_h[k]? || cur_v` fallback sat here,
-            # and it silently undid a concurrent instance's DELETION: sections vanish from
-            # `serialize` the moment they are emptied (`env`, `upstream_rules`, `outbound_tls`,
-            # `listeners`, `scan_rules`, `oast_providers`, `hostname_overrides`, `tabs`,
-            # `hotkeys`, `decoder`, `fuzzer`, `retention` at default, `mine`/`discover` unsaved
-            # — nearly every optional one), so "the operator cleared their env vars in the other
-            # gori window" reached this line as an absent key, and `|| cur_v` wrote our stale
-            # copy — token VALUES and all — straight back. Their EDITS merged correctly the
-            # whole time; only their deletions came back, which is the harder failure to notice.
-            #
-            # Dropping the fallback is the entire fix, because the remaining case it covered is
-            # already handled: if disk lacks the key AND we did not change the section, then
-            # `cur_v == base_h[k]?`, so either base had it (they deleted it → drop, correct) or
-            # nobody ever had it (`cur_v` is nil → dropped anyway, same result).
-            chosen = cur_v != base_h[k]? ? cur_v : disk_h[k]?
+            chosen = if lists = RULE_SECTION_LISTS[k]?
+                       merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists)
+                     else
+                       pick_changed(cur_v, base_h[k]?, disk_h[k]?)
+                     end
             j.field k, chosen if chosen
           end
         end
       end
     rescue
       current # any merge hiccup falls back to the plain write (never worse than before)
+    end
+
+    # The section-level rule, and the default for every key that is not a rule list: I changed
+    # this section (mine != base) → mine wins; else take disk's, INCLUDING when disk no longer
+    # has the key at all.
+    #
+    # That last clause is the whole point. A `disk || mine` fallback sat here, and it silently
+    # undid a concurrent instance's DELETION: sections vanish from `serialize` the moment they
+    # are emptied (`env`, `upstream_rules`, `outbound_tls`, `listeners`, `scan_rules`,
+    # `oast_providers`, `hostname_overrides`, `tabs`, `hotkeys`, `decoder`, `fuzzer`, `retention`
+    # at default, `mine`/`discover` unsaved — nearly every optional one), so "the operator
+    # cleared their env vars in the other gori window" reached this line as an absent key, and
+    # `|| mine` wrote our stale copy — token VALUES and all — straight back. Their EDITS merged
+    # correctly the whole time; only their deletions came back, which is the harder failure to
+    # notice.
+    #
+    # Dropping the fallback is the entire fix, because the remaining case it covered is already
+    # handled: if disk lacks the key AND we did not change the section, then `mine == base`, so
+    # either base had it (they deleted it → drop, correct) or nobody ever had it (`mine` is nil →
+    # dropped anyway, same result).
+    private def self.pick_changed(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?) : JSON::Any?
+      mine != base ? mine : disk
+    end
+
+    # One mergeable list inside a rule section: the key that holds it, how an entry's IDENTITY is
+    # spelled in it, and whether the serializer OMITS the key when the list is empty (which is
+    # what an ABSENT key has to mean — see `index_entries`).
+    alias RuleList = NamedTuple(key: String, identity: Symbol, optional: Bool)
+
+    # The two sections that CANNOT be merged as a unit, and the lists inside them reconciled
+    # entry by entry instead.
+    #
+    # Every other section is one operator decision, so `pick_changed` loses nothing: whoever
+    # wrote it last meant it. `rewriter` and `colormarker` are not one decision — each holds a
+    # whole rule LIST plus the `next_rule_id` counter that numbers it in ONE section, so two
+    # processes each adding a rule have both "changed the section" and the section-level rule
+    # threw one of the two rules away. Both had also minted from the same counter, so the
+    # survivors could share an id — and a project's `rewriter_overrides` /
+    # `colormarker_overrides` are keyed by exactly that id (`reload_section` is the half of the
+    # fix that stops the collision; this half stops the loss). A project's DB-scoped rules need
+    # none of this: SQLite gives them a real transaction and its own id sequence.
+    RULE_SECTION_LISTS = {
+      "rewriter" => [
+        {key: "rules", identity: :id, optional: false},
+      ],
+      "colormarker" => [
+        {key: "rules", identity: :id, optional: false},
+        {key: "colors", identity: :color_name, optional: true},
+      ],
+    }
+
+    # The id counter both of those sections carry, merged by MAX rather than by who changed it.
+    RULE_SECTION_COUNTER = "next_rule_id"
+
+    # Retired keys INSIDE a rule section, subtracted for exactly the reason LEGACY_SECTION_KEYS
+    # is subtracted at the top level: nothing serializes one, so the key-by-key rule below would
+    # read it as "I did not change this" and copy disk's block forward for good. `parse_rewriter`
+    # has already folded `presets` into `rules` in memory, so a save that touches the section is
+    # the one place the old block can actually be cleared — which is what it did while the whole
+    # section was decided as a unit, and what it has to keep doing now that it is not.
+    #
+    # One flat list rather than one per section: `presets` was only ever a `rewriter` key, and a
+    # name retired from one of these two is not a name the other may start using. Pinned by
+    # spec/settings_spec.cr's "adopts legacy rewriter presets as DISABLED global rules", which
+    # asserts the saved file no longer mentions them.
+    LEGACY_RULE_SECTION_KEYS = ["presets"]
+
+    # Merge one rule section key by key: its lists entry by entry, its counter by high-water
+    # mark, anything else by the section-level rule.
+    private def self.merge_rule_section(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
+                                        lists : Array(RuleList)) : JSON::Any?
+      mine_h = mine.try(&.as_h?)
+      disk_h = disk.try(&.as_h?)
+      # One side has no object here at all, so there is no second list to lose — and if disk's
+      # is not an object, nothing about it can be trusted to be reconciled with.
+      return pick_changed(mine, base, disk) unless mine_h && disk_h
+      base_h = base.try(&.as_h?) || {} of String => JSON::Any
+      merged = {} of String => JSON::Any
+      keys = (mine_h.keys + disk_h.keys).uniq! - LEGACY_RULE_SECTION_KEYS
+      keys.each do |k|
+        v = if list = lists.find { |l| l[:key] == k }
+              merge_entry_list(mine_h[k]?, base_h[k]?, disk_h[k]?, list)
+            elsif k == RULE_SECTION_COUNTER
+              merge_counter(mine_h[k]?, disk_h[k]?)
+            else
+              pick_changed(mine_h[k]?, base_h[k]?, disk_h[k]?)
+            end
+        merged[k] = v if v
+      end
+      JSON::Any.new(merged)
+    end
+
+    # The id counter is MONOTONIC and its ids are never reused, so it is the one field here where
+    # neither side "wins": the answer is the larger. A peer that minted ids while we held an older
+    # snapshot has advanced it, and taking our lower number forward would hand a live rule's id
+    # to the next rule created — the very thing `rewriter_next_rule_id` exists to prevent. The
+    # base plays no part: there is no edit to detect here, only a high-water mark.
+    private def self.merge_counter(mine : JSON::Any?, disk : JSON::Any?) : JSON::Any?
+      m = mine.try(&.as_i64?)
+      d = disk.try(&.as_i64?)
+      return mine || disk unless m && d
+      JSON::Any.new({m, d}.max)
+    end
+
+    # Reconcile one list of identified entries. Every entry goes through `pick_changed`, the SAME
+    # rule the top level applies to a whole section — nothing is being decided differently here,
+    # it is being decided at the granularity of a rule instead of a library. Read against an
+    # identity, that one expression is all four cases:
+    #
+    #   * in mine, not in base     → WE added it; ours.
+    #   * in base, not in mine     → WE deleted it; it goes, even though disk still has it.
+    #   * in neither mine nor base → the PEER added it; theirs, so an add of ours cannot eat it.
+    #   * in mine and in base      → ours if we edited it (mine != base), else follow disk —
+    #                                including disk having dropped it, which is the peer's delete.
+    #
+    # One consequence worth naming, because it reads as a surprise until it doesn't: a
+    # `reset_to_factory` racing a peer's add clears every rule it KNEW about (they are all in the
+    # base) and leaves that one. It is the third case, and the alternative is deleting a rule
+    # this process has never seen on the strength of a snapshot taken before it existed.
+    #
+    # ORDER is meaning in both of these lists (rewriter apply order, colormarker first-match-wins
+    # precedence), so it is merged too: if we REORDERED, ours leads and the peer's adds follow;
+    # otherwise disk's order stands and our adds append to it, which is where `add` puts them.
+    private def self.merge_entry_list(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
+                                      list : RuleList) : JSON::Any?
+      mine_ix = index_entries(mine, list)
+      disk_ix = index_entries(disk, list)
+      return pick_changed(mine, base, disk) unless mine_ix && disk_ix
+      # An absent list in the BASE always reads as empty, whatever the serializer does with an
+      # empty one: the base is our own writing, so "no key" there means we had nothing to record,
+      # never that the shape is unknown. Everything in both lists is then an add, which is exactly
+      # right for a peer that created the section while we held a snapshot without it.
+      base_ix = base.nil? ? ({} of String => JSON::Any) : index_entries(base, list)
+      return pick_changed(mine, base, disk) unless base_ix
+      kept = {} of String => JSON::Any
+      (mine_ix.keys + disk_ix.keys).uniq!.each do |id|
+        chosen = pick_changed(mine_ix[id]?, base_ix[id]?, disk_ix[id]?)
+        kept[id] = chosen if chosen
+      end
+      mine_ids, base_ids, disk_ids = mine_ix.keys, base_ix.keys, disk_ix.keys
+      # Compared over the ids the two lists SHARE, so our own add (always appended) is not read
+      # as a reorder — it would make every add claim the peer's order as well as its own entry.
+      order = if (mine_ids & base_ids) != (base_ids & mine_ids)
+                mine_ids + (disk_ids - mine_ids)
+              else
+                disk_ids + (mine_ids - disk_ids)
+              end
+      merged = order.compact_map { |id| kept[id]? }
+      # An emptied list goes the way the serializer would have written it, so a merge cannot
+      # introduce a shape a plain save never produces: `colormarker.colors` is omitted when there
+      # is nothing in it ("an install with rules but no customs should not start writing an empty
+      # colors array it never had"), while `rules` is always written.
+      return nil if merged.empty? && list[:optional]
+      JSON::Any.new(merged)
+    end
+
+    # `list` as identity → entry, in list order, or nil when it cannot be merged entry by entry
+    # and the section-level rule has to stand in.
+    #
+    # An entry gori itself did not write is what forces that fallback. `claim_id` RENUMBERS an
+    # entry whose id is missing, non-positive, at the Int64 ceiling or already taken, so for such
+    # a list our in-memory id is not the one on disk — and then "in base, absent from disk" would
+    # read as the peer's delete when it is really the same rule under another number, and the
+    # entry would be dropped from the operator's own file. Falling back is exactly the behaviour
+    # that shipped before this merge existed, so it can only be as good as before, never worse.
+    private def self.index_entries(entries : JSON::Any?, list : RuleList) : Hash(String, JSON::Any)?
+      # An ABSENT key is an empty list where the serializer omits an empty one:
+      # `colormarker.colors` is written only when there is a colour to write, so "no key" is how
+      # "no colours" is spelled, and reading it as unmergeable would drop a peer's new colour
+      # along with the last one of ours. `rules` is written whenever its section is, so ITS
+      # absence means something else wrote this section — the pre-upgrade `rewriter.presets`
+      # block, or a hand edit — and the in-memory list came from a migration `pick_changed` has
+      # to carry through whole.
+      return ({} of String => JSON::Any) if entries.nil? && list[:optional]
+      arr = entries.try(&.as_a?)
+      return nil unless arr
+      by_id = {} of String => JSON::Any
+      arr.each do |e|
+        id = entry_identity(e, list[:identity])
+        return nil unless id
+        return nil if by_id.has_key?(id) # a duplicate is ambiguous by id, exactly as `claim_id` says
+        by_id[id] = e
+      end
+      by_id
+    end
+
+    # How this entry is identified across the three documents, or nil when it is not in the form
+    # the parse would keep VERBATIM — which is the same question `index_entries` needs answered,
+    # so both normalisations below are the parser's own (`usable_id?`, `normalize_color_name`,
+    # `normalize_hex`) rather than a second spelling of them here.
+    private def self.entry_identity(entry : JSON::Any, identity : Symbol) : String?
+      o = entry.as_h?
+      return nil unless o
+      case identity
+      when :id
+        id = o["id"]?.try(&.as_i64?)
+        id && usable_id?(id) ? id.to_s : nil
+      when :color_name
+        # A custom colour's NAME is its identity (there is no numeric id), and both of its fields
+        # are normalised on the way in, so an entry spelled any other way is one the parse would
+        # rewrite or drop.
+        name = o["name"]?.try(&.as_s?)
+        hex = o["hex"]?.try(&.as_s?)
+        return nil unless name && hex
+        normalize_color_name(name) == name && normalize_hex(hex) == hex ? name : nil
+      end
     end
 
     # --- profiles: export / import a settings subset (`gori settings export|import`) -------

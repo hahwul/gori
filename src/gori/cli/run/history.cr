@@ -129,11 +129,17 @@ module Gori
           abort "gori run history delete: #{err}"
         end
         filter = QL.parse(q, scope: lens)
+        # A `body:`/free-text delete drains the trigram index first, because an under-reporting
+        # query here means SILENTLY SPARING flows the operator asked to delete — and refuses the
+        # whole delete when the drain did not finish. Under-deleting while printing a count is
+        # the one direction this command cannot degrade in.
+        if err = fts_backlog_error(store, filter,
+             "#{q.inspect} cannot see all of them and this delete would silently spare some. " \
+             "NOTHING was deleted;")
+          store.close
+          abort "gori run history delete: #{err}"
+        end
         ids = begin
-          # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run right
-          # after a capture would under-report until the backlog drains — and here that means
-          # SILENTLY SPARING flows the operator asked to delete. Wait for it.
-          store.index_pending! if filter.uses_fts?
           matching_flow_ids(store, filter)
         rescue ex
           store.close
@@ -190,6 +196,33 @@ module Gori
       private def self.delete_confirmation_error(q : String, count : Int32, yes : Bool) : String?
         return nil if yes
         "refusing to delete #{count} flow#{count == 1 ? "" : "s"} matching #{q.inspect} without --yes"
+      end
+
+      # Drain the off-commit trigram index for a `body:`/free-text query, and return the refusal
+      # the operator is owed when the drain did not finish — nil when the query is safe to run
+      # (including every query that never touches the index at all).
+      #
+      # Trigram indexing runs off the capture commit (Store V4), so draining is what makes a
+      # one-shot answer exact instead of "whatever happened to be indexed". `drain_fts!`, not
+      # a bare `index_pending!`: that one reports a batch that lost SQLite's single writer slot
+      # to a capturing peer as "0 indexed" and returns NORMALLY with rows still dirty, so every
+      # caller read it as success and printed a short answer with no marker on it. `drain_fts!`
+      # answers what is still dirty and RETRIES a contended attempt first, which is what keeps
+      # this from refusing a query for a collision that was over a millisecond later.
+      #
+      # `consequence` is the caller's own sentence for what a partial index would do to ITS
+      # answer — a listing omits rows, a delete spares flows, a tree loses endpoints, and those
+      # are three different things to be warned about. The head is shared so the cause is worded
+      # once. Lives in this file, with the other `*_error` guards, because two of its three call
+      # sites are here; `cmd_sitemap_tree` is the third (same `Run` module).
+      private def self.fts_backlog_error(store : Store, filter : QL::Filter,
+                                         consequence : String) : String?
+        return nil unless filter.uses_fts?
+        pending = store.drain_fts!
+        return nil if pending.zero?
+        "#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed for free-text search " \
+        "(this project's writer is busy — another gori is capturing it), so #{consequence} " \
+        "Retry in a moment."
       end
 
       # Flows per delete transaction. Big enough that a routine cleanup is one or two fsyncs,
@@ -406,7 +439,15 @@ module Gori
               # right after a capture — or against a db a killed process left behind — would
               # under-report until the backlog drains. A one-shot answer must be exact, so
               # wait for it here rather than silently returning fewer rows.
-              store.index_pending! if combined.uses_fts?
+              #
+              # And a drain that did not FINISH is a refusal, not a short listing: see
+              # `fts_backlog_error`. Refused rather than warned, because this listing IS the
+              # answer — a caveat on STDERR is gone the moment the rows are piped to a file.
+              if err = fts_backlog_error(store, combined,
+                   "#{q.inspect} would silently omit them. Nothing was listed;")
+                store.close
+                abort "gori run history: #{err}"
+              end
               begin
                 store.search(combined, limit, raise_on_error: true)
               rescue ex

@@ -505,6 +505,11 @@ module Gori::CLI::Run
   def self.matching_flow_ids_for_spec(store : Store, filter : QL::Filter) : Array(Int64)
     matching_flow_ids(store, filter)
   end
+
+  def self.fts_backlog_error_for_spec(store : Store, filter : QL::Filter,
+                                      consequence : String) : String?
+    fts_backlog_error(store, filter, consequence)
+  end
 end
 
 private def history_store(&)
@@ -735,6 +740,133 @@ describe "gori run history delete -q --yes" do
       store.insert_flow(captured("acme.test", "/b"))
       store.flush
       Gori::CLI::Run.matching_flow_ids_for_spec(store, Gori::QL.parse("host:nope.test")).should be_empty
+    end
+  end
+end
+
+# The guard behind three aborts: `history` (listing), `history delete -q`, and — same `Run`
+# module — `sitemap`. Spec'd at the helper, the way every other refusal in this file is
+# (`delete_query_error`, `delete_confirmation_error`): the abort itself is `exit`, which a
+# spec process cannot survive, and the helper holds the whole decision.
+#
+# `index_pending!` reports a batch that lost SQLite's single writer slot to a capturing peer as
+# "0 indexed" and takes its `break if n == 0` there (Store#index_pending!), so it returns
+# NORMALLY with rows still dirty. Every caller read that as success: the listing printed a short
+# match set with no marker on it, and the DELETE spared flows the operator had asked to remove
+# while printing a count for the ones it did take.
+private def contended_history_store(&)
+  path = File.tempname("gori-history-fts", ".db")
+  url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1" # the real 5 s wait is what this skips
+  db = DB.open(url)
+  Gori::Store::Schema.migrate!(db)
+  store = Gori::Store.new(db, nil)
+  # Without this the idle indexer drains the backlog within one FAST tick (5 ms), before the peer
+  # lock can be taken — the order these examples need is unreachable with it running. A real
+  # product state (#752: a view-only Session that lost the capture lock pauses it); explicit
+  # `index_pending!` is an op on the write channel and still runs, which is what is under test.
+  store.pause_background_index
+  peer = DB.open(url)
+  begin
+    yield store, peer
+  ensure
+    done = Channel(Nil).new(1)
+    spawn do
+      store.close
+      done.send(nil)
+    end
+    select
+    when done.receive
+      # closed cleanly
+    when timeout(20.seconds)
+      # a wedged writer must fail the example, never hang the run
+    end
+    peer.close rescue nil
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+# Holds the WAL write lock the way a peer gori's writer would.
+private def while_history_peer_writes(peer : DB::Database, &)
+  lock = peer.checkout
+  lock.exec("BEGIN IMMEDIATE")
+  begin
+    yield
+  ensure
+    lock.exec("ROLLBACK") rescue nil
+    lock.release rescue nil
+  end
+end
+
+# A flow whose RESPONSE body carries `needle` (≥3 chars → the trigram path in QL's `body_cond`,
+# not the `instr` fallback), left DIRTY: nothing flushes and the idle indexer is paused.
+private def seed_dirty_body_flow(store, needle : String) : Int64
+  id = store.insert_flow(captured("acme.test", "/login"))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
+    body: "<p>#{needle}</p>".to_slice, reason: "OK", content_type: "text/html", duration_us: 1_i64))
+  id
+end
+
+describe "gori run history / sitemap — the FTS drain that did not finish" do
+  it "refuses a body: query when the drain lost the writer slot, naming the count and the consequence" do
+    contended_history_store do |store, peer|
+      seed_dirty_body_flow(store, "needleone")
+      store.fts_backlog.should be > 0 # the drain has real work to fail at
+
+      err = nil.as(String?)
+      while_history_peer_writes(peer) do
+        err = Gori::CLI::Run.fts_backlog_error_for_spec(store, Gori::QL.parse("body:needleone"),
+          "\"body:needleone\" would silently omit them. Nothing was listed;")
+      end
+
+      msg = err.not_nil!
+      msg.should contain("1 flow could not be indexed")
+      msg.should contain("writer is busy")
+      msg.should contain("Nothing was listed")
+      msg.should contain("Retry in a moment")
+      # The rows are still there and still dirty: this refused, it did not lose anything.
+      store.fts_backlog.should be > 0
+    end
+  end
+
+  # The delete's own consequence clause, because under-deleting is the failure this command
+  # cannot have: it printed "Deleted 3 flows" for a query whose match set it could not see.
+  it "carries the caller's own consequence — a delete spares flows, a listing omits rows" do
+    contended_history_store do |store, peer|
+      seed_dirty_body_flow(store, "needletwo")
+      err = nil.as(String?)
+      while_history_peer_writes(peer) do
+        err = Gori::CLI::Run.fts_backlog_error_for_spec(store, Gori::QL.parse("body:needletwo"),
+          "\"body:needletwo\" cannot see all of them and this delete would silently spare some. " \
+          "NOTHING was deleted;")
+      end
+      err.not_nil!.should contain("NOTHING was deleted")
+    end
+  end
+
+  # The complement, and the reason the guard is not unconditional: with nothing holding the
+  # writer the drain finishes, and the same filter is cleared to run.
+  it "clears a body: query once the drain actually completes" do
+    contended_history_store do |store, _peer|
+      seed_dirty_body_flow(store, "needlethree")
+      Gori::CLI::Run.fts_backlog_error_for_spec(store, Gori::QL.parse("body:needlethree"),
+        "anything;").should be_nil
+      store.fts_backlog.should eq(0) # it drained here — not a pre-indexed pass
+    end
+  end
+
+  # A filter that never reads `flows_fts` must not be refused by, or pay for, a backlog it does
+  # not depend on.
+  it "leaves a non-FTS filter alone while the backlog is stuck" do
+    contended_history_store do |store, peer|
+      seed_dirty_body_flow(store, "needlefour")
+      while_history_peer_writes(peer) do
+        Gori::CLI::Run.fts_backlog_error_for_spec(store, Gori::QL.parse("host:acme.test"),
+          "anything;").should be_nil
+      end
     end
   end
 end

@@ -169,6 +169,32 @@ module Gori
         committed
       end
 
+      # Adopt the PERSISTED mode without writing it back. `set_mode` above is the operator's
+      # own edit (this process decided, so it persists); this is the other direction — a peer
+      # (`gori run probe mode`, MCP `set_probe_mode`, a second TUI) already committed the row
+      # and this process has to catch up. Called from the TUI's data_version tick and the
+      # headless capture reload loop, both of which run on a cadence: persisting here would
+      # re-write the same value on every poll, and — worse — a stale in-memory mode would race
+      # the peer's write and put the OLD mode back.
+      #
+      # The direction that matters is the DOWNGRADE. `Store#set_probe_mode` names it: a peer
+      # setting `off`/`passive` to stop active probing was reported as done while a separate
+      # live instance kept the persisted `active`/`aggressive` mode in memory and went on
+      # firing attack payloads at production. This is what makes that stop take effect here.
+      #
+      # Otherwise identical to `set_mode` minus the store write: the arming rule collapses to a
+      # bare `probes_actively?` because the early return has already established the mode moved.
+      def apply_stored_mode : Nil
+        m = @store.probe_mode
+        return if m == @mode
+        @mode = m
+        arm_active_backfill if m.probes_actively?
+      rescue DB::Error | SQLite3::Exception
+        # Same tolerance as `load_custom`: an unreadable settings row leaves the live mode
+        # alone and the next tick tries again. Both callers poll on the UI / capture fiber
+        # with no per-call rescue of their own.
+      end
+
       def start : Nil
         return if @running
         @running = true
