@@ -396,6 +396,10 @@ module Gori
             # (or a bad regex/glob resurfacing as an exception) can't skip the other —
             # log and try both again next tick.
             begin
+              # Global Match&Replace is a settings.json section this process loaded once.
+              # `Rules#reload` folds whatever is in memory, so a peer's `gori run rewriter`
+              # / MCP `create_rule{scope:global}` is invisible until that section is re-read.
+              Settings.reload_rewriter_from_disk
               session.rules.reload
             rescue ex
               Log.error(exception: ex) { "rewriter rule reload failed" }
@@ -413,10 +417,49 @@ module Gori
             rescue ex
               Log.error(exception: ex) { "host override reload failed" }
             end
+            begin
+              # The extract rules, which decide what `$KEY` expands to at every send seam — the
+              # other half of `rules` above, edited by the same `gori run rewriter` / MCP
+              # `create_extract_rule` surfaces and read on the same proxy path.
+              session.bindings.reload
+            rescue ex
+              Log.error(exception: ex) { "extract rule reload failed" }
+            end
+            begin
+              # The session-slot registry: `Env.overlay_slot` applies the active slot's headers
+              # at every seam and `Bindings` decides from this list which table `$SESSION`
+              # resolves out of. Without it a peer's `gori run session add/remove` left this
+              # capture sending as an identity that had been deleted.
+              session.slots.reload
+            rescue ex
+              Log.error(exception: ex) { "session slot reload failed" }
+            end
+            begin
+              # The per-project `$KEY` table. It lives in a process global that `Session.open`
+              # fills ONCE, so a peer's `gori run project env set` was invisible for the whole
+              # capture and every rewritten value expanded to whatever this process opened with.
+              # Cheap on an unchanged table — `load_project` publishes only on a real delta.
+              Env.load_project(session.store)
+            rescue ex
+              Log.error(exception: ex) { "project env reload failed" }
+            end
+            begin
+              # Probe MODE, which is not config but AUTHORIZATION. `Session.open` starts the
+              # analyzer whenever this process holds the capture lock, so a headless capture is
+              # an actively-probing instance like any other: a peer setting the project to
+              # `off`/`passive` to stop active probing was reported as done everywhere while
+              # this one kept the mode it opened with and went on firing payloads. Adopts the
+              # persisted value WITHOUT writing it back — see `Analyzer#apply_stored_mode`.
+              session.probe.apply_stored_mode
+            rescue ex
+              Log.error(exception: ex) { "probe mode reload failed" }
+            end
             # `session.colormarker` is DELIBERATELY absent from this loop, and adding it to
-            # "complete the set" would be a regression. The three above each have a headless
+            # "complete the set" would be a regression. Every reload above has a headless
             # consumer — rules rewrites bytes on the proxy path, scope gates the sandbox and
-            # Probe, host_overrides steers the dial — while colour rules are read only by
+            # Probe, host_overrides steers the dial, bindings/slots/env decide what a `$KEY`
+            # or `$SESSION` expands to at the send seams, and the probe mode authorizes the
+            # active scanner this process runs — while colour rules are read only by
             # History's renderer, and `gori run capture` draws no rows. Polling them here
             # would cost a settings read, a table read and N FilterAst parses every tick for a
             # value nothing in this process reads. The TUI reloads them in

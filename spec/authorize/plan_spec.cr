@@ -511,3 +511,120 @@ describe Gori::Authorize::Plan do
     end
   end
 end
+
+# A `--query body:…` selection drains the off-commit trigram index (Store V4) before selecting
+# rows, because an under-reporting query here means REPLAYING FEWER FLOWS than asked — and an
+# access-control sweep that quietly skipped flows reports the same "no bypasses found" as one
+# that actually looked at them.
+#
+# `index_pending!` reports a batch that lost SQLite's single writer slot to a capturing peer as
+# "0 indexed" and takes its `break if n == 0` there (Store#index_pending!), so it returns
+# normally with rows still dirty and the drain's return says nothing. The peer connection stands
+# in for that second gori: SQLite locks per CONNECTION, so one pool holding BEGIN IMMEDIATE is
+# the same contention a second process produces. `busy_timeout=1` skips the real 5 s wait.
+private def contended_authz_store(&)
+  path = File.tempname("gori-authz-fts", ".db")
+  url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+  db = DB.open(url)
+  Gori::Store::Schema.migrate!(db)
+  store = Gori::Store.new(db, nil)
+  # Without this the idle indexer drains the backlog within one FAST tick (5 ms), before the peer
+  # lock can be taken. Pausing it is a real product state (#752); the explicit `index_pending!`
+  # under test is an op on the write channel and still runs.
+  store.pause_background_index
+  peer = DB.open(url)
+  begin
+    yield store, peer
+  ensure
+    done = Channel(Nil).new(1)
+    spawn do
+      store.close
+      done.send(nil)
+    end
+    select
+    when done.receive
+      # closed cleanly
+    when timeout(20.seconds)
+      # a wedged writer must fail the example, never hang the run
+    end
+    peer.close rescue nil
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private def while_authz_peer_writes(peer : DB::Database, &)
+  lock = peer.checkout
+  lock.exec("BEGIN IMMEDIATE")
+  begin
+    yield
+  ensure
+    lock.exec("ROLLBACK") rescue nil
+    lock.release rescue nil
+  end
+end
+
+# `seed` above flushes (which drains the index); this one deliberately does not, and gives the
+# response a body carrying `needle` (≥3 chars → QL's trigram path, not the `instr` fallback).
+private def seed_dirty_authz_flow(store, needle : String) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: "/admin", http_version: "HTTP/1.1",
+    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\nCookie: session=ADMIN\r\n\r\n".to_slice))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
+    body: "<p>#{needle}</p>".to_slice, content_type: "text/html", duration_us: 1_000_i64))
+  id
+end
+
+describe "Authorize::Plan — a body: selection whose FTS drain did not finish" do
+  it "refuses the whole plan rather than replaying the flows it could see" do
+    contended_authz_store do |store, peer|
+      seed_dirty_authz_flow(store, "needleone")
+      store.fts_backlog.should be > 0 # the drain has real work to fail at
+
+      ex = nil.as(Exception?)
+      while_authz_peer_writes(peer) do
+        ex = expect_raises(Gori::Error) do
+          Plan.build(options(store, query: "body:needleone"), ungated_outbound)
+        end
+      end
+      # NOT a PlanError: every `PlanError::Reason` arm on both surfaces concatenates its own tail
+      # to the message, and `BadQuery`'s ("a query that compiles to no clause matches EVERY
+      # captured flow") would contradict this sentence for whoever reads it.
+      #
+      # It also has to be distinguishable from what HEAD raised HERE, which was
+      # `PlanError(NoFlows)` — "no captured flows matched the selection", about a flow that was
+      # sitting in the store the whole time. That is the lie, in the surface's own words.
+      ex.should_not be_a(PlanError)
+      msg = ex.not_nil!.message.not_nil!
+      msg.should contain("1 flow could not be indexed")
+      msg.should contain("clean sweep")
+      msg.should contain("Nothing was sent")
+    end
+  end
+
+  # The complement, and what stops the guard from being unconditional: with the writer free the
+  # drain finishes and the same query selects its flow.
+  it "plans the flow once the drain actually completes" do
+    contended_authz_store do |store, _peer|
+      id = seed_dirty_authz_flow(store, "needletwo")
+      plan = Plan.build(options(store, query: "body:needletwo"), ungated_outbound)
+      plan.targets.map(&.row.id).should eq([id])
+      store.fts_backlog.should eq(0) # it drained here — not a pre-indexed pass
+    end
+  end
+
+  # A query that never reads `flows_fts` must not be refused by a backlog it does not depend on.
+  it "leaves a non-FTS query alone while the backlog is stuck" do
+    contended_authz_store do |store, peer|
+      id = seed_dirty_authz_flow(store, "needlethree")
+      while_authz_peer_writes(peer) do
+        plan = Plan.build(options(store, query: "host:acme.test"), ungated_outbound)
+        plan.targets.map(&.row.id).should eq([id])
+      end
+    end
+  end
+end

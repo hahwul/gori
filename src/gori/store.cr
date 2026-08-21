@@ -306,6 +306,15 @@ module Gori
       # Announce that this process has the database open, for as long as it is (see OpenLock).
       # Taken BEFORE `DB.open` so the window in which a peer could delete the file out from
       # under a half-built store does not exist.
+      #
+      # It RAISES rather than returning nil in one case — a peer holding the EXCLUSIVE lock
+      # (a compact's strip+VACUUM, a delete's rm_rf) still holding it after ~2s — and that
+      # raise is deliberately NOT rescued here. An open that proceeds past it is a store whose
+      # existence the destructive process cannot see, which is the whole point of the lock; a
+      # `Gori::Error` is what every caller of this method already recovers from (the picker's
+      # `open_failure_reason`, MCP `switch_project`'s error result, the CLI's rescue), and it
+      # names the path, so the operator is told to try again rather than shown an empty project.
+      # Nothing is open yet at this point, so there is nothing to unwind.
       open_lock = OpenLock.try_shared(path)
       db = begin
         DB.open(url)
@@ -1405,9 +1414,11 @@ module Gori
           return op
         when timeout(tick)
           # No capture work waiting: index a slice of the backlog and re-check. `try_lock`
-          # so a peer holding the write lock does not park this fiber (and capture) for
-          # `busy_timeout`. `== 0` is confirmed empty; `nil` is "still dirty, lock was busy"
-          # and must not clear the hint.
+          # so a peer holding the write lock does not stall this fiber for `busy_timeout` —
+          # and it is not only this fiber that would wait: SQLite's busy handler sleeps inside
+          # C without yielding and the scheduler is single-threaded (no -Dpreview_mt), so that
+          # wait stops capture, the proxy and the render loop with it (#752). `== 0` is
+          # confirmed empty; `nil` is "still dirty, lock was busy" and must not clear the hint.
           @fts_backlog_hint = false if index_batch_safely(try_lock: true) == 0
         end
       end

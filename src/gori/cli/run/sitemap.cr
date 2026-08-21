@@ -193,6 +193,16 @@ module Gori
           # exactly what an operator looking at an empty tree needs to hear.
           Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run sitemap: #{n}" }
         end
+        # The `--query body:…` drain (see `fts_backlog_error`), and it lives HERE rather than in
+        # `collect_sitemap` for the wording: the rescue just below frames everything it catches
+        # as `query … failed`, and a busy writer is not a bad query — it is a tree with endpoints
+        # missing from it, which is the one thing a sitemap must not be silent about.
+        if err = fts_backlog_error(store, filter,
+             "#{query.inspect} would leave endpoints out of the tree with nothing saying so. " \
+             "Nothing was printed;")
+          store.close
+          abort "gori run sitemap: #{err}"
+        end
         hosts = begin
           collect_sitemap(store, filter, limit, in_scope, group, fold_query)
         rescue ex
@@ -231,9 +241,10 @@ module Gori
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool,
                                        fold_query : Bool) : Array(Sitemap::Node)
-        # `--query body:…` reads the off-commit trigram index (Store V4); drain it so a
-        # one-shot tree can't be missing endpoints that simply weren't indexed yet.
-        store.index_pending! if filter.uses_fts?
+        # A `--query body:…` filter arrives here already drained and CHECKED — see
+        # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
+        # is still behind.
+        # The drain used to sit on this line, where a leftover backlog had no way to be reported.
         hosts = Sitemap.build(store.sitemap_entries(filter, limit, raise_on_error: true))
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope

@@ -69,7 +69,22 @@ module Gori
         # bytes reported and the bytes written are the same slice.
         h1_wire = plan.wire_bytes
         wire = wire_request(plan, built, h1_wire)
-        recorded_flow_id = record_history ? record_outbound_request(built, wire, http2, plan.h2_fields) : nil
+        recorded_flow_id = nil.as(Int64?)
+        if record_history
+          id = record_outbound_request(built, wire, http2, plan.h2_fields)
+          # BEFORE the send, and it stays that way: `record_history` defaults to true and is an
+          # audit promise, so a row that cannot be written means this request must not go out
+          # unaudited. `insert_flow` answers 0 rather than blocking when it loses SQLite's single
+          # writer slot to a capturing peer (Store#insert_flow) — momentary, and PROJECT_BUSY /
+          # retryable is what an agent's error policy can act on. It used to raise `Gori::Error`,
+          # which the rescue below coded INVALID_ARGUMENT: "fix your arguments" for a call whose
+          # arguments were fine, so the agent rewrote a correct request instead of retrying it.
+          return busy("could not record this request in History — the project's writer is busy " \
+                      "(a gori capturing beside this server holds SQLite's single writer slot). " \
+                      "NOTHING was sent. Retry in a moment, or pass record_history=false only if " \
+                      "an unaudited send is intentional.") if id <= 0
+          recorded_flow_id = id
+        end
         result = plan.send_wire(h1_wire)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
@@ -539,6 +554,8 @@ module Gori
       # `wire` — not `built.bytes` — is the evidence: History is what `run show --format raw`
       # and `get_flow` replay from, and on h2 the source text is not what went out. See
       # `wire_request`.
+      #
+      # Returns the new flow id, or 0 when the row did not commit (see the tail).
       private def record_outbound_request(built : RequestBuilder::Built, wire : Bytes, http2 : Bool,
                                           h2_fields : Array({String, String})? = nil) : Int64
         head, body = split_wire_request(replayable_field_head(h2_fields, built, wire))
@@ -567,11 +584,10 @@ module Gori
           body: body,
           body_size: body.try(&.size.to_i64),
         )
-        id = store.insert_flow(captured)
-        if id <= 0
-          raise Gori::Error.new("could not record outbound request in History; pass record_history=false only if an unaudited send is intentional")
-        end
-        id
+        # 0 (or less) means the row did NOT commit — the caller turns that into PROJECT_BUSY and
+        # refuses the send. Answered rather than raised: `send_request`'s `Gori::Error` rescue is
+        # for genuine argument mistakes, and a held writer is not one of those.
+        store.insert_flow(captured)
       end
 
       private def record_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil

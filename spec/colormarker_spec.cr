@@ -16,16 +16,30 @@ end
 
 # The global rule library is process-wide state (Settings), so every example that writes it
 # restores what it found — `Colormarker.load` merges it into EVERY project's rule list.
+#
+# And it is a FILE as much as it is memory: every global CRUD re-reads its own section from
+# settings.json before it mutates (`Settings.reload_colormarker_from_disk`, so two gori processes
+# cannot mint the same rule id), which makes the suite-wide settings.json under $GORI_HOME shared
+# state between examples — one example's rules would be read back by the next one's `add`. So the
+# config gets its own home per example too. GORI_HOME rather than `path_override`, because
+# `with_unwritable_settings` below makes `save` fail by pointing GORI_HOME at a directory that
+# cannot be created, and an override here would take precedence over it.
 private def with_globals(&)
   before = Gori::Settings.colormarker_rules
   counter = Gori::Settings.colormarker_next_rule_id
+  prev_home = ENV["GORI_HOME"]?
+  dir = File.tempname("gori-colormarker-globals")
+  Dir.mkdir_p(dir)
   begin
+    ENV["GORI_HOME"] = dir
     Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
     Gori::Settings.colormarker_next_rule_id = 1_i64
     yield
   ensure
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     Gori::Settings.colormarker_rules = before
     Gori::Settings.colormarker_next_rule_id = counter
+    FileUtils.rm_rf(dir)
   end
 end
 

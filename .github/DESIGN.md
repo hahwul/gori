@@ -174,8 +174,12 @@ connection pool directly. `Scope`, `Rules`, `HostOverrides`, and `Interceptor` e
 in-memory snapshot with a `Mutex`, and `Rules` and `Interceptor` additionally keep a lock-free
 `Atomic` counter so the common no-op case on the proxy hot path takes no lock at all.
 Cross-*process* coordination (a second `gori mcp` process driving intercept decisions, or
-capture ownership of a project) goes through the flock-based `CaptureLock` and Store bridge
-tables, not shared memory.
+capture ownership of a project) goes through the flock-based `CaptureLock`/`OpenLock` and
+Store bridge tables, not shared memory. Live in-memory objects on the proxy path
+(`Rules`, `Bindings`, `Probe::Analyzer` mode, `Scope`, `HostOverrides`) are re-read from
+the store — and the global rewriter/colormarker sections from settings.json — on the
+capturer's `data_version` tick / headless reload loop. An exclusive `OpenLock` (Compact,
+project delete) makes a peer `Store.open` fail rather than proceed unannounced.
 
 <a id="s2-1"></a>
 
@@ -336,6 +340,34 @@ the comment was written.
 Format: one `### YYYY-MM-DD: title` block per decision, naming the principle it refines and
 the issue or PR that settled it. Adding an entry must not require restructuring anything
 above it.
+
+### 2026-08-21: a peer's write must reach the live proxy objects, or fail honestly
+
+Refines: [P1](#p1), [P6](#p6). TUI + MCP coexistence audit.
+
+Three surfaces share one project DB. The gap was not the WAL writer (that queues) but
+in-memory objects the capturing process built at open and never re-read: Match&Replace,
+extract rules, and probe mode sat on the proxy hot path while MCP `create_rule` /
+`set_probe_mode` reported success against the store. The tick (`Runner#apply_external_change`,
+headless `App#spawn_reload_loop`) now reloads those objects. Probe mode is adopted from the
+persisted row without writing it back, so the tick cannot race a peer's `off` back to
+`active`.
+
+Global rewriter/colormarker live in settings.json. The existing 3-way merge is section-granular
+and correct for unrelated keys; those two sections hold a list plus its id allocator, so a
+wholesale section win minted colliding ids and dropped the peer's rules. They now merge by
+rule id, and CRUD re-reads only that section before allocating.
+
+`OpenLock.try_shared` used to give up in ~20 ms and open unannounced. Compact holds the
+matching exclusive lock for a second or more, after which a later delete cannot see the
+store. `Store.open` now retries on the order of Compact and then fails; unwritable mounts
+still proceed. `busy_timeout` still blocks the whole scheduler (SQLite's handler never
+returns to Crystal); the comments that said it parked one fiber were wrong, the 5000 ms
+value is unchanged.
+
+A `body:` query that cannot drain FTS because a peer holds the writer answers retryable
+`FTS_BACKLOG` rather than a short match set. `send_request` classifies a rolled-back
+`insert_flow` as `PROJECT_BUSY`, not `INVALID_ARGUMENT`.
 
 ### 2026-07-25: this document restored
 

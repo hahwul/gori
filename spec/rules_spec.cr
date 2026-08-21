@@ -15,16 +15,30 @@ end
 
 # The global rule library is process-wide state (Settings), so every example that writes it
 # restores what it found — `Rules.load` merges it into EVERY project's rule list.
+#
+# And it is a FILE as much as it is memory: every global CRUD re-reads its own section from
+# settings.json before it mutates (`Settings.reload_rewriter_from_disk`, so two gori processes
+# cannot mint the same rule id), which makes the suite-wide settings.json under $GORI_HOME shared
+# state between examples — one example's rules would be read back by the next one's `add`. So the
+# config gets its own home per example too. GORI_HOME rather than `path_override`, because the
+# examples that need `save` to FAIL do it by pointing one or the other somewhere unwritable, and
+# an override here would take precedence over the GORI_HOME half of that.
 private def with_globals(&)
   before = Gori::Settings.rewriter_rules
   counter = Gori::Settings.rewriter_next_rule_id
+  prev_home = ENV["GORI_HOME"]?
+  dir = File.tempname("gori-rules-globals")
+  Dir.mkdir_p(dir)
   begin
+    ENV["GORI_HOME"] = dir
     Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
     Gori::Settings.rewriter_next_rule_id = 1_i64
     yield
   ensure
+    prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     Gori::Settings.rewriter_rules = before
     Gori::Settings.rewriter_next_rule_id = counter
+    FileUtils.rm_rf(dir)
   end
 end
 
@@ -509,8 +523,13 @@ describe Gori::Rules do
             "A", "B", name: "twin", scope: Gori::Store::RuleScope::Global)
           rule = rules.rules.first
 
-          # …and it is gone from the library before the move lands.
+          # …and it is gone from the library before the move lands. From the FILE as well as
+          # from memory: `delete_rewriter_rule` re-reads its section before it touches anything
+          # (so two processes cannot collide on a rule id), so a memory-only clear is no longer
+          # the peer delete this is simulating — the re-read would just put the rule back. The
+          # counter stays where the add left it, exactly as a real delete leaves it.
           Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+          File.write(Gori::Settings.path, %({"rewriter":{"next_rule_id":2,"rules":[]}}))
 
           rules.set_scope(rule, Gori::Store::RuleScope::Project).should be_false
           store.match_rules.should be_empty # the copy was rolled back, not left behind

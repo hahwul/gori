@@ -40,13 +40,19 @@ module Gori
 
     def initialize(@store : Store, @entries : Array(Entry))
       # Guards `@entries` ONLY, and every critical section it has is a pointer read or a
-      # pointer swap. The store round-trip that used to sit inside it does not: `exec_task`
-      # parks the calling fiber on its reply channel, and with `busy_timeout=5000` a PEER
-      # process holding the write lock parks it for up to five seconds. `connect_address`
-      # takes this same mutex on every proxied request, so holding it across that write
-      # stalled every dial in a project that has any override at all, for as long as the
-      # peer held the lock. The writers below serialise against each other on @write_mutex
-      # instead, which the read path never touches.
+      # pointer swap. The store round-trip that used to sit inside it does not: `exec_task` parks
+      # the calling fiber on its reply channel until the writer fiber has run the op, and with
+      # `busy_timeout=5000` a PEER process holding the write lock can put that reply five seconds
+      # away. That wait is TWO stalls, and only the second one is this mutex's business. SQLite's
+      # busy handler waits by sleeping inside C on whichever fiber is running the statement, and
+      # the scheduler is single-threaded (no -Dpreview_mt), so those sleeps stall the WHOLE
+      # process — every fiber, mutex or no mutex; nothing here can fix that (`write_transaction`'s
+      # `try_lock` is what keeps the idle indexer out of it). What the mutex added on top is the
+      # queue wait — the writer's backlog ahead of our op plus the reply hop, which is time the
+      # scheduler is running normally — and `connect_address` takes this same mutex on every
+      # proxied request, so holding it across the write serialized every dial in a project that
+      # has any override at all behind an unrelated store write. The writers below serialise
+      # against each other on @write_mutex instead, which the read path never touches.
       @mutex = Mutex.new
       # Serialises writers THROUGH THIS INSTANCE — the session's live object, which the TUI
       # holds and the proxy dials from. It is deliberately not claimed as more than that: the

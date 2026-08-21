@@ -158,10 +158,18 @@ module Gori::Settings
   # anyway. The rule itself is kept either way — see `next_id_after` for what raising here
   # would have cost.
   private def self.claim_id(id : Int64?, seen : Set(Int64)) : Int64
-    return id if id && id > 0 && id < Int64::MAX && seen.add?(id)
+    return id if id && usable_id?(id) && seen.add?(id)
     fresh = next_id_after(seen.max? || 0_i64)
     seen << fresh
     fresh
+  end
+
+  # The id shape `claim_id` gets to KEEP as written, split out because the concurrent merge needs
+  # the same answer: an entry whose id this returns false for is renumbered on the way into
+  # memory, so its in-memory id is not the one in the file and the merge cannot key on it (see
+  # `index_entries` in settings.cr). One predicate, so the two cannot drift apart.
+  protected def self.usable_id?(id : Int64) : Bool
+    id > 0 && id < Int64::MAX
   end
 
   # Adopt a pre-upgrade `rewriter.presets` block as global rules, DISABLED. A preset was inert
@@ -199,15 +207,42 @@ module Gori::Settings
     list
   end
 
+  # Re-read the `rewriter` section from settings.json into memory, leaving every other section
+  # alone — the counter included, so the next id minted here is one no peer has handed out.
+  # See `Settings.reload_section` for why a full `Settings.load` is the wrong tool and what this
+  # does with a file it cannot read; every mutation below opens with it.
+  #
+  # Public because the TUI needs it too: the Rewriter list is a view of a FILE two gori processes
+  # share, so a tick that never re-reads it shows rules a peer deleted and hides rules a peer
+  # added until the next restart. The caller owns `Rules#refresh` after it — this only puts the
+  # section back into the class properties.
+  def self.reload_rewriter_from_disk : Nil
+    reload_section("rewriter") do |node|
+      held = rewriter_next_rule_id
+      parse_rewriter(node)
+      # The counter is this INSTALL's high-water mark, not the file's: a hand edit, a profile
+      # import that replaced the section, or a factory reset whose write never committed can all
+      # leave a lower number on disk, and taking it would mint an id a project's
+      # `rewriter_overrides` already names. It only ever goes up.
+      self.rewriter_next_rule_id = {rewriter_next_rule_id, held}.max
+    end
+  end
+
   # --- global rule CRUD -----------------------------------------------------------------
-  # Each mutation rewrites the array and persists via `save` (atomic + 3-way merge). The array
-  # ORDER is the apply order among global rules, which is why add appends and move swaps.
+  # Each mutation re-reads the section (see `reload_rewriter_from_disk`), rewrites the array and
+  # persists via `save` (atomic + 3-way merge, reconciled by rule id inside this section). The
+  # array ORDER is the apply order among global rules, which is why add appends and move swaps.
 
   # Returns the new rule's id, or 0 when the write did not reach disk — the same "did it
   # commit" answer `Store#insert_rule` gives, so `Rules#add` can report the two scopes alike.
   def self.add_rewriter_rule(target : String, part : String, pattern : String, replacement : String,
                              op : String, match_kind : String, name : String, host : String,
                              body_file : String, enabled : Bool = true) : Int64
+    # BEFORE the snapshot below, so a refused write rolls back to what the FILE says rather than
+    # to a list this process has been holding since startup. And before the mint, which is the
+    # whole point: `rewriter_next_rule_id` is read from this line, and reading it stale is how
+    # two processes hand the same number to two different rules.
+    reload_rewriter_from_disk
     # The answer below is a COMMIT answer, so memory has to agree with it: `save` refuses the
     # write outright when the last load only got half the file in (`@@load_partial`), and it
     # returns false on any transient write failure too. Mutating first and answering 0 left
@@ -238,6 +273,9 @@ module Gori::Settings
   def self.update_rewriter_rule(id : Int64, target : String, part : String, pattern : String,
                                 replacement : String, op : String, match_kind : String,
                                 name : String, host : String, body_file : String) : Bool
+    # A rule a peer deleted while this list sat on screen must not come BACK as an edit: after the
+    # re-read there is no such id, `found` stays false, and the caller is told so.
+    reload_rewriter_from_disk
     prev_rules = rewriter_rules
     found = false
     self.rewriter_rules = rewriter_rules.map do |r|
@@ -255,6 +293,7 @@ module Gori::Settings
 
   # The rule's DEFAULT state, which every project without an override follows.
   def self.set_rewriter_rule_enabled(id : Int64, enabled : Bool) : Bool
+    reload_rewriter_from_disk # see `update_rewriter_rule`
     prev_rules = rewriter_rules
     found = false
     self.rewriter_rules = rewriter_rules.map do |r|
@@ -268,6 +307,7 @@ module Gori::Settings
   end
 
   def self.delete_rewriter_rule(id : Int64) : Bool
+    reload_rewriter_from_disk # see `update_rewriter_rule`
     prev_rules = rewriter_rules
     kept = rewriter_rules.reject { |r| r.id == id }
     return false if kept.size == rewriter_rules.size
@@ -285,6 +325,10 @@ module Gori::Settings
   # different mechanisms, so "past the last global rule" is not a position — it is a scope
   # change, which is its own action.
   def self.move_rewriter_rule(id : Int64, dir : Int32) : Bool
+    # A swap is a statement about a POSITION, so it has to be made against the order the file
+    # actually holds — swapping inside a stale copy would also silently re-persist that copy's
+    # order over a peer's reordering, which the merge then honours as ours.
+    reload_rewriter_from_disk
     list = rewriter_rules.dup
     i = list.index { |r| r.id == id }
     return false unless i

@@ -113,6 +113,29 @@ describe "the data_version tick" do
     tick.should contain("host_overrides.reload")
     tick.should contain("slots.reload")
   end
+
+  it "reloads every object the SEND path reads, not just the ones with a visible pane" do
+    # The same argument as the slot registry above, applied to the rest of the set. Each of
+    # these is read on the proxy hot path or at a send seam by ONE live object this process
+    # opened with, and each had no refresh here at all:
+    #
+    #   rules     — rewrites the bytes of every request/response that passes through
+    #   bindings  — decides what a `$KEY` expands to at every seam (the extract-rule half)
+    #   probe     — not a view: the in-memory mode is what AUTHORIZES an active probe, so a
+    #               peer switching the project to off/passive to stop it left this session
+    #               firing payloads for the rest of its life
+    #
+    # Pinned by source for the reason in the file header (`Runner.new` appears nowhere under
+    # spec/), and inside the method body so that landing the call in `on_enter_tab` — which is
+    # where rules/bindings already were, and why the gap survived — does not satisfy it.
+    body = slot_code("tui", "runner.cr").join('\n')
+    tick = body[/def apply_external_change.*?\n    end/m].not_nil!
+    tick.should contain("reload_rewriter_from_disk")
+    tick.should contain("reload_colormarker_from_disk")
+    tick.should contain("rules.reload")
+    tick.should contain("bindings.reload")
+    tick.should contain("probe.apply_stored_mode")
+  end
 end
 
 describe "the Repeater's send line" do

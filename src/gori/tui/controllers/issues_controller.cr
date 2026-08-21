@@ -289,8 +289,19 @@ module Gori::Tui
       @issues.reload(@host.session.store)
     end
 
+    # `refresh_detail` reloads the list too, so it REPLACES the bare reload this used to do
+    # rather than joining it. Without it the tab was refreshed in halves: the list behind an
+    # open issue picked up a peer's severity/status/notes edit while the detail card on top of
+    # it kept rendering the row it was opened with — the same split HistoryController closed
+    # with its own detail refresh. It is gated on `detail_open?` inside the view, not on an
+    # overlay: an Issues detail is in-tab state, so `@host.overlay` is `:none` while it is up.
     def on_external_change : Nil
-      @issues.reload(@host.session.store)
+      return unless @issues.refresh_detail(@host.session.store, announce: true)
+      # An INS buffer is never overwritten (refresh_detail leaves it alone and says so here).
+      # Announce instead — the alternative is the operator finding out at `esc`, when the save
+      # is refused for a reason nothing on screen had hinted at. Latched to once per distinct
+      # peer value: this tick also fires on this session's OWN captures.
+      @host.status("notes changed by another session — esc will refuse to overwrite; ^W discards yours")
     end
 
     # The flush the shell runs on a tab switch and on `commit_pending_edits` (quit /
@@ -301,7 +312,22 @@ module Gori::Tui
     # blocks the exit on it either), so this reports without promising a retry that one of its
     # three callers cannot honour.
     def commit : Nil
+      # Still INS-gated, deliberately, now that `IssuesView#notes_dirty?` can be true in READ
+      # (the NOR/INS chip leaves the editor without saving). `esc` is this pane's save key and
+      # the chip is not — flushing a buffer the operator stepped out of would persist an edit
+      # they never committed, on a tab switch they may not connect to it. What that buffer
+      # needed was to stop being silently ERASED, and it no longer is: the tick and a re-entry
+      # both leave it alone, so `i` picks the text back up exactly where it was.
       return unless @issues.notes_insert_mode?
+      # The lost-update refusal belongs here as much as on `esc`: a tab switch and a quit both
+      # route through this, and either one would have written this window's buffer over a
+      # peer's writeup without the operator ever seeing the two versions. No retry hint, for
+      # the reason above — and no way to reconcile from here either, which is why the message
+      # names the key that keeps the peer's text (`^W`) instead of promising a merge.
+      if @issues.notes_conflict?(@host.session.store)
+        @host.status("notes NOT saved — another session rewrote them; ^W discards yours and takes theirs")
+        return
+      end
       return if @issues.save_notes(@host.session.store)
       @host.status("notes NOT saved — project busy")
     end
@@ -312,6 +338,15 @@ module Gori::Tui
     # retry. Say so — reporting nothing is what made a busy project look like it had saved
     # while it had discarded the writeup.
     private def save_notes_or_report : Nil
+      # Ahead of the write, because `update_issue` sets the column wholesale — there is no
+      # row-version to lose the race against, so the last esc in either window silently won and
+      # the other operator's writeup was simply gone. Distinct from the busy answer below on
+      # purpose: that one says "esc to retry", and here a retry is the thing that destroys the
+      # peer's text. Stay in INS either way, so the typed text is still on screen to copy out.
+      if @issues.notes_conflict?(@host.session.store)
+        @host.status("notes NOT saved — another session rewrote them; ^Y copies yours, ^W takes theirs")
+        return
+      end
       return if @issues.save_notes(@host.session.store)
       @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
     end

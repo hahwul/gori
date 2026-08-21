@@ -150,20 +150,62 @@ describe "Gori::OpenLock resilience" do
     end
   end
 
-  it "gives up rather than raising while an exclusive guard is held, and works once it is not" do
+  it "refuses instead of announcing nothing while an exclusive guard is held, and works once it is not" do
     with_project do |_registry, project|
       Gori::Store.open(project.db_path).close # materialize the lock file
       guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
       begin
-        # Bounded retries, so a store open can never be parked behind a long VACUUM. Giving up
-        # is a logged degradation, never an exception.
-        Gori::OpenLock.try_shared(project.db_path).should be_nil
+        # The ONE case that does not degrade to "no lock". An exclusive holder is always a
+        # destructive operation (a compact's strip + VACUUM, a delete's rm_rf), so returning nil
+        # here — as this used to — meant the caller opened a database being rewritten or unlinked
+        # with nothing announcing it to the process doing that. Bounded, so it is a sentence and
+        # not a hang: CONTENTION_BUDGET of short sleeps, then raise.
+        expect_raises(Gori::Error, /compacting or deleting/) do
+          Gori::OpenLock.try_shared(project.db_path)
+        end
       ensure
         guard.close
       end
       shared = Gori::OpenLock.try_shared(project.db_path)
       shared.should_not be_nil
       shared.not_nil!.close
+    end
+  end
+
+  it "does not open a store unannounced while an exclusive guard is held" do
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close # materialize the lock file
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      # The refusal must not cost a descriptor per attempt: the raise path is the one place
+      # `try_shared` leaves its own lock-file handle behind if it forgets to close it, and
+      # nothing about the exception itself would show that.
+      baseline = Dir.children("/dev/fd").size
+      begin
+        # What the bug looked like from here: `Store.open` returned a live, writable Store
+        # while `Compact`/`delete` held the exclusive lock, so the compact's VACUUM (or the
+        # delete's rm_rf) ran under a writer it could not see. Reproduced as an INSERT that
+        # committed "successfully" into a directory that no longer existed.
+        # Two, not more: each refusal waits out the whole CONTENTION_BUDGET, and the spec
+        # exercises the shipped budget rather than a parameterized short one.
+        2.times do
+          ex = expect_raises(Gori::Error) { Gori::Store.open(project.db_path) }
+          # Names the path as the CALLER spelled it, which is what `Project#open_failure_reason`
+          # keys on to pass a message through to the picker verbatim.
+          ex.message.to_s.should contain(project.db_path)
+        end
+        (Dir.children("/dev/fd").size - baseline).should be < 2
+      ensure
+        guard.close
+      end
+      # Released ⇒ the open succeeds and announces itself, so this is a retryable refusal and
+      # not a project that can no longer be opened.
+      store = Gori::Store.open(project.db_path)
+      begin
+        Gori::OpenLock.in_use?(project.db_path).should be_true
+        store.count.should eq(0)
+      ensure
+        store.close
+      end
     end
   end
 end

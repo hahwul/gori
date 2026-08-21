@@ -1236,21 +1236,35 @@ module Gori
       # guard in list_history makes — silently answering "nothing matched" to a question we did
       # not actually get to ask is the failure worth refusing. `retryable`, because whoever owns
       # the writer will drain it. Returns nil when the query is safe to run.
+      #
+      # BOTH branches answer from `fts_backlog`, never from the drain's return: a batch that
+      # loses SQLite's single writer slot to a capturing peer is reported as "0 indexed" and
+      # `index_pending!` takes its `break if n == 0` there (that contract is what keeps a
+      # contended write from hanging capture — see Store#index_pending!), so a drain that
+      # RETURNED can still leave rows dirty. Trusting the return answered `body:` off a partial
+      # index and called it complete — the same silence the read-only branch exists to refuse,
+      # reached through the writable door instead.
       private def drain_fts_or_error(uses_fts : Bool) : Result?
         return nil unless uses_fts
         s = @store
         return nil if s.nil?
-        unless s.read_only?
-          s.index_pending!
-          return nil
-        end
+        read_only = s.read_only?
+        s.index_pending! unless read_only
         backlog = s.fts_backlog
         return nil if backlog.zero?
-        err("#{backlog} flow(s) are not yet indexed for free-text search, and this server is " \
-            "read-only (gori mcp --read-only) so it cannot index them — a body:/free-text " \
-            "result would silently omit them. Open the project in gori, or restart this server " \
-            "without --read-only, to drain the index; or query without a free-text term.",
-          "FTS_BACKLOG", retryable: true)
+        if read_only
+          err("#{backlog} flow(s) are not yet indexed for free-text search, and this server is " \
+              "read-only (gori mcp --read-only) so it cannot index them — a body:/free-text " \
+              "result would silently omit them. Open the project in gori, or restart this server " \
+              "without --read-only, to drain the index; or query without a free-text term.",
+            "FTS_BACKLOG", retryable: true)
+        else
+          err("#{backlog} flow(s) are still not indexed for free-text search after draining: this " \
+              "project's writer was busy (a gori capturing beside this server holds SQLite's " \
+              "single writer slot), so the index is still partial and a body:/free-text result " \
+              "would silently omit them. Retry — whoever holds the writer drains the rest.",
+            "FTS_BACKLOG", retryable: true)
+        end
       end
 
       # Emits scope_decision / matched scope_rule_id / effective_host onto an

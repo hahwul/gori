@@ -319,7 +319,8 @@ module Gori::Authorize
     #     flow, so a typo (`status:>=foo`) would replay the entire history under every
     #     identity — the widest possible reading of the narrowest possible intent.
     #   * `index_pending!` first for an FTS query. Trigram indexing is off-commit (Store V4),
-    #     so a `body:` query run right after a capture would silently see fewer rows.
+    #     so a `body:` query run right after a capture would silently see fewer rows — and a
+    #     drain that did not FINISH is refused, not run (see below).
     #   * `raise_on_error: true`. `search` otherwise degrades a failed query to no matches,
     #     which here is indistinguishable from "nothing matched" — and the two need opposite
     #     responses.
@@ -343,7 +344,29 @@ module Gori::Authorize
         raise PlanError.new(PlanError::Reason::BadQuery,
           "query #{query.inspect} did not match any field", query)
       end
-      options.store.index_pending! if filter.uses_fts?
+      if filter.uses_fts?
+        options.store.index_pending!
+        # `index_pending!` reports a batch that lost SQLite's single writer slot to a capturing
+        # peer as "0 indexed" and returns there, rows still dirty (Store#index_pending!) — so its
+        # return says nothing about whether the index caught up, and `fts_backlog` is the only
+        # answer worth reading. Replaying the short set anyway is the worst silence on this
+        # surface: an access-control sweep that quietly skipped flows reports the SAME
+        # "no bypasses found" as one that actually looked at them.
+        #
+        # A plain `Gori::Error`, deliberately not a `PlanError`. Every `PlanError::Reason` arm on
+        # both surfaces (`cli/run/authorize.cr`, `mcp/tools/authorize.cr`) concatenates a tail to
+        # the message it carries, and `BadQuery`'s — "a query that compiles to no clause matches
+        # EVERY captured flow" — would contradict this sentence for an operator reading it. The
+        # CLI's top-level `rescue ex : Error` (cli.cr) prints this verbatim; MCP's `call` returns
+        # it verbatim too.
+        if (pending = options.store.fts_backlog) > 0
+          raise Gori::Error.new("#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed for " \
+                                "free-text search (this project's writer is busy — another gori is " \
+                                "capturing it), so #{query.inspect} cannot see all of them and this " \
+                                "run would replay fewer flows than asked while reporting a clean " \
+                                "sweep. Nothing was sent; retry in a moment.")
+        end
+      end
       begin
         options.store.search(filter, options.limit, raise_on_error: true)
       rescue ex

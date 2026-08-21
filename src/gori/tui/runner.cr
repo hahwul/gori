@@ -626,8 +626,19 @@ module Gori::Tui
             # Record what the user is currently viewing (active tab / focus / selection) to
             # the project store so a separate `gori mcp` process can report it via
             # get_current_context. Throttled + diffed so idle focus never churns the WAL.
+            #
+            # Only in the capture-lock holder, exactly as the intercept bridge above. There is
+            # ONE `ui_state` row per project and two live instances on the same db both wrote
+            # it, so `get_current_context` reported whichever window last moved its cursor —
+            # an agent asking "what is the operator looking at" got an answer from a window the
+            # operator was not in. The lock is the same tiebreak the bridge already uses, and
+            # the same one the operator understands (it is what `c` takes over). The bookkeeping
+            # is inside the gate too: advancing `last_ui_ident` while refusing to write would
+            # leave a window that later takes capture silently unpublished until its identity
+            # happened to move again.
             ident = ui_state_identity
-            if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+            if @session.capturing_lock_held? && ident != last_ui_ident &&
+               (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
               @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
               last_ui_ident = ident
               last_ui_write = now
@@ -884,6 +895,12 @@ module Gori::Tui
       # external `gori run colormarker` / MCP `create_color_rule` against this db. Cheap
       # regardless — `Colormarker#refresh` bails out on an unchanged rule set, so the common
       # tick recompiles nothing and does not bump the revision History memoises against.
+      # Re-read the GLOBAL half of the library first: `Colormarker#reload` folds
+      # `Settings.colormarker_rules` as they sit in THIS process, so a peer's
+      # `create_color_rule` against settings.json is invisible until that section is
+      # re-read. Section-only — a full `Settings.load` would clobber unsaved other
+      # sections (see `Settings.reload_section`).
+      Settings.reload_colormarker_from_disk
       @session.colormarker.reload
       # Re-prime the render-side custom-mark map only when the colour set actually moved — the
       # revision bumps on a rule OR a custom-colour change, so a hex edit repaints History
@@ -892,6 +909,28 @@ module Gori::Tui
         Theme.set_custom_marks(Settings.colormarker_color_map)
         @custom_marks_rev = rev
       end
+      # Match&Replace and the extract rules, for the same reason as Scope above and one that is
+      # sharper: both are read on the proxy HOT PATH (`Rules` rewrites the bytes of every
+      # request/response that passes through, `Bindings` decides what `$KEY` expands to at every
+      # send seam), and the only refresh either had was the Rewriter tab's own `r` key /
+      # on-enter. So a peer's `gori run rewriter add` / MCP `create_rule` / `create_extract_rule`
+      # against this db did not reach the traffic this session was rewriting until somebody
+      # happened to walk into that tab — and a rule the operator DISABLED elsewhere went on
+      # rewriting live traffic here for the rest of the session. Safe in place, like the rest:
+      # the rule EDITOR is an overlay with its own buffer, and only the underlying snapshot
+      # moves. Both `#reload` calls are just `refresh` (one settings read + one table read).
+      # Global Match&Replace lives in settings.json, not the project DB, so `Rules#reload`
+      # alone would keep the process's startup snapshot of that section. Re-read it first.
+      Settings.reload_rewriter_from_disk
+      @session.rules.reload
+      @session.bindings.reload
+      # And the Probe mode, which is not a view at all — it is the authorization for sending
+      # attack payloads. A peer's `set_probe_mode` (MCP, `gori run probe`, a second TUI) commits
+      # the row and every surface reports the change as done, while THIS analyzer kept the mode
+      # it opened with; a peer switching the project to `off`/`passive` to stop active probing
+      # left this session firing. `apply_stored_mode` adopts the persisted value WITHOUT writing
+      # it back — a tick that persisted would race the peer's write and put the old mode back.
+      @session.probe.apply_stored_mode
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
