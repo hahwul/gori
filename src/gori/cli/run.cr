@@ -77,6 +77,7 @@ module Gori
     # capturing instance (SQLite WAL; #752).
     module Run
       def self.dispatch(args : Array(String)) : Nil
+        route_logs_to_stderr
         dispatch_subcommand(args)
       rescue ex : IO::Error
         # `gori run … | head` (or any reader that closes early) breaks the STDOUT
@@ -86,6 +87,24 @@ module Gori
         # cyclomatic-complexity bar — see dispatch_subcommand.)
         raise ex unless ex.os_error == Errno::EPIPE
         exit 0
+      end
+
+      # STDOUT on these commands is DATA — a flow listing, a sitemap tree, `--format json` being
+      # piped into `jq`. Nothing had pointed the root logger anywhere, so it sat on Crystal's
+      # default STDOUT backend and any `Log.warn` in the code these commands run landed in the
+      # middle of that data. Reproduced with `OpenLock`'s "held by a destructive operation"
+      # warning: the operator got a raw timestamped log line on STDOUT and the clean sentence on
+      # STDERR, the same failure said twice on two streams, one of which a pipe was reading.
+      #
+      # STDERR is where the other non-TUI surfaces already put it (`gori mcp`,
+      # `App#run_capture`), so this is the read side joining them rather than a new policy. Not
+      # in `dispatch_subcommand`: `run capture` calls `setup_logging` itself and this must not
+      # be the thing that decides for it, but it must be in place before ANY subcommand runs.
+      private def self.route_logs_to_stderr : Nil
+        ::Log.setup(:info, ::Log::IOBackend.new(STDERR))
+      rescue
+        # A logger that cannot be configured is not a reason to refuse the command; the worst
+        # case is the behaviour that shipped.
       end
 
       private def self.dispatch_subcommand(args : Array(String)) : Nil

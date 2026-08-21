@@ -202,14 +202,13 @@ module Gori
       # the operator is owed when the drain did not finish — nil when the query is safe to run
       # (including every query that never touches the index at all).
       #
-      # Trigram indexing runs off the capture commit (Store V4), so `index_pending!` is what
-      # makes a one-shot answer exact instead of "whatever happened to be indexed". The check
-      # AFTER it is the part that was missing: `index_pending!` reports a batch that lost
-      # SQLite's single writer slot to a capturing peer as "0 indexed" and takes its
-      # `break if n == 0` there — that contract is deliberate (a contended write must never hang
-      # capture, see Store#index_pending!), and it means the drain returns NORMALLY with rows
-      # still dirty. Every caller read that as success and printed a short answer with no marker
-      # on it, which is precisely the silent under-report the drain was added to prevent.
+      # Trigram indexing runs off the capture commit (Store V4), so draining is what makes a
+      # one-shot answer exact instead of "whatever happened to be indexed". `drain_fts!`, not
+      # a bare `index_pending!`: that one reports a batch that lost SQLite's single writer slot
+      # to a capturing peer as "0 indexed" and returns NORMALLY with rows still dirty, so every
+      # caller read it as success and printed a short answer with no marker on it. `drain_fts!`
+      # answers what is still dirty and RETRIES a contended attempt first, which is what keeps
+      # this from refusing a query for a collision that was over a millisecond later.
       #
       # `consequence` is the caller's own sentence for what a partial index would do to ITS
       # answer — a listing omits rows, a delete spares flows, a tree loses endpoints, and those
@@ -219,8 +218,7 @@ module Gori
       private def self.fts_backlog_error(store : Store, filter : QL::Filter,
                                          consequence : String) : String?
         return nil unless filter.uses_fts?
-        store.index_pending!
-        pending = store.fts_backlog
+        pending = store.drain_fts!
         return nil if pending.zero?
         "#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed for free-text search " \
         "(this project's writer is busy — another gori is capturing it), so #{consequence} " \

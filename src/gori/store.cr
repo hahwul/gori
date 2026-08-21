@@ -748,6 +748,51 @@ module Gori
       total
     end
 
+    # How long `drain_fts!` keeps trying, and how long it waits between attempts.
+    #
+    # `index_pending!` reports a batch that lost SQLite's single writer slot to a capturing
+    # peer as "0 indexed" and takes its `break if n == 0` there. That contract is deliberate —
+    # a contended write must never hang capture — but it means one call gives up the instant
+    # it collides, and the collision is over microseconds later. Measured against a live
+    # capture: 4 of 40 one-shot `body:` queries were refused for a backlog that had not
+    # drained, and every single one of those succeeded on an immediate re-run. So the refusal
+    # was reporting to the operator something the process could have waited out inside one
+    # keystroke's worth of time.
+    #
+    # A second of short sleeps, for the same reason `OpenLock::CONTENTION_BUDGET` is what it
+    # is: the callers are one-shot surfaces (a CLI query, an MCP tool, a scan's selection),
+    # nothing is proxied on this fiber, and the alternative is handing back a refusal for a
+    # transient. Bounded, so a peer that holds the writer indefinitely still ends in a
+    # sentence rather than a hang — and the LIVE surface (the TUI) must not call this at all:
+    # it reports `fts_backlog` as a note and keeps rendering.
+    FTS_DRAIN_BUDGET = 1.second
+    FTS_DRAIN_RETRY  = 10.milliseconds
+
+    # Drain the off-commit trigram index and answer what is STILL dirty — 0 when a
+    # `body:`/free-text query can now see every stored flow.
+    #
+    # The return of `index_pending!` says nothing about that (see the constants above), so
+    # this reads `fts_backlog` after each attempt and retries a contended one rather than
+    # reporting it. The answer is the ONLY thing a caller should branch on; a caller that
+    # branches on the drain's return is asking a different question than the one it needs.
+    #
+    # A read-only store has no writer to drain with, so it answers immediately: waiting a
+    # second to learn what is already permanent for this process is pure latency.
+    def drain_fts!(budget : Time::Span = FTS_DRAIN_BUDGET) : Int32
+      return fts_backlog if read_only?
+      index_pending!
+      remaining = fts_backlog
+      return 0 if remaining.zero?
+      deadline = Time.instant + budget
+      while Time.instant < deadline
+        sleep FTS_DRAIN_RETRY
+        index_pending!
+        remaining = fts_backlog
+        return 0 if remaining.zero?
+      end
+      remaining
+    end
+
     # How many flows are waiting to be (re)indexed for `body:`/free-text search — i.e. how
     # far behind the search index is. Capped at FTS_BACKLOG_PROBE_MAX (a bigger number would
     # only ever be shown as "lots"), and answered from the partial index, so it is cheap

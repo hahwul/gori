@@ -110,20 +110,62 @@ module Gori
       # from that point the database is open with nothing announcing it, and the only holder of
       # an exclusive lock is a destructive operation — so "open anyway" means opening a database
       # that is being VACUUMed or rm_rf'd, invisibly to the process doing it. So refuse, and
-      # refuse with a sentence naming the path.
+      # refuse with a sentence naming the path — `guarded_message`, shared with the picker's
+      # fast refusal so the two cannot describe the same state differently.
       #
-      # `db_path` as the CALLER spelled it, not `lock_path`'s canonicalized form:
-      # `Project#open_failure_reason` passes a message through verbatim only when it
-      # `includes?` the project's own `db_path`, so a canonicalized path would make the TUI
-      # picker drop this reason for its generic "could not open '<name>'" wrapper on any
-      # `$GORI_HOME` reached through a symlink.
-      #
-      # Logged too, because the surfaces that catch this show one line and no backtrace.
-      # gori.log, not STDERR (#411).
+      # Logged too, because the surfaces that catch this show one line and no backtrace. Where
+      # that line LANDS is the surface's business, not this one's — `gori mcp` and
+      # `gori run capture` both point the root logger at STDERR, and the TUI points it at its
+      # log file. The read-side `gori run` commands set it up too, for the reason `CLI::Run`
+      # gives: without that they inherit Crystal's default STDOUT backend, and this very warning
+      # was printing into the data stream next to the clean sentence below.
       file.close rescue nil
       ::Log.warn { "open-lock: #{db_path} is held by a destructive operation; refusing to open it unannounced" }
-      raise Gori::Error.new("cannot open #{db_path}: another gori instance is compacting or " \
-                            "deleting this project — try again in a moment")
+      raise Gori::Error.new(guarded_message(db_path))
+    end
+
+    # Is a DESTRUCTIVE operation holding this database RIGHT NOW? A single non-blocking shared
+    # acquire answers it: shared locks stack, so the only thing that can refuse one is an
+    # exclusive holder, and the only holders of that are `Store::Compact` and a project delete.
+    # Released immediately — this asks a question, it does not announce anything.
+    #
+    # For a caller that can offer a retry more cheaply than it can afford to wait: the TUI picker
+    # has the operator's finger on the key that would retry, so making them watch a frozen screen
+    # for `CONTENTION_BUDGET` and THEN telling them to try again is the worst of both. A one-shot
+    # `Store.open` has nobody to ask and keeps the budget.
+    #
+    # FALSE on every uncertainty — no lock file, an unwritable directory, a mount whose flock
+    # does not work. This is a fast path in front of `try_shared`, never a replacement for it:
+    # answering "not guarded" only ever means the caller goes on to do the careful thing, while a
+    # wrong `true` would refuse an open that `try_shared` would have completed.
+    def self.guarded?(db_path : String) : Bool
+      return false unless lockable?(db_path)
+      lock_path = path(db_path)
+      return false unless File.exists?(lock_path)
+      file = File.open(lock_path, "a") rescue return false
+      begin
+        file.flock_shared(blocking: false)
+        false
+      rescue ex : IO::Error
+        contention?(ex)
+      rescue
+        false
+      ensure
+        file.close rescue nil # releases the shared lock too, if we took one
+      end
+    end
+
+    # The one sentence for "a destructive operation has this database", so the picker's fast
+    # refusal and `try_shared`'s raise cannot drift into describing the same state two ways.
+    #
+    # `db_path` as the CALLER spelled it, never the canonicalized form:
+    # `Project#open_failure_reason` passes a message through verbatim only when it `includes?`
+    # the project's own `db_path`, so a canonicalized path would make the TUI picker drop this
+    # reason for its generic "could not open '<name>'" wrapper on any `$GORI_HOME` reached
+    # through a symlink.
+    def self.guarded_message(db_path : String) : String
+      "cannot open #{db_path}: another gori instance is compacting or " \
+      "deleting this project — try again in a moment"
     end
 
     # Was this flock failure "somebody holds it" rather than "flock does not work here"?

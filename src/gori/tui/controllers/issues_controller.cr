@@ -16,6 +16,28 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @issues = IssuesView.new
+      # The peer notes value an `esc` overwrite is currently armed against — see
+      # `save_notes_or_report`. nil when nothing is armed, which is every state but the one
+      # right after a refusal the operator has read.
+      @notes_overwrite_armed = nil.as(String?)
+    end
+
+    # Would `commit` REFUSE the open Issues writeup right now? Asked by the quit and
+    # leave-project prompts, which are the two places the buffer dies for good and the only two
+    # where a status line arrives too late to be read (the loop breaks immediately after
+    # `commit_pending_edits`).
+    #
+    # Gated on INS exactly as `commit` is, so the prompt describes what will actually happen. A
+    # dirty buffer the NOR/INS chip stepped out of is dropped at quit too — but by the INS gate,
+    # not by this conflict, and a line blaming a peer for it would send the operator looking for
+    # a collision that is not the reason. That silence is older than this guard and is its own
+    # question.
+    #
+    # `@host.session.store`, not a cached row: the answer has to be about the version on disk at
+    # the moment the operator is being asked, which is the moment they can still act on it.
+    def notes_conflict_pending? : Bool
+      return false unless @issues.notes_insert_mode?
+      @issues.notes_conflict?(@host.session.store)
     end
 
     def view : IssuesView
@@ -220,8 +242,13 @@ module Gori::Tui
 
     private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
       case
-      when ev.ctrl? && key.lower_w? then @issues.cancel_notes_edit
-      when ev.ctrl_z?               then @issues.notes_undo
+      when ev.ctrl? && key.lower_w?
+        # Disarmed on the way out: an arm granted for a refusal the operator then answered with
+        # `^W` must not still be sitting there for the NEXT edit of this issue, where a second
+        # `esc` would write over a peer without ever showing the refusal that earns it.
+        @notes_overwrite_armed = nil
+        @issues.cancel_notes_edit
+      when ev.ctrl_z? then @issues.notes_undo
       when (ev.ctrl? || ev.alt?) && !@issues.notes_word_delete_key?(ev) && !editing_motion?(ev)
         # Every other modified chord defers to the central keymap so it stays rebindable —
         # `^Y` Copy above all, which is the only way to copy an INS selection here (bare `y`
@@ -320,12 +347,18 @@ module Gori::Tui
       # both leave it alone, so `i` picks the text back up exactly where it was.
       return unless @issues.notes_insert_mode?
       # The lost-update refusal belongs here as much as on `esc`: a tab switch and a quit both
-      # route through this, and either one would have written this window's buffer over a
-      # peer's writeup without the operator ever seeing the two versions. No retry hint, for
-      # the reason above — and no way to reconcile from here either, which is why the message
-      # names the key that keeps the peer's text (`^W`) instead of promising a merge.
+      # route through this, and either one would have written this window's buffer over a peer's
+      # writeup without the operator ever seeing the two versions.
+      #
+      # NOT armable from here, unlike `esc`. A tab switch is not a save — the buffer stays in
+      # the view and `i` picks it back up — so the honest answer is "not saved, here is where to
+      # go", and the message names the pane's own key rather than turning an unrelated keypress
+      # into a write. The quit caller is louder still: `Runner#quit_message` /
+      # `leave_confirm_message` put this conflict in the modal, because a status line posted
+      # from inside a teardown is never rendered and the operator would have learned about it
+      # by finding the writeup gone.
       if @issues.notes_conflict?(@host.session.store)
-        @host.status("notes NOT saved — another session rewrote them; ^W discards yours and takes theirs")
+        @host.status("notes NOT saved — another session rewrote them; esc in the notes pane overwrites theirs, ^W takes theirs")
         return
       end
       return if @issues.save_notes(@host.session.store)
@@ -340,13 +373,30 @@ module Gori::Tui
     private def save_notes_or_report : Nil
       # Ahead of the write, because `update_issue` sets the column wholesale — there is no
       # row-version to lose the race against, so the last esc in either window silently won and
-      # the other operator's writeup was simply gone. Distinct from the busy answer below on
-      # purpose: that one says "esc to retry", and here a retry is the thing that destroys the
-      # peer's text. Stay in INS either way, so the typed text is still on screen to copy out.
-      if @issues.notes_conflict?(@host.session.store)
-        @host.status("notes NOT saved — another session rewrote them; ^Y copies yours, ^W takes theirs")
-        return
+      # the other operator's writeup was simply gone. Stay in INS on the refusal, so the typed
+      # text is still on screen.
+      #
+      # And the refusal ARMS the next `esc` rather than standing forever. A guard on this pane
+      # can only be an interruption, never a veto: the operator is the one who knows whether
+      # their paragraph or the peer's is the one to keep, and a refusal with no way through left
+      # them with three keys that all lose their text (`^W` takes the peer's, a tab switch
+      # refuses again, quitting drops it). Second `esc` writes. That is the same shape as every
+      # other "are you sure" in the app — informed, then allowed — and the informing is the part
+      # that was missing, not the forbidding.
+      #
+      # Armed against the VALUE, so it cannot be pre-armed and cannot go stale: a peer who
+      # writes again between the two presses moves the key, and the second `esc` refuses afresh
+      # against the version nobody has seen yet.
+      if key = @issues.notes_conflict_key(@host.session.store)
+        if @notes_overwrite_armed != key
+          @notes_overwrite_armed = key
+          @host.status("notes NOT saved — another session rewrote them; esc again overwrites theirs, ^W takes theirs, ^Y copies yours")
+          return
+        end
       end
+      # Either there was no conflict, or the operator answered one. Disarm before the write, so
+      # an arm can never outlive the press it was granted for.
+      @notes_overwrite_armed = nil
       return if @issues.save_notes(@host.session.store)
       @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
     end

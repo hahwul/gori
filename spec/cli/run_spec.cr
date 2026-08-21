@@ -1143,3 +1143,33 @@ describe "gori run --bind-from — no project vs no rules" do
     end
   end
 end
+
+# STDOUT on the read-side `gori run` commands is DATA — a flow listing, a sitemap tree,
+# `--format json` on its way into `jq`. Nothing had ever pointed the root logger anywhere, so it
+# sat on Crystal's default STDOUT backend and every `Log.warn` these commands can reach landed in
+# the middle of that data.
+#
+# Reproduced with `OpenLock`'s "held by a destructive operation" warning, which #771 made newly
+# reachable: the operator got a raw timestamped log line on STDOUT and the clean sentence on
+# STDERR — the same failure said twice, on two streams, one of which a pipe was reading.
+#
+# A source-grep spec, deliberately. What is being pinned is that the setup happens at the DISPATCH
+# gate and therefore covers every subcommand: an example that ran one command and found its stdout
+# clean would keep passing after somebody added a subcommand that logs, which is exactly how this
+# was missed the first time.
+describe "gori run — the root logger" do
+  it "is pointed at STDERR before any subcommand runs" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "cli", "run.cr"))
+    body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    dispatch = body[/^ *def self\.dispatch\(args.*?\n( *)end\n/m].not_nil!
+    dispatch.should contain("route_logs_to_stderr")
+    # BEFORE the work, not after it: a warning raised while resolving the project or opening the
+    # store is exactly the one that was polluting stdout.
+    dispatch.index("route_logs_to_stderr").not_nil!
+      .should be < dispatch.index("dispatch_subcommand(args)").not_nil!
+    # And it must name STDERR — the stream `gori mcp` and `App#run_capture` already use.
+    setup = body[/^ *private def self\.route_logs_to_stderr.*?\n( *)end\n/m].not_nil!
+    setup.should contain("STDERR")
+    setup.should_not contain("STDOUT")
+  end
+end

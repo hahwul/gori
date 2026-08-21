@@ -1237,20 +1237,22 @@ module Gori
       # not actually get to ask is the failure worth refusing. `retryable`, because whoever owns
       # the writer will drain it. Returns nil when the query is safe to run.
       #
-      # BOTH branches answer from `fts_backlog`, never from the drain's return: a batch that
-      # loses SQLite's single writer slot to a capturing peer is reported as "0 indexed" and
-      # `index_pending!` takes its `break if n == 0` there (that contract is what keeps a
-      # contended write from hanging capture — see Store#index_pending!), so a drain that
-      # RETURNED can still leave rows dirty. Trusting the return answered `body:` off a partial
-      # index and called it complete — the same silence the read-only branch exists to refuse,
-      # reached through the writable door instead.
+      # BOTH branches answer from what is STILL dirty, never from the drain's return: a batch
+      # that loses SQLite's single writer slot to a capturing peer is reported as "0 indexed"
+      # and `index_pending!` takes its `break if n == 0` there (that contract is what keeps a
+      # contended write from hanging capture), so a drain that RETURNED can still leave rows
+      # dirty. Trusting the return answered `body:` off a partial index and called it complete —
+      # the same silence the read-only branch exists to refuse, reached through the writable
+      # door instead. `Store#drain_fts!` asks the right question AND retries a contended
+      # attempt, so an agent is not handed a retryable error for a collision it would have won
+      # on the next call; it short-circuits on a read-only store, where there is nothing to
+      # drain with and the backlog is permanent for this process.
       private def drain_fts_or_error(uses_fts : Bool) : Result?
         return nil unless uses_fts
         s = @store
         return nil if s.nil?
         read_only = s.read_only?
-        s.index_pending! unless read_only
-        backlog = s.fts_backlog
+        backlog = s.drain_fts!
         return nil if backlog.zero?
         if read_only
           err("#{backlog} flow(s) are not yet indexed for free-text search, and this server is " \

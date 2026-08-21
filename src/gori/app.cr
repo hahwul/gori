@@ -222,7 +222,7 @@ module Gori
           break unless project # nil => quit gori
           # Reassigned every pass: a picker-chosen project that won't open reports it the
           # same way, and a successful open clears the previous failure's notice.
-          outcome, notice = open_and_run(project, term)
+          outcome, notice = open_or_report_guard(project, term)
           break if outcome == :quit
         end
       ensure
@@ -290,6 +290,29 @@ module Gori
       reload_stop.send(nil) rescue nil
       session.close
       signaled
+    end
+
+    # `open_and_run`, but answering a project that a compact or a delete is holding RIGHT NOW
+    # without making the operator watch a frozen screen first.
+    #
+    # `Store.open` waits out `OpenLock::CONTENTION_BUDGET` (~2s) before refusing, which is the
+    # right call for a one-shot CLI or an MCP tool: nobody is there to retry, so waiting beats
+    # failing. Here the opposite holds. The picker is still the last frame on the terminal and
+    # there is nothing rendering a spinner over it, so those two seconds are an Enter that did
+    # nothing — indistinguishable from a hang, and ending in a message that says "try again in a
+    # moment" to an operator whose finger is already on the key that would.
+    #
+    # A probe, not a substitute for the budget: this only skips the wait when a guard is
+    # ALREADY held. A compact that starts in the gap between the probe and the open falls
+    # through to `try_shared` and waits it out exactly as before, which is the rare race inside
+    # an already-rare collision.
+    private def open_or_report_guard(project : Project, term : Termisu) : {Symbol, String?}
+      if OpenLock.guarded?(project.db_path)
+        # `:back` with a reason is the picker's own "here is why you are looking at this
+        # screen" channel — the same one a failed open uses, so this needs no new surface.
+        return {:back, OpenLock.guarded_message(project.db_path)}
+      end
+      open_and_run(project, term)
     end
 
     # `{outcome, error}`. `outcome` is :quit (leave gori) or :back (return to the picker);

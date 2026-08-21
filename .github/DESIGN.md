@@ -369,6 +369,18 @@ A `body:` query that cannot drain FTS because a peer holds the writer answers re
 `FTS_BACKLOG` rather than a short match set. `send_request` classifies a rolled-back
 `insert_flow` as `PROJECT_BUSY`, not `INVALID_ARGUMENT`.
 
+A guard against a peer is an INTERRUPTION, not a veto. Every refusal added here is one the
+operator can answer: the Issues lost-update guard arms a second `esc` (against the version it
+showed, so a further peer write refuses again) and names the conflict in the exit prompts, which
+are the last point either version can still be chosen. The refusals that are NOT the operator's
+to answer — a `body:` query whose index could not drain — retry the contention first and only
+report what survives it, because a guard that reports a collision the process could have waited
+out is spending the operator's attention on its own scheduling.
+
+The reload tick is on the render fiber, so its cost is a frame. Both settings folds are gated on
+the file's bytes and both reloaded lists re-anchor their selection by id, for the same reason
+`IssuesView#apply_filter` gives: a list that moves under a cursor re-aims the next keypress.
+
 The single `ui_state` row goes to the capture holder, which is the tiebreak the intercept
 bridge already uses — but the holder is not necessarily a window. A headless `gori run capture`
 holds the lock and draws nothing, so a lock-ONLY gate published nothing at all while the

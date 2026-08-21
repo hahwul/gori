@@ -111,14 +111,14 @@ module Gori
         # A scan that silently skipped flows because their trigram entries hadn't been written
         # yet (indexing is off-commit — Store V4) would under-report FINDINGS, so drain the
         # backlog before selecting the set to scan — and then check that the drain WORKED.
-        # `index_pending!` reports a batch that lost SQLite's single writer slot to a capturing
-        # peer as "0 indexed" and returns with the rows still dirty (Store#index_pending!), so
-        # its return says nothing; `fts_backlog` is the answer. Scanning the short set anyway
-        # produced a report with FEWER findings and no marker distinguishing it from a clean
-        # one — which is the whole failure the drain above was added to prevent.
+        # `drain_fts!` rather than `index_pending!`: that one reports a batch that lost SQLite's
+        # single writer slot to a capturing peer as "0 indexed" and returns with the rows still
+        # dirty, so its return says nothing, and a collision it gave up on is usually over
+        # milliseconds later. Scanning the short set anyway produced a report with FEWER findings
+        # and no marker distinguishing it from a clean one — which is the whole failure the drain
+        # above was added to prevent.
         if filter.try(&.uses_fts?)
-          store.index_pending!
-          if (pending = store.fts_backlog) > 0
+          if (pending = store.drain_fts!) > 0
             raise Gori::Error.new("#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed " \
                                   "for free-text search (this project's writer is busy — another " \
                                   "gori is capturing it), so a body:/free-text scan would silently " \

@@ -1147,7 +1147,8 @@ module Gori::Tui
       if Runner.quit_chord_claimed?(ev, modal: !ov.nil?)
         # The policy is `Runner.quit_decision`, shared with `quit!` (the palette's Quit) so
         # the two entry points cannot answer "does this need a confirm?" differently again.
-        case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed)
+        case Runner.quit_decision(Settings.confirm_quit?, chord: true, armed: @quit_armed,
+          notes_conflict: issues_notes_conflict?)
         in .confirm?
           # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
           # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
@@ -2475,8 +2476,11 @@ module Gori::Tui
     # chord the palette operator never pressed; ^P, typing a filter, and ↵ on a row that reads
     # "Quit gori" is already the deliberate act the arm asks for.
     def quit! : Nil
-      # chord: false — a palette dispatch can never arm, so this is Confirm or Quit.
-      if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false).confirm?
+      # chord: false — a palette dispatch can never arm, so this is Confirm or Quit, and with
+      # the confirm setting off it is Quit with nothing shown. `notes_conflict` is what turns
+      # that one into a question.
+      if Runner.quit_decision(Settings.confirm_quit?, chord: false, armed: false,
+           notes_conflict: issues_notes_conflict?).confirm?
         raise_quit_confirm
       else
         finish_quit
@@ -2510,8 +2514,9 @@ module Gori::Tui
     # line, and still a non-danger confirm — closing an idle project discards nothing.
     def leave_project : Nil
       active = @jobs.active_summary
-      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size),
-        confirm_label: "leave", danger: !active.nil?, return_to: @overlay.to_sym) do
+      notes_conflict = issues_notes_conflict?
+      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
+        confirm_label: "leave", danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
         stop_all_jobs
         commit_pending_edits
@@ -2537,11 +2542,22 @@ module Gori::Tui
     end
 
     private def quit_message : String
-      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size)
+      Runner.quit_confirm_message(@jobs.active_summary, @jobs.active.size, issues_notes_conflict?)
     end
 
     private def quit_arm_hint : String
-      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size, back_key: back_key_live?)
+      Runner.quit_arm_hint(@jobs.active_summary, @jobs.active.size, back_key: back_key_live?,
+        notes_conflict: issues_notes_conflict?)
+    end
+
+    # Would `commit_pending_edits` refuse the open Issues writeup? Asked only when an exit
+    # prompt is being composed — one store read on an operator action, never on the tick — and
+    # swallowed on failure, because a prompt that cannot be built is worse than one that leaves
+    # a line out.
+    private def issues_notes_conflict? : Bool
+      issues_controller.notes_conflict_pending?
+    rescue
+      false
     end
 
     # Does `q` actually go back to the project picker from where the operator is standing?
@@ -2571,19 +2587,31 @@ module Gori::Tui
     # The two modal messages put the count/consequence and the per-kind inventory on
     # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
     # columns, so one combined sentence lost its own verb to the ellipsis.
-    def self.leave_confirm_message(active : String?, count : Int32) : String
+    def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
       base = "Close this project and return to the picker?"
-      return base unless active
-      "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}"
+      msg = active ? "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
     # for the same reason the leave confirm does: quitting abandons them.
-    def self.quit_confirm_message(active : String?, count : Int32) : String
-      base = "Quit gori? (pending edits are committed first)"
-      return base unless active
-      "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}"
+    def self.quit_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
+      # The parenthetical is a PROMISE, so it only gets made when it is true. `commit_pending_edits`
+      # refuses an Issues writeup a peer has rewritten (IssuesController#commit), and saying
+      # "pending edits are committed first" over the top of that is the lie that made this the
+      # one place a writeup could disappear without the operator being told anything at all.
+      base = notes_conflict ? "Quit gori?" : "Quit gori? (pending edits are committed first)"
+      msg = active ? "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
+      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
     end
+
+    # Said the same way in all three exit prompts, because it is the same fact — and said in
+    # terms of what the operator loses and which key keeps it, not in terms of the guard.
+    # This is the LAST point at which either version can still be chosen; after it, one of the
+    # two texts is gone and nothing on screen said so.
+    NOTES_CONFLICT_LINE =
+      "An Issues writeup here was rewritten by another session — leaving DISCARDS yours " \
+      "(esc in the notes pane overwrites theirs instead)."
 
     # A status toast, not a card, so this one stays on a single line.
     #
@@ -2592,8 +2620,14 @@ module Gori::Tui
     # failure this argument exists to prevent is a hint naming a key that is dead in the focus
     # it is shown from — and a hint that says less is recoverable, one that lies is not.
     # The running-jobs sentence never offered `q` and is byte-identical to what shipped.
-    def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false) : String
+    def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false,
+                           notes_conflict : Bool = false) : String
       base = "press ^D (or ^C) again to quit"
+      # Ahead of the jobs clause, because this is the one that loses something UNRECOVERABLE.
+      # A stopped job can be started again; the writeup cannot be typed again. The double-press
+      # arm is the quit path that never raises a modal, so this hint is the operator's only
+      # warning on it.
+      return "an Issues writeup was rewritten by another session — quitting DISCARDS yours; #{base}" if notes_conflict
       return "#{job_count(count)} running (#{active}) — #{base} and stop #{count == 1 ? "it" : "them"}" if active
       back_key ? "#{base} · q: back to projects" : base
     end
@@ -2629,9 +2663,18 @@ module Gori::Tui
     # Pure + class-level for the same reason the exit prompts above are: the Runner needs a
     # live tty. `@overlay.confirm?` deliberately stays at the chord's call site — "don't stack a
     # second modal on the one already asking this question" is dispatch, not policy.
-    def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool) : QuitAction
+    def self.quit_decision(confirm_setting : Bool, *, chord : Bool, armed : Bool,
+                           notes_conflict : Bool = false) : QuitAction
       return QuitAction::Confirm if confirm_setting
-      return QuitAction::Quit if !chord || armed
+      return QuitAction::Quit if armed # the arm hint already said what this press costs
+      # The palette's "Quit gori" verb is not a chord, so it never arms — with the confirm
+      # setting off it is the ONE quit that tears down having shown nothing at all. That is
+      # fine for a quit that only drops a session; it is not fine for one that drops a writeup
+      # a peer's rewrite has already made unsaveable. "Confirm before quit" is a preference
+      # about a routine action, and this stops being one — the same reason `esc` refuses once
+      # before it will overwrite.
+      return QuitAction::Confirm if notes_conflict && !chord
+      return QuitAction::Quit if !chord
       QuitAction::Arm
     end
 

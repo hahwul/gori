@@ -209,3 +209,90 @@ describe "Gori::OpenLock resilience" do
     end
   end
 end
+
+# `OpenLock.guarded?` — the fast probe in front of `try_shared`, for the one caller that can offer
+# a retry more cheaply than it can afford to wait.
+#
+# `try_shared` spends CONTENTION_BUDGET (~2s) before refusing, which is right for a one-shot CLI
+# or an MCP tool: nobody is there to try again, so waiting beats failing. The TUI picker is the
+# opposite. It is still the last frame on the terminal with nothing rendering a spinner over it,
+# so those two seconds are an Enter that did nothing — measured at 2.06s on the CLI path, and
+# ending in a message telling an operator to "try again in a moment" with their finger already on
+# the key that would.
+describe "Gori::OpenLock.guarded?" do
+  it "is true only while a destructive operation actually holds the lock" do
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close # materialize the lock file
+      Gori::OpenLock.guarded?(project.db_path).should be_false
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        Gori::OpenLock.guarded?(project.db_path).should be_true
+      ensure
+        guard.close
+      end
+      Gori::OpenLock.guarded?(project.db_path).should be_false
+    end
+  end
+
+  it "answers immediately rather than spending the budget to say so" do
+    # The whole point: this is what replaces the dead press.
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        t0 = Time.instant
+        Gori::OpenLock.guarded?(project.db_path).should be_true
+        (Time.instant - t0).should be < 200.milliseconds
+      ensure
+        guard.close
+      end
+    end
+  end
+
+  it "is FALSE for a database merely OPEN elsewhere, which must still open here" do
+    # Shared locks stack. Reading a live capture's project is the normal case and has nothing to
+    # do with a compact — answering true here would refuse every second window.
+    with_project do |_registry, project|
+      store = Gori::Store.open(project.db_path)
+      begin
+        # `in_use?` and `guarded?` ask DIFFERENT questions, and this is the case that separates
+        # them: someone has it open (so a delete must refuse), but nothing destructive is
+        # running (so an open must proceed without waiting).
+        Gori::OpenLock.in_use?(project.db_path).should be_true
+        Gori::OpenLock.guarded?(project.db_path).should be_false
+      ensure
+        store.close
+      end
+    end
+  end
+
+  it "is FALSE on every uncertainty, so it can only ever skip a wait — never a working open" do
+    # A wrong `true` would refuse an open `try_shared` would have completed, which is strictly
+    # worse than the wait it saves. No lock file yet, an in-memory database, a path whose
+    # directory does not exist: all "not guarded", and the caller goes on to do the careful thing.
+    with_project do |_registry, project|
+      Gori::OpenLock.guarded?(project.db_path).should be_false # nothing has ever opened it
+    end
+    Gori::OpenLock.guarded?(":memory:").should be_false
+    Gori::OpenLock.guarded?("/nonexistent-dir-#{Random::Secure.hex(4)}/gori.db").should be_false
+  end
+
+  it "shares its sentence with the raise, so the two cannot describe the state differently" do
+    # The picker refuses without ever calling `try_shared`, so the wording has one source or it
+    # drifts. It must also carry the path AS SPELLED, which is what `Project#open_failure_reason`
+    # keys on to pass a reason through verbatim.
+    msg = Gori::OpenLock.guarded_message("/tmp/whatever/gori.db")
+    msg.should contain("/tmp/whatever/gori.db")
+    msg.should contain("compacting or deleting")
+    with_project do |_registry, project|
+      Gori::Store.open(project.db_path).close
+      guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!
+      begin
+        ex = expect_raises(Gori::Error) { Gori::Store.open(project.db_path) }
+        ex.message.to_s.should eq(Gori::OpenLock.guarded_message(project.db_path))
+      ensure
+        guard.close
+      end
+    end
+  end
+end

@@ -431,6 +431,170 @@ describe "the Issues notes lost-update refusal" do
   end
 end
 
+# A guard on this pane can only ever be an interruption. The operator is the one who knows
+# whether their paragraph or the peer's is the one worth keeping, and the first cut of this
+# refusal gave them no way to say so: `esc` refused forever, `^W` took the peer's text, a tab
+# switch refused again, and quitting dropped the buffer with a status line nobody could read
+# because the process was already tearing down. Every door out of the room lost the writeup.
+describe "the Issues notes refusal, once the operator has read it" do
+  it "lets a second `esc` write, and the text that lands is the operator's" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS")
+      esc = -> { ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) }
+      esc.call
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS") # first esc refuses, as before
+      host.last_status.should contain("esc again overwrites theirs")
+      esc.call
+      store.get_issue(id).not_nil!.notes.should eq("mine original")
+      ctrl.view.notes_insert_mode?.should be_false # a real save, so INS closes
+    end
+  end
+
+  it "will not carry an arm across a peer's SECOND write" do
+    # The arm is granted against a version the operator was shown. A peer writing again between
+    # the two presses means the text on the other side is one nobody has seen, so the second
+    # `esc` has to refuse afresh rather than spend an arm earned for different bytes.
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS")
+      esc = -> { ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) }
+      esc.call # armed against "THEIRS"
+      store.update_issue(id, notes: "THEIRS, REVISED")
+      esc.call
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS, REVISED") # refused again
+      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+      esc.call # now armed against what is really there
+      store.get_issue(id).not_nil!.notes.should eq("mine original")
+    end
+  end
+
+  it "cannot be pre-armed by an esc that had nothing to refuse" do
+    # An ordinary save leaves no arm behind, so a later conflict gets its refusal rather than
+    # being spent by a keypress from before it existed.
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "one ")
+      esc = -> { ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) }
+      esc.call # a clean save; nothing to arm against
+      store.get_issue(id).not_nil!.notes.should eq("one original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "two ")
+      store.update_issue(id, notes: "THEIRS")
+      esc.call
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS") # refused, not silently overwritten
+      host.last_status.should contain("esc again overwrites theirs")
+    end
+  end
+
+  it "drops the arm when ^W answers the refusal instead" do
+    # `^W` is the other answer. Leaving the arm behind would make the NEXT conflict on this
+    # issue skip its refusal and write over a peer with no warning at all.
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)) # arm
+      ctrl.on_external_change                                                      # the tick, so `^W` restores the row as it now stands
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl))
+      ctrl.view.notes_copy_all.should eq("THEIRS")
+      # A fresh edit that collides again must be refused, not written.
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "second ")
+      store.update_issue(id, notes: "THEIRS AGAIN")
+      ctrl.handle_detail_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape))
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS AGAIN")
+      host.statuses.count(&.includes?("esc again overwrites theirs")).should eq(2)
+    end
+  end
+
+  it "points a refused tab switch at the key that resolves it" do
+    with_issues_controller do |ctrl, host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.commit
+      host.last_status.should contain("esc in the notes pane overwrites theirs")
+      # And a tab switch does NOT become a save by being repeated — only `esc` is the save key.
+      ctrl.commit
+      store.get_issue(id).not_nil!.notes.should eq("THEIRS")
+    end
+  end
+
+  it "reports the conflict to the exit prompts, which is where quitting can still be undone" do
+    with_issues_controller do |ctrl, _host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.notes_conflict_pending?.should be_false
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      ctrl.notes_conflict_pending?.should be_false # typed, but nobody else has written
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.notes_conflict_pending?.should be_true
+    end
+  end
+
+  it "does not blame a peer for a buffer the INS gate drops anyway" do
+    # `commit` only saves while the pane is in INS, so a buffer the NOR/INS chip stepped out of
+    # is dropped at quit whether or not anybody else wrote — by that gate, not by this conflict.
+    # A prompt saying "another session rewrote them" over it would send the operator hunting a
+    # collision that is not the reason they lost the text.
+    with_issues_controller do |ctrl, _host, store|
+      id = open_issue(ctrl, store, notes: "original")
+      ctrl.view.enter_notes_insert!
+      type(ctrl, "mine ")
+      ctrl.view.exit_notes_insert!
+      store.update_issue(id, notes: "THEIRS")
+      ctrl.view.notes_dirty?.should be_true # there IS unsaved text
+      ctrl.notes_conflict_pending?.should be_false
+    end
+  end
+end
+
+# `commit_pending_edits` runs INSIDE the accept block of both exit paths and is followed by the
+# loop breaking, so a status line posted from it is never rendered. The confirm is the last
+# moment the operator can still choose, so that is where the fact has to be.
+describe "the exit prompts when an Issues writeup is in conflict" do
+  it "names it in the leave-project confirm" do
+    plain = Gori::Tui::Runner.leave_confirm_message(nil, 0)
+    plain.should_not contain("writeup")
+    warned = Gori::Tui::Runner.leave_confirm_message(nil, 0, true)
+    warned.should contain("DISCARDS yours")
+    warned.should contain("esc in the notes pane")
+  end
+
+  it "names it in the quit confirm, and stops promising the edits are committed" do
+    # The parenthetical was the specific lie: it told the operator their pending edits were
+    # safe on the one path where one of them was about to be dropped.
+    Gori::Tui::Runner.quit_confirm_message(nil, 0).should contain("pending edits are committed")
+    warned = Gori::Tui::Runner.quit_confirm_message(nil, 0, true)
+    warned.should_not contain("pending edits are committed")
+    warned.should contain("DISCARDS yours")
+  end
+
+  it "names it in the double-press arm, ahead of the jobs clause" do
+    # The ^C/^D arm never raises a modal, so this hint is the whole warning on that path — and
+    # it outranks the jobs sentence because a stopped job can be restarted and a writeup cannot
+    # be retyped.
+    Gori::Tui::Runner.quit_arm_hint(nil, 0).should_not contain("writeup")
+    hint = Gori::Tui::Runner.quit_arm_hint("fuzz: acme", 1, notes_conflict: true)
+    hint.should contain("DISCARDS yours")
+    hint.should contain("press ^D")
+  end
+
+  it "keeps both clauses when jobs are running too" do
+    msg = Gori::Tui::Runner.quit_confirm_message("fuzz: acme", 1, true)
+    msg.should contain("1 job still running")
+    msg.should contain("DISCARDS yours")
+  end
+end
+
 describe "the ui-state row a second window must not clobber" do
   it "is gated, and the bookkeeping is inside the gate" do
     # One `ui_state` row per project, two live instances writing it: `get_current_context`
@@ -525,6 +689,48 @@ describe "intercept in a VIEW-ONLY window" do
       ctrl.intercept_toggle
       session.interceptor.enabled?.should be_true
       host.last_status.should contain("intercept ON")
+    end
+  end
+end
+
+# The quit POLICY, which decides whether an exit prompt is shown at all. Adding the conflict to
+# the prompts is worth nothing on the path that shows no prompt.
+describe "Runner.quit_decision with an Issues writeup in conflict" do
+  it "asks on the palette quit, which otherwise tears down having shown nothing" do
+    # `chord: false` is the palette's "Quit gori" verb: it can never arm, so with the confirm
+    # setting off it goes straight to `finish_quit` — the one quit that would drop the writeup
+    # with no modal, no hint and a status line that is never rendered.
+    Gori::Tui::Runner.quit_decision(false, chord: false, armed: false).quit?.should be_true
+    Gori::Tui::Runner.quit_decision(false, chord: false, armed: false,
+      notes_conflict: true).confirm?.should be_true
+  end
+
+  it "leaves the chord's arm alone, because the hint is already the warning" do
+    # First ^C/^D still arms (and `quit_arm_hint` names the conflict); the second press is the
+    # operator answering it, so re-confirming there would be asking twice for one decision.
+    Gori::Tui::Runner.quit_decision(false, chord: true, armed: false,
+      notes_conflict: true).arm?.should be_true
+    Gori::Tui::Runner.quit_decision(false, chord: true, armed: true,
+      notes_conflict: true).quit?.should be_true
+  end
+
+  it "changes nothing when the confirm setting is already on" do
+    Gori::Tui::Runner.quit_decision(true, chord: false, armed: false).confirm?.should be_true
+    Gori::Tui::Runner.quit_decision(true, chord: false, armed: false,
+      notes_conflict: true).confirm?.should be_true
+  end
+
+  it "changes nothing at all without a conflict" do
+    # The default must be byte-for-byte the policy that shipped: this is a quit path, and a
+    # regression here is an operator who cannot leave.
+    {true, false}.each do |setting|
+      {true, false}.each do |chord|
+        {true, false}.each do |armed|
+          Gori::Tui::Runner.quit_decision(setting, chord: chord, armed: armed)
+            .should eq(Gori::Tui::Runner.quit_decision(setting, chord: chord, armed: armed,
+              notes_conflict: false))
+        end
+      end
     end
   end
 end

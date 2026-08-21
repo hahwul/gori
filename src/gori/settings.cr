@@ -100,6 +100,12 @@ module Gori
     def self.load : Nil
       @@loaded_raw = nil
       @@load_partial = false
+      # A full load rewrites every section's class properties, including the two
+      # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
+      # these bytes" from outliving the memory it was an assertion about — a load that ends in
+      # `@@load_partial` leaves sections at their factory DEFAULTS, and a stale cache entry
+      # would then let the next tick skip the fold that repairs one.
+      forget_reloaded_sections
       @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
       raw = load_raw
       return unless raw # no file yet / unreadable — first run, keep defaults
@@ -294,22 +300,61 @@ module Gori
     # section that is not a JSON object, leaves memory exactly as it was and the mutation runs
     # against what this process already believed — the behaviour that shipped, never worse.
     #
-    # NOT free: it reads the file and re-serializes the settings twice (once to re-base, once in
-    # `save`). That is nothing on an operator action, so this belongs on one of those or on a slow
-    # tick, not on a render frame. And the CALLER still owns its compiled view (`Rules#refresh`,
-    # `Colormarker#refresh`) — including on the paths where the CRUD answers false, since a
-    # reload can have changed the list even when the write did not commit.
+    # NOT free when it actually folds: three JSON parses and a full re-serialization of the
+    # settings, all of it on the calling fiber. Measured on the TUI's `data_version` tick, which
+    # is where the two live callers sit — 1.9 ms at 10 global rules per section, 13 ms at 100,
+    # 63 ms at 500. The tick runs ~1.3×/sec for as long as capture is committing flows, and 63 ms
+    # of it is a visible stutter in a UI that is also drawing frames and taking keys.
+    #
+    # Which is why the file's own bytes gate the work. The overwhelmingly common tick is one
+    # where nobody touched settings.json at all, and for that one there is nothing to fold: the
+    # class properties already hold what the file says. So a repeat of the same bytes costs the
+    # read and stops — and a read is what stays, deliberately, rather than an mtime or size
+    # check. Both of those miss a same-second rewrite of the same length, which is exactly the
+    # shape of a peer toggling a rule's `enabled` flag, and being fast is worth nothing if the
+    # answer is stale.
+    #
+    # Keyed by PATH as well as content: `$GORI_HOME` moves between spec examples (and between a
+    # `--db` open and the picker), and two different homes whose settings.json happen to agree
+    # byte for byte must not let one seed the other's cache.
+    #
+    # The cache is only written after a fold that reached the end, so a parse that bailed out
+    # halfway is retried on the next tick rather than remembered as done.
+    #
+    # And the CALLER still owns its compiled view (`Rules#refresh`, `Colormarker#refresh`) —
+    # including on the paths where the CRUD answers false, since a reload can have changed the
+    # list even when the write did not commit, and including when this returns early: "the file
+    # did not move" is not "your snapshot is current", because a project-scope rule lives in the
+    # store and never touches this file.
+    @@reloaded_from : Hash(String, {String, String}) = {} of String => {String, String}
+
     protected def self.reload_section(key : String, & : JSON::Any -> Nil) : Nil
       raw = load_raw
       return unless raw
+      here = {path, raw}
+      return if @@reloaded_from[key]? == here
       root = JSON.parse(raw).as_h?
       return unless root
       node = root[key]?
       return unless node && node.as_h?
       yield node
       rebase_section(key)
+      @@reloaded_from[key] = here
     rescue
       nil
+    end
+
+    # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.
+    #
+    # For a caller that changed the class properties BEHIND the file — `load` re-reading
+    # everything, and a spec that assigns `rewriter_rules=` directly. Without it the cache would
+    # claim those bytes were already folded and skip a fold memory genuinely needs.
+    #
+    # Public rather than protected because the callers that need it most are outside this module:
+    # a spec fixture that hands the globals back on the way out is mutating exactly the state the
+    # cache is an assertion about, and it has no other way to say so.
+    def self.forget_reloaded_sections : Nil
+      @@reloaded_from.clear
     end
 
     # Re-base the merge on ONE section as it now stands in memory. Called by `reload_section`,

@@ -1108,13 +1108,25 @@ module Gori::Tui
     # save on an unreadable row would strand the operator's text with no way out, and the write
     # underneath is a plain UPDATE that will fail on its own if the store is really gone.
     def notes_conflict?(store : Store) : Bool
-      return false unless issue = @detail
-      return false unless notes_dirty? # nothing local to lose
+      !notes_conflict_key(store).nil?
+    end
+
+    # The PEER'S text (as a `notes_key`) when saving this buffer would overwrite it, else nil.
+    #
+    # The value, not just a flag, because the refusal it feeds is one the operator can decide to
+    # push through — and "push through" has to mean "through the version I was shown". Arming an
+    # overwrite against a value latches it against THAT value, so a peer who writes again between
+    # the refusal and the second `esc` gets a fresh refusal rather than being silently clobbered
+    # by an arm that was granted for text nobody has now seen.
+    def notes_conflict_key(store : Store) : String?
+      return nil unless issue = @detail
+      return nil unless notes_dirty? # nothing local to lose
       stored = store.get_issue(issue.id)
-      return false unless stored # deleted by a peer — a different case, and `update_issue` reports it
-      notes_key(stored.notes) != @notes_base
+      return nil unless stored # deleted by a peer — a different case, and `update_issue` reports it
+      key = notes_key(stored.notes)
+      key == @notes_base ? nil : key
     rescue DB::Error | SQLite3::Exception
-      false
+      nil
     end
 
     private def links_visible_rows : Int32
