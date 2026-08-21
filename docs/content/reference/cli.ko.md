@@ -94,7 +94,7 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`). 전역 플래그는 **동사 뒤에** 옵니다. `gori run rewriter rm 1 --project=x`는 되지만 `gori run rewriter --project=x rm 1`은 조용히 목록만 찍는 대신 사용법 오류로 거부됩니다.
 
-읽기 서브커맨드는 스토어를 직접 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다.
+읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다.
 
 #### 출력 계약 {#output-contract}
 

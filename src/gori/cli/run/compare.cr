@@ -45,7 +45,7 @@ module Gori
         id_b = positional[1].to_i64? || abort("gori run compare: invalid flow id '#{positional[1]}'")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         detail_a, detail_b = begin
           {store.get_flow(id_a), store.get_flow(id_b)}
         ensure

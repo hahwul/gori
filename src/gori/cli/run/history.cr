@@ -361,7 +361,9 @@ module Gori
         # that reason, and this one has nothing to close).
         Run.refuse_unknown_query_fields("history", query, lenient)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        # `body:` drains FTS, which is a write. Everything else is a read (#752).
+        store = open_store(resolve_read_project(project_name, db_path),
+          read_only: !query_uses_fts?(query))
         begin
           # The scope lens, opt-in and independent of the persisted ⇧S flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
@@ -509,7 +511,7 @@ module Gori
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
         # has already loaded the BLOBs we need. A WebSocket flow also carries a ws_messages
         # log — fetch it now while the store is open (`show_ws_messages`).
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         detail, ws_msgs = begin
           d = store.get_flow(id)
           {d, show_ws_messages(store, d)}

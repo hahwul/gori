@@ -144,7 +144,7 @@ module Gori
         refuse_list_leftovers(leftover, "oast providers",
           "add, update, enable, disable, delete/rm, list")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         configs = begin
           Oast.provider_configs(store)
         ensure
@@ -372,7 +372,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "oast", "list, resume, release")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         sessions = begin
           Oast::Sessions.list(store)
         ensure

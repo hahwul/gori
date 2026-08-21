@@ -373,7 +373,7 @@ module Gori
         elsif rid = repeater_id
           fuzz_source_repeater(rid, project_name, db_path)
         elsif id = flow_id
-          store = open_store(resolve_read_project(project_name, db_path))
+          store = open_store(resolve_read_project(project_name, db_path), read_only: true)
           detail = begin
             store.get_flow(id)
           ensure
@@ -416,7 +416,7 @@ module Gori
       # bytes are an `Upgrade:` handshake for a framed exchange the fuzzer cannot drive.
       private def self.fuzz_source_repeater(id : Int64, project_name : String?,
                                             db_path : String?) : {String, String?, Bool, Bool, String?}
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         rec = begin
           store.get_repeater(id)
         ensure
@@ -662,7 +662,7 @@ module Gori
       end
 
       private def self.hydrate_project_env(project_name : String?, db_path : String?) : Nil
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         store.close
       end
     end

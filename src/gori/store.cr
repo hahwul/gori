@@ -252,13 +252,22 @@ module Gori
     #
     # `read_only` opens a store that never writes: no writer fiber, and so no background FTS
     # indexer either. SQLite allows exactly one writer, so a second gori process that opens the
-    # same project only to READ it (`gori mcp --read-only`, a count for a delete preview) should
-    # not be contending for that slot at all — see the note on @read_only in #initialize (#752).
+    # same project only to READ it (`gori mcp --read-only`, `gori run history`, a count for a
+    # delete preview) should not be contending for that slot at all — see the note on
+    # @read_only in #initialize (#752).
+    #
+    # `background_index` is the idle FTS drain on the writer fiber. The capture-lock holder
+    # (the TUI that is actually proxying) should leave it on: that is the process that should
+    # keep the index current. Every other long-lived opener — `gori mcp` even with actions
+    # enabled, a view-only second TUI — passes false, because an idle tick that takes the
+    # write lock is the #752 two-writer condition, and those surfaces already drain on demand
+    # (`index_pending!` before a `body:` query). Ignored when `read_only` (there is no writer).
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
                   probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT,
                   authorize_events : Channel(FlowEvent)? = nil,
-                  read_only : Bool = false) : Store
+                  read_only : Bool = false,
+                  background_index : Bool = true) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -322,6 +331,7 @@ module Gori
         harden_permissions(path)
         configure_connections(db)
         Schema.migrate!(db, read_only: read_only)
+        apply_query_only(db) if read_only
       rescue ex
         db.close rescue nil
         open_lock.try(&.close)
@@ -329,7 +339,8 @@ module Gori
       end
       # Past this point the Store owns the pool and closes it in #close.
       new(db, events, probe_events, retention_flows, authorize_events: authorize_events,
-        open_lock: open_lock, read_only: read_only)
+        open_lock: open_lock, read_only: read_only,
+        background_index: background_index && !read_only)
     end
 
     # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
@@ -350,7 +361,7 @@ module Gori
     #
     # `Store::Compact` deliberately does NOT come through here: it opens its own handle
     # (`compact_url`), which is also why its `VACUUM` never runs against an mmap'd file.
-    private def self.configure_connections(db : DB::Database) : Nil
+    private def self.configure_connections(db : DB::Database, *, query_only : Bool = false) : Nil
       db.setup_connection do |conn|
         next unless sqlite = conn.as?(SQLite3::Connection)
         # Byte-safe REGEXP before any query runs, so a binary body can't crash a
@@ -360,6 +371,20 @@ module Gori
         # mean what the in-memory lens means (see ScopeMatch).
         sqlite.gori_install_scope_match
         sqlite.exec("PRAGMA mmap_size = #{MMAP_SIZE}")
+        # After migrate. A read-only store must not be able to write even if a caller forgets
+        # the @writes-closed degradation — SQLite refuses the statement instead of taking
+        # the WAL write lock (#752).
+        sqlite.exec("PRAGMA query_only = ON") if query_only
+      end
+    end
+
+    # Pin `PRAGMA query_only` on a pool that has already migrated. `setup_connection` REPLACES
+    # its block, so this re-installs the full connection setup (regexp, mmap, query_only) for
+    # connections checked out later, and stamps the pragma on the one migrate already used.
+    private def self.apply_query_only(db : DB::Database) : Nil
+      configure_connections(db, query_only: true)
+      db.using_connection do |conn|
+        conn.exec("PRAGMA query_only = ON")
       end
     end
 
@@ -393,6 +418,7 @@ module Gori
       before = File.info?(path)
       db = DB.open("sqlite3:#{path}?busy_timeout=2000")
       begin
+        db.exec("PRAGMA query_only = ON")
         db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
       ensure
         db.close
@@ -501,7 +527,8 @@ module Gori
                    @prune_interval : Int32 = PRUNE_INTERVAL,
                    @events_retention : Int32 = EVENTS_RETENTION,
                    @open_lock : OpenLock? = nil,
-                   @read_only : Bool = false)
+                   @read_only : Bool = false,
+                   @background_index : Bool = true)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
       @closed = false # see #close: a second drain would park forever on @done
@@ -561,6 +588,14 @@ module Gori
     # `body:` query will under-report until whoever owns the writer catches up.
     def read_only? : Bool
       @read_only
+    end
+
+    # Stop the idle FTS drain on this store's writer. Explicit `index_pending!` / `flush`
+    # still run: those are ops on `@writes`, not the timeout tick. Called by a view-only
+    # Session once it fails to take the capture lock — the capturer beside it already
+    # drains, and a second idle writer is the #752 contention.
+    def pause_background_index : Nil
+      @background_index = false
     end
 
     # Monotonic counter of committed probe_issues writes. Single-threaded fiber
@@ -1360,6 +1395,10 @@ module Gori
     # backlog drains in the gaps — which is what `fts_backlog` exists to make visible.
     private def await_op : WriteOp?
       loop do
+        # No idle drain: just wait for an op. MCP and a view-only TUI reach here so they
+        # do not take the WAL write lock every few milliseconds against a capturing peer
+        # (#752). `index_pending!` is still an op and still runs.
+        return @writes.receive unless @background_index
         tick = @fts_backlog_hint ? FTS_IDLE_TICK_FAST : FTS_IDLE_TICK_SLOW
         select
         when op = @writes.receive

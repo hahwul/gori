@@ -71,7 +71,7 @@ module Gori
         fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
         overrides = begin
-          store = open_store(resolve_read_project(project_name, db_path))
+          store = open_store(resolve_read_project(project_name, db_path), read_only: true)
           begin
             Gori::HostOverrides.load(store)
           ensure
@@ -153,7 +153,7 @@ module Gori
         parser.parse(args)
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           repeaters = store.repeaters_mcp
           if format == :json
@@ -555,7 +555,7 @@ module Gori
 
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         rec, host_overrides = begin
           {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
         ensure
@@ -665,7 +665,7 @@ module Gori
                                             evidence : Bool = false) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         out_messages = begin
           ws_out_messages(store, id, message_override, verbatim, evidence)
         ensure
@@ -1290,7 +1290,7 @@ module Gori
         # get_flow loads all the BLOBs, so the store can close before the send. Also
         # cheaply probe whether a repeater SESSION shares this id (get_repeater reads
         # no response BLOBs) — only when the flow exists — to warn about the ambiguity.
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         # HostOverrides.load snapshots rows into memory (connect_address never re-touches the
         # store), so it's safe to load here and use after the store closes.
         detail, session_collision, host_overrides = begin

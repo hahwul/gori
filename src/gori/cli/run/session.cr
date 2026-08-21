@@ -117,8 +117,9 @@ module Gori
       # The project's slot registry. Every subcommand here goes through it rather than
       # writing `Store::SESSION_SLOTS_KEY` by hand, so the single-baseline rule and the
       # serialization live in one place (`SessionSlots`) for all three surfaces.
-      private def self.session_slots(project_name : String?, db_path : String?) : {Store, Gori::SessionSlots}
-        store = open_store(resolve_read_project(project_name, db_path))
+      private def self.session_slots(project_name : String?, db_path : String?, *,
+                                     read_only : Bool = false) : {Store, Gori::SessionSlots}
+        store = open_store(resolve_read_project(project_name, db_path), read_only: read_only)
         {store, Gori::SessionSlots.load(store)}
       end
 
@@ -148,7 +149,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "session", "add, from-flow, edit, rm/delete, baseline, show, list")
 
-        store, slots = session_slots(project_name, db_path)
+        store, slots = session_slots(project_name, db_path, read_only: true)
         begin
           list = slots.slots
           if format == :json

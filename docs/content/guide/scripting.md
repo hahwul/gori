@@ -29,7 +29,7 @@ Each project is its own SQLite database. Read subcommands resolve one in this or
 
 `gori run capture` differs on one point: it **creates or reopens** its target, where reads require a project that already exists.
 
-Read subcommands never take the capture lock, so they are safe to run against a project a live TUI is capturing into — SQLite WAL keeps both readers and the writer happy.
+Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into — SQLite WAL keeps both readers and the writer happy. A `body:` query is the exception: answering it drains the search index, which is a write.
 
 ```bash
 gori run history --project my-engagement -q 'status:5xx'

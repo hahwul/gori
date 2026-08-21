@@ -48,7 +48,7 @@ module Gori
         refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         # Build the report while the store is open (markdown resolves linked-flow
         # evidence), then close BEFORE any file I/O so a write failure can't leak the
         # connection — and so the abort below runs after a clean close.
