@@ -48,7 +48,7 @@ private def capture_flow(store,
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: created_at, scheme: scheme, host: host, port: port, method: method,
     target: target, http_version: http_version, head: req_head.to_slice, body: req_body,
-    body_truncated: req_body_truncated, body_size: req_body_size))
+    body_truncated: req_body_truncated, body_size: req_body_size, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status, head: resp_head.to_slice, body: resp_body, reason: reason,
     content_type: content_type, duration_us: duration_us,
@@ -60,7 +60,7 @@ private def pending_flow(store) : Gori::Store::FlowDetail
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_780_000_000_000_000_i64, scheme: "https", host: "shop.test", port: 443,
     method: "GET", target: "/slow", http_version: "HTTP/1.1",
-    head: "GET /slow HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice, body: nil))
+    head: "GET /slow HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.get_flow(id).not_nil!
 end
 
@@ -72,7 +72,7 @@ private def refused_flow(store) : Gori::Store::FlowDetail
     created_at: 1_780_000_000_000_000_i64, scheme: "http", host: "shop.test", port: 80,
     method: "POST", target: "/clte", http_version: "HTTP/1.1",
     head: "POST /clte HTTP/1.1\r\nHost: shop.test\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice,
-    body: "5\r\nhello\r\n0\r\n\r\n".to_slice))
+    body: "5\r\nhello\r\n0\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
   # Built by the SAME producer the proxy uses, because the empty-vs-NULL distinction this
   # example turns on is exactly what a hand-rolled DTO would get wrong.
   store.update_response(Gori::FlowMapper.error_response(
@@ -86,7 +86,7 @@ private def aborted_flow(store) : Gori::Store::FlowDetail
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_780_000_000_000_000_i64, scheme: "https", host: "shop.test", port: 443,
     method: "GET", target: "/chunked", http_version: "HTTP/1.1",
-    head: "GET /chunked HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice))
+    head: "GET /chunked HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, reason: "OK", content_type: "text/plain",
     head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice,
@@ -450,7 +450,7 @@ describe Gori::Export::Har do
         created_at: 1_i64, scheme: "https", host: "shop.test", port: 443, method: "GET",
         target: "/pushed", http_version: "HTTP/2",
         head: "GET /pushed HTTP/2\r\nHost: shop.test\r\n\r\n".to_slice,
-        advisory: "server push: this request was invented by the origin"))
+        advisory: "server push: this request was invented by the origin", source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/2 200\r\nContent-Length: 0\r\n\r\n".to_slice,
         advisory: "server push: this request was invented by the origin"))

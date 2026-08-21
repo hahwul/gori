@@ -43,7 +43,7 @@ private def response_view(store, body : String) : Gori::Tui::HistoryView
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
     method: "GET", target: "/api", http_version: "HTTP/1.1",
-    head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+    head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200,
     head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,

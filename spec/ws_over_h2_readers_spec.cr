@@ -45,7 +45,7 @@ private def h2_ws_flow(store, frames : Array({String, Int32, Bytes}) = [] of {St
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_700_000_000_000_000_i64, scheme: "https", host: "ws.test", port: 443,
     method: "CONNECT", target: "/chat", http_version: "HTTP/2", head: head, body: nil,
-    h2_conn_id: 1_i64, h2_stream_id: 3_i64))
+    h2_conn_id: 1_i64, h2_stream_id: 3_i64, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status,
     head: HeadCodec.synth_response([{":status", status.to_s}]),
@@ -62,7 +62,7 @@ private def h1_ws_flow(store, frames : Array({String, Int32, Bytes}) = [] of {St
          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_700_000_000_000_000_i64, scheme: "https", host: "ws.test", port: 443,
-    method: "GET", target: "/chat", http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+    method: "GET", target: "/chat", http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status,
     head: "HTTP/1.1 #{status} #{status == 101 ? "Switching Protocols" : "Forbidden"}\r\n\r\n".to_slice,
@@ -88,7 +88,7 @@ private def plain_http_flow(store) : Gori::Store::FlowDetail
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_700_000_000_000_000_i64, scheme: "https", host: "api.test", port: 443,
     method: "GET", target: "/x", http_version: "HTTP/1.1",
-    head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil))
+    head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
     body: "hi".to_slice, content_type: "text/plain", duration_us: 1000_i64))

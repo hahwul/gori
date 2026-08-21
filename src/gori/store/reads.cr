@@ -7,7 +7,8 @@ module Gori
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
              request_size, response_size, state, duration_us, content_type,
-             short_circuited, advisory, request_content_type, connect_protocol
+             short_circuited, advisory, request_content_type, connect_protocol,
+             source, source_surface, source_ref
       FROM flows
       SQL
 
@@ -241,6 +242,7 @@ module Gori
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
                  short_circuited, advisory, request_content_type, connect_protocol,
+                 source, source_surface, source_ref,
                  http_version, request_head,
                  CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END,
                  response_head,
@@ -256,6 +258,7 @@ module Gori
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
                  short_circuited, advisory, request_content_type, connect_protocol,
+                 source, source_surface, source_ref,
                  http_version, request_head, request_body, response_head, response_body,
                  h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
                  sni

@@ -165,7 +165,7 @@ private def req_for(target : String, host = "acme.test")
   Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "http", host: host, port: 80,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil)
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 private def respond(store, id : Int64, status : Int32)
@@ -238,7 +238,7 @@ private def abandon_req(target : String) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil)
+    head: "GET #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 describe "Gori::Store#abandon_pending! and imported reference placeholders" do

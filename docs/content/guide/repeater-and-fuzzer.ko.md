@@ -119,7 +119,13 @@ gori run fuzz <flow-id> \
 
 소스는 캡처된 플로우(`--flow`), 저장된 HTTP 리피터 세션(`--repeater`), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다.
 
-워크벤치와 증거 저장소는 분리되어 있습니다. Repeater나 Fuzzer 전송은 기본적으로 History 플로우를 남기지 않습니다. `get_flow`·`compare`·다음 도구에 넘길 `flow_id`가 필요할 때는 명시적으로 뚫으세요. `gori run repeater send --record-history`는 전송을 플로우로 기록하고 그 id를 출력하며, `gori run fuzz --record-history=none|matched|all`은 전송한 각 요청+응답을 기록합니다(`matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한). 기본값은 워크벤치 전용으로 유지됩니다.
+**TUI의 Repeater 전송은 History에 기록됩니다.** 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends*에서 끌 수 있습니다. WebSocket 전송과 send-group은 기록되지 않으며(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다) 상태줄이 한 번 그렇게 알려 줍니다.
+
+나머지는 그대로 opt-in이고, 헤드리스 표면은 각자의 호출별 인자를 유지하므로 이 설정 때문에 스크립트 동작이 바뀌지 않습니다. `gori run repeater send --record-history`는 전송을 플로우로 기록하고 그 id를 출력하며(기본 off), `gori run fuzz --record-history=none|matched|all`은 전송한 각 요청+응답을 기록하고(`matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한), MCP `send_request`는 `record_history:false`를 넘기지 않는 한 기록합니다.
+
+기록된 플로우는 모두 출처를 말합니다 — History의 **SRC** 열, 그리고 쿼리의 `src:repeater` /
+`src:fuzzer` / `src:gori` — 그래서 재전송이 대상 클라이언트가 만든 트래픽으로 잘못 읽히지
+않습니다. [이 플로우는 어디서 왔나](/ko/guide/proxy/#flow-source)를 보세요.
 
 두 도구 모두, 기록된 플로우는 **와이어에 나간 그대로의 요청**입니다. 활성 세션 슬롯의 헤더 오버레이와 전송 시점에 치환된 `$NAME` 값이 그 안에 들어 있으므로, 그 플로우를 재전송·비교·스캔하면 조립 전 초안이나 템플릿이 아니라 실제 전송을 재현합니다. (Fuzzer의 결과 *행*은 여전히 렌더된 템플릿을 보여줍니다. "Repeater로 보내기"가 그 바이트로 탭을 시드하고, 슬롯은 전송할 때마다 적용되기 때문입니다.)
 

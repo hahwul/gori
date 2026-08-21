@@ -24,7 +24,7 @@ private def req_with_body(target : String, body : String?, method = "GET", ct : 
   Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, body: body.try(&.to_slice))
+    head: head.to_slice, body: body.try(&.to_slice), source: Gori::FlowSource::Kind::Proxy)
 end
 
 private def resp_with_body(id : Int64, body : String?, ct = "text/html", status = 200)
@@ -140,7 +140,7 @@ describe "contentless FTS (V24)" do
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/up", http_version: "HTTP/1.1",
         head: "POST /up HTTP/1.1\r\nHost: h.test\r\ncontent-encoding: gzip\r\n\r\n".to_slice,
-        body: "gzreqtoken".to_slice))
+        body: "gzreqtoken".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.flush
       body_hits(store, "gzreqtoken").should be_empty
     end

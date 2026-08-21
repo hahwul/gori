@@ -1,6 +1,7 @@
 require "./types"
 require "../flow_mapper"
 require "../env"
+require "../flow_source"
 require "../proxy/codec/http1"
 
 module Gori
@@ -28,8 +29,14 @@ module Gori
       # SILENT either, or a locked/read-only DB reports as a clean "recorded 0 flows" with no
       # reason (#749 review). The caller supplies the reporting, because the two surfaces rate-
       # limit differently: MCP counts against its per-job drain budget, the CLI says it once.
+      # `source` is a PARAMETER and not a hardcoded `Fuzzer`, because `Fuzz::Sender` is not the
+      # Fuzzer's sender — the Miner, the Sequencer, Authorize, Minimize and Probe's active rules
+      # all sweep through it (`Fuzz::Engine`). Hardcoding would make the first of those to learn
+      # recording label its flows `fuzzer`, which is the drift these columns exist to stop.
+      # `surface` names which of gori's three faces asked for the sweep.
       def record(store : Store, r : Result, *, scheme : String, host : String, port : Int32,
-                 http2 : Bool, &on_error : Exception -> _) : Int64?
+                 http2 : Bool, source : FlowSource::Kind, surface : FlowSource::Surface,
+                 source_ref : String? = nil, &on_error : Exception -> _) : Int64?
         # `wire` FIRST: `request` is the rendered template, and the send seam rewrote it — the
         # `$NAME` pass and the active session slot's header overlay both run below the matcher
         # (`Fuzz::Sender#send`). Recording the template wrote flows without the identity the
@@ -45,7 +52,8 @@ module Gori
           scheme: scheme, host: host, port: port,
           method: method, target: target,
           http_version: http2 ? "HTTP/2" : version,
-          head: head, body: body, body_size: body.try(&.size.to_i64)))
+          head: head, body: body, body_size: body.try(&.size.to_i64),
+          source: source, source_surface: surface, source_ref: source_ref))
         # A store that ROLLED BACK reports 0, it does not raise — the commonest failure here
         # (busy/locked/closed) and, until this was reported, the silent one: every result
         # yielded nil and the run printed "recorded 0 flows" with no reason anywhere.

@@ -37,7 +37,8 @@ end
 # marks it as answered by gori.
 private def seed(store : Gori::Store, method : String = "GET", target : String = "/admin",
                  host : String = "acme.test", complete : Bool = true,
-                 short_circuited : Bool = false, cookie : Bool = true) : Int64
+                 short_circuited : Bool = false, cookie : Bool = true,
+                 source : Gori::FlowSource::Kind = Gori::FlowSource::Kind::Proxy) : Int64
   head = String.build do |s|
     s << method << ' ' << target << " HTTP/1.1\r\nHost: " << host << "\r\n"
     s << "Cookie: session=ADMIN\r\n" if cookie
@@ -46,7 +47,7 @@ private def seed(store : Gori::Store, method : String = "GET", target : String =
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: host, port: 443,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, short_circuited: short_circuited))
+    head: head.to_slice, short_circuited: short_circuited, source: source))
   if complete
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
@@ -87,7 +88,7 @@ private def pseudo_header_seed(store : Gori::Store) : Int64
   head = ":method: GET\r\n:path: /admin\r\n:authority: acme.test\r\ncookie: session=ADMIN\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
-    method: "GET", target: "/admin", http_version: "HTTP/1.1", head: head.to_slice))
+    method: "GET", target: "/admin", http_version: "HTTP/1.1", head: head.to_slice, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
     body: "ok".to_slice, duration_us: 1_000_i64))
@@ -571,7 +572,7 @@ private def seed_dirty_authz_flow(store, needle : String) : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: "/admin", http_version: "HTTP/1.1",
-    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\nCookie: session=ADMIN\r\n\r\n".to_slice))
+    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\nCookie: session=ADMIN\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200,
     head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
@@ -625,6 +626,65 @@ describe "Authorize::Plan — a body: selection whose FTS drain did not finish" 
         plan = Plan.build(options(store, query: "host:acme.test"), ungated_outbound)
         plan.targets.map(&.row.id).should eq([id])
       end
+    end
+  end
+end
+
+describe "Gori::Authorize::Passive provenance" do
+  # Passive replay follows the BROWSER. Since the Repeater records its sends by default, a flow
+  # gori itself put on the wire now arrives on the same live feed — and replaying it fans one
+  # `^R` out into a shadow request per identity while telling the operator nothing they did not
+  # just ask for. `AuthorizeController`'s watcher comment used to argue a self-loop was
+  # structurally impossible; the `source` column is the explicit marker it said would be needed.
+  it "declines a flow gori sent, by name, on the unattended path" do
+    with_store do |store|
+      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      sent_by_gori = store.get_flow(seed(store, source: Gori::FlowSource::Kind::Repeater)).not_nil!
+      Gori::Authorize::Passive.passive_skip_reason(sent_by_gori, idents).should eq(:gori_originated)
+      Gori::Authorize::Passive.reason_label(:gori_originated).should eq("sent by gori, not the browser")
+    end
+  end
+
+  it "still replays what the browser produced, and what somebody else captured" do
+    with_store do |store|
+      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      captured = store.get_flow(seed(store, source: Gori::FlowSource::Kind::Proxy)).not_nil!
+      Gori::Authorize::Passive.passive_skip_reason(captured, idents).should be_nil
+      # An import is not gori's traffic: it describes a real endpoint somebody captured, and
+      # replaying it is exactly what an operator handed a HAR wants.
+      imported = store.get_flow(seed(store, target: "/orders",
+        source: Gori::FlowSource::Kind::Import)).not_nil!
+      Gori::Authorize::Passive.passive_skip_reason(imported, idents).should be_nil
+    end
+  end
+
+  it "replays a flow gori sent when a HUMAN named it" do
+    # The refusal is about UNATTENDED fan-out, not about the bytes. Every explicit path — the
+    # manual queue, `gori run authorize 42`, MCP `authorize_start{flow_ids}` — asks
+    # `skip_reason` / `manual_skip_reason`, neither of which consults provenance.
+    with_store do |store|
+      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      id = seed(store, source: Gori::FlowSource::Kind::Repeater)
+      detail = store.get_flow(id).not_nil!
+      Gori::Authorize::Passive.skip_reason(detail, idents).should be_nil
+      Gori::Authorize::Passive.manual_skip_reason(detail, idents).should be_nil
+      plan = Plan.build(options(store, flow_ids: [id]), ungated_outbound)
+      plan.targets.map(&.row.id).should eq([id])
+    end
+  end
+
+  it "leaves a pre-provenance flow replayable" do
+    # Those rows are overwhelmingly proxy captures — nothing else recorded by default when they
+    # were written — so reading "not recorded" as "gori's own" would switch passive replay off
+    # for every project captured with an older gori.
+    with_store do |store|
+      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      detail = store.get_flow(seed(store)).not_nil!
+      row = detail.row
+      legacy = Gori::Store::FlowRow.new(row.id, row.created_at, row.scheme, row.method, row.host,
+        row.port, row.target, row.status, row.size, row.state, row.response_size,
+        row.duration_us, row.content_type)
+      Gori::Authorize::Passive.gori_originated?(legacy).should be_false
     end
   end
 end

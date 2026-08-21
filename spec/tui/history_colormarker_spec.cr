@@ -21,7 +21,7 @@ private def add_flow(store, method = "GET", target = "/search", status : Int32? 
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\nbody".to_slice,

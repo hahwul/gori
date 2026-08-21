@@ -434,7 +434,8 @@ Preferences → **General** → **General**:
 {
   "general": {
     "clipboard_osc52": true,
-    "confirm_quit": false
+    "confirm_quit": false,
+    "repeater_record_history": true
   }
 }
 ```
@@ -443,6 +444,7 @@ Preferences → **General** → **General**:
 |-----|------|---------|-------------|
 | `clipboard_osc52` | bool | `true` | Copy through the OSC 52 terminal escape, so `y` reaches your local clipboard over SSH |
 | `confirm_quit` | bool | `false` | Ask before quitting |
+| `repeater_record_history` | bool | `true` | Write every **TUI** Repeater send into History as a flow (SRC column: `RPTR`). `gori run repeater send --record-history` and MCP `send_request{record_history}` keep their own per-call arguments |
 
 ### notifications
 

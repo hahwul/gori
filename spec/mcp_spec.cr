@@ -45,7 +45,7 @@ private def seed_flow(store, host, method, target, status = nil,
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: host, port: 443,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: resp_head.to_slice, body: resp_body, content_type: content_type))
@@ -989,7 +989,7 @@ describe Gori::MCP::Server do
           id = store.insert_flow(Gori::Store::CapturedRequest.new(
             created_at: 1_i64, scheme: scheme, host: "api.test", port: scheme == "https" ? 443 : 80,
             method: "GET", target: "/x", http_version: ver,
-            head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil))
+            head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
           store.update_response(Gori::Store::CapturedResponse.new(
             flow_id: id, status: status, head: "HTTP/1.1 #{status}\r\n\r\n".to_slice, body: nil))
         end
@@ -1019,7 +1019,7 @@ describe Gori::MCP::Server do
           id = store.insert_flow(Gori::Store::CapturedRequest.new(
             created_at: 1_i64, scheme: "https", host: "shop.demo.test", port: 443,
             method: "GET", target: target, http_version: "HTTP/1.1",
-            head: "GET #{target} HTTP/1.1\r\nHost: shop.demo.test\r\n\r\n".to_slice, body: nil))
+            head: "GET #{target} HTTP/1.1\r\nHost: shop.demo.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
           store.update_response(Gori::Store::CapturedResponse.new(
             flow_id: id, status: status, head: "HTTP/1.1 #{status}\r\n\r\n".to_slice, body: nil))
         end
@@ -1053,7 +1053,7 @@ describe Gori::MCP::Server do
           store.insert_flow(Gori::Store::CapturedRequest.new(
             created_at: 1_i64, scheme: scheme, host: "api.test", port: port,
             method: "GET", target: target, http_version: "HTTP/1.1",
-            head: "GET #{target} HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil))
+            head: "GET #{target} HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         end
         mk.call("http", 80, "/x?a=1")
         mk.call("https", 443, "/x?a=2")
@@ -2099,7 +2099,7 @@ describe Gori::MCP::Server do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
           method: "GET", target: "/h2flow", http_version: "HTTP/2",
-          head: "GET /h2flow HTTP/2\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice, body: nil))
+          head: "GET /h2flow HTTP/2\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"http2":false,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
@@ -2202,7 +2202,7 @@ describe Gori::MCP::Server do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
           method: "GET", target: "/seed", http_version: "HTTP/1.1",
-          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil))
+          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://ignored.test/x","method":"POST","allow_unscoped":true}}})
         p = tool_payload(drive(store, call)[0]) # send fails fast (127.0.0.1:1), payload still carries the fields
         p["effective_request"]["host"].as_s.should eq("127.0.0.1")
@@ -2461,12 +2461,12 @@ describe Gori::MCP::Server do
           created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
           method: "GET", target: "/x", http_version: "HTTP/1.1",
           head: "GET /x HTTP/1.1\r\nHost: a.test\r\nAuthorization: Bearer topsecret\r\n\r\n".to_slice,
-          body: nil))
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
         b = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "https", host: "a.test", port: 443,
           method: "GET", target: "/y", http_version: "HTTP/1.1",
           head: "GET /y HTTP/1.1\r\nHost: a.test\r\nAuthorization: Bearer topsecret\r\n\r\n".to_slice,
-          body: nil))
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
 
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compare_flows","arguments":{"flow_id_a":#{a},"flow_id_b":#{b},"pane":"request"}}})
         payload = tool_payload(drive(store, call)[0])
@@ -2964,7 +2964,7 @@ describe Gori::MCP::Server do
           created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
           method: "GET", target: "/", http_version: "HTTP/1.1",
           head: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\nCookie: sid=abc\r\n\r\n".to_slice,
-          body: nil))
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200,
           head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=xyz\r\nContent-Type: text/plain\r\n\r\n".to_slice, body: nil))
@@ -3669,7 +3669,7 @@ describe "MCP sitemap tags" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
         method: "GET", target: "/login?a=1", http_version: "HTTP/1.1",
-        head: "GET /login?a=1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+        head: "GET /login?a=1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
       tools = tools_for(store)
@@ -3734,7 +3734,7 @@ private def seed_flow(store, target = "/a") : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
   id
@@ -4067,7 +4067,7 @@ private def seed_invalid_utf8_flow(store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: bad_target, http_version: "HTTP/1.1",
-    head: "GET #{bad_target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+    head: "GET #{bad_target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
 end
 
 describe "MCP JSON-RPC UTF-8 validity" do

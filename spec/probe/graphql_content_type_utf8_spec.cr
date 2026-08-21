@@ -39,7 +39,7 @@ private def capture_ct_flow(store, ct : String, *, target = "/api", host = "acme
   req = Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: host, port: 443,
     method: "POST", target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, body: %({"query":"{__schema{queryType{name}}}"}).to_slice)
+    head: head.to_slice, body: %({"query":"{__schema{queryType{name}}}"}).to_slice, source: Gori::FlowSource::Kind::Proxy)
   id = store.insert_flow(req)
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.18.0\r\n\r\n".to_slice,

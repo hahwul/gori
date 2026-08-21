@@ -419,7 +419,8 @@ Preferences → **General** → **General**:
 {
   "general": {
     "clipboard_osc52": true,
-    "confirm_quit": false
+    "confirm_quit": false,
+    "repeater_record_history": true
   }
 }
 ```
@@ -428,6 +429,7 @@ Preferences → **General** → **General**:
 |-----|------|---------|-------------|
 | `clipboard_osc52` | bool | `true` | OSC 52 터미널 이스케이프로 복사. SSH 너머에서도 `y`가 로컬 클립보드에 도달합니다 |
 | `confirm_quit` | bool | `false` | 종료 전에 확인 |
+| `repeater_record_history` | bool | `true` | **TUI** Repeater 전송을 History에 플로우로 기록(SRC 열 `RPTR`). `gori run repeater send --record-history`와 MCP `send_request{record_history}`는 각자의 호출별 인자를 유지합니다 |
 
 ### notifications {#notifications}
 

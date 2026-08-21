@@ -12,7 +12,7 @@ private def sample_request(target = "/")
     http_version: "HTTP/1.1",
     head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
     body: nil,
-  )
+    source: Gori::FlowSource::Kind::Proxy)
 end
 
 private def with_temp_home(&)

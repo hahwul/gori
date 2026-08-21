@@ -22,7 +22,7 @@ module Gori
       # Tags read per item. Everything else Burp writes (`<status>`, `<responselength>`,
       # `<mimetype>`, `<comment>`, …) is a projection of the raw messages we already store,
       # so it is ignored rather than trusted — the wire bytes are the truth (P7).
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         # NOT scrubbed. A `base64="false"` item carries its message INLINE, so a scrub of the
         # file is a scrub of the wire bytes — and this importer's whole reason to exist is
         # that those bytes survive. It used to `raw = raw.scrub unless raw.valid_encoding?`
@@ -56,7 +56,7 @@ module Gori
           # One unparseable item (no URL, undecodable base64, a host that isn't a host) skips
           # rather than discarding the rest of the export — the contract every parser shares.
           begin
-            pairs << item_to_flow(inner, now)
+            pairs << item_to_flow(inner, now, prov)
           rescue
             skipped += 1
           end
@@ -65,12 +65,13 @@ module Gori
         ParseResult.new(pairs, skipped)
       end
 
-      private def self.item_to_flow(item : String, now : Int64) : Builder::FlowPair
+      private def self.item_to_flow(item : String, now : Int64, prov : Provenance) : Builder::FlowPair
         request = bytes_of(item, "request")
         raise Gori::Error.new("item has no <request>") if request.nil? || request.empty?
         url = item_url(item)
         Raw.flow(created_at: started_at(item, now), url: url,
-          raw_request: request, raw_response: bytes_of(item, "response"))
+          raw_request: request, raw_response: bytes_of(item, "response"),
+          source_surface: prov.surface, source_ref: prov.ref)
       end
 
       # `<url>` is the authoritative origin; fall back to composing one from

@@ -23,7 +23,7 @@ private def flow(store, *, resp_head = "HTTP/1.1 200 OK\r\nContent-Type: text/ht
   req = Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: host, port: 443,
     method: method, target: "/", http_version: "HTTP/1.1",
-    head: head.to_slice, body: req_body.try(&.to_slice))
+    head: head.to_slice, body: req_body.try(&.to_slice), source: Gori::FlowSource::Kind::Proxy)
   id = store.insert_flow(req)
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: resp_head.to_slice, body: body.try(&.to_slice),

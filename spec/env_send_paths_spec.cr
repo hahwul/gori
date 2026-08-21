@@ -189,7 +189,7 @@ describe "WebSocket message payloads (#524)" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!,
         [%({"t":"$SESSION"}), "ping $SESSION", "plain"].map { |t| Gori::Store::WsOutMessage.text(t) })

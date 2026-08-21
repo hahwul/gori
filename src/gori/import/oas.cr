@@ -8,7 +8,7 @@ module Gori
     module Oas
       HTTP_METHODS = %w[get post put patch delete head options trace]
 
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         raw = File.read(path)
         json_raw = case File.extname(path).downcase
                    when ".yaml", ".yml"
@@ -50,7 +50,7 @@ module Gori
             op = item[m]? rescue nil
             next unless op
             begin
-              pairs << operation_to_flow(now, base, url_path.to_s, m, op, item, schemes, root_security)
+              pairs << operation_to_flow(now, base, url_path.to_s, m, op, item, schemes, root_security, prov)
             rescue
               skipped += 1
             end
@@ -88,7 +88,8 @@ module Gori
       private def self.operation_to_flow(created_at : Int64, base : String, path : String,
                                          method : String, op : JSON::Any, item : JSON::Any,
                                          schemes : Hash(String, String),
-                                         root_security : JSON::Any?) : Builder::FlowPair
+                                         root_security : JSON::Any?,
+                                         prov : Provenance) : Builder::FlowPair
         # Merge path-item-level and operation-level parameters (operation wins on a
         # name+location clash) — OpenAPI commonly declares a shared path param like
         # {id} once at the path-item level for every method beneath it.
@@ -106,7 +107,8 @@ module Gori
         headers << {"Content-Type", ct} if ct
         headers.concat(header_params(params))
         security_headers(op, root_security, schemes).each { |name| headers << {name, "PLACEHOLDER"} }
-        Builder.pending_request(created_at, url, method.upcase, headers, body)
+        Builder.pending_request(created_at, url, method.upcase, headers, body,
+          source_surface: prov.surface, source_ref: prov.ref)
       end
 
       private def self.join_url(base : String, path : String) : String

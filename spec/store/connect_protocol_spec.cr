@@ -33,7 +33,7 @@ private def h2_connect_flow(store : Gori::Store, *, protocol : String? = "websoc
     created_at: 1_i64, scheme: scheme, host: "ws.test", port: scheme == "https" ? 443 : 80,
     method: "CONNECT", target: "/chat", http_version: "HTTP/2",
     head: HeadCodec.synth_request(fields, "ws.test", protocol: protocol), body: nil,
-    h2_conn_id: 1_i64, h2_stream_id: 1_i64, connect_protocol: protocol))
+    h2_conn_id: 1_i64, h2_stream_id: 1_i64, connect_protocol: protocol, source: Gori::FlowSource::Kind::Proxy))
   if s = status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: s, head: HeadCodec.synth_response([{":status", s.to_s}]),
@@ -47,7 +47,7 @@ private def h1_ws_flow(store : Gori::Store, *, status : Int32 = 101) : Int64
   head = "GET /chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "ws.test", port: 443, method: "GET",
-    target: "/chat", http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+    target: "/chat", http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status,
     head: "HTTP/1.1 #{status} X\r\n\r\n".to_slice, body: nil, duration_us: 1_i64))
@@ -129,7 +129,7 @@ describe "the extended CONNECT protocol column (V16)" do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
         target: "/x", http_version: "HTTP/2",
         head: HeadCodec.synth_request([{":method", "GET"}, {":path", "/x"}], "api.test"),
-        body: nil))
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
       row_of(store, id).connect_protocol.should be_nil
     end
   end

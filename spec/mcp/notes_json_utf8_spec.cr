@@ -68,11 +68,11 @@ describe "MCP issue tools — JSON-RPC UTF-8" do
       primary = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/a", http_version: "HTTP/1.1",
-        head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       linked = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: String.new(Bytes[0x2f, 0x80, 0x61]), http_version: "HTTP/1.1",
-        head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
 

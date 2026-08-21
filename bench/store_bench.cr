@@ -55,7 +55,7 @@ def make_req(i : Int32, body : Bytes?) : Store::CapturedRequest
     created_at: (1_700_000_000_000_000_i64 + i.to_i64 * 1000),
     scheme: "https", host: HOSTS[h], port: 443,
     method: METHODS[i % METHODS.size], target: TARGETS[i % TARGETS.size],
-    http_version: "HTTP/1.1", head: (BINARY ? REQ_HEAD_BIN : REQ_HEAD), body: body)
+    http_version: "HTTP/1.1", head: (BINARY ? REQ_HEAD_BIN : REQ_HEAD), body: body, source: Gori::FlowSource::Kind::Proxy)
 end
 
 def make_resp(id : Int64, i : Int32, body : Bytes?) : Store::CapturedResponse

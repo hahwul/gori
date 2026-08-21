@@ -399,7 +399,7 @@ describe Gori::Rules do
         flow = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80,
           method: "GET", target: "/ws", http_version: "HTTP/1.1",
-          head: "GET /ws HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+          head: "GET /ws HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: flow, status: 101,
           head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, body: nil))

@@ -31,6 +31,7 @@ require "../src/gori/project_registry"
 include Gori
 
 alias S = Gori::Store
+alias FS = Gori::FlowSource
 
 US_PER_MIN = 60_000_000_i64
 
@@ -43,7 +44,9 @@ def add_flow(store : S, created_at : Int64, *,
              status : Int32, reason : String, ctype : String? = nil,
              resp_headers = {} of String => String, resp_body : String? = nil,
              http = "HTTP/1.1", dur_us = 28_000_i64,
-             state = S::FlowState::Complete) : Int64
+             state = S::FlowState::Complete,
+             source = FS::Kind::Proxy, source_surface : FS::Surface? = nil,
+             source_ref : String? = nil) : Int64
   req_head = String.build do |b|
     b << method << ' ' << target << ' ' << http << "\r\n"
     b << "Host: " << host << "\r\n"
@@ -61,7 +64,8 @@ def add_flow(store : S, created_at : Int64, *,
     created_at: created_at, scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: http,
     head: req_head.to_slice, body: req_body.try(&.to_slice),
-    body_size: req_body.try(&.bytesize.to_i64)))
+    body_size: req_body.try(&.bytesize.to_i64),
+    source: source, source_surface: source_surface, source_ref: source_ref))
 
   resp_head = String.build do |b|
     b << http << ' ' << status << ' ' << reason << "\r\n"
@@ -92,13 +96,16 @@ def raw_flow(store : S, created_at : Int64, *,
              resp_head : String, resp_body : Bytes? = nil, dur_us = 28_000_i64,
              h2_conn_id : Int64? = nil, h2_stream_id : Int64? = nil,
              connect_protocol : String? = nil, short_circuited = false,
-             state = S::FlowState::Complete, error : String? = nil) : Int64
+             state = S::FlowState::Complete, error : String? = nil,
+             source = FS::Kind::Proxy, source_surface : FS::Surface? = nil,
+             source_ref : String? = nil) : Int64
   fid = store.insert_flow(S::CapturedRequest.new(
     created_at: created_at, scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: http,
     head: req_head.to_slice, body: req_body,
     h2_conn_id: h2_conn_id, h2_stream_id: h2_stream_id,
-    short_circuited: short_circuited, connect_protocol: connect_protocol))
+    short_circuited: short_circuited, connect_protocol: connect_protocol,
+    source: source, source_surface: source_surface, source_ref: source_ref))
 
   store.update_response(S::CapturedResponse.new(
     flow_id: fid, status: status, reason: reason, content_type: ctype,
@@ -969,7 +976,7 @@ store.insert_flow(S::CapturedRequest.new(
   created_at: t.call(124), scheme: "https", host: "api.demo.test", port: 443,
   method: "POST", target: "/v1/reports/rebuild", http_version: "HTTP/1.1",
   head: pending_head.to_slice, body: pending_body.to_slice,
-  body_size: pending_body.bytesize.to_i64))
+  body_size: pending_body.bytesize.to_i64, source: FS::Kind::Proxy))
 
 puts "• inserted act-two traffic: oauth, cors, upload, png, bundle, .env, listing, redirect, 3 cookies, euc-kr, big/slow/basic/pending"
 
@@ -1704,6 +1711,95 @@ ids[:seq_code] = store.insert_sequencer_session("https://auth.demo.test", seq_co
 
 puts "• inserted 7 repeater (1 ws, 1 bound) + 3 fuzz + 2 miner + 2 sequencer sessions"
 
+# --- Act four: where a flow came from (the History SRC column) ---------------
+# Everything above is `proxy` — traffic a client sent through gori — and until this section
+# existed that was the ONLY provenance the demo could show, which is exactly the state
+# History itself was in: a Repeater send, an agent's `send_request`, a crawl and an import
+# all landed here as rows indistinguishable from captured traffic.
+#
+# Seeded LAST, and after the workbench sessions, because `source_ref` points back at a real
+# repeater/fuzz row — a demo that pointed at an id nothing owns would teach the wrong thing
+# about what the field means.
+#
+# Only the sources gori ACTUALLY records are seeded. `miner`, `sequencer`, `authorize` and
+# `probe` are members of `FlowSource::Kind` because `Fuzz::HistoryRecord` takes the source as
+# an argument and those tools sweep through the same sender — but none of them writes a flow
+# today, and seeding a label no code path produces would put fiction in the evidence store.
+
+# REPEATER, from the TUI: the operator changed one field of a captured order and re-sent it
+# by hand. This is the row the SRC column exists for — same endpoint, same shape, same 200
+# as the captured traffic above, and NOT something the shop's own client ever sent.
+rptr_body = %({"id":9,"total":1,"items":2})
+raw_flow(store, t.call(162), host: "api.demo.test", method: "POST", target: "/v1/orders/9",
+  req_head: "POST /v1/orders/9 HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Authorization: Bearer #{jwt}\r\nContent-Type: application/json\r\n" \
+            "Content-Length: #{rptr_body.bytesize}\r\n\r\n",
+  req_body: rptr_body.to_slice,
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
+             "Content-Length: 34\r\n\r\n",
+  resp_body: %({"id":9,"total":1,"status":"paid"}).to_slice, dur_us: 41_000_i64,
+  source: FS::Kind::Repeater, source_surface: FS::Surface::Tui,
+  source_ref: ids[:repeater_idor].to_s)
+
+# REPEATER, from MCP: the same tool, a different surface — `send_request` records by
+# default, so an agent working beside the operator has been writing into this table all
+# along. The surface column is the only thing that separates the two rows.
+raw_flow(store, t.call(163), host: "api.demo.test", method: "GET", target: "/v1/users/2",
+  req_head: "GET /v1/users/2 HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Authorization: Bearer #{jwt}\r\nAccept: application/json\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
+             "Content-Length: 58\r\n\r\n",
+  resp_body: %({"id":2,"email":"bob@demo.test","role":"admin","mfa":false}).to_slice,
+  dur_us: 37_000_i64,
+  source: FS::Kind::Repeater, source_surface: FS::Surface::Mcp,
+  source_ref: ids[:repeater_idor].to_s)
+
+# FUZZER: one hit out of the traversal sweep, recorded because the run asked for evidence
+# (`--record-history matched`). The payload is on the wire, which is why reading this row as
+# "the origin serves .env" without noticing the SRC column would be a mistake.
+raw_flow(store, t.call(164), host: "shop.demo.test", method: "GET",
+  target: "/assets/..%2F..%2F.env",
+  req_head: "GET /assets/..%2F..%2F.env HTTP/1.1\r\nHost: shop.demo.test\r\n" \
+            "User-Agent: gori-demo/1.0\r\nAccept: */*\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/plain",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
+             "Content-Length: 63\r\n\r\n",
+  resp_body: "DB_PASSWORD=demo-only-not-real\nSTRIPE_KEY=sk_test_demo_only\n".to_slice,
+  dur_us: 22_000_i64,
+  source: FS::Kind::Fuzzer, source_surface: FS::Surface::Cli,
+  source_ref: ids[:fuzz_traversal].to_s)
+
+# DISCOVER: a crawl finding. These have been persisted by default since the tab shipped —
+# the crawler fetched this URL, no browser ever asked for it, and until the column existed
+# the sitemap could not say so.
+raw_flow(store, t.call(165), host: "shop.demo.test", method: "GET", target: "/.well-known/security.txt",
+  req_head: "GET /.well-known/security.txt HTTP/1.1\r\nHost: shop.demo.test\r\n" \
+            "User-Agent: gori-demo/1.0\r\nAccept: */*\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/plain",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
+             "Content-Length: 52\r\n\r\n",
+  resp_body: "Contact: mailto:security@demo.test\nExpires: 2027-01-01\n".to_slice,
+  dur_us: 18_000_i64,
+  source: FS::Kind::Discover, source_surface: FS::Surface::Tui)
+
+# IMPORT: read out of somebody else's capture. NOT `sent_by_gori?` — gori never put this on
+# a wire, and `source_ref` names the file it came out of, which is the provenance question
+# an operator actually asks of an imported row.
+raw_flow(store, t.call(166), host: "partner.demo.test", method: "POST", target: "/api/v2/webhook",
+  req_head: "POST /api/v2/webhook HTTP/1.1\r\nHost: partner.demo.test\r\n" \
+            "User-Agent: PartnerBot/2.1\r\nContent-Type: application/json\r\n" \
+            "X-Signature: sha256=6f1c0e2a\r\nContent-Length: 41\r\n\r\n",
+  req_body: %({"event":"order.paid","order_id":"9","v":2}).to_slice,
+  status: 202, reason: "Accepted", ctype: "application/json",
+  resp_head: "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n",
+  resp_body: %({"queued":true}).to_slice, dur_us: 58_000_i64,
+  source: FS::Kind::Import, source_ref: "partner-webhooks.har")
+
+store.flush
+puts "• inserted act-four provenance: 2 repeater (tui · mcp), 1 fuzzer, 1 discover, 1 import"
+
 # --- Rewriter (Match & Replace rules applied to in-flight traffic) -----------
 # A few illustrative rules — the security-hardening two are ON; the rest are OFF so
 # they don't silently alter traffic, but are one keystroke (toggle) from live so you
@@ -1772,7 +1868,16 @@ store.insert_color_rule("path:/graphql", S::MarkerColor::Yellow.label, S::Marker
 # one rule covers both spellings the PROTO column prints.
 store.insert_color_rule("proto:grpc OR proto:sse", S::MarkerColor::Green.label, S::MarkerStyle::Strip,
   "streaming protocols")
-puts "• inserted 7 colormarker rules (6 active, 1 staged)"
+# Traffic gori ITSELF sent — a Repeater send, a fuzz hit, a crawl. `src:gori` is the union of
+# every tool (built from `FlowSource::Kind#sent_by_gori?`, so it widens on its own as tools
+# learn to record), and it deliberately leaves `import` out: a capture read out of someone
+# else's file is not gori's traffic either. Last, so the protocol and status lenses above
+# still win on a row that is both.
+# Yellow on purpose: it is already gori's "you are not seeing what you think" colour — the
+# PROTO column paints `STUB` with it for the same reason.
+store.insert_color_rule("src:gori", S::MarkerColor::Yellow.label, S::MarkerStyle::Strip,
+  "sent by gori, not the client")
+puts "• inserted 8 colormarker rules (7 active, 1 staged)"
 
 # --- OAST (out-of-band listener) — provider + session + received callbacks ---
 # Seeded to prove the SSRF above out of band. Polling never auto-resumes (see the
@@ -1942,6 +2047,25 @@ note_main = <<-NOTES
 - [ ] enumerate /v1/users/{id} range (Fuzzer session "user id enum" is staged)
 - [ ] replay the OAuth code — is it single-use? ("oauth code entropy" sequencer is staged)
 
+## Where these flows came from
+The SRC column says who put each request on the wire, and everything without a tag is
+`PROXY` — traffic this target's own client sent through gori. Five rows are not:
+
+- `RPTR` twice — the same IDOR probe re-sent by hand from the Repeater tab and by an agent
+  through MCP `send_request`. Same tool, different surface; open either and the request pane
+  ends with `sent by gori — repeater (tui)` / `(mcp)` and the repeater session it came from.
+- `FUZZ` — one hit out of the "path traversal" sweep, recorded because the run asked for
+  evidence. The `.env` it returns is real, but the PAYLOAD is gori's: reading this row without
+  the SRC column would be reading your own request back as a finding.
+- `CRAWL` — a Discover fetch. Crawls have been persisted by default since the tab shipped.
+- `IMPRT` — read out of `partner-webhooks.har`, not sent by gori at all. That is why
+  `src:gori` leaves it out while `-src:proxy` keeps it.
+
+`src:` takes the long tokens and the column's short tags alike (`src:rptr` = `src:repeater`),
+and `source:` is accepted as a synonym. A flow captured before gori recorded provenance shows
+`—` and falls out of `src:` in BOTH directions, the way a Pending flow falls out of `status:`
+and `-status:`. This project is freshly seeded, so it holds no such row.
+
 ## Protocols on this target
 Sort History by the PROTO column (or filter `proto:ws` / `proto:grpc` / `proto:sse`) — every
 label the column can print is in here, cleartext spellings included.
@@ -2070,6 +2194,10 @@ note_start = <<-NOTES4
    Look at the PROTO column: HTTP/HTTPS, WS/WSS, GRPC/GRPCS, SSE/SSES and one STUB row are
    all present. `proto:grpc` finds the cleartext AND the TLS gRPC calls; `proto:grpcs` only
    the TLS ones. See the "Protocols on this target" section of the recon note for the tour.
+   Then look at the SRC column beside it: five rows say something other than `PROXY`, and
+   they are the ones the target's own client never sent. `src:gori` selects them (a yellow
+   strip marks them too); `src:proxy` reads History as traffic that really happened. See
+   "Where these flows came from" in the recon note.
 2. **A binary body** — open `GET /avatars/1.png` (cdn.demo.test): no text rendering, so
    the pane falls back to hex. `GET /ko/notice` is EUC-KR — bytes that are not UTF-8.
 3. **The Decoder** already has five sub-tabs loaded. Run the SAML one, then the Flask

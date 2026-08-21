@@ -67,7 +67,7 @@ private def seed_flow(store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h", port: 80,
     method: "GET", target: "/seed", http_version: "HTTP/1.1",
-    head: "GET /seed HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, body: nil))
+    head: "GET /seed HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 describe "MCP repeater drafts keep the author's bytes" do

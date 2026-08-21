@@ -18,7 +18,7 @@ private def fu_insert(store, target : String, *, scheme = "http", host = "127.0.
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}:#{port}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}:#{port}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: "HTTP/1.1 #{status} OK\r\n\r\n".to_slice))

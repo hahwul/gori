@@ -101,7 +101,7 @@ describe "the group-send decision on a real RepeaterView" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/seed", http_version: "HTTP/1.1",
-        head: head, body: body))
+        head: head, body: body, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
       view.evidence?.should be_true
@@ -231,7 +231,7 @@ describe "minimize on a %%% group buffer" do
               "Content-Length: #{body.size}\r\n\r\n").to_slice
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
-        method: "POST", target: "/p", http_version: "HTTP/1.1", head: head, body: body))
+        method: "POST", target: "/p", http_version: "HTTP/1.1", head: head, body: body, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
       view.evidence?.should be_true

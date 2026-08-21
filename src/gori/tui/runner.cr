@@ -3227,7 +3227,7 @@ module Gori::Tui
     end
 
     private def apply_import(kind : Symbol, label : String, path : String) : Nil
-      result = Import.import_file(@session.store, kind, path)
+      result = Import.import_file(@session.store, kind, path, Gori::FlowSource::Surface::Tui)
       sitemap_controller.reload
       msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{path}"
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0

@@ -30,7 +30,7 @@ private def seed_project_flow(store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "ex.test", port: 443,
     method: "GET", target: "/", http_version: "HTTP/1.1",
-    head: "GET / HTTP/1.1\r\nHost: ex.test\r\n\r\n".to_slice, body: nil))
+    head: "GET / HTTP/1.1\r\nHost: ex.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 # One handle, closed exactly once — Store#close is NOT idempotent (a 2nd @done.receive

@@ -1,7 +1,8 @@
 require "db"
 require "levenshtein"
 require "./filter_ast"
-require "./proto" # Proto::Kind, used by the `proto:` term below
+require "./proto"       # Proto::Kind, used by the `proto:` term below
+require "./flow_source" # FlowSource::Kind, used by the `src:` term below
 
 module Gori
   # The query language (DESIGN.md §4): a Lucene/KQL-style boolean filter over the
@@ -107,7 +108,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body url stub scope
+        host path method scheme proto status size reqsize respsize dur header body url stub src scope
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -126,6 +127,13 @@ module Gori
       Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
       short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
       from the server, so `stub:false` is what you want before treating History as evidence.
+
+      Source: src:proxy  src:repeater  src:fuzzer  src:import  …  src:gori — where the flow came
+      from. `proxy` is traffic a client sent through gori; every other value is a request gori
+      itself put on the wire (`src:gori` is all of them at once), and `import` is a capture read
+      out of somebody else's file. The SRC column's short tags are accepted too (src:rptr).
+      CAUTION: a flow captured before gori recorded provenance matches NEITHER direction — see
+      the caveat list.
 
       Scope: scope:in  scope:out  — the project's scope rules (the include/exclude boundary the
       TUI's ⇧S lens and `--in-scope` apply), as an ordinary term: it negates and it groups.
@@ -288,7 +296,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub scope
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub src scope
       req.header resp.header req.body resp.body]
 
     REGEX_FIELDS = %w[host path url header body req.header resp.header req.body resp.body]
@@ -328,6 +336,11 @@ module Gori
     FIELD_ALIASES = {
       "res.header" => "resp.header", "res.body" => "resp.body",
       "req.size" => "reqsize", "resp.size" => "respsize", "res.size" => "respsize",
+      # `source:` is the long spelling of `src:`. Same trap as `res.`: an unknown field
+      # free-texts the whole token, so `source:repeater` would have matched nothing and read
+      # as "no repeater flows" rather than "that is not the name". Completion offers `src:`
+      # only, so there is still one spelling to learn.
+      "source" => "src",
     }
 
     # Does QL implement this field name? THE membership test — `FIELDS` alone is the pool a
@@ -418,6 +431,7 @@ module Gori
       "header"      => "head bytes, BOTH sides — see req./resp.",
       "body"        => "body via index: 8 KiB/side, no compressed",
       "stub"        => "true = gori answered it, origin never saw it",
+      "src"         => "who sent it — proxy repeater fuzzer … or gori",
       "scope"       => "in / out — the project's scope rules",
       "req.header"  => "request head bytes only",
       "resp.header" => "response head bytes only",
@@ -466,6 +480,7 @@ module Gori
       {"a dropped term broadens", "status:>=foo is ignored, not refused — use ql_explain"},
       {"a bad regex matches nothing", "body~[ is a HARD error, never silently dropped"},
       {"scope: with no scope rules", "nothing is in scope, so in AND out match nothing"},
+      {"src: on a pre-0.4 flow", "provenance was not recorded, so it matches NEITHER direction"},
     ]
 
     # The grammar itself — everything that is NOT a field name, as {what you type, what it does}.
@@ -573,6 +588,7 @@ module Gori
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
       when "stub"                                then stub_cond(value)
+      when "src"                                 then src_cond(value)
       when "scope"                               then scope_cond(value, scope)
       else
         # A side prefix we OWN, on a field that has no side. `resp.status:200` is not a typo the
@@ -613,6 +629,38 @@ module Gori
       when "false", "no", "off", "0" then {"short_circuited = 0", no_args}
       end
     end
+
+    # src: selects flows by WHERE THEY CAME FROM — `src:proxy` for traffic a client sent through
+    # gori, `src:repeater` / `src:fuzzer` / … for a request one of gori's own tools put on the
+    # wire, `src:import` for a capture read out of someone else's file, and `src:gori` for every
+    # tool at once. See `Gori::FlowSource`.
+    #
+    # `src:gori` is built FROM the enum (`sent_by_gori?`) rather than as a hand-written IN-list,
+    # so a workbench that learns to record joins the filter by existing. It is deliberately not
+    # the complement of `src:proxy`: an imported flow is neither traffic gori observed nor
+    # traffic gori sent, and folding it into either answers "is this evidence about the target?"
+    # wrongly.
+    #
+    # NULL — a flow captured before the V17 columns existed — matches NEITHER direction, exactly
+    # as a Pending flow falls out of both `status:` and `-status:`. The column has no default to
+    # fall back on because gori was ALREADY recording repeater sends, fuzz hits, crawls and
+    # imports before the migration, so a backfill would be inventing provenance. `QL::CAVEATS`
+    # says so; the SRC column draws those rows as `—`.
+    #
+    # An unrecognised value drops the term rather than guessing, same as a bad proto:/status:.
+    private def self.src_cond(value : String) : {String, Array(DB::Any)}?
+      if value.downcase == "gori"
+        tokens = FlowSource::Kind.values.select(&.sent_by_gori?).map(&.token)
+        return {"source IN (#{Array.new(tokens.size, "?").join(",")})", tokens.map(&.as(DB::Any))}
+      end
+      FlowSource::Kind.parse?(value).try { |k| {"source = ?", [k.token] of DB::Any} }
+    end
+
+    # `src:`'s value vocabulary — every `Kind` token plus the `gori` union. Read by History's
+    # own value-completion table and by `InterceptFilter.suggest_values` (the pool the colour-rule
+    # overlay completes QL's wider field list through), so the two cannot offer different sets.
+    # `SCOPE_VALUES`' reasoning, one field over.
+    SOURCE_VALUES = FlowSource::Kind.tokens + ["gori"]
 
     # scope: selects flows by the project's SCOPE rules — `scope:in` for the include/exclude
     # boundary, `scope:out` for everything outside it. The same predicate the ⇧S History lens

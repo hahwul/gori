@@ -119,7 +119,13 @@ gori run fuzz <flow-id> \
 
 Sources can be a captured flow (`--flow`), a saved HTTP repeater session (`--repeater`), a raw request file (`--request`), or stdin. Output is `text`, `json`, or `jsonl`.
 
-The workbench and the evidence store stay separate: a Repeater or Fuzzer send leaves no History flow by default. When you want one — a `flow_id` for `get_flow`, `compare`, or the next tool — punch through explicitly. `gori run repeater send --record-history` writes the send as a flow and prints its id; `gori run fuzz --record-history=none|matched|all` records each sent request+response (`matched` only the rows that matched, `all` every send, capped at 5000). The default stays workbench-only.
+**A Repeater send from the TUI is recorded in History.** The tester driving a request by hand is the one whose evidence went missing, and a send that leaves no flow cannot be compared, exported or handed over; the status line names the id it wrote (`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends* turns it off. WebSocket sends and send-groups are not recorded — a socket's evidence is its frame transcript, which the session already keeps — and the status line says so once.
+
+Everything else stays opt-in, and the headless surfaces keep their own per-call arguments so no script's behaviour moves under the setting: `gori run repeater send --record-history` writes the send as a flow and prints its id (off by default); `gori run fuzz --record-history=none|matched|all` records each sent request+response (`matched` only the rows that matched, `all` every send, capped at 5000); MCP `send_request` records unless you pass `record_history:false`.
+
+Every recorded flow says where it came from — the History **SRC** column, and `src:repeater` /
+`src:fuzzer` / `src:gori` in a query — so a resend is never read back as traffic the target's
+client produced. See [Where a flow came from](/guide/proxy/#flow-source).
 
 A recorded flow — from either tool — is the request **as it went on the wire**: the active session slot's header overlay and any `$NAME` the send seam resolved are part of it, so replaying, comparing or scanning that flow reproduces the send rather than the draft or template it was assembled from. (A Fuzzer *row* still shows the rendered template, which is what "send to Repeater" seeds a tab from — the slot applies per send.)
 

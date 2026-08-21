@@ -38,7 +38,7 @@ private def sample_request(method = "GET", host = "acme.test", target = "/")
     http_version: "HTTP/1.1",
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice,
     body: nil,
-  )
+    source: Gori::FlowSource::Kind::Proxy)
 end
 
 describe Gori::Store do
@@ -172,7 +172,7 @@ describe Gori::Store do
       req = Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "a.test", port: 443, method: "GET",
         target: "/x", http_version: "HTTP/2", head: "GET /x HTTP/2\r\n\r\n".to_slice,
-        advisory: "request-side line")
+        advisory: "request-side line", source: Gori::FlowSource::Kind::Proxy)
       id = store.insert_flow(req)
       store.flow_row(id).not_nil!.advisory.should eq("request-side line")
 
@@ -305,7 +305,7 @@ describe Gori::Store do
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/up", http_version: "HTTP/1.1",
         head: "POST /up HTTP/1.1\r\n\r\n".to_slice, body: stored,
-        body_truncated: true, body_size: 5_000_000_i64)
+        body_truncated: true, body_size: 5_000_000_i64, source: Gori::FlowSource::Kind::Proxy)
       id = store.insert_flow(req)
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
@@ -721,7 +721,7 @@ describe Gori::Store do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "victim.test", port: 80,
           method: "GET", target: "/victim", http_version: "HTTP/1.1",
-          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         issue = store.insert_issue("evidence on the victim flow",
           Gori::Store::Severity::High, "victim.test", id)
 
@@ -729,7 +729,7 @@ describe Gori::Store do
         reused = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "http", host: "unrelated.test", port: 80,
           method: "GET", target: "/UNRELATED-ADMIN-PANEL", http_version: "HTTP/1.1",
-          head: "GET /UNRELATED-ADMIN-PANEL HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /UNRELATED-ADMIN-PANEL HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 
         reused.should eq(id) # the id really is handed out again — that is the whole problem
         store.issues.find { |i| i.id == issue }.not_nil!.flow_id.should be_nil
@@ -741,7 +741,7 @@ describe Gori::Store do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "victim.test", port: 80,
           method: "GET", target: "/victim", http_version: "HTTP/1.1",
-          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /victim HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         issue = store.insert_issue("cleared", Gori::Store::Severity::Low, "victim.test", id)
         store.@db.exec(
           "INSERT INTO probe_issues (code, category, host, title, severity, sample_flow_id, " \
@@ -807,7 +807,7 @@ describe "Gori::Store::Schema V7 (WebSocket frame shape)" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.insert_ws_message(id, "in", 8, Bytes[0x03, 0xEA] + "bye-reason".to_slice,
         shape: Gori::Store::WsShape.new(masked: false))
       msg = store.ws_messages(id)[0]

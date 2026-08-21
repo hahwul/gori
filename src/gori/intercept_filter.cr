@@ -285,6 +285,7 @@ module Gori
                when "status" then STATUS_VAL
                when "proto"  then PROTO_VAL
                when "scope"  then QL::SCOPE_VALUES
+               when "src"    then QL::SOURCE_VALUES
                else               return [] of String
                end
       values.select(&.downcase.starts_with?(p))

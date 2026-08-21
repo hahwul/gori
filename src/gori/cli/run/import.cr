@@ -54,7 +54,7 @@ module Gori
 
         store = open_store(resolve_import_project(project_name, db_path))
         result = begin
-          Import.import_file(store, kind, path)
+          Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
         rescue ex : Gori::Error
           abort "gori run import: #{ex.message}"
         ensure

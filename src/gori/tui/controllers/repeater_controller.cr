@@ -66,7 +66,12 @@ module Gori::Tui
       # Repeater round-trips run off the UI fiber and deliver their Result here; the run
       # loop applies it to the originating view on a later tick (buffered so a finished
       # repeater never blocks its background fiber).
-      @repeater_results = Channel({RepeaterView, Repeater::Result}).new(8)
+      # The third slot is the History recorder's note — nil when nothing was recorded, else the
+      # flow id or the reason the write did not land. It rides the SAME hand-off rather than
+      # `@host.status` because the recording happens on the send fiber (see `repeater_send`), and
+      # a status line written from there would race the run loop's own.
+      @unrecorded_notice = false
+      @repeater_results = Channel({RepeaterView, Repeater::Result, String?}).new(8)
       # WebSocket repeater transcripts arrive on their own channel (a distinct result
       # type from HTTP) and are applied by the same drain on a later tick.
       @ws_results = Channel({RepeaterView, Repeater::WsEngine::Result}).new(8)
@@ -1124,7 +1129,7 @@ module Gori::Tui
       applied = @refusal_applied
       @refusal_applied = false
       while pair = nonblocking_repeater_result
-        view, result = pair
+        view, result, record_note = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it would
         # mutate an orphaned view and flash a toast for a gone session.
         next unless tab = @repeaters.find(&.view.same?(view))
@@ -1135,7 +1140,8 @@ module Gori::Tui
           @host.session.store.update_repeater_response(id, result.head, result.body, result.error, result.duration_us)
           probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
-        @host.status(result.ok? ? "sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}" : "repeater error: #{result.error}")
+        note = record_note ? " · #{record_note}" : ""
+        @host.status(result.ok? ? "sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{note}" : "repeater error: #{result.error}#{note}")
         applied = true
       end
       while pair = nonblocking_ws_result
@@ -1272,7 +1278,7 @@ module Gori::Tui
     rescue
     end
 
-    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result}?
+    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result, String?}?
       select
       when p = @repeater_results.receive
         p
@@ -1643,6 +1649,31 @@ module Gori::Tui
       @refusal_applied = true
     end
 
+    # The store a send should be recorded into, or nil when the operator has recording off.
+    # Read on the UI fiber and handed to the send fiber as a captured local, so a toggle mid-
+    # flight cannot change what an in-progress send does.
+    private def history_record_store : Store?
+      Settings.repeater_record_history? ? @host.session.store : nil
+    end
+
+    # Write one repeater send to History and return the note the run loop puts on the status
+    # line — the flow id, or why the row did not land.
+    #
+    # A class method, and off the controller on purpose: it runs on the SEND FIBER, which must
+    # never read a controller ivar (the same rule the minimize and ws fibers follow). The send
+    # ALREADY happened by the time this is called, so a refused write is a note beside the
+    # response and never a failed send — the contract `gori run repeater send --record-history`
+    # keeps when it warns on STDERR and returns no id.
+    def self.record_send(store : Store, plan : Repeater::Plan, result : Repeater::Result,
+                         sent_at : Int64, wire : Bytes, source_ref : String?) : String
+      fid = Repeater::HistoryRecord.record(store, plan, result, sent_at, wire,
+        surface: Gori::FlowSource::Surface::Tui, source_ref: source_ref)
+      "History ##{fid}"
+    rescue ex : Gori::Error
+      ::Log.warn(exception: ex) { "repeater History record failed" }
+      "not recorded (#{ex.message})"
+    end
+
     # " as admin" for the send line, or "" while nothing is active.
     #
     # The ACTIVE SESSION SLOT is named where the send is initiated, not only on the `session:`
@@ -1651,6 +1682,16 @@ module Gori::Tui
     # line that reconciles them. Silent for as-captured, which is the default.
     private def sending_as : String
       (name = Gori::Env.active_slot_name) ? " as #{name}" : ""
+    end
+
+    # "· not recorded (…)" for the one send shape that History recording does not cover, said
+    # ONCE per process. The setting is on by default, so silence on these paths would read as
+    # "it was recorded"; saying it on every send would be noise on a pane an operator hammers.
+    private def unrecorded_note(what : String) : String
+      return "" unless Settings.repeater_record_history?
+      return "" if @unrecorded_notice
+      @unrecorded_notice = true
+      " · not recorded (#{what})"
     end
 
     def repeater_send : Nil
@@ -1686,13 +1727,25 @@ module Gori::Tui
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
       @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…")
+      # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` above is the
+      # assembled DRAFT; this is the message, with the send seam's two passes applied (the
+      # `$NAME` binding pass and the active session slot's header overlay). The History
+      # recorder writes THIS slice, so the row is the request that went out rather than a
+      # second run of a seam whose binding values can rotate between two reads — which is why
+      # `Repeater::HistoryRecord` takes `wire` as a required argument at all.
+      sent_wire = plan.wire_bytes
+      # Read live so a toggle in Settings takes on the very next ^R, and read on the UI fiber
+      # so the send fiber captures a decision rather than racing one.
+      record_store = history_record_store
+      record_ref = tab.db_id.try(&.to_s)
+      sent_at = Time.utc.to_unix_ms * 1000_i64
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
       started = Time.instant
       spawn(name: "gori-repeater") do
         result = begin
-          plan.send
+          plan.send_wire(sent_wire)
         rescue ex
           # `Repeater::Engine.send` rescues its own transport failures, so anything escaping
           # here is a bug — and an unrescued raise in `spawn` kills just this fiber while
@@ -1702,10 +1755,17 @@ module Gori::Tui
           ::Log.error(exception: ex) { "repeater send fiber died" }
           Repeater::Engine.error(ex.message || "repeater send error", started)
         end
+        # Recorded HERE, on the send fiber, and BEFORE the hand-off: `Store#insert_flow` blocks
+        # on the writer fiber's reply, and the UI fiber must never wait on a writer a live
+        # capture may be holding. Recorded whatever the outcome — an error flow is evidence
+        # too, and it is the same call MCP `send_request` makes for a send that failed.
+        record_note = record_store.try do |st|
+          RepeaterController.record_send(st, plan, result, sent_at, sent_wire, record_ref)
+        end
         # Non-blocking hand-off: if the user already left the project the channel is
         # orphaned, so drop the late result instead of blocking this fiber forever.
         select
-        when results.send({view, result})
+        when results.send({view, result, record_note})
         else
         end
       ensure
@@ -1833,7 +1893,10 @@ module Gori::Tui
       messages = view.ws_out_messages
       keep_key = view.ws_keep_key?
       view.inflight = true
-      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
+      # WebSocket sends are not written to History, and the CLI draws the same line
+      # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
+      # the repeater session already keeps, and a flow row would hold a handshake and nothing else.
+      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…#{unrecorded_note("WebSocket")}")
       spawn(name: "gori-ws-repeater") do
         result = plan.send_ws(messages, Repeater::WsEngine::DEFAULT_IDLE, keep_key)
         select
@@ -1888,7 +1951,11 @@ module Gori::Tui
       end
       view.inflight = true
       n = plan.requests.size
-      @host.status("send group → #{plan.host}:#{plan.port} · #{n} request#{n == 1 ? "" : "s"} on one connection…")
+      # A group is not recorded either: `Sender#send_group` builds each request's wire INSIDE
+      # the seam, so there is no per-request slice a recorder could be handed — and writing the
+      # drafts instead is exactly the defect `HistoryRecord`'s required `wire` argument exists
+      # to prevent.
+      @host.status("send group → #{plan.host}:#{plan.port} · #{n} request#{n == 1 ? "" : "s"} on one connection…#{unrecorded_note("send group")}")
       spawn(name: "gori-repeater-group") do
         rs = plan.send_group
         labeled = labels.zip(rs)

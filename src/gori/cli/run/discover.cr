@@ -237,7 +237,8 @@ module Gori
             findings << f
             emit_discover_finding(f, format)
             unless no_store
-              pair = Discover::Persist.flow_pair(f, base_ts + findings.size, ev.exchange)
+              pair = Discover::Persist.flow_pair(f, base_ts + findings.size, ev.exchange,
+                surface: Gori::FlowSource::Surface::Cli)
               pending << {pair.request, pair.response}
               flush_discover(store, pending) if pending.size >= 200
             end

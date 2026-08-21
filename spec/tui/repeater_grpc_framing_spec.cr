@@ -28,7 +28,7 @@ describe "RepeaterView gRPC framing failure" do
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: private_head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
+      head: private_head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41], source: Gori::FlowSource::Kind::Proxy))
     view = RepeaterView.new
     view.load_grpc(store.get_flow(id).not_nil!)
     view
@@ -78,7 +78,7 @@ describe "RepeaterView gRPC framing failure" do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/2",
         head: private_head.to_slice,
-        body: Bytes[0x00, 0x00, 0x00, 0x27, 0x0F, 0x68, 0x65, 0x6C, 0x6C, 0x6F]))
+        body: Bytes[0x00, 0x00, 0x00, 0x27, 0x0F, 0x68, 0x65, 0x6C, 0x6C, 0x6F], source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       resp = Gori::Proxy::Codec::Http1.parse_response_head(resp_head.to_slice)
@@ -161,7 +161,7 @@ describe "RepeaterView gRPC reframe toggle" do
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
+      head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41], source: Gori::FlowSource::Kind::Proxy))
     view = RepeaterView.new
     view.load_grpc(store.get_flow(id).not_nil!)
     view
@@ -190,7 +190,7 @@ describe "RepeaterView gRPC reframe toggle" do
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 3_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: head.to_slice, body: multi_body))
+      head: head.to_slice, body: multi_body, source: Gori::FlowSource::Kind::Proxy))
     view = RepeaterView.new
     view.load_grpc(store.get_flow(id).not_nil!)
     view
@@ -245,7 +245,7 @@ describe "RepeaterView gRPC reframe toggle" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/N", http_version: "HTTP/2",
-        head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x5A]))
+        head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x5A], source: Gori::FlowSource::Kind::Proxy))
       view.load_grpc(store.get_flow(id).not_nil!)
       view.grpc_reframe?.should be_true
     end
@@ -301,7 +301,7 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
-      head: head.to_slice, body: body))
+      head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
     view = RepeaterView.new
     view.load_grpc(store.get_flow(id).not_nil!)
     view
@@ -327,7 +327,7 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
-        head: head.to_slice, body: body))
+        head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       wire = String.new(view.request_bytes)

@@ -68,7 +68,7 @@ private def with_seed_store(body : Bytes, head : String? = nil, &)
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
       method: "POST", target: "/seed?q=1&r=2", http_version: "HTTP/1.1",
-      head: h.to_slice, body: body))
+      head: h.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
     store.close
     yield({path, id, (h.to_slice.to_a + body.to_a)})
   ensure

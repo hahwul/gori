@@ -66,6 +66,17 @@ module Gori
           # the two key sets against each other): a consumer of either feed has no other way
           # to tell a gori-authored stub response from one the origin actually sent (#511).
           j.field "short_circuited", row.short_circuited?
+          # Where this flow came from (`Gori::FlowSource`). Emitted on EVERY row, `null`
+          # included, for `short_circuited`'s reason: a consumer has no other way to tell a
+          # request gori sent from traffic the target's client produced, and an absent field
+          # would read as "proxy" — which is exactly the guess the store refuses to make. null
+          # means the flow predates the column, NOT that it came from the proxy.
+          j.field("source") { (k = row.source) ? j.string(k.token) : j.null }
+          # The surface and the originating session, only when there is one: a proxy capture
+          # has no gori surface behind it, and most tools have no session id to point at. Same
+          # field-presence discipline as `advisory`.
+          row.source_surface.try { |sf| j.field "source_surface", sf.token }
+          row.source_ref.try { |r| json_captured(j, "source_ref", r) }
           # What gori has to say about this flow that its bytes cannot (`FlowRow#advisory`):
           # a rule that structurally could not run on it, a request the ORIGIN invented in a
           # PUSH_PROMISE. Emitted only when there is one, so a script keying off field
@@ -232,6 +243,11 @@ module Gori
           # Never silently: a text-mode reader scanning this list would otherwise take a
           # stub for traffic the server produced.
           io << "  [stub]" if row.short_circuited?
+          # Same reasoning again, one axis over: a row gori itself put on the wire must not
+          # scan as traffic the target's client produced. Only when it IS one — a proxy
+          # capture is the norm, and a chip on every row teaches nothing. The lowercase token
+          # is the `src:` value, so a reader can paste it straight into a query.
+          row.source.try { |k| io << "  [" << k.token << ']' unless k.proxy? }
           # Same reasoning as [stub] one line up: a text-mode reader scanning a list must be
           # able to SEE that gori has something to say about a row. The chip is a pointer —
           # `gori run show <id>` prints the sentences.

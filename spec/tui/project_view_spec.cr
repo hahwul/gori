@@ -183,7 +183,7 @@ describe "ProjectView created time" do
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: created_us, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       project = Gori::Project.new("t", path)
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.reload(project, store)

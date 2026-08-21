@@ -3,7 +3,7 @@ require "./builder"
 module Gori
   module Import
     module Urls
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         skipped = 0
@@ -15,7 +15,8 @@ module Gori
           # a non-http scheme (ftp://, mailto:, ws://, tel:) or a host-less URL raises.
           # These are common in scraped/exported lists; one used to discard the whole file.
           begin
-            pairs << Builder.pending_request(now, url)
+            pairs << Builder.pending_request(now, url,
+              source_surface: prov.surface, source_ref: prov.ref)
           rescue
             skipped += 1
           end

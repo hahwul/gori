@@ -50,7 +50,7 @@ def detail(store) : Store::FlowDetail
   req = Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: "/", http_version: "HTTP/1.1",
-    head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil)
+    head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
   id = store.insert_flow(req)
   store.update_response(Store::CapturedResponse.new(
     flow_id: id, status: 200, head: RESP_HEAD.to_slice, body: BODY.to_slice,

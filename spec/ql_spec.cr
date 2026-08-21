@@ -17,7 +17,7 @@ private def capture(store, host, method, target, status = nil)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\n".to_slice))
@@ -149,12 +149,12 @@ describe Gori::QL do
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/bin", http_version: "HTTP/1.1",
         head: "POST /bin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-        body: Bytes[0x68, 0x65, 0x61, 0x64, 0x00, 0x4E, 0x55, 0x4C, 0x4E, 0x45, 0x45, 0x44]))
+        body: Bytes[0x68, 0x65, 0x61, 0x64, 0x00, 0x4E, 0x55, 0x4C, 0x4E, 0x45, 0x45, 0x44], source: Gori::FlowSource::Kind::Proxy))
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/other", http_version: "HTTP/1.1",
         head: "GET /other HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-        body: "plain".to_slice))
+        body: "plain".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.flush
 
       # `NU` sits past the NUL. The <3-char blob path is byte-wise, so it finds it regardless of
@@ -169,7 +169,7 @@ describe Gori::QL do
       bodyless = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 3_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/none", http_version: "HTTP/1.1",
-        head: "GET /none HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /none HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       neg = store.search(Gori::QL.parse("-body:NU"), 50).map(&.id)
       neg.should contain(bodyless)   # kept — it has no body to match
       neg.should_not contain(buried) # excluded — its body does contain NU
@@ -241,7 +241,7 @@ describe Gori::QL do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: head))
       store.flush
@@ -436,13 +436,13 @@ describe "Gori::Store#search (QL)" do
       cleartext = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/chat", http_version: "HTTP/1.1",
-        head: "GET /chat HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+        head: "GET /chat HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(flow_id: cleartext, status: 101,
         head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice))
       tls = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "acme.test", port: 443,
         method: "GET", target: "/chat", http_version: "HTTP/1.1",
-        head: "GET /chat HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice))
+        head: "GET /chat HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(flow_id: tls, status: 101,
         head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice))
 
@@ -461,12 +461,12 @@ describe "Gori::Store#search (QL)" do
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
         head: "POST /login HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-        body: "username=admin&csrf=SeCrEtToken".to_slice))
+        body: "username=admin&csrf=SeCrEtToken".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       resp_match = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: resp_match, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
         body: "<input name=secrettoken value=1>".to_slice))
@@ -475,7 +475,7 @@ describe "Gori::Store#search (QL)" do
         created_at: 3_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/about", http_version: "HTTP/1.1",
         head: "GET /about HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-        body: "nothing here".to_slice))
+        body: "nothing here".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       store.flush # body: reads the trigram index, which is written off-commit (Store V4)
 
@@ -505,12 +505,12 @@ describe "Gori::Store#search (QL)" do
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
         head: "POST /login HTTP/1.1\r\nHost: acme.test\r\nX-Only-Req: 1\r\n\r\n".to_slice,
-        body: "csrf=secrettoken".to_slice))
+        body: "csrf=secrettoken".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       resp_side = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: resp_side, status: 200,
         head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=1\r\n\r\n".to_slice,
@@ -807,12 +807,12 @@ describe "Gori::Store#search (QL)" do
         created_at: 1_i64, scheme: "http", host: "api.acme.test", port: 80,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
         head: "POST /login HTTP/1.1\r\nHost: api.acme.test\r\n\r\n".to_slice,
-        body: "username=admin&csrf=SeCrEtToken".to_slice))
+        body: "username=admin&csrf=SeCrEtToken".to_slice, source: Gori::FlowSource::Kind::Proxy))
       plain = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "cdn.other.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
         head: "GET / HTTP/1.1\r\nHost: cdn.other.test\r\n\r\n".to_slice,
-        body: "nothing here".to_slice))
+        body: "nothing here".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       # body regex is case-sensitive; an inline (?i) opts into case-insensitivity
       store.search(Gori::QL.parse("body~SeCrEt[A-Za-z]+"), 50).map(&.id).should eq([secret])
@@ -846,12 +846,12 @@ describe "Gori::Store#search (QL)" do
         created_at: 1_i64, scheme: "http", host: "bin.test", port: 80,
         method: "GET", target: "/img", http_version: "HTTP/1.1",
         head: "GET /img HTTP/1.1\r\nHost: bin.test\r\n\r\n".to_slice,
-        body: Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43])) # "ABC" sits after the NUL
+        body: Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43], source: Gori::FlowSource::Kind::Proxy)) # "ABC" sits after the NUL
       text = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "txt.test", port: 80,
         method: "POST", target: "/", http_version: "HTTP/1.1",
         head: "POST / HTTP/1.1\r\nHost: txt.test\r\n\r\n".to_slice,
-        body: "hello ABC world".to_slice))
+        body: "hello ABC world".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       # Both match now: the binary row's "ABC" after the NUL is no longer truncated.
       store.search(Gori::QL.parse("body~ABC"), 50).map(&.id).sort.should eq([bin, text].sort)
@@ -863,7 +863,7 @@ describe "Gori::Store#search (QL)" do
       big = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/big", http_version: "HTTP/1.1",
-        head: "GET /big HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /big HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: big, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
         body: ("A" * 20_000).to_slice, duration_us: 800_000_i64)) # 20KB, 800ms
@@ -871,7 +871,7 @@ describe "Gori::Store#search (QL)" do
       small = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "http", host: "acme.test", port: 80,
         method: "GET", target: "/small", http_version: "HTTP/1.1",
-        head: "GET /small HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /small HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: small, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
         body: "ok".to_slice, duration_us: 50_000_i64)) # 2B, 50ms
@@ -1010,6 +1010,63 @@ describe "Gori::Store#search (QL)" do
       f = Gori::QL.parse(%(host:"my host"))
       f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
       f.args.should eq(["%my host%"])
+    end
+
+    it "compiles src: to the provenance column, by token and by the SRC column's tag" do
+      f = Gori::QL.parse("src:repeater")
+      f.sql.should eq("(source = ?)")
+      f.args.should eq(["repeater"])
+      # The tag the History column prints is typeable, and normalises to the stored token.
+      Gori::QL.parse("src:rptr").args.should eq(["repeater"])
+      Gori::QL.parse("src:IMPRT").args.should eq(["import"])
+      # `source:` is the accepted long spelling; an unknown field free-texts, so without the
+      # alias it would have matched nothing and read as "no repeater flows".
+      Gori::QL.parse("source:repeater").sql.should eq(f.sql)
+      Gori::QL.parse("source:repeater").args.should eq(f.args)
+    end
+
+    it "compiles src:gori from the enum, so it widens as tools learn to record" do
+      f = Gori::QL.parse("src:gori")
+      expected = Gori::FlowSource::Kind.values.select(&.sent_by_gori?).map(&.token)
+      f.args.should eq(expected)
+      f.sql.should eq("(source IN (#{Array.new(expected.size, "?").join(",")}))")
+      # Deliberately NOT the complement of src:proxy — an import is neither.
+      f.args.should_not contain("proxy")
+      f.args.should_not contain("import")
+    end
+
+    it "drops an unrecognised src: value instead of guessing, like proto:/status:" do
+      Gori::QL.analyze("src:browser").ignored.should_not be_empty
+      Gori::QL.parse("src:browser host:a").sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+    end
+
+    it "matches a pre-V17 flow in NEITHER direction" do
+      # The column has no default to fall back on, so an unrecorded provenance is SQL NULL and
+      # both `source = 'proxy'` and `NOT (source = 'proxy')` are NULL — the same way a Pending
+      # flow falls out of `status:` and `-status:`. `QL::CAVEATS` says so out loud.
+      path = File.tempname("gori-ql-null-src", ".db")
+      begin
+        store = Gori::Store.open(path)
+        recorded = capture(store, "t.test", "GET", "/recorded", 200)
+        legacy = capture(store, "t.test", "GET", "/legacy", 200)
+        store.close
+        DB.open("sqlite3:#{path}") { |db| db.exec("UPDATE flows SET source = NULL WHERE id = ?", legacy) }
+
+        store = Gori::Store.open(path)
+        begin
+          store.search(Gori::QL.parse("src:proxy"), 10).map(&.id).should eq([recorded])
+          store.search(Gori::QL.parse("-src:proxy"), 10).should be_empty
+          store.search(Gori::QL.parse("src:gori"), 10).should be_empty
+          # It is still a flow, and everything that does not ask about provenance still finds it.
+          store.search(Gori::QL.parse("path:/legacy"), 10).map(&.id).should eq([legacy])
+        ensure
+          store.close
+        end
+      ensure
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
     end
 
     it "leaves a parenthesis inside a value literal (no escaping needed)" do

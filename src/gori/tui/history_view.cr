@@ -1989,13 +1989,27 @@ module Gori::Tui
       method_x = rect.x + 16 + sw # time column widened to fit MM-DD HH:MM:SS
       proto_x = rect.x + 24 + sw
       host_x = rect.x + 31 + sw
-      # Right cluster STA · TYPE · SIZE · DUR (status code, response MIME, size,
-      # latency — frequently-scanned), anchored to the right edge and sized to FIT:
-      # STA always shows; TYPE/SIZE/DUR drop right-to-left when the pane is too narrow
-      # to also keep HOST+PATH legible, so the cluster never spills past the frame.
-      # (Each span includes its trailing 1-col gap.) HOST+PATH split the rest.
+      # Right cluster STA · SRC · TYPE · SIZE · DUR (status code, provenance, response MIME,
+      # size, latency — frequently-scanned), anchored to the right edge and sized to FIT:
+      # STA always shows; the rest drop when the pane is too narrow to also keep HOST+PATH
+      # legible, so the cluster never spills past the frame. (Each span includes its trailing
+      # 1-col gap.) HOST+PATH split the rest.
+      #
+      # The offsets used to be hand-computed constants off `status_x` (+4/+11/+18), which meant
+      # inserting a column here was three arithmetic edits with nothing to catch a missed one.
+      # They are a running accumulator now, so a future column costs one grant and one line.
+      #
+      # SRC is granted FIRST — right after the always-on STA — which makes it the LAST to drop.
+      # It answers "did the target's client really send this, or did gori?", and a marker that
+      # falls off a narrow terminal is a marker that lets someone screenshot a Repeater send as
+      # if it were captured traffic. That is the same argument that keeps `STUB` inside the
+      # fixed-width PROTO column; this one lives in the cluster, so priority is the lever it has.
       cluster_w = 4                                # STA (3-digit code + gap)
       spare = rect.right - host_x - 18 - cluster_w # reserve 18 for HOST+PATH first
+      if show_src = spare >= 6
+        cluster_w += 6
+        spare -= 6
+      end
       if show_type = spare >= 7
         cluster_w += 7
         spare -= 7
@@ -2008,9 +2022,14 @@ module Gori::Tui
       cluster_w += 6 if show_dur
 
       status_x = {rect.right - cluster_w, host_x}.max
-      type_x = status_x + 4
-      size_x = status_x + 11
-      dur_x = status_x + 18
+      cx = status_x + 4
+      src_x = cx
+      cx += 6 if show_src
+      type_x = cx
+      cx += 7 if show_type
+      size_x = cx
+      cx += 7 if show_size
+      dur_x = cx
       mid = {status_x - host_x, 0}.max
       host_w = {(mid * 2 // 5).clamp(6, 40), mid}.min # never crosses STA even when pinned
       path_x = host_x + host_w + 1
@@ -2022,6 +2041,7 @@ module Gori::Tui
       screen.text(host_x, hdr_y, "HOST", Theme.muted, width: host_w) if host_w > 0
       screen.text(path_x, hdr_y, "PATH", Theme.muted, width: path_w) if path_w > 0
       screen.text(status_x, hdr_y, "STA", Theme.muted, width: 3)
+      screen.text(src_x, hdr_y, "SRC", Theme.muted, width: 5) if show_src
       screen.text(type_x, hdr_y, "TYPE", Theme.muted, width: 6) if show_type
       screen.text(size_x, hdr_y, "SIZE", Theme.muted, width: 6) if show_size
       screen.text(dur_x, hdr_y, "DUR", Theme.muted, width: 6) if show_dur
@@ -2136,6 +2156,23 @@ module Gori::Tui
         # a cryptic "0" indistinguishable from a still-pending "···".
         status, scolor = FlowStatus.cell(row)
         screen.text(status_x, y, status, scolor, bg, width: 3)
+        # SRC: which gori tool produced this flow. `Gori::FlowSource::Kind#label` owns the
+        # spelling — the same single-source-of-truth contract `Proto` keeps for PROTO — and
+        # `src:` accepts these tags as well as the long tokens, so what is on screen is
+        # typeable into the filter bar.
+        #
+        # NULL (a flow captured before provenance was recorded) draws `—`, not `PROXY`: gori
+        # was already writing repeater sends, fuzz hits, crawls and imports into this table
+        # before the column existed, so "unknown" is the only honest answer for those rows.
+        #
+        # Accented for everything except PROXY, which is the norm and stays muted. NOT yellow —
+        # `STUB` owns that, and it means "you are not seeing what you think". A Repeater flow
+        # IS a real response from the origin; only its request came from gori.
+        if show_src
+          src = row.source
+          screen.text(src_x, y, src.try(&.label) || "—",
+            src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
+        end
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
@@ -2391,6 +2428,21 @@ module Gori::Tui
       end
 
       render_detail_body(screen, body, focused: focused)
+    end
+
+    # "sent by gori — repeater (tui), session #42", or nil for a proxy capture and for a row
+    # whose provenance predates the columns. `Gori::FlowSource` owns both spellings.
+    private def source_note(row : Store::FlowRow) : String?
+      src = row.source
+      return nil if src.nil? || src.proxy?
+      via = row.source_surface.try { |sf| " (#{sf.token})" } || ""
+      # `#3` for a numeric session id, the string itself for anything else — an import's ref is
+      # the FILE it was read out of, and `#partner.har` would read as an id it is not. The
+      # column is opaque by design (each tool numbers its own space, some not at all), so this
+      # is the one place that has to guess, and it guesses only about punctuation.
+      ref = row.source_ref.try { |r| !r.empty? && r.each_char.all?(&.ascii_number?) ? " ##{r}" : " · #{r}" } || ""
+      verb = src.sent_by_gori? ? "sent by gori" : "read in by gori"
+      "#{verb} — #{src.token}#{via}#{ref}"
     end
 
     # Draws the pane chip strip and returns the x column just past the last chip. The
@@ -2659,6 +2711,7 @@ module Gori::Tui
                when "host"   then host_values_for(prefix)
                when "size"   then [">10000", ">100000", "<1000"]
                when "scope"  then QL::SCOPE_VALUES
+               when "src"    then QL::SOURCE_VALUES
                when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end
@@ -2847,6 +2900,14 @@ module Gori::Tui
         detail.row.advisories.each do |a|
           trailer << Highlight::Line.new
           trailer << [Highlight::Span.new("! #{a}", Theme.yellow)]
+        end
+        # Where this request came from, spelled out — the SRC column has five cells and has to
+        # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
+        # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
+        # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
+        if note = source_note(detail.row)
+          trailer << Highlight::Line.new
+          trailer << [Highlight::Span.new(note, Theme.muted)]
         end
       end
 

@@ -27,7 +27,7 @@ module Gori
         end
         path = str(h, "path").try(&.strip)
         return err("missing required 'path'", "INVALID_ARGUMENT", field: "path") if path.nil? || path.empty?
-        result = Import.import_file(store, kind, path)
+        result = Import.import_file(store, kind, path, Gori::FlowSource::Surface::Mcp)
         # import_file RAISES when the parse yields zero flows, so it only returns here with
         # ≥1 flow to insert. A count of 0 therefore means the batch write was rolled back
         # (store busy/locked) — NOT an empty import — so surface it as retryable rather than

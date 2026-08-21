@@ -2,6 +2,7 @@ require "json"
 require "../ascii_bytes"
 require "../url"
 require "../token_extract"
+require "../flow_source"
 require "../proxy/ws/frame"
 require "../proxy/h2/head_codec" # PROTOCOL_MARKER — see FlowDetail#websocket?
 
@@ -49,13 +50,29 @@ module Gori
       # line — and a marker line is forgeable by an IMPORTED flow, where a pseudo-header the h2
       # decoder read off the wire is not. Only `H2::Assembler` sets this. See V16.
       getter connect_protocol : String?
+      # Which gori tool produced this flow, which surface issued it, and which of that tool's
+      # sessions it belongs to. See `Gori::FlowSource` and the V17 migration.
+      #
+      # `source` is a REQUIRED named argument with no default, and that is the whole point: a
+      # recorder added later that forgets it would otherwise label gori's own traffic as
+      # captured proxy traffic, which is the exact failure these columns exist to prevent. A
+      # caller that has not been threaded through is a compile error rather than a row that
+      # lies — the same argument `Repeater::Sender` makes for requiring an `Outbound` and
+      # `Repeater::HistoryRecord` for requiring the sent `wire`.
+      getter source : FlowSource::Kind
+      # nil = no gori surface originated this (a proxy capture: the request came from the
+      # client's own program). NOT "unknown".
+      getter source_surface : FlowSource::Surface?
+      getter source_ref : String?
 
       def initialize(@created_at, @scheme, @host, @port, @method, @target,
                      @http_version, @head, @body = nil,
                      @sni = nil, @alpn = nil, @tls_version = nil,
                      @body_truncated = false, @body_size = nil,
                      @h2_conn_id = nil, @h2_stream_id = nil, @short_circuited = false,
-                     @advisory = nil, @connect_protocol = nil)
+                     @advisory = nil, @connect_protocol = nil,
+                     *, @source : FlowSource::Kind,
+                     @source_surface : FlowSource::Surface? = nil, @source_ref : String? = nil)
       end
     end
 
@@ -140,11 +157,29 @@ module Gori
       # flow that was not an h2 extended CONNECT — NOT "this is not a WebSocket"; `Proto.classify`
       # treats it as unknown and falls back to what it always read. See the V16 migration.
       getter connect_protocol : String?
+      # Which gori tool produced this flow. NULL — here a nil `Kind` — means "not recorded": a
+      # row written before the V17 columns existed. It does NOT mean `Proxy`; gori could already
+      # record a repeater send, a fuzz hit, an MCP `send_request`, a crawl and an import before
+      # that migration, so guessing would put a fact no capture produced on the row. The SRC
+      # column draws it as `—` and a `src:` term matches it in neither direction.
+      getter source : FlowSource::Kind?
+      # nil = no gori surface originated the request (a proxy capture) — or, when `source` is
+      # also nil, simply not recorded.
+      getter source_surface : FlowSource::Surface?
+      # The originating tool's own session/job id, opaque and meaningful only beside `source`.
+      getter source_ref : String?
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
                      @content_type = nil, @short_circuited = false, @advisory = nil,
-                     @request_content_type = nil, @connect_protocol = nil)
+                     @request_content_type = nil, @connect_protocol = nil,
+                     @source = nil, @source_surface = nil, @source_ref = nil)
+      end
+
+      # Did gori itself put this request on the wire? nil (`source` not recorded) answers false:
+      # an unknown provenance must not be reported as gori's own traffic.
+      def sent_by_gori? : Bool
+        !!@source.try(&.sent_by_gori?)
       end
 
       # The advisory as a list of statements, empty when there is none.

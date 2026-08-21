@@ -164,6 +164,38 @@ gori는 gRPC 페이로드를 protobuf 와이어 포맷 자체에서 디코드합
 - **GraphQL**: POST 본문과 `?query=` 파라미터에서 `query`, `operationName`, `variables`를 파싱합니다.
 - **Form 파라미터**: `application/x-www-form-urlencoded` 및 `multipart/form-data` 요청 본문과 URL 쿼리 문자열을 PARAMS 패널에서 단순한 key=value 목록으로 디코드합니다(multipart 파일 파트는 요약됩니다).
 
+## 이 플로우는 어디서 왔나 {#flow-source}
+
+History에는 브라우저가 한 일만 담기지 않습니다. gori 자신의 도구도 여기에 씁니다 — MCP
+`send_request`는 기본으로 기록하고, Discover 크롤은 가져온 것을 저장하며, Repeater 전송은
+TUI에서 기록되고(`gori run`에서는 요청 시), 퍼즈 스윕도 기록할 수 있으며, `import`는 다른
+도구의 캡처를 읽어 들입니다. 이 전부가 예전에는 캡처 트래픽과 구별되지 않았습니다. History를
+증거로 읽는 순간 이 차이가 중요해집니다 — "대상이 이렇게 답했다"와 "내가 그렇게 만들었다"는
+서로 다른 주장입니다.
+
+**SRC** 열이 그것을 말해 줍니다. `PROXY`는 클라이언트가 gori를 거쳐 보낸 트래픽이고, `RPTR`·
+`FUZZ`·`CRAWL` 등은 gori가 만든 요청이며, `IMPRT`는 파일에서 읽어 들인 것입니다. 상세 패널은
+요청 아래에 `sent by gori — repeater (tui) #4`처럼 풀어 적어, 어느 표면에서 왔고 어느 세션이
+만든 것인지까지 되짚을 수 있게 합니다.
+
+[`src:`](/ko/reference/query-language/#src-provenance)로 필터링합니다.
+
+```text
+src:proxy        실제로 일어난 트래픽만 History로 읽기
+src:gori         gori가 전송한 것만
+-src:repeater    내가 다시 보낸 것을 뺀 전부
+```
+
+컬러 룰도 같은 항을 받으므로, `src:gori` + strip 마커를 걸어 두면 스크롤하는 동안 내 트래픽이
+시각적으로 계속 분리됩니다. 이 컬럼이 생기기 전에 캡처된 플로우는 출처가 없어 `—`로 표시되며
+어느 쪽에도 매칭되지 않습니다. 어떤 캡처도 기록하지 않은 출처를 gori가 추측하지는 않기 때문입니다.
+
+**Repeater 전송은 기본으로 기록됩니다.** Settings → General → *Record Repeater sends*에서 끌 수
+있습니다. 이 설정은 TUI만 지배합니다 — `gori run repeater send`는 여전히 `--record-history`가
+필요하고(기본 off), MCP `send_request`는 여전히 `record_history`를 받으므로(기본 on) 어떤
+스크립트의 동작도 이 설정 때문에 바뀌지 않습니다. WebSocket 전송과 send-group은 기록되지 않으며,
+상태줄이 한 번 그렇게 알려 줍니다.
+
 ## History 필터링 {#filtering-history}
 
 History는 gori의 [쿼리 언어](/ko/reference/query-language/)로 검색할 수 있습니다. 몇 가지 예시입니다.

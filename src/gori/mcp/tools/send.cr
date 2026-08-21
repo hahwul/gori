@@ -71,7 +71,8 @@ module Gori
         wire = wire_request(plan, built, h1_wire)
         recorded_flow_id = nil.as(Int64?)
         if record_history
-          id = record_outbound_request(built, wire, http2, plan.h2_fields)
+          id = record_outbound_request(built, wire, http2, plan.h2_fields,
+            source_ref: send_seed_ref(h))
           # BEFORE the send, and it stays that way: `record_history` defaults to true and is an
           # audit promise, so a row that cannot be written means this request must not go out
           # unaudited. `insert_flow` answers 0 rather than blocking when it loses SQLite's single
@@ -556,8 +557,18 @@ module Gori
       # `wire_request`.
       #
       # Returns the new flow id, or 0 when the row did not commit (see the tail).
+      # The saved repeater a send was seeded FROM, as the recorded flow's `source_ref` — so a
+      # History row can be traced back to the session an agent executed. `build_send_plan` has
+      # already validated the argument by the time this runs, so reading it here cannot refuse
+      # anything that has not refused already.
+      private def send_seed_ref(h) : String?
+        return nil unless present?(h, "repeater_id")
+        int(h, "repeater_id").try(&.to_s)
+      end
+
       private def record_outbound_request(built : RequestBuilder::Built, wire : Bytes, http2 : Bool,
-                                          h2_fields : Array({String, String})? = nil) : Int64
+                                          h2_fields : Array({String, String})? = nil,
+                                          source_ref : String? = nil) : Int64
         head, body = split_wire_request(replayable_field_head(h2_fields, built, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
         # method/target COLUMNS (list_history / QL / sitemap read them) come off the FIELDS a
@@ -583,6 +594,13 @@ module Gori
           head: head,
           body: body,
           body_size: body.try(&.size.to_i64),
+          # `repeater` and not a source of its own: an agent driving `send_request` is doing
+          # exactly what the Repeater tab does — one hand-shaped request at a time. The SURFACE
+          # is what separates "an agent sent this" from "the operator did", which is the
+          # distinction worth keeping, and it has its own column.
+          source: Gori::FlowSource::Kind::Repeater,
+          source_surface: Gori::FlowSource::Surface::Mcp,
+          source_ref: source_ref,
         )
         # 0 (or less) means the row did NOT commit — the caller turns that into PROJECT_BUSY and
         # refuses the send. Answered rather than raised: `send_request`'s `Gori::Error` rescue is

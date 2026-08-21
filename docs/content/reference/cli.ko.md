@@ -149,6 +149,8 @@ gori run history -q 'status:5xx' --limit 100 --format json
 
 `json`/`jsonl`의 각 행은 플로우의 절대 `url`과 요청 헤더를 담은 `headers` 객체를 함께 싣습니다 (같은 이름이 반복되면 배열이 됩니다). 본문은 넣지 않습니다 — 그건 `run show`의 몫입니다.
 
+각 행에는 `source`도 실립니다 — 이 플로우가 어디서 왔는지(`proxy`, `repeater`, `fuzzer`, `discover`, `import` …)이며, 출처를 기록하기 전에 캡처된 플로우는 `null`입니다. 값이 있을 때 `source_surface`(`tui` / `cli` / `mcp`)와 `source_ref`도 함께 나옵니다. text 형식은 평범한 캡처 트래픽이 아닌 행에 `[repeater]` 같은 칩을 찍습니다. [`src:`](/ko/reference/query-language/#src-provenance)로 필터링하며, MCP `list_history`와 `get_flow`도 같은 키를 냅니다.
+
 `history delete -q QL`은 쿼리에 매칭되는 플로우를 전부 삭제하며 `--yes`가 필요합니다. `--yes` 없이 실행하면 몇 개가 지워질지 출력하고 거부합니다. QL이 모르는 필드를 쓴 쿼리(`methd:`)도 조용히 아무것도 지우지 않는 대신 거부합니다. id도 `-q`도 없으면 거부합니다 — 프로젝트를 통째로 비우는 건 `history clear --yes`입니다.
 
 `--format har`은 결과 집합 전체를 하나의 HAR 1.2 log로 STDOUT에 씁니다. 오래된 항목이 먼저 오므로, 쿼리 결과를 동료에게 넘기거나 Burp, Charles, 브라우저 네트워크 패널에 그대로 불러올 수 있습니다. [HAR 내보내기](#har-export)를 참고하세요.

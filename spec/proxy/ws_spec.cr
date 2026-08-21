@@ -1519,7 +1519,7 @@ describe "Gori::Store WebSocket messages" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "echo.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.insert_ws_message(id, "out", 1, "hello".to_slice)
       store.insert_ws_message(id, "in", 1, "world".to_slice)
 

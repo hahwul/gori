@@ -228,7 +228,7 @@ private def seed_login_flow(store, resp_head : String, resp_body : String? = nil
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
     method: "POST", target: "/login", http_version: "HTTP/1.1",
-    head: req_head.to_slice, body: nil))
+    head: req_head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: resp_head.to_slice, body: resp_body.try(&.to_slice),
     content_type: "application/json"))

@@ -236,10 +236,15 @@ module Gori::Tui
     # the main fiber through `@seeds`, and `drain_events` is what adds the row.
     #
     # SELF-LOOP: gori's own replays go out through `Fuzz::Sender`, which dials the origin
-    # directly and bypasses the capture proxy, and nothing here writes them back with
-    # `insert_flow` — so a shadow request can never come back round as a new flow event. That
-    # is a property of the send path, not a guard here; recording a shadow send into History
-    # would reintroduce the loop and would need an explicit marker to break it.
+    # directly and bypasses the capture proxy, and nothing here writes THOSE back with
+    # `insert_flow` — so a shadow request can never come back round as a new flow event.
+    #
+    # That is no longer the whole story, and `proxy_origin?` below is the explicit marker this
+    # comment used to ask for. The Repeater now records its sends by default, so `^R` publishes
+    # a flow event on the same feed: without the guard, every hand-driven send would fan out
+    # into one shadow request per identity, and a `send_request` from an agent beside the TUI
+    # would too. Passive replay is a lens on WHAT THE BROWSER TOUCHED — a request gori made is
+    # not that, and replaying it says nothing the operator did not already ask for by hand.
     private def start_passive_watcher : Nil
       return if @passive_started
       @passive_started = true
@@ -251,6 +256,7 @@ module Gori::Tui
           next unless ev.kind == :updated # the response side exists only on the second event
           detail = store.get_flow(ev.id)
           next unless detail
+          next unless proxy_origin?(detail.row)
           # NO filtering here. The decision needs the identity set and its outcome needs to be
           # COUNTED, and both live on the main fiber — a flow silently dropped on this side is
           # exactly how this mode came to look broken.
@@ -285,6 +291,7 @@ module Gori::Tui
           store.recent_flows(PASSIVE_CATCHUP_SCAN).each do |row|
             break unless @passive
             next unless row.state.complete?
+            next unless proxy_origin?(row) # same guard as the live feed — see start_passive_watcher
             detail = store.get_flow(row.id)
             next unless detail
             # Skip what is already queued HERE rather than letting `accept_seed` count it as a
@@ -302,6 +309,16 @@ module Gori::Tui
           # store closing / busy — the next tick re-reads
         end
       end
+    end
+
+    # Is this a flow passive replay is a lens on at all? `Authorize::Passive` owns the answer —
+    # this is a cheap pre-filter over the same predicate, not a second rule.
+    #
+    # `skip_reason` refuses these anyway, so nothing would be SENT without it. What it buys is
+    # that hammering `^R` does not fill the queue with one skipped row per send: the readout is
+    # meant to be read, and a log of the operator's own keystrokes is not a readout.
+    private def proxy_origin?(row : Store::FlowRow) : Bool
+      !Authorize::Passive.gori_originated?(row)
     end
 
     # Add what the watcher found (main fiber). Returns true when anything landed, so the render
@@ -330,7 +347,7 @@ module Gori::Tui
     # is tallied by reason so the tab can say what passive is doing instead of appearing idle.
     private def accept_seed(detail : Store::FlowDetail) : Bool
       @passive_seen_count += 1
-      if reason = Authorize::Passive.skip_reason(detail, identities)
+      if reason = Authorize::Passive.passive_skip_reason(detail, identities)
         @passive_skips[reason] += 1
         return false
       end

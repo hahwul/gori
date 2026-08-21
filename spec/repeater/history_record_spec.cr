@@ -33,7 +33,7 @@ describe Gori::Repeater::HistoryRecord do
       plan = plan_for("POST /login HTTP/1.1\r\nHost: t.test\r\nContent-Length: 5\r\n\r\nhello")
       result = result_for("HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\n", "ok")
       id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 123_i64,
-        wire: plan.wire_bytes)
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
       id.should be > 0
 
       detail = store.get_flow(id).not_nil!
@@ -41,6 +41,11 @@ describe Gori::Repeater::HistoryRecord do
       detail.row.target.should eq("/login")
       detail.row.host.should eq("t.test")
       detail.row.status.should eq(201)
+      # The row says gori sent it, through which surface, and from which repeater session —
+      # without which it is indistinguishable from traffic the target's client produced.
+      detail.row.source.should eq(Gori::FlowSource::Kind::Repeater)
+      detail.row.source_surface.should eq(Gori::FlowSource::Surface::Cli)
+      detail.row.sent_by_gori?.should be_true
       String.new(detail.request_body.not_nil!).should eq("hello")
     end
   end
@@ -67,7 +72,8 @@ describe Gori::Repeater::HistoryRecord do
         String.new(plan.bytes).should_not contain("Authorization")
 
         result = result_for("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", "ok")
-        id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 7_i64, wire: wire)
+        id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 7_i64, wire: wire,
+          surface: Gori::FlowSource::Surface::Cli)
         detail = store.get_flow(id).not_nil!
         String.new(detail.request_head).should eq(String.new(wire))
       ensure
@@ -82,7 +88,7 @@ describe Gori::Repeater::HistoryRecord do
       plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
       failed = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 100_i64, "connection refused")
       id = Gori::Repeater::HistoryRecord.record(store, plan, failed, created_at: 1_i64,
-        wire: plan.wire_bytes)
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
       store.get_flow(id).not_nil!.row.state.error?.should be_true
     end
   end

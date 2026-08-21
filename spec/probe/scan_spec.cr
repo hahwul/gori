@@ -20,7 +20,7 @@ private def capture_ws_flow(store) : Int64
   head = "GET /ws HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
   req = Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
-    method: "GET", target: "/ws", http_version: "HTTP/1.1", head: head.to_slice, body: nil)
+    method: "GET", target: "/ws", http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
   id = store.insert_flow(req)
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 101,

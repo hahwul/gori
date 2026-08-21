@@ -153,10 +153,10 @@ describe Gori::Tui::IssuesView do
       f2 = store.insert_issue("B", Gori::Store::Severity::Low, nil, nil)
       fid1 = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
-        method: "GET", target: "/", http_version: "HTTP/1.1", head: Bytes[0]))
+        method: "GET", target: "/", http_version: "HTTP/1.1", head: Bytes[0], source: Gori::FlowSource::Kind::Proxy))
       fid2 = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "b.test", port: 443,
-        method: "GET", target: "/b", http_version: "HTTP/1.1", head: Bytes[0]))
+        method: "GET", target: "/b", http_version: "HTTP/1.1", head: Bytes[0], source: Gori::FlowSource::Kind::Proxy))
       store.add_link(Gori::Store::LinkOwnerKind::Issue, f1, Gori::Store::LinkRefKind::Flow, fid1)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, f1, Gori::Store::LinkRefKind::Flow, fid2)
 

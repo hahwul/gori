@@ -98,7 +98,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 | Tool | Purpose |
 |------|---------|
-| `list_history` | List flows newest-first, with optional QL and pagination |
+| `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` — `proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, … — so a flow gori made is never read back as evidence about the target. Filter with `src:` |
 | `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows |
 | `get_flow` | Full request + response for one flow |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |

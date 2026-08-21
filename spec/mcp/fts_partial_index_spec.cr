@@ -76,7 +76,7 @@ private def seed_body_flow(store, needle : String, target : String = "/a") : Int
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   body = "<html><body>#{needle} lives here</body></html>"
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200,

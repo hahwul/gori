@@ -18,6 +18,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `method` | HTTP 메서드 |
 | `scheme` | `http` / `https` |
 | `proto` | 프로토콜: `http`, `ws`, `grpc`, `sse` |
+| `src` | 이 플로우가 어디서 왔는지([아래](#src-provenance)) |
 | `status` | 응답 상태 코드 |
 | `size` | 요청 + 응답 전체 바이트 |
 | `reqsize` / `respsize` | 각 방향의 바이트 수 |
@@ -50,6 +51,46 @@ NOT (req.body:token OR resp.body:token)
 ```
 
 `res.`는 `resp.`의 동의어이고, `req.size` / `resp.size`는 `reqsize` / `respsize`와 같습니다. 방향이 하나뿐인 필드(`host`, `method`, `status` 등)에는 접두사를 붙이지 않습니다.
+
+## 출처: `src:` {#src-provenance}
+
+`src:`는 **요청을 실제로 보낸 주체**로 플로우를 고릅니다. `src:proxy`는 클라이언트가 gori를
+거쳐 보낸 트래픽이고, 나머지 값은 gori 자신이 만든 요청입니다. `src:import`는 다른 도구가
+남긴 캡처를 읽어 들인 것입니다.
+
+| 값 | 매칭 대상 |
+|-------|---------|
+| `proxy` | 캡처 프록시가 중계한 클라이언트의 요청 — 평범한 캡처 트래픽 |
+| `repeater` | Repeater 전송(TUI, `gori run repeater send --record-history`, MCP `send_request`) |
+| `fuzzer` | `--record-history` / `record_history`로 기록된 퍼즈 결과 |
+| `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
+| `miner`, `sequencer`, `authorize`, `probe` | 예약됨 — 아직 플로우를 기록하지 않는 도구들 |
+| `import` | HAR, Burp export, `--urls`, OpenAPI 문서에서 읽어 들인 것 |
+| `gori` | gori가 **보낸** 모든 출처 — 가운데 행들의 합집합이며 `import`는 **포함하지 않습니다** |
+
+```text
+src:proxy                             실제로 일어난 트래픽만 History로 읽기
+-src:proxy                            gori가 넣은 것 전부
+src:gori                              …같은 집합을 긍정형으로
+src:repeater status:200               내가 다시 보낸 것 중 200으로 돌아온 것
+src:fuzzer resp.body:root:            퍼즈 히트 — 내 페이로드를 발견으로 착각하지 않도록
+```
+
+History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `RPTR`, `FUZZ`, `CRAWL`,
+`IMPRT` …). `src:`는 그 태그도 받으므로 `src:rptr`과 `src:repeater`는 같은 쿼리입니다.
+`source:`는 `src:`의 긴 철자로 함께 받습니다.
+
+두 가지는 의도된 동작입니다:
+
+- **가져온(import) 플로우는 `src:gori`가 아닙니다.** gori가 그것을 전송한 적이 없고, 다른
+  사람이 캡처한 실제 엔드포인트를 설명할 뿐입니다. `-src:proxy`에는 걸리고 `src:gori`에는
+  걸리지 않습니다.
+- **출처를 기록하기 전에 캡처된 플로우는 양쪽 어디에도 걸리지 않습니다.** 그 행들은 출처를
+  전혀 갖고 있지 않습니다 — 컬럼이 생기기 전에도 gori는 이미 Repeater 전송·크롤·import를
+  History에 쓰고 있었으므로, 그것들을 `proxy`로 채우는 것은 어떤 캡처도 만들지 않은 사실을
+  지어내는 일이 됩니다. SRC 열에는 `—`가 뜨고 `src:proxy`와 `-src:proxy` 양쪽 모두 이 행을
+  건너뜁니다. Pending 플로우가 `status:`와 `-status:` 양쪽에서 빠지는 것과 같습니다. 업그레이드
+  이후에 캡처된 플로우만 이 값을 가집니다.
 
 ## 스코프: `scope:in` / `scope:out` {#scope-in-scope-out}
 

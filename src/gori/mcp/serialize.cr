@@ -97,6 +97,15 @@ module Gori
           # feed has no other way to tell a fabricated response from a real one, and an absent
           # field reads as "not applicable" rather than "false".
           j.field "short_circuited", row.short_circuited?
+          # Where this flow came from (`Gori::FlowSource`), and on EVERY row for
+          # `short_circuited`'s reason: an agent reading this feed has no other way to tell a
+          # request gori sent — including one IT sent through `send_request` — from traffic the
+          # target's own client produced. `null` means the flow predates the column, not that
+          # it came from the proxy. Kept in lockstep with `CLI::Output.flow_row_fields`
+          # (spec/cli/run/history_spec.cr pins the two key sets against each other).
+          j.field("source") { (k = row.source) ? j.string(k.token) : j.null }
+          row.source_surface.try { |sf| j.field "source_surface", sf.token }
+          row.source_ref.try { |r| j.field "source_ref", text(r) }
           # What gori has to say about this flow that its bytes cannot — a rule it could not
           # apply, a request the ORIGIN invented in a PUSH_PROMISE (`FlowRow#advisory`). An
           # array, and only when non-empty: a model has no reason to reason about `null` on
@@ -419,6 +428,13 @@ module Gori
           # "`stub:false` is what you want before treating History as evidence"; the list
           # projection said so and the detail one dropped it.
           j.field "short_circuited", row.short_circuited?
+          # `flow_row`'s provenance, on the DETAIL projection for the same sharpened reason: an
+          # agent about to quote these bytes in an issue has to know whether the request was
+          # the target's client's or gori's own — including one this very server sent through
+          # `send_request`, which records by default.
+          j.field("source") { (k = row.source) ? j.string(k.token) : j.null }
+          row.source_surface.try { |sf| j.field "source_surface", sf.token }
+          row.source_ref.try { |r| j.field "source_ref", text(r) }
           # See `flow_row`. On the detail projection this is the one the agent reading BYTES
           # as evidence needs: "Match&Replace was not applied to this head" and "the origin
           # invented this request" are both statements about how much the bytes below can be

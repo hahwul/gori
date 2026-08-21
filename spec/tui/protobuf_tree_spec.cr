@@ -121,7 +121,7 @@ describe "HistoryView gRPC detail" do
     store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: GRPC_HEAD.to_slice, body: body))
+      head: GRPC_HEAD.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
     view = HistoryView.new
     view.reload(store)
     view.open_detail(store).should be_true
@@ -217,7 +217,7 @@ describe "RepeaterView gRPC protobuf transcript" do
     id = store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
       method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: GRPC_HEAD.to_slice, body: grpc_frame(PB_BODY)))
+      head: GRPC_HEAD.to_slice, body: grpc_frame(PB_BODY), source: Gori::FlowSource::Kind::Proxy))
     view = RepeaterView.new
     view.load_grpc(store.get_flow(id).not_nil!)
     view

@@ -120,7 +120,7 @@ private HTML_ORIGIN_PORT = html_origin
 private def insert_flow(store, port : Int32, head : String) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
-    method: "GET", target: "/", http_version: "HTTP/1.1", head: head.to_slice))
+    method: "GET", target: "/", http_version: "HTTP/1.1", head: head.to_slice, source: Gori::FlowSource::Kind::Proxy))
 end
 
 # ── 1. flow seeds are EVIDENCE ────────────────────────────────────────────────────────────

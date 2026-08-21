@@ -24,7 +24,7 @@ module Gori
       # collection is 32 folders deep.
       MAX_DEPTH = 32
 
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         doc = begin
           JSON.parse(File.read(path))
         rescue ex : JSON::ParseException
@@ -41,7 +41,7 @@ module Gori
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
         skipped = walk(items, Vars.merge!(Vars::Table.new, root["variable"]?), root["auth"]?,
-          0, now, pairs, missing)
+          0, now, pairs, missing, prov)
 
         # A collection whose `{{baseUrl}}` lives in a separate ENVIRONMENT file resolves to
         # nothing, and the generic "all N entries were skipped as malformed" would blame the
@@ -56,7 +56,8 @@ module Gori
       # `variable`/`auth`, both of which the nearest ancestor loses to.
       private def self.walk(items : Array(JSON::Any), vars : Vars::Table, auth : JSON::Any?,
                             depth : Int32, now : Int64,
-                            pairs : Array(Builder::FlowPair), missing : Set(String)) : Int32
+                            pairs : Array(Builder::FlowPair), missing : Set(String),
+                            prov : Provenance) : Int32
         return 0 if depth > MAX_DEPTH
         skipped = 0
         items.each do |node|
@@ -65,7 +66,7 @@ module Gori
           scoped = h["variable"]? ? Vars.merge!(vars.dup, h["variable"]) : vars
           scoped_auth = h["auth"]? || auth
           if kids = h["item"]?.try(&.as_a?)
-            skipped += walk(kids, scoped, scoped_auth, depth + 1, now, pairs, missing)
+            skipped += walk(kids, scoped, scoped_auth, depth + 1, now, pairs, missing, prov)
             next
           end
           req = h["request"]?
@@ -73,7 +74,7 @@ module Gori
           # One bad request (unresolved variable, non-http scheme, host-less URL) skips
           # rather than aborting the collection — the contract every import parser shares.
           begin
-            pairs << request_to_flow(now, req, scoped, scoped_auth, missing)
+            pairs << request_to_flow(now, req, scoped, scoped_auth, missing, prov)
           rescue
             skipped += 1
           end
@@ -82,10 +83,12 @@ module Gori
       end
 
       private def self.request_to_flow(now : Int64, req : JSON::Any, vars : Vars::Table,
-                                       auth : JSON::Any?, missing : Set(String)) : Builder::FlowPair
+                                       auth : JSON::Any?, missing : Set(String),
+                                       prov : Provenance) : Builder::FlowPair
         # `"request": "https://example.com/x"` is legal shorthand for a bare GET.
         if s = req.as_s?
-          return Builder.pending_request(now, resolve_url(s, vars, missing))
+          return Builder.pending_request(now, resolve_url(s, vars, missing),
+            source_surface: prov.surface, source_ref: prov.ref)
         end
         h = req.as_h? || raise Gori::Error.new("request is neither a URL string nor an object")
         method = h["method"]?.to_s.presence || "GET"
@@ -97,7 +100,8 @@ module Gori
           headers << {"Content-Type", content_type}
         end
         headers.concat(auth_headers(h["auth"]? || auth, vars))
-        Builder.pending_request(now, url, method, headers, body)
+        Builder.pending_request(now, url, method, headers, body,
+          source_surface: prov.surface, source_ref: prov.ref)
       end
 
       # --- URL -----------------------------------------------------------------

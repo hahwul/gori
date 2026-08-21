@@ -33,7 +33,7 @@ describe "entity_links (V21)" do
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
         target: "/x", http_version: "HTTP/1.1",
-        head: "GET /x HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /x HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       issue_id = store.insert_issue("xss", Gori::Store::Severity::High, "a.test", fid)
       links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
       links.size.should eq(1)
@@ -109,7 +109,7 @@ describe Gori::Links do
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
         target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice))
+        head: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, fid)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
         Gori::Store::LinkRefKind::Repeater, 3_i64)

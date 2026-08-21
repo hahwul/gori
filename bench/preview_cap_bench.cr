@@ -18,7 +18,7 @@ body = Bytes.new(1_500_000) { |i| ((i % 26) + 97).to_u8 }
 id = store.insert_flow(Gori::Store::CapturedRequest.new(
   created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
   method: "GET", target: "/big", http_version: "HTTP/1.1",
-  head: "GET /big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+  head: "GET /big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 store.update_response(Gori::Store::CapturedResponse.new(
   flow_id: id, status: 200,
   head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,

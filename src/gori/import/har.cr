@@ -8,7 +8,7 @@ require "../proxy/h2/head_codec" # PROTOCOL_MARKER — the `:protocol` line Expo
 module Gori
   module Import
     module Har
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         raw = File.read(path)
         doc = begin
           JSON.parse(raw)
@@ -30,7 +30,7 @@ module Gori
           # shape) must SKIP, not abort the whole import — entry_to_flow can raise
           # (Base64::Error, type casts), which previously discarded every valid entry.
           flow = begin
-            entry_to_flow(e)
+            entry_to_flow(e, prov)
           rescue
             nil
           end
@@ -44,7 +44,7 @@ module Gori
         ParseResult.new(flows, skipped)
       end
 
-      private def self.entry_to_flow(entry : JSON::Any) : Builder::FlowPair?
+      private def self.entry_to_flow(entry : JSON::Any, prov : Provenance) : Builder::FlowPair?
         req = entry["request"]?
         return nil unless req
         url = req["url"]?.to_s
@@ -66,7 +66,8 @@ module Gori
         resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
         unless resp
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
-            http_version, req_declared)
+            http_version, req_declared,
+            source_surface: prov.surface, source_ref: prov.ref)
         end
 
         # `number_i64`, not `as_i`: a fractional `"status": 200.5` raises `TypeCastError`
@@ -108,7 +109,8 @@ module Gori
         pair = Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
-          req_declared, resp_declared, connect_protocol(req_headers))
+          req_declared, resp_declared, connect_protocol(req_headers),
+          source_surface: prov.surface, source_ref: prov.ref)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
       end

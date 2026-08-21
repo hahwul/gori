@@ -28,7 +28,7 @@ private def detach_request(target : String) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80, method: "GET",
     target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil)
+    head: "GET #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 private def plant_probe(store : Gori::Store, token : String, flow_id : Int64?) : Nil

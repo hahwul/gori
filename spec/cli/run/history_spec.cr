@@ -531,7 +531,7 @@ private def captured(host : String, target : String) : Gori::Store::CapturedRequ
   Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: host, port: 443,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil)
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 describe "gori run history --format json — the listing's url and headers" do

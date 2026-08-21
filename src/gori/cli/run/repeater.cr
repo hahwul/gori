@@ -626,7 +626,7 @@ module Gori
         #
         # Recorded regardless of ok?: an error flow is evidence too (and matches MCP
         # send_request, which records the attempt).
-        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, project_name, db_path) : nil
+        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project_name, db_path) : nil
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id)
         persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project_name, db_path) if result.ok?
         exit 1 unless result.ok?
@@ -640,11 +640,13 @@ module Gori
       # in text) rather than this method printing — see the call site.
       private def self.record_repeater_send_to_history(plan : Repeater::Plan, wire : Bytes,
                                                        result : Repeater::Result,
-                                                       created_at : Int64, project_name : String?,
+                                                       created_at : Int64, session_id : Int64,
+                                                       project_name : String?,
                                                        db_path : String?) : Int64?
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          Repeater::HistoryRecord.record(store, plan, result, created_at, wire)
+          Repeater::HistoryRecord.record(store, plan, result, created_at, wire,
+            surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.to_s)
         rescue ex : Gori::Error
           STDERR.puts "gori run repeater send: #{ex.message}"
           nil
