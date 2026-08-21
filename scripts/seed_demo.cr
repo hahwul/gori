@@ -10,11 +10,19 @@
 #   Decoder / JWT / Comparer                                          — pre-loaded sub-tabs and material
 #   Env (bindings)                                                    — project `$KEY` vars a Repeater tab uses
 #
+# The captured traffic covers every PROTO label History can print — HTTP/HTTPS, WS/WSS,
+# GRPC/GRPCS, SSE/SSES and a short-circuited STUB — over both transports, plus the shapes
+# that are not a clean 200: an RFC 8441 extended CONNECT, a `connect-udp` tunnel, MQTT and
+# graphql-transport-ws over a socket, gRPC server streaming / trailers-only failures /
+# grpc-web / a body cut mid-frame, a gzip'd chunked body, and flows in Pending, Aborted and
+# Error state. See the "Act three" section for the whole list.
+#
 #   crystal run scripts/seed_demo.cr
 #
 # Re-runnable: it wipes any existing "demo" project first, then recreates it.
 require "file_utils"
 require "base64"
+require "compress/gzip"
 require "openssl/hmac"
 require "uri"
 require "../src/gori"
@@ -80,19 +88,22 @@ def raw_flow(store : S, created_at : Int64, *,
              scheme = "https", host : String, port = 443,
              method : String, target : String, http = "HTTP/1.1",
              req_head : String, req_body : Bytes? = nil,
-             status : Int32, reason : String, ctype : String? = nil,
+             status : Int32, reason : String? = nil, ctype : String? = nil,
              resp_head : String, resp_body : Bytes? = nil, dur_us = 28_000_i64,
-             h2_conn_id : Int64? = nil, h2_stream_id : Int64? = nil) : Int64
+             h2_conn_id : Int64? = nil, h2_stream_id : Int64? = nil,
+             connect_protocol : String? = nil, short_circuited = false,
+             state = S::FlowState::Complete, error : String? = nil) : Int64
   fid = store.insert_flow(S::CapturedRequest.new(
     created_at: created_at, scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: http,
     head: req_head.to_slice, body: req_body,
-    h2_conn_id: h2_conn_id, h2_stream_id: h2_stream_id))
+    h2_conn_id: h2_conn_id, h2_stream_id: h2_stream_id,
+    short_circuited: short_circuited, connect_protocol: connect_protocol))
 
   store.update_response(S::CapturedResponse.new(
     flow_id: fid, status: status, reason: reason, content_type: ctype,
     head: resp_head.to_slice, body: resp_body,
-    ttfb_us: dur_us // 2, duration_us: dur_us))
+    ttfb_us: dur_us // 2, duration_us: dur_us, state: state, error: error))
   fid
 end
 
@@ -122,13 +133,123 @@ def pb_string_field(field : Int32, value : String) : Bytes
   io.to_slice
 end
 
-# gRPC length-prefixed frame: 1-byte compressed flag + 4-byte big-endian length + message.
-def grpc_frame(msg : Bytes) : Bytes
+# protobuf varint field (wire type 0) — the numbers beside the strings, so the
+# schema-less tree the detail pane draws has more than one row shape in it.
+def pb_varint_field(field : Int32, value : Int32) : Bytes
   io = IO::Memory.new
-  io.write_byte(0_u8) # not compressed
+  io.write_byte((field << 3).to_u8)
+  v = value
+  while v >= 0x80
+    io.write_byte(((v & 0x7f) | 0x80).to_u8)
+    v >>= 7
+  end
+  io.write_byte(v.to_u8)
+  io.to_slice
+end
+
+def pb_message(*parts : Bytes) : Bytes
+  io = IO::Memory.new
+  parts.each { |p| io.write(p) }
+  io.to_slice
+end
+
+# gRPC length-prefixed frame: 1-byte flag + 4-byte big-endian length + message.
+# The flag is a bitmask: 0x01 = the payload is compressed, 0x80 = this is a grpc-web
+# TRAILER frame whose payload is ASCII `name: value` lines (grpc-status/grpc-message),
+# not protobuf. Same layout `Proxy::H2::Grpc.frame` writes and the detail pane deframes.
+def grpc_frame(msg : Bytes, compressed = false, trailer = false) : Bytes
+  io = IO::Memory.new
+  flag = 0_u8
+  flag |= 0x01_u8 if compressed
+  flag |= 0x80_u8 if trailer
+  io.write_byte(flag)
   io.write_bytes(msg.size.to_u32, IO::ByteFormat::BigEndian)
   io.write(msg)
   io.to_slice
+end
+
+# A WebSocket handshake's request/response head pair. Every 101 flow needs the same dozen
+# lines and differs in three facts, so those are the arguments: the SUBPROTOCOL it
+# negotiates (which is what says "this socket carries MQTT / graphql-transport-ws and not
+# just JSON"), the extension it asks for, and the scheme — a `ws://` socket's handshake must
+# not claim to have come from an `https://` page.
+def ws_heads(host : String, target : String, *, scheme = "https",
+             subprotocol : String? = nil, extensions : String? = nil,
+             accept_subprotocol = true, accept_extensions = false,
+             req_headers = {} of String => String) : {String, String}
+  origin = scheme == "https" ? "https://shop.demo.test" : "http://legacy.demo.test:8080"
+  req = String.build do |b|
+    b << "GET " << target << " HTTP/1.1\r\n"
+    b << "Host: " << host << "\r\n"
+    b << "User-Agent: gori-demo/1.0\r\n"
+    b << "Upgrade: websocket\r\n"
+    b << "Connection: Upgrade\r\n"
+    b << "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
+    b << "Sec-WebSocket-Version: 13\r\n"
+    b << "Sec-WebSocket-Protocol: " << subprotocol << "\r\n" if subprotocol
+    b << "Sec-WebSocket-Extensions: " << extensions << "\r\n" if extensions
+    req_headers.each { |k, v| b << k << ": " << v << "\r\n" }
+    b << "Origin: " << origin << "\r\n\r\n"
+  end
+  resp = String.build do |b|
+    b << "HTTP/1.1 101 Switching Protocols\r\n"
+    b << "Upgrade: websocket\r\n"
+    b << "Connection: Upgrade\r\n"
+    b << "Sec-WebSocket-Accept: HSmrc0sMlYUkAGmm5OPpG2HaGWk=\r\n"
+    b << "Sec-WebSocket-Protocol: " << subprotocol << "\r\n" if subprotocol && accept_subprotocol
+    b << "Sec-WebSocket-Extensions: " << extensions << "\r\n" if extensions && accept_extensions
+    b << "\r\n"
+  end
+  {req, resp}
+end
+
+# gzip the way an origin does it, so the body pane has something real to inflate — the
+# stored bytes stay the wire bytes and the detail view says "decoded: gzip" over them.
+def gzip_bytes(data : String) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io, &.print(data))
+  io.to_slice
+end
+
+# The h1 chunked wire form, terminating 0-chunk included. Storage keeps the framing
+# (P7); only the DISPLAY de-chunks it.
+def chunked_bytes(body : Bytes, chunk = 64) : Bytes
+  io = IO::Memory.new
+  pos = 0
+  while pos < body.size
+    n = {chunk, body.size - pos}.min
+    io << n.to_s(16) << "\r\n"
+    io.write(body[pos, n])
+    io << "\r\n"
+    pos += n
+  end
+  io << "0\r\n\r\n"
+  io.to_slice
+end
+
+# MQTT 3.1.1 control packets, the bytes a broker really sees. Every one here is under 128
+# bytes, so the remaining-length field is a single byte. These ride a WebSocket as BINARY
+# frames — an application protocol that is not HTTP at all, tunnelled through one.
+def mqtt_packet(type_flags : UInt8, rest : Bytes) : Bytes
+  io = IO::Memory.new
+  io.write_byte(type_flags)
+  io.write_byte(rest.size.to_u8)
+  io.write(rest)
+  io.to_slice
+end
+
+def mqtt_string(value : String) : Bytes
+  io = IO::Memory.new
+  io.write_bytes(value.bytesize.to_u16, IO::ByteFormat::BigEndian)
+  io << value
+  io.to_slice
+end
+
+def mqtt_publish(topic : String, payload : String) : Bytes
+  io = IO::Memory.new
+  io.write(mqtt_string(topic))
+  io << payload
+  mqtt_packet(0x30_u8, io.to_slice)
 end
 
 # base64url without padding (the JWT segment encoding).
@@ -174,8 +295,10 @@ end
 project = registry.create("demo",
   "Demo target for exploring gori's TUI — a fictional shop, JSON API, OAuth server and " \
   "legacy stack, plus a real, replayable capture of www.hahwul.com. Captured browsing of " \
-  "shop/api/cdn/auth/legacy.demo.test with planted issues; HTTP/2, WebSocket, gRPC, SSE, " \
-  "GraphQL, SAML and framework-signed cookies; Repeater (incl. a WS and a `$KEY`-bound tab)/" \
+  "shop/api/cdn/auth/legacy.demo.test with planted issues; every PROTO the column can print " \
+  "(HTTP/2, WS and WSS, GRPC and GRPCS, SSE and SSES, a STUB), incl. an RFC 8441 CONNECT, MQTT " \
+  "and graphql-ws sockets, grpc-web and a connect-udp tunnel; GraphQL, SAML and framework-signed " \
+  "cookies; Repeater (incl. a WS and a `$KEY`-bound tab)/" \
   "Fuzzer/Miner/Sequencer sessions; Rewriter rules + session bindings; project env vars; " \
   "colormarker rules; an OAST listener with callbacks; passive AND active probe findings; " \
   "and entity links tying issues and notes to related workbench items.")
@@ -850,6 +973,463 @@ store.insert_flow(S::CapturedRequest.new(
 
 puts "• inserted act-two traffic: oauth, cors, upload, png, bundle, .env, listing, redirect, 3 cookies, euc-kr, big/slow/basic/pending"
 
+# --- Act three: protocol variety --------------------------------------------
+# The showcase above holds ONE flow per protocol, and every one of them is a SUCCESSFUL
+# exchange over TLS — the half of each protocol that never surprises anyone. This section is
+# the other half, seeded so the code that CLASSIFIES and RENDERS a flow can be looked at
+# instead of assumed:
+#
+#   * every label the History PROTO column can print, not just the TLS spellings: WS and
+#     WSS, GRPC and GRPCS, SSE and SSES, plus the STUB a short-circuited flow gets;
+#   * the classifications gori derives from something OTHER than a response content-type —
+#     an RFC 8441 extended CONNECT (a WebSocket over HTTP/2: answered 200, never 101), an
+#     extended CONNECT that is NOT a WebSocket (`connect-udp`), and a gRPC call answered by
+#     a proxy's `text/html` 502 (still gRPC — the REQUEST said so);
+#   * the framings whose RENDERING is the thing worth checking: server streaming, a grpc-web
+#     trailer frame, a body cut mid-frame, a gzip'd chunked body, and a socket carrying
+#     control frames, a fragmented message and an unmasked client frame;
+#   * application protocols that are not HTTP at all and ride a WebSocket to get here: MQTT
+#     (binary frames) and graphql-transport-ws (which lights up the GRAPHQL pane on a flow
+#     that has no request body to decode);
+#   * the flow STATES a clean capture never produces — Error, Aborted, and a response gori
+#     wrote itself.
+#
+# A WebSocket CLOSE payload (§5.5.1): 2-byte big-endian status code, then a UTF-8 reason.
+ws_close = ->(code : Int32, reason : String) {
+  io = IO::Memory.new
+  io.write_bytes(code.to_u16, IO::ByteFormat::BigEndian)
+  io << reason
+  io.to_slice
+}
+
+# CLEARTEXT WebSocket (ws://) — the row the PROTO column prints as `WS` rather than `WSS`,
+# and the reason that distinction is drawn at all: this socket carries the session JWT in
+# its first frame, in the clear, and a WSS row and a WS row are otherwise identical on the
+# History line. The transcript also carries the frame shapes a plain chat log never has:
+# an unmasked client frame (§5.1 violation — the most common WebSocket hardening probe),
+# a message that arrived in three fragments, PING/PONG, an RSV1 frame on a socket that
+# negotiated no extension (§5.2), a `[gori]` advisory row, and a CLOSE with code + reason.
+ws_plain_req, ws_plain_resp = ws_heads("legacy.demo.test:8080", "/ws/notify", scheme: "http")
+ids[:ws_plain] = raw_flow(store, t.call(126), scheme: "http", host: "legacy.demo.test", port: 8080,
+  method: "GET", target: "/ws/notify", req_head: ws_plain_req,
+  status: 101, reason: "Switching Protocols", resp_head: ws_plain_resp, dur_us: 2_400_000_i64)
+
+[
+  {"out", 1, %({"op":"auth","token":"#{jwt}"}).to_slice, S::WsShape.new},
+  {"in", 1, %({"op":"auth.ok","user":"alice"}).to_slice, S::WsShape.new},
+  # §5.1: a client frame MUST be masked. This one is not — a server that accepts it is the
+  # finding, and without the shape columns the row would read as an ordinary text frame.
+  {"out", 1, %({"op":"subscribe","topic":"orders"}).to_slice, S::WsShape.new(masked: false)},
+  # Reassembled from three frames. The payload alone cannot say that; `frames` can.
+  {"in", 1, %({"op":"event","topic":"orders","order":{"id":9,"total":3998,"status":"paid"}}).to_slice,
+   S::WsShape.new(frames: 3)},
+  {"out", 9, "hb".to_slice, S::WsShape.new}, # PING
+  {"in", 10, "hb".to_slice, S::WsShape.new}, # PONG
+  # RSV1 set on a socket whose handshake negotiated NO extension — a deliberate §5.2 probe,
+  # so the payload is exactly the bytes the operator sent, not a deflate stream.
+  {"out", 1, %({"op":"ping","rsv":"probe"}).to_slice, S::WsShape.new(rsv: 1)},
+  {"in", 2, Bytes[0x08, 0x96, 0x01, 0x12, 0x07, 0x6f, 0x72, 0x64, 0x65, 0x72, 0x73, 0x18, 0x01], S::WsShape.new},
+  # gori's own prose ABOUT the socket, on `Relay::NOTICE_DIRECTION` and behind `[gori] ` so
+  # every repeater seed refuses to replay it as traffic. This is what a real advisory looks
+  # like in the transcript.
+  {"in", 1, "[gori] server→client: message exceeded the intercept parking ceiling; forwarded unheld".to_slice,
+   S::WsShape.new},
+  {"in", 8, ws_close.call(1000, "session expired"), S::WsShape.new},
+].each { |(dir, op, payload, shape)| store.insert_ws_message(ids[:ws_plain], dir, op, payload, shape: shape) }
+
+# WebSocket over HTTP/2 (RFC 8441 extended CONNECT). There is no 101 anywhere in this
+# handshake — §5.1 replaces the h1 upgrade with `CONNECT` + a `:protocol` pseudo-header,
+# answered 2xx — so the ONLY thing that makes this a WebSocket is the `connect_protocol`
+# column (V16). The stored request head carries it as `HeadCodec`'s synthetic
+# `X-Gori-Protocol` marker line, which is what a real capture writes.
+ws_h2_conn = store.insert_h2_connection("api.demo.test", 443, "h2")
+# SETTINGS with ENABLE_CONNECT_PROTOCOL (0x8) = 1 — without the origin advertising it, §5.1
+# forbids the client from sending the extended CONNECT at all.
+store.insert_h2_frame(ws_h2_conn, "in", 0x4_u8, 0x0_u8, 0_u32, Bytes[0x00, 0x08, 0x00, 0x00, 0x00, 0x01])
+store.insert_h2_frame(ws_h2_conn, "out", 0x8_u8, 0x0_u8, 0_u32, Bytes[0x00, 0x0f, 0x00, 0x01])
+store.insert_h2_frame(ws_h2_conn, "out", 0x1_u8, 0x4_u8, 1_u32,
+  Bytes[0x83, 0x86, 0x41, 0x8a, 0xa0, 0xe4, 0x1d, 0x13, 0x9d, 0x09, 0xb8, 0xf0, 0x1e, 0x07])
+store.insert_h2_frame(ws_h2_conn, "in", 0x1_u8, 0x4_u8, 1_u32, Bytes[0x88, 0x76, 0x8b, 0x77])
+store.insert_h2_frame(ws_h2_conn, "out", 0x0_u8, 0x0_u8, 1_u32, Bytes.new(46))
+store.insert_h2_frame(ws_h2_conn, "in", 0x0_u8, 0x0_u8, 1_u32, Bytes.new(58))
+store.insert_h2_frame(ws_h2_conn, "in", 0x0_u8, 0x0_u8, 1_u32, Bytes.new(64))
+store.flush
+
+ws_h2_req = String.build do |b|
+  b << "CONNECT /ws/notifications HTTP/2\r\n"
+  b << "Host: api.demo.test\r\n"
+  b << "user-agent: gori-demo/1.0\r\n"
+  b << "origin: https://shop.demo.test\r\n"
+  b << "sec-websocket-version: 13\r\n"
+  b << "authorization: Bearer " << jwt << "\r\n"
+  b << "X-Gori-Protocol: websocket\r\n\r\n"
+end
+# h2 has no reason phrase (RFC 9113 §8.3.2) — `HeadCodec.synth_response` stops at the code.
+ws_h2_resp = "HTTP/2 200\r\nserver: nginx/1.25.3\r\nsec-websocket-version: 13\r\n\r\n"
+ids[:ws_h2] = raw_flow(store, t.call(128), host: "api.demo.test", method: "CONNECT",
+  target: "/ws/notifications", http: "HTTP/2", req_head: ws_h2_req,
+  status: 200, resp_head: ws_h2_resp, dur_us: 3_100_000_i64,
+  h2_conn_id: ws_h2_conn, h2_stream_id: 1_i64, connect_protocol: "websocket")
+
+[
+  {"out", 1, %({"type":"subscribe","channels":["orders","stock"]})},
+  {"in", 1, %({"type":"ack","channels":["orders","stock"]})},
+  {"in", 1, %({"type":"stock","sku":"BW-0042","stock":15})},
+  {"in", 1, %({"type":"order","id":9,"status":"shipped"})},
+  {"out", 1, %({"type":"unsubscribe","channels":["stock"]})},
+].each { |(dir, op, payload)| store.insert_ws_message(ids[:ws_h2], dir, op, payload.to_slice) }
+
+# An extended CONNECT that is NOT a WebSocket: `connect-udp` (RFC 9298, MASQUE) tunnels UDP
+# datagrams through the proxy. It is the case `Proto.websocket_connect?` exists to REJECT —
+# the token is the whole test, so this row stays HTTPS and carries no transcript, because
+# the datagrams are not RFC 6455 frames and gori has nothing to show for them.
+connect_udp_req = String.build do |b|
+  b << "CONNECT /.well-known/masque/udp/10.0.4.53/53/ HTTP/2\r\n"
+  b << "Host: proxy.demo.test\r\n"
+  b << "user-agent: gori-demo/1.0\r\n"
+  b << "capsule-protocol: ?1\r\n"
+  b << "X-Gori-Protocol: connect-udp\r\n\r\n"
+end
+raw_flow(store, t.call(129), host: "proxy.demo.test", method: "CONNECT",
+  target: "/.well-known/masque/udp/10.0.4.53/53/", http: "HTTP/2", req_head: connect_udp_req,
+  status: 200, resp_head: "HTTP/2 200\r\ncapsule-protocol: ?1\r\n\r\n",
+  dur_us: 1_800_000_i64, connect_protocol: "connect-udp")
+
+# MQTT over WebSocket — an application protocol that is not HTTP in any part, tunnelled
+# through one to reach a browser. Every frame is BINARY, so the MESSAGES pane shows
+# «binary Nb» rather than text: the point is that gori captures the transcript at all, and
+# that the subprotocol in the handshake (`mqtt`) is what names what those bytes are.
+mqtt_req, mqtt_resp = ws_heads("iot.demo.test", "/mqtt", subprotocol: "mqtt")
+ids[:mqtt] = raw_flow(store, t.call(131), host: "iot.demo.test", method: "GET", target: "/mqtt",
+  req_head: mqtt_req, status: 101, reason: "Switching Protocols", resp_head: mqtt_resp,
+  dur_us: 4_700_000_i64)
+
+mqtt_connect = IO::Memory.new
+mqtt_connect.write(mqtt_string("MQTT"))
+mqtt_connect.write(Bytes[0x04, 0xc2, 0x00, 0x3c]) # level 4, user+pass+clean-session, keepalive 60
+mqtt_connect.write(mqtt_string("shop-web-001"))
+mqtt_connect.write(mqtt_string("demo"))
+mqtt_connect.write(mqtt_string("mqtt-pw-2026")) # credentials in the clear inside the frame
+mqtt_sub = IO::Memory.new
+mqtt_sub.write(Bytes[0x00, 0x01]) # packet id
+mqtt_sub.write(mqtt_string("shop/orders/#"))
+mqtt_sub.write(Bytes[0x01]) # QoS 1
+[
+  {"out", mqtt_packet(0x10_u8, mqtt_connect.to_slice)},                     # CONNECT
+  {"in", mqtt_packet(0x20_u8, Bytes[0x00, 0x00])},                          # CONNACK, accepted
+  {"out", mqtt_packet(0x82_u8, mqtt_sub.to_slice)},                         # SUBSCRIBE
+  {"in", mqtt_packet(0x90_u8, Bytes[0x00, 0x01, 0x01])},                    # SUBACK
+  {"in", mqtt_publish("shop/orders/9", %({"status":"paid","total":3998}))}, # PUBLISH
+  {"in", mqtt_publish("shop/orders/10", %({"status":"picked","total":1999}))},
+  {"out", mqtt_packet(0xc0_u8, Bytes.new(0))}, # PINGREQ
+  {"in", mqtt_packet(0xd0_u8, Bytes.new(0))},  # PINGRESP
+].each { |(dir, payload)| store.insert_ws_message(ids[:mqtt], dir, 2, payload) }
+
+# GraphQL over a WebSocket — how every real SUBSCRIPTION runs, and the one GraphQL shape
+# that has no request body to decode: the document travels INSIDE a frame, wrapped in the
+# subprotocol's envelope. Opening this flow offers a GRAPHQL pane built from the transcript
+# (`Gori::GraphqlWs`), which the three POST /graphql flows above cannot exercise.
+gql_ws_req, gql_ws_resp = ws_heads("api.demo.test", "/graphql", subprotocol: "graphql-transport-ws")
+ids[:gql_ws] = raw_flow(store, t.call(133), host: "api.demo.test", method: "GET", target: "/graphql",
+  req_head: gql_ws_req, status: 101, reason: "Switching Protocols", resp_head: gql_ws_resp,
+  dur_us: 6_200_000_i64)
+
+[
+  {"out", 1, %({"type":"connection_init","payload":{"Authorization":"Bearer #{jwt}"}})},
+  {"in", 1, %({"type":"connection_ack"})},
+  {"out", 1, %({"id":"1","type":"subscribe","payload":{"operationName":"OnOrder","query":"subscription OnOrder($cartId: ID!) { orderUpdated(cartId: $cartId) { id status total } }","variables":{"cartId":"9"}}})},
+  {"in", 1, %({"id":"1","type":"next","payload":{"data":{"orderUpdated":{"id":"9","status":"paid","total":3998}}}})},
+  {"in", 1, %({"id":"1","type":"next","payload":{"data":{"orderUpdated":{"id":"9","status":"shipped","total":3998}}}})},
+  {"out", 1, %({"type":"ping"})},
+  {"in", 1, %({"type":"pong"})},
+  # A second subscription, on the ADMIN field a customer token should not reach — it is
+  # accepted, which is the same authorization gap the REST IDOR shows, one transport over.
+  {"out", 1, %({"id":"2","type":"subscribe","payload":{"query":"subscription { auditLog { actor action target } }"}})},
+  {"in", 1, %({"id":"2","type":"next","payload":{"data":{"auditLog":{"actor":"bob@demo.test","action":"role.grant","target":"user:2"}}}})},
+  {"out", 1, %({"id":"1","type":"complete"})},
+].each { |(dir, op, payload)| store.insert_ws_message(ids[:gql_ws], dir, op, payload.to_slice) }
+
+# --- gRPC: the calls that are not a happy unary 200 -------------------------
+# One h2 connection carrying TWO streams, so the FRAMES pane shows the surrounding
+# multiplexed traffic with `*` marking the stream the open flow belongs to — the frames
+# below are interleaved on purpose, the way they arrive on the wire.
+grpc_conn = store.insert_h2_connection("api.demo.test", 443, "h2")
+
+watch_msgs = [
+  grpc_frame(pb_message(pb_string_field(1, "BW-0042"), pb_varint_field(2, 1999))),
+  grpc_frame(pb_message(pb_string_field(1, "RW-0043"), pb_varint_field(2, 2499))),
+  grpc_frame(pb_message(pb_string_field(1, "BW-0042"), pb_varint_field(2, 1899))),
+  grpc_frame(pb_message(pb_string_field(1, "GW-0044"), pb_varint_field(2, 3299))),
+]
+watch_body = IO::Memory.new
+watch_msgs.each { |m| watch_body.write(m) }
+watch_req_msg = grpc_frame(pb_message(pb_string_field(1, "shop"), pb_varint_field(2, 4)))
+stats_req_msg = grpc_frame(pb_string_field(1, "2026-06"))
+
+store.insert_h2_frame(grpc_conn, "out", 0x4_u8, 0x0_u8, 0_u32, Bytes[0x00, 0x03, 0x00, 0x00, 0x00, 0x64])
+store.insert_h2_frame(grpc_conn, "out", 0x1_u8, 0x4_u8, 1_u32,
+  Bytes[0x82, 0x87, 0x41, 0x8a, 0xa0, 0xe4, 0x1d, 0x13, 0x9d, 0x09, 0xb8, 0xf0, 0x1e, 0x07])
+store.insert_h2_frame(grpc_conn, "out", 0x0_u8, 0x1_u8, 1_u32, watch_req_msg)
+store.insert_h2_frame(grpc_conn, "out", 0x1_u8, 0x4_u8, 3_u32,
+  Bytes[0x82, 0x87, 0x41, 0x8a, 0xa0, 0xe4, 0x1d, 0x13, 0x9d, 0x09, 0xb8, 0xf0, 0x1e, 0x11])
+store.insert_h2_frame(grpc_conn, "in", 0x1_u8, 0x4_u8, 1_u32,
+  Bytes[0x88, 0x5f, 0x10, 0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e])
+store.insert_h2_frame(grpc_conn, "out", 0x0_u8, 0x1_u8, 3_u32, stats_req_msg)
+watch_msgs.each { |m| store.insert_h2_frame(grpc_conn, "in", 0x0_u8, 0x0_u8, 1_u32, m) }
+store.insert_h2_frame(grpc_conn, "in", 0x1_u8, 0x4_u8, 3_u32, Bytes[0x88, 0x5f, 0x10, 0x61, 0x70, 0x70])
+# stream 3's whole answer IS its trailers: grpc-status 7 = PERMISSION_DENIED, so there is no
+# DATA frame at all — a gRPC failure that a status-code reader would call a 200.
+store.insert_h2_frame(grpc_conn, "in", 0x1_u8, 0x5_u8, 3_u32,
+  Bytes[0x40, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x37])
+store.insert_h2_frame(grpc_conn, "in", 0x1_u8, 0x5_u8, 1_u32,
+  Bytes[0x40, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30])
+store.flush
+
+grpc_head = ->(path : String, extra : String) {
+  String.build do |b|
+    b << "POST " << path << " HTTP/2\r\n"
+    b << "Host: api.demo.test\r\n"
+    b << "content-type: application/grpc+proto\r\n"
+    b << "te: trailers\r\n"
+    b << "grpc-encoding: identity\r\n"
+    b << "grpc-accept-encoding: identity,gzip\r\n"
+    b << "authorization: Bearer " << jwt << "\r\n"
+    b << extra
+    b << "user-agent: grpc-demo/1.0 grpc-crystal/0.3\r\n\r\n"
+  end
+}
+
+# SERVER STREAMING: one request, four messages back on one stream. The body deframes into
+# four length-prefixed protobuf messages, each with a string AND a varint field, so the
+# schema-less tree the pane draws has more than one row shape in it.
+ids[:grpc_stream] = raw_flow(store, t.call(135), host: "api.demo.test", method: "POST",
+  target: "/demo.Prices/Watch", http: "HTTP/2",
+  req_head: grpc_head.call("/demo.Prices/Watch", "grpc-timeout: 30S\r\n"), req_body: watch_req_msg,
+  status: 200, ctype: "application/grpc+proto",
+  resp_head: "HTTP/2 200\r\ncontent-type: application/grpc+proto\r\ngrpc-status: 0\r\ngrpc-message: OK\r\n" \
+             "X-Gori-Trailers: grpc-status, grpc-message\r\n\r\n",
+  resp_body: watch_body.to_slice, dur_us: 7_300_000_i64,
+  h2_conn_id: grpc_conn, h2_stream_id: 1_i64)
+
+# A gRPC call that FAILED at the application layer while succeeding at the HTTP one: 200 OK,
+# empty body, and the real answer in the trailers. `X-Gori-Trailers` names the fields that
+# arrived in the trailing HEADERS block rather than the response head — without that line a
+# trailer is indistinguishable from a header, and for gRPC the trailer IS the status.
+ids[:grpc_denied] = raw_flow(store, t.call(136), host: "api.demo.test", method: "POST",
+  target: "/demo.Admin/GetStats", http: "HTTP/2",
+  req_head: grpc_head.call("/demo.Admin/GetStats", ""), req_body: stats_req_msg,
+  status: 200, ctype: "application/grpc+proto",
+  resp_head: "HTTP/2 200\r\ncontent-type: application/grpc+proto\r\ngrpc-status: 7\r\n" \
+             "grpc-message: caller is not an administrator\r\n" \
+             "X-Gori-Trailers: grpc-status, grpc-message\r\n\r\n",
+  dur_us: 51_000_i64, h2_conn_id: grpc_conn, h2_stream_id: 3_i64)
+
+# A gRPC call answered by a PROXY, not the service: `text/html` 502, no framing at all. The
+# response content-type says HTML, and this is still a gRPC call in the PROTO column and
+# under `proto:grpc` — because the REQUEST said `application/grpc`, and that is the set an
+# operator hunting broken gRPC routes is looking through.
+gateway_html = "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center>" \
+               "<hr><center>nginx/1.25.3</center></body></html>\n"
+ids[:grpc_502] = raw_flow(store, t.call(137), host: "api.demo.test", method: "POST",
+  target: "/demo.Greeter/SayHello", http: "HTTP/2",
+  req_head: grpc_head.call("/demo.Greeter/SayHello", ""), req_body: grpc_frame(pb_string_field(1, "alice")),
+  status: 502, ctype: "text/html",
+  resp_head: "HTTP/2 502\r\nserver: nginx/1.25.3\r\ncontent-type: text/html\r\n" \
+             "content-length: #{gateway_html.bytesize}\r\n\r\n",
+  resp_body: gateway_html.to_slice, dur_us: 84_000_i64)
+
+# CLEARTEXT gRPC (h2c, prior knowledge) to an internal service on the legacy box — the row
+# the PROTO column prints as `GRPC` and not `GRPCS`. An admin RPC, unauthenticated, over a
+# plaintext connection: exactly the pair of facts the transport-bearing label exists to make
+# visible on the triage line.
+h2c_req = String.build do |b|
+  b << "POST /demo.Legacy/ListUsers HTTP/2\r\n"
+  b << "Host: legacy.demo.test:8081\r\n"
+  b << "content-type: application/grpc\r\n"
+  b << "te: trailers\r\n"
+  b << "user-agent: grpc-demo/1.0\r\n\r\n"
+end
+h2c_body = IO::Memory.new
+h2c_body.write(grpc_frame(pb_message(pb_varint_field(1, 1), pb_string_field(2, "alice@demo.test"))))
+h2c_body.write(grpc_frame(pb_message(pb_varint_field(1, 2), pb_string_field(2, "bob@demo.test"))))
+ids[:grpc_h2c] = raw_flow(store, t.call(139), scheme: "http", host: "legacy.demo.test", port: 8081,
+  method: "POST", target: "/demo.Legacy/ListUsers", http: "HTTP/2",
+  req_head: h2c_req, req_body: grpc_frame(pb_varint_field(1, 50)),
+  status: 200, ctype: "application/grpc",
+  resp_head: "HTTP/2 200\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\n" \
+             "X-Gori-Trailers: grpc-status\r\n\r\n",
+  resp_body: h2c_body.to_slice, dur_us: 23_000_i64)
+
+# grpc-web-text: the browser-facing variant, over HTTP/1.1, with the WHOLE framed stream
+# base64-encoded — scanning the raw body for a length prefix finds base64 characters and
+# reports nothing, so the deframer has to decode first. Its trailers ride INSIDE the body as
+# a 0x80-flagged frame of ASCII header lines, which is the other half of the same feature:
+# the pane prints them as `▸ trailer` instead of trying to read them as protobuf.
+web_stream = IO::Memory.new
+web_stream.write(grpc_frame(pb_message(pb_string_field(1, "Hello, alice!"), pb_varint_field(2, 2))))
+web_stream.write(grpc_frame("grpc-status: 0\r\ngrpc-message: OK\r\n".to_slice, trailer: true))
+web_body = Base64.strict_encode(web_stream.to_slice)
+web_req_body = Base64.strict_encode(grpc_frame(pb_string_field(1, "alice")))
+web_req = String.build do |b|
+  b << "POST /demo.Greeter/SayHello HTTP/1.1\r\n"
+  b << "Host: api.demo.test\r\n"
+  b << "Content-Type: application/grpc-web-text\r\n"
+  b << "X-Grpc-Web: 1\r\n"
+  b << "Accept: application/grpc-web-text\r\n"
+  b << "Origin: https://shop.demo.test\r\n"
+  b << "Content-Length: " << web_req_body.bytesize << "\r\n\r\n"
+end
+ids[:grpc_web] = raw_flow(store, t.call(141), host: "api.demo.test", method: "POST",
+  target: "/demo.Greeter/SayHello", req_head: web_req, req_body: web_req_body.to_slice,
+  status: 200, reason: "OK", ctype: "application/grpc-web-text",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/grpc-web-text\r\n" \
+             "Access-Control-Expose-Headers: grpc-status,grpc-message\r\n" \
+             "Content-Length: #{web_body.bytesize}\r\n\r\n",
+  resp_body: web_body.to_slice, dur_us: 39_000_i64)
+
+# A stream cut mid-frame: the last length prefix declares 96 bytes and 8 arrived. The bytes
+# that could NOT be framed are the finding in a parser test, so the pane frames what it can
+# and says the rest is short rather than silently dropping it.
+cut = IO::Memory.new
+cut.write(grpc_frame(pb_message(pb_string_field(1, "BW-0042"), pb_varint_field(2, 1999))))
+cut.write(Bytes[0x00, 0x00, 0x00, 0x00, 0x60]) # declares 96 bytes…
+cut.write(pb_string_field(1, "GW-004"))        # …8 arrive, then the connection died
+raw_flow(store, t.call(143), host: "api.demo.test", method: "POST",
+  target: "/demo.Prices/Watch", http: "HTTP/2",
+  req_head: grpc_head.call("/demo.Prices/Watch", ""), req_body: watch_req_msg,
+  status: 200, ctype: "application/grpc+proto",
+  resp_head: "HTTP/2 200\r\ncontent-type: application/grpc+proto\r\n\r\n",
+  resp_body: cut.to_slice, dur_us: 2_050_000_i64,
+  state: S::FlowState::Aborted, error: "connection closed mid-response")
+
+# --- SSE, the other two ways it goes -----------------------------------------
+# CLEARTEXT SSE (`SSE`, not `SSES`) from the legacy box, with the fields the price stream
+# above does not have: a multi-line `data:` (the parser joins the lines), an event with no
+# `event:` type at all, and a stream that opens with a comment keepalive.
+legacy_sse = <<-SSE
+  : connected
+
+  data: {"level":"info","msg":"worker started"}
+
+  event: job
+  id: 41
+  data: {"id":41,"state":"running"}
+  data: {"queue":"exports","attempt":1}
+
+  event: job
+  id: 42
+  data: {"id":42,"state":"failed","error":"SMTP timeout after 30s"}
+
+  : keepalive
+
+  SSE
+raw_flow(store, t.call(145), scheme: "http", host: "legacy.demo.test", port: 8080,
+  method: "GET", target: "/internal/events",
+  req_head: "GET /internal/events HTTP/1.1\r\nHost: legacy.demo.test:8080\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Accept: text/event-stream\r\nAuthorization: Basic ZGVtbzptZXRyaWNzLXB3\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/event-stream",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/event-stream\r\n" \
+             "Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n",
+  resp_body: legacy_sse.to_slice, dur_us: 12_600_000_i64)
+
+# An SSE stream the origin dropped mid-event: the last `data:` line has no terminating blank
+# line, so the final event never completed. State Aborted, and the row reads ERR in History
+# while still classifying as SSE — the content-type landed, the stream did not.
+raw_flow(store, t.call(147), host: "api.demo.test", method: "GET", target: "/v1/stream/orders",
+  req_head: "GET /v1/stream/orders HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Accept: text/event-stream\r\nAuthorization: Bearer #{jwt}\r\nLast-Event-ID: 17\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/event-stream",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/event-stream; charset=utf-8\r\n" \
+             "Cache-Control: no-cache\r\n\r\n",
+  resp_body: ("event: order\nid: 18\ndata: {\"id\":10,\"status\":\"paid\"}\n\n" \
+              "event: order\nid: 19\ndata: {\"id\":11,\"stat").to_slice,
+  dur_us: 31_400_000_i64,
+  state: S::FlowState::Aborted, error: "connection closed mid-response")
+
+# --- HTTP itself, in the shapes the happy path skips ------------------------
+# A response gori WROTE: the short-circuit rewriter rule seeded below matched and no origin
+# was ever dialed. The PROTO column prints `STUB` in place of HTTP/HTTPS, because a
+# fabricated response must not look like an ordinary row while scrolling (#511).
+stub_js = "console.log('demo shop boot — served by gori');\nwindow.API='https://api.demo.test/v1';\n"
+raw_flow(store, t.call(149), host: "cdn.demo.test", method: "GET", target: "/assets/app.min.js",
+  req_head: "GET /assets/app.min.js HTTP/1.1\r\nHost: cdn.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Accept: */*\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/javascript",
+  resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n" \
+             "Content-Length: #{stub_js.bytesize}\r\nX-Gori-Stub: match-and-replace\r\n\r\n",
+  resp_body: stub_js.to_slice, dur_us: 300_i64, short_circuited: true)
+
+# gzip'd AND chunked — the two layers the display has to undo in order (RFC 9112 §6.1 puts
+# the transfer coding outside the content coding). Storage keeps the wire bytes; the detail
+# pane says "de-chunked · decoded: gzip" over the JSON it recovered.
+gz_json = %({"orders":[{"id":9,"total":3998,"items":2},{"id":10,"total":1999,"items":1}],"page":1,"pages":4})
+gz_body = chunked_bytes(gzip_bytes(gz_json))
+raw_flow(store, t.call(151), host: "api.demo.test", method: "GET", target: "/v1/orders?page=1",
+  req_head: "GET /v1/orders?page=1 HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Accept-Encoding: gzip, deflate, br\r\nAuthorization: Bearer #{jwt}\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
+             "Content-Encoding: gzip\r\nTransfer-Encoding: chunked\r\nVary: Accept-Encoding\r\n\r\n",
+  resp_body: gz_body, dur_us: 66_000_i64)
+
+# A plaintext forward-proxy request: captured ABSOLUTE-form, because that is the wire truth
+# — the request line really did carry the scheme and authority (P7). Every surface that
+# builds a URL from a row has to notice and NOT double the host onto it.
+raw_flow(store, t.call(153), scheme: "http", host: "legacy.demo.test", port: 80,
+  method: "GET", target: "http://legacy.demo.test/status",
+  req_head: "GET http://legacy.demo.test/status HTTP/1.1\r\nHost: legacy.demo.test\r\n" \
+            "User-Agent: curl/8.6.0\r\nProxy-Connection: Keep-Alive\r\nAccept: */*\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/plain",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: Apache/2.4.41 (Ubuntu)\r\nContent-Type: text/plain\r\n" \
+             "Content-Length: 3\r\n\r\n",
+  resp_body: "OK\n".to_slice, dur_us: 12_000_i64)
+
+# HTTP/1.0, no keep-alive, no Host requirement honoured on the way back — the old box still
+# answers this way, and the version column has something other than 1.1/2 in it.
+raw_flow(store, t.call(154), scheme: "http", host: "legacy.demo.test", port: 8080,
+  method: "GET", target: "/cgi-bin/status.cgi", http: "HTTP/1.0",
+  req_head: "GET /cgi-bin/status.cgi HTTP/1.0\r\nHost: legacy.demo.test:8080\r\nUser-Agent: gori-demo/1.0\r\n\r\n",
+  status: 200, reason: "OK", ctype: "text/plain",
+  resp_head: "HTTP/1.0 200 OK\r\nServer: thttpd/2.25b\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n",
+  resp_body: "uptime 41d\nload 0.42 0.31 0.28\n".to_slice, dur_us: 44_000_i64)
+
+# HEAD: a response that declares a body it will never send. The pane has to show the head
+# and nothing else, and the SIZE column has to mean the bytes that ACTUALLY arrived.
+raw_flow(store, t.call(155), host: "cdn.demo.test", method: "HEAD", target: "/assets/app.js",
+  req_head: "HEAD /assets/app.js HTTP/1.1\r\nHost: cdn.demo.test\r\nUser-Agent: gori-demo/1.0\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/javascript",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/javascript\r\n" \
+             "Content-Length: 84\r\nETag: \"6a43cf48-54\"\r\n\r\n", dur_us: 9_000_i64)
+
+# 304: the conditional request the browser really sends on every reload. No body by
+# definition, and the row exists to prove the cache round trip happened.
+raw_flow(store, t.call(156), host: "cdn.demo.test", method: "GET", target: "/assets/app.js",
+  req_head: "GET /assets/app.js HTTP/1.1\r\nHost: cdn.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "If-None-Match: \"6a43cf48-54\"\r\nIf-Modified-Since: Thu, 19 Jun 2026 09:00:00 GMT\r\n\r\n",
+  status: 304, reason: "Not Modified",
+  resp_head: "HTTP/1.1 304 Not Modified\r\nServer: nginx/1.25.3\r\nETag: \"6a43cf48-54\"\r\n\r\n",
+  dur_us: 6_000_i64)
+
+# No response at all — the upstream refused the connection. `FlowMapper.error_response`
+# records status 0 with an EMPTY head and a message, so History shows ERR with the reason
+# and the SIZE column reads "—" rather than a misleading 0B (P4/P7: the failure is captured,
+# not swallowed).
+raw_flow(store, t.call(158), host: "internal.demo.test", method: "GET", target: "/admin/health",
+  req_head: "GET /admin/health HTTP/1.1\r\nHost: internal.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Accept: */*\r\n\r\n",
+  status: 0, resp_head: "", dur_us: 2_010_000_i64,
+  state: S::FlowState::Error, error: "upstream connect: connection refused (10.0.4.19:443)")
+
+raw_flow(store, t.call(159), host: "expired.demo.test", method: "GET", target: "/",
+  req_head: "GET / HTTP/1.1\r\nHost: expired.demo.test\r\nUser-Agent: gori-demo/1.0\r\nAccept: */*\r\n\r\n",
+  status: 0, resp_head: "", dur_us: 340_000_i64,
+  state: S::FlowState::Error, error: "tls handshake: certificate has expired")
+
+store.flush
+puts "• inserted act-three protocol variety: 4 sockets (ws:// · h2 CONNECT · mqtt · graphql-ws), " \
+     "1 connect-udp tunnel, 6 grpc (stream/denied/502/h2c/grpc-web/cut), 2 sse, " \
+     "stub + gzip-chunked + absolute-form + 1.0 + HEAD + 304 + 2 errors"
+
 # --- Issues (a few planted vulns, linked to the flows above) ----------------
 f1 = store.insert_issue("Reflected XSS in /search `q` parameter", S::Severity::High,
   "shop.demo.test", ids[:xss])
@@ -964,7 +1544,27 @@ store.update_issue(f16, notes: "GET http://legacy.demo.test:8080/internal/metric
                                "Reported and fixed in the 2026-06-18 deploy; the listener now redirects to https.",
   status: S::Status::Resolved)
 
-puts "• inserted 16 issues (open / confirmed / false-positive / resolved)"
+f17 = store.insert_issue("Session JWT sent over a CLEARTEXT WebSocket (ws://)", S::Severity::High,
+  "legacy.demo.test", ids[:ws_plain])
+store.update_issue(f17, notes: "ws://legacy.demo.test:8080/ws/notify carries the bearer JWT in its FIRST frame, " \
+                               "in the clear — the same token /v1/* accepts.\n\n" \
+                               "This is what the transport-bearing PROTO label is for: the row reads WS, not WSS, and " \
+                               "the MESSAGES pane shows the token going out on frame #1.\n" \
+                               "The same transcript also has the server accepting an UNMASKED client frame (RFC 6455 " \
+                               "§5.1 requires masking), which is a second, independent finding on one socket.\n" \
+                               "Fix: wss:// only, and reject unmasked client frames.", status: S::Status::Confirmed)
+
+f18 = store.insert_issue("Unauthenticated gRPC admin service on cleartext h2c", S::Severity::High,
+  "legacy.demo.test", ids[:grpc_h2c])
+store.update_issue(f18, notes: "POST /demo.Legacy/ListUsers on legacy.demo.test:8081 answers grpc-status 0 with the " \
+                               "full user list and NO credentials on the request — over h2c (prior knowledge), so the " \
+                               "row is GRPC and not GRPCS.\n\n" \
+                               "Compare /demo.Admin/GetStats on api.demo.test, which refuses the same class of call " \
+                               "with grpc-status 7 PERMISSION_DENIED — the trailers carry the real answer while HTTP " \
+                               "says 200 either way.\n" \
+                               "Fix: require the bearer on the internal service, and terminate TLS in front of it.")
+
+puts "• inserted 18 issues (open / confirmed / false-positive / resolved)"
 
 # --- Workbench sessions (Repeater / Fuzzer / Miner) -------------------------
 # Pre-seed sub-tabs so entity links have repeater/fuzz/miner targets to jump to.
@@ -1167,7 +1767,12 @@ store.insert_color_rule("host:legacy.demo.test", S::MarkerColor::Purple.label, S
 store.insert_color_rule("proto:ws", S::MarkerColor::Blue.label, S::MarkerStyle::Strip, "websocket")
 store.insert_color_rule("method:POST host:auth.demo.test", S::MarkerColor::Green.label, S::MarkerStyle::Full, "token exchange")
 store.insert_color_rule("path:/graphql", S::MarkerColor::Yellow.label, S::MarkerStyle::Strip, "graphql", enabled: false)
-puts "• inserted 6 colormarker rules (5 active, 1 staged)"
+# The streaming protocols, both transports — `proto:grpc` and `proto:sse` match the cleartext
+# AND the TLS rows (the transport half is a separate term, see `Proto.split_transport`), so
+# one rule covers both spellings the PROTO column prints.
+store.insert_color_rule("proto:grpc OR proto:sse", S::MarkerColor::Green.label, S::MarkerStyle::Strip,
+  "streaming protocols")
+puts "• inserted 7 colormarker rules (6 active, 1 staged)"
 
 # --- OAST (out-of-band listener) — provider + session + received callbacks ---
 # Seeded to prove the SSRF above out of band. Polling never auto-resumes (see the
@@ -1282,6 +1887,9 @@ store.add_link(S::LinkOwnerKind::Issue, f12, S::LinkRefKind::Flow, ids[:listing]
 
 store.add_link(S::LinkOwnerKind::Issue, f13, S::LinkRefKind::Flow, ids[:png])
 
+store.add_link(S::LinkOwnerKind::Issue, f17, S::LinkRefKind::Flow, ids[:gql_ws])
+store.add_link(S::LinkOwnerKind::Issue, f18, S::LinkRefKind::Flow, ids[:grpc_denied])
+
 NOTE_MAIN  = 1_i64 # stable note id (entity_links.owner_id)
 NOTE_LINKS = 2_i64
 
@@ -1335,13 +1943,43 @@ note_main = <<-NOTES
 - [ ] replay the OAuth code — is it single-use? ("oauth code entropy" sequencer is staged)
 
 ## Protocols on this target
+Sort History by the PROTO column (or filter `proto:ws` / `proto:grpc` / `proto:sse`) — every
+label the column can print is in here, cleartext spellings included.
+
 - **WebSocket** GET /ws/chat (101) — open it and switch to the MESSAGES pane (→ sent, ← received).
+  Three more sockets sit beside it:
+  - `ws://legacy.demo.test:8080/ws/notify` — CLEARTEXT (`WS`, not `WSS`), and it puts the
+    session JWT in its first frame. Its transcript also carries an unmasked client frame, a
+    3-fragment message, PING/PONG, an RSV1 probe, a `[gori]` advisory row and a CLOSE with a code.
+  - `CONNECT /ws/notifications` — a WebSocket over HTTP/2 (RFC 8441): no 101 anywhere, just an
+    extended CONNECT answered 200. The `X-Gori-Protocol: websocket` marker line is what makes it a
+    WebSocket; the FRAMES pane holds the h2 frames underneath.
+  - `/mqtt` — MQTT, an application protocol that is not HTTP at all, tunnelled through a socket.
+    Every frame is binary; the handshake's `Sec-WebSocket-Protocol: mqtt` is what names the bytes.
+  - `/graphql` (101) — a graphql-transport-ws SUBSCRIPTION. The document travels inside a frame,
+    so this flow has no body to decode and still offers a GRAPHQL pane.
 - **gRPC** POST /demo.Greeter/SayHello (HTTP/2) — FRAMES pane shows the raw h2 frame log;
-  the application/grpc body deframes into length-prefixed protobuf messages (hex — opaque without the .proto).
-- **SSE** GET /v1/stream/prices (text/event-stream) — captured as one streamed body, not split per event.
+  the application/grpc body deframes into length-prefixed protobuf messages (a schema-less
+  wire-format tree — `p` toggles it back to hex). Five more, each a different shape:
+  - `/demo.Prices/Watch` — SERVER STREAMING: four messages on one stream. A second copy of the
+    call was cut mid-frame, so the pane frames what it can and says the rest is short.
+  - `/demo.Admin/GetStats` — HTTP 200, grpc-status **7 PERMISSION_DENIED**. The trailers carry the
+    real answer; `X-Gori-Trailers` names the fields that arrived in the trailing HEADERS block.
+  - `/demo.Greeter/SayHello` answered by a proxy's `text/html` **502** — still gRPC in the PROTO
+    column and under `proto:grpc`, because the REQUEST said so.
+  - `legacy.demo.test:8081/demo.Legacy/ListUsers` — cleartext h2c (`GRPC`), unauthenticated.
+  - the grpc-web-text variant over HTTP/1.1 — the whole framed stream is base64, and its trailers
+    ride INSIDE the body as a 0x80-flagged frame.
+- **SSE** GET /v1/stream/prices (text/event-stream) — captured as one streamed body; the EVENTS
+  pane parses it. `http://legacy.demo.test:8080/internal/events` is the cleartext one (multi-line
+  `data:`, an event with no type), and `/v1/stream/orders` was dropped mid-event (ABT).
 - **GraphQL** POST /graphql — plain JSON (query / mutation / introspection). Introspection is ON (see Issues).
 - **SAML** POST /saml/acs — SAMLResponse is url-encoded base64 XML.
   Decode in the Decoder tab: url-decode → base64-decode (→ XML assertion for alice@demo.test).
+- **Not a protocol, but the same idea** — a `connect-udp` (MASQUE) tunnel: an extended CONNECT that
+  is NOT a WebSocket, so it stays HTTPS and has no transcript; a `STUB` row gori answered itself;
+  a gzip'd chunked body; a plaintext forward-proxy request captured absolute-form; HTTP/1.0; a
+  HEAD and a 304 with no body; and two flows that never got a response at all (ERR).
 
 ## Live target (real, replayable)
 - **www.hahwul.com** is a real, live site (unlike the shop/api hosts above) — every
@@ -1381,6 +2019,7 @@ Space → `l` (links) on this sub-tab opens the overlay; `↵`/`o` jumps to the 
 - **sid randomness** sequencer — grade the /api/login session-cookie entropy
 - **oauth code entropy** sequencer — the same over a byte range of the Location header
 - **WebSocket chat** flow — MESSAGES pane for the 101 upgrade
+- **graphql-ws subscription** flow — a GRAPHQL pane built from the frames, not from a body
 - **hahwul home** repeater — live, replayable traffic against www.hahwul.com
 NOTES2
 
@@ -1397,8 +2036,8 @@ Which tab does what on this demo (send a selection to a tool with Space → the 
   (cookie) are lifted from /api/login and published as `$token` / `$sid`.
 - **Env (^E)** — 5 project vars: `$API`, `$SHOP`, `$AUTH`, `$UA`, `$ADMIN_ID`. The
   "bound $token" Repeater tab is written entirely in them; they expand only at send time.
-- **Colormarker** — 6 row-colour rules (first match wins): 5xx red, 401/403 orange,
-  legacy.demo.test purple, websocket blue, the token exchange green.
+- **Colormarker** — 7 row-colour rules (first match wins): 5xx red, 401/403 orange,
+  legacy.demo.test purple, websocket blue, the token exchange green, gRPC/SSE green strip.
 - **OAST** — the out-of-band listener. It holds the DNS + HTTP callbacks the server made
   when it fetched our payload host (proof of the blind SSRF). Polling is paused on load.
 - **Sequencer** — "sid randomness" re-collects the login cookie and grades its entropy;
@@ -1428,6 +2067,9 @@ note_start = <<-NOTES4
 1. **History** — rows are coloured by the Colormarker rules (5xx red, 401/403 orange,
    legacy purple). Sort by duration to find the 8.4s export; `/v1/reports/rebuild` reads
    ERR — a request whose response never arrived, adopted as orphaned on the next open.
+   Look at the PROTO column: HTTP/HTTPS, WS/WSS, GRPC/GRPCS, SSE/SSES and one STUB row are
+   all present. `proto:grpc` finds the cleartext AND the TLS gRPC calls; `proto:grpcs` only
+   the TLS ones. See the "Protocols on this target" section of the recon note for the tour.
 2. **A binary body** — open `GET /avatars/1.png` (cdn.demo.test): no text rendering, so
    the pane falls back to hex. `GET /ko/notice` is EUC-KR — bytes that are not UTF-8.
 3. **The Decoder** already has five sub-tabs loaded. Run the SAML one, then the Flask
@@ -1436,8 +2078,10 @@ note_start = <<-NOTES4
 5. **Repeater** — "bound $token" is written in `$API`/`$token`. Open the env overlay (^E)
    to see where those come from, then look at the "WS chat" tab: a WebSocket session with
    four outbound frames queued.
-6. **Issues** — 16 of them, deliberately across all four triage states. The two on
-   legacy.demo.test are cookie findings; the .env one is Critical.
+6. **Issues** — 18 of them, deliberately across all four triage states. The two on
+   legacy.demo.test are cookie findings; the .env one is Critical. Two more come from the
+   protocol traffic: a session JWT on a cleartext WebSocket, and an unauthenticated gRPC
+   admin service on h2c.
 7. **Probe** — passive findings from the traffic plus four active ones. The list defaults
    to OPEN findings; press `a` to include the triaged ones — two are confirmed (the blind
    SSRF and the CORS reflection) and one header rule is muted project-wide. Follow the
