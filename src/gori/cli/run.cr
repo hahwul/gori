@@ -72,9 +72,9 @@ module Gori
     # `gori run <subcommand>` — the non-interactive CLI. Scripts the same project
     # data the TUI works on, built directly on the Store / Repeater / Session APIs
     # (NOT the verb system, whose ExecContext is ~60 UI-action methods that only
-    # make sense in front of a terminal). Read subcommands open the store directly
+    # make sense in front of a terminal). Read subcommands open the store read-only
     # and never take the capture lock, so they're safe to run alongside a live
-    # capturing instance (SQLite WAL).
+    # capturing instance (SQLite WAL; #752).
     module Run
       def self.dispatch(args : Array(String)) : Nil
         dispatch_subcommand(args)
@@ -342,8 +342,15 @@ module Gori
 
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
       # turn that into a clean CLI error instead of an unhandled backtrace.
-      private def self.open_store(project : Project) : Store
-        store = Store.open(project.db_path, retention_flows: Settings.retention_flows)
+      # `read_only` for commands that never persist (history list/show, compare, issues
+      # list, a scope load for Outbound). A `body:` query is a write — it drains FTS —
+      # so those callers pass false. Every CLI store skips idle FTS: the process is
+      # short-lived, and an idle indexer next to a capturing TUI is the #752 condition.
+      private def self.open_store(project : Project, *, read_only : Bool = false) : Store
+        store = Store.open(project.db_path,
+          retention_flows: read_only ? Store::RETENTION_UNLIMITED : Settings.retention_flows,
+          read_only: read_only,
+          background_index: false)
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
@@ -371,6 +378,16 @@ module Gori
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
       end
 
+      # Does this QL string read `flows_fts`? Shape-only: no store, so it is safe to call
+      # before `open_store` and decide whether the open has to be writable to drain.
+      private def self.query_uses_fts?(query : String?) : Bool
+        return false unless q = query
+        return false if q.strip.empty?
+        QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY).uses_fts?
+      rescue
+        false
+      end
+
       # Project host overrides for a CLI direct-dial command (fuzz/mine/sequence), loaded when
       # a project is in play — a flow-id reads from one, or --project/--db names one. Returns
       # nil for --request/stdin with no project (nothing to load; global Settings overrides
@@ -378,7 +395,7 @@ module Gori
       private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?,
                                           repeater_id : Int64? = nil) : Gori::HostOverrides?
         return nil unless flow_id || repeater_id || project_name || db_path
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         begin
           Gori::HostOverrides.load(store)
         ensure
@@ -429,7 +446,7 @@ module Gori
       # short-circuiting on "no --project given" would drop Sandbox containment).
       private def self.project_outbound(project_name : String?, db_path : String?,
                                         allow_unscoped : Bool) : Gori::Outbound
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         scope = begin
           Gori::Scope.load(store)
         rescue ex
@@ -552,7 +569,7 @@ module Gori
         # open_store also installs the project's extract rules as `Env.layer` (see its
         # comment) — the seed depends on that having happened, which is why it reads the flow
         # through the same helper rather than opening the DB by hand.
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         detail, overrides = begin
           {store.get_flow(flow_id), Gori::HostOverrides.load(store)}
         ensure

@@ -45,7 +45,7 @@ module Gori
         end
         parser.parse(args)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: list)
         begin
           if list
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
@@ -177,7 +177,8 @@ module Gori
         # bad query must not leave a store handle open.
         filter = sitemap_filter(query)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path),
+          read_only: !filter.uses_fts?)
         # A `scope:` term needs the project's scope rules, which are in the store that just
         # opened — so the one term this command cannot compile before the open is recompiled
         # after it. Only when the query actually names the field: nothing else about the filter

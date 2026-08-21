@@ -77,6 +77,7 @@ class Gori::Store
     refuse_non_database(path)
     db = DB.open(compact_url(path))
     begin
+      db.exec("PRAGMA query_only = ON")
       # One scan of the (large) flows table for both body sums + the count, instead of three.
       resp, req, flows = begin
         db.query_one("SELECT COALESCE(SUM(LENGTH(response_body)), 0), COALESCE(SUM(LENGTH(request_body)), 0), COUNT(*) FROM flows", as: {Int64, Int64, Int64})
@@ -140,8 +141,19 @@ class Gori::Store
         # names below (issues/probe/repeater renames, repeater_id, truncated
         # flags) are guaranteed present — same as opening it would.
         Schema.migrate!(db)
-        db.transaction do |tx|
-          apply_plan(tx.connection, plan)
+        # IMMEDIATE, not `db.transaction` (deferred BEGIN). Compact holds the exclusive
+        # open lock so a peer writer should not be here; if that lock degraded (best-effort
+        # nil), a deferred upgrade is the #752 BUSY_SNAPSHOT path. IMMEDIATE takes the
+        # write lock where `busy_timeout` applies, same as Store's writer and migrate!.
+        db.using_connection do |conn|
+          conn.exec("BEGIN IMMEDIATE")
+          begin
+            apply_plan(conn, plan)
+            conn.exec("COMMIT")
+          rescue ex
+            conn.exec("ROLLBACK") rescue nil
+            raise ex
+          end
         end
         # VACUUM rewrites the whole file to reclaim freed pages; it is ILLEGAL
         # inside a transaction (see schema.cr) so it runs after the commit. The strip

@@ -1030,6 +1030,12 @@ module Gori
           # binary cannot read is worse than a write the operator did not ask for — and a schema
           # from a NEWER gori still has to reach the refusal below, so only `current == VERSION`
           # may take this exit.
+          #
+          # Writable opens do NOT take this shortcut. The `current > VERSION` refusal below
+          # has to observe the version AFTER any concurrent migrator commits; peek-then-skip
+          # would let an older gori see VERSION, skip the lock, and write into a schema a
+          # newer binary just upgraded. Lock-first serialises that. The cost is a brief
+          # IMMEDIATE at every writable open, which `busy_timeout` absorbs.
           if read_only && conn.scalar("PRAGMA user_version").as(Int64).to_i == VERSION
             next
           end

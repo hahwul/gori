@@ -232,7 +232,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "probe issues", "dismiss, promote, delete/rm, list")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         issues = begin
           list = store.probe_issues(category, host.try(&.strip).presence, min_sev)
           include_closed ? list : list.select(&.status.open?)
@@ -434,7 +434,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "probe rules", "add, enable, disable, delete/rm")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         entries, mode = begin
           list = Probe::RuleCatalog.load(store)
           list = list.select { |e| e.kind == kind } if kind

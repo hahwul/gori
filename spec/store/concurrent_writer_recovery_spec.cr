@@ -345,4 +345,72 @@ describe "a read-only Gori::Store" do
       File.delete?("#{path}-shm")
     end
   end
+
+  it "pins PRAGMA query_only so a forgotten write cannot take the WAL lock" do
+    path = File.tempname("gori-ro-qo", ".db")
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+    seed = DB.open(url)
+    begin
+      Gori::Store::Schema.migrate!(seed)
+    ensure
+      seed.close
+    end
+    store = Gori::Store.open(path, read_only: true)
+    begin
+      expect_raises(DB::Error | SQLite3::Exception) do
+        store.@db.exec("CREATE TABLE query_only_probe (id INTEGER)")
+      end
+      close_within(store, 20.seconds).should be_true
+    ensure
+      close_within(store, 10.seconds)
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end
+
+describe "Gori::Store background FTS indexing" do
+  it "does not idle-drain when background_index is off" do
+    path = File.tempname("gori-no-idle", ".db")
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+    db = DB.open(url)
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil, background_index: false)
+    begin
+      store.insert_flow(capture(1)).should be > 0
+      store.fts_backlog.should be > 0
+      # Several idle ticks would have drained this if the flag were on (FAST is 5 ms).
+      sleep 50.milliseconds
+      store.fts_backlog.should be > 0
+      store.index_pending!.should be > 0
+      store.fts_backlog.should eq(0)
+      close_within(store, 20.seconds).should be_true
+    ensure
+      close_within(store, 10.seconds)
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "pause_background_index stops the idle drain on a live store" do
+    path = File.tempname("gori-pause-idle", ".db")
+    url = "sqlite3:#{path}?journal_mode=wal&busy_timeout=1"
+    db = DB.open(url)
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil)
+    begin
+      store.pause_background_index
+      store.insert_flow(capture(1)).should be > 0
+      sleep 50.milliseconds
+      store.fts_backlog.should be > 0
+      close_within(store, 20.seconds).should be_true
+    ensure
+      close_within(store, 10.seconds)
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
 end

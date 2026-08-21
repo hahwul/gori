@@ -114,7 +114,7 @@ module Gori
           # holding SQLite's writer slot on a project a TUI may be capturing into (#752), and
           # switching projects must not quietly hand that slot back.
           Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED,
-            read_only: !@allow_actions)
+            read_only: !@allow_actions, background_index: false)
         rescue ex
           return err("could not open project database: #{ex.message}", "INTERNAL")
         end

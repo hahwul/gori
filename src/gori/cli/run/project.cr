@@ -443,7 +443,7 @@ module Gori
           "add, update/edit, delete/rm, enable, disable, list")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           scope = Scope.load(store)
           if format == :json
@@ -844,7 +844,7 @@ module Gori
         refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           vars = Settings.project_env_vars
           if format == :json
@@ -1002,7 +1002,7 @@ module Gori
         refuse_list_leftovers(leftover, "project host-override", "add, update, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           ov = HostOverrides.load(store)
           if format == :json

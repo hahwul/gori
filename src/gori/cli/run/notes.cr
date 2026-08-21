@@ -53,7 +53,7 @@ module Gori
         index = parse_note_index(positional.first?)
         abort "gori run notes: <n> and --all are mutually exclusive" if index && all
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         doc = begin
           Notes.load(store)
         ensure

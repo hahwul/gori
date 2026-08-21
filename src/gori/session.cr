@@ -187,6 +187,11 @@ module Gori
           # (their per-session item ids no longer mean anything) before we start publishing.
           store.clear_intercept_state!
           probe.start
+        else
+          # View-only: workbench writes (notes, issues, repeaters) still go through this
+          # store, but idle FTS is the capturer's job. A second idle indexer is the #752
+          # two-writer condition against the instance that actually holds the lock.
+          store.pause_background_index
         end
         session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, bindings, slots, scope, host_overrides, interceptor, sink, authorize_events, bind_error, lock, extra, listener_errs)
         session.sync_capture_status!

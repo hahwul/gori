@@ -62,7 +62,7 @@ module Gori
         abort "gori run links: --id is required" if oid_opt.nil?
         oid = oid_opt
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         resolved = begin
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
           # otherwise a typo'd id prints "no links on issue #99999", which reads as "this

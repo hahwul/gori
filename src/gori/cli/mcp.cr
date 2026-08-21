@@ -109,8 +109,10 @@ module Gori::CLI
         # never prune the user's history; and under --read-only, never WRITE it either —
         # a store that only reads starts no writer fiber, so this process stops competing
         # for SQLite's single writer slot with the TUI capturing into the same db (#752).
+        # Even with actions on, skip the idle FTS drain: `index_pending!` still runs on a
+        # `body:` query, and an idle tick against a capturing TUI is the #752 condition.
         Store.open(resolved, events: nil, retention_flows: Store::RETENTION_UNLIMITED,
-          read_only: read_only)
+          read_only: read_only, background_index: false)
       rescue ex : DB::Error | SQLite3::Exception | Error
         reason = "cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         Log.error { "mcp: #{reason}; starting unbound" }

@@ -94,7 +94,7 @@ gori run <subcommand> [verb] [options]
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`). Global flags go **after** the verb — `gori run rewriter rm 1 --project=x`, not `gori run rewriter --project=x rm 1`, which is rejected as a usage error rather than silently listing.
 
-Read subcommands open the store directly and never take the capture lock, so they are safe to run against a project a live TUI is capturing into.
+Read subcommands open the store read-only and never take the capture lock, so they are safe to run against a project a live TUI is capturing into. A `body:` query drains the search index and is therefore a write.
 
 #### Output contract
 

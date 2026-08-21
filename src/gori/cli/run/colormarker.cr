@@ -278,7 +278,7 @@ module Gori
         refuse_list_leftovers(leftover, "colormarker", "add, rm/delete, enable, disable, move, preview, color")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           rules = Gori::Colormarker.merged(store)
           rules = rules.select { |r| r.scope == scope } if scope

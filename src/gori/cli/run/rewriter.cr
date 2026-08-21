@@ -78,7 +78,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         begin
           rules = store.extract_rules
           if format == :json
@@ -242,7 +242,7 @@ module Gori
         end
         parser.parse(args)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         begin
           rules = store.extract_rules
           if format == :json
@@ -338,7 +338,7 @@ module Gori
         refuse_list_leftovers(leftover, "rewriter", "add, rm/delete, enable, disable, preview, extract, bindings")
 
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
+        store = open_store(project, read_only: true)
         begin
           rules = Gori::Rules.merged(store)
           rules = rules.select { |r| r.scope == scope } if scope

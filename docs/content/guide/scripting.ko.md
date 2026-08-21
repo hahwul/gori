@@ -29,7 +29,7 @@ gori run <subcommand> [verb] [options]
 
 `gori run capture`만 한 가지가 다릅니다. 읽기는 이미 존재하는 프로젝트를 요구하지만, capture는 대상을 **생성하거나 다시 엽니다**.
 
-읽기 서브커맨드는 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다.
+읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다. `body:` 질의는 예외입니다. 검색 인덱스를 비우므로 쓰기입니다.
 
 ```bash
 gori run history --project my-engagement -q 'status:5xx'
