@@ -627,18 +627,26 @@ module Gori::Tui
             # the project store so a separate `gori mcp` process can report it via
             # get_current_context. Throttled + diffed so idle focus never churns the WAL.
             #
-            # Only in the capture-lock holder, exactly as the intercept bridge above. There is
-            # ONE `ui_state` row per project and two live instances on the same db both wrote
-            # it, so `get_current_context` reported whichever window last moved its cursor —
-            # an agent asking "what is the operator looking at" got an answer from a window the
-            # operator was not in. The lock is the same tiebreak the bridge already uses, and
-            # the same one the operator understands (it is what `c` takes over). The bookkeeping
-            # is inside the gate too: advancing `last_ui_ident` while refusing to write would
-            # leave a window that later takes capture silently unpublished until its identity
-            # happened to move again.
+            # The capture-lock holder publishes, exactly as the intercept bridge above. There
+            # is ONE `ui_state` row per project and two live instances on the same db both
+            # wrote it, so `get_current_context` reported whichever window last moved its
+            # cursor — an agent asking "what is the operator looking at" got an answer from a
+            # window the operator was not in. The lock is the same tiebreak the bridge already
+            # uses, and the same one the operator understands (it is what `c` takes over).
+            #
+            # `may_publish_ui_state?` is the carve-out that keeps the lock from meaning
+            # "nobody publishes": the holder does not have to be a window at all. A headless
+            # `gori run capture` takes this project's capture lock and draws nothing, so
+            # gating on the lock alone left the operator's live view-only TUI silent and the
+            # agent told "the gori TUI may not have run against it" while it was on screen.
+            #
+            # The bookkeeping is inside the gate too: advancing `last_ui_ident` while refusing
+            # to write would leave a window that later takes capture silently unpublished
+            # until its identity happened to move again.
             ident = ui_state_identity
-            if @session.capturing_lock_held? && ident != last_ui_ident &&
-               (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+            if ident != last_ui_ident &&
+               (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE) &&
+               may_publish_ui_state?
               @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
               last_ui_ident = ident
               last_ui_write = now
@@ -690,6 +698,13 @@ module Gori::Tui
     # Minimum spacing between ui-state writes (get_current_context). Coalesces a fast
     # focus/scroll burst into ≤1 write per window so the WAL never churns per frame.
     UI_STATE_THROTTLE = 300.milliseconds
+
+    # How long a view-only window leaves the capture holder's `ui_state` row alone before it
+    # publishes its own (see `may_publish_ui_state?`). Not a liveness probe — the holder writes
+    # only when its view MOVES, so this is "the holder has not looked at anything for a minute",
+    # which is the point at which the other window is the better answer to "what is the operator
+    # looking at". Long enough that a holder being read rather than driven keeps the row.
+    UI_STATE_TAKEOVER = 60.seconds
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
     SPINNER_INTERVAL = 120.milliseconds
@@ -788,6 +803,56 @@ module Gori::Tui
       "#{@active_tab}|#{@focus}|#{current_selected_flow_id}|#{current_subtab_index}"
     end
 
+    # May THIS window write the project's single `ui_state` row?
+    #
+    # The capture-lock holder always may — it is the tiebreak the intercept bridge already
+    # uses and the one the operator can move with `c`. A view-only window may only when no
+    # UI-BEARING holder is publishing, which is a different question from "does a holder
+    # exist": `gori run capture` holds the lock headless, and under a lock-only gate that
+    # deployment published nothing at all while a TUI sat on screen.
+    #
+    # Answered from the row rather than from the lock, because that is where the evidence is.
+    # `holds_capture` says the last writer was a holder; `recorded_at` says when. A row with
+    # neither (or with a writer that was view-only itself) is free to take. So:
+    #
+    #   * no row / unreadable / written by a view-only window  → take it; nobody better is here
+    #   * written by a holder within UI_STATE_TAKEOVER         → leave it; that window is live
+    #   * written by a holder longer ago than that             → take it
+    #
+    # The last clause is what bounds the ping-pong the lock gate removed. Both windows write
+    # only when their own identity CHANGES, so two idle windows never trade the row; and the
+    # holder's writes are unconditional, so any activity in it reclaims the row on the next
+    # tick. A holder that has not moved for a full minute is not what the operator is looking
+    # at, whatever it holds.
+    #
+    # Read only on a tick that is otherwise about to write, so this costs at most one small
+    # indexed SELECT per UI_STATE_THROTTLE, and none at all in the capture holder — the store
+    # is not touched before the lock question is answered.
+    private def may_publish_ui_state? : Bool
+      return true if @session.capturing_lock_held?
+      Runner.view_only_may_publish?(@session.store.setting(Store::UI_STATE_KEY), Time.utc.to_unix_ms)
+    end
+
+    # The decision above, as a function of the row and the clock, so it can be exercised
+    # without a `Runner` (which owns a terminal and is therefore unconstructible under spec/).
+    # `raw` is the stored `ui_state` value, `now_ms` the same epoch `ui_state_json` stamps.
+    def self.view_only_may_publish?(raw : String?, now_ms : Int64) : Bool
+      return true unless raw
+      obj = JSON.parse(raw).as_h?
+      return true unless obj
+      # nil (a row written before this field existed) and false (a view-only window wrote it)
+      # both mean "no UI-bearing holder is claiming this row", and both are free to take.
+      return true unless obj["holds_capture"]?.try(&.as_bool?)
+      rec = obj["recorded_at"]?.try(&.as_i64?)
+      return true unless rec
+      (now_ms - rec) > UI_STATE_TAKEOVER.total_milliseconds
+    rescue
+      # Unreadable is not a reason to stay silent — the row is a hint, and the failure mode
+      # this whole method exists to stop is "nobody publishes". Same direction as the
+      # `parsed.nil?` arm `get_current_context` already takes on the reading side.
+      true
+    end
+
     # The ui-state payload written to the project store, read cross-process by
     # `gori mcp get_current_context`. It lives in this project's own db, so the served project
     # identity is implicit — no name field (which would skew display-name vs slug).
@@ -796,6 +861,10 @@ module Gori::Tui
         j.object do
           j.field "active_tab", @active_tab.to_s
           j.field "focus_pane", @focus.to_s
+          # Who wrote this, for `may_publish_ui_state?` in a PEER window and for the agent
+          # reading it: a row from a view-only window is a weaker claim about what the
+          # operator is looking at than one from the window holding traffic.
+          j.field "holds_capture", @session.capturing_lock_held?
           if fid = current_selected_flow_id
             j.field "selected_flow_id", fid
           end

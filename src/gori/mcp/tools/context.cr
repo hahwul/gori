@@ -95,6 +95,15 @@ module Gori
               j.field "project_id", @project_id
               j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
               j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
+              # Whether the window that recorded this was the one holding capture. A view-only
+              # window publishes only when no UI-bearing holder is (Runner#may_publish_ui_state?),
+              # which is the common `gori run capture` + TUI deployment — so `false` is a normal
+              # answer, not a degraded one. Omitted for a row written before this field existed,
+              # where "unknown" is the honest reading rather than a guessed `false`.
+              # `.nil?`, never a truthiness test: `false` is the answer this field exists to
+              # carry, and `if hc = ...` would drop exactly that case on the floor.
+              hc = parsed["holds_capture"]?.try(&.as_bool?)
+              j.field "holds_capture", hc unless hc.nil?
               if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
                 j.field "selected_flow_id", fid
               end

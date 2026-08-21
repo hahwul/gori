@@ -432,24 +432,72 @@ describe "the Issues notes lost-update refusal" do
 end
 
 describe "the ui-state row a second window must not clobber" do
-  it "is written only by the capture-lock holder" do
+  it "is gated, and the bookkeeping is inside the gate" do
     # One `ui_state` row per project, two live instances writing it: `get_current_context`
     # answered from whichever window last moved a cursor, so an agent asking what the operator
-    # was looking at got a window they were not in. Same tiebreak as the intercept bridge.
+    # was looking at got a window they were not in.
     #
     # Source-pinned like the reloads in `spec/tui/session_slots_spec.cr` — `Runner.new` appears
-    # nowhere under spec/ (it owns a terminal), and the write only exists on the tick.
+    # nowhere under spec/ (it owns a terminal), and the write only exists on the tick. The
+    # DECISION the gate makes is a real example below; this pins that the gate is on the write
+    # at all, which no unit test of a pure function can say.
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
     body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')
     write = body[/^ *ident = ui_state_identity.*?\n *end\n/m]
     write.should_not be_nil
-    write.not_nil!.should contain("capturing_lock_held?")
+    write.not_nil!.should contain("may_publish_ui_state?")
     # The bookkeeping is INSIDE the gate: advancing the throttle/identity while refusing to
     # write would leave a window that later takes capture with `c` silently unpublished until
     # its identity happened to move again.
-    guard = write.not_nil!.index("capturing_lock_held?").not_nil!
+    guard = write.not_nil!.index("may_publish_ui_state?").not_nil!
     write.not_nil!.index("last_ui_ident =").not_nil!.should be > guard
     write.not_nil!.index("set_setting(Store::UI_STATE_KEY").not_nil!.should be > guard
+  end
+
+  # The capture holder always publishes (`may_publish_ui_state?` returns before touching the
+  # store), so every example here is the VIEW-ONLY window deciding whether to take the row.
+  describe "a view-only window" do
+    now = 1_800_000_000_000_i64
+    holder = ->(age_ms : Int64) {
+      %({"active_tab":"history","holds_capture":true,"recorded_at":#{now - age_ms}})
+    }
+
+    it "publishes when there is no row at all — the headless-capture deployment" do
+      # `gori run capture` takes the capture lock and draws nothing. Gating on the lock alone
+      # meant nobody wrote this row, and `get_current_context` told the agent the TUI "may not
+      # have run against it" while the operator was looking at it.
+      Gori::Tui::Runner.view_only_may_publish?(nil, now).should be_true
+    end
+
+    it "leaves a live holder's row alone — the two-TUI case the gate exists for" do
+      Gori::Tui::Runner.view_only_may_publish?(holder.call(5_000_i64), now).should be_false
+    end
+
+    it "takes over a holder's row once it has gone a full minute without moving" do
+      # Bounded ping-pong, not a fight: both windows write only when their OWN identity moves,
+      # so two idle windows never trade the row, and the holder's write is unconditional — any
+      # activity there reclaims it on the next tick.
+      Gori::Tui::Runner.view_only_may_publish?(holder.call(61_000_i64), now).should be_true
+    end
+
+    it "takes a row another view-only window wrote, without waiting a minute" do
+      raw = %({"active_tab":"history","holds_capture":false,"recorded_at":#{now - 100_i64}})
+      Gori::Tui::Runner.view_only_may_publish?(raw, now).should be_true
+    end
+
+    it "takes a row written before the field existed, rather than reading it as a holder's" do
+      raw = %({"active_tab":"history","recorded_at":#{now - 100_i64}})
+      Gori::Tui::Runner.view_only_may_publish?(raw, now).should be_true
+    end
+
+    it "publishes rather than staying silent when the row cannot be read" do
+      # The failure this whole gate exists to stop is "nobody publishes", so an unreadable row
+      # errs toward writing — the same direction `get_current_context` takes when it cannot
+      # parse one.
+      Gori::Tui::Runner.view_only_may_publish?("not json", now).should be_true
+      Gori::Tui::Runner.view_only_may_publish?("[1,2,3]", now).should be_true
+      Gori::Tui::Runner.view_only_may_publish?(%({"holds_capture":true}), now).should be_true
+    end
   end
 end
 

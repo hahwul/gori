@@ -369,6 +369,16 @@ A `body:` query that cannot drain FTS because a peer holds the writer answers re
 `FTS_BACKLOG` rather than a short match set. `send_request` classifies a rolled-back
 `insert_flow` as `PROJECT_BUSY`, not `INVALID_ARGUMENT`.
 
+The single `ui_state` row goes to the capture holder, which is the tiebreak the intercept
+bridge already uses — but the holder is not necessarily a window. A headless `gori run capture`
+holds the lock and draws nothing, so a lock-ONLY gate published nothing at all while the
+operator's view-only TUI was on screen and told the agent it "may not have run". A view-only
+window therefore publishes when no UI-bearing holder is: no row, a row a view-only window
+wrote, or a holder's row older than `UI_STATE_TAKEOVER`. Both windows write only when their
+own view MOVES, so two idle windows never trade the row, and the holder's write is
+unconditional — any activity there reclaims it. The row carries `holds_capture` so the reader
+can weigh whose view it is.
+
 ### 2026-07-25: this document restored
 
 Refines: none. Issue #353.
