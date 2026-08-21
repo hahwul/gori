@@ -191,6 +191,19 @@ private def seed_dead_capture(store : Gori::Store, port : Int32, target : String
   id
 end
 
+# A finished two-identity result, so the sub-cursor has something to walk.
+private def two_identity_target : Gori::Authorize::Target
+  base_meta = Gori::Repeater::ExchangeMeta.of(200, 40_i64, 1_000_i64, nil)
+  base_sum = Gori::Authorize::ResponseSummary.new(200, 40_i64, 0_u64)
+  head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+  Gori::Authorize::Target.new(1_i64, "GET", "https://acme.test/orders", [
+    Gori::Authorize::Trial.new("as-captured", true, base_meta,
+      Gori::Authorize::Verdict::Baseline, nil, base_sum, "req".to_slice, head, "ok".to_slice),
+    Gori::Authorize::Trial.new("anonymous", false, base_meta,
+      Gori::Authorize::Verdict::Different, "Δ", base_sum, "req".to_slice, head, "ok".to_slice),
+  ])
+end
+
 private def unreachable_port : Int32
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
@@ -518,6 +531,24 @@ describe Gori::Tui::AuthorizeController do
 
       ctrl.view.auto_pending_entries.size.should eq(1)
       ctrl.view.pending_entries.size.should eq(1)
+    end
+  end
+
+  # ⇥ moved the identity sub-cursor and nothing moved it back. It WRAPS, so with eight
+  # identities configured, stepping back one row meant seven presses — and seven response
+  # panes redrawn on the way to the one being read. `move_trial(-1)` was already there; no key
+  # reached it.
+  describe "the identity sub-cursor" do
+    it "steps backwards on ⇧⇥" do
+      with_authorize_controller do |c, _, session|
+        id = seed_capture(session.store, "/orders", "session=A")
+        c.seed_flows([id])
+        entry = c.view.entries.first
+        c.view.apply_result(entry.id, two_identity_target)
+        c.view.selected_trial.not_nil!.identity.should eq("as-captured")
+        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::BackTab)).should be_true
+        c.view.selected_trial.not_nil!.identity.should eq("anonymous")
+      end
     end
   end
 end

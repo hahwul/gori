@@ -798,6 +798,11 @@ module Gori::Tui
       when key.tab?
         @view.move_trial(1)
         true
+      when key.back_tab?
+        # The pair, not just ⇥: the sub-cursor wraps, so with eight identities stepping BACK one
+        # row meant seven forward presses and eight response panes redrawn on the way.
+        @view.move_trial(-1)
+        true
       when key.page_up?
         @view.scroll_detail(-10)
         true

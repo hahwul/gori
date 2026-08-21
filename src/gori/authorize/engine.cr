@@ -172,7 +172,11 @@ module Gori
       # agree).
       private def send_one(base_bytes : Bytes, id : Identity,
                            backend : Fuzz::Backend, baseline_trial : Trial?) : Trial
-        bytes = Authorize.overlay_wire(base_bytes, id)
+        # RESOLVED first: a `$NAME` in this identity's own header value expands out of this
+        # identity's binding table. Nothing downstream will do it — `all_verbatim` below stops
+        # the message-level pass, and `Engine.live` turns the active-slot overlay off precisely
+        # so these bytes stay this identity's. See `Authorize.resolve`.
+        bytes = Authorize.overlay_wire(base_bytes, Authorize.resolve(id))
         # Whole-buffer verbatim: we supply the identity ourselves, so gori's own session-binding
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).

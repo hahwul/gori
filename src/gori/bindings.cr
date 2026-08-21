@@ -290,7 +290,20 @@ module Gori
       # OUTSIDE `@mutex`: `SessionSlots` has its own, and the two must never nest — see
       # `candidates`. Nothing here needs the two snapshots to be atomic with each other; a
       # slot switching between these two lines resolves the next send, not this one.
-      slot = @slots.try(&.active)
+      values_in(@slots.try(&.active))
+    end
+
+    # `Env::Layer#slot_values` — the same read, answered for a NAMED slot instead of the active
+    # one. For the caller that carries several identities through one run and cannot activate
+    # each in turn (`Authorize`, whose whole measurement is that two identities resolve to two
+    # different sessions); see `Env.expand_bindings_as`. An unknown name degrades to the global
+    # table, which is what a slot holding no table of its own resolves to anyway.
+    def slot_values(slot : String) : Hash(String, String)
+      values_in(@slots.try(&.find(slot)))
+    end
+
+    # Same lock discipline as `values`: `slot` is resolved by the caller, outside `@mutex`.
+    private def values_in(slot : SessionSlot?) : Hash(String, String)
       @mutex.synchronize do
         live = Set(String).new
         @rules.each { |r| live << r.name if r.enabled? }
