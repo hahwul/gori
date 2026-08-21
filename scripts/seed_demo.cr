@@ -1161,12 +1161,12 @@ puts "• inserted 5 extract rules (bindings) + 5 project env vars"
 # --- Colormarker (History row colours — display only, never touches traffic) --
 # First enabled match wins, so the order below IS the precedence statement: server errors
 # outrank auth failures, which outrank the "interesting" lenses.
-store.insert_color_rule("status:5xx", S::MarkerColor::Red, S::MarkerStyle::Full, "server errors")
-store.insert_color_rule("status:401 OR status:403", S::MarkerColor::Orange, S::MarkerStyle::Full, "auth failures")
-store.insert_color_rule("host:legacy.demo.test", S::MarkerColor::Purple, S::MarkerStyle::Strip, "legacy stack")
-store.insert_color_rule("proto:ws", S::MarkerColor::Blue, S::MarkerStyle::Strip, "websocket")
-store.insert_color_rule("method:POST host:auth.demo.test", S::MarkerColor::Green, S::MarkerStyle::Full, "token exchange")
-store.insert_color_rule("path:/graphql", S::MarkerColor::Yellow, S::MarkerStyle::Strip, "graphql", enabled: false)
+store.insert_color_rule("status:5xx", S::MarkerColor::Red.label, S::MarkerStyle::Full, "server errors")
+store.insert_color_rule("status:401 OR status:403", S::MarkerColor::Orange.label, S::MarkerStyle::Full, "auth failures")
+store.insert_color_rule("host:legacy.demo.test", S::MarkerColor::Purple.label, S::MarkerStyle::Strip, "legacy stack")
+store.insert_color_rule("proto:ws", S::MarkerColor::Blue.label, S::MarkerStyle::Strip, "websocket")
+store.insert_color_rule("method:POST host:auth.demo.test", S::MarkerColor::Green.label, S::MarkerStyle::Full, "token exchange")
+store.insert_color_rule("path:/graphql", S::MarkerColor::Yellow.label, S::MarkerStyle::Strip, "graphql", enabled: false)
 puts "• inserted 6 colormarker rules (5 active, 1 staged)"
 
 # --- OAST (out-of-band listener) — provider + session + received callbacks ---
