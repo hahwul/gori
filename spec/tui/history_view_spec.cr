@@ -20,12 +20,23 @@ private def add_flow(store, method, target, status = nil, content_type = nil, ho
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\nbody".to_slice,
       body: "body".to_slice, content_type: content_type))
   end
+  id
+end
+
+private def add_sourced_flow(store, target, source, surface = nil, ref = nil, status = 200)
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+    source: source, source_surface: surface, source_ref: ref))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\n".to_slice))
   id
 end
 
@@ -82,7 +93,7 @@ describe Gori::Tui::HistoryView do
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/submit", http_version: "HTTP/1.1",
         head: "POST /submit HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
-        body: "lagindexbodytoken".to_slice))
+        body: "lagindexbodytoken".to_slice, source: Gori::FlowSource::Kind::Proxy))
 
       view = HistoryView.new
       view.start_query
@@ -149,7 +160,7 @@ describe Gori::Tui::HistoryView do
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
         head: "POST /x HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-        body: "lagindexbodytoken".to_slice))
+        body: "lagindexbodytoken".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
         body: "lagindexbodytoken".to_slice))
@@ -364,7 +375,7 @@ describe Gori::Tui::HistoryView do
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "www.hahwul.com", port: 80,
         method: "GET", target: "http://www.hahwul.com/about", http_version: "HTTP/1.1",
-        head: "GET http://www.hahwul.com/about HTTP/1.1\r\n\r\n".to_slice, body: nil))
+        head: "GET http://www.hahwul.com/about HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = HistoryView.new
       view.reload(store)
 
@@ -392,6 +403,125 @@ describe Gori::Tui::HistoryView do
       backend.contains?("PATH").should be_true    # header intact
       backend.contains?("PSTA").should be_false   # STA did not overwrite the PATH header
       backend.contains?("/search").should be_true # PATH value not squeezed to a bare "/"
+    end
+  end
+
+  describe "the SRC column" do
+    it "prints the tool tag, and PROXY for traffic a client sent" do
+      tmp_store do |store|
+        add_sourced_flow(store, "/captured", Gori::FlowSource::Kind::Proxy)
+        add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater,
+          Gori::FlowSource::Surface::Tui, "7")
+        view = HistoryView.new
+        view.reload(store)
+
+        backend = MemoryBackend.new(120, 8)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 8))
+        backend.contains?("SRC").should be_true
+        backend.contains?("PROXY").should be_true
+        backend.contains?("RPTR").should be_true
+      end
+    end
+
+    it "draws an unrecorded provenance as — rather than claiming PROXY" do
+      # A row from a project captured before V17. Guessing `proxy` here is the whole failure
+      # this column exists to prevent, and the list is where the guess would be seen.
+      path = File.tempname("gori-hv-nullsrc", ".db")
+      begin
+        store = Gori::Store.open(path)
+        id = add_sourced_flow(store, "/legacy", Gori::FlowSource::Kind::Proxy)
+        store.close
+        DB.open("sqlite3:#{path}") { |db| db.exec("UPDATE flows SET source = NULL WHERE id = ?", id) }
+
+        store = Gori::Store.open(path)
+        begin
+          view = HistoryView.new
+          view.reload(store)
+          backend = MemoryBackend.new(120, 8)
+          view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 8))
+          backend.contains?("PROXY").should be_false
+          backend.contains?("—").should be_true
+        ensure
+          store.close
+        end
+      ensure
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
+    it "survives every other cluster column on the way down to a narrow pane" do
+      # SRC is granted FIRST in the right cluster, so it is the LAST to drop: a marker that
+      # falls off a narrow terminal is a marker that lets someone screenshot a Repeater send
+      # as if it were captured traffic. DUR goes first, then SIZE, then TYPE.
+      tmp_store do |store|
+        add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater)
+        view = HistoryView.new
+        view.reload(store)
+
+        widths = (48..120).step(2).to_a.reverse
+        seen = {} of Int32 => Array(String)
+        widths.each do |w|
+          backend = MemoryBackend.new(w, 8)
+          view.render_list(Screen.new(backend), Rect.new(0, 0, w, 8))
+          seen[w] = %w[SRC TYPE SIZE DUR].select { |h| backend.contains?(h) }
+        end
+        # THE invariant, and the one worth pinning rather than a magic width: no column granted
+        # after SRC can be on screen while SRC is not. Reordering the grants breaks this, which
+        # is the only way the marker could start falling off before the columns it outranks.
+        #
+        # NOT full monotonicity across the sweep: DUR's span is 6 and TYPE/SIZE's is 7, so a pane
+        # with exactly 6 spare columns affords DUR and refuses the two beside it. That predates
+        # this column and is left alone here.
+        seen.each_value do |present|
+          present.should contain("SRC") unless present.empty?
+        end
+        seen[120].should eq(%w[SRC TYPE SIZE DUR])
+        # The narrowest pane that still affords a cluster column affords SRC and nothing else.
+        widths.map { |w| seen[w] }.reject(&.empty?).last.should eq(%w[SRC])
+      end
+    end
+
+    it "spells the source out in the detail pane, where five cells are not the budget" do
+      tmp_store do |store|
+        add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater,
+          Gori::FlowSource::Surface::Tui, "7")
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        backend.contains?("sent by gori — repeater (tui) #7").should be_true
+      end
+    end
+
+    it "says nothing about a proxy capture, which is the norm" do
+      tmp_store do |store|
+        add_sourced_flow(store, "/captured", Gori::FlowSource::Kind::Proxy)
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        backend.contains?("sent by gori").should be_false
+      end
+    end
+
+    it "names an import by its FILE, not as an id it is not" do
+      tmp_store do |store|
+        add_sourced_flow(store, "/webhook", Gori::FlowSource::Kind::Import, nil, "acme.har")
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        # "read in by", not "sent by": gori never put this on a wire.
+        backend.contains?("read in by gori — import · acme.har").should be_true
+      end
     end
   end
 
@@ -424,7 +554,7 @@ describe Gori::Tui::HistoryView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/2",
         head: "POST /svc/M HTTP/2\r\nHost: api.test\r\nContent-Type: application/grpc\r\n\r\n".to_slice,
-        body: nil))
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = HistoryView.new
       view.reload(store)
 
@@ -552,7 +682,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
-        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
@@ -580,7 +710,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
-        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
@@ -623,7 +753,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
-        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
@@ -661,7 +791,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
-        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
@@ -694,7 +824,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/img", http_version: "HTTP/1.1",
-        head: "GET /img HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /img HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: image/webp\r\n\r\n".to_slice,
@@ -743,7 +873,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/t", http_version: "HTTP/1.1",
-        head: "GET /t HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /t HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n#{line}".to_slice,
@@ -774,7 +904,7 @@ describe Gori::Tui::HistoryView do
       pid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/p", http_version: "HTTP/1.1",
-        head: "GET /p HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /p HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 
       view = HistoryView.new
       view.reload(store)
@@ -798,7 +928,7 @@ describe Gori::Tui::HistoryView do
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/", http_version: "HTTP/2",
         head: "GET / HTTP/2\r\n\r\n".to_slice, body: nil,
-        h2_conn_id: conn, h2_stream_id: 1_i64))
+        h2_conn_id: conn, h2_stream_id: 1_i64, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/2 200\r\n\r\n".to_slice))
       store.insert_h2_frame(conn, "out", 0x4_u8, 0_u8, 0_u32, Bytes.new(18))    # SETTINGS stream 0
@@ -827,7 +957,7 @@ describe Gori::Tui::HistoryView do
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/", http_version: "HTTP/2",
         head: "GET / HTTP/2\r\n\r\n".to_slice, body: nil,
-        h2_conn_id: conn, h2_stream_id: 1_i64))
+        h2_conn_id: conn, h2_stream_id: 1_i64, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/2 200\r\n\r\n".to_slice))
       store.insert_h2_frame(conn, "out", 0x1_u8, 0x5_u8, 1_u32, "hdr".to_slice)
@@ -883,7 +1013,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
-        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil))
+        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       # one gRPC message "hi": flag 0 + len 2 + "hi"
       gbody = IO::Memory.new
       gbody.write(Bytes[0x00, 0x00, 0x00, 0x00, 0x02])
@@ -914,7 +1044,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
-        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil))
+        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       # a length prefix claiming 9999 bytes with 5 arriving: 10 unframeable tail bytes
       gbody = IO::Memory.new
       gbody.write(Bytes[0x00, 0x00, 0x00, 0x27, 0x0f])
@@ -958,7 +1088,7 @@ describe Gori::Tui::HistoryView do
         head: "POST /upload HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
         body: req_body,
         body_truncated: true,
-        body_size: 50_000_i64))
+        body_size: 50_000_i64, source: Gori::FlowSource::Kind::Proxy))
 
       resp_body = "captured-resp-body".to_slice
       store.update_response(Gori::Store::CapturedResponse.new(
@@ -1047,7 +1177,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/big", http_version: "HTTP/1.1",
-        head: "GET /big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        head: "GET /big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
@@ -1087,7 +1217,7 @@ describe Gori::Tui::HistoryView do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/preview-big", http_version: "HTTP/1.1",
-          head: "GET /preview-big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "GET /preview-big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200,
           head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
@@ -1177,7 +1307,7 @@ describe Gori::Tui::HistoryView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
-        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil))
+        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       gbody = IO::Memory.new
       gbody.write(Bytes[0x00, 0x00, 0x00, 0x00, 0x02]) # flag 0 + len 2
       gbody << "hi"
@@ -1254,11 +1384,11 @@ describe Gori::Tui::HistoryView do
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.example.com", port: 443,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, body: nil))
+        head: "GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "app.example.com", port: 443,
         method: "POST", target: "/login", http_version: "HTTP/1.1",
-        head: "POST /login HTTP/1.1\r\nHost: app.example.com\r\n\r\n".to_slice, body: nil))
+        head: "POST /login HTTP/1.1\r\nHost: app.example.com\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 
       view = HistoryView.new
       view.reload(store)

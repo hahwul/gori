@@ -171,7 +171,7 @@ private def seed_capture(store : Gori::Store, target : String, cookie : String? 
   end
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
-    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice,
     body: "ok".to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
@@ -184,7 +184,7 @@ private def seed_dead_capture(store : Gori::Store, port : Int32, target : String
   head = "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nCookie: session=A\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
-    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice,
     body: "ok".to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))

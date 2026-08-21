@@ -108,7 +108,7 @@ private def captured(store, host : String, target : String, *,
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: host, port: 443,
     method: "POST", target: target, http_version: "HTTP/1.1",
-    head: req_head.to_slice, body: body_bytes || body.try(&.to_slice)))
+    head: req_head.to_slice, body: body_bytes || body.try(&.to_slice), source: Gori::FlowSource::Kind::Proxy))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
       flow_id: id, status: status, head: "HTTP/1.1 #{status} OK\r\n\r\n".to_slice))
@@ -307,7 +307,7 @@ describe Gori::Colormarker do
           id = store.insert_flow(Gori::Store::CapturedRequest.new(
             created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
             method: "GET", target: "/slow", http_version: "HTTP/1.1",
-            head: "GET /slow HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+            head: "GET /slow HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
           pending = store.flow_row(id).not_nil!
           cm = Gori::Colormarker.load(store)
           cm.add("body:landed", RED, FULL, "late")
@@ -490,6 +490,7 @@ describe Gori::Colormarker do
                 when "proto"                                        then "ws"
                 when "stub"                                         then "true"
                 when "scope"                                        then "in"
+                when "src"                                          then "repeater"
                 else                                                     "x"
                 end
         Gori::Colormarker.unusable_reason("#{field}:#{value}").should be_nil

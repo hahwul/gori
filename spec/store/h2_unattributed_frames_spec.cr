@@ -24,7 +24,7 @@ private def h2_request(target : String, conn : Int64?) : Gori::Store::CapturedRe
     created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: target, http_version: "HTTP/2",
     head: "GET #{target} HTTP/2\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
-    h2_conn_id: conn, h2_stream_id: 1_i64)
+    h2_conn_id: conn, h2_stream_id: 1_i64, source: Gori::FlowSource::Kind::Proxy)
 end
 
 describe "unattributed HTTP/2 frames" do

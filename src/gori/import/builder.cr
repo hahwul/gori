@@ -426,10 +426,19 @@ module Gori
         end.to_slice
       end
 
+      # `source` defaults to `Import` because that is what this builder is FOR — every parser in
+      # this module reads a file someone else captured. It is still a parameter, because the
+      # builder has one caller from outside the module (`Discover::Persist`, which synthesizes a
+      # pair for a finding it fetched itself) and a crawl that filed itself under `import` would
+      # be answering "did gori send this?" wrongly. The hard gate is one layer down:
+      # `Store::CapturedRequest` takes `source` with NO default at all.
       def self.pending_request(created_at : Int64, url : String, method : String = "GET",
                                headers : Headers = Headers.new,
                                body : Bytes? = nil, http_version : String = "HTTP/1.1",
-                               declared_body_size : Int64? = nil) : FlowPair
+                               declared_body_size : Int64? = nil,
+                               source : FlowSource::Kind = FlowSource::Kind::Import,
+                               source_surface : FlowSource::Surface? = nil,
+                               source_ref : String? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head(method, target, http_version, scheme, host, port, headers, body,
@@ -437,7 +446,8 @@ module Gori
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
-          head: head, body: stored, body_truncated: trunc, body_size: size)
+          head: head, body: stored, body_truncated: trunc, body_size: size,
+          source: source, source_surface: source_surface, source_ref: source_ref)
         FlowPair.new(req, nil)
       end
 
@@ -450,7 +460,10 @@ module Gori
                              duration_us : Int64?,
                              declared_req_body_size : Int64? = nil,
                              declared_resp_body_size : Int64? = nil,
-                             connect_protocol : String? = nil) : FlowPair
+                             connect_protocol : String? = nil,
+                             source : FlowSource::Kind = FlowSource::Kind::Import,
+                             source_surface : FlowSource::Surface? = nil,
+                             source_ref : String? = nil) : FlowPair
         scheme, host, port, target = endpoint(url)
         req_stored, req_trunc, req_size = capped(req_body, declared_req_body_size)
         req_head = request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
@@ -462,7 +475,8 @@ module Gori
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
           head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size,
-          connect_protocol: connect_protocol)
+          connect_protocol: connect_protocol,
+          source: source, source_surface: source_surface, source_ref: source_ref)
         # `response_head` keeps an incoming Content-Length verbatim, so a truncated response
         # already re-serializes with the origin's true length — no override needed on this side.
         # It does need to KNOW the body was cut short, though, or a capped chunked response

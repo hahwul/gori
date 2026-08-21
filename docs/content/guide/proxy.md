@@ -167,6 +167,39 @@ On top of the wire protocols, gori decodes common payloads inline:
 - **GraphQL**: `query`, `operationName`, and `variables` parsed from POST bodies and `?query=` parameters.
 - **Form params**: `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
 
+## Where a flow came from {#flow-source}
+
+History is not only what your browser did. gori's own tools write into it too — an MCP
+`send_request` records by default, a Discover crawl persists what it fetched, a Repeater send
+is recorded from the TUI (and on request from `gori run`), a fuzz sweep can be, and `import`
+reads somebody else's capture in. All of them used to be indistinguishable from captured
+traffic, which matters the moment History is read as evidence: "the target answered this" and
+"I made this happen" are different claims.
+
+The **SRC** column says which. `PROXY` is traffic a client sent through gori; `RPTR`, `FUZZ`,
+`CRAWL` and friends are requests gori made; `IMPRT` was read in from a file. The detail pane
+spells it out under the request — `sent by gori — repeater (tui) #4` — naming the surface it
+came from and the session behind it, so a row can be traced back to the tab that produced it.
+
+Filter on it with [`src:`](/reference/query-language/#src-provenance):
+
+```text
+src:proxy        read History as traffic that really happened
+src:gori         only what gori put on the wire
+-src:repeater    everything except your own resends
+```
+
+A colour rule takes the same term, so `src:gori` + a strip marker keeps your own traffic
+visually separate while you scroll. Flows captured before the upgrade that added this carry no
+source: they show `—` and match neither direction, because gori will not guess at a provenance
+no capture recorded.
+
+**Repeater sends are recorded by default**, and Settings → General → *Record Repeater sends*
+turns that off. It governs the TUI only — `gori run repeater send` still needs
+`--record-history` (off by default) and MCP `send_request` still takes `record_history` (on by
+default), so no script's behaviour moves under it. WebSocket sends and send-groups are not
+recorded; the status line says so once.
+
 ## Filtering History
 
 History is searchable with gori's [query language](/reference/query-language/). A few examples:

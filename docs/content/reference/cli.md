@@ -150,6 +150,8 @@ Subcommands: `history show <id>` (same as `run show`), `history delete <id>`, `h
 
 Each `json`/`jsonl` row carries the flow's absolute `url` and a compact `headers` object for the request (a repeated header name becomes an array). Bodies are not inlined — that is `run show`.
 
+Every row also carries `source` — where the flow came from (`proxy`, `repeater`, `fuzzer`, `discover`, `import`, …), `null` on a flow captured before gori recorded provenance — plus `source_surface` (`tui` / `cli` / `mcp`) and `source_ref` when there is one. The text format prints a `[repeater]`-style chip on anything that is not ordinary captured traffic. Filter on it with [`src:`](/reference/query-language/#src-provenance); the same keys are on MCP `list_history` and `get_flow`.
+
 `history delete -q QL` deletes every flow the query matches and needs `--yes`; without it, it prints how many would go and refuses. A query naming a field QL does not know (`methd:`) is refused too, rather than silently matching nothing. With neither an id nor `-q` it refuses — wiping the project is `history clear --yes`.
 
 `--format har` writes the whole result set as one HAR 1.2 log on STDOUT, oldest entry first, so a query can be handed to a teammate or loaded into Burp, Charles, or a browser's network panel. See [HAR export](#har-export).

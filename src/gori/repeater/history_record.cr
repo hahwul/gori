@@ -1,15 +1,23 @@
 require "./plan"
 require "../flow_mapper"
 require "../env"
+require "../flow_source"
 
 module Gori
   module Repeater
-    # Writes a repeater SEND to History as a captured flow — the opt-in "punch a hole" between
-    # the workbench (Repeater/Fuzz) and the evidence store (History/Sitemap/HAR/compare). The
-    # two are deliberately separate universes: a Repeater send leaves no captured flow by
-    # default, exactly as Burp Repeater stays out of Proxy history. `--record-history` (CLI) and
-    # MCP `send_request`'s `record_history` are how an operator asks for a flow id when they want
-    # the send to enter the next tool.
+    # Writes a repeater SEND to History as a captured flow — the "punch a hole" between the
+    # workbench (Repeater/Fuzz) and the evidence store (History/Sitemap/HAR/compare).
+    #
+    # The two used to be entirely separate universes, the way Burp Repeater stays out of Proxy
+    # history, and every surface was opt-in. The TUI now records by default
+    # (`Settings.repeater_record_history?`), because the tester driving a request by hand is the
+    # one whose evidence goes missing; `gori run repeater send --record-history` (off by
+    # default) and MCP `send_request`'s `record_history` (on by default) keep the explicit
+    # arguments they already had, so no script's behaviour moves under it.
+    #
+    # Every row this writes carries `source: repeater` (see `Gori::FlowSource`), so History,
+    # QL `src:`, the Sitemap lens and Authorize's passive watcher can all tell a send gori made
+    # from traffic the target's own client produced.
     #
     # MCP `send_request` has its OWN recorder (`Tools#record_outbound_request`), because it
     # records from a `RequestBuilder::Built` before a `Plan` exists. This one records from a
@@ -32,8 +40,14 @@ module Gori
       # can rotate between two reads. A caller that has not been threaded through is a compile
       # error rather than a row that silently differs from the send — the same argument
       # `Sender` makes for requiring an `Outbound` in its constructor.
+      # `surface` names which of gori's three faces issued the send, and `source_ref` the
+      # repeater session it came from (so a History row can point back at the tab that sent it).
+      # `surface` is required for the same reason `wire` is: every caller of this recorder lives
+      # inside one surface's own file and knows the answer, and a defaulted one would let a
+      # fourth surface record under a third's name.
       def record(store : Store, plan : Plan, result : Result, created_at : Int64,
-                 wire : Bytes) : Int64
+                 wire : Bytes, *, surface : FlowSource::Surface,
+                 source_ref : String? = nil) : Int64
         head, body, method, target, version = request_projection(plan, wire)
         captured = Store::CapturedRequest.new(
           created_at: created_at,
@@ -46,6 +60,9 @@ module Gori
           head: head,
           body: body,
           body_size: body.try(&.size.to_i64),
+          source: FlowSource::Kind::Repeater,
+          source_surface: surface,
+          source_ref: source_ref,
         )
         id = store.insert_flow(captured)
         raise Gori::Error.new("could not record the send in History (project busy) — the send happened, but no flow id was written") if id <= 0

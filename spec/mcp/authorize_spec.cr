@@ -68,7 +68,7 @@ private def seed_authz_flow(store, port, method = "GET", target = "/admin", cook
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
     method: method, target: target, http_version: "HTTP/1.1",
-    head: head.to_slice, body: nil))
+    head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil, content_type: nil))
   id
@@ -443,7 +443,7 @@ describe "MCP authorize tools" do
         drop = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "http", host: "elsewhere.invalid", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
-          head: "GET / HTTP/1.1\r\nHost: elsewhere.invalid\r\nCookie: s=1\r\n\r\n".to_slice, body: nil))
+          head: "GET / HTTP/1.1\r\nHost: elsewhere.invalid\r\nCookie: s=1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: drop, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil, content_type: nil))
         store.add_scope_rule("include", "host", "127.0.0.1")

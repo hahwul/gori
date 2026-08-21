@@ -40,6 +40,43 @@ module Gori
         skip_reason(detail, identities).nil?
       end
 
+      # `skip_reason` plus the one rung only an UNATTENDED replay adds: a request gori itself
+      # sent. Every explicit path — the TUI's manual queue, `gori run authorize 42`, MCP
+      # `authorize_start{flow_ids}` — deliberately does NOT ask this, because there a person
+      # pointed at that flow and replaying it is what they asked for.
+      #
+      # FIRST in the chain, ahead of `:incomplete`: it is the cheapest test and the most
+      # specific answer. A repeater send that never completed is more usefully reported as
+      # "sent by gori" than as "never completed", which reads like a target problem.
+      def self.passive_skip_reason(detail : Store::FlowDetail,
+                                   identities : Array(Identity)) : Symbol?
+        return :gori_originated if gori_originated?(detail.row)
+        skip_reason(detail, identities)
+      end
+
+      # Did gori itself put this request on the wire — a Repeater send, an agent's
+      # `send_request`, a fuzz hit, a crawl?
+      #
+      # Passive replay is a lens on WHAT THE BROWSER TOUCHED, and a request the operator (or an
+      # agent beside them) just made by hand is not that: replaying it says nothing they did not
+      # already ask for, and it fans one keystroke out into a shadow request per identity. It is
+      # also the marker that keeps this feature from feeding itself, now that the Repeater
+      # records by default — `AuthorizeController`'s watcher comment used to say a self-loop was
+      # impossible "because nothing writes them back with `insert_flow`", and that stopped being
+      # true. Only `passive_skip_reason` consults it; a human who names a flow gets it replayed.
+      #
+      # An IMPORTED flow is deliberately not caught: gori never sent it, it describes a real
+      # endpoint somebody captured, and replaying it is exactly what an operator handed a HAR
+      # wants. `FlowSource::Kind#sent_by_gori?` draws that line once.
+      #
+      # A row whose provenance predates the column answers FALSE — it is replayed as before.
+      # Those are overwhelmingly proxy captures (nothing else recorded by default when they were
+      # written), and treating "not recorded" as "gori's own" would silently switch passive
+      # replay off for every project captured with an older gori.
+      def self.gori_originated?(row : Store::FlowRow) : Bool
+        row.sent_by_gori?
+      end
+
       # `skip_reason` for a request a HUMAN named — the TUI's manual queue, `gori run authorize
       # 42 --unsafe-methods`, MCP `unsafe_methods:true`. The only rung lifted is
       # `:unsafe_method`: there a person chose the request and accepted that the side effect
@@ -87,6 +124,7 @@ module Gori
         when :unsafe_method   then "not a safe method to repeat"
         when :incomplete      then "never completed"
         when :short_circuited then "answered by gori"
+        when :gori_originated then "sent by gori, not the browser"
         when :out_of_scope    then "outside project scope"
         when :duplicate       then "already queued"
         else                       reason.to_s

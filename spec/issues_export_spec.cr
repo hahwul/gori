@@ -103,11 +103,11 @@ describe Gori::Issues::Export do
         primary = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/a", http_version: "HTTP/1.1",
-          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         linked = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: String.new(Bytes[0x2f, 0x80, 0x61]), http_version: "HTTP/1.1",
-          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
         store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
 
@@ -122,11 +122,11 @@ describe Gori::Issues::Export do
         primary = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/a", http_version: "HTTP/1.1",
-          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /a HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         linked = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/b\nX", http_version: "HTTP/1.1",
-          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil))
+          head: "GET /b HTTP/1.1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         iid = store.insert_issue("t", Gori::Store::Severity::Low, "h.test", primary)
         store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, linked)
 
@@ -143,7 +143,7 @@ describe Gori::Issues::Export do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "POST", target: "/", http_version: "HTTP/1.1",
-          head: "POST / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "POST / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         # Body tries to break out of the ```http fence and inject a heading.
         evil = "```\n## INJECTED HEADING\n```\nmore".to_slice
         store.update_response(Gori::Store::CapturedResponse.new(
@@ -169,7 +169,7 @@ describe Gori::Issues::Export do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
-          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         cap = Gori::Issues::Export::EVIDENCE_CAP
         # Pad so a 3-byte char straddles the cap boundary: body[0, cap] ends mid-codepoint,
         # which used to make the slice's valid_encoding? false → whole body dropped as binary.
@@ -190,7 +190,7 @@ describe Gori::Issues::Export do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
-          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         cap = Gori::Issues::Export::EVIDENCE_CAP
         # Valid ASCII through the cap, then a stray 0xFF byte DEEPER than the cap. The slice
         # (first `cap` bytes) is valid text, so the readable prefix must still be shown —
@@ -212,7 +212,7 @@ describe Gori::Issues::Export do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
-          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200,
           head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
@@ -230,7 +230,7 @@ describe Gori::Issues::Export do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
-          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         # "5\r\nhello\r\n0\r\n\r\n" — a single 5-byte chunk, then the terminator.
         chunked = "5\r\nhello\r\n0\r\n\r\n".to_slice
         store.update_response(Gori::Store::CapturedResponse.new(

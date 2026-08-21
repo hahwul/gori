@@ -470,7 +470,8 @@ module Gori::Tui
     private def queue_persist(run : DiscoverRun, idx : Int32, f : Discover::Finding,
                               exchange : Discover::Exchange?) : Nil
       @persist_seq += 1
-      pair = Discover::Persist.flow_pair(f, @persist_base + @persist_seq, exchange)
+      pair = Discover::Persist.flow_pair(f, @persist_base + @persist_seq, exchange,
+        surface: Gori::FlowSource::Surface::Tui)
       @persist_buf << {pair.request, pair.response}
       @persist_owners << {run, idx}
     end

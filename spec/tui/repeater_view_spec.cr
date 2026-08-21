@@ -343,7 +343,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/", http_version: "HTTP/1.1",
-        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: Bytes.empty))
+        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: Bytes.empty, source: Gori::FlowSource::Kind::Proxy))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "ORIG".to_slice))
       view = RepeaterView.new
@@ -388,7 +388,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
         head: "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 99\r\n\r\n".to_slice,
-        body: "hello".to_slice)) # stale CL=99, real body is 5 bytes
+        body: "hello".to_slice, source: Gori::FlowSource::Kind::Proxy)) # stale CL=99, real body is 5 bytes
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
       detail = store.get_flow(id).not_nil!
@@ -425,7 +425,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
         head: "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 6\r\n\r\n".to_slice,
-        body: body))
+        body: body, source: Gori::FlowSource::Kind::Proxy))
       detail = store.get_flow(id).not_nil!
 
       view = RepeaterView.new
@@ -458,7 +458,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
-        head: head.to_slice, body: body))
+        head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
       detail = store.get_flow(id).not_nil!
 
       view = RepeaterView.new
@@ -495,7 +495,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/api?$filter=name", http_version: "HTTP/1.1",
-        head: head.to_slice, body: nil))
+        head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
 
@@ -519,7 +519,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/api?$filter=name", http_version: "HTTP/1.1",
-        head: head.to_slice, body: nil))
+        head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
 
@@ -803,7 +803,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/seed?q=1&r=2", http_version: "HTTP/1.1",
-        head: head.to_slice, body: body))
+        head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
       store.get_flow(id).not_nil!
     end
 
@@ -937,7 +937,7 @@ describe Gori::Tui::RepeaterView do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "POST", target: "/x", http_version: "HTTP/1.1",
-          head: h.to_slice, body: plain.to_slice))
+          head: h.to_slice, body: plain.to_slice, source: Gori::FlowSource::Kind::Proxy))
         view = RepeaterView.new
         view.load(store.get_flow(id).not_nil!)
         String.new(view.request_bytes).should eq(h + plain)
@@ -963,7 +963,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/p", http_version: "HTTP/1.1",
-        head: head.to_slice, body: body.to_slice))
+        head: head.to_slice, body: body.to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.get_flow(id).not_nil!
     end
 
@@ -1175,7 +1175,7 @@ describe Gori::Tui::RepeaterView do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "POST", target: "/p", http_version: "HTTP/1.1",
-          head: h.to_slice, body: plain.to_slice))
+          head: h.to_slice, body: plain.to_slice, source: Gori::FlowSource::Kind::Proxy))
         view = RepeaterView.new
         view.load(store.get_flow(id).not_nil!)
         String.new(view.request_bytes).should eq(h + plain)
@@ -1418,7 +1418,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/demo.Greeter/SayHello", http_version: "HTTP/2",
         head: "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\nte: trailers\r\n\r\n".to_slice,
-        body: body))
+        body: body, source: Gori::FlowSource::Kind::Proxy))
       detail = store.get_flow(id).not_nil!
 
       view = RepeaterView.new
@@ -1441,7 +1441,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/S/M", http_version: "HTTP/2",
         head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
-        body: body))
+        body: body, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       view.grpc_reframable?.should be_true
@@ -1543,7 +1543,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/crlf", http_version: "HTTP/1.1",
-        head: head.to_slice, body: body.to_slice))
+        head: head.to_slice, body: body.to_slice, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
       String.new(view.request_bytes).should eq(
@@ -1620,7 +1620,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/S/M", http_version: "HTTP/2",
         head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
-        body: body))
+        body: body, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       view.grpc_reframable?.should be_false
@@ -1652,7 +1652,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/demo.Greeter/SayHello", http_version: "HTTP/2",
         head: "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
-        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x00]))
+        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x00], source: Gori::FlowSource::Kind::Proxy))
       gview = RepeaterView.new
       gview.load_grpc(store.get_flow(gid).not_nil!)
       gview.toggle_http2.should be_true # stays h2 — no flip
@@ -1661,7 +1661,7 @@ describe Gori::Tui::RepeaterView do
       wid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       wview = RepeaterView.new
       wview.load_ws(store.get_flow(wid).not_nil!, [] of Gori::Store::WsOutMessage)
       wview.toggle_http2.should be_false # stays h1 — no flip
@@ -1674,7 +1674,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
-        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!,
         ["{\"a\":1}", "ping"].map { |t| Gori::Store::WsOutMessage.text(t) })
@@ -1705,7 +1705,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!, [
         Gori::Store::WsOutMessage.text("first"),
@@ -1742,7 +1742,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
-        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!, [Gori::Store::WsOutMessage.new(2, bin)])
 
@@ -1780,7 +1780,7 @@ describe Gori::Tui::RepeaterView do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
-        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!,
         ["{\"a\":1}", "ping"].map { |t| Gori::Store::WsOutMessage.text(t) })
@@ -1810,7 +1810,7 @@ describe Gori::Tui::RepeaterView do
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/2",
         head: "POST /svc/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
-        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
+        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41], source: Gori::FlowSource::Kind::Proxy))
       view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
 

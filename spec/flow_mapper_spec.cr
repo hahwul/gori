@@ -8,7 +8,7 @@ describe Gori::FlowMapper do
 
     cap = Gori::FlowMapper.request(req,
       scheme: "https", host: "shop.test", port: 443, created_at: 99_i64,
-      body: body, sni: "shop.test", alpn: "http/1.1", tls_version: "TLSv1.3")
+      body: body, sni: "shop.test", alpn: "http/1.1", tls_version: "TLSv1.3", source: Gori::FlowSource::Kind::Proxy)
 
     cap.method.should eq("POST")
     cap.target.should eq("/api/orders")
@@ -32,7 +32,7 @@ describe Gori::FlowMapper do
     req.version.should eq("proxy")
 
     cap = Gori::FlowMapper.request(req,
-      scheme: "http", host: "acme.test", port: 80, created_at: 1_i64)
+      scheme: "http", host: "acme.test", port: 80, created_at: 1_i64, source: Gori::FlowSource::Kind::Proxy)
 
     cap.method.should eq("GET")                                   # first token still correct
     cap.target.should eq("GET /search?q=raw proxy test HTTP/1.1") # verbatim request-line

@@ -61,7 +61,7 @@ describe "Authorize vs the active session slot" do
         created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: origin.port,
         method: "GET", target: "/admin", http_version: "HTTP/1.1",
         head: "GET /admin HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: session=ADMIN\r\n\r\n".to_slice,
-        body: nil))
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
       detail = store.get_flow(id).not_nil!
 
       # The operator picked a send context in another tab — the ordinary case, since the slot
@@ -132,7 +132,7 @@ describe "Authorize and per-identity bindings" do
         created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: origin.port,
         method: "GET", target: "/orders", http_version: "HTTP/1.1",
         head: "GET /orders HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: sid=CAPTURED\r\n\r\n".to_slice,
-        body: nil))
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
       detail = store.get_flow(id).not_nil!
 
       slots = Gori::SessionSlots.load(store)

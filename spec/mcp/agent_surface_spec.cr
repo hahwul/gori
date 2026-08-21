@@ -566,7 +566,7 @@ describe "MCP flow replay" do
       [odata, bare].each do |text|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
-          method: "GET", target: "/", http_version: "HTTP/1.1", head: text.to_slice))
+          method: "GET", target: "/", http_version: "HTTP/1.1", head: text.to_slice, source: Gori::FlowSource::Kind::Proxy))
         resp = drive(store, call_line("send_request",
           %({"flow_id":#{id},"allow_unscoped":true,"record_history":false})))[0]
         resp["result"]["isError"].as_bool.should be_false

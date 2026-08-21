@@ -391,7 +391,7 @@ describe Gori::Session do
       session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
       pending_id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/hang",
-        http_version: "HTTP/1.1", head: "GET /hang HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+        http_version: "HTTP/1.1", head: "GET /hang HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       session.close
 
       store = Gori::Store.open(project.db_path)

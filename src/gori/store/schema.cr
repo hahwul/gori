@@ -1017,7 +1017,50 @@ module Gori
         "ALTER TABLE flows ADD COLUMN connect_protocol TEXT",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16]
+      # Where a flow CAME FROM: which gori tool produced it (`source`), which surface issued the
+      # request (`source_surface`), and which of that tool's sessions it belongs to
+      # (`source_ref`). See `Gori::FlowSource`.
+      #
+      # Six producers already wrote into this table and NOTHING on the row told them apart: the
+      # capture proxy, MCP `send_request` (whose `record_history` defaults to TRUE), a Discover
+      # crawl (on by default), an opt-in `--record-history` fuzz sweep or repeater send, and
+      # `import`. History is read as evidence, so "the target answered this" and "gori's own
+      # Repeater elicited this" being byte-identical here is the same class of defect V5's
+      # `short_circuited` fixed one layer down — that one about a response gori FABRICATED, this
+      # one about a request gori SENT.
+      #
+      # Columns and not a re-derivation at read time, for V14's and V16's reason verbatim:
+      # `QL.src_cond` compiles `src:` to SQL against this table, so a label derived from
+      # something the query cannot see is precisely the drift `Proto`/`FlowSource` exist to
+      # prevent.
+      #
+      # ## Why these are NULLable and NOT backfilled
+      #
+      # V5 could give `short_circuited` a `NOT NULL DEFAULT 0` because 0 was the TRUTH for every
+      # existing row — gori could not short-circuit before that migration. **That argument does
+      # not hold here.** gori could already record a repeater send, a fuzz hit, an MCP
+      # `send_request`, a crawl and an import before this migration, so writing `proxy` into
+      # every pre-existing row would be inventing a fact no capture produced — the thing V14 and
+      # V16 both refuse to do. NULL means "not recorded", not "proxy"; the SRC column draws it as
+      # `—` and a `src:` term matches neither direction on those rows (`QL::CAVEATS` says so).
+      #
+      # `source_surface` NULL carries a SECOND meaning for rows that DO have a `source`: a proxy
+      # capture has no originating gori surface, because the request came from the client's own
+      # program. `source IS NULL` is what separates "not recorded" from "not applicable".
+      #
+      # `source_ref` is opaque and only meaningful beside `source` — a repeater session id, a
+      # fuzz job id, an import's filename. TEXT because each tool numbers its own space (and
+      # some do not number at all), and nothing joins on it.
+      #
+      # No index. `src:` is a low-cardinality term that rides an AND-chain with a selective one,
+      # and `flows` already carries six indexes plus the inline request/response BLOBs.
+      V17 = [
+        "ALTER TABLE flows ADD COLUMN source TEXT",
+        "ALTER TABLE flows ADD COLUMN source_surface TEXT",
+        "ALTER TABLE flows ADD COLUMN source_ref TEXT",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

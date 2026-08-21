@@ -23,7 +23,7 @@ private def capture_flow(store, resp_head : String = "HTTP/1.1 200 OK\r\n\r\n", 
   head = "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n"
   req = Gori::Store::CapturedRequest.new(
     created_at: 1_000_i64, scheme: "https", host: host, port: 443,
-    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil)
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
   id = store.insert_flow(req)
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status, head: resp_head.to_slice, body: body,

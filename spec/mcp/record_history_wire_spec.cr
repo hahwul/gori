@@ -94,4 +94,32 @@ describe "MCP send_request(record_history) records the wire" do
       end
     end
   end
+
+  # `send_request` records by DEFAULT, so an agent working beside an operator has been writing
+  # into the evidence store all along. Until the provenance columns existed those rows were
+  # indistinguishable from traffic the target's client produced — on this surface most of all,
+  # because the thing reading them back is the same agent that made them.
+  it "marks the flow as a repeater send from the MCP surface" do
+    with_store do |store|
+      with_recording_origin do |port, _|
+        res = drive(store,
+          call("send_request",
+            %({"url":"http://127.0.0.1:#{port}/me","method":"GET",) +
+            %("record_history":true,"allow_unscoped":true}), 1))
+        flow_id = tool_payload(res[0])["recorded_flow_id"].as_i64
+
+        row = store.flow_row(flow_id).not_nil!
+        row.source.should eq(Gori::FlowSource::Kind::Repeater)
+        row.source_surface.should eq(Gori::FlowSource::Surface::Mcp)
+        row.sent_by_gori?.should be_true
+
+        # …and it reaches the agent through both projections, or the agent cannot tell either.
+        listed = tool_payload(drive(store, call("list_history", %({"limit":1}), 1))[0]).as_a
+        listed[0]["source"].as_s.should eq("repeater")
+        listed[0]["source_surface"].as_s.should eq("mcp")
+        detail = tool_payload(drive(store, call("get_flow", %({"id":#{flow_id}}), 1))[0])
+        detail["source"].as_s.should eq("repeater")
+      end
+    end
+  end
 end

@@ -62,7 +62,7 @@ private def seed_dirty_probe_flow(store, needle : String) : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
     method: "GET", target: "/admin", http_version: "HTTP/1.1",
-    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil))
+    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200,
     head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,

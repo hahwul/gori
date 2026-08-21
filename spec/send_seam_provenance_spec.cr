@@ -111,7 +111,7 @@ end
 private def seam_flow(store, target : String, head : String) : Gori::Store::FlowDetail
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 80,
-    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil))
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   store.get_flow(id).not_nil!
 end
 
@@ -310,7 +310,7 @@ describe "Repeater::Sender provenance (a DECLARED binding at the send seam)" do
         fid = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: origin.port,
           method: "GET", target: "/api?$TOKEN=1&sort=asc", http_version: "HTTP/1.1",
-          head: head.to_slice, body: nil))
+          head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
         store.flush
         tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
         r = tools.call("send_request", JSON.parse(%({"flow_id":#{fid},"allow_unscoped":true})))
@@ -436,7 +436,7 @@ describe "WebSocket message provenance across the three surfaces" do
       Gori::Settings.project_env_vars = [{"where", "WHEREVAL"}, {"WHO", "alice"}]
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/ws",
-        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil))
+        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       seeded = store.insert_repeater("ws://h", WS_SEAM_UPGRADE.to_slice, false, true, fid, 0)
       store.insert_ws_message(0_i64, "out", 1, %({"$where":"this.a==1"}).to_slice, repeater_id: seeded)
       store.flush
@@ -461,7 +461,7 @@ describe "WebSocket message provenance across the three surfaces" do
       Gori::Settings.project_env_vars = [{"WHO", "alice"}]
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/ws",
-        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil))
+        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       id = store.insert_repeater("ws://h", WS_SEAM_UPGRADE.to_slice, false, true, fid, 0)
       store.insert_ws_message(0_i64, "out", 1, %({"$where":"x"}).to_slice, repeater_id: id)
       store.flush
@@ -492,7 +492,7 @@ describe "WebSocket message provenance across the three surfaces" do
     with_prov_store do |store|
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/ws",
-        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil))
+        http_version: "HTTP/1.1", head: WS_SEAM_UPGRADE.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       id = store.insert_repeater("ws://h", WS_SEAM_UPGRADE.to_slice, false, true, fid, 0)
       store.insert_ws_message(0_i64, "out", 1, "AAA".to_slice, repeater_id: id)
       store.insert_ws_message(0_i64, "out", 1, notice.to_slice, repeater_id: id)
@@ -523,7 +523,7 @@ describe "WebSocket message provenance across the three surfaces" do
       upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port, method: "GET",
-        target: "/ws", http_version: "HTTP/1.1", head: upgrade.to_slice, body: nil))
+        target: "/ws", http_version: "HTTP/1.1", head: upgrade.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       id = store.insert_repeater("ws://127.0.0.1:#{port}", upgrade.to_slice, false, true, fid, 0)
       store.insert_ws_message(0_i64, "out", 1, %({"$where":"this.a==1"}).to_slice, repeater_id: id)
       store.flush

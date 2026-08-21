@@ -235,7 +235,8 @@ module Gori
         else
           djob.truncated = true
         end
-        pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size, exchange)
+        pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size, exchange,
+          surface: Gori::FlowSource::Surface::Mcp, source_ref: djob.id)
         djob.persist_buf << {pair.request, pair.response}
         if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH ||
            Time.instant - djob.persist_at >= DISCOVER_PERSIST_INTERVAL

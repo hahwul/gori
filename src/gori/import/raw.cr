@@ -19,7 +19,9 @@ module Gori
       # a smuggling payload in the path survives import verbatim; the URL is just how we
       # learn which origin the operator captured it from.
       def self.flow(created_at : Int64, url : String, raw_request : Bytes,
-                    raw_response : Bytes? = nil, duration_us : Int64? = nil) : Builder::FlowPair
+                    raw_response : Bytes? = nil, duration_us : Int64? = nil,
+                    source_surface : FlowSource::Surface? = nil,
+                    source_ref : String? = nil) : Builder::FlowPair
         scheme, host, port, _ = Builder.endpoint(url)
 
         head, body = split(raw_request)
@@ -28,7 +30,9 @@ module Gori
         stored, trunc, size = Builder.capped(body)
         request = FlowMapper.request(req,
           scheme: scheme, host: host, port: port, created_at: created_at,
-          body: stored, body_truncated: trunc, body_size: size)
+          body: stored, body_truncated: trunc, body_size: size,
+          source: FlowSource::Kind::Import,
+          source_surface: source_surface, source_ref: source_ref)
 
         return Builder::FlowPair.new(request, nil) if raw_response.nil? || raw_response.empty?
 

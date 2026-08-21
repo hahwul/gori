@@ -171,6 +171,9 @@ module Gori::Tui
         bool: true),
       Field.new("History retention (flows)",
         "how many newest flows a project keeps before the oldest are dropped — 0 = unlimited; applies on the next project open"),
+      Field.new("Record Repeater sends",
+        "write every Repeater send into History as a flow (SRC column: RPTR) so it can be filtered, compared and exported — TUI only; gori run and MCP take their own per-call argument; ←/→/space toggles",
+        bool: true),
     ]
     SECTIONS = {
       :network       => NETWORK_FIELDS,
@@ -292,6 +295,7 @@ module Gori::Tui
                   Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
                   Settings::DEFAULT_UPDATE_CHECK_ENABLED ? "on" : "off",
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
+                  Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), rule_count_label(Settings.outbound_tls.size, "entry", "entries"), hostnames_summary]
                 end
@@ -358,6 +362,7 @@ module Gori::Tui
         Settings.confirm_quit? ? "on" : "off",
         Settings.update_check_enabled? ? "on" : "off",
         Settings.retention_max_flows.to_s,
+        Settings.repeater_record_history? ? "on" : "off",
       ]
     end
 
@@ -676,6 +681,7 @@ module Gori::Tui
         Settings.confirm_quit = @values[1] == "on"
         Settings.update_check_enabled = @values[2] == "on"
         Settings.retention_max_flows = @values[3].strip.to_i
+        Settings.repeater_record_history = @values[4] == "on"
         @values = general_values
         return persist
       end

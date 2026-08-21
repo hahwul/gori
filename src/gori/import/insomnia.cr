@@ -18,7 +18,7 @@ module Gori
       # types that History has no request-shaped representation for.
       REQUEST_TYPE = "request"
 
-      def self.parse_file(path : String) : ParseResult
+      def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         raw = File.read(path)
         # v5 (Insomnia 9+) exports YAML with a different tree entirely. Detect it by shape
         # AND by extension so a mis-named file still gets the actionable message instead of
@@ -48,7 +48,7 @@ module Gori
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
-            pairs << resource_to_flow(now, h, vars, missing)
+            pairs << resource_to_flow(now, h, vars, missing, prov)
           rescue
             skipped += 1
           end
@@ -87,7 +87,8 @@ module Gori
       end
 
       private def self.resource_to_flow(now : Int64, res : Hash(String, JSON::Any),
-                                        vars : Vars::Table, missing : Set(String)) : Builder::FlowPair
+                                        vars : Vars::Table, missing : Set(String),
+                                        prov : Provenance) : Builder::FlowPair
         method = res["method"]?.to_s.presence || "GET"
         url = resolve_url(res, vars, missing)
         headers = header_list(res["headers"]?, vars)
@@ -96,7 +97,8 @@ module Gori
           headers << {"Content-Type", content_type}
         end
         headers.concat(auth_headers(res["authentication"]?, vars))
-        Builder.pending_request(now, url, method, headers, body)
+        Builder.pending_request(now, url, method, headers, body,
+          source_surface: prov.surface, source_ref: prov.ref)
       end
 
       # `url` plus the separate `parameters` array (Insomnia's query-param editor). Both are

@@ -1601,13 +1601,19 @@ module Gori
       # it. Not derived from the head here, unlike `request_content_type` above: a pseudo-header
       # reaches the stored head only as a synthetic marker line, which an import could forge.
       args << req.connect_protocol
+      # Where this flow came from (V17). Written from the DTO and never guessed here: `source`
+      # is a required argument on `CapturedRequest`, so every producer states it, and a row
+      # whose provenance nobody stated must stay NULL rather than default to `proxy`.
+      args << req.source.token
+      args << req.source_surface.try(&.token)
+      args << req.source_ref
       res = conn.exec(
         "INSERT INTO flows " \
         "(created_at, scheme, host, port, method, target, http_version, " \
         " sni, alpn, tls_version, request_head, request_body, request_size, state, " \
         " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, " \
-        " request_content_type, connect_protocol, fts_dirty) " \
-        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,1)", args: args)
+        " request_content_type, connect_protocol, source, source_surface, source_ref, fts_dirty) " \
+        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)", args: args)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
@@ -1856,9 +1862,16 @@ module Gori
       advisory = rs.read(String?)
       request_content_type = rs.read(String?)
       connect_protocol = rs.read(String?)
+      # An unrecognised token reads as nil — "not recorded" — rather than raising. The column
+      # holds a vocabulary that grows, and a row written by a build that knew one more member
+      # (or hand-edited in `sqlite3`) must not take the History list down mid-scroll.
+      source = rs.read(String?).try { |t| FlowSource::Kind.parse?(t) }
+      source_surface = rs.read(String?).try { |t| FlowSource::Surface.parse?(t) }
+      source_ref = rs.read(String?)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type,
-        short_circuited, advisory, request_content_type, connect_protocol)
+        short_circuited, advisory, request_content_type, connect_protocol,
+        source, source_surface, source_ref)
     end
 
     # Column order MUST match EVENT_COLS.

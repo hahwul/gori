@@ -23,7 +23,7 @@ private def seed_flow(store : Gori::Store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
     target: "/x", http_version: "HTTP/1.1",
-    head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
+    head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
 end
 
 # Private CLI glue — reopen the module for bare-call wrappers. (The `abort` branches of

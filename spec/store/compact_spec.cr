@@ -24,7 +24,7 @@ private def req_for(target : String) : Gori::Store::CapturedRequest
     created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80,
     method: "POST", target: target, http_version: "HTTP/1.1",
     head: "POST #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
-    body: big_body(120_000))
+    body: big_body(120_000), source: Gori::FlowSource::Kind::Proxy)
 end
 
 private def seed_flow_with_bodies(store : Gori::Store, target : String) : Int64

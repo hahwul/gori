@@ -135,7 +135,9 @@ module Gori
       # request — the failure is counted against this job's drain budget instead.
       private def record_fuzz_flow(fjob : FuzzJob, request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
         Fuzz::HistoryRecord.record(store, r,
-          scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2) do |ex|
+          scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
+          source_ref: fjob.id) do |ex|
           fjob.drain_errors += 1
           Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
         end

@@ -157,7 +157,7 @@ describe "RepeaterView transport chip" do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
           method: "POST", target: "/svc/M", http_version: "HTTP/2",
-          head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
+          head: head.to_slice, body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41], source: Gori::FlowSource::Kind::Proxy))
         view = RepeaterView.new
         view.load_grpc(store.get_flow(id).not_nil!)
         rect = Rect.new(0, 0, 100, 24)

@@ -72,7 +72,7 @@ private def add_flow(store, host : String = "h.test")
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_700_000_000_000_000_i64, scheme: "http", host: host, port: 80,
     method: "GET", target: "/", http_version: "HTTP/1.1",
-    head: "GET / HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "GET / HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 describe "ProjectView OVERVIEW row budget" do

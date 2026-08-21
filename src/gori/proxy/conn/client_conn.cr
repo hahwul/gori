@@ -595,7 +595,7 @@ module Gori::Proxy
       req_body = req_framing.none? ? nil : req_capture.to_slice
       flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
-        body_truncated: req_capture.truncated?, body_size: req_capture.total))
+        body_truncated: req_capture.truncated?, body_size: req_capture.total, source: FlowSource::Kind::Proxy))
       unless req_complete # client cut the request body short — don't reuse the connection
         release_upstream
         @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body"))
@@ -708,7 +708,7 @@ module Gori::Proxy
       stored, trunc, size = capped(edited_body)
       flow_id = @sink.on_request(FlowMapper.request(sent_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, advisory: advisory))
+        body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
     end
@@ -757,7 +757,7 @@ module Gori::Proxy
       stored, trunc, size = capped(buffered)
       flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, short_circuited: true))
+        body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy))
       resp = Codec::Http1.parse_response_head(resp_head)
       # ttfb/duration stay nil on purpose. There was no round trip to measure, and a `0`
       # would render in History as an impossibly fast origin — the exact misreading the
@@ -850,7 +850,7 @@ module Gori::Proxy
       stored, trunc, size = capped(fwd_body)
       flow_id = @sink.on_request(FlowMapper.request(sent_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, advisory: advisory))
+        body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: false, sent_req: sent_req)
     end
@@ -2321,7 +2321,7 @@ module Gori::Proxy
 
     private def record_error(req, scheme, host, port, created_at, message) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
-        scheme: scheme, host: host, port: port, created_at: created_at, body: nil))
+        scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy))
       @sink.on_response(FlowMapper.error_response(flow_id, message))
     end
 
@@ -2388,7 +2388,7 @@ module Gori::Proxy
     def self.record_silent_client(sink : FlowSink, scheme : String, host : String, port : Int32,
                                   *, client_tls : Bool) : Nil
       flow_id = sink.on_request(FlowMapper.request(Codec::Http1.parse_request_head(Bytes.new(0)),
-        scheme: scheme, host: host, port: port, created_at: now_us, body: nil))
+        scheme: scheme, host: host, port: port, created_at: now_us, body: nil, source: FlowSource::Kind::Proxy))
       sink.on_response(FlowMapper.error_response(flow_id,
         "no request: the client opened this connection, sent zero bytes, and was closed when the " \
         "#{SocketTuning::CLIENT_IO_TIMEOUT.total_seconds.to_i} s client read timeout expired. A " \
@@ -2467,7 +2467,7 @@ module Gori::Proxy
       stored, trunc, size = capped(body)
       flow_id = @sink.on_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size))
+        body: stored, body_truncated: trunc, body_size: size, source: FlowSource::Kind::Proxy))
       @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept (request)"))
     end
 
@@ -2482,7 +2482,7 @@ module Gori::Proxy
     # is nil — we block before reading it and close the connection right after.
     private def record_blocked_request(req, scheme, host, port, created_at) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
-        scheme: scheme, host: host, port: port, created_at: created_at, body: nil))
+        scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy))
       @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Outbound::SANDBOX_ERROR))
     end
 

@@ -13,7 +13,7 @@ private def ws_flow(store : Gori::Store) : Int64
         "Sec-WebSocket-Protocol: graphql-transport-ws\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
-    method: "GET", target: "/graphql", http_version: "HTTP/1.1", head: req.to_slice, body: nil))
+    method: "GET", target: "/graphql", http_version: "HTTP/1.1", head: req.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 101, head: resp.to_slice, body: nil, reason: "Switching Protocols",

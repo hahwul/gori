@@ -14,7 +14,10 @@ module Gori
                      alpn : String? = nil, tls_version : String? = nil,
                      body_truncated : Bool = false, body_size : Int64? = nil,
                      short_circuited : Bool = false,
-                     advisory : String? = nil) : Store::CapturedRequest
+                     advisory : String? = nil,
+                     source : FlowSource::Kind,
+                     source_surface : FlowSource::Surface? = nil,
+                     source_ref : String? = nil) : Store::CapturedRequest
       # A malformed request-line (unencoded space ⇒ >3 tokens, or the h2 preface) makes
       # split(' ') mis-slice target/version — target becomes a truncated fragment and
       # version a garbage token. RawRequest keeps those for the live forwarding/keep-alive
@@ -41,6 +44,9 @@ module Gori
         body_size: body_size,
         short_circuited: short_circuited,
         advisory: advisory,
+        source: source,
+        source_surface: source_surface,
+        source_ref: source_ref,
       )
     end
 

@@ -92,7 +92,7 @@ describe "gori run issues --format json" do
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
         target: "/x", http_version: "HTTP/1.1",
-        head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
+        head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       issue_id = store.insert_issue("linked", Gori::Store::Severity::Medium, "api.test", fid)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
         Gori::Store::LinkRefKind::Repeater, 9_i64)
@@ -125,7 +125,7 @@ describe "gori run issues --format markdown" do
       req = Gori::Store::CapturedRequest.new(
         created_at: 0_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
         target: "/v1/debug", http_version: "HTTP/1.1",
-        head: "GET /v1/debug HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice)
+        head: "GET /v1/debug HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy)
       fid = store.insert_flow(req)
       store.flush
       issues = [issue(1_i64, "leak", Gori::Store::Severity::Medium, "api.test", fid)]
@@ -146,7 +146,7 @@ describe "gori run issues --format markdown" do
         created_at: 0_i64, scheme: "https", host: "api.test", port: 443, method: "POST",
         target: "/login", http_version: "HTTP/1.1",
         head: "POST /login HTTP/1.1\r\nHost: api.test\r\nContent-Length: 9\r\n\r\n".to_slice,
-        body: "user=root".to_slice)
+        body: "user=root".to_slice, source: Gori::FlowSource::Kind::Proxy)
       fid = store.insert_flow(req)
       store.flush
       issues = [issue(1_i64, "creds in body", Gori::Store::Severity::High, "api.test", fid)]

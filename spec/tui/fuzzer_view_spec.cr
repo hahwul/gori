@@ -1532,7 +1532,7 @@ describe "Gori::Tui::FuzzerView ⇧I capture seeding" do
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/seed?q=1", http_version: "HTTP/1.1",
-        head: h.to_slice, body: b))
+        head: h.to_slice, body: b, source: Gori::FlowSource::Kind::Proxy))
       store.get_flow(id).not_nil!
     end
 

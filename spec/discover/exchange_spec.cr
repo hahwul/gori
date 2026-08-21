@@ -107,7 +107,7 @@ describe "Gori::Discover finding exchanges" do
     f = D::Finding.new("https://10.0.0.5/", "GET", 200, 2_i64, nil, D::Source::Seed, 0, 0.95, nil)
 
     with_store do |store|
-      pair = D::Persist.flow_pair(f, 4_i64, ex)
+      pair = D::Persist.flow_pair(f, 4_i64, ex, surface: Gori::FlowSource::Surface::Cli)
       id = store.insert_import_batch_ids([{pair.request, pair.response}]).first
       store.get_flow(id).not_nil!.sni.should eq("vhost.example")
     end
@@ -130,7 +130,7 @@ describe "Gori::Discover finding exchanges" do
     f = D::Finding.new("http://t/a", "GET", 200, 5_i64, "text/html", D::Source::Crawled, 1, 0.95, nil)
 
     with_store do |store|
-      pair = D::Persist.flow_pair(f, 1_i64, ex)
+      pair = D::Persist.flow_pair(f, 1_i64, ex, surface: Gori::FlowSource::Surface::Cli)
       id = store.insert_import_batch_ids([{pair.request, pair.response}]).first
       detail = store.get_flow(id).not_nil!
 
@@ -153,7 +153,7 @@ describe "Gori::Discover finding exchanges" do
     f = D::Finding.new("http://t/big", "GET", 200, 4096_i64, nil, D::Source::Crawled, 1, 0.95, nil)
 
     with_store do |store|
-      pair = D::Persist.flow_pair(f, 2_i64, ex)
+      pair = D::Persist.flow_pair(f, 2_i64, ex, surface: Gori::FlowSource::Surface::Cli)
       id = store.insert_import_batch_ids([{pair.request, pair.response}]).first
       detail = store.get_flow(id).not_nil!
       detail.response_body_truncated?.should be_true
@@ -163,7 +163,7 @@ describe "Gori::Discover finding exchanges" do
 
   it "still writes the synthesized stub when there is no exchange" do
     f = D::Finding.new("http://t/x", "GET", 403, 12_i64, "text/plain", D::Source::Bruteforced, 1, 0.9, nil)
-    pair = D::Persist.flow_pair(f, 3_i64)
+    pair = D::Persist.flow_pair(f, 3_i64, surface: Gori::FlowSource::Surface::Cli)
     String.new(pair.response.not_nil!.head).should contain("X-Gori-Discover: bruteforced")
   end
 
@@ -171,7 +171,7 @@ describe "Gori::Discover finding exchanges" do
     with_store do |store|
       pairs = (1..3).map do |i|
         f = D::Finding.new("http://t/#{i}", "GET", 200, 1_i64, nil, D::Source::Crawled, 1, 0.9, nil)
-        p = D::Persist.flow_pair(f, i.to_i64)
+        p = D::Persist.flow_pair(f, i.to_i64, surface: Gori::FlowSource::Surface::Cli)
         {p.request, p.response}
       end
       ids = store.insert_import_batch_ids(pairs)

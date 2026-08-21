@@ -18,6 +18,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `method` | HTTP method |
 | `scheme` | `http` / `https` |
 | `proto` | Protocol: `http`, `ws`, `grpc`, `sse` |
+| `src` | Where the flow came from ([below](#src-provenance)) |
 | `status` | Response status code |
 | `size` | Total request + response bytes |
 | `reqsize` / `respsize` | Per-side byte count |
@@ -52,6 +53,45 @@ NOT (req.body:token OR resp.body:token)
 
 `res.` is a synonym of `resp.`, and `req.size` / `resp.size` are synonyms of `reqsize` /
 `respsize`. Fields that only ever have one side (`host`, `method`, `status`, …) take no prefix.
+
+## Source: `src:` {#src-provenance}
+
+`src:` matches flows by **who put the request on the wire**. `src:proxy` is traffic a client
+sent through gori; every other value is a request gori itself made, and `src:import` is a
+capture read out of somebody else's file.
+
+| Value | Matches |
+|-------|---------|
+| `proxy` | The capture proxy relayed a client's request — ordinary captured traffic |
+| `repeater` | A Repeater send (the TUI, `gori run repeater send --record-history`, MCP `send_request`) |
+| `fuzzer` | A fuzz result recorded with `--record-history` / `record_history` |
+| `discover` | A crawl fetch (Discover persists by default) |
+| `miner`, `sequencer`, `authorize`, `probe` | Reserved — those tools do not record flows yet |
+| `import` | Read in from a HAR, Burp export, `--urls`, an OpenAPI document |
+| `gori` | Every source gori SENT — the union of the middle rows, and **not** `import` |
+
+```text
+src:proxy                             read History as traffic that really happened
+-src:proxy                            everything gori put there
+src:gori                              …the same set, stated positively
+src:repeater status:200               your own resends that came back OK
+src:fuzzer resp.body:root:            fuzz hits, so a payload is not mistaken for a finding
+```
+
+The History **SRC** column prints a short tag for each of these (`PROXY`, `RPTR`, `FUZZ`,
+`CRAWL`, `IMPRT`, …) and `src:` accepts those tags too, so `src:rptr` and `src:repeater` are the
+same query. `source:` is accepted as a long spelling of `src:`.
+
+Two things about it are deliberate:
+
+- **An imported flow is not `src:gori`.** gori never put it on a wire; it describes a real
+  endpoint somebody else captured. `-src:proxy` keeps it, `src:gori` does not.
+- **A flow captured before gori recorded provenance matches NEITHER direction.** Those rows
+  hold no source at all — gori was already writing repeater sends, crawls and imports into
+  History before the column existed, so filling them in as `proxy` would have invented a fact
+  no capture produced. They show `—` in the SRC column, and both `src:proxy` and `-src:proxy`
+  skip them, the way a Pending flow falls out of `status:` and `-status:`. Only flows captured
+  after the upgrade carry it.
 
 ## Scope: `scope:in` / `scope:out` {#scope-in-scope-out}
 

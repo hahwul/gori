@@ -63,6 +63,14 @@ module Gori::Settings
   # quit instead of the double-press ^D.
   DEFAULT_CLIPBOARD_OSC52 = true
   DEFAULT_CONFIRM_QUIT    = false
+  # repeater_record_history = write every TUI Repeater send into History as a flow (`SRC`
+  # column: `RPTR`). On by default: the tester driving a request by hand is the one whose
+  # evidence went missing, and a send that leaves no trace cannot be compared, exported or
+  # handed over. Governs the TUI ONLY — `gori run repeater send --record-history` (off by
+  # default) and MCP `send_request{record_history}` (on by default) already take an explicit
+  # argument per call, and a global toggle that silently flipped those would move behaviour
+  # under scripts that never asked for it.
+  DEFAULT_REPEATER_RECORD_HISTORY = true
 
   class_property editor : String = DEFAULT_EDITOR                     # external editor for ^E; "" = $VISUAL/$EDITOR/vi
   class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN     # syntax-highlight markdown in Notes/Project
@@ -104,6 +112,8 @@ module Gori::Settings
   # General prefs (settings:general). Both `?` toggles read live (Clipboard.copy / quit handler).
   class_property? clipboard_osc52 : Bool = DEFAULT_CLIPBOARD_OSC52
   class_property? confirm_quit : Bool = DEFAULT_CONFIRM_QUIT
+  # Read live at the send site, so toggling it takes on the very next ^R.
+  class_property? repeater_record_history : Bool = DEFAULT_REPEATER_RECORD_HISTORY
 
   # The History-list preview body cap in BYTES (stored as KiB above). Clamped so a
   # large (or hand-edited) KiB value can never overflow Int32 (see MAX_PREVIEW_BODY_KIB).
@@ -198,6 +208,7 @@ module Gori::Settings
     return unless o = node.try(&.as_h?)
     self.clipboard_osc52 = load_bool_h(o, "clipboard_osc52", clipboard_osc52?)
     self.confirm_quit = load_bool_h(o, "confirm_quit", confirm_quit?)
+    self.repeater_record_history = load_bool_h(o, "repeater_record_history", repeater_record_history?)
   end
 
   # Allowed depths: -1 (all) or 0..3. Anything else falls back to default.
@@ -333,15 +344,18 @@ module Gori::Settings
   private def self.reset_general : Nil
     self.clipboard_osc52 = DEFAULT_CLIPBOARD_OSC52
     self.confirm_quit = DEFAULT_CONFIRM_QUIT
+    self.repeater_record_history = DEFAULT_REPEATER_RECORD_HISTORY
   end
 
   private def self.serialize_general(j : JSON::Builder) : Nil
     unless clipboard_osc52? == DEFAULT_CLIPBOARD_OSC52 &&
-           confirm_quit? == DEFAULT_CONFIRM_QUIT
+           confirm_quit? == DEFAULT_CONFIRM_QUIT &&
+           repeater_record_history? == DEFAULT_REPEATER_RECORD_HISTORY
       j.field "general" do
         j.object do
           j.field "clipboard_osc52", clipboard_osc52?
           j.field "confirm_quit", confirm_quit?
+          j.field "repeater_record_history", repeater_record_history?
         end
       end
     end

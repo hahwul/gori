@@ -26,7 +26,7 @@ private def insert_flow_row(store, *, host : String, target : String, method : S
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: scheme, host: host, port: port, method: method,
     target: target, http_version: "HTTP/1.1",
-    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 describe Gori::Links do

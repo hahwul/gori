@@ -106,9 +106,15 @@ module Gori::Discover
   # keeps its `X-Gori-Discover` provenance marker and the captured pair carries no header
   # gori invented.
   module Persist
+    # `surface` says which of gori's three faces ran the crawl; it is required, because every
+    # caller is a surface-specific controller that knows the answer and a defaulted one would
+    # let a fourth file itself under a third's name. `source_ref` points at the run when the
+    # surface has a handle an operator can use later (MCP's job id) and is nil when it does not.
     def self.flow_pair(f : Finding, created_at : Int64,
-                       exchange : Exchange? = nil) : Import::Builder::FlowPair
-      return captured_pair(f, created_at, exchange) if exchange
+                       exchange : Exchange? = nil, *,
+                       surface : FlowSource::Surface,
+                       source_ref : String? = nil) : Import::Builder::FlowPair
+      return captured_pair(f, created_at, exchange, surface, source_ref) if exchange
       if status = f.status
         resp_headers = Import::Builder::Headers.new
         resp_headers << {"Content-Type", f.content_type.not_nil!} if f.content_type
@@ -117,21 +123,25 @@ module Gori::Discover
         Import::Builder.complete_flow(
           created_at, f.url, f.method,
           Import::Builder::Headers.new, nil, "HTTP/1.1",
-          status, reason_for(status), resp_headers, nil, f.content_type, nil)
+          status, reason_for(status), resp_headers, nil, f.content_type, nil,
+          source: FlowSource::Kind::Discover, source_surface: surface, source_ref: source_ref)
       else
-        Import::Builder.pending_request(created_at, f.url, f.method)
+        Import::Builder.pending_request(created_at, f.url, f.method,
+          source: FlowSource::Kind::Discover, source_surface: surface, source_ref: source_ref)
       end
     end
 
     # The captured half: raw head bytes in, storage projections out. `Import::Builder` is a
     # SERIALIZER and would re-emit the head from parsed parts (see `Import::Raw`'s note on why
     # that destroys wire truth), so only its URL split and its body cap are reused here.
-    private def self.captured_pair(f : Finding, created_at : Int64,
-                                   ex : Exchange) : Import::Builder::FlowPair
+    private def self.captured_pair(f : Finding, created_at : Int64, ex : Exchange,
+                                   surface : FlowSource::Surface,
+                                   source_ref : String?) : Import::Builder::FlowPair
       scheme, host, port, _ = Import::Builder.endpoint(f.url)
       req = Proxy::Codec::Http1.parse_request_head(ex.request_head)
       request = FlowMapper.request(req, scheme: scheme, host: host, port: port,
-        created_at: created_at, sni: ex.sni)
+        created_at: created_at, sni: ex.sni,
+        source: FlowSource::Kind::Discover, source_surface: surface, source_ref: source_ref)
       stored, trunc, size = Import::Builder.capped(ex.body, ex.body_size)
       # `incomplete` is the OTHER way a stored body is short of what the origin framed (it cut
       # the response off); `capped` only knows about the ceiling gori applied. Either one means

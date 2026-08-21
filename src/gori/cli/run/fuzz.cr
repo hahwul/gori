@@ -479,7 +479,8 @@ module Gori
                 # "recorded 0 flows" at the end of a run whose every write hit a locked or
                 # read-only DB, and an operator who asked for evidence would get neither the
                 # evidence nor a reason.
-                fid = Fuzz::HistoryRecord.record(rs, r, scheme: scheme, host: host, port: port, http2: http2) do |ex|
+                fid = Fuzz::HistoryRecord.record(rs, r, scheme: scheme, host: host, port: port, http2: http2,
+                  source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) do |ex|
                   unless record_failed
                     record_failed = true
                     STDERR.puts "gori run fuzz: could not record to History: #{ex.message} (further record errors suppressed)"

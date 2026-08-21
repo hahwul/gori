@@ -41,12 +41,34 @@ describe Gori::Fuzz::HistoryRecord do
       with_store do |store|
         r = result_with("GET /hit?q=1 HTTP/1.1\r\nHost: t.test\r\n\r\n",
           "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", matched: true)
-        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test", port: 443, http2: false) { }.not_nil!
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test", port: 443, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
         detail = store.get_flow(id).not_nil!
         detail.row.method.should eq("GET")
         detail.row.target.should eq("/hit?q=1")
         detail.row.host.should eq("t.test")
         detail.row.status.should eq(200)
+        detail.row.source.should eq(Gori::FlowSource::Kind::Fuzzer)
+        detail.row.source_surface.should eq(Gori::FlowSource::Surface::Cli)
+      end
+    end
+
+    # `source` is a PARAMETER, not a hardcoded `Fuzzer`. `Fuzz::Sender` is not the Fuzzer's
+    # sender — the Miner, the Sequencer, Authorize, Minimize and Probe's active rules all sweep
+    # through it — so the first of those to learn recording would otherwise file its flows under
+    # a tool that did not send them.
+    it "stamps the source it was given, not the module it lives in" do
+      with_store do |store|
+        r = result_with("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", matched: true)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test",
+          port: 443, http2: false,
+          source: Gori::FlowSource::Kind::Miner, surface: Gori::FlowSource::Surface::Mcp,
+          source_ref: "job-7") { }.not_nil!
+        row = store.flow_row(id).not_nil!
+        row.source.should eq(Gori::FlowSource::Kind::Miner)
+        row.source_surface.should eq(Gori::FlowSource::Surface::Mcp)
+        row.source_ref.should eq("job-7")
       end
     end
 
@@ -66,7 +88,8 @@ describe Gori::Fuzz::HistoryRecord do
           request: "GET /hit HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice,
           wire: "GET /hit HTTP/1.1\r\nHost: t.test\r\nAuthorization: Bearer ADMIN\r\n\r\n".to_slice)
         id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test",
-          port: 443, http2: false) { }.not_nil!
+          port: 443, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
         String.new(store.get_flow(id).not_nil!.request_head)
           .should contain("Authorization: Bearer ADMIN")
       end
@@ -75,7 +98,8 @@ describe Gori::Fuzz::HistoryRecord do
     it "returns nil when the result kept no request bytes (keep_bodies was :none)" do
       with_store do |store|
         r = result_with(nil, "HTTP/1.1 200 OK\r\n\r\n", matched: true)
-        Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false) { }.should be_nil
+        Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { }.should be_nil
       end
     end
 
@@ -87,7 +111,8 @@ describe Gori::Fuzz::HistoryRecord do
       store.close # every write from here raises
       seen = [] of Exception
       r = result_with("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\n", matched: true)
-      id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false) { |ex| seen << ex }
+      id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false,
+        source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { |ex| seen << ex }
       id.should be_nil
       seen.size.should eq(1) # the caller gets the reason, once
     ensure

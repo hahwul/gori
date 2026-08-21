@@ -49,7 +49,7 @@ private def searchable_pair(i : Int32) : {Gori::Store::CapturedRequest, Gori::St
   req = Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
     target: "/p#{i}", http_version: "HTTP/1.1",
-    head: "GET /p#{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil)
+    head: "GET /p#{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
   {req, nil.as(Gori::Store::CapturedResponse?)}
 end
 

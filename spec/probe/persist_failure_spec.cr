@@ -40,7 +40,7 @@ private def seed_flow(store : Gori::Store) : Gori::Store::FlowDetail
   head = "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
-    method: "GET", target: "/", http_version: "HTTP/1.1", head: head.to_slice))
+    method: "GET", target: "/", http_version: "HTTP/1.1", head: head.to_slice, source: Gori::FlowSource::Kind::Proxy))
   resp_head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nSet-Cookie: sid=1\r\n\r\n"
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: 200, head: resp_head.to_slice, body: "<html>hi</html>".to_slice,

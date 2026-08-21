@@ -17,7 +17,7 @@ private def grpc_call(store : Gori::Store, *, ct = "application/grpc", answered 
   head = "POST /svc/M HTTP/1.1\r\nHost: api.test\r\nContent-Type: #{ct}\r\n\r\n"
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
-    method: "POST", target: "/svc/M", http_version: "HTTP/2", head: head.to_slice, body: nil))
+    method: "POST", target: "/svc/M", http_version: "HTTP/2", head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if answered
     # A proxy's error page, not gRPC — the shape that made the call read as plain HTTP.
     store.update_response(Gori::Store::CapturedResponse.new(
@@ -82,7 +82,7 @@ describe "the request Content-Type column (V14)" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/",
-        http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, body: nil))
+        http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
       store.get_flow(id).not_nil!.row.request_content_type.should be_nil
     end
   end

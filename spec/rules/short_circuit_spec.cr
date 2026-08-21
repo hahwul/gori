@@ -251,7 +251,7 @@ describe "Gori::Rules — short-circuit op" do
       flow = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
         method: "GET", target: "/admin", http_version: "HTTP/1.1",
-        head: get("/admin")))
+        head: get("/admin"), source: Gori::FlowSource::Kind::Proxy))
       flow.should be > 0
 
       rules = Gori::Rules.load(store)

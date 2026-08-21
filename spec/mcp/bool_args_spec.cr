@@ -53,7 +53,7 @@ private def seed_bool_flow(store, target = "/x", host = "acme.test") : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
     method: "GET", target: target, http_version: "HTTP/1.1",
-    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 private def repeater_row(store, id : Int64)
@@ -261,7 +261,7 @@ private def seed_absolute_form_flow(store, host = "evil.example") : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
     method: "GET", target: "http://#{host}/abs", http_version: "HTTP/1.1",
-    head: "GET http://#{host}/abs HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil))
+    head: "GET http://#{host}/abs HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
 describe "MCP create_repeater / send_request keep_request_line" do
@@ -310,7 +310,7 @@ describe "MCP create_repeater / send_request keep_request_line" do
         created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
         method: "GET", target: "http://127.0.0.1:#{port}/abs", http_version: "HTTP/1.1",
         head: "GET http://127.0.0.1:#{port}/abs HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice,
-        body: nil))
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
       tools = bool_tools(store)
 
       rewritten = bool_json(tools, "send_request",

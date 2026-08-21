@@ -50,28 +50,41 @@ module Gori
     # otherwise-valid multi-thousand-entry file.
     record ParseResult, flows : Array(Builder::FlowPair), skipped : Int32 = 0
 
-    def self.from_har(path : String) : ParseResult
-      Har.parse_file(path)
+    # Where an imported flow came from, threaded from `import_file` down to the format parsers.
+    #
+    # A parser knows the bytes; it does not know which surface asked for the import or what the
+    # file was called, and both of those are learned one layer up. Carried as one record so six
+    # parser signatures grow by one parameter instead of three, and defaulted to `none` so a
+    # caller that has no provenance to state (a spec, a direct `Har.parse_file`) still compiles
+    # — the flow's `source` is `Import` either way, which is the fact that matters.
+    record Provenance, surface : FlowSource::Surface? = nil, ref : String? = nil do
+      def self.none : Provenance
+        new
+      end
     end
 
-    def self.from_urls(path : String) : ParseResult
-      Urls.parse_file(path)
+    def self.from_har(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Har.parse_file(path, prov)
     end
 
-    def self.from_oas(path : String) : ParseResult
-      Oas.parse_file(path)
+    def self.from_urls(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Urls.parse_file(path, prov)
     end
 
-    def self.from_postman(path : String) : ParseResult
-      Postman.parse_file(path)
+    def self.from_oas(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Oas.parse_file(path, prov)
     end
 
-    def self.from_insomnia(path : String) : ParseResult
-      Insomnia.parse_file(path)
+    def self.from_postman(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Postman.parse_file(path, prov)
     end
 
-    def self.from_burp(path : String) : ParseResult
-      Burp.parse_file(path)
+    def self.from_insomnia(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Insomnia.parse_file(path, prov)
+    end
+
+    def self.from_burp(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Burp.parse_file(path, prov)
     end
 
     # Pairs per store write. The whole file used to go in as ONE `insert_import_batch`, which
@@ -124,19 +137,24 @@ module Gori
       {committed, pairs.size}
     end
 
-    def self.import_file(store : Store, kind : Symbol, path : String) : Result
+    # `surface` is which of gori's three faces asked for this import. Every imported flow is
+    # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
+    # it came out of — the provenance question an operator actually asks of an imported row.
+    def self.import_file(store : Store, kind : Symbol, path : String,
+                         surface : FlowSource::Surface? = nil) : Result
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
+      prov = Provenance.new(surface, File.basename(expanded))
 
       parsed = begin
         case kind
-        when :har      then from_har(expanded)
-        when :urls     then from_urls(expanded)
-        when :oas      then from_oas(expanded)
-        when :postman  then from_postman(expanded)
-        when :insomnia then from_insomnia(expanded)
-        when :burp     then from_burp(expanded)
+        when :har      then from_har(expanded, prov)
+        when :urls     then from_urls(expanded, prov)
+        when :oas      then from_oas(expanded, prov)
+        when :postman  then from_postman(expanded, prov)
+        when :insomnia then from_insomnia(expanded, prov)
+        when :burp     then from_burp(expanded, prov)
         else                raise Gori::Error.new("unknown import kind: #{kind}")
         end
       rescue ex : File::Error

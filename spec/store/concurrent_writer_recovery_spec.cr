@@ -55,7 +55,7 @@ private def capture(i : Int32) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
     created_at: i.to_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
     target: "/p#{i}", http_version: "HTTP/1.1",
-    head: "GET /p#{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil)
+    head: "GET /p#{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 # Takes the WAL write lock the way a peer gori's writer would, runs the block, and gives it back.

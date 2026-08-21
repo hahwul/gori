@@ -503,7 +503,8 @@ module Gori::Proxy::H2
         method: method, target: path, http_version: "HTTP/2", head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,
-        advisory: advisory_of(stream), connect_protocol: protocol)
+        advisory: advisory_of(stream), connect_protocol: protocol,
+        source: FlowSource::Kind::Proxy)
       stream.flow_id = @sink.on_request(captured)
     end
 

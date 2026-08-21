@@ -30,7 +30,7 @@ end
 private def flow_with_head(head : Bytes) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "a.test", port: 80, method: "GET",
-    target: "/", http_version: "HTTP/1.1", head: head, body: nil)
+    target: "/", http_version: "HTTP/1.1", head: head, body: nil, source: Gori::FlowSource::Kind::Proxy)
 end
 
 describe "a zero-length BLOB in a NOT NULL column" do
