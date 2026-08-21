@@ -1,5 +1,7 @@
 require "./screen"
+require "./frame"
 require "./geometry"
+require "./viewport"
 require "./theme"
 require "./fmt"
 require "./url"
@@ -119,6 +121,11 @@ module Gori::Tui
       @next_id = 0
       @sel = 0  # master (request) cursor
       @tsel = 0 # identity sub-cursor within the selected request
+      # Window offsets for the three scrolling regions. Each is DERIVED on the draw path from
+      # its cursor and the rows the pane turned out to have (`Viewport`), never set by a
+      # keypress — the height is only known to the renderer.
+      @list_scroll = 0
+      @trial_scroll = 0
       @detail_scroll = 0
       @stop_requested = false
     end
@@ -142,6 +149,7 @@ module Gori::Tui
       @entries << Entry.new(id, detail)
       @sel = @entries.size - 1
       @tsel = 0
+      @trial_scroll = 0
       @detail_scroll = 0
       id
     end
@@ -207,6 +215,7 @@ module Gori::Tui
       @entries.delete(e)
       @sel = @sel.clamp(0, {@entries.size - 1, 0}.max)
       @tsel = 0
+      @trial_scroll = 0
       @detail_scroll = 0
       true
     end
@@ -362,6 +371,8 @@ module Gori::Tui
       @entries.clear
       @sel = 0
       @tsel = 0
+      @list_scroll = 0
+      @trial_scroll = 0
       @detail_scroll = 0
     end
 
@@ -369,6 +380,7 @@ module Gori::Tui
       return if @entries.empty?
       @sel = (@sel + delta).clamp(0, @entries.size - 1)
       @tsel = 0
+      @trial_scroll = 0
       @detail_scroll = 0
     end
 
@@ -378,6 +390,18 @@ module Gori::Tui
       return unless trials && !trials.empty?
       @tsel = (@tsel + delta) % trials.size
       @detail_scroll = 0
+    end
+
+    # The sub-cursor belongs to the SELECTED request's trials, and that list changes underneath
+    # it: ⇧R re-runs a row whose identity set has since lost a member, and `apply_skip` /
+    # `apply_error` drop the target entirely. An index left past the end selects no trial, so
+    # the table highlighted nothing and the response pane drew nothing until ⇥ was pressed.
+    # Derived on the draw path next to the window offsets, for the same reason they are.
+    private def clamp_trial : Nil
+      n = selected_entry.try(&.target).try(&.trials.size) || 0
+      return if n > 0 && @tsel < n
+      @tsel = 0
+      @trial_scroll = 0
     end
 
     def scroll_detail(delta : Int32) : Nil
@@ -400,6 +424,7 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil
       return render_empty(screen, rect) if @entries.empty?
+      clamp_trial
       y = render_header(screen, rect, rect.y)
       # Split: the request list up top (bounded to half the body), the selected request's
       # identities + response below.
@@ -436,12 +461,24 @@ module Gori::Tui
     end
 
     # One row per request: cursor · # · METHOD · host/path · aggregate verdict.
+    #
+    # WINDOWED. The queue is not a handful of rows an operator typed: `Send to Authorize` takes
+    # every marked flow at once and passive replay fills it unattended up to `PASSIVE_CAP`
+    # (200), while this pane is capped at half the body. Drawing from index 0 and breaking at
+    # the bottom meant that past the fourteenth row the cursor simply left the screen — ↑/↓ went
+    # on moving it, the detail pane below went on following it, and nothing on the list said
+    # which request was selected or that there were any more.
     private def render_list(screen : Screen, rect : Rect, y : Int32, bottom : Int32, focused : Bool) : Nil
+      return if y >= bottom # a pane with no room even for the column header
       hdr = sprintf("  %-3s %-6s %-38s %s", "#", "METHOD", "HOST / PATH", "VERDICT")
       screen.text(rect.x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: rect.w)
       y += 1
-      @entries.each_with_index do |e, i|
-        break if y >= bottom
+      rows = {bottom - y, 0}.max
+      @list_scroll = Viewport.scroll_to_show(@sel, @list_scroll, rows, @entries.size)
+      top = y
+      rows.times do |n|
+        i = @list_scroll + n
+        break unless e = @entries[i]?
         selected = i == @sel
         bg = (selected && focused) ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected && focused
@@ -454,6 +491,10 @@ module Gori::Tui
           Attribute::Bold, width: rect.right - vx)
         y += 1
       end
+      # `rect.right` is the framed body's own hairline — the column `scroll_gauge` draws in, the
+      # same arrangement `HistoryView`'s list uses.
+      Frame.scroll_gauge(screen, Rect.new(rect.x, top, rect.w, rows), @entries.size,
+        @list_scroll, focused)
     end
 
     private def render_divider(screen : Screen, rect : Rect, y : Int32) : Nil
@@ -477,19 +518,40 @@ module Gori::Tui
         screen.text(x, y, no_result_note(e), Theme.muted, Theme.bg, width: right - x)
         return
       end
-      y = render_trials(screen, x, y, right, bottom, t, focused)
+      # The table gets what it needs up to a BUDGET, and the response preview keeps the rest.
+      # Without one, a set of eight identities filled the pane and the response — the thing the
+      # sub-cursor exists to read — never drew at all, on the exact configuration that has the
+      # most to compare.
+      #
+      # HALF the region, the same split `render` makes between the request list and this pane,
+      # rather than "everything but N rows reserved for the response". A fixed reservation
+      # squeezes a table that fits perfectly well: two identities under a six-row region need
+      # three rows and would have been windowed down to two to buy the response a line it did
+      # not need. Half only ever bites once the table is bigger than the pane can seat anyway.
+      # `table_h` counts the column header, and the floor of 2 is header + one row.
+      avail = bottom - y
+      table_h = {t.trials.size + 1, {avail // 2, 2}.max}.min
+      y = render_trials(screen, x, y, right, y + table_h, t, focused)
       return if y >= bottom
       render_response(screen, x, y, right, bottom)
     end
 
+    # WINDOWED on the sub-cursor for the same reason the request list is: ⇥ walks identities,
+    # and a set with more of them than the table has rows moved the cursor onto a row that was
+    # not drawn — no highlight anywhere, and the response pane below following an identity the
+    # operator could not see named.
     private def render_trials(screen : Screen, x : Int32, y : Int32, right : Int32, bottom : Int32,
                               t : Authorize::Target, focused : Bool) : Int32
       return y if y >= bottom
       hdr = sprintf("  %-14s %-7s %-9s %-22s %s", "IDENTITY", "STATUS", "SIZE", "Δ VS BASELINE", "VERDICT")
       screen.text(x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: right - x)
       y += 1
-      t.trials.each_with_index do |trial, i|
-        break if y >= bottom
+      rows = {bottom - y, 0}.max
+      @trial_scroll = Viewport.scroll_to_show(@tsel, @trial_scroll, rows, t.trials.size)
+      top = y
+      rows.times do |n|
+        i = @trial_scroll + n
+        break unless trial = t.trials[i]?
         sub = i == @tsel
         bg = (sub && focused) ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(x, y, right - x, 1), bg) if sub && focused
@@ -503,6 +565,8 @@ module Gori::Tui
           Attribute::Bold, width: right - vx)
         y += 1
       end
+      Frame.scroll_gauge(screen, Rect.new(x, top, right - x, rows), t.trials.size,
+        @trial_scroll, focused)
       y
     end
 
@@ -518,14 +582,23 @@ module Gori::Tui
       head += " · #{summary.error}" if summary.error
       screen.text(x, y, head, Theme.text_bright, Theme.bg, Attribute::Bold, width: right - x)
       y += 1
+      top = y
       lines = Repeater::MessageLines.of(trial.response_head, trial.response_body,
         decode: true, error: summary.error)
+      # CLAMPED to the last page, here rather than at the keypress — `scroll_detail` is called
+      # from ⇟ and the wheel, neither of which knows how many lines this response has or how
+      # tall the pane is. Unclamped, a couple of page-downs put the offset past the end and the
+      # pane went blank with nothing to say why and no ↓ left to press.
+      rows = {bottom - y, 0}.max
+      @detail_scroll = Viewport.clamp_scroll(@detail_scroll, rows, lines.size)
       shown = lines[@detail_scroll..]? || [] of String
       shown.each do |ln|
         break if y >= bottom
         screen.text(x, y, ln, Theme.text, Theme.bg, width: right - x)
         y += 1
       end
+      Frame.scroll_gauge(screen, Rect.new(x, top, right - x, rows), lines.size,
+        @detail_scroll, false)
     end
 
     # ── labels / colours ────────────────────────────────────────────────────────

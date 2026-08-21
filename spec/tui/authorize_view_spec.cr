@@ -494,4 +494,83 @@ describe AuthorizeView do
       v.queued_flow_ids.should eq(Set{1_i64})
     end
   end
+
+  # Neither pane windowed, and both fill from the outside: `Send to Authorize` takes every
+  # marked flow at once, passive replay queues up to 200 rows unattended, and an identity set
+  # is as long as the operator makes it. Drawing from index 0 and breaking at the pane's edge
+  # meant the cursor simply left the screen — ↑/↓ and ⇥ went on moving it, the panes below went
+  # on following it, and nothing drawn said which row was selected or that more existed.
+  describe "scrolling" do
+    it "windows the request list onto the cursor" do
+      v = AuthorizeView.new
+      30.times { |i| v.add(flow("GET", "/p#{i}")) } # `add` selects the row it appends
+      be = render_to(v)
+      be.contains?("/p29").should be_true
+      # …and the CURSOR mark is on it, not merely the text somewhere on screen: the detail pane
+      # below prints the selected request's URL either way, which is exactly how this looked
+      # like it was working.
+      row = (0...30).find { |y| be.row(y).includes?("/p29") && be.row(y).starts_with?("▎") }
+      row.should_not be_nil
+    end
+
+    it "scrolls back with the cursor" do
+      v = AuthorizeView.new
+      30.times { |i| v.add(flow("GET", "/p#{i}")) }
+      render_to(v)
+      v.move_row(-29)
+      be = render_to(v)
+      be.row(2).should contain("/p0")
+      be.contains?("/p29").should be_false
+    end
+
+    # The trials table gets a BUDGET rather than the whole pane. With eight identities it took
+    # every row and the response preview — the thing ⇥ exists to read — never drew at all, on
+    # the configuration that has the most to compare.
+    it "windows the identity table and still draws the response" do
+      v = AuthorizeView.new
+      e = v.add(flow)
+      trials = [trial("as-captured", true, 200, Gori::Authorize::Verdict::Baseline)]
+      8.times { |i| trials << trial("id#{i}", false, 403, Gori::Authorize::Verdict::Different) }
+      v.apply_result(e, Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/admin", trials))
+      8.times { v.move_trial(1) } # onto the last identity
+      be = render_to(v, 120, 14)
+      sub = (0...14).find { |y| be.row(y).includes?("id7") && be.row(y).starts_with?("▎") }
+      sub.should_not be_nil
+      be.contains?("HTTP/1.1 403").should be_true # the response preview survived
+    end
+
+    # ⇟ and the wheel do not know how long the response is or how tall the pane turned out to
+    # be, so the offset ran past the end and the pane went blank with no ↓ left to press.
+    it "clamps the response scroll to the last page" do
+      v = AuthorizeView.new
+      e = v.add(flow)
+      v.apply_result(e, target(false))
+      v.scroll_detail(500)
+      render_to(v).contains?("HTTP/1.1 200").should be_true
+    end
+
+    # A sub-cursor outliving the trials it indexed: ⇧R re-runs a row whose identity set has
+    # since lost a member, and `apply_skip` / `apply_error` drop the target outright. An index
+    # past the end selected no trial, so nothing was highlighted and no response drew.
+    it "clamps the sub-cursor when the trial list shrinks" do
+      v = AuthorizeView.new
+      e = v.add(flow)
+      trials = [trial("as-captured", true, 200, Gori::Authorize::Verdict::Baseline)]
+      4.times { |i| trials << trial("id#{i}", false, 403, Gori::Authorize::Verdict::Different) }
+      v.apply_result(e, Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/admin", trials))
+      4.times { v.move_trial(1) }
+      v.apply_result(e, target(false)) # re-run under two identities
+      render_to(v)
+      v.selected_trial.not_nil!.identity.should eq("as-captured")
+    end
+
+    # `render_list` drew its column header before asking whether the pane had a row for it.
+    it "draws nothing below a one-row pane" do
+      v = AuthorizeView.new
+      3.times { |i| v.add(flow("GET", "/q#{i}")) }
+      be = MemoryBackend.new(80, 8)
+      v.render(Screen.new(be), Rect.new(0, 0, 80, 1), true)
+      (1...8).each { |y| be.row(y).strip.should eq("") }
+    end
+  end
 end

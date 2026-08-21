@@ -97,6 +97,14 @@ module Gori
       # Values available for RESOLUTION — what `$NAME` may expand to at send time.
       abstract def values : Hash(String, String)
 
+      # Values for RESOLUTION as if the slot named were the ACTIVE one. Defaults to `values`,
+      # which is the right answer for a layer with no slot registry: one table, and the name
+      # cannot select a different one. `Bindings` overrides it with the global table under
+      # that slot's own. See `Env.expand_bindings_as` for who asks and why.
+      def slot_values(slot : String) : Hash(String, String)
+        values
+      end
+
       # Every value the layer is HOLDING, resolvable or not. Defaults to `values`; a layer
       # whose two answers differ must override it. `Bindings` does: it keeps a disabled
       # rule's token so re-enabling costs no round trip, while refusing to resolve it. See
@@ -159,6 +167,11 @@ module Gori
     # Bound values only. Never merged into `effective_vars`; see the note above.
     def self.binding_values : Hash(String, String)
       @@layer.try(&.values) || {} of String => String
+    end
+
+    # `binding_values` as if `slot` were active — see `expand_bindings_as`.
+    def self.binding_values_as(slot : String) : Hash(String, String)
+      @@layer.try(&.slot_values(slot)) || {} of String => String
     end
 
     def self.binding_rev : UInt64
@@ -433,7 +446,34 @@ module Gori
     def self.expand_bindings(text : String, guard_boundary : Bool = true) : String
       prefix = Settings.env_prefix
       return text if prefix.empty? || !text.byte_index(prefix)
-      vals = binding_values
+      expand_binding_text(text, binding_values, prefix, guard_boundary)
+    end
+
+    # `expand_bindings` resolved as if the slot NAMED were the active one, for the caller that
+    # sends several identities in one run and cannot activate each in turn.
+    #
+    # `activate` is process-global and every other tab's send seam reads it, so walking it
+    # across a set would race whatever else is in flight — the same argument that gave
+    # `Fuzz::Sender` its `slot_overlay: false`. `Authorize` is the caller: it applies each
+    # identity's overlay ITSELF, and an identity's `Authorization: Bearer $SESSION` has to mean
+    # THAT identity's `$SESSION`. Resolving it against `binding_values` would hand every
+    # identity in the run the active slot's token — one credential wearing several names, which
+    # is the fabricated `⚠ same` on every row that `slot_overlay: false` already exists to
+    # prevent; leaving it unresolved ships the literal `$SESSION` and the identity goes out
+    # unauthenticated, which reads as `enforced` — a MISSED bypass, the direction this tool
+    # must not fail in.
+    #
+    # An unregistered name (an `--identities` file, the baseline gori prepends) resolves out of
+    # the global table alone. That is the honest answer: an identity with no slot has no private
+    # table, and it is what a project with no slots at all has always done.
+    def self.expand_bindings_as(text : String, slot : String, guard_boundary : Bool = true) : String
+      prefix = Settings.env_prefix
+      return text if prefix.empty? || !text.byte_index(prefix)
+      expand_binding_text(text, binding_values_as(slot), prefix, guard_boundary)
+    end
+
+    private def self.expand_binding_text(text : String, vals : Hash(String, String),
+                                         prefix : String, guard_boundary : Bool) : String
       return text if vals.empty? && !contains_escape?(text.to_slice, prefix) # see the Bytes form
       expand(text, guard_boundary ? boundary_safe(vals) : vals, prefix, escape: Escape::Consume)
     end
