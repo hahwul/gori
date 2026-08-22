@@ -8,11 +8,16 @@ across HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE.
 Three entry points, one engine layer underneath: `gori` (TUI), `gori mcp` (stdio JSON-RPC for
 agents), `gori run <sub>` (headless, for scripts).
 
-This file is the short version. [DESIGN.md](.github/DESIGN.md) is the long one, and its numbering is
+This file is the short version, and it is the whole contract for a change that stays inside
+one subsystem. [DESIGN.md](.github/DESIGN.md) is the long one, and its numbering is
 load-bearing: source comments cite principles as `(P4)`, `(P6/P7)` and sections as
 `DESIGN.md §4`.
 
-## Three things not to get wrong
+- Changing behavior? Read **Invariants** below first — those three are what changes get wrong.
+- Committing? **House rules** has the commit, CHANGELOG and pre-commit checklist.
+- Adding a subsystem? DESIGN.md, then back here.
+
+## Invariants: three things not to get wrong
 
 ### 1. Malformed input is the payload (P7)
 
@@ -108,13 +113,27 @@ bottleneck every time.
 | Full suite | `just test` (`crystal spec`) |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
-| Format + lint check | `just check` (`crystal tool format --check` then `lib/ameba/bin/ameba.cr`) |
+| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, then ameba) |
+| Format + autofix | `just fix` |
+| Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
 | Proxy benchmark | `just benchmark` |
+| Seed a demo project | `just seed-demo` (`scripts/seed_demo.cr`) |
 | Version consistency | `just vc` |
 
-ameba runs as the source file in `lib/`, not a `bin/ameba` binary. CI runs only build, spec,
-and docker: there is **no lint or format gate** (see the comment in
-`.github/workflows/ci.yml`), so `just check` is on you.
+What CI gates, and what it does not:
+
+- **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts`,
+  and `scripts/bench_check.sh`. Format and bench are real gates — `just test` touches neither,
+  so a green suite is not a green CI.
+- **Not gated:** ameba. It carries a large pre-existing backlog, mostly
+  `Metrics/CyclomaticComplexity` in the TUI (the reasoning is in `.ameba.yml` and in the
+  `# Still no ameba job` comment in `ci.yml`), so judge `just check` output on the files
+  *you* touched.
+- CI tests your branch, **not the merge result** — the `merge_group` trigger is inert until a
+  merge queue is enabled. Re-run the build and the suite after every rebase.
+- ameba runs as the source file in `lib/ameba/bin/ameba.cr`, not a `bin/ameba` binary.
+- Two checkouts compiling at once share `~/.cache/crystal`. In a second worktree, set
+  `CRYSTAL_CACHE_DIR` to something local before building.
 
 ## Repo map
 
@@ -136,14 +155,63 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 | `ql.cr`, `filter_ast.cr` | the query language behind every filter |
 | one dir per tool | `repeater/`, `fuzz/`, `miner/`, `discover/`, `sequencer/`, `probe/`, `oast/`, `decoder/`, `import/`, `jwt/` |
 
-## Before you commit
+## House rules
 
-- `just check` and `just test` green.
+### Commit messages: short
+
+One subject line carries the change:
+
+```
+type(scope): what changed, imperative (#123)
+```
+
+- `type` is `feat`, `fix`, `refactor`, `docs`, `style` or `chore`. `scope` is the subsystem
+  (`proxy`, `store`, `tui`, `history`, `cli/mcp`, …), comma-joined only when a change really
+  spans two. Keep the line under ~72 characters and end it with the issue or PR numbers.
+- A body is optional. When there is one, a few lines: what changed, plus the *why* a reader of
+  the diff cannot reconstruct. It is not the place for the investigation that produced the
+  change — that belongs in the PR description, and a decision that refines a principle belongs
+  in DESIGN.md §7.
+- `git log` contains multi-page commit bodies. They are history, not a template. Do not match
+  their length.
+- One theme per commit. A drive-by format or rename of unrelated files goes in its own commit.
+- **No AI attribution anywhere** — commit, PR body, or issue. No `Claude-Session:` line, no
+  "Generated with …", no bot co-author. End after the content and any real human
+  `Co-authored-by:` trailer.
+
+### CHANGELOG: shorter
+
+`CHANGELOG.md` is the source for release notes, so an entry has to be liftable exactly as
+written.
+
+- Add a line under `## Unreleased` for anything a user would notice. A refactor, a spec, an
+  internal cleanup gets no entry.
+- **One line per theme**, plain prose, issue/PR numbers in parentheses at the end. One or two
+  sentences. If it has to be read twice, it is too long (#709).
+- Join the existing theme line instead of adding a fourth bullet about the same area.
+- Fixing something that is still under `## Unreleased` means **editing the line already there**,
+  not appending "…and then fixed it". The section says what will ship, not what happened.
+- The reasoning that justifies a change is not a changelog entry. PR body, or DESIGN.md §7.
+
+### Branches and PRs
+
+- Branch off `main` as `hahwul/<topic>` — `fix-729-expect-continue`, `feat-733-ws-over-h2`,
+  `audit-miner-defects`, `docs-…`. `main` takes merges, not direct commits.
+- Keep a change scoped and behavior-preserving unless it is explicitly a behavior change; call
+  out any intentional behavior change in the PR description.
+- The PR body is where the long form goes: what you measured, what you ruled out, why this
+  shape. That is the one place length pays for itself.
+
+### Before you commit
+
+- `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
+  type-check it (`crystal build --no-codegen scripts/seed_demo.cr`) — nothing else compiles it.
 - **Format only the files you changed** (`crystal tool format <files>`). A whole-tree format
   rewrites 100+ unrelated files due to Crystal version drift.
 - Add or update specs mirroring the source you touched. `spec/spec_helper.cr` points
   `GORI_HOME` at a tempdir before requiring gori; engine specs that are not exercising the
   scope gate use the `ungated_outbound` helper rather than inventing a decision.
+- A user-visible change gets its CHANGELOG line, in the shape above.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.
 - Changing `shard.lock` means regenerating `nix/shards.nix` (`just nix-shards`) in the same commit.
@@ -160,6 +228,7 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 - Adding a `PlanError::Reason` member: three surfaces `case` it exhaustively.
 - Crystal has no `override`, so a subclass silently shadows a base-class contract method.
   Audit overlay and controller subclasses for accidental shadowing.
+- Shipping a green `just test` without `just check` and `just benchmark-check`: CI gates both.
 
 ## Where to read next
 
