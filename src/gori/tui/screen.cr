@@ -526,7 +526,16 @@ module Gori::Tui
     # single line with one non-ASCII grapheme (which takes this path) isn't fully
     # grapheme-scanned on every render frame (the old `display_width(str) <= w`
     # pre-check walked the whole string first).
+    #
+    # Stateless — it measures with `Screen.grapheme_cols` and never touches the buffer — so it
+    # is also exposed as `Screen.fit`. A hit-test has no Screen and still has to know how wide
+    # render truncated a label to; the instance form stays because every drawing caller already
+    # reads as `screen.fit`.
     def fit(str : String, w : Int32) : String
+      Screen.fit(str, w)
+    end
+
+    def self.fit(str : String, w : Int32) : String
       return "" if w <= 0
       return (str.each_grapheme.first?.try(&.to_s) || "") if w == 1 # first GRAPHEME (not codepoint): keep flags/ZWJ/combining intact, matching Highlight.draw
       cur = 0                                                       # width accumulated into `head` (the ellipsis prefix, within w-1)
