@@ -468,7 +468,7 @@ module Gori
           host ||= stamped.host
           if d.code == "tech_http3" && @h3_announced_hosts.add?(d.host)
             trim(@h3_announced_hosts, ANALYZED_CAP)
-            @store.insert_event("probe", "alt_svc_h3", "info", "Alt-Svc: #{d.host} advertised HTTP/3 (QUIC may bypass proxy)",
+            @store.insert_event("probe", "alt_svc_h3", "info", "Alt-Svc: #{d.host} advertised HTTP/3 (QUIC may bypass the proxy — settings network.strip_alt_svc removes the advertisement)",
               flow_id: stamped.flow_id, goto_tab: "probe")
           end
         end

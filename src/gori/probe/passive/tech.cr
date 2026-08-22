@@ -38,22 +38,15 @@ module Gori
           check_frameworks(ctx, acc)
         end
 
-        # Extracts evidence for Alt-Svc / alt-svc advertising HTTP/3 (h3 or h3-*).
-        # An origin advertising h3 may cause browsers without --disable-quic to switch to QUIC/UDP,
-        # bypassing the TCP proxy.
+        # Evidence for an `Alt-Svc` advertising HTTP/3 (h3 or h3-*). An origin advertising h3
+        # may take a browser without --disable-quic onto QUIC/UDP, bypassing the TCP proxy.
+        #
+        # A DELEGATE, and deliberately still here: `Gori::AltSvc` is the one home for the parse
+        # now that the proxy strips what this rule reports (settings `network.strip_alt_svc`).
+        # Two spellings of "advertises h3" would mean a flow flagged for a header gori had
+        # already removed, or a header removed with nothing saying so.
         def self.alt_svc_h3_evidence(value : String) : String?
-          val = value.scrub
-          val.split(',').each do |entry|
-            trimmed = entry.strip
-            next if trimmed.empty?
-            parts = trimmed.split('=', 2)
-            next if parts.size < 2
-            proto = parts[0].strip.downcase
-            if proto == "h3" || proto.starts_with?("h3-")
-              return trimmed[0, {trimmed.size, 80}.min]
-            end
-          end
-          nil
+          Gori::AltSvc.h3_evidence(value)
         end
 
         private def check_alt_svc(ctx : Context, acc : Array(Detection)) : Nil

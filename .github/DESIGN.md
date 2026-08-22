@@ -1544,3 +1544,68 @@ Four things this accepts:
    is the term that keeps a slowloris drip from writing a flow per connection, and the banner is
    indistinguishable from a version-fuzzing payload on the first line anyway (the entry above).
    #729 left three shapes; this closes the two that can be told apart from a payload.
+
+### 2026-08-22: an h3 `Alt-Svc` is removed only because the operator said so, and never in silence
+
+Refines: [P4](#p4), [P7](#p7). No issue — the HTTP/3 half of a protocol-coverage sweep.
+
+gori does not intercept HTTP/3. QUIC is UDP and every listener here is a TCP socket, so an
+origin answering `Alt-Svc: h3=":443"` is inviting the client onto a transport nothing in this
+process can read. What gori had was detection — `Probe::Passive::Tech`'s `tech_http3` and the
+once-per-host `alt_svc_h3` event — and no remedy, which leaves the operator holding the one
+failure mode where "I found nothing" and "I could not see it" look identical.
+
+`network.strip_alt_svc` is that remedy, and it is **off by default** because of P4 rather than
+caution. gori edits a message the operator did not ask it to edit in exactly one place today,
+and that place earns it: leave `Sec-WebSocket-Extensions` in the handshake and History presents
+a deflate stream as the payload, so not editing would make gori lie about its own capture. An
+unstripped `Alt-Svc` costs no capture fidelity. It costs a client, silently — which is a reason
+to offer the switch, not to throw it for the operator.
+
+Three decisions inside it:
+
+1. **Per field, and only the fields that advertise h3.** `Alt-Svc: clear` is RFC 7838's "forget
+   the alternatives you cached", the one spelling of this header gori most wants delivered; a
+   plain `h2=":8443"` alternative is another TCP port, still tunnelled and still captured.
+   Neither is removed. A field naming both goes whole rather than being re-spelled: value
+   surgery would put gori's own rendering of a remote-chosen field on the wire for a saving
+   that buys no visibility.
+2. **Before Match&Replace, on both transports** — the opposite of where the 101's
+   `Sec-WebSocket-Extensions` strip sits, and not in disagreement with it. That one prevents a
+   protocol desync and so must have the last word over any rule. This one is a blanket policy,
+   so a response rule that puts the header back is the operator saying so about ONE host,
+   explicitly, and that outranks a switch they threw for all of them.
+3. **The store keeps what gori delivered**, which is the answer a Match&Replace head rewrite
+   already gives, and the flow's `advisory` quotes what was removed. The consequence is worth
+   stating rather than discovering: the passive rule reads the STORED head, so a CAPTURED
+   response stops fingerprinting `tech_http3` once the strip is on. That is the right trade in
+   both directions — the advisory carries the same evidence per flow, and the event was a
+   warning about a bypass that can no longer happen. It is the proxy path only: a response
+   gori itself elicited (Repeater, Fuzz, Discover, MCP `send_request`, import) is built by
+   `Outbound`, never reaches the seam, and still carries the origin's `Alt-Svc` — which is the
+   right way round, since the strip exists to keep a CLIENT on a readable transport and gori's
+   own sender has no client to lose.
+
+On HTTP/2 the strip costs the connection its HPACK passthrough: removing a field means
+re-encoding the block, and re-encoding is one-way per direction (see `H2::HeadRewrite`'s class
+comment), so every later response head on that connection is re-encoded too and gori's encoder
+does not index. That is a bytes-on-the-wire price the operator buys visibility with, paid only
+while the switch is on — and it is why the h2 half filters the decoded fields directly instead
+of going through the h1-text rewrite seam, which refuses any head it cannot round-trip and
+would therefore skip exactly the heads most worth stripping.
+
+The parse has one home (`Gori::AltSvc`) and the probe rule delegates to it. Two spellings of
+"advertises h3" would mean a flow flagged for a header gori had already taken off the wire, or
+a header removed with nothing saying so.
+
+Not addressed, and not fixable here: a host on `network.tls_passthrough` is never decrypted, so
+its `Alt-Svc` cannot be stripped; and an h3 route can reach a client out of band (a DNS HTTPS
+RR), which no response-side strip reaches. Nor is a field-name spelled with whitespace before
+the colon (`Alt-Svc : h3=…`) — `parse_headers` keeps that name unstripped, so gori's own gate
+does not recognise the field either, and a conforming recipient rejects it too (RFC 9112 §5.1).
+The scan takes `parse_headers`' CRLF line view precisely so that it can never see a field the
+projection did not: an LF-framed scan reached inside a value that smuggled a bare LF, and the
+head it left behind cost the client a 200 it had been receiving with the switch off. An
+obs-fold continuation is dropped with the field it belongs to, and the block is handed the
+JOINED value — more than the projection records, deliberately, because this decides what
+leaves the machine rather than what gori filed.

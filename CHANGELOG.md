@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `network.strip_alt_svc` removes the `Alt-Svc` fields advertising HTTP/3 before the client sees them, so a browser cannot switch to QUIC and leave the proxy unseen. Off by default; `Alt-Svc: clear` and non-h3 alternatives are never touched (#PR).
+
 - `gori mcp --install-hermes` writes the server into Hermes' `~/.hermes/config.yaml` (or `$HERMES_HOME`), the first YAML client alongside the JSON and TOML ones. Sibling servers, their `env:` keys and the comments around them are left as they are. (#785)
 
 - The History and Target filter bars are clickable: `v:` opens the view picker, `f:follow`, `g:fold` and `⇧S scope` toggle what their chords do, and a click on the query readout beside them opens the filter for typing. (#782)

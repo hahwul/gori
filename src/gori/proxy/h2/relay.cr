@@ -109,7 +109,13 @@ module Gori::Proxy::H2
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
                            assembler : Assembler) : Nil
       rw = @rewriter
-      heads = rw ? HeadRewrite.new(direction, rw, assembler, @host, @extractor) : nil
+      # The pipeline is also built with NO rewriter when the h3 `Alt-Svc` strip is on: that
+      # strip lives inside `HeadRewrite#finish` (it is the only point in the response path
+      # where the decoded fields exist and nothing has been written yet), so without this the
+      # switch would be silently h1-only wherever the relay was handed no rule engine. In the
+      # app that is never — `Session` always passes a live `Rules` — but "on both transports"
+      # must not be a claim that depends on an unrelated object being present.
+      heads = rw || Settings.strip_alt_svc? ? HeadRewrite.new(direction, rw, assembler, @host, @extractor) : nil
       extract = direction == "in" ? extract_for(assembler) : nil
       begin
         loop do

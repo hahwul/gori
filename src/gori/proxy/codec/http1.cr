@@ -382,6 +382,128 @@ module Gori::Proxy::Codec::Http1
     resp.raw_head
   end
 
+  # `head` with every header FIELD named `lower_name` the block ACCEPTS removed, and every
+  # other byte copied verbatim (P7) — start-line, field order, each line's own terminator, the
+  # blank line and everything after it included. The block is handed the field-VALUE bytes
+  # (OWS trimmed) and returns whether that field goes.
+  #
+  # Returns the INPUT slice when nothing was dropped, so a caller can tell by identity that it
+  # still holds the peer's bytes and keep the byte-exact path rather than forwarding a copy —
+  # and allocates nothing at all in that case (see the buffer below).
+  #
+  # The one home for "drop a header field without rewriting the head". Two callers have wanted
+  # it for opposite reasons — `WS::Handshake.strip_extensions` removes a field by NAME alone
+  # (an offer gori will not relay), `AltSvc.strip_h3` removes it only for the values that
+  # advertise a transport gori cannot see — and a second hand-rolled line-walk is how the two
+  # would drift on the parts that must not vary.
+  #
+  # ## The line view is `parse_headers`'s, and the VALUE view is a lenient client's
+  #
+  # Lines are framed on CRLF and the block ends at the blank line, which is exactly what
+  # `parse_headers` reads. That is not a detail: an earlier version split on LF alone, so a
+  # bare LF smuggled INSIDE a field value made this scan see a header the parser never did,
+  # and dropping it cut the interior out of a field nobody asked about — turning a delivered
+  # 200 into a framing refusal, but only while the switch that gated it was on. A head with no
+  # CRLF at all has no header block by this view and is returned untouched.
+  #
+  # An obs-fold continuation (RFC 7230 §3.2.4 — a line beginning with SP/HTAB) is part of the
+  # field above it, so it is dropped WITH that field: leaving it behind orphans a continuation
+  # onto the line before it, which is gori manufacturing a malformed head out of a well-formed
+  # one. For the same reason the block is handed the JOINED value, which is more than the
+  # parser's projection records (`parse_headers` keeps only the first line and ignores the
+  # continuation entirely). Deliberate, and in the safe direction: this decides what LEAVES the
+  # machine, so the question is what a lenient recipient will act on, not what gori filed.
+  #
+  # Still not matched, and it cannot be from here: a field-name with whitespace before the
+  # colon (`Alt-Svc : x`). `parse_headers` records that name with the space still on it, so no
+  # caller's own gate recognises the field either — the whole path agrees, and a conforming
+  # recipient rejects the field too (RFC 9112 §5.1).
+  def self.strip_header_lines(head : Bytes, lower_name : String, & : Bytes -> Bool) : Bytes
+    start_crlf = index_crlf(head, 0)
+    return head if start_crlf.nil? # no CRLF → no header block, exactly as `parse_headers` reads it
+    io = nil.as(IO::Memory?)
+    pos = start_crlf + 2
+    while pos < head.size
+      crlf = index_crlf(head, pos)
+      line_end = crlf || head.size
+      break if line_end == pos # the blank line ends the header block
+      value = header_line_value(head[pos, line_end - pos], lower_name)
+      field_end, folded = fold_field(head, crlf ? crlf + 2 : head.size, value)
+      drop = value ? yield(folded || value) : false
+      if drop
+        # The buffer is allocated HERE, on the first field that goes, and seeded with
+        # everything walked past so far. A head that keeps every field therefore allocates
+        # nothing at all — which is the case that matters, because the caller asking this
+        # question asks it of every message once the switch it gates is on.
+        io ||= IO::Memory.new(head.size).tap(&.write(head[0, pos]))
+      elsif io
+        io.write(head[pos, field_end - pos])
+      end
+      pos = field_end
+    end
+    return head unless io
+    io.write(head[pos, head.size - pos]) # the blank line and whatever follows it, verbatim
+    io.to_slice
+  end
+
+  # Walk the obs-fold continuation lines (RFC 7230 §3.2.4 — a line beginning with SP/HTAB)
+  # under a field that starts at `after`, and return where the whole field ends plus its JOINED
+  # value. The join is built only when the caller has a `value` to join onto, so a field nobody
+  # asked about costs the walk and nothing else.
+  private def self.fold_field(head : Bytes, after : Int32, value : Bytes?) : {Int32, Bytes?}
+    folded = nil.as(IO::Memory?)
+    while after < head.size &&
+          (head.unsafe_fetch(after) == 0x20_u8 || head.unsafe_fetch(after) == 0x09_u8)
+      cont_crlf = index_crlf(head, after)
+      cont_end = cont_crlf || head.size
+      if value
+        f = (folded ||= IO::Memory.new.tap(&.write(value)))
+        f << ' ' # §3.2.4: a fold unfolds to SP
+        f.write(trim_ows(head[after, cont_end - after]))
+      end
+      after = cont_crlf ? cont_crlf + 2 : head.size
+    end
+    {after, folded.try(&.to_slice)}
+  end
+
+  # The field-VALUE bytes of `line` when its field-name is exactly `lower_name` (ASCII
+  # case-insensitive), nil otherwise. A colon-less line — the blank line that ends the head,
+  # or a garbage line — never matches.
+  #
+  # The value is trimmed of the line terminator and of OWS on both sides (RFC 9110 §5.5), and
+  # is a VIEW into `head`: no copy, and no String round-trip that a non-UTF-8 value would not
+  # survive.
+  def self.header_line_value(line : Bytes, lower_name : String) : Bytes?
+    colon = line.index(0x3a_u8) # ':'
+    return nil unless colon
+    return nil unless colon == lower_name.bytesize
+    name = lower_name.to_slice
+    colon.times do |i|
+      b = line.unsafe_fetch(i)
+      b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # ASCII 'A'..'Z' -> lower
+      return nil unless b == name.unsafe_fetch(i)
+    end
+    trim_ows(line[colon + 1, line.size - colon - 1])
+  end
+
+  # `line` with OWS (and any line terminator) trimmed off both ends, as a VIEW.
+  private def self.trim_ows(line : Bytes) : Bytes
+    start = 0
+    stop = line.size
+    while stop > start && ows?(line.unsafe_fetch(stop - 1))
+      stop -= 1
+    end
+    while start < stop && ows?(line.unsafe_fetch(start))
+      start += 1
+    end
+    line[start, stop - start]
+  end
+
+  # SP / HTAB / CR / LF — the terminator and the optional whitespace around a field-value.
+  private def self.ows?(b : UInt8) : Bool
+    b == 0x20_u8 || b == 0x09_u8 || b == 0x0d_u8 || b == 0x0a_u8
+  end
+
   # Whether `s` may be written onto a request line as ONE space-delimited token — the
   # method, the request target, or an authority. False for any octet at or below SP
   # (0x20, which covers SP, HTAB, CR, LF and NUL) and for DEL (0x7F).

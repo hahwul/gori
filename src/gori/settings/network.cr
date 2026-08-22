@@ -57,6 +57,19 @@ module Gori::Settings
   # turns out not to speak h2, and there is no demonstrated need yet.
   HTTP2_MODES   = ["auto", "off"]
   DEFAULT_HTTP2 = "auto"
+  # Whether the proxy removes `Alt-Svc` response headers advertising HTTP/3 (settings:network).
+  #
+  # OFF by default, and that default is P4: gori edits a message the operator did not ask it to
+  # edit only where NOT editing it would make gori lie about what it captured (the WebSocket
+  # `Sec-WebSocket-Extensions` strip is that case — leave the offer in and History presents a
+  # deflate stream as the payload). This is not that case. An unstripped `Alt-Svc` costs no
+  # capture fidelity; it costs the operator a client, silently, on a transport gori cannot read.
+  # So it is a switch the human throws, not a policy gori applies behind them.
+  #
+  # ON, the h3-advertising fields are removed from the response the CLIENT receives, the flow
+  # records what was removed (`Store::FlowRow#advisory`), and the client stays on TCP where
+  # gori can see it. Global-only, read live per response — a change applies to the next one.
+  DEFAULT_STRIP_ALT_SVC = false
   # Cap on the once-per-host passthrough notice (see tls_passthrough?). A bypassed host is
   # otherwise INVISIBLE — nothing is captured — so "why is this host missing from History?"
   # has no answer anywhere; one gori.log line per distinct host gives it one, without a log
@@ -93,6 +106,9 @@ module Gori::Settings
   # HTTP/2 mode (see HTTP2_MODES). Read live by the TLS tunnel per CONNECT, so a change
   # applies to the next connection without a restart. Global-only.
   class_property http2 : String = DEFAULT_HTTP2
+  # Whether to strip h3 `Alt-Svc` (see DEFAULT_STRIP_ALT_SVC). Read live by the response path
+  # on both transports, per response, so a change applies without a restart. Global-only.
+  class_property? strip_alt_svc : Bool = DEFAULT_STRIP_ALT_SVC
 
   # True when HTTP/2 must not be used. The proxy asks this rather than comparing strings, so
   # an out-of-range hand-edited value reads as "auto" (only an explicit "off" disables h2)
@@ -396,6 +412,7 @@ module Gori::Settings
     self.capture_max_mib = DEFAULT_CAPTURE_MAX_MIB
     self.tls_passthrough = DEFAULT_TLS_PASSTHROUGH.dup
     self.http2 = DEFAULT_HTTP2
+    self.strip_alt_svc = DEFAULT_STRIP_ALT_SVC
   end
 
   private def self.serialize_network(j : JSON::Builder) : Nil
@@ -414,6 +431,7 @@ module Gori::Settings
         # in the file rather than appearing only once someone already knew to add it.
         j.field "tls_passthrough" { j.array { tls_passthrough.each { |p| j.string p } } }
         j.field "http2", http2
+        j.field "strip_alt_svc", strip_alt_svc?
       end
     end
   end

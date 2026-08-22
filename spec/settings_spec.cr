@@ -249,17 +249,23 @@ describe Gori::Settings do
       Gori::Settings.bind_port = 9999
       Gori::Settings.upstream_proxy = "up:1234"
       Gori::Settings.serve_landing = false
+      Gori::Settings.strip_alt_svc = true
       Gori::Settings.save.should be_true
 
       Gori::Settings.bind_host = "x"
       Gori::Settings.bind_port = 1
       Gori::Settings.upstream_proxy = ""
       Gori::Settings.serve_landing = true
+      Gori::Settings.strip_alt_svc = false
       Gori::Settings.load
       Gori::Settings.bind_host.should eq("0.0.0.0")
       Gori::Settings.bind_port.should eq(9999)
       Gori::Settings.upstream_proxy.should eq("up:1234")
       Gori::Settings.serve_landing?.should be_false # a stored false survives the reload
+      # …and the mirror case for a default-false bool: the stored TRUE survives, which is the
+      # only thing load_bool can get wrong on it (an absent/misread key falls back to the
+      # in-memory value, so a clobber-then-load is what tells the two apart).
+      Gori::Settings.strip_alt_svc?.should be_true
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
@@ -267,6 +273,7 @@ describe Gori::Settings do
       Gori::Settings.bind_port = 8070
       Gori::Settings.upstream_proxy = ""
       Gori::Settings.serve_landing = true
+      Gori::Settings.strip_alt_svc = false
     end
   end
 

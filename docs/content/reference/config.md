@@ -49,6 +49,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
 | `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
 | `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
+| `strip_alt_svc` | bool | `false` | Remove the `Alt-Svc` response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See [strip_alt_svc](#strip-alt-svc) below |
 | `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls_passthrough) below |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
@@ -96,6 +97,22 @@ Patterns use the same dialect as scope `host` rules: `example.com` covers that h
 Empty (the default) means everything is intercepted, which is how gori behaved before this setting existed. Plaintext HTTP is unaffected: there is no TLS there to pass through.
 
 Because a bypassed host produces no flow, gori writes one line to its log the first time each host is relayed, so a host missing from History has a traceable reason. Edit the list from Preferences → **Network & Tabs** → **Network** → **TLS passthrough** (comma-separated).
+
+#### strip_alt_svc {#strip-alt-svc}
+
+gori does not intercept HTTP/3: QUIC is UDP, and every gori listener is a TCP socket. So an origin answering `Alt-Svc: h3=":443"` is inviting the client onto a transport gori cannot read, and what you are left with is a History that just stops. Turn this on and gori removes the `Alt-Svc` fields advertising `h3` (or an `h3-…` draft) from the response the *client* receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go.
+
+It is off by default on purpose. gori edits a response you did not ask it to edit only where *not* editing it would make gori lie about what it captured — the `Sec-WebSocket-Extensions` strip is that case, because a negotiated `permessage-deflate` leaves every stored frame a deflate stream presented as the payload. An `Alt-Svc` left in place corrupts nothing gori records; it only means the client may leave. That is a call about the test in front of you, so it is a switch the human throws.
+
+Removal is per **field**, and only for fields that advertise h3. `Alt-Svc: clear` is never removed: RFC 7838 §3 makes it the instruction to *forget* cached alternatives, which is the one spelling that helps here. A plain `h2=":8443"` alternative is never removed either — that is another TCP port, still tunnelled through gori.
+
+The strip runs *before* Match & Replace, so a response head rule that puts the header back wins. An operator saying so about one host outranks a switch thrown for all of them.
+
+On HTTP/2 there is a price: removing a field means gori re-encodes that response's header block, and HPACK's per-connection state makes that one-way, so from the first strip onward gori re-encodes every response head on that connection and gives up the origin's HPACK compression for it. The raw frame log for that connection then holds gori's HPACK rather than the origin's, which the advisory on the flow says out loud. A trailer block and a PUSH_PROMISE are left alone: no client acts on an `Alt-Svc` in either, and stripping one would let an origin close that latch whenever it liked.
+
+Every flow whose response was stripped carries an advisory naming what was removed and quoting the removed value, in the History detail pane, `gori run history --format json` and the MCP `get_flow` tool. The switch costs you the bypass, not the evidence — but it does move where that evidence lives. The passive probe reads the *stored* response, and the stored response is the one gori delivered, so a captured flow stops raising the `tech_http3` fingerprint and its `Alt-Svc: <host> advertised HTTP/3` event line once the strip is on. The per-flow advisory is where that fact moves to, and the event was a warning about a bypass that can no longer happen. Only captured traffic is affected: a response gori elicited itself — a Repeater send, a Fuzz sweep, a Discover crawl, MCP `send_request`, an import — never goes through the proxy path, so it keeps the origin's `Alt-Svc` and still fingerprints. Resend the request from the Repeater and the advertisement is back in front of you.
+
+Three things it cannot cover. A host on [`tls_passthrough`](#tls-passthrough) is never decrypted, so there is no response for gori to edit. A client can learn an h3 route without any `Alt-Svc` at all — a DNS `HTTPS` record does it, and no response-side strip reaches that. And a field-name spelled with whitespace before the colon (`Alt-Svc : h3=…`) is not recognised, by this setting or by gori's own header projection; a conforming client rejects that field too (RFC 9112 §5.1). Toggle the setting from Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**.
 
 ### listeners
 

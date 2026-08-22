@@ -18,6 +18,7 @@ end
 
 require "./gori/proxy/codec/message"
 require "./gori/proxy/codec/http1"
+require "./gori/alt_svc"
 require "./gori/proxy/codec/body"
 require "./gori/proxy/codec/content_decode"
 require "./gori/proxy/h2/frame"

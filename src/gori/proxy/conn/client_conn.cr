@@ -19,6 +19,7 @@ require "../pump"
 require "../ws/relay"
 require "../ws/handshake"
 require "../../flow_mapper"
+require "../../alt_svc"
 require "./self_page"
 
 module Gori::Proxy
@@ -207,6 +208,19 @@ module Gori::Proxy
       # request by `strip_ws_extension_offer`, read by the 101 path: an acceptance is only
       # gori's to remove when gori is the reason nothing was offered. See `WS::Handshake`.
       @ws_offer_stripped = false
+      # What gori removed from THIS response's head on its own account — today only an h3
+      # `Alt-Svc` (see `settle_alt_svc`) — carried to whichever record site the response takes
+      # so the flow says so (`Store::FlowRow#advisory`). Assigned unconditionally at the seam,
+      # which is what resets it between keep-alive requests on this connection.
+      @alt_svc_note = nil.as(String?)
+      # Hosts whose h3 `Alt-Svc` strip this connection has already written to `gori.log`. The
+      # advisory is the record an operator reads; the log line is for the one debugging a
+      # client that stopped using QUIC, and an origin that sends `Alt-Svc` on every response
+      # must not write a line per response. Bounded by `COMPRESSED_SKIP_LOG_CAP` for the same
+      # reason `@compressed_skips` below is: a cleartext forward-proxy connection serves
+      # whatever hosts the client's keep-alive requests name, so the set is bounded rather
+      # than trusted.
+      @alt_svc_logged = Set(String).new
       # One-shot: has this connection already logged an intercept hold that failed open because
       # the declared body was over the ceiling? See `warn_hold_oversize`.
       @warned_hold_oversize = false
@@ -928,6 +942,11 @@ module Gori::Proxy
       resp_head, resp = final
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
+      # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
+      # can put the header back — see `settle_alt_svc`. A no-op returning the same slices when
+      # the switch is off, which is the default.
+      resp_head, resp, @alt_svc_note = settle_alt_svc(resp_head, resp, host)
+
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
       sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp, host)
@@ -1399,7 +1418,7 @@ module Gori::Proxy
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
-        state: state, error: error))
+        state: state, error: error, advisory: response_advisory(nil)))
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -1452,7 +1471,7 @@ module Gori::Proxy
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
         body_truncated: trunc, body_size: size, state: state, error: error,
-        advisory: advisory))
+        advisory: response_advisory(advisory)))
       # Reuse iff the origin kept its side AND we read the whole body; a truncated body
       # was forwarded short, so close the client connection (return false) rather than
       # block its next keep-alive request on the missing bytes.
@@ -1581,11 +1600,11 @@ module Gori::Proxy
           out_head, out_body || Bytes.empty)
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size, advisory: advisory))
+          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory)))
       else
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size, advisory: advisory,
+          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
           state: Store::FlowState::Aborted, error: "connection closed while forwarding held response"))
       end
       # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept its
@@ -1800,6 +1819,63 @@ module Gori::Proxy
       ensure
         upstream.close rescue nil
       end
+    end
+
+    # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), HTTP/1.1's half. Returns the
+    # head and projection the CLIENT should receive, plus the advisory for the flow.
+    #
+    # gori does not intercept HTTP/3: QUIC is UDP and every listener here is a TCP socket. A
+    # client that acts on `Alt-Svc: h3=":443"` therefore leaves for a transport gori has no
+    # way to read, and what the operator is left holding is a History that simply stops — the
+    # one failure mode where "I found nothing" and "I could not see it" look identical. The
+    # switch removes the invitation; this is where.
+    #
+    # Runs BEFORE Match&Replace, which is the OPPOSITE of where the 101's
+    # `Sec-WebSocket-Extensions` strip below sits, and the two are not in disagreement. That
+    # one prevents a protocol desync and so must have the last word over any rule; this one is
+    # a blanket policy, and a response rule that puts the header back is the operator saying
+    # so about THIS host, explicitly, which outranks a switch they threw for all of them (P4).
+    #
+    # The stripped head is CAPTURED as well as sent, exactly as a Match&Replace head rewrite
+    # is: the stored response is the message gori delivered. What keeps the origin's
+    # advertisement on the record is the advisory, which quotes the removed value — so the
+    # switch costs the operator the bypass and not the evidence. One consequence worth knowing
+    # rather than discovering: `Probe::Passive::Tech` reads the STORED head, so a CAPTURED
+    # response stops fingerprinting `tech_http3` once the strip is on. The advisory is where
+    # that fact moves to, and the `alt_svc_h3` event it would have raised was a warning about a
+    # bypass that can no longer happen.
+    #
+    # The PROXY path only, and deliberately: a response gori itself elicited — Repeater, Fuzz,
+    # Discover, MCP `send_request`, an import — is built by `Gori::Outbound` and never reaches
+    # this seam, so it keeps the origin's `Alt-Svc` and still fingerprints. That asymmetry is
+    # the right way round. The strip exists to keep a CLIENT on a transport gori can read, and
+    # gori's own sender has no client to lose.
+    private def settle_alt_svc(head : Bytes, resp : Codec::RawResponse,
+                               host : String) : {Bytes, Codec::RawResponse, String?}
+      return {head, resp, nil} unless Settings.strip_alt_svc?
+      # Asked of the already-parsed projection: the overwhelming majority of responses carry
+      # no `Alt-Svc` at all, and this keeps that case at one header-list lookup rather than a
+      # walk over the head.
+      return {head, resp, nil} unless resp.headers.has?(Gori::AltSvc::FIELD_NAME)
+      stripped, removed = Gori::AltSvc.strip_h3(head)
+      # An `Alt-Svc` that advertises no h3 — `clear`, or a plain `h2=` alternative — is left
+      # byte-exact (P7). It costs gori no visibility, and `clear` is the spelling that tells a
+      # client to FORGET an alternative it already cached.
+      return {head, resp, nil} if removed.empty?
+      note = Gori::AltSvc.removal_note(removed)
+      if @alt_svc_logged.size < COMPRESSED_SKIP_LOG_CAP && @alt_svc_logged.add?(host)
+        ::Log.info { "alt-svc #{host}: #{note}" }
+      end
+      {stripped, Codec::Http1.parse_response_head(stripped), note}
+    end
+
+    # The advisory a RESPONSE record carries: what the body seam had to say, plus what the
+    # proxy did to the head on its own account. Newline-separated, which is the shape
+    # `Store::FlowRow#advisories` splits back apart.
+    private def response_advisory(body : String?) : String?
+      note = @alt_svc_note
+      return body unless note
+      body ? "#{body}\n#{note}" : note
     end
 
     # The `Sec-WebSocket-Extensions` half of a 101 (#518). Returns the head and projection
