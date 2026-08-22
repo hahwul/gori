@@ -110,27 +110,60 @@ describe "HistoryView — view mode" do
     end
   end
 
-  it "draws v:All muted at rest and v:NAME left of f:follow when one is on" do
+  it "draws v:all muted at rest and v:name left of f:follow when one is on" do
     tmp_store do |store|
       view = HistoryView.new
       view.reload(store)
       text = screen_text(view)
-      text.should contain("v:All")
+      text.should contain("v:all")
 
       view.set_view(history_view)
       view.reload(store)
       row = screen_rows(view).first
-      row.should contain("v:History")
+      row.should contain("v:history")
       # `Frame.right_text_chain` draws rightmost-first, so "left of f:follow" is an ordering
       # claim about the rendered row, not about the array.
-      row.index("v:History").not_nil!.should be < row.index("f:follow").not_nil!
+      row.index("v:history").not_nil!.should be < row.index("f:follow").not_nil!
     end
   end
 
-  it "truncates a long view name so the chain cannot drop it and hand its slot to another chip" do
+  it "draws the DEFAULT view's chip whole — the one everybody looks at was the one being cut" do
+    # `History + Repeater` is 18 columns against VIEW_CHIP_NAME_MAX's 14, so the chip a fresh
+    # project opens on read `v:History + Re…`. `CHIP_LABELS` is what stops the most-seen chip
+    # on the bar from being the one wearing an ellipsis.
     tmp_store do |store|
       view = HistoryView.new
-      view.set_view(Gori::SavedViews::View.new("1", "a name far too long to fit", "src:proxy", "project"))
+      view.set_view(Gori::SavedViews.default_view(store))
+      view.reload(store)
+      # Its neighbour immediately after it: a truncated label would read `v:history+rpt…`, and
+      # an ellipsis anywhere else on this row belongs to the filter hint, not to the chip.
+      row = screen_rows(view).first
+      row.should contain("v:history+rptr f:follow")
+      row.should_not contain("v:History")
+    end
+  end
+
+  it "keeps every built-in's chip label inside the chip, so none can be added that ellipsizes" do
+    # The guard the `History + Repeater` defect wanted: a built-in's label is not operator-typed,
+    # so an ellipsis on one is a mistake in this repo rather than a long name someone chose.
+    # Asked through `fit` itself, so it stays true of whatever measure the chip actually uses.
+    screen = Screen.new(MemoryBackend.new(110, 14))
+    Gori::SavedViews::BUILTINS.each do |v|
+      screen.fit(v.chip_label, HistoryView::VIEW_CHIP_NAME_MAX).should eq(v.chip_label)
+    end
+  end
+
+  it "lowercases an operator's own view name in the chip, and still truncates it" do
+    # The chip is a mode indicator beside `f:follow` and `⇧S scope:off`, not a place a name is
+    # quoted — so a saved view's casing goes the same way a builtin's does. The picker, the CLI
+    # and MCP keep the name the operator typed.
+    tmp_store do |store|
+      view = HistoryView.new
+      view.set_view(Gori::SavedViews::View.new("1", "API Auth", "src:proxy", "project"))
+      view.reload(store)
+      screen_text(view).should contain("v:api auth")
+
+      view.set_view(Gori::SavedViews::View.new("2", "A Name Far Too Long To Fit", "src:proxy", "project"))
       view.reload(store)
       screen_text(view).should contain("v:a name far to…")
     end
@@ -190,7 +223,7 @@ describe "HistoryView — view mode" do
       # The bar's own branch, not the first-run card: the note explains WHY (the view is also
       # narrowing) and the hint points back at the thing they just typed.
       text.should contain("/ to edit the filter")
-      text.should contain("v:History + Repeater also narrows to")
+      text.should contain("v:history+rptr also narrows to")
     end
   end
 
@@ -204,7 +237,7 @@ describe "HistoryView — view mode" do
       view.rows.should be_empty
       # The bar is on screen and still does not explain the empty list — the same reason the
       # ⇧S lens gets a note beside it.
-      screen_text(view).should contain("v:History also narrows to src:proxy")
+      screen_text(view).should contain("v:history also narrows to src:proxy")
     end
   end
 end

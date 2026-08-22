@@ -220,7 +220,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Views (`v`)
 
-A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar — a view is ANDed *over* whatever you type, the same way the `⇧S` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:NAME` chip so what you are looking at is never a guess.
+A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar — a view is ANDed *over* whatever you type, the same way the `⇧S` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess — lowercase like the `f:follow` and `⇧S scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name — the picker, `gori run views`, `--view`, MCP — and `--view` ignores case, so `--view history` finds `History`.
 
 Seven views ship with every project, on two axes. The **source** views answer *is this evidence about the target, or something gori did?*; the **protocol** ones answer *which conversation am I reading?*
 

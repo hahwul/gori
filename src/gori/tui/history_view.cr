@@ -529,7 +529,7 @@ module Gori::Tui
       # empty list. Named LAST because a broken regex or a dropped term is a defect in what they
       # just typed, while this one is a standing mode they may have set days ago.
       if v = active_view
-        return "v:#{v.name} also narrows to #{v.query}"
+        return "v:#{v.chip_label} also narrows to #{v.query}"
       end
       nil
     end
@@ -539,7 +539,7 @@ module Gori::Tui
     # broken and not their filter — otherwise the only symptom is a list that will not fill.
     private def broken_view_note(view : SavedViews::View?) : String?
       return nil unless view
-      "v:#{view.name} is not a usable query — edit or pick another view"
+      "v:#{view.chip_label} is not a usable query — edit or pick another view"
     end
 
     # Why an active view legitimately matched nothing. The one case worth naming is provenance:
@@ -2825,8 +2825,9 @@ module Gori::Tui
       chips << {:follow, "f:follow", @follow ? Theme.accent : Theme.muted}
       # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
       # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
-      # nobody finds. Accent when a view is narrowing, muted `v:All` when none is, so the key is
-      # visible before it is ever used.
+      # nobody finds. Accent when a view is narrowing, muted `v:all` when none is, so the key is
+      # visible before it is ever used. Lowercase like every chip beside it — the view's own name
+      # keeps its casing everywhere it is a name rather than a chip.
       chips << view_chip
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
@@ -2866,19 +2867,23 @@ module Gori::Tui
     # which is why it needed a `right_x` and its own too-narrow guard; as a string it joins
     # the same chain as its neighbours and `Frame.right_text_chain` drops it on a narrow bar
     # for the same reason it drops any of them.
-    # The widest a view NAME may render in the chip. Every other chip on this bar has a bounded
+    # The widest a view LABEL may render in the chip. Every other chip on this bar has a bounded
     # label; a view's is operator-typed, and `Frame.right_text_chain` drops an overlong chip
-    # WITHOUT advancing its cursor — so an untruncated name would silently hand its slot to the
+    # WITHOUT advancing its cursor — so an untruncated one would silently hand its slot to the
     # mark chip, and shrink the query readout beside it for nothing.
+    #
+    # Every builtin fits under this by construction — `SavedViews::CHIP_LABELS` shortens the one
+    # that did not — and `spec/tui/history_view_mode_spec.cr` holds them to it, so the `fit`
+    # below truncates operator-typed names ONLY, the one case where an ellipsis is honest.
     VIEW_CHIP_NAME_MAX = 14
 
     # `Screen.fit`, not `screen.fit`: this is measured by the hit-test as well as drawn, and
     # the hit-test has no Screen. The truncation is stateless either way.
     private def view_chip : {Symbol, String, Color}
       if v = active_view
-        {:view, "v:#{Screen.fit(v.name, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
+        {:view, "v:#{Screen.fit(v.chip_label, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
       else
-        {:view, "v:#{SavedViews.all_view.name}", Theme.muted}
+        {:view, "v:#{SavedViews.all_view.chip_label}", Theme.muted}
       end
     end
 

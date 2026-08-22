@@ -75,6 +75,24 @@ describe Gori::SavedViews do
       end
     end
 
+    it "spells a lowercase chip label for each, abbreviating only the one that did not fit" do
+      # The filter row's `v:` chip is the one place a view is printed beside `f:follow` and
+      # `⇧S scope:off`, and it is the narrowest. The NAME is untouched — the picker, the CLI's
+      # `--view`, MCP and the docs all keep `History + Repeater`, and `resolve_by_name`
+      # downcases, so a chip read off the bar and typed back in still resolves.
+      Gori::SavedViews::BUILTINS.map(&.chip_label).should eq(
+        ["all", "history", "history+rptr", "websocket", "grpc", "sse", "errors"])
+      # `rptr` is not new vocabulary: it is what the SRC column prints and what `src:rptr` takes.
+      Gori::SavedViews::CHIP_LABELS.size.should eq(1)
+    end
+
+    it "falls back to the operator's own name, lowercased, for a saved view" do
+      Gori::SavedViews::View.new("3", "API Auth", "src:proxy", "project").chip_label.should eq("api auth")
+      Gori::SavedViews::View.new("3", "API Auth", "src:proxy", "global").chip_label.should eq("api auth")
+      # A saved view whose id happens to collide with a builtin's key must not borrow its label.
+      Gori::SavedViews::View.new("proxy+repeater", "Mine", "src:proxy", "project").chip_label.should eq("mine")
+    end
+
     it "keeps the source and protocol axes apart rather than pre-combining them" do
       # A `WebSocket` view that also excluded an imported socket would be lying about its own
       # name. The axes compose through the LENS instead: a view ANDs over the filter bar, so
