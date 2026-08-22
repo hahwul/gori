@@ -627,19 +627,32 @@ module Gori
     private def apply(bytes : Bytes, target : Store::RuleTarget, part : Store::RulePart,
                       count : Atomic(Int32), host : String, report : Bool = true) : Bytes
       return bytes if count.get == 0 # lock-free fast path: no rules to apply
-      active = @mutex.synchronize do
-        @rules.select { |r| rewrites?(r, target, part) && host_matches?(r.host, host) }
+      # `@rules` is REPLACED on every edit, never mutated in place (see `refresh`), so a bare
+      # reference read under the lock is a consistent snapshot with NO allocation — where the
+      # old path minted a filtered `select` Array on EVERY proxied head and buffered body. The
+      # scope predicate is re-checked inline in the loop instead, and `String.new(bytes)` — the
+      # whole-body copy — is deferred to the FIRST rule that is actually in scope for this
+      # {target, part, host}, so a message no rule targets (e.g. a body rule scoped to another
+      # host) pays neither the Array nor the copy. `host_matches?`/`apply_rule` already ran
+      # outside the lock (the old `active.each` did), so nothing new is read unsynchronised.
+      rules = @mutex.synchronize { @rules }
+      text = nil.as(String?)
+      rules.each do |r|
+        next unless rewrites?(r, target, part) && host_matches?(r.host, host)
+        cur = text
+        if cur.nil?
+          cur = String.new(bytes)
+          # A WS message is arbitrary application bytes, and `gsub` over a String holding
+          # invalid UTF-8 turns those bytes into U+FFFD — so a rule would corrupt a payload it
+          # never even matched. Gate rather than `scrub`: 9 µs vs 130 µs on a 40 KB payload, and
+          # this is a per-MESSAGE path, not a per-response one. Heads and bodies keep their
+          # pre-existing behaviour (a body rule simply won't match a compressed body).
+          return bytes if part.ws? && !cur.valid_encoding?
+        end
+        text = apply_rule(cur, r, report)
       end
-      return bytes if active.empty? # nothing in scope → same bytes, byte-fidelity preserved
-      text = String.new(bytes)
-      # A WS message is arbitrary application bytes, and `gsub` over a String holding
-      # invalid UTF-8 turns those bytes into U+FFFD — so a rule would corrupt a payload it
-      # never even matched. Gate rather than `scrub`: 9 µs vs 130 µs on a 40 KB payload, and
-      # this is a per-MESSAGE path, not a per-response one. Heads and bodies keep their
-      # pre-existing behaviour (a body rule simply won't match a compressed body).
-      return bytes if part.ws? && !text.valid_encoding?
-      active.each { |r| text = apply_rule(text, r, report) }
-      text.to_slice
+      t = text
+      t ? t.to_slice : bytes # no rule in scope → same bytes, byte-fidelity preserved
     end
 
     # Apply ONE rule to `text` (a head or a body already decoded to a String). Returns a
