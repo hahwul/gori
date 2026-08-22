@@ -161,6 +161,74 @@ describe Gori::Proxy::Codec::ContentDecode do
     note.should eq("decoded: zstd")
   end
 
+  # The truncated-body case is the one a capture cap produces every day, and it was silently
+  # capped at exactly one output buffer. With a large window — the default for a CDN-sized body
+  # — libbrotlidec swallows the whole truncated input in ONE call, hands back 64 KiB and asks
+  # for more input; stopping there threw away everything still buffered inside the decoder, so
+  # a 340 KB body cut anywhere decoded to exactly 65,536 bytes whatever the cap had kept.
+  # Measured on this payload: 65,536 before, 171,915 after.
+  it "keeps draining a truncated brotli body past the first output buffer" do
+    next unless Gori::Proxy::Codec::Brotli::AVAILABLE
+    # RANDOM word soup, seeded for determinism. A regular pattern compresses to a few hundred
+    # bytes, and half of a few hundred bytes decodes to nothing — the ceiling this pins is only
+    # reachable when the truncated PREFIX itself carries more than 64 KiB of output.
+    words = %w[alpha beta gamma delta]
+    rng = Random.new(11)
+    body = String.build { |io| 60_000.times { io << words[rng.rand(4)] << ' ' } }
+    full = br_compress(body)
+    next if full.nil?
+    truncated = full[0, full.size // 2]
+    decoded, _ = decode(head("HTTP/1.1 200 OK", "Content-Encoding: br"), truncated)
+    decoded.not_nil!.size.should be > 65_536
+  end
+
+  # A zstd STREAM is one or more frames back to back, and a `Content-Encoding: zstd` body
+  # legitimately is several. Stopping at the first returned half a body with nothing saying so.
+  it "decodes every frame of a multi-frame zstd body" do
+    next unless Gori::Proxy::Codec::Zstd::AVAILABLE
+    one = zstd_compress("first frame. ")
+    next if one.nil?
+    two = zstd_compress("second frame.")
+    next if two.nil?
+    decoded, _ = decode(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), one + two)
+    String.new(decoded.not_nil!).should eq("first frame. second frame.")
+  end
+
+  # A zstd stream is many frames, and `ZSTD_decompressStream` returns 0 at the END OF EVERY ONE
+  # — so a `next` at the frame boundary skipped the bomb guard entirely, and the cap was never
+  # consulted for a multi-frame body. Measured before the fix: 25 KB of input, 131 MB out
+  # against a 32 MiB cap, linear in the input, on the path an operator reaches by opening a flow.
+  it "holds the decompression cap across a multi-frame zstd body" do
+    next unless Gori::Proxy::Codec::Zstd::AVAILABLE
+    one = zstd_compress("a" * 2048)
+    next if one.nil?
+    bomb = IO::Memory.new
+    400.times { bomb.write(one) }
+    cap = 64 * 1024
+    bytes, _ = Gori::Proxy::Codec::Zstd.decode_full(bomb.to_slice, cap)
+    bytes.size.should be < cap * 4 # the cap binds; one output buffer of slack
+  end
+
+  # `decode_full`'s second element is the only honest failure signal either library has: both
+  # answer a buffer that was never one of their streams the same way they answer a stream of an
+  # empty payload — no bytes, no raise. The Decoder workbench has to tell those apart.
+  it "reports whether a native stream ended cleanly" do
+    if Gori::Proxy::Codec::Zstd::AVAILABLE && (z = zstd_compress("complete"))
+      bytes, clean = Gori::Proxy::Codec::Zstd.decode_full(z, 1 << 20)
+      String.new(bytes).should eq("complete")
+      clean.should be_true
+      _, dirty = Gori::Proxy::Codec::Zstd.decode_full("not a zstd stream at all".to_slice, 1 << 20)
+      dirty.should be_false
+    end
+    if Gori::Proxy::Codec::Brotli::AVAILABLE && (b = br_compress("complete"))
+      bytes, clean = Gori::Proxy::Codec::Brotli.decode_full(b, 1 << 20)
+      String.new(bytes).should eq("complete")
+      clean.should be_true
+      _, dirty = Gori::Proxy::Codec::Brotli.decode_full("not brotli at all".to_slice, 1 << 20)
+      dirty.should be_false
+    end
+  end
+
   # The zero-alloc `-encoding` gate must be ASCII case-insensitive: an all-caps header
   # name still reaches the decoder (a false gate-negative here would silently pass a gzip
   # body through as garbage).
