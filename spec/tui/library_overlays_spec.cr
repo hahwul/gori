@@ -168,6 +168,65 @@ describe Gori::Tui::LibraryPicker do
     deleted.should eq([2])
   end
 
+  # ^E (#776) — the History view picker's "edit this one", which for a view means loading its
+  # query back into the filter bar. `:cancel`, not `:commit`: editing an entry is not also
+  # picking it, and `:commit` would have run `on_commit` on the way out.
+  it "^E hands the highlighted entry's library index to on_edit and takes the card down" do
+    lp = LibraryPicker.new("HISTORY VIEW", private_rows, "view", action: "activate")
+    edited = [] of Int32
+    lp.on_edit = ->(i : Int32) { edited << i; nil }
+    h = OverlayHarness.new(lp)
+    h.press(Termisu::Input::Key::Down)
+    h.press(Termisu::Input::Key::LowerE, 'e', ctrl: true).should eq(:closed)
+    edited.should eq([1])
+    h.commits.should eq(0) # editing is not picking
+  end
+
+  it "^E is inert, and unadvertised, on a library with no editor wired" do
+    lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
+    lp.hint.should_not contain("^E")
+    OverlayHarness.new(lp).press(Termisu::Input::Key::LowerE, 'e', ctrl: true).should eq(:open)
+
+    with_edit = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
+    with_edit.on_edit = ->(_i : Int32) { nil }
+    with_edit.hint.should contain("^E edit")
+  end
+
+  # A SENTINEL row — the view picker's `+ Save current filter…` carries -1 so it can never
+  # collide with a position in the library array — reaches the hook as -1, and must. Crystal's
+  # `Array#[]?` WRAPS a negative index (`views[-1]?` is the LAST view), so the open-site's guard
+  # is the only thing between this and ^E silently editing an unrelated entry. Pinned here
+  # because the picker is where the contract lives.
+  it "^E and ^X pass a sentinel row's negative index through rather than clamping it" do
+    rows = private_rows + [LibraryPicker::Row.new(-1, "+ Save current filter…", "status:200")]
+    lp = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    seen = [] of Int32
+    lp.on_edit = ->(i : Int32) { seen << i; nil }
+    lp.on_delete = ->(i : Int32) { seen << i; nil }
+    h = OverlayHarness.new(lp)
+    3.times { h.press(Termisu::Input::Key::Down) }
+    lp.selected_index.should eq(-1)
+    h.press(Termisu::Input::Key::LowerX, 'x', ctrl: true)
+    seen.should eq([-1])
+
+    # ^E takes the card down, so it needs its own picker to answer on.
+    lp2 = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    edited = [] of Int32
+    lp2.on_edit = ->(i : Int32) { edited << i; nil }
+    h2 = OverlayHarness.new(lp2)
+    3.times { h2.press(Termisu::Input::Key::Down) }
+    h2.press(Termisu::Input::Key::LowerE, 'e', ctrl: true)
+    edited.should eq([-1])
+  end
+
+  it "does not type ^E into the filter query" do
+    lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
+    lp.on_edit = ->(_i : Int32) { nil }
+    h = OverlayHarness.new(lp)
+    h.press(Termisu::Input::Key::LowerE, 'e', ctrl: true)
+    lp.entry_count.should eq(3) # an 'e' in the query would have narrowed to peel/urlx
+  end
+
   it "^X is inert, and unadvertised, on a library with no deleter wired" do
     lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
     lp.hint.should_not contain("^X")

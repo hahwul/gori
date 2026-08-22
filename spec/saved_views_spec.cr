@@ -157,6 +157,23 @@ describe Gori::SavedViews do
       Gori::SavedViews.unusable_name_reason("acme errors").should be_nil
     end
 
+    it "refuses a control character in either half, because both halves get PRINTED" do
+      # The TUI grid substitutes a control cell with a space; a terminal written to directly does
+      # not. A newline in a name breaks `gori run views list`'s one-line-per-view contract and an
+      # ESC emits its own sequence — and the TUI's prompt cannot type either, so the CLI and MCP
+      # are the two surfaces that have to be stopped here.
+      Gori::SavedViews.unusable_name_reason("two\nlines").should eq("name contains a control character")
+      Gori::SavedViews.unusable_name_reason("red\e[31m").should eq("name contains a control character")
+      Gori::SavedViews.unusable_name_reason("tab\there").should eq("name contains a control character")
+      Gori::SavedViews.unusable_query_reason("src:proxy\e[31m").should eq("query contains a control character")
+      # Named BEFORE the parse: `\n` is whitespace to the QL tokenizer, so a query holding one
+      # compiles cleanly and would sail past every check below it.
+      Gori::SavedViews.unusable_query_reason("src:proxy\nOR src:repeater")
+        .should eq("query contains a control character")
+      # A plain space is not a control character, and a name is allowed to be a phrase.
+      Gori::SavedViews.unusable_name_reason("acme errors").should be_nil
+    end
+
     it "refuses a broken view at APPLY time too, because a peer can write one behind us" do
       broken = Gori::SavedViews::View.new("1", "broken", "src:nope", "project")
       Gori::SavedViews.filter(broken).should be_nil
