@@ -15,6 +15,7 @@ require "./settings/keymap"
 require "./settings/decoder"
 require "./settings/rewriter"
 require "./settings/colormarker"
+require "./settings/saved_views"
 require "./settings/miner"
 require "./settings/probe"
 require "./settings/discover"
@@ -238,6 +239,9 @@ module Gori
       end
       if cm = object_section(root, "colormarker")
         parse_colormarker(cm)
+      end
+      if sv = object_section(root, "saved_views")
+        parse_saved_views(sv)
       end
       parse_mine_prefs(root["mine"]?)
       parse_fuzzer_prefs(root["fuzzer"]?)
@@ -556,7 +560,7 @@ module Gori
     # discard a concurrent writer's edit to an unrelated one: a section this process
     # left unchanged (mine == base) yields to disk; a section it changed wins.
     #
-    # Two sections are merged one level DEEPER than that — see RULE_SECTION_LISTS.
+    # A few sections are merged one level DEEPER than that — see RULE_SECTION_LISTS.
     private def self.merge_with_disk(current : String) : String
       base = @@loaded_raw
       return current unless base && File.exists?(path)
@@ -576,7 +580,8 @@ module Gori
           keys.each do |k|
             cur_v = cur_h[k]?
             chosen = if lists = RULE_SECTION_LISTS[k]?
-                       merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists)
+                       merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists,
+                         RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
                      else
                        pick_changed(cur_v, base_h[k]?, disk_h[k]?)
                      end
@@ -615,18 +620,19 @@ module Gori
     # what an ABSENT key has to mean — see `index_entries`).
     alias RuleList = NamedTuple(key: String, identity: Symbol, optional: Bool)
 
-    # The two sections that CANNOT be merged as a unit, and the lists inside them reconciled
-    # entry by entry instead.
+    # The sections that CANNOT be merged as a unit, and the lists inside them reconciled entry
+    # by entry instead.
     #
     # Every other section is one operator decision, so `pick_changed` loses nothing: whoever
-    # wrote it last meant it. `rewriter` and `colormarker` are not one decision — each holds a
-    # whole rule LIST plus the `next_rule_id` counter that numbers it in ONE section, so two
-    # processes each adding a rule have both "changed the section" and the section-level rule
-    # threw one of the two rules away. Both had also minted from the same counter, so the
+    # wrote it last meant it. `rewriter`, `colormarker` and `saved_views` are not one decision —
+    # each holds a whole LIST plus the id counter that numbers it in ONE section, so two
+    # processes each adding an entry have both "changed the section" and the section-level rule
+    # threw one of the two entries away. Both had also minted from the same counter, so the
     # survivors could share an id — and a project's `rewriter_overrides` /
-    # `colormarker_overrides` are keyed by exactly that id (`reload_section` is the half of the
-    # fix that stops the collision; this half stops the loss). A project's DB-scoped rules need
-    # none of this: SQLite gives them a real transaction and its own id sequence.
+    # `colormarker_overrides` / `history_view` are keyed by exactly that id (`reload_section` is
+    # the half of the fix that stops the collision; this half stops the loss). A project's
+    # DB-scoped rows need none of this: SQLite gives them a real transaction and its own id
+    # sequence.
     RULE_SECTION_LISTS = {
       "rewriter" => [
         {key: "rules", identity: :id, optional: false},
@@ -635,9 +641,21 @@ module Gori
         {key: "rules", identity: :id, optional: false},
         {key: "colors", identity: :color_name, optional: true},
       ],
+      "saved_views" => [
+        {key: "views", identity: :id, optional: false},
+      ],
     }
 
-    # The id counter both of those sections carry, merged by MAX rather than by who changed it.
+    # The id counter each of those sections carries, merged by MAX rather than by who changed
+    # it. Keyed BY SECTION rather than one shared literal: `saved_views` has no rules, and
+    # writing a key named `next_rule_id` into it to satisfy a constant would be a lie the next
+    # reader has to un-learn. Sections absent here fall back to the historical name, so a
+    # future section that does spell it `next_rule_id` needs no entry.
+    RULE_SECTION_COUNTERS = {
+      "rewriter"    => "next_rule_id",
+      "colormarker" => "next_rule_id",
+      "saved_views" => "next_view_id",
+    }
     RULE_SECTION_COUNTER = "next_rule_id"
 
     # Retired keys INSIDE a rule section, subtracted for exactly the reason LEGACY_SECTION_KEYS
@@ -648,7 +666,7 @@ module Gori
     # section was decided as a unit, and what it has to keep doing now that it is not.
     #
     # One flat list rather than one per section: `presets` was only ever a `rewriter` key, and a
-    # name retired from one of these two is not a name the other may start using. Pinned by
+    # name retired from one of these sections is not a name another may start using. Pinned by
     # spec/settings_spec.cr's "adopts legacy rewriter presets as DISABLED global rules", which
     # asserts the saved file no longer mentions them.
     LEGACY_RULE_SECTION_KEYS = ["presets"]
@@ -656,7 +674,8 @@ module Gori
     # Merge one rule section key by key: its lists entry by entry, its counter by high-water
     # mark, anything else by the section-level rule.
     private def self.merge_rule_section(mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
-                                        lists : Array(RuleList)) : JSON::Any?
+                                        lists : Array(RuleList),
+                                        counter_key : String = RULE_SECTION_COUNTER) : JSON::Any?
       mine_h = mine.try(&.as_h?)
       disk_h = disk.try(&.as_h?)
       # One side has no object here at all, so there is no second list to lose — and if disk's
@@ -668,7 +687,7 @@ module Gori
       keys.each do |k|
         v = if list = lists.find { |l| l[:key] == k }
               merge_entry_list(mine_h[k]?, base_h[k]?, disk_h[k]?, list)
-            elsif k == RULE_SECTION_COUNTER
+            elsif k == counter_key
               merge_counter(mine_h[k]?, disk_h[k]?)
             else
               pick_changed(mine_h[k]?, base_h[k]?, disk_h[k]?)
@@ -831,7 +850,7 @@ module Gori
       theme mouse pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      colormarker
+      colormarker saved_views
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -1023,6 +1042,7 @@ module Gori
       reset_decoder
       reset_rewriter
       reset_colormarker
+      reset_saved_views
       # `$KEY` highlighting is cached against this revision, exactly as apply_sections does
       # after a load — the env block just changed underneath every editor showing it.
       Env.bump_highlight_rev
@@ -1064,6 +1084,7 @@ module Gori
           serialize_decoder(j)
           serialize_rewriter(j)
           serialize_colormarker(j)
+          serialize_saved_views(j)
         end
       end
     end

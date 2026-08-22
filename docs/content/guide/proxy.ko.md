@@ -214,6 +214,53 @@ History 필터 바에 쿼리를 입력하거나, 헤드리스로 실행하세요
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
+## 뷰 (`v`) {#views}
+
+**뷰(view)** 는 목록을 좁히는 이름 붙은 쿼리이며, 무엇보다 **모드**입니다. `v`를 눌러 하나를 고르면, 그 뒤로 다른 필터를 입력하는 동안에도 계속 좁혀 줍니다. 이것이 뷰와 필터 바의 차이입니다 — 뷰는 입력한 내용을 *대체하지 않고* 그 위에 AND로 얹힙니다. `⇧S` 스코프 렌즈와 같은 방식이라, `/ status:5xx`는 뷰를 지우는 대신 뷰 안에서 다시 좁힙니다. 필터 줄의 `v:NAME` 칩이 지금 무엇을 보고 있는지 항상 알려 줍니다.
+
+모든 프로젝트에 일곱 개가 기본으로 들어 있고, 축은 두 가지입니다. **출처** 뷰는 *이게 대상에 대한 증거인가, gori가 한 일인가*에, **프로토콜** 뷰는 *어떤 대화를 읽고 있는가*에 답합니다.
+
+| 뷰 | 의미 |
+|------|-------|
+| **All** | 전부 |
+| **History** | `src:proxy` — 클라이언트가 실제로 gori를 통해 보낸 트래픽만 |
+| **History + Repeater** | `src:proxy OR src:repeater` — 거기에 내가 다시 보낸 요청까지. **기본값** |
+| **WebSocket** | `proto:ws` — 평문과 TLS 소켓 모두 |
+| **gRPC** | `proto:grpc` |
+| **SSE** | `proto:sse` — 서버 전송 이벤트 스트림 |
+| **Errors** | `status:>=400` |
+
+두 축을 미리 합쳐 두지 **않은** 것은 의도적입니다. `WebSocket`이라는 이름의 뷰가 몰래 import된 소켓까지 제외한다면 자기 이름에 대해 거짓말을 하는 셈입니다. 대신 렌즈로 조합됩니다 — `History + Repeater`를 고르고 `proto:ws`를 입력하면 교집합이 되며, 어느 기본 뷰도 다른 쪽을 미리 알 필요가 없습니다.
+
+**새 프로젝트는 `All`이 아니라 `History + Repeater`로 열립니다.** gori 자신의 크롤러·퍼저·임포터가 쓴 flow는 대상에 대한 증거가 아니고, 그것들이 섞인 목록이야말로 `src:`가 고치려던 결함입니다 — 기본값은 그 term을 한 번도 입력하지 않는 사람에게도 그걸 고쳐 줄 뿐입니다. Repeater가 포함된 이유는, 재전송은 실제 엔드포인트를 향한 테스터 자신의 의도적 행위이고 그 응답을 캡처된 응답 옆에서 읽는 것이 그 탭의 목적이기 때문입니다. 예외가 하나 있습니다. **gori가 출처를 기록하기 전에** 캡처된 프로젝트는 `All`로 열립니다. `src:`가 그 행들을 양쪽 어디에도 걸지 않아 평소 기본값이면 빈 목록이 되기 때문입니다.
+
+계속 쓰고 싶은 필터를 입력했다면 피커의 **`+ Save current filter as a view…`** 행에서 이름을 붙이면 됩니다. 어디에 둘지 묻습니다.
+
+- **Project** — 이 프로젝트에서만. `host:api.acme.test scope:in` 같은 뷰가 있을 자리입니다.
+- **Global** — 모든 프로젝트에서, `settings.json`에 저장됩니다. `src:` 계열 뷰가 있을 자리입니다.
+
+피커 안에서 `^E`는 뷰의 쿼리를 필터 바로 불러와 편집하게 하고(같은 이름으로 저장하면 그 뷰가 갱신됩니다), `^X`는 뷰를 지웁니다. 기본 제공 뷰는 편집도 삭제도 되지 않습니다. *다른* 스코프에 이미 있는 이름으로 저장하면 뷰를 새로 만들지 않고 그쪽으로 **옮깁니다**.
+
+활성 뷰는 스코프 렌즈처럼 프로젝트별로 재시작 후에도 유지됩니다. 켜 둔 뷰를 다른 gori가 지웠다면, 존재하지 않는 뷰로 계속 거르는 대신 History가 **All**로 돌아가고 그 사실을 알려 줍니다.
+
+뷰는 TUI 편의 기능이 아니라 프로젝트 객체이며, 세 표면 모두가 읽습니다.
+
+```bash
+gori run views                                   # 활성 뷰가 표시된 목록
+gori run views add 'acme errors' -q 'host:api.acme.test status:5xx'
+gori run views add 'proxied' -q 'src:proxy' --scope global
+gori run views set 'acme errors' -q 'status:>=500'
+gori run views scope 'acme errors' --to global   # 스코프 옮기기
+gori run views rm 'acme errors'
+gori run history --view 'History' -q 'status:5xx'
+```
+
+MCP에도 같은 세트가 있습니다. `list_views`, `create_view`, `update_view`, `delete_view`, 그리고 `list_history`의 `view` 인자입니다.
+
+목록이 고장 난 것처럼 보이기 전에 알아 둘 것이 하나 있습니다. **gori가 출처를 기록하기 전에** 캡처된 플로우에는 source가 없고, `src:`는 그런 행을 [양쪽 어디에도](/ko/reference/query-language/#src-provenance) 걸지 않습니다. 그래서 오래된 프로젝트에서는 트래픽이 아무리 많아도 `History` 뷰가 비어 있을 수 있습니다 — 빈 화면이 그렇게 말해 주며, **All**은 전부 보여 줍니다.
+
+뷰의 쿼리는 실행할 때가 아니라 **저장할 때** 검사합니다. 모든 항이 버려질 쿼리는 아예 거절합니다. `v:` 칩은 좁히고 있다고 주장하는데 실제로는 아무것도 좁히지 않는 상태가 되기 때문입니다.
+
 ## 플로우 표시하기 (다중 선택) {#marking-flows}
 
 `t`를 누르면 커서 위의 플로우를 **표시(mark)** 하고 바로 다음(더 오래된) 플로우로 이동하므로, `t`를 연달아 누르면 정렬 순서와 무관하게 연속된 행이 표시됩니다. `Shift-↑` / `Shift-↓`는 시작한 지점부터 연속 범위를 확장하고, `Shift-T`는 현재 필터에 보이는 전체를 표시하며, `Esc`는 표시를 모두 해제합니다. 표시된 행은 왼쪽 여백에 굵은 막대가 붙고, 필터 줄에 `3 marked` 카운트가 실시간으로 표시됩니다.

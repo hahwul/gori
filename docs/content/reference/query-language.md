@@ -93,6 +93,10 @@ Two things about it are deliberate:
   skip them, the way a Pending flow falls out of `status:` and `-status:`. Only flows captured
   after the upgrade carry it.
 
+The two common `src:` scopings are also **views** — press `v` in History to pick `History`
+(`src:proxy`) or `History + Repeater`, and the list stays narrowed while you type other filters.
+`History + Repeater` is what a project opens on. See [Views](/guide/proxy/#views).
+
 ## Scope: `scope:in` / `scope:out` {#scope-in-scope-out}
 
 `scope:in` matches the flows inside the project's scope — the same include/exclude boundary the

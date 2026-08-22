@@ -354,6 +354,7 @@ module Gori
         format = :text
         lenient = false
         in_scope = false
+        view_name : String? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -363,6 +364,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
+          p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's ⇧S lens; capture still records everything)") { in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines) | har (one HAR 1.2 log)") do |v|
@@ -395,13 +397,46 @@ module Gori
         Run.refuse_unknown_query_fields("history", query, lenient)
 
         # `body:` drains FTS, which is a write. Everything else is a read (#752).
+        #
+        # A `--view` forces the writable open even when `-q` needs nothing: the view's own query
+        # can contain `body:`, and it is not knowable until the store is open (a PROJECT view
+        # lives in this database). Opening read-only and discovering that afterwards would leave
+        # the listing silently short of whatever the off-commit index had not caught up on —
+        # exactly what `fts_backlog_error` refuses to let a one-shot answer do.
         store = open_store(resolve_read_project(project_name, db_path),
-          read_only: !query_uses_fts?(query))
+          read_only: !query_uses_fts?(query) && view_name.nil?)
         begin
           # The scope lens, opt-in and independent of the persisted ⇧S flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
           # same set. Capture is untouched; this narrows only the VIEW. Empty (nothing in scope)
           # when no scope rules are configured, matching `sitemap --in-scope`.
+          # The `scope:` lens is read whether or not `--in-scope` was passed: the flag is a lens
+          # over the whole listing, the term is one clause of the query, and an operator can ask
+          # for either or both. Hoisted out of the query branch below so the VIEW compiles under
+          # the same lens the bar does — a `scope:in` written inside a view has to mean what
+          # `scope:in` means when typed.
+          lens = Scope.ql_lens(store)
+
+          # `--view NAME`: a saved query ANDed over everything else, exactly as the TUI's `v`
+          # picker ANDs it over the filter bar. Resolved project > global > builtin, the same
+          # precedence `SavedViews.resolve_by_name` gives every surface.
+          view_filter = QL::EMPTY
+          if vn = view_name
+            unless view = SavedViews.resolve_by_name(store, vn)
+              known = SavedViews.names(store).join(", ")
+              store.close
+              abort "gori run history: no view named #{vn.inspect} (known: #{known})"
+            end
+            # A view whose query compiles to nothing is REFUSED, not applied. `QL.and` folds an
+            # EMPTY side away, so applying it would list EVERY flow while the command line says
+            # a view is narrowing — the same failure the query refusal below exists to stop.
+            unless f = SavedViews.filter(view, scope: lens)
+              store.close
+              abort "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`"
+            end
+            view_filter = f
+          end
+
           scope_unconfigured = false
           scope_filter = QL::EMPTY
           if in_scope
@@ -417,10 +452,6 @@ module Gori
             if scope_unconfigured
               [] of Store::FlowRow
             elsif q = query
-              # The `scope:` lens is read whether or not `--in-scope` was passed: the flag is a
-              # lens over the whole listing, the term is one clause of the query, and an
-              # operator can ask for either or both.
-              lens = Scope.ql_lens(store)
               filter = QL.parse(q, scope: lens)
               Run.warn_query_terms("history", q)
               # Two states where a `scope:` query runs CLEAN and lists nothing; an empty listing
@@ -434,7 +465,7 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
-              combined = QL.and(scope_filter, filter)
+              combined = QL.and(QL.and(scope_filter, view_filter), filter)
               # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
               # right after a capture — or against a db a killed process left behind — would
               # under-report until the backlog drains. A one-shot answer must be exact, so
@@ -454,8 +485,28 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} failed: #{ex.message}"
               end
-            elsif in_scope
-              store.search(scope_filter, limit, raise_on_error: true)
+            elsif in_scope || view_filter != QL::EMPTY
+              # `view_filter` belongs in this condition and not only in the AND above: without
+              # it a `--view` with no `-q` and no `--in-scope` falls through to `recent_flows`,
+              # which takes no filter at all — the command would accept the view and list
+              # everything.
+              combined = QL.and(scope_filter, view_filter)
+              # Same drain-or-refuse the query branch runs, for the same reason: a view is free
+              # to use `body:`, and this listing IS the answer.
+              if err = fts_backlog_error(store, combined,
+                   "the #{view_name.inspect} view would silently omit them. Nothing was listed;")
+                store.close
+                abort "gori run history: #{err}"
+              end
+              # Same rescue the query branch has: a view can hold a regex or an OR chain that
+              # PARSES but SQLite still refuses to run (hand-edited settings.json, a peer's
+              # write), and a raw Crystal backtrace is not an answer an operator can act on.
+              begin
+                store.search(combined, limit, raise_on_error: true)
+              rescue ex
+                store.close
+                abort "gori run history: view #{view_name.inspect} failed: #{ex.message}"
+              end
             else
               store.recent_flows(limit)
             end

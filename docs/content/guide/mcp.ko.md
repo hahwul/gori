@@ -100,6 +100,7 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 |------|---------|
 | `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다 — 클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` … — 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음 |
+| `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views) — `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다** — 그쪽은 넘긴 `view`로만 거릅니다 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
@@ -141,6 +142,7 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다 — `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
+| `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다 — `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절하는데, 아무것도 좁히지 못하면서 모든 표면의 칩은 좁히고 있다고 주장하게 되기 때문입니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
 | `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp 파일을 History로 일괄 임포트 |
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |

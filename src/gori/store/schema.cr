@@ -1060,7 +1060,33 @@ module Gori
         "ALTER TABLE flows ADD COLUMN source_ref TEXT",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17]
+      # The PROJECT half of the History view library (#776). A view is a named QL query the
+      # History list ANDs over the filter bar, and the global half lives in settings.json
+      # (`saved_views.views`); `SavedViews.merged` folds the two together the way
+      # `Probe.custom_rules` and `Oast.provider_configs` do for their pairs.
+      #
+      # `name` is UNIQUE within this project, and the index is what enforces it: the two scopes
+      # number themselves independently, so a project view and a global view MAY share a name
+      # (`SavedViews.resolve_by_name` prefers the project one, as `Env.effective_vars` prefers a
+      # project variable). Enforcing it here rather than only at the surfaces means a hand-edited
+      # DB cannot produce two views one `--view NAME` would have to choose between.
+      #
+      # No `position` column, deliberately. `color_rules` carries one because for a colour rule
+      # order IS the meaning — the first enabled match paints the row — while a view is chosen
+      # by pick, so its order is display-only and `SavedViews.merged` derives it.
+      V18 = [
+        <<-SQL,
+          CREATE TABLE saved_views (
+            id    INTEGER PRIMARY KEY,
+            name  TEXT NOT NULL,
+            query TEXT NOT NULL
+          )
+          SQL
+        "CREATE UNIQUE INDEX idx_saved_views_name ON saved_views (name COLLATE NOCASE)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
+                    V18]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

@@ -38,6 +38,14 @@ module Gori::Tui
     # here that changes the list while the card stays up.
     property on_delete : Proc(Int32, Nil)?
 
+    # Take the highlighted entry somewhere it can be EDITED, by its `Row#index`. Injected at
+    # the open-site for the same reason `on_delete` is, and shipped as a hook rather than a
+    # second card because what "edit" means is per-library: a History view's editor is the
+    # filter bar it came from, not a form.
+    #
+    # nil = a library with no editor (the ^E hint then stays off).
+    property on_edit : Proc(Int32, Nil)?
+
     def initialize(@title : String, @rows : Array(Row), @noun : String, @action : String = "load")
       # Precompute each row's filter haystack ONCE (not per keystroke).
       @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
@@ -75,8 +83,9 @@ module Gori::Tui
     end
 
     private def idle_hint : String
+      edit = @on_edit ? " · ^E edit" : ""
       del = @on_delete ? " · ^X delete" : ""
-      "type to filter · ↑/↓ select · ↵ #{@action}#{del} · esc cancel"
+      "type to filter · ↑/↓ select · ↵ #{@action}#{edit}#{del} · esc cancel"
     end
 
     # ^X removes the highlighted entry from the library, in place — the card stays up so a
@@ -94,6 +103,15 @@ module Gori::Tui
       if ev.ctrl? && ev.key.lower_x?
         delete_selected
         return :stay
+      end
+      # ^E hands the entry to the open-site's editor. `:cancel` rather than `:commit`, because
+      # the two are different intents and `:commit` would run `on_commit` as well — editing an
+      # entry is not also picking it. The card still comes down: unlike a delete, an edit takes
+      # the operator somewhere else. (A hook that opens its own modal survives the close, per
+      # `close_active_overlay`'s same? guard — the nested-modal seam in overlay.cr.)
+      if ev.ctrl? && ev.key.lower_e? && (edit = @on_edit) && (i = selected_index)
+        edit.call(i)
+        return :cancel
       end
       super
     end

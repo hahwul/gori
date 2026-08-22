@@ -288,6 +288,22 @@ module Gori
         h2_conn, h2_stream, req_trunc, resp_trunc, err, sni)
     end
 
+    # Does this project predate provenance recording (schema V17)?
+    #
+    # Answered from the OLDEST flow rather than by counting NULLs, and that is the whole trick:
+    # `flows.source` carries no index, so `WHERE source IS NULL` would full-scan a project that
+    # has none — the common case, and the one asked on every empty-list render. Sourceless rows
+    # are by construction the oldest ones (nothing after the migration writes a NULL), so a
+    # single rowid seek answers it.
+    #
+    # Imprecise in exactly one direction, deliberately: delete every pre-upgrade flow and this
+    # goes false, which is correct — the caveat no longer applies to anything on screen.
+    def pre_provenance_flows? : Bool
+      @db.query_one?("SELECT source IS NULL FROM flows ORDER BY id ASC LIMIT 1", as: Int64) == 1
+    rescue
+      false
+    end
+
     def count : Int64
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     rescue

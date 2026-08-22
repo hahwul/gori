@@ -34,7 +34,8 @@ private RESET_FIXTURE = <<-JSON
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
     "rewriter": { "next_rule_id": 7, "rules": [] },
-    "colormarker": { "next_rule_id": 7, "rules": [], "colors": [ { "name": "mine", "hex": "#ff0000" } ] }
+    "colormarker": { "next_rule_id": 7, "rules": [], "colors": [ { "name": "mine", "hex": "#ff0000" } ] },
+    "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
   }
   JSON
 
@@ -101,10 +102,11 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.reset_to_factory.should eq(Gori::Settings::ResetResult::Saved)
 
       # What is left is the handful of sections a fresh install writes anyway — every optional
-      # one omits itself at its default, which is how the key disappears — plus `rewriter` and
-      # `colormarker`, which stay only to carry their id counters (see reset_rewriter: those
-      # are what stop a project's surviving overrides from latching onto a reused id).
-      left = %w[theme mouse pretty_bodies network editor probe rewriter colormarker]
+      # one omits itself at its default, which is how the key disappears — plus `rewriter`,
+      # `colormarker` and `saved_views`, which stay only to carry their id counters (see
+      # reset_rewriter: those are what stop a project's surviving overrides — or, for views, its
+      # `history_view` pointer — from latching onto a reused id).
+      left = %w[theme mouse pretty_bodies network editor probe rewriter colormarker saved_views]
       Gori::Settings.document_keys.sort.should eq(left.sort)
       JSON.parse(File.read(path)).as_h.keys.sort.should eq(left.sort)
 

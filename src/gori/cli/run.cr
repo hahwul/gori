@@ -64,6 +64,7 @@ require "./run/cookie"
 require "./run/decoder"
 require "./run/rewriter"
 require "./run/colormarker"
+require "./run/views"
 require "./run/project"
 require "./run/session"
 
@@ -158,6 +159,7 @@ module Gori
         when "links"     then cmd_links(rest)
         when "authorize" then cmd_authorize(rest)
         when "session"   then cmd_session(rest)
+        when "views"     then cmd_views(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -204,6 +206,7 @@ module Gori
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
         {"colormarker", "Manage History row-colour rules (list, add, rm, enable/disable, move, preview)"},
+        {"views", "Manage History views — named QL filters (list, add, rm, rename, set, scope)"},
         {"project [list]", "List projects holding captured traffic (--all for every one)"},
         {"project create", "Create (or reopen) a project by name"},
         {"project delete", "Delete a project and everything captured in it"},

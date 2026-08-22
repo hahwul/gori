@@ -127,6 +127,7 @@ require "./runner/sequencer"
 require "./runner/session_slots"
 require "./runner/sitemap"
 require "./runner/subtabs"
+require "./runner/views"
 
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the
@@ -971,6 +972,13 @@ module Gori::Tui
       # sections (see `Settings.reload_section`).
       Settings.reload_colormarker_from_disk
       @session.colormarker.reload
+      # The GLOBAL half of the view library, for the same reason and on the same tick: a peer's
+      # `gori run views add --scope global` or MCP `create_view` writes settings.json, and the
+      # picker folds `Settings.saved_views` as they sit in THIS process. Unconditional, like the
+      # colormarker read above — HistoryController#on_external_change re-resolves the ACTIVE
+      # view against the merged list afterwards, and it cannot spot a global edit this never
+      # pulled in.
+      Settings.reload_saved_views_from_disk
       # Re-prime the render-side custom-mark map only when the colour set actually moved — the
       # revision bumps on a rule OR a custom-colour change, so a hex edit repaints History
       # without this running every tick.

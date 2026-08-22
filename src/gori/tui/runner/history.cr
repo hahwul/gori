@@ -72,6 +72,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.history_query
   end
 
+  # `v` — see runner/views.cr for the picker and the whole view-editing surface.
+  def history_view_pick : Nil
+    open_history_view_picker
+  end
+
   def history_delete : Nil
     history_controller.history_delete
   end
