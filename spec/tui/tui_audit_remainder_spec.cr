@@ -158,7 +158,7 @@ describe "TUI audit remainder — preview focus after a collapsing resize" do
 end
 
 describe "TUI audit remainder — missing width clamps" do
-  # METHOD sits in a fixed 8-column cell (method_x = rect.x + 16, proto_x = rect.x + 24) but
+  # METHOD sits in a fixed 8-column cell (method_x = rect.x + 16, proto_x = rect.x + 25) but
   # was drawn with no `width:` at all, so its limit was the whole screen. RFC 9110 permits
   # any token and the parser caps nothing, so a long method ran through PROTO/HOST/PATH.
   it "clamps an over-long METHOD token to its 8-column cell" do
@@ -171,20 +171,25 @@ describe "TUI audit remainder — missing width clamps" do
       view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
       line = backend.row(3) # list_top = rect.y + 3 (QL bar, header, divider)
 
-      # Budget is the FULL 8, not 7-in-8 like the neighbouring cells. PROTO draws at its own
-      # absolute `proto_x`, so a full 8 columns cannot bleed into it — 7 would only buy a
-      # blank gap, and it costs `PROPFIND` and `CHECKOUT` (both exactly 8, both methods this
-      # tool is pointed at), which the unclamped code rendered correctly. A clamp that
-      # truncates a real method is a regression the clamp introduced; a tight column is not.
+      # Budget is the FULL 8, not 7-in-8 like the neighbouring cells: 7 would cost `PROPFIND`
+      # and `CHECKOUT` (both exactly 8, both methods this tool is pointed at), which the
+      # unclamped code rendered correctly. A clamp that truncates a real method is a
+      # regression the clamp introduced; a tight column is not. The separating blank comes
+      # out of `proto_x` instead — see the sibling example below.
       line[16, 8].should eq("X-CUSTO…") # ellipsized inside the cell, not clipped silently
-      line[24, 4].should eq("HTTP")     # PROTO starts at its own x, untouched
-      line[28, 3].should eq("   ")      # nothing bleeds out of METHOD toward HOST
+      line[24].should eq(' ')           # the cell's own gap column
+      line[25, 4].should eq("HTTP")     # PROTO starts at its own x, untouched
+      line[29, 2].should eq("  ")       # nothing bleeds out of PROTO toward HOST
       line.should contain("h.test")
     end
   end
 
   # The other half of choosing 8 over 7: the widest REAL methods must survive the clamp. If
   # someone re-tightens this cell to 7 for the sake of a gap column, this fails and says why.
+  #
+  # And the gap itself is asserted HERE, on the method that fills the cell exactly — this is
+  # the only row shape that can lose it. Flush against PROTO the two cells read as one token
+  # (`PROPFINDHTTPS`), which is why `proto_x` is +25 and not +24.
   it "renders an exactly-8-character method in full, without eating PROTO" do
     tmp_store do |store|
       add_flow(store, "PROPFIND", "/dav")
@@ -196,7 +201,8 @@ describe "TUI audit remainder — missing width clamps" do
       line = backend.row(3)
 
       line[16, 8].should eq("PROPFIND") # no ellipsis — it fits the cell exactly
-      line[24, 4].should eq("HTTP")     # and PROTO is still where it belongs
+      line[24].should eq(' ')           # …and is still separated from the label beside it
+      line[25, 4].should eq("HTTP")     # and PROTO is still where it belongs
     end
   end
 

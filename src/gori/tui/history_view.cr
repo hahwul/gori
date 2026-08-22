@@ -1987,7 +1987,20 @@ module Gori::Tui
       strip_x = rect.x + 1
       time_x = rect.x + 1 + sw
       method_x = rect.x + 16 + sw # time column widened to fit MM-DD HH:MM:SS
-      proto_x = rect.x + 24 + sw
+      # +25, not +24: METHOD keeps its full 8 cells (16..23) and this buys the BLANK COLUMN
+      # between them. The clamp below is what stops a long token bleeding, but a method that
+      # exactly FILLS the cell — `PROPFIND`, `CHECKOUT`, both WebDAV/DeltaV verbs this tool is
+      # pointed at — then sat flush against the label and the two columns read as one token:
+      # `PROPFINDHTTPS`. Not clipping and being legible are different properties, and the cell
+      # was only buying the first.
+      #
+      # The gap is paid for out of PROTO's own span rather than by widening the fixed left
+      # block, so `host_x` does not move and no terminal loses a column of HOST/PATH for it:
+      # `Proto::Kind#label` is a closed set whose longest member is 5 (`HTTPS`/`GRPCS`), as is
+      # the `STUB` that displaces it, so 25..30 still leaves PROTO the same one-column gap
+      # before HOST that METHOD now has. A label longer than 6 would be the thing to re-check
+      # here — there is no `width:` on the PROTO draw, by the same closed-set argument.
+      proto_x = rect.x + 25 + sw
       host_x = rect.x + 31 + sw
       # Right cluster STA · SRC · TYPE · SIZE · DUR (status code, provenance, response MIME,
       # size, latency — frequently-scanned), anchored to the right edge and sized to FIT:
@@ -2127,11 +2140,11 @@ module Gori::Tui
         # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
         # `X-CUSTOM-METHOD`) ran straight through PROTO/HOST/PATH.
         #
-        # 8, not the 7-in-8 the neighbouring cells use. PROTO is drawn at its own absolute
-        # `proto_x`, so a full 8 cannot bleed into it — the only thing 7 buys is a blank gap,
-        # and it costs `PROPFIND` and `CHECKOUT`, both exactly 8 and both methods this tool is
-        # pointed at (WebDAV, DeltaV). Truncating a real method the unclamped code rendered
-        # correctly would be a regression introduced by the clamp; a tight column is not.
+        # 8, not the 7-in-8 the neighbouring cells use: `PROPFIND` and `CHECKOUT` are exactly 8
+        # and both are methods this tool is pointed at (WebDAV, DeltaV), so truncating one to
+        # buy a gap would make the clamp itself the regression. The gap comes out of `proto_x`
+        # instead (see the geometry above) — a full 8 cannot bleed into PROTO either way, but
+        # flush against it `PROPFIND` + `HTTPS` read as the single token `PROPFINDHTTPS`.
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg, width: 8)
         # PROTO: surface WS/GRPC/SSE (accented so they pop out of the HTTP stream), each
         # carrying the plaintext-vs-TLS signal the HTTP/HTTPS pair has always carried —
