@@ -267,6 +267,27 @@ module Gori::Tui
       x
     end
 
+    # Hit-test for a `right_text_chain` run. `chips` is `{id, text}` in the SAME right-to-left
+    # order the draw takes, so a caller can build ONE tagged list and map it for each. Miss →
+    # nil. Pure geometry — no Screen.
+    #
+    # `next`, not `break`, for the reason `right_badge_hit` spells out: the draw does not stop
+    # at the first chip that would cross `min_x`, it drops that one and keeps going, so a
+    # shorter chip further left still lands on a narrow bar and must still be clickable.
+    def self.right_text_chain_hit(mx : Int32, my : Int32, y : Int32, right_edge : Int32,
+                                  min_x : Int32, chips : Array({Symbol, String})) : Symbol?
+      return nil if my != y
+      x = right_edge + 1
+      chips.each do |(id, text)|
+        w = Screen.draw_width(text)
+        left = x - 1 - w
+        next if left < min_x
+        return id if mx >= left && mx < left + w
+        x = left
+      end
+      nil
+    end
+
     # A filled severity/status pill: the label inked in the canvas colour ON `color`, bold.
     # `Frame.chip`'s lit/muted pair cannot express this — the fill IS the datum here (a
     # severity's own hue), not an on/off state — which is why Issues and Probe each grew a

@@ -1235,20 +1235,8 @@ module Gori::Tui
         return
       end
 
-      # Right cluster: the scope-lens chip (always shown so the ⇧S toggle is
-      # discoverable — the Scope lens filters the tree too) and, when filtering, the
-      # matching host count.
-      # One right-anchored chain — see HistoryView#render_ql_bar, which this mirrors. The
-      # `g:fold` toggle keeps the scope chip's accent/muted dress so the two lenses read as
-      # one cluster, and its `g` chord stays in view (folding on vs off renders identically
-      # when a tree has no ids to fold).
-      chips = [] of {String, Color}
-      chips << {"#{@hosts.size}h", Theme.muted} if filtering?
-      scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted})
-      chips << {"g:fold", @grouping ? Theme.accent : Theme.muted}
-      chips << {mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
-      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
+      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2,
+        ql_bar_chips.map { |(_, text, color)| {text, color} })
 
       left_w = {lx - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
@@ -1264,6 +1252,45 @@ module Gori::Tui
         # repeating it, and the user's next move here is to ADD a query atop the lens.
         screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
+    end
+
+    # The filter bar's right cluster as `{tag, text, colour}`, RIGHT-TO-LEFT — the order
+    # `Frame.right_text_chain` draws in.
+    #
+    # Right cluster: the scope-lens chip (always shown so the ⇧S toggle is discoverable — the
+    # Scope lens filters the tree too) and, when filtering, the matching host count. The
+    # `g:fold` toggle keeps the scope chip's accent/muted dress so the two lenses read as one
+    # cluster, and its `g` chord stays in view (folding on vs off renders identically when a
+    # tree has no ids to fold).
+    #
+    # ONE tagged list, mapped for the paint and again for `ql_chip_at` — see
+    # HistoryView#ql_bar_chips, which this mirrors, for why the hit-test may not rebuild it.
+    private def ql_bar_chips : Array({Symbol, String, Color})
+      chips = [] of {Symbol, String, Color}
+      chips << {:count, "#{@hosts.size}h", Theme.muted} if filtering?
+      scope_on = @scope.try(&.active?) == true
+      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << {:fold, "g:fold", @grouping ? Theme.accent : Theme.muted}
+      chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
+      chips
+    end
+
+    # Which filter-bar chip is under (mx, my) — :count | :scope | :fold | :mark, or nil for a
+    # miss. Same geometry as the paint, off the same tagged list; nil while the bar is being
+    # EDITED, where those cells hold the query text instead (see HistoryView#ql_chip_at).
+    def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @querying
+      return nil if rect.empty?
+      Frame.right_text_chain_hit(mx, my, rect.y, rect.right - 1, rect.x + 2,
+        ql_bar_chips.map { |(tag, text, _)| {tag, text} })
+    end
+
+    # True when (mx, my) is on the filter bar row — the query readout / `/ filter` hint left of
+    # the chips, which a click opens for editing the way `/` does. `ql_chip_at` is asked FIRST
+    # (see SitemapController#click_filter_bar); what is left of it is the field.
+    def ql_bar_at?(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false if rect.empty?
+      my == rect.y && mx >= rect.x && mx < rect.right
     end
 
     # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left edge

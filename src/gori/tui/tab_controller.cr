@@ -37,6 +37,17 @@ module Gori::Tui
     # form is reached from it, and an overlay cannot open another overlay, so the Runner keeps
     # that hand-off to itself (Runner#open_authorize_identities).
     abstract def open_authorize_identities : Nil
+
+    # The History VIEW picker (#776) — the `v` chord's own overlay, reached from the filter
+    # bar's `v:` chip as well, and an overlay is not a controller's to open.
+    #
+    # CONCRETE and a no-op, for the reason `subtab_find_focused?` below is concrete: twenty
+    # spec files `include Host` to drive a controller, none of them can open an overlay, and
+    # "do nothing" is the body every one of them already writes for `request_overlay` and its
+    # neighbours. The Runner's own `open_history_view_picker` (runner/views.cr) overrides it.
+    def open_history_view_picker : Nil
+    end
+
     # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
     abstract def reconfigure_sequence : Nil
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).

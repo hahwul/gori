@@ -2780,28 +2780,8 @@ module Gori::Tui
         return
       end
 
-      # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable)
-      # and, when filtering, the row count. The scope lens is a filter too, so it lives
-      # on the filter bar next to the QL query.
-      # One right-anchored chain, drawn by `Frame.right_text_chain` — rightmost first. The
-      # `f:follow` toggle shares the scope chip's accent/muted dress so the two read as one
-      # cluster, and the mark chip joins them rather than being placed by hand afterwards.
-      chips = [] of {String, Color}
-      if filtering?
-        # @rows is capped at PAGE by the search LIMIT; show "N+" at the cap so the count
-        # isn't silently misread as the exact match total when more actually match.
-        chips << {@rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s, Theme.muted}
-      end
-      scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted})
-      chips << {"f:follow", @follow ? Theme.accent : Theme.muted}
-      # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
-      # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
-      # nobody finds. Accent when a view is narrowing, muted `v:All` when none is, so the key is
-      # visible before it is ever used.
-      chips << view_chip(screen)
-      chips << {mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
-      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
+      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2,
+        ql_bar_chips.map { |(_, text, color)| {text, color} })
 
       left_w = {lx - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
@@ -2819,6 +2799,64 @@ module Gori::Tui
       end
     end
 
+    # The filter bar's right cluster as `{tag, text, colour}`, RIGHT-TO-LEFT — the order
+    # `Frame.right_text_chain` draws in.
+    #
+    # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable) and,
+    # when filtering, the row count. The scope lens is a filter too, so it lives on the filter
+    # bar next to the QL query. The `f:follow` toggle shares the scope chip's accent/muted dress
+    # so the two read as one cluster, and the mark chip joins them rather than being placed by
+    # hand afterwards.
+    #
+    # ONE tagged list, mapped for the paint and again for `ql_chip_at`, the way
+    # `Chrome.top_bar_chips` feeds the top bar's own hit-test. The chips appear and disappear
+    # (count, mark) and drop INDIVIDUALLY on a narrow bar, so a hit-test that rebuilt this
+    # geometry by hand would have to repeat both rules and would drift the first time one of
+    # them changed here.
+    private def ql_bar_chips : Array({Symbol, String, Color})
+      chips = [] of {Symbol, String, Color}
+      if filtering?
+        # @rows is capped at PAGE by the search LIMIT; show "N+" at the cap so the count
+        # isn't silently misread as the exact match total when more actually match.
+        chips << {:count, @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s, Theme.muted}
+      end
+      scope_on = @scope.try(&.active?) == true
+      chips << (scope_on ? {:scope, "⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "⇧S scope:off", Theme.muted})
+      chips << {:follow, "f:follow", @follow ? Theme.accent : Theme.muted}
+      # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
+      # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
+      # nobody finds. Accent when a view is narrowing, muted `v:All` when none is, so the key is
+      # visible before it is ever used.
+      chips << view_chip
+      chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
+      chips
+    end
+
+    # Which filter-bar chip is under (mx, my) — :count | :scope | :follow | :view | :mark, or
+    # nil for a miss. Same geometry as the paint, off the same tagged list.
+    #
+    # nil while the bar is in EDIT mode: `render_ql_bar` returns before the cluster there, so
+    # those cells hold the query being typed and a click on them must not toggle a lens the
+    # operator cannot see.
+    def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @querying
+      list_rect, _ = list_split(rect)
+      return nil if list_rect.empty?
+      Frame.right_text_chain_hit(mx, my, list_rect.y, list_rect.right - 1, list_rect.x + 2,
+        ql_bar_chips.map { |(tag, text, _)| {tag, text} })
+    end
+
+    # True when (mx, my) is on the filter bar row itself — the query readout / `/ filter` hint
+    # left of the chip cluster, which a click opens for editing the way `/` does. The chips are
+    # ON this row too, so `ql_chip_at` is asked FIRST (see HistoryController#handle_click); what
+    # is left is the field, and treating its whole span as the target (rather than the drawn
+    # glyphs alone) is what makes it read as a text box.
+    def ql_bar_at?(rect : Rect, mx : Int32, my : Int32) : Bool
+      list_rect, _ = list_split(rect)
+      return false if list_rect.empty?
+      my == list_rect.y && mx >= list_rect.x && mx < list_rect.right
+    end
+
     # Mark count (#442), drawn right-to-left ending just left of `right_x`; returns the new
     # left edge of the chip cluster. Always shown while any mark is set — marks deliberately
     # survive a tab switch, so this chip is what keeps the set from being invisible when you
@@ -2834,11 +2872,13 @@ module Gori::Tui
     # mark chip, and shrink the query readout beside it for nothing.
     VIEW_CHIP_NAME_MAX = 14
 
-    private def view_chip(screen : Screen) : {String, Color}
+    # `Screen.fit`, not `screen.fit`: this is measured by the hit-test as well as drawn, and
+    # the hit-test has no Screen. The truncation is stateless either way.
+    private def view_chip : {Symbol, String, Color}
       if v = active_view
-        {"v:#{screen.fit(v.name, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
+        {:view, "v:#{Screen.fit(v.name, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
       else
-        {"v:#{SavedViews.all_view.name}", Theme.muted}
+        {:view, "v:#{SavedViews.all_view.name}", Theme.muted}
       end
     end
 

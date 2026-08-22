@@ -72,6 +72,7 @@ module Gori::Tui
     # below its sub-tab strip; the standalone path insets the frame itself).
     def handle_click_content(content : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
+      return true if click_filter_bar(content, mx, my)
       # The scroll gauge on the frame's right hairline — one column outside the tree rect, so
       # `row_at` never sees it. A click there moves the cursor to the row it points at.
       if row = @sitemap.gauge_row_at(content, mx, my)
@@ -86,6 +87,28 @@ module Gori::Tui
       end_range_gesture unless ri == @sitemap.selected_index
       @sitemap.select_index(ri)
       @sitemap.toggle_at(ri) if @sitemap.marker_hit?(content, mx, ri)
+      true
+    end
+
+    # The filter bar row. Its chips do exactly what their own chords do — ⇧S flips the scope
+    # lens, `g` id folding — and the field left of them opens for editing like `/`. The mirror
+    # of HistoryController#click_filter_bar, including that a READOUT chip (the host count, the
+    # mark count) still consumes the click: the bar is chrome, not a tree row, and falling
+    # through would move the cursor out from under the pointer.
+    private def click_filter_bar(content : Rect, mx : Int32, my : Int32) : Bool
+      # The tag editor is a text sub-mode the shell routes every key into. Opening the QL bar
+      # under it would leave two fields claiming the keyboard, so while it is up the bar row
+      # falls through to the tree click it has always been.
+      return false if @sitemap.tagging?
+      if chip = @sitemap.ql_chip_at(content, mx, my)
+        case chip
+        when :scope then @host.toggle_scope_lens
+        when :fold  then sitemap_toggle_grouping
+        end
+        return true
+      end
+      return false unless @sitemap.ql_bar_at?(content, mx, my)
+      sitemap_query unless @sitemap.querying?
       true
     end
 

@@ -173,6 +173,29 @@ module Gori::Tui
       @history.detail_click_to_cursor(body, mx, my, focused: true)
     end
 
+    # The filter bar row. Its right cluster's chips do exactly what their own chords do —
+    # ⇧S flips the scope lens, `f` follow, `v` opens the view picker — and the field left of
+    # them opens for editing like `/`. A chip that is a READOUT rather than a control (the row
+    # count, the mark count) still consumes the click: it is chrome, not a list row, and
+    # falling through would move the selection out from under the pointer.
+    #
+    # Runs BEFORE `handle_click`'s stop_query, and `ql_chip_at` declines while the bar is being
+    # edited — the chips are not painted then, those cells hold the query text, so a click
+    # there leaves the editor up instead of dismissing the field it landed in.
+    private def click_filter_bar(inner : Rect, mx : Int32, my : Int32) : Bool
+      if chip = @history.ql_chip_at(inner, mx, my)
+        case chip
+        when :scope  then @host.toggle_scope_lens
+        when :follow then toggle_follow
+        when :view   then @host.open_history_view_picker
+        end
+        return true
+      end
+      return false unless @history.ql_bar_at?(inner, mx, my)
+      history_query unless @history.querying?
+      true
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1) # framed insets 1,1
       if @host.overlay == :detail
@@ -180,6 +203,7 @@ module Gori::Tui
         return true
       end
       @host.focus_body
+      return true if click_filter_bar(inner, mx, my)
       # A click that selects a row / opens detail also exits QL edit mode (applying the query,
       # like Enter) — otherwise @querying stays set and later keys are hijacked into the filter bar.
       if @history.querying?
