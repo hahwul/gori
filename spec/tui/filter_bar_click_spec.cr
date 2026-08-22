@@ -184,7 +184,7 @@ describe "HistoryView — filter bar chips are clickable" do
   it "claims exactly the cells each chip was painted in" do
     view = HistoryView.new
     history_bar(view).should eq({
-      :view   => "v:All",
+      :view   => "v:all",
       :follow => "f:follow",
       :scope  => "⇧S scope:off",
     })
@@ -193,7 +193,7 @@ describe "HistoryView — filter bar chips are clickable" do
   it "follows the chip's own label when a view is active" do
     view = HistoryView.new
     view.set_view(Gori::SavedViews::BUILTINS.find { |v| v.name == "Errors" }.not_nil!)
-    history_bar(view)[:view].should eq("v:Errors")
+    history_bar(view)[:view].should eq("v:errors")
   end
 
   it "claims nothing while the bar is being edited" do
@@ -210,7 +210,7 @@ describe "HistoryView — filter bar chips are clickable" do
     # dropped chip would leave live cells on chrome nobody painted.
     view = HistoryView.new
     hits = history_bar(view, w: 26)
-    hits.has_key?(:view).should be_false # "v:All" no longer fits left of f:follow
+    hits.has_key?(:view).should be_false # "v:all" no longer fits left of f:follow
     hits[:follow].should eq("f:follow")
   end
 end

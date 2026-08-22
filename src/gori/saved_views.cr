@@ -86,6 +86,19 @@ module Gori
       def narrowing? : Bool
         !query.blank?
       end
+
+      # What the History filter row's `v:` chip spells. A LABEL, not the name, for two reasons
+      # that both belong to that row and to nowhere else: every chip beside it reads
+      # `f:follow` / `⇧S scope:off` / `3 marked`, so a Title-Case one is the only word on the
+      # bar shouting; and the chip is the narrowest place a view is ever printed, which is why
+      # `CHIP_LABELS` exists at all.
+      #
+      # The name itself is untouched — the picker, `gori run views`, `--view` and MCP all keep
+      # spelling it `History + Repeater`, and `resolve_by_name` downcases, so a chip read off
+      # the bar and typed straight into `--view` still resolves.
+      def chip_label : String
+        (builtin? ? CHIP_LABELS[id]? : nil) || name.downcase
+      end
     end
 
     # The views every project has. `All` is not a special case in the code — it is a view whose
@@ -108,6 +121,15 @@ module Gori
     # socket", and `proto:wss` is one keystroke away in the bar for when it is not.
     ALL_ID     = "all"
     DEFAULT_ID = "proxy+repeater"
+
+    # Short chip labels for builtins whose NAME does not fit the chip, keyed by id. Only one
+    # entry earns its place: `History + Repeater` is 18 columns against a 14-column budget
+    # (`HistoryView::VIEW_CHIP_NAME_MAX`), so the DEFAULT view — the one a fresh project opens
+    # on and therefore the chip most operators look at all day — rendered as `v:History + Re…`.
+    #
+    # `rptr` rather than `rep` because it is not a new abbreviation: the SRC column already
+    # teaches `PROXY · RPTR · FUZZ · CRAWL · IMPRT`, and `src:rptr` is typeable in the bar.
+    CHIP_LABELS = {DEFAULT_ID => "history+rptr"}
 
     BUILTINS = [
       View.new(ALL_ID, "All", "", "builtin"),
