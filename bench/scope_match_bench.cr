@@ -73,6 +73,11 @@ HOSTS = ["app.example.com", "evil.other.net", "telemetry.example.com", "api.acme
     x.report("may_match_host? (per CONNECT)") do
       HOSTS.each { |h| display.may_match_host?(h) }
     end
+    # The active-sender audit trail (Outbound#evaluate): the id of the include that
+    # allowlisted a fuzz/mine/probe/repeater request. Same @includes + one-downcase path.
+    x.report("matching_include_id (active send)") do
+      URLS.each { |(u, h)| display.matching_include_id(u, h) }
+    end
   end
 end
 

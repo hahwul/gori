@@ -368,7 +368,7 @@ module Gori
       # They need opposite remedies, so ask the exclude question separately rather than
       # letting the caller guess from a single out_of_scope.
       return {OUT_OF_SCOPE, nil, s.excluded?(url, host)} unless s.matches_url?(url, host)
-      {IN_SCOPE, s.rules.find { |r| r.include? && r.matches?(url, host) }.try(&.id), false}
+      {IN_SCOPE, s.matching_include_id(url, host), false}
     end
 
     # Throttled in-place reload of the scope from its store so a mid-run rule / Sandbox

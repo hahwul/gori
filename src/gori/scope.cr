@@ -261,6 +261,17 @@ module Gori
       @mutex.synchronize { @excludes.any? { |r| r.matches?(url, host, url_down) } }
     end
 
+    # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate
+    # (`Outbound#evaluate`) stamps on a request it has ALREADY confirmed allowlisted. It used
+    # to re-walk the whole rule list (`rules.find { |r| r.include? && r.matches? }`) and
+    # re-lower the url once per include; this reuses the precomputed @includes and lowers the
+    # url once, like the allowlist evaluators, and reads under @mutex rather than off the bare
+    # getter. @includes keeps @rules order, so the first match is the same rule as before.
+    def matching_include_id(url : String, host : String) : Int64?
+      url_down = url.downcase
+      @mutex.synchronize { @includes.find { |r| r.matches?(url, host, url_down) }.try(&.id) }
+    end
+
     # The ALLOWLIST evaluation (callers hold @mutex): true ⇔ at least one INCLUDE rule
     # matches AND no EXCLUDE matches. Empty includes ⇒ false — "nothing is explicitly
     # allowed". SHARED by the Probe Active gate (matches_url?) and the Sandbox block gate
