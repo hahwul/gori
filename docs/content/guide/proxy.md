@@ -218,6 +218,53 @@ Type a query in the History filter bar, or run it headless:
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
+## Views (`v`)
+
+A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar — a view is ANDed *over* whatever you type, the same way the `⇧S` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:NAME` chip so what you are looking at is never a guess.
+
+Seven views ship with every project, on two axes. The **source** views answer *is this evidence about the target, or something gori did?*; the **protocol** ones answer *which conversation am I reading?*
+
+| View | Means |
+|------|-------|
+| **All** | everything |
+| **History** | `src:proxy` — only traffic a client actually sent through gori |
+| **History + Repeater** | `src:proxy OR src:repeater` — that, plus your own resends. **The default** |
+| **WebSocket** | `proto:ws` — sockets, cleartext and TLS alike |
+| **gRPC** | `proto:grpc` |
+| **SSE** | `proto:sse` — server-sent event streams |
+| **Errors** | `status:>=400` |
+
+The two axes are deliberately **not** pre-combined: a view named `WebSocket` that also excluded an imported socket would be lying about its own name. They compose through the lens instead — pick `History + Repeater` and type `proto:ws`, and you get the intersection without either built-in having to anticipate the other.
+
+**A new project opens on `History + Repeater`,** not `All`. The flows gori's own crawler, fuzzer and importer wrote are not evidence about the target, and a list that mixes them in is the defect `src:` exists to fix — the default just fixes it for people who never type the term. Repeater is *in* because a resend is your own deliberate act on a real endpoint, and reading its response beside the captured one is the point of the tab. One exception: a project captured **before gori recorded provenance** opens on `All` instead, because `src:` matches those rows in neither direction and the usual default would show an empty list.
+
+Type a filter you want to keep and the picker's **`+ Save current filter as a view…`** row names it. You are asked where it lives:
+
+- **Project** — this engagement only. Where a `host:api.acme.test scope:in` belongs.
+- **Global** — every project, in `settings.json`. Where a `src:` view belongs.
+
+Inside the picker, `^E` loads a view's query back into the filter bar to edit (saving it under the same name updates it), and `^X` deletes one. Built-ins cannot be edited or deleted. Saving a name that already exists in the *other* scope **moves** the view there rather than leaving two.
+
+The active view is remembered per project across restarts, like the scope lens. If a view is deleted from another gori while you have it on, History drops back to **All** and says so rather than filtering by something that no longer exists.
+
+Views are a project object, not a TUI convenience — all three surfaces read them:
+
+```bash
+gori run views                                   # list, with the active one marked
+gori run views add 'acme errors' -q 'host:api.acme.test status:5xx'
+gori run views add 'proxied' -q 'src:proxy' --scope global
+gori run views set 'acme errors' -q 'status:>=500'
+gori run views scope 'acme errors' --to global   # re-home it
+gori run views rm 'acme errors'
+gori run history --view 'History' -q 'status:5xx'
+```
+
+MCP has the same set: `list_views`, `create_view`, `update_view`, `delete_view`, and a `view` argument on `list_history`.
+
+One caveat worth knowing before the list looks broken: a flow captured **before gori recorded provenance** carries no source, and `src:` matches it in [neither direction](/reference/query-language/#src-provenance). So the `History` view on an older project can be empty however much traffic it holds — the empty state says so, and **All** shows everything.
+
+A view's query is checked when you save it, not when it runs. One whose every term would be dropped is refused outright, because it would narrow *nothing* while the `v:` chip claimed otherwise.
+
 ## Marking flows (multi-select)
 
 Press `t` to **mark** the flow under the cursor and step to the next older one, so a run of `t` marks consecutive rows (in either list order). `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.

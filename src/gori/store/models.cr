@@ -1025,6 +1025,18 @@ module Gori
       end
     end
 
+    # One row of this project's saved-History-view library (`saved_views`, V18). The global
+    # counterpart lives in settings.json (`Settings::SavedView`); both fold into the runtime
+    # `SavedViews::View` list through `SavedViews.merged`.
+    #
+    # A record rather than a struct with a scope field: unlike `ColorRule`, the scope is not
+    # carried here — `SavedViews::View` is the type every surface handles, and this one exists
+    # only to name the three columns the read projection produces.
+    record SavedViewRow,
+      id : Int64,
+      name : String,
+      query : String
+
     # A per-project user-defined Probe match rule (probe_custom_rules, V38). String/regex match
     # over one region of a captured flow (side × region); `severity` stamps the emitted finding.
     # The global-scope counterpart lives in settings.json (Settings::ScanRule); both fold into the

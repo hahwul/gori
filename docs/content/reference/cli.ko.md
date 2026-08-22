@@ -141,6 +141,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 |--------|-------------|
 | `-q`, `--query=QL` | 쿼리 언어 필터 (위치 인자로도 허용) |
 | `-n`, `--limit=N` | 최대 행 수 (기본값 50) |
+| `--view=NAME` | 저장된 [뷰](#run-views)를 적용합니다 — 그 쿼리는 `-q`를 **대체하지 않고 AND로** 얹힙니다. TUI의 `v` 피커가 필터 바 위에 얹히는 것과 같습니다. 명시할 때만 적용됩니다 — TUI가 보고 있는 뷰가 여기 자동으로 걸리는 일은 없으며, `--in-scope`가 저장된 ⇧S 렌즈에 대해 긋는 선과 같습니다. 없는 이름은 무시하지 않고 거절하며(있는 이름들을 알려 줍니다), 목록에서만 씁니다 |
 | `--in-scope` | 프로젝트에 설정된 스코프 안의 플로우만 — TUI의 ⇧S 렌즈로, 옵트인이며 그 렌즈의 활성화 여부와 무관합니다. 캡처는 여전히 전부 기록하며, 스코프 규칙이 없으면 빈 결과 |
 | `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
 | `--format=FMT` | `text`, `json` / `jsonl` (둘 다 JSON-Lines), 또는 `har` |
@@ -787,6 +788,36 @@ gori run colormarker add --when 'method:DELETE' --color hotpink
 이름이 곧 식별자입니다. 규칙의 `--color`에 저장되는 값이자 선택기에 보이는 값이므로 소문자로 정규화되고, 중복될 수 없으며, 내장 색 이름과 같을 수 없습니다. `update`는 두 옵션 중 하나만 줘도 됩니다.
 
 색상을 지우거나 **이름을 바꿔도** 그 색을 쓰던 규칙은 의도적으로 고쳐 쓰지 않습니다. 규칙은 옛 이름을 그대로 들고 있다가 눈에 띄는 기본색으로 대체되어 그려지므로, 같은 이름으로 색을 다시 추가하면 원래대로 돌아옵니다. 이 명령에서 모든 프로젝트의 데이터베이스에 손을 뻗을 수는 없고, 절반만 적용된 연쇄 수정은 이름 하나가 붕 뜨는 것보다 나쁩니다. 색상 값만 바꾸는 경우는 다릅니다. 규칙은 색을 이름으로 참조하므로 어디서든 새 hex를 그대로 따라갑니다.
+
+### run views {#run-views}
+
+**History 뷰**를 관리합니다 — History 목록을 좁히는, 이름 붙은 QL 쿼리입니다. 뷰는 *렌즈*입니다. 다른 필터를 대체하지 않고 그 위에 AND로 얹히므로, `gori run history --view History -q 'status:5xx'`는 둘 다를 뜻합니다. 기본 뷰 일곱 개가 모든 프로젝트에 들어 있습니다 — 출처 3종 `All` / `History`(`src:proxy`) / `History + Repeater`(기본값), 그리고 `WebSocket`·`gRPC`·`SSE`·`Errors`. 저장된 뷰는 컬러 룰과 똑같이 두 저장소에 나뉘어 삽니다.
+
+```bash
+gori run views                                              # 목록; TUI의 활성 뷰에 ● 표시
+gori run views --scope global --format json
+gori run views add 'acme errors' -q 'host:api.acme.test status:5xx'
+gori run views add 'proxied' -q 'src:proxy' --scope global
+gori run views set 'acme errors' -q 'status:>=500'          # 이름은 그대로, 쿼리만 교체
+gori run views rename 'acme errors' --to 'acme 5xx'
+gori run views scope 'acme 5xx' --to global                 # 두 저장소 사이로 옮기기
+gori run views rm 'acme 5xx' --scope global
+```
+
+| Option | Description |
+|--------|-------------|
+| `-q`, `--query=QL` | `add`와 `set`에 필수. 뷰의 쿼리이며, 필터 바와 `run history -q`가 받는 것과 같은 History QL입니다 |
+| `--scope=SCOPE` | `project`(기본값) 또는 `global`. 글로벌 뷰는 `settings.json`에 살며 모든 프로젝트에 나타납니다 |
+| `--to=NAME` | `rename`에서: 새 이름 |
+| `--to=SCOPE` | `scope`에서: 옮길 저장소, `project` 또는 `global` |
+
+뷰는 **이름**으로 지목합니다. `--view`와 피커가 받는 것이 이름이고, id를 두면 한 가지를 두 가지로 부르는 셈이기 때문입니다. 이름은 스코프 *안에서* 유일하며 스코프끼리는 겹칠 수 있습니다. 그럴 때 `--view`는 **project → global → 기본 제공** 순으로 고릅니다. 프로젝트 환경변수와 호스트 오버라이드가 이미 쓰는 것과 같은 우선순위입니다. 모든 변경 명령이 `--scope`를 받는 이유는 `colormarker rm`과 같습니다. 두 저장소는 각각 따로 지목되며, 어느 쪽을 뜻했는지 추측하면 엉뚱한 뷰를 고치게 됩니다. 목록은 스코프를 `G`/`P`/`·` 접두사로 찍습니다.
+
+쿼리는 실행할 때가 아니라 **저장할 때** 검사합니다. 없는 필드를 쓴 쿼리, 깨진 정규식, 그리고 모든 항이 버려질 쿼리는 거절합니다. 마지막 것이 중요합니다 — 아무것도 좁히지 못하는 뷰인데도 `v:` 칩은 좁히고 있다고 주장하게 되기 때문입니다. 같은 검사가 세 표면 모두에서 돌아가므로, TUI가 거절한 뷰를 CLI가 받아 주는 일은 없습니다.
+
+기본 제공 뷰는 편집도 삭제도 되지 않으며, 저장된 뷰가 기본 뷰의 이름을 가져갈 수도 없습니다 — 가려 버리면 `--view`로 그 기본 뷰에 다시 닿을 수 없기 때문입니다.
+
+지금 보고 있는 뷰를 지우면 그 프로젝트는 `All`로 돌아갑니다. 지운 *글로벌* 뷰를 가리키던 다른 프로젝트의 포인터는 무해하게 남습니다. id는 단조 증가 카운터에서 나오고 재사용되지 않으므로 다른 뷰가 그 자리를 물려받을 수 없습니다. 대화형 피커는 [프록시 & History](/ko/guide/proxy/#views)를 보세요.
 
 ### run project {#run-project}
 

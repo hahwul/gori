@@ -30,6 +30,25 @@ module Gori
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
+        # `view` is a saved query applied as a LENS: ANDed over `query`, never replacing it, the
+        # same way the TUI's `v` picker ANDs it over the filter bar. Resolved by name with
+        # project > global > builtin precedence, as every surface resolves it.
+        view_filter = QL::EMPTY
+        if (vn = str(h, "view")) && !vn.strip.empty?
+          unless view = SavedViews.resolve_by_name(store, vn)
+            return err("no view named #{vn.inspect} (known: #{SavedViews.names(store).join(", ")}) — see list_views",
+              "INVALID_ARGUMENT", field: "view")
+          end
+          # A view whose stored query compiles to nothing is REFUSED, not applied: `QL.and` folds
+          # an EMPTY side away, so applying it would return EVERY flow while the call named a
+          # view — the same silent-broadening `ql_filter_or_error` refuses for `query`.
+          unless vf = SavedViews.filter(view, scope: Scope.ql_lens(store))
+            return err("view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with update_view",
+              "INVALID_ARGUMENT", field: "view")
+          end
+          view_filter = vf
+          filter = QL.and(view_filter, filter)
+        end
         # `in_scope` opt-in: the same per-flow scope lens the TUI History ⇧S toggle and
         # `gori run history --in-scope` apply, independent of the persisted flag. Capture is
         # untouched — this narrows only the rows returned. Empty (nothing in scope) when no
@@ -53,7 +72,10 @@ module Gori
         rows =
           if scope_unconfigured
             [] of Store::FlowRow
-          elsif (query && !query.strip.empty?) || in_scope
+          elsif (query && !query.strip.empty?) || in_scope || view_filter != QL::EMPTY
+            # `view_filter` belongs in this condition and not only in the AND above: without it a
+            # `view` with no `query` and no `in_scope` falls through to `recent_flows`, which
+            # takes no filter at all — the call would accept the view and return everything.
             store.search(filter, limit, before_id, since_id)
           else
             store.recent_flows(limit, before_id, since_id)
@@ -262,6 +284,7 @@ module Gori
           s.field "limit", intprop("max rows (default 50, max 500)")
           s.field "before_id", intprop("cursor: page OLDER — only flows with id < this (newest-first; works with query too)")
           s.field "since", intprop("forward cursor: tail NEWER — only flows with id > this, oldest-first (mutually exclusive with before_id)")
+          s.field "view", strprop("apply a saved History view by name (list_views) — its query is ANDed OVER `query`, never replacing it, the same way the TUI's `v` picker layers over the filter bar. Built-ins: All, History (src:proxy), 'History + Repeater'. An unknown name is refused rather than ignored")
           s.field "in_scope", boolprop("only flows in the project's configured scope (the TUI ⇧S lens; capture still records everything). Empty result when no scope rules exist. Default false. For finer control use the QL terms `scope:in` / `scope:out` in `query`, which negate and group like any other term (ql_explain reports whether the project has scope rules at all)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
         end

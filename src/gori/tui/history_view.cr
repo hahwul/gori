@@ -119,6 +119,24 @@ module Gori::Tui
       # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
       @popup = SuggestPopup.new
       @scope = nil.as(Scope?)
+      # The active VIEW (#776) — a named QL query ANDed over the bar, the way the ⇧S scope lens
+      # is. Nil until `set_view`, exactly like @scope: every construction site outside
+      # HistoryController leaves it nil, which keeps the whole feature a no-op for the existing
+      # History specs. `SavedViews.all_view` is "no view" spelled as a view, so nil and All mean
+      # the same thing to every reader here.
+      @view = nil.as(SavedViews::View?)
+      # Why the view narrows nothing even though a chip says it does — a view whose query
+      # compiles to EMPTY (a peer's edit, a hand-edited settings.json). Kept apart from
+      # @query_note so a broken view is not reported as a broken filter bar.
+      @view_broken = false
+      # Why an ACTIVE view came back empty, when the reason is something the operator can act on
+      # rather than "no flows matched". Computed in `reload` (which has the store) and read by
+      # the empty state (which does not).
+      @view_note = nil.as(String?)
+      # Does the project hold NO flows at all? Read only on the empty-result path, and it is
+      # what keeps the first-run card reachable now that a fresh project opens with a default
+      # view on — see the empty-state branch.
+      @no_flows = false
       # Colormarker (the row-colour lens). Nil until `set_colormarker` — every construction
       # site outside HistoryController leaves it nil, which is what makes the whole feature a
       # no-op for the existing History specs (no swatch column, no tint, byte-identical render).
@@ -319,6 +337,20 @@ module Gori::Tui
       @scope = scope
     end
 
+    # The active view, or nil for "no view" (equivalent to the All builtin). Set by
+    # HistoryController from the project's persisted `history_view` key, and again whenever the
+    # operator picks one or a peer's edit lands.
+    def set_view(view : SavedViews::View?) : Nil
+      @view = view
+    end
+
+    # The active view as the chip and the empty state name it. Nil when nothing is narrowing —
+    # All included, since a view that narrows nothing has nothing to announce.
+    def active_view : SavedViews::View?
+      v = @view
+      v && v.narrowing? ? v : nil
+    end
+
     def set_colormarker(cm : Colormarker) : Nil
       @colormarker = cm
     end
@@ -376,9 +408,15 @@ module Gori::Tui
       cm.prefetch(pending)
     end
 
-    # True when the displayed list is a filtered subset (QL query or Scope lens).
+    # True when the displayed list is a filtered subset (QL query, Scope lens, or a view).
+    #
+    # The VIEW belongs here and it is not cosmetic. `on_event` reads this to decide whether a
+    # newly captured flow may be pushed straight onto @rows or has to go through `reload` — and
+    # an unfiltered list may never reload at all (see the note there). Leaving a view out would
+    # let the list fill, permanently, with exactly the rows the view exists to exclude, while
+    # the chip claimed otherwise.
     def filtering? : Bool
-      !@query.blank? || (@scope.try(&.active?) == true)
+      !@query.blank? || (@scope.try(&.active?) == true) || !active_view.nil?
     end
 
     # Load flows applying the Scope lens AND the QL query. store.search returns
@@ -393,20 +431,34 @@ module Gori::Tui
       # lens off. nil only before `set_scope` has run.
       lens = @scope.try(&.ql_lens)
       query_filter = QL.parse(@query, scope: lens)
+      # The view's term, compiled under the SAME lens as the bar: a `scope:in` written inside a
+      # view has to mean what `scope:in` means when typed, or the same words answer two
+      # questions depending on where the operator put them.
+      #
+      # nil means the view's query compiles to EMPTY. `SavedViews.unusable_query_reason` guards
+      # every write path, but a view still arrives here from a peer's settings.json or a hand
+      # edit — and applying it would fold away to match-all under `QL.and`, showing EVERY flow
+      # while the `v:` chip asserts a filter. Refuse it the way `reject_empty?` refuses the bar.
+      view = active_view
+      view_filter = SavedViews.filter(view, scope: lens)
+      @view_broken = view_filter.nil?
       @query_note = query_note_for(query_filter, store, lens)
       # A non-blank query that compiles to EMPTY (every term invalid — a typo'd field,
       # a bad numeric like dur:>2sec, an unterminated value) must NOT fall through to a
       # match-all search: that would show EVERY flow while the bar claims a filter is
       # active — the opposite of the ask, and dangerous on a security proxy. Reject it
       # (empty list + a note), mirroring the MCP/CLI surfaces which both reject_empty?.
-      if QL.reject_empty?(@query, query_filter)
+      if @view_broken || QL.reject_empty?(@query, query_filter)
         @rows = [] of Store::FlowRow
+        @view_note = @view_broken ? broken_view_note(view) : nil
+        @no_flows = false # a refused filter says nothing about what the project holds
         @filter_dirty = false
         @selected = 0
         @scroll = 0
         return
       end
-      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, query_filter)
+      combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
+        query_filter)
       @rows =
         begin
           store.search(combined, PAGE, raise_on_error: true)
@@ -419,6 +471,9 @@ module Gori::Tui
           [] of Store::FlowRow
         end
       @rows.reverse! unless newest_first?
+      # One indexed one-row read, and only when there is nothing to show anyway.
+      @no_flows = @rows.empty? && store.recent_flows(1).empty?
+      @view_note = @rows.empty? ? empty_view_note(view, store) : nil
       @filter_dirty = false
       @selected =
         if @follow
@@ -435,7 +490,15 @@ module Gori::Tui
     # typo'd status:/dur:/size: or a broken body~[regex isn't misread as "no traffic".
     private def query_note_for(filter : QL::Filter, store : Store,
                                lens : QL::ScopeLens?) : String?
-      return nil if @query.blank?
+      # A VIEW can read the trigram index too (`body:`, free text), and with a blank bar this
+      # method used to return before the backlog probe — so during a capture burst the list
+      # under-reported with no signal at all, which is the exact silence `fts_backlog_note`
+      # exists to break. The CLI and MCP both drain-or-refuse for a view; the TUI must not
+      # stall, so it says so instead.
+      if @query.blank?
+        return nil unless (v = active_view) && (vf = SavedViews.filter(v, scope: lens))
+        return fts_backlog_note(vf, store)
+      end
       return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
@@ -456,7 +519,38 @@ module Gori::Tui
         return "no scope rules — nothing is in scope" unless lens.try(&.configured?)
         return "⇧S lens also narrows to in-scope" if @scope.try(&.active?)
       end
+      # Same reasoning as the ⇧S line above, one lens over: a view ANDs its own query over
+      # whatever is typed, so a bar the operator can read in full still does not explain the
+      # empty list. Named LAST because a broken regex or a dropped term is a defect in what they
+      # just typed, while this one is a standing mode they may have set days ago.
+      if v = active_view
+        return "v:#{v.name} also narrows to #{v.query}"
+      end
       nil
+    end
+
+    # A view whose stored query compiles to nothing. `reload` refuses to APPLY it (see there),
+    # so the list is empty on purpose and the operator needs to know it is the view that is
+    # broken and not their filter — otherwise the only symptom is a list that will not fill.
+    private def broken_view_note(view : SavedViews::View?) : String?
+      return nil unless view
+      "v:#{view.name} is not a usable query — edit or pick another view"
+    end
+
+    # Why an active view legitimately matched nothing. The one case worth naming is provenance:
+    # `src:` matches NEITHER direction on a flow captured before gori recorded it (QL::CAVEATS
+    # says so), so `History` on a project older than that upgrade is empty however much traffic
+    # it holds — and an empty list is exactly what "there was no proxy traffic" looks like.
+    #
+    # Gated on the project ACTUALLY holding such rows (`pre_provenance_flows?`, a single rowid
+    # seek), not merely on it holding flows: said whenever a `src:` view came back empty it
+    # would be a false explanation on every modern project, which is worse than no note — the
+    # operator would go looking for an upgrade problem instead of at their view.
+    private def empty_view_note(view : SavedViews::View?, store : Store) : String?
+      return nil unless view
+      return nil unless QL.fields_used(view.query).any? { |f| f.name == "src" }
+      return nil unless store.pre_provenance_flows?
+      "flows captured before gori recorded provenance match no `src:` term — try All"
     end
 
     # `body:`/free-text read the trigram index, which is written OFF the capture commit
@@ -868,6 +962,18 @@ module Gori::Tui
     def start_query : Nil
       @querying = true
       @qcx = @query.size
+    end
+
+    # Replace the bar's contents wholesale, caret at the end. The one caller is `^E` in the view
+    # picker (runner/views.cr), which loads a saved view's query back into the bar to be edited —
+    # the ONLY place a view writes to @query, since picking one is a lens and deliberately leaves
+    # what the operator typed alone.
+    def set_query(text : String) : Nil
+      @query = text
+      @qcx = @query.size
+      @preedit = ""
+      @popup.close
+      @filter_dirty = true
     end
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
@@ -2065,6 +2171,18 @@ module Gori::Tui
       ensure_visible(list_h)
 
       if @rows.empty?
+        # NOTHING captured yet, and no typed query: the first-run card, whatever else is
+        # narrowing. A project opens with a default VIEW on (SavedViews.default_view), so
+        # without this the very first thing a new user saw was "no flows match the History +
+        # Repeater view" instead of the card telling them where to point their client — and
+        # naming the filter that excluded nothing is useless when there was nothing to exclude.
+        # A typed query is the one exception: the operator just wrote it and is owed the answer
+        # that it matched nothing.
+        if @no_flows && @query.blank?
+          list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
+          TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
+          return
+        end
         # Mirror Issues/Probe: a recovery hint under the message. The QL-clear
         # cue only applies to a real query (not a Scope-lens-only empty set, which
         # ⇧S toggles off), so branch on @querying / @query before filtering?.
@@ -2072,10 +2190,21 @@ module Gori::Tui
         # set is caused by the Scope lens or no traffic, where "esc clears the filter"
         # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
-          if !@query.blank?
+          if @view_broken
+            # FIRST, ahead of the bar: the list is empty because `reload` refused to apply the
+            # view, so every other hint here would send the operator to a control that is not
+            # the problem.
+            {@view_note || "the active view is not a usable query", "v picks another view"}
+          elsif !@query.blank?
             # An INVALID query (all terms bad, or a broken regex) reads as "no flows match"
-            # unless we say why — @query_note distinguishes it from a genuine empty result.
+            # unless we say why — @query_note distinguishes it from a genuine empty result, and
+            # names the view when a view is also narrowing.
             {@query_note || "no flows match", @querying ? "esc clears the filter" : "/ to edit the filter"}
+          elsif v = active_view
+            # A view with a blank bar. Named before the Scope lens for the same reason the bar
+            # is: it is the more specific of the two, and "⇧S clears the scope lens" on a
+            # view-emptied list points at the wrong control.
+            {@view_note || "no flows match the #{v.name} view", "v selects a view — All shows everything"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no flows in scope", "⇧S clears the scope lens"}
           else
@@ -2661,6 +2790,11 @@ module Gori::Tui
       scope_on = @scope.try(&.active?) == true
       chips << (scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted})
       chips << {"f:follow", @follow ? Theme.accent : Theme.muted}
+      # LEFT of `f:follow` — the chain draws rightmost-first, so it is pushed after it. Always
+      # shown, like the scope chip and for the same reason: a mode nothing advertises is a mode
+      # nobody finds. Accent when a view is narrowing, muted `v:All` when none is, so the key is
+      # visible before it is ever used.
+      chips << view_chip(screen)
       chips << {mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
 
@@ -2689,6 +2823,20 @@ module Gori::Tui
     # which is why it needed a `right_x` and its own too-narrow guard; as a string it joins
     # the same chain as its neighbours and `Frame.right_text_chain` drops it on a narrow bar
     # for the same reason it drops any of them.
+    # The widest a view NAME may render in the chip. Every other chip on this bar has a bounded
+    # label; a view's is operator-typed, and `Frame.right_text_chain` drops an overlong chip
+    # WITHOUT advancing its cursor — so an untruncated name would silently hand its slot to the
+    # mark chip, and shrink the query readout beside it for nothing.
+    VIEW_CHIP_NAME_MAX = 14
+
+    private def view_chip(screen : Screen) : {String, Color}
+      if v = active_view
+        {"v:#{screen.fit(v.name, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
+      else
+        {"v:#{SavedViews.all_view.name}", Theme.muted}
+      end
+    end
+
     private def mark_chip_text : String?
       return nil if @marks.empty?
       hidden = marked_hidden_count

@@ -92,6 +92,11 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
   건너뜁니다. Pending 플로우가 `status:`와 `-status:` 양쪽에서 빠지는 것과 같습니다. 업그레이드
   이후에 캡처된 플로우만 이 값을 가집니다.
 
+`src:`로 흔히 하는 두 가지 좁히기는 **뷰**로도 준비돼 있습니다. History에서 `v`를 눌러
+`History`(`src:proxy`)나 `History + Repeater`를 고르면, 다른 필터를 입력하는 동안에도 목록이
+계속 좁혀진 채로 있습니다. 프로젝트는 `History + Repeater`로 열립니다.
+[뷰](/ko/guide/proxy/#views)를 보세요.
+
 ## 스코프: `scope:in` / `scope:out` {#scope-in-scope-out}
 
 `scope:in`은 프로젝트 스코프 안쪽의 플로를 고릅니다 — TUI의 `⇧S` 렌즈와

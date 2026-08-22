@@ -100,6 +100,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 |------|---------|
 | `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` — `proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, … — so a flow gori made is never read back as evidence about the target. Filter with `src:` |
 | `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows |
+| `list_views` | The project's History [views](/guide/proxy/#views) — named QL queries `list_history{view}` applies as a lens, ANDed over `query` rather than replacing it. Seven built-ins (`All`, `History`, `History + Repeater` — the default — `WebSocket`, `gRPC`, `SSE`, `Errors`), then the global library, then the project's own; `active` marks the one the TUI is showing, which does **not** apply to `list_history` — that filters only by the `view` you pass it |
 | `get_flow` | Full request + response for one flow |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
@@ -142,6 +143,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope` — `project` (default) or `global`, which applies in every project |
+| `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope` — `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
 | `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file into History |
 | `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |

@@ -20,6 +20,39 @@ module Gori::Tui
       @history.set_scope(@host.session.scope)
       @history.set_colormarker(@host.session.colormarker)
       @query_reload_at = nil.as(Time::Instant?)
+      # A view that has gone missing since it was picked. Held rather than announced here: this
+      # runs while the shell is still booting, where a status line is overwritten before anyone
+      # reads it. `on_enter` says it at the moment the operator actually looks at History.
+      @lost_view_key = resolve_active_view.as(String?)
+    end
+
+    # Read the project's persisted active view (#776) into the list.
+    #
+    # Returns the KEY that went missing, if any — one naming a view a peer deleted, or one left
+    # by a project the operator has since switched away from. The caller says so; the list falls
+    # back to All either way, because a filter silently applied by a view that is gone and a
+    # filter silently dropped are both worse than a sentence.
+    def resolve_active_view : String?
+      store = @host.session.store
+      key = store.setting(SavedViews::ACTIVE_KEY)
+      if key.nil? || key.empty?
+        # Nobody has chosen yet — `default_view`, not nil. Not persisted here: the same answer
+        # is what `gori run history` and MCP compute, and writing it would take a store write on
+        # every first open (and fail on a read-only one) to record a decision nobody made.
+        @history.set_view(SavedViews.default_view(store))
+        return nil
+      end
+      if found = SavedViews.find(store, key)
+        @history.set_view(found)
+        return nil
+      end
+      @history.set_view(nil)
+      # Clear the pointer as well as the lens. Left in place it would resurrect the moment a
+      # peer re-created a view that happened to land on the same id — which is exactly the
+      # collision the never-reused id counters exist to prevent, and not a promise this key
+      # should be relying on.
+      SavedViews.set_active(store, nil)
+      key
     end
 
     def view : HistoryView
@@ -352,10 +385,40 @@ module Gori::Tui
     end
 
     def on_enter : Nil
+      # Re-resolve BEFORE the reload, and not only in `on_external_change`: the runner
+      # dispatches that to `@tabs[@active_tab]` alone, so a peer deleting the active view while
+      # the operator sat on another tab left History filtering by a view that no longer exists —
+      # no status line, and no `●` on any picker row to explain it.
+      had = @history.active_view
+      lost = resolve_active_view
       @history.reload(@host.session.store) # catch peer captures while we were elsewhere
+      if had && @history.active_view.nil?
+        @lost_view_key = nil
+        @host.status("the #{had.name} view is gone — showing All")
+      elsif !@lost_view_key.nil? || !lost.nil?
+        # The boot case: nothing was being shown yet, so there is no before/after to compare —
+        # the dangling pointer itself is the signal, and this is the first moment the operator
+        # is actually looking at History (a status set during startup is overwritten unread).
+        @lost_view_key = nil
+        @host.status("the saved view this project had is gone — showing All")
+      end
     end
 
     def on_external_change : Nil
+      # A peer can create, edit or DELETE a view between frames — through the CLI, through MCP,
+      # or from another gori against the same project. Re-resolving here (rather than only at
+      # construction) is what keeps the chip and the list agreeing with the stores.
+      #
+      # The comparison is against the view we were SHOWING, not against the pointer: a peer that
+      # deletes the active view clears the `history_view` key on its way out (both `gori run
+      # views rm` and MCP `delete_view` do), so by the time this runs there is no dangling key
+      # left to notice — only a list that just silently got wider. Which is the one direction
+      # worth a sentence.
+      had = @history.active_view
+      resolve_active_view
+      if had && @history.active_view.nil?
+        @host.status("the #{had.name} view is gone — showing All")
+      end
       @history.reload(@host.session.store)
       @history.refresh_detail(@host.session.store) if @host.overlay == :detail # peer filled the open flow
     end
@@ -580,6 +643,13 @@ module Gori::Tui
       msg = "copied #{urls.size} URL#{urls.size == 1 ? "" : "s"} to clipboard (#{written}b)#{Clipboard.note(written, text)}"
       msg += " — #{ids.size - urls.size} no longer available" if urls.size < ids.size
       @host.status(msg)
+    end
+
+    # Load `text` into the filter bar (see HistoryView#set_query) and re-run the list, so the
+    # row count beside the bar answers for the new query before the operator touches a key.
+    def set_history_query(text : String) : Nil
+      @history.set_query(text)
+      @history.reload(@host.session.store)
     end
 
     def history_query : Nil

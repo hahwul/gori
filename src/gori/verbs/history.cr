@@ -39,6 +39,19 @@ module Gori
         "history.toggle-follow", "Toggle follow", "Follow newest flows (tail) on/off",
         Verb::Scope::Body, [Verb::Chord.new("f")], available: in_history, group: :view) { |ctx| ctx.toggle_follow; nil }
 
+      # `v` is a bare-key (L1) claim, argued the same way `t` is below. A view is the answer to
+      # "what am I looking at", asked every time the operator returns to the tab and every time
+      # a list is unexpectedly empty — and unlike the query bar it is a MODE, so the gesture is
+      # pick-and-forget rather than type. It sits beside `f` on the filter row because both are
+      # list-shape toggles rather than actions on a flow.
+      #
+      # Free as both a chord and a menu key across Scope::Body (see the note on `t`). Gated by
+      # `in_history` because Body is shared with the Project and Comparer tabs.
+      r.register Verb::Definition.new(
+        "history.view", "View…", "Pick a History view — a saved filter the list narrows to, on top of the filter bar",
+        Verb::Scope::Body, [Verb::Chord.new("v")],
+        available: in_history, mnemonic: 'v', group: :view) { |ctx| ctx.history_view_pick; nil }
+
       # --- multi-select marks (#442) ---
       # Marks make the EXISTING space menu act on N flows — every batch verb below reads
       # ctx.selected_flow_ids ("marks if any, else the cursor row"), so there are no
@@ -46,11 +59,11 @@ module Gori
       #
       # `t` is a bare-key (L1) claim against the L3-by-default budget in docs/guide/hotkeys:
       # marking is a many-times-per-minute gesture during triage, the same argument that
-      # earns `y` (copy) and `f` (follow) theirs. It is also mutt's tag key. NOT `x`/`v`:
-      # `x` is already a Scope::Body chord (project.select-line) and `v` a Body menu key
-      # (project.clear-selection) — both gated to other tabs at runtime, but
+      # earns `y` (copy) and `f` (follow) theirs. It is also mutt's tag key. NOT `x`: it is
+      # already a Scope::Body chord (project.select-line) — gated to another tab at runtime, but
       # validate_menu_keys!/keymap_spec don't know that (see the project.copy note in
-      # verbs/core.cr:124).
+      # verbs/core.cr:124). (`v` was listed here too, back when project.clear-selection was a
+      # Body menu key; it moved to Scope::ProjectDesc, and `v` is now history.view below.)
       r.register Verb::Definition.new(
         "history.mark-toggle", "Mark flow", "Mark/unmark this flow and step to the next older one — the space menu then acts on every marked flow",
         Verb::Scope::Body, [Verb::Chord.new("t")],

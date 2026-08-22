@@ -142,6 +142,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 |--------|-------------|
 | `-q`, `--query=QL` | Query-language filter (also accepted positionally) |
 | `-n`, `--limit=N` | Max rows (default 50) |
+| `--view=NAME` | Apply a saved [view](#run-views) — its query is **ANDed with** `-q`, never replacing it, exactly as the TUI's `v` picker layers over the filter bar. An unknown name is refused (and names the ones that exist) rather than ignored. Listing only |
 | `--in-scope` | Only flows in the project's configured scope — the TUI's ⇧S lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--lenient` | Don't refuse a query naming an unknown field — search that token as text |
 | `--format=FMT` | `text`, `json` / `jsonl` (both JSON-Lines), or `har` |
@@ -820,6 +821,36 @@ gori run colormarker add --when 'method:DELETE' --color hotpink
 The name is the identity — it is what a rule's `--color` stores and what the picker shows — so it is lowercased, must be unique, and may not be one of the built-in words. `update` takes either half alone.
 
 Deleting or **renaming** a colour deliberately does **not** rewrite the rules that name it: they keep the reference and fall back to a visible default, so re-adding the colour restores them. gori cannot reach every project's database from here, and a half-applied cascade would be worse than a dangling name. Recolouring is different — a rule references a colour by name, so it follows the new hex everywhere.
+
+### run views
+
+Manage **History views** — named QL queries the History list narrows to. A view is a *lens*: it is ANDed over whatever else is filtering rather than replacing it, so `gori run history --view History -q 'status:5xx'` means both. Seven built-ins ship with every project — the source trio `All` / `History` (`src:proxy`) / `History + Repeater` (the default), plus `WebSocket`, `gRPC`, `SSE` and `Errors` — and saved views live in two stores exactly as colour rules do.
+
+```bash
+gori run views                                              # list; the TUI's active view is marked ●
+gori run views --scope global --format json
+gori run views add 'acme errors' -q 'host:api.acme.test status:5xx'
+gori run views add 'proxied' -q 'src:proxy' --scope global
+gori run views set 'acme errors' -q 'status:>=500'          # new query, same name
+gori run views rename 'acme errors' --to 'acme 5xx'
+gori run views scope 'acme 5xx' --to global                 # re-home between the two stores
+gori run views rm 'acme 5xx' --scope global
+```
+
+| Option | Description |
+|--------|-------------|
+| `-q`, `--query=QL` | Required on `add` and `set`. The view's query, in the same History QL the filter bar and `run history -q` take |
+| `--scope=SCOPE` | `project` (default) or `global`. A global view lives in `settings.json` and appears in every project |
+| `--to=NAME` | On `rename`: the new name |
+| `--to=SCOPE` | On `scope`: the destination store, `project` or `global` |
+
+A view is addressed by **name**, because that is what `--view` and the picker take — an id would be a second spelling of one thing. Names are unique *within* a scope and may collide across them; `--view` then resolves **project → global → built-in**, the same precedence project env vars and host overrides already follow. Every mutator takes `--scope` for the same reason `colormarker rm` does: the two stores are independently addressable, and guessing which one you meant would edit the wrong view. The listing prints the scope as a `G`/`P`/`·` prefix.
+
+The query is validated **on the way in**, not when it runs. A query naming an unknown field, holding a broken regex, or one whose every term would be dropped is refused — that last one is the important one, because a view that narrows nothing would still show a `v:` chip claiming it does. The same check runs at all three surfaces, so a view the TUI refuses is not one the CLI accepts.
+
+Built-in views cannot be edited or deleted, and a saved view may not take a built-in's name — it would shadow it, and `--view` could never reach the built-in again.
+
+Deleting the view a project is currently looking through drops that project back to `All`. Another project's pointer at a *global* view you delete stays inert: ids come from a monotonic counter and are never reused, so nothing can inherit it. See [Proxy & History](/guide/proxy/#views) for the interactive picker.
 
 ### run project
 

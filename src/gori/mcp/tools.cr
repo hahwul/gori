@@ -51,6 +51,7 @@ require "./tools/ql"
 require "./tools/repeater"
 require "./tools/rules"
 require "./tools/color_rules"
+require "./tools/saved_views"
 require "./tools/scope"
 require "./tools/send"
 require "./tools/sequence"
@@ -122,6 +123,7 @@ module Gori
         "minimize_repeater",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_color_rule", "update_color_rule", "delete_color_rule", "set_color_rule_enabled", "move_color_rule",
+        "create_view", "update_view", "delete_view",
         "create_custom_color", "update_custom_color", "delete_custom_color",
         "create_extract_rule", "update_extract_rule", "delete_extract_rule", "set_extract_rule_enabled",
         "create_note", "update_note", "delete_note",
@@ -697,6 +699,7 @@ module Gori
           list_sequence_tools j
           list_rules_tools j
           list_color_rules_tools j
+          list_saved_views_tools j
           list_projects_tools j
           list_scope_tools j
           list_import_tools j
@@ -900,6 +903,7 @@ module Gori
         when "sequence_analyze"        then sequence_analyze(h)
         when "list_rules"              then list_rules(h)
         when "list_color_rules"        then list_color_rules(h)
+        when "list_views"              then list_views(h)
         when "preview_color_rule"      then preview_color_rule(h)
         when "list_custom_colors"      then list_custom_colors
         when "list_extract_rules"      then list_extract_rules
@@ -1004,6 +1008,9 @@ module Gori
         when "set_color_rule_enabled"    then gated { set_color_rule_enabled(h) }
         when "move_color_rule"           then gated { move_color_rule(h) }
         when "delete_color_rule"         then gated { delete_color_rule(h) }
+        when "create_view"               then gated { create_view(h) }
+        when "update_view"               then gated { update_view(h) }
+        when "delete_view"               then gated { delete_view(h) }
         when "create_custom_color"       then gated { create_custom_color(h) }
         when "update_custom_color"       then gated { update_custom_color(h) }
         when "delete_custom_color"       then gated { delete_custom_color(h) }

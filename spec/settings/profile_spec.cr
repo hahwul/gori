@@ -68,7 +68,8 @@ private MAXIMAL_PROFILE = <<-JSON
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
     "rewriter": { "next_rule_id": 2, "rules": [] },
-    "colormarker": { "next_rule_id": 2, "rules": [] }
+    "colormarker": { "next_rule_id": 2, "rules": [] },
+    "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
   }
   JSON
 
@@ -108,6 +109,8 @@ private def with_every_section_populated(&)
   next_id = Gori::Settings.rewriter_next_rule_id
   color_rules = Gori::Settings.colormarker_rules
   color_next_id = Gori::Settings.colormarker_next_rule_id
+  views = Gori::Settings.saved_views
+  views_next_id = Gori::Settings.saved_views_next_id
   # `parse_mine_prefs`/`parse_discover_prefs` end with `keep_alive = obj["keep_alive"]? != false`,
   # so a mine/discover block that omits the key forces BOTH to true — a leak this helper exists
   # to prevent, and one no other reset in this file covers.
@@ -147,6 +150,8 @@ private def with_every_section_populated(&)
     Gori::Settings.rewriter_next_rule_id = next_id
     Gori::Settings.colormarker_rules = color_rules
     Gori::Settings.colormarker_next_rule_id = color_next_id
+    Gori::Settings.saved_views = views
+    Gori::Settings.saved_views_next_id = views_next_id
     Gori::Settings.mine_keep_alive = mine_keep_alive
     Gori::Settings.discover_keep_alive = discover_keep_alive
   end

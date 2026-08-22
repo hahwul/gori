@@ -34,6 +34,8 @@ private def with_rule_home(&)
   prev_cm = Gori::Settings.colormarker_rules
   prev_cm_next = Gori::Settings.colormarker_next_rule_id
   prev_colors = Gori::Settings.colormarker_colors
+  prev_views = Gori::Settings.saved_views
+  prev_views_next = Gori::Settings.saved_views_next_id
   # Every example here hands `Settings.load` a file holding nothing BUT its own section, so the
   # load resets the rest to factory defaults. Put back the ones a later spec file would notice.
   prev_theme = Gori::Settings.theme
@@ -49,6 +51,8 @@ private def with_rule_home(&)
     Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
     Gori::Settings.colormarker_next_rule_id = 1_i64
     Gori::Settings.colormarker_colors = [] of Gori::Settings::ColormarkerColor
+    Gori::Settings.saved_views = [] of Gori::Settings::SavedView
+    Gori::Settings.saved_views_next_id = 1_i64
     yield
   ensure
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
@@ -59,6 +63,8 @@ private def with_rule_home(&)
     Gori::Settings.colormarker_rules = prev_cm
     Gori::Settings.colormarker_next_rule_id = prev_cm_next
     Gori::Settings.colormarker_colors = prev_colors
+    Gori::Settings.saved_views = prev_views
+    Gori::Settings.saved_views_next_id = prev_views_next
     Gori::Settings.theme = prev_theme
     Gori::Settings.bind_port = prev_port
     Gori::Settings.env_vars = prev_env
@@ -121,6 +127,26 @@ end
 
 private def disk_colormarker_color_names : Array(String)
   disk_section("colormarker")["colors"].as_a.map(&.["name"].as_s)
+end
+
+# One view spelled the way `serialize_saved_views` spells it, for the reason `rw_entry` above
+# records: a fixture in a private spelling would let the merge key on something the parser
+# renumbers and still pass.
+private def sv_entry(id : Int32, name : String, query : String) : String
+  %({"id":#{id},"name":"#{name}","query":"#{query}"})
+end
+
+private def write_saved_views(next_id : Int32, views : Array(String)) : Nil
+  File.write(Gori::Settings.path,
+    %({"saved_views":{"next_view_id":#{next_id},"views":[#{views.join(",")}]}}))
+end
+
+private def disk_saved_view_ids : Array(Int64)
+  disk_section("saved_views")["views"].as_a.map(&.["id"].as_i64)
+end
+
+private def disk_saved_view_names : Array(String)
+  disk_section("saved_views")["views"].as_a.map(&.["name"].as_s)
 end
 
 describe "Settings — the global rewriter section against a concurrent writer" do
@@ -423,6 +449,69 @@ describe "Settings — the global colormarker section against a concurrent write
 
       disk_colormarker_ids.should eq([1_i64, 2_i64])
       disk_section("colormarker").as_h.has_key?("colors").should be_false
+    end
+  end
+end
+
+# `saved_views` is the third `RULE_SECTION_LISTS` member, and the first whose counter is NOT
+# spelled `next_rule_id` — which is why `RULE_SECTION_COUNTERS` is keyed by section. Merged by
+# MAX like the other two: a project's `history_view` pointer is a global view id, so two
+# processes minting the same number would silently point one project at the other's view.
+describe "Settings — the global saved_views section against a concurrent writer" do
+  it "does not mint an id a peer minted while this process held its snapshot" do
+    with_rule_home do
+      write_saved_views(2, [sv_entry(1, "a", "src:proxy")])
+      Gori::Settings.load
+      Gori::Settings.saved_views_next_id.should eq(2_i64)
+
+      write_saved_views(3, [sv_entry(1, "a", "src:proxy"), sv_entry(2, "b", "host:cdn")])
+
+      Gori::Settings.add_saved_view("c", "method:DELETE").should eq(3_i64)
+      disk_saved_view_ids.should eq([1_i64, 2_i64, 3_i64])
+    end
+  end
+
+  it "merges the counter by high-water mark under its OWN key, not next_rule_id" do
+    with_rule_home do
+      write_saved_views(2, [sv_entry(1, "a", "src:proxy")])
+      Gori::Settings.load
+      write_saved_views(9, [sv_entry(1, "a", "src:proxy"), sv_entry(8, "b", "host:cdn")])
+
+      Gori::Settings.add_saved_view("c", "method:DELETE")
+      # 9 (disk) vs our 3 — the peer's counter wins, or the next mint reuses a live id. A
+      # section whose counter key the merge did not recognise would take OUR number instead.
+      disk_section("saved_views")["next_view_id"].as_i64.should be >= 9_i64
+      disk_section("saved_views").as_h.has_key?("next_rule_id").should be_false
+    end
+  end
+
+  it "keeps a peer's view when this process deletes a different one" do
+    with_rule_home do
+      write_saved_views(3, [sv_entry(1, "a", "src:proxy"), sv_entry(2, "b", "host:cdn")])
+      Gori::Settings.load
+
+      write_saved_views(4, [sv_entry(1, "a", "src:proxy"), sv_entry(2, "b", "host:cdn"),
+                            sv_entry(3, "c", "status:404")])
+
+      Gori::Settings.delete_saved_view(1_i64).should be_true
+      # We deleted 1; the peer added 3. Both dispositions honoured — a whole-section
+      # `pick_changed` would have thrown one of them away.
+      disk_saved_view_ids.should eq([2_i64, 3_i64])
+      disk_saved_view_names.should eq(["b", "c"])
+    end
+  end
+
+  it "keeps a peer's ADD when this process edits another view in the same window" do
+    with_rule_home do
+      write_saved_views(3, [sv_entry(1, "a", "src:proxy"), sv_entry(2, "b", "host:cdn")])
+      Gori::Settings.load
+
+      write_saved_views(4, [sv_entry(1, "a", "src:proxy"), sv_entry(2, "b", "host:cdn"),
+                            sv_entry(3, "c", "status:404")])
+
+      Gori::Settings.update_saved_view(2_i64, "b2", "host:img").should be_true
+      disk_saved_view_ids.should eq([1_i64, 2_i64, 3_i64])
+      disk_saved_view_names.should eq(["a", "b2", "c"])
     end
   end
 end
