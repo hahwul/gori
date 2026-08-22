@@ -59,11 +59,16 @@ Saved chains can call each other. A recursive definition fails that step with a 
 |----------|----------|
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
-| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (headerless, RFC 1951) |
+| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
+| **Serialization** | `msgpack-decode`, `cbor-decode` — a binary document rendered as JSON text |
 | **Token** | `jwt-decode` (header + payload; signature shown, not verified) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
+
+`brotli-decompress` and `zstd-decompress` are decompress-only, and that is the shape of the dependency rather than an omission: gori links the brotli *decoder* library and wraps libzstd's decompressor, because what a proxy needs is to read what an origin sent. Both accept the `br` and `zstd` aliases a `Content-Encoding` spells them with, and both tolerate a truncated stream — the ordinary case for a body copied out of a capture-capped flow. A gori built with `-Dwithout_native_codecs` still knows the names, and says that is the build it is rather than reporting a typo.
+
+`msgpack-decode` and `cbor-decode` read a binary document somebody else wrote and render it as JSON — one direction, and the one that matters. The JSON is a *projection*, not a re-encoding: what JSON has no room for comes back named rather than folded away (`{"$bin": …}` for a byte string, `{"$tag": …}` for a CBOR tag, `{"$ext": …}` for a MessagePack extension, a decimal string for an integer too wide for a JSON number). A document that runs out of input renders what it read and marks the spot with `{"$partial": …}`, which is the ordinary case for a body the capture cap cut short. One ambiguity comes with the projection: a document whose own map key is literally `$bin` or `$tag` renders the shape a wrapper does — escaping every key in every body to defend against the one body that does this would make the common body harder to read.
 
 A few entries only go one way, and the chain will not undo them. `shell-escape` and `powershell-escape` wrap a value in a quoted literal. `homoglyph` swaps ASCII letters for Unicode lookalikes, and is partial: a letter with no established confusable is left alone. `typo` is a generator rather than a transform, emitting one near-miss variant per line, built from omissions, adjacent-character swaps, and QWERTY neighbour keys.
 

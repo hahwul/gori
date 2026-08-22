@@ -285,6 +285,51 @@ describe Gori::Decoder do
     end
   end
 
+  describe "serialization" do
+    it "renders a MessagePack document as JSON, naming what JSON cannot hold" do
+      # {"a": 1, "b": <2 raw bytes>}
+      doc = Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe]
+      String.new(conv_bytes("msgpack-decode", doc)).should eq(%({"a":1,"b":{"$bin":"//4="}}))
+      String.new(conv_bytes("msgpack", doc)).should eq(%({"a":1,"b":{"$bin":"//4="}}))
+    end
+
+    it "keeps a partial document and fails only one that decoded nothing" do
+      # `drain`'s rule, one format over: a body cut short by the capture cap is the ordinary
+      # case, and what it did decode is what the operator came for.
+      String.new(conv_bytes("msgpack-decode", Bytes[0x93, 0x01, 0x02]))
+        .should eq(%([1,2,{"$partial":"truncated"}]))
+      expect_raises(Gori::Decoder::DecoderError, /not a MessagePack document/) do
+        conv_bytes("msgpack-decode", Bytes[0xc1])
+      end
+      # A converter is where the operator ALREADY decided what the bytes are — they typed the
+      # name — so it keeps far more than the content-type-driven panes do, and fails only when
+      # the reader could not take the very first byte.
+      String.new(conv_bytes("msgpack-decode", %({"a":1}).to_slice)).should eq("123")
+    end
+
+    it "does not mistake a document that IS null for one that failed" do
+      # The failure rule is "rendered only `null` AND did not finish". A top-level null is a
+      # legitimate one-byte document in both formats and finishes cleanly, so it survives —
+      # the two halves of that rule are what keep it apart from a first byte the reader could
+      # not take.
+      String.new(conv_bytes("msgpack-decode", Bytes[0xc0])).should eq("null")
+      String.new(conv_bytes("cbor-decode", Bytes[0xf6])).should eq("null")
+    end
+
+    it "renders a CBOR document, naming what JSON cannot hold" do
+      # {"a": 1} and a tagged bignum, the two shapes the projection is about.
+      String.new(conv_bytes("cbor-decode", "a161610 1".gsub(" ", "").hexbytes)).should eq(%({"a":1}))
+      String.new(conv_bytes("cbor", "c249400000000000000000".hexbytes))
+        .should contain(%("$bignum":"1180591620717411303424"))
+    end
+
+    it "chains, which is the point of it being a converter" do
+      # base64 in, JSON out — the shape of a body pasted out of a header or a JSON string.
+      chain = Gori::Decoder.run(REG, "kQE=".to_slice, "base64-decode > msgpack-decode")
+      String.new(chain.output.not_nil!).should eq("[1]")
+    end
+  end
+
   describe "compression" do
     it "gzip round-trips" do
       gz = conv_bytes("gzip-compress", "hello world".to_slice)
@@ -294,6 +339,68 @@ describe Gori::Decoder do
     it "zlib round-trips" do
       z = conv_bytes("zlib-compress", "hello world".to_slice)
       String.new(conv_bytes("zlib-decompress", z)).should eq "hello world"
+    end
+
+    # gori links the brotli DECODER and wraps libzstd's decompressor only — what a proxy needs
+    # is to read what an origin sent — so these two cannot be round-tripped through the
+    # workbench. The fixtures are real streams produced by `brotli -q 11` and `zstd -19`,
+    # embedded rather than shelled out for so the suite does not need either tool installed.
+    it "brotli-decompresses a real `Content-Encoding: br` stream" do
+      br = "2128000468656c6c6f20776f726c6403".hexbytes
+      String.new(conv_bytes("brotli-decompress", br)).should eq "hello world"
+      String.new(conv_bytes("br", br)).should eq "hello world" # the alias a header spells it with
+    end
+
+    it "zstd-decompresses a real `Content-Encoding: zstd` stream" do
+      zs = "28b52ffd240b59000068656c6c6f20776f726c6468691eb2".hexbytes
+      String.new(conv_bytes("zstd-decompress", zs)).should eq "hello world"
+      String.new(conv_bytes("zstd", zs)).should eq "hello world"
+    end
+
+    it "turns a buffer that was never one of these streams into a FAILED step, not a raise" do
+      # Through the chain, which is what every surface runs: `DecoderError` is what `Chain.run`
+      # converts into a Failed step, and anything else would unwind into a TUI draw.
+      %w[brotli-decompress zstd-decompress].each do |name|
+        res = Gori::Decoder.run(REG, "not a compressed stream at all".to_slice, name)
+        res.steps.first.state.failed?.should be_true
+        res.steps.first.error.to_s.should contain("decompress failed")
+        res.output.should be_nil
+      end
+    end
+
+    it "lets a stream that really decodes to nothing through" do
+      # `zstd -19` over an empty file. The libraries answer a corrupt buffer and a valid empty
+      # payload identically — no bytes, no raise — so the reader's own "did this end cleanly"
+      # is what separates them. Guessing from the output length gets one of the two wrong.
+      empty = "28b52ffd240001000099e9d851".hexbytes
+      conv_bytes("zstd-decompress", empty).size.should eq(0)
+    end
+
+    it "keeps a truncated stream rather than calling it a failure" do
+      # `drain`'s rule: a body cut short by the capture cap is the ordinary case, and what it
+      # did decode is what the operator came for.
+      next unless Gori::Proxy::Codec::Zstd::AVAILABLE
+      full = "28b52ffd240b59000068656c6c6f20776f726c6468691eb2".hexbytes
+      conv_bytes("zstd-decompress", full[0, full.size - 4]).size.should be > 0
+    end
+
+    it "resolves every new name, and says why on a build that cannot run them" do
+      # `Registry#[]` RAISES on a miss, so `should_not be_nil` on its result asserts nothing —
+      # `[]?` is the one that can answer "missing". A `-Dwithout_native_codecs` build must not
+      # make `br` read as a typo: the name resolves and the converter carries the reason,
+      # prefixed with its own name because `Fuzz::Plan` and the Repeater collect several of
+      # these into one list.
+      %w[brotli-decompress brotli br unbrotli zstd-decompress zstd unzstd].each do |name|
+        REG[name]?.should_not be_nil
+      end
+      available = Gori::Proxy::Codec::Brotli::AVAILABLE
+      %w[brotli-decompress zstd-decompress].each do |name|
+        reason = REG[name].unusable
+        reason.nil?.should eq(available)
+        reason.try(&.starts_with?("#{name}: ")).should eq(available ? nil : true)
+      end
+      # Nothing else in the catalog claims to be unusable.
+      REG.each { |c| c.unusable.should be_nil } if available
     end
 
     it "raw deflate round-trips (RFC 1951, no zlib/gzip wrapper)" do

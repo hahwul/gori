@@ -79,6 +79,31 @@ module Gori
       !!value.try(&.downcase.includes?("x-www-form-urlencoded"))
     end
 
+    # A binary DOCUMENT format gori can render — MessagePack or CBOR. Precise, not permissive,
+    # and that split is the same one `json?` documents: a permissive test is right for "is this
+    # worth trying" (a failed JSON parse costs one parse) and wrong for DISPATCH, which is what
+    # this is. Handing an arbitrary body to a binary reader because its content-type contained
+    # the word would render whatever the reader made of unrelated bytes.
+    #
+    # `application/cbor-seq` (RFC 8742) deliberately does NOT match: a sequence is several
+    # documents back to back, `Gori::Cbor` reads one, and rendering the first while dropping
+    # the rest is exactly the silent-truncation shape this codebase keeps finding.
+    def msgpack?(value : String?) : Bool
+      e = essence(value) || return false
+      e == "application/msgpack" || e == "application/x-msgpack" ||
+        e == "application/vnd.msgpack" || e.ends_with?("+msgpack")
+    end
+
+    def cbor?(value : String?) : Bool
+      e = essence(value) || return false
+      e == "application/cbor" || e.ends_with?("+cbor")
+    end
+
+    # :ditto: — either of them, for a caller that only has to decide whether the body is one.
+    def binary_document?(value : String?) : Bool
+      msgpack?(value) || cbor?(value)
+    end
+
     # Any `multipart/*` (the GraphQL upload spec and every ordinary file upload are
     # `multipart/form-data`; `multipart/mixed` carries an incremental-delivery response).
     def multipart?(value : String?) : Bool

@@ -102,4 +102,27 @@ describe Gori::MediaType do
       MT.boundary("multipart/form-data; boundary=graphql-9").should eq("graphql-9")
     end
   end
+  describe ".binary_document?" do
+    it "matches the spellings a msgpack or CBOR body actually carries" do
+      %w[application/msgpack application/x-msgpack application/vnd.msgpack
+        application/cbor application/senml+cbor application/vnd.acme+msgpack].each do |ct|
+        Gori::MediaType.binary_document?(ct).should be_true
+      end
+      Gori::MediaType.binary_document?("application/msgpack; charset=binary").should be_true
+    end
+
+    it "is a DISPATCH test, so it does not match a type that merely mentions one" do
+      # `json?` is permissive on purpose — a false positive there costs one failed parse. Here
+      # it costs a body rendered as whatever a binary reader made of unrelated bytes.
+      %w[text/plain application/json application/octet-stream text/cbor-ish
+        application/msgpackish application/json+msgpack-ish].each do |ct|
+        Gori::MediaType.binary_document?(ct).should be_false
+      end
+      Gori::MediaType.binary_document?(nil).should be_false
+    end
+
+    it "declines a CBOR SEQUENCE, which is several documents and not one" do
+      Gori::MediaType.cbor?("application/cbor-seq").should be_false
+    end
+  end
 end

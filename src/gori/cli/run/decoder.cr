@@ -142,13 +142,20 @@ module Gori
                   j.field "category", c.category.label
                   j.field "direction", c.direction.to_s.downcase
                   j.field "description", c.description
+                  # Non-null when this build cannot run the converter (a saved chain that
+                  # recurses, a native codec the build dropped). The NAME still resolves, which
+                  # is the point — a listing that showed it as ordinary would send an operator
+                  # to a step that fails later for a reason the listing already knew.
+                  j.field "unusable", c.unusable if c.unusable
                 end
               end
             end
           end)
         else
           registry.each do |c|
-            puts "#{c.name.ljust(22)}  #{c.category.label.ljust(11)}  #{c.direction.to_s.downcase.ljust(9)}  #{c.description}"
+            line = "#{c.name.ljust(22)}  #{c.category.label.ljust(11)}  #{c.direction.to_s.downcase.ljust(9)}  #{c.description}"
+            (u = c.unusable) && (line += "  [unusable: #{u}]")
+            puts line
           end
         end
       end

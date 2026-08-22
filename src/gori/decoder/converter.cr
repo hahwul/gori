@@ -4,8 +4,9 @@ module Gori
   # both drive it). A value flows through the chain as `Bytes` so binary results
   # (gzip, hash digests, base64/hex decode) stay first-class; text converters are
   # authored with the `text` builder, which wraps the lossless Bytes⇄String
-  # round-trip (the same invariant mcp/serialize relies on). Pure: depends only on
-  # Gori::Error + the stdlib.
+  # round-trip (the same invariant mcp/serialize relies on). Depends on Gori::Error, the
+  # stdlib, and the two leaf FFI codecs (`Proxy::Codec::Brotli`/`Zstd`) — the two
+  # `Content-Encoding`s a captured body arrives in that Crystal has no stdlib reader for.
   module Decoder
     # Structurally-invalid input (bad base64, odd-length hex, truncated gzip …).
     # Subclass of Gori::Error so the app's top-level rescue still classifies it, but
@@ -15,13 +16,14 @@ module Gori
     end
 
     enum Category
-      Encoding    # base64, url, hex, base32, ascii85, base58
-      Compression # gzip, zlib
-      Hash        # md5, sha1, sha224, sha256, sha384, sha512
-      Token       # jwt-decode
-      Escape      # html, json-string, unicode
-      Text        # rot13, upper, lower, reverse
-      Saved       # a named chain from the user's library, callable as one step (decoder/library.cr)
+      Encoding      # base64, url, hex, base32, ascii85, base58
+      Compression   # gzip, zlib, brotli, zstd
+      Serialization # msgpack, cbor — a binary document rendered as JSON text
+      Hash          # md5, sha1, sha224, sha256, sha384, sha512
+      Token         # jwt-decode
+      Escape        # html, json-string, unicode
+      Text          # rot13, upper, lower, reverse
+      Saved         # a named chain from the user's library, callable as one step (decoder/library.cr)
 
       def label : String
         to_s.downcase
@@ -81,9 +83,16 @@ module Gori
     end
 
     # bytes-in / bytes-out (gzip, zlib) — the raw form.
+    #
+    # `unusable` is passed through for a converter whose NAME must resolve even where it cannot
+    # run — the brotli and zstd decoders in a `-Dwithout_native_codecs` build. Registering them
+    # only when the libraries are linked would make `brotli` read as a typo on a build that
+    # deliberately dropped them; registering them unusable says which build the operator has.
+    # See `Converter#unusable`.
     def self.bytes(name : String, *aliases, category : Category,
-                   direction : Direction, description : String, &fn : Bytes -> Bytes) : Converter
-      Converter.new(name, alias_list(aliases), category, direction, description, fn)
+                   direction : Direction, description : String, unusable : String? = nil,
+                   &fn : Bytes -> Bytes) : Converter
+      Converter.new(name, alias_list(aliases), category, direction, description, fn, unusable)
     end
 
     # text-in / text-out (rot13, url-encode, html-escape …). The transform is

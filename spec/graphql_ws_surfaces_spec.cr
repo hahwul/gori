@@ -88,3 +88,35 @@ describe "GraphQL over WebSocket — the headless surfaces" do
     end
   end
 end
+
+# The shared headless projection carries a binary document too, so `gori run show --format json`
+# and MCP `get_flow` cannot grow separate ideas of what a msgpack body says.
+describe Gori::DecodedView do
+  it "emits a MessagePack response body as the same JSON the pane renders" do
+    json = JSON.build do |j|
+      j.object do
+        Gori::DecodedView.emit_json(j, target: "/rpc",
+          req_head: "POST /rpc HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, req_body: nil,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/msgpack\r\n\r\n".to_slice,
+          resp_body: Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe])
+      end
+    end
+    doc = JSON.parse(json)["binary_documents"].as_a
+    doc.size.should eq(1)
+    doc[0]["side"].as_s.should eq("response")
+    doc[0]["format"].as_s.should eq("msgpack")
+    doc[0]["complete"].as_bool.should be_true
+    doc[0]["json"].as_s.should eq(%({"a":1,"b":{"$bin":"//4="}}))
+  end
+
+  it "says nothing for a flow that carries none" do
+    json = JSON.build do |j|
+      j.object do
+        Gori::DecodedView.emit_json(j, target: "/", req_head: nil, req_body: nil,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+          resp_body: %({"a":1}).to_slice)
+      end
+    end
+    JSON.parse(json).as_h.has_key?("binary_documents").should be_false
+  end
+end

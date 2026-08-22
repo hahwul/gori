@@ -5,6 +5,8 @@ require "compress/zlib"
 require "compress/deflate"
 require "big"
 require "../cookie"
+require "../proxy/codec/brotli"
+require "../proxy/codec/zstd"
 
 module Gori::Decoder
   # The implementations that have no (or no convenient) stdlib equivalent, plus the
@@ -543,6 +545,70 @@ module Gori::Decoder
         raise DecoderError.new("decompress failed: #{ex.message}")
       end
       drain(reader)
+    end
+
+    # Brotli and zstd, the two `Content-Encoding`s a captured body arrives in that Crystal has
+    # no stdlib reader for. DECOMPRESS ONLY, and that is the shape of the dependency rather
+    # than an omission: gori links `libbrotlidec` (a decoder library — the encoder is a
+    # separate `libbrotlienc`) and wraps only libzstd's decompressor, because what the proxy
+    # needs is to READ what an origin sent. The workbench inherits exactly that.
+    #
+    # Both go through `decode_full`, whose second element is the only honest failure signal
+    # either format has. Neither library RAISES on a buffer that was never one of its streams:
+    # they hand back what they produced, which for garbage is nothing — and "nothing" also
+    # describes a valid stream of an empty payload. Guessing from the output length gets one of
+    # those two wrong whichever way it guesses, so the rule is `drain`'s, with the reader's own
+    # answer supplying the second half: produced nothing AND did not end cleanly is a failure;
+    # anything else is kept, truncated bodies included (which is the ordinary case for a body
+    # the capture cap cut short).
+    def brotli_decompress(data : Bytes) : Bytes
+      native("brotli") { Gori::Proxy::Codec::Brotli.decode_full(data, Gori::Decoder::MAX_OUT) }
+    end
+
+    def zstd_decompress(data : Bytes) : Bytes
+      native("zstd") { Gori::Proxy::Codec::Zstd.decode_full(data, Gori::Decoder::MAX_OUT) }
+    end
+
+    private def native(label : String, &) : Bytes
+      out, clean = yield
+      raise DecoderError.new("#{label} decompress failed: not a #{label} stream") if out.empty? && !clean
+      out
+    rescue ex : Gori::Error
+      raise ex if ex.is_a?(DecoderError)
+      raise DecoderError.new("#{label} decompress failed: #{ex.message}")
+    end
+
+    # MessagePack and CBOR rendered as JSON text (`Gori::Msgpack`, `Gori::Cbor`). Both readers
+    # never raise and never invent: a type JSON has no room for comes back named (`$bin`,
+    # `$ext`, `$tag`, `$bignum`), and a document that runs out of input renders what it read.
+    #
+    # Tolerance is `drain`'s rule, two formats over: a body that decoded PART of itself keeps
+    # what it produced (the ordinary case for a body cut short by the capture cap), and only
+    # one that produced nothing at all is a failure. `null` from an incomplete parse IS that
+    # nothing — the first byte was not a value the reader could take.
+    def msgpack_to_json(data : Bytes) : Bytes
+      document(Gori::Msgpack.render(data), "msgpack", "MessagePack")
+    end
+
+    def cbor_to_json(data : Bytes) : Bytes
+      document(Gori::Cbor.render(data), "cbor", "CBOR")
+    end
+
+    private def document(r : Gori::BinaryDocument::Rendering, label : String, name : String) : Bytes
+      # A converter is the one place the operator has ALREADY decided what the bytes are — they
+      # typed the name — so this is far more permissive than the content-type-driven panes: it
+      # fails only when the reader could not take the FIRST VALUE at all, and keeps everything
+      # else, truncation included.
+      #
+      # "The whole rendering is one marker" is what that looks like: a document that got
+      # anywhere renders a container or a scalar and carries its marker inside. (A body whose
+      # own top-level value is a map spelled `{"$partial": …}` renders the same text and is kept
+      # — it parsed, so `complete` is true. That collision is the one this projection accepts
+      # everywhere, and it errs toward keeping the document here.)
+      if !r.complete && r.json.starts_with?(%({"$partial"))
+        raise DecoderError.new("#{label} decode failed: not a #{name} document")
+      end
+      r.json.to_slice
     end
 
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).

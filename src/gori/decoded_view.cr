@@ -4,6 +4,10 @@ require "./jwt"
 require "./graphql"
 require "./graphql_ws"
 require "./form_data"
+require "./media_type"
+require "./binary_document"
+require "./msgpack"
+require "./cbor"
 
 module Gori
   # The single JSON projection of a flow's decoded protocols (SAML / JWT / GraphQL /
@@ -50,6 +54,8 @@ module Gori
           end
         end
       end
+      emit_binary_documents(j, req_head: req_head, req_body: req_body,
+        resp_head: resp_head, resp_body: resp_body, clip: clip)
       ws_ops = ws_messages ? GraphqlWs.from_messages(ws_messages) : [] of GraphqlWs::Frame
       if op = Graphql.from_flow(target, req_head, req_body)
         j.field "graphql" do
@@ -108,6 +114,39 @@ module Gori
               j.field "form", f.op.form.to_s.downcase
               emit_text(j, "query", f.op.query.scrub, clip)
               j.field "variables", f.op.variables.try(&.scrub)
+            end
+          end
+        end
+      end
+    end
+
+    # A body somebody SERIALIZED rather than wrote — MessagePack or CBOR — as the JSON
+    # projection its reader produces. Headless surfaces get the same rendering the detail pane
+    # shows, which is the whole reason this module exists: `gori run show --format json` and
+    # MCP `get_flow` must not each grow their own idea of what a body says.
+    #
+    # `json` is the projection as TEXT, not a nested object: it can hold a value JSON has no
+    # literal for (a `$bin` wrapper, a decimal string for a wide integer) and a DUPLICATE member
+    # (the same map key twice, which is a fact about the body), and the reader that receives it
+    # is entitled to see exactly what the pane shows. `complete` is false when the document
+    # ended mid-value — a body cut short by the capture cap is the ordinary case, and
+    # `BinaryDocument.render` is what tells that apart from a header that simply lied.
+    private def emit_binary_documents(j : JSON::Builder, *, req_head : Bytes?, req_body : Bytes?,
+                                      resp_head : Bytes?, resp_body : Bytes?, clip : Int32?) : Nil
+      found = [] of {String, String, BinaryDocument::Rendering}
+      { {"request", req_head, req_body}, {"response", resp_head, resp_body} }.each do |(side, head, body)|
+        format, r = BinaryDocument.render(body, MediaType.of(head)) || next
+        found << {side, format, r}
+      end
+      return if found.empty?
+      j.field "binary_documents" do
+        j.array do
+          found.each do |(side, format, r)|
+            j.object do
+              j.field "side", side
+              j.field "format", format
+              j.field "complete", r.complete
+              emit_text(j, "json", r.json, clip)
             end
           end
         end

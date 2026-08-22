@@ -160,6 +160,18 @@ Two payloads deliberately stay hex, on every surface:
 
 The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` and the MCP `get_flow` tool (both as `grpc_messages[].protobuf`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected — the octets stay reachable either way.
 
+### MessagePack and CBOR {#binary-documents}
+
+A body whose `Content-Type` says `application/msgpack` or `application/cbor` (including the `+msgpack` / `+cbor` suffixes) is rendered as JSON in the detail pane, under the same `p` toggle everything else reflows with. Without it these bodies hit the binary placeholder and the hex view, because both formats encode the integer `0` as a NUL byte and essentially every real one trips the binary sniff.
+
+**The JSON is a projection, not a re-encoding.** Both formats carry things JSON has no room for, and every one of them comes back *named* rather than folded away: `{"$bin": "…"}` for a byte string, `{"$ext": "…", "$ext_type": n}` for a MessagePack extension, `{"$tag": n, "value": …}` for a CBOR tag (with `$bignum` and `$time` beside the raw value, never instead of it), `{"$str_invalid_utf8": "…"}` for text that is not, and a decimal string for an integer past what a JSON number holds exactly. A reader that quietly coerced any of those would be inventing evidence.
+
+One ambiguity is accepted rather than papered over: a document whose own map key is literally `$bin` or `$tag` renders the same shape a wrapper does. Escaping every key in every body to defend against the one body that does this would make the common body harder to read, and the bytes are one `^X` away when it matters.
+
+Because it is a projection, it is never written back over anything you are about to send: formatting a msgpack request body in the Repeater editor is refused rather than replacing your bytes with something that cannot become them again. A document that ends mid-value renders what it read and says so in the pane's note — the ordinary case for a body cut short by the capture cap. The bytes stay one `^X` away throughout, and the same rendering is in `gori run show --format json` and MCP `get_flow` as `binary_documents[]`.
+
+The dispatch is on the content type alone — never a sniff. A body labelled `application/octet-stream` is not offered to either reader, because a reader with no schema will make *something* of any bytes, and a rendering that is wrong is worse than a hex dump that is right. The Decoder tab (`msgpack-decode`, `cbor-decode`) is where an unlabelled body goes, because there the operator is the one who decided what it is.
+
 On top of the wire protocols, gori decodes common payloads inline:
 
 - **JWT**: header and payload decoded from `Authorization`, cookies, URLs, and bodies (signatures are shown but never verified).
