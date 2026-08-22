@@ -19,6 +19,7 @@ require "../pump"
 require "../ws/relay"
 require "../ws/handshake"
 require "../../flow_mapper"
+require "../../alt_svc"
 require "./self_page"
 
 module Gori::Proxy
@@ -150,6 +151,7 @@ module Gori::Proxy
     # original head is what History shows, exactly as with a Match&Replace-free forward.
     def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
+                   @listener_pinned : Bool = false,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
@@ -207,6 +209,19 @@ module Gori::Proxy
       # request by `strip_ws_extension_offer`, read by the 101 path: an acceptance is only
       # gori's to remove when gori is the reason nothing was offered. See `WS::Handshake`.
       @ws_offer_stripped = false
+      # What gori removed from THIS response's head on its own account — today only an h3
+      # `Alt-Svc` (see `settle_alt_svc`) — carried to whichever record site the response takes
+      # so the flow says so (`Store::FlowRow#advisory`). Assigned unconditionally at the seam,
+      # which is what resets it between keep-alive requests on this connection.
+      @alt_svc_note = nil.as(String?)
+      # Hosts whose h3 `Alt-Svc` strip this connection has already written to `gori.log`. The
+      # advisory is the record an operator reads; the log line is for the one debugging a
+      # client that stopped using QUIC, and an origin that sends `Alt-Svc` on every response
+      # must not write a line per response. Bounded by `COMPRESSED_SKIP_LOG_CAP` for the same
+      # reason `@compressed_skips` below is: a cleartext forward-proxy connection serves
+      # whatever hosts the client's keep-alive requests name, so the set is bounded rather
+      # than trusted.
+      @alt_svc_logged = Set(String).new
       # One-shot: has this connection already logged an intercept hold that failed open because
       # the declared body was over the ceiling? See `warn_hold_oversize`.
       @warned_hold_oversize = false
@@ -928,6 +943,11 @@ module Gori::Proxy
       resp_head, resp = final
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
+      # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
+      # can put the header back — see `settle_alt_svc`. A no-op returning the same slices when
+      # the switch is off, which is the default.
+      resp_head, resp, @alt_svc_note = settle_alt_svc(resp_head, resp, host)
+
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
       sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp, host)
@@ -1399,7 +1419,7 @@ module Gori::Proxy
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
-        state: state, error: error))
+        state: state, error: error, advisory: response_advisory(nil)))
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -1452,7 +1472,7 @@ module Gori::Proxy
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
         body_truncated: trunc, body_size: size, state: state, error: error,
-        advisory: advisory))
+        advisory: response_advisory(advisory)))
       # Reuse iff the origin kept its side AND we read the whole body; a truncated body
       # was forwarded short, so close the client connection (return false) rather than
       # block its next keep-alive request on the missing bytes.
@@ -1581,11 +1601,11 @@ module Gori::Proxy
           out_head, out_body || Bytes.empty)
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size, advisory: advisory))
+          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory)))
       else
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size, advisory: advisory,
+          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
           state: Store::FlowState::Aborted, error: "connection closed while forwarding held response"))
       end
       # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept its
@@ -1802,6 +1822,63 @@ module Gori::Proxy
       end
     end
 
+    # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), HTTP/1.1's half. Returns the
+    # head and projection the CLIENT should receive, plus the advisory for the flow.
+    #
+    # gori does not intercept HTTP/3: QUIC is UDP and every listener here is a TCP socket. A
+    # client that acts on `Alt-Svc: h3=":443"` therefore leaves for a transport gori has no
+    # way to read, and what the operator is left holding is a History that simply stops — the
+    # one failure mode where "I found nothing" and "I could not see it" look identical. The
+    # switch removes the invitation; this is where.
+    #
+    # Runs BEFORE Match&Replace, which is the OPPOSITE of where the 101's
+    # `Sec-WebSocket-Extensions` strip below sits, and the two are not in disagreement. That
+    # one prevents a protocol desync and so must have the last word over any rule; this one is
+    # a blanket policy, and a response rule that puts the header back is the operator saying
+    # so about THIS host, explicitly, which outranks a switch they threw for all of them (P4).
+    #
+    # The stripped head is CAPTURED as well as sent, exactly as a Match&Replace head rewrite
+    # is: the stored response is the message gori delivered. What keeps the origin's
+    # advertisement on the record is the advisory, which quotes the removed value — so the
+    # switch costs the operator the bypass and not the evidence. One consequence worth knowing
+    # rather than discovering: `Probe::Passive::Tech` reads the STORED head, so a CAPTURED
+    # response stops fingerprinting `tech_http3` once the strip is on. The advisory is where
+    # that fact moves to, and the `alt_svc_h3` event it would have raised was a warning about a
+    # bypass that can no longer happen.
+    #
+    # The PROXY path only, and deliberately: a response gori itself elicited — Repeater, Fuzz,
+    # Discover, MCP `send_request`, an import — is built by `Gori::Outbound` and never reaches
+    # this seam, so it keeps the origin's `Alt-Svc` and still fingerprints. That asymmetry is
+    # the right way round. The strip exists to keep a CLIENT on a transport gori can read, and
+    # gori's own sender has no client to lose.
+    private def settle_alt_svc(head : Bytes, resp : Codec::RawResponse,
+                               host : String) : {Bytes, Codec::RawResponse, String?}
+      return {head, resp, nil} unless Settings.strip_alt_svc?
+      # Asked of the already-parsed projection: the overwhelming majority of responses carry
+      # no `Alt-Svc` at all, and this keeps that case at one header-list lookup rather than a
+      # walk over the head.
+      return {head, resp, nil} unless resp.headers.has?(Gori::AltSvc::FIELD_NAME)
+      stripped, removed = Gori::AltSvc.strip_h3(head)
+      # An `Alt-Svc` that advertises no h3 — `clear`, or a plain `h2=` alternative — is left
+      # byte-exact (P7). It costs gori no visibility, and `clear` is the spelling that tells a
+      # client to FORGET an alternative it already cached.
+      return {head, resp, nil} if removed.empty?
+      note = Gori::AltSvc.removal_note(removed)
+      if @alt_svc_logged.size < COMPRESSED_SKIP_LOG_CAP && @alt_svc_logged.add?(host)
+        ::Log.info { "alt-svc #{host}: #{note}" }
+      end
+      {stripped, Codec::Http1.parse_response_head(stripped), note}
+    end
+
+    # The advisory a RESPONSE record carries: what the body seam had to say, plus what the
+    # proxy did to the head on its own account. Newline-separated, which is the shape
+    # `Store::FlowRow#advisories` splits back apart.
+    private def response_advisory(body : String?) : String?
+      note = @alt_svc_note
+      return body unless note
+      body ? "#{body}\n#{note}" : note
+    end
+
     # The `Sec-WebSocket-Extensions` half of a 101 (#518). Returns the head and projection
     # the CLIENT should receive, plus an advisory for the flow's WebSocket message stream —
     # a `gori.log` line is where an operator does not look, and this is a fact about the
@@ -1918,6 +1995,23 @@ module Gori::Proxy
     # below never happens for a passthrough host.
     private def handle_connect(req : Codec::RawRequest) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
+
+      # A LISTENER-pinned connection is not a forward proxy. The destination was settled before
+      # this request existed — a reverse listener's declared origin, or the client's own SOCKS5
+      # CONNECT — and `resolve_forward` holds every ordinary request to it. `CONNECT` is the one
+      # shape that never reaches `resolve_forward`, so without this it walks straight out of the
+      # pin: a granted SOCKS5 tunnel to one host, then one line of HTTP, and gori opens a blind
+      # byte tunnel somewhere else entirely with no flow to show for it. Refused whatever
+      # authority it names, including the pinned one — the socket never advertised proxy
+      # semantics, and answering at all is what makes the destination negotiable.
+      #
+      # `@listener_pinned`, not `@fixed_host`. The TLS MITM tunnel pins its inner `ClientConn`
+      # the same way (`Tls::Tunnel#intercept`), and there the client DID negotiate a proxy hop —
+      # gori answered its `CONNECT`. A second `CONNECT` inside that tunnel is a client testing an
+      # upstream proxy through gori, which worked before this guard existed and still does.
+      if @listener_pinned && (fixed = @fixed_host)
+        return refuse_connect_on_pinned(req, fixed, host, port)
+      end
 
       return false if connect_answered_locally?(host, port)
 
@@ -2377,12 +2471,12 @@ module Gori::Proxy
         client_tls: @client_tls)
     end
 
-    # The same record, addressable WITHOUT a ClientConn — because on two listeners there isn't
-    # one yet when this shape happens. `Server#serve_reverse` and `#serve_transparent` route on
-    # `client.peek`, which blocks BEFORE any `ClientConn` is constructed, so a peer that connects
-    # and says nothing times out there and never reaches `read_client_head`. Those are also the
-    # only listeners a plaintext server-speaks-first protocol can arrive on at all — SMTP/IMAP
-    # cannot traverse a forward proxy without CONNECT — so leaving them out would have put the
+    # The same record, addressable WITHOUT a ClientConn — because on three listeners there isn't
+    # one yet when this shape happens. `Server#serve_reverse`, `#serve_transparent` and
+    # `#serve_socks5` route on `client.peek`, which blocks BEFORE any `ClientConn` is constructed,
+    # so a peer that connects and says nothing times out there and never reaches
+    # `read_client_head`. Those are also the only listeners a plaintext server-speaks-first
+    # protocol can arrive on at all — SMTP/IMAP cannot traverse a forward proxy without CONNECT — so leaving them out would have put the
     # fix everywhere except where it is needed (#729 says the transparent listener "matters more
     # here than anywhere else"). One method, so the sentence cannot fork.
     def self.record_silent_client(sink : FlowSink, scheme : String, host : String, port : Int32,
@@ -2397,6 +2491,35 @@ module Gori::Proxy
         "never sends. #{non_http_remedy(host, client_tls)}. Harmless alternative: a speculative " \
         "preconnect, a connection a browser opened ahead of a request it never made, looks " \
         "identical and needs nothing done about it"))
+    end
+
+    # A `CONNECT` sent to a listener whose destination was already settled. Answered 403 — not
+    # 502, which would read as "the origin is down", and not a dropped connection, which would
+    # read as gori being broken — and recorded, because a client doing this is either misconfigured
+    # or probing, and both are worth seeing.
+    private def refuse_connect_on_pinned(req : Codec::RawRequest, fixed : String,
+                                         host : String, port : Int32) : Bool
+      message = "CONNECT refused: this listener serves a fixed destination " \
+                "(#{Gori::BindAddress.authority(fixed, @fixed_port)}) and is not a forward proxy, " \
+                "so it will not open a tunnel to #{Gori::BindAddress.authority(host, port)}. " \
+                "Point the client at gori's proxy listener if it needs one"
+      ::Log.warn { message }
+      record_error(req, @scheme, host, port, now_us, message)
+      @io.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_slice)
+      @io.flush rescue nil
+      false
+    end
+
+    # A connection a LISTENER refused before any request existed, on the record. Same shape and
+    # the same reason as `record_silent_client` above: the refusal is a fact about a client that
+    # tried to use gori, and `gori.log` is where an operator does not look. `host`/`port` are
+    # whatever the refusal knew — empty and 0 when it was refused before naming a destination.
+    def self.record_listener_refusal(sink : FlowSink, host : String, port : Int32,
+                                     message : String) : Nil
+      flow_id = sink.on_request(FlowMapper.request(Codec::Http1.parse_request_head(Bytes.new(0)),
+        scheme: "http", host: host, port: port, created_at: now_us, body: nil,
+        source: FlowSource::Kind::Proxy))
+      sink.on_response(FlowMapper.error_response(flow_id, message))
     end
 
     # The remedy sentence shared by the two ways a connection can turn out not to be HTTP — bytes

@@ -113,6 +113,37 @@ describe SettingsView do
     end
   end
 
+  # Stripping h3 Alt-Svc is OFF by default and global-only, so this row is the only place an
+  # operator turns it on — and it sits between two rows that are NOT bools (the HTTP/2 cycle
+  # above it, the passthrough text field below), so a misaligned insert would land the toggle
+  # on one of those instead of failing loudly. Located by LABEL, like the passthrough and
+  # rule-table examples below: a walk count re-breaks on the next inserted field.
+  it "toggles Strip HTTP/3 Alt-Svc on, then resets it to the default on save" do
+    dir = File.tempname("gori-settings-altsvc")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.strip_alt_svc?
+    row = SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Strip HTTP/3 Alt-Svc" }
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.strip_alt_svc = false
+      v = SettingsView.new
+      v.reload(:network)
+      row.times { v.move_field(1) }
+      v.toggle_or_move(-1) # flip the bool on
+      v.save               # persists the working copy back to the live Settings
+      Gori::Settings.strip_alt_svc?.should be_true
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.strip_alt_svc?.should eq(Gori::Settings::DEFAULT_STRIP_ALT_SVC)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.strip_alt_svc = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "reverts the EDITOR section toggles to their defaults on save" do
     dir = File.tempname("gori-settings-reset-ed")
     Dir.mkdir_p(dir)

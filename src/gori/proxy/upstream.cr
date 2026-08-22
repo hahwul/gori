@@ -4,6 +4,7 @@ require "openssl"
 require "../settings"
 require "../host_overrides"
 require "./socket_tuning"
+require "./socks5"
 
 # OpenSSL's own compiled-in default trust locations — the paths SSL_CTX_set_default_verify_paths
 # consults. Not bound by the stdlib, so declared here to let the no-store warning reflect the
@@ -434,21 +435,11 @@ module Gori::Proxy
     # Reaches an origin through a SOCKS5 proxy — `ssh -D`, Tor, a jump host. The returned
     # socket sits at the start of the origin stream, exactly like the CONNECT path, so every
     # caller (dial_tls, the request forwarder) is unaffected.
-    SOCKS_VERSION      = 5_u8
-    SOCKS_AUTH_NONE    = 0_u8
-    SOCKS_AUTH_USERPWD = 2_u8
-    SOCKS_CMD_CONNECT  = 1_u8
-    SOCKS_ATYP_IPV4    = 1_u8
-    SOCKS_ATYP_DOMAIN  = 3_u8
-    SOCKS_ATYP_IPV6    = 4_u8
-    # RFC 1928's 0xFF "no acceptable methods" is deliberately NOT a constant: socks5_handshake
-    # never tests for it, because its `else` already refuses every method it did not offer,
-    # and 0xFF is one of those. A named constant would invite a branch that looks like it
-    # narrows the refusal when it cannot.
-    # RFC 1928 caps a domain name at one length byte, and RFC 1929 caps each credential the
-    # same way. A longer value cannot be encoded, so the dial fails rather than being truncated
-    # into a request for a DIFFERENT host than the caller asked for.
-    SOCKS_MAX_FIELD = 255
+    # The wire vocabulary is `Proxy::Socks5`'s — gori speaks both ends of this protocol (a
+    # `socks5` LISTENER is the server half) and a second spelling of what a byte means is how
+    # the two would drift. RFC 1928's 0xFF "no acceptable methods" is deliberately not tested
+    # for here: `socks5_handshake`'s `else` already refuses every method it did not offer, and
+    # 0xFF is one of those, so a named branch would look like it narrows a refusal it cannot.
 
     private def self.dial_via_socks5(route : Settings::UpstreamRoute,
                                      host : String, port : Int32,
@@ -472,15 +463,15 @@ module Gori::Proxy
     # Method negotiation → optional auth → CONNECT. False on any refusal, so the caller closes.
     private def self.socks5_handshake(sock : TCPSocket, route : Settings::UpstreamRoute,
                                       host : String, port : Int32) : Bool
-      methods = authenticating?(route) ? Bytes[SOCKS_AUTH_NONE, SOCKS_AUTH_USERPWD] : Bytes[SOCKS_AUTH_NONE]
-      sock.write(Bytes[SOCKS_VERSION, methods.size.to_u8])
+      methods = authenticating?(route) ? Bytes[Socks5::AUTH_NONE, Socks5::AUTH_USERPWD] : Bytes[Socks5::AUTH_NONE]
+      sock.write(Bytes[Socks5::VERSION, methods.size.to_u8])
       sock.write(methods)
       sock.flush
-      return false unless (reply = socks5_read(sock, 2)) && reply[0] == SOCKS_VERSION
+      return false unless (reply = Socks5.read_exactly(sock, 2)) && reply[0] == Socks5::VERSION
       case reply[1]
-      when SOCKS_AUTH_NONE
+      when Socks5::AUTH_NONE
         # The proxy waived auth. Nothing to send even if we hold credentials.
-      when SOCKS_AUTH_USERPWD
+      when Socks5::AUTH_USERPWD
         return false unless socks5_authenticate(sock, route)
       else
         return false # 0xFF "no acceptable methods", or a method we never offered
@@ -492,13 +483,13 @@ module Gori::Proxy
     private def self.socks5_authenticate(sock : TCPSocket, route : Settings::UpstreamRoute) : Bool
       user = route.username.to_slice
       pass = (route.password || "").to_slice
-      return false if user.size > SOCKS_MAX_FIELD || pass.size > SOCKS_MAX_FIELD
+      return false if user.size > Socks5::MAX_FIELD || pass.size > Socks5::MAX_FIELD
       sock.write(Bytes[1_u8, user.size.to_u8])
       sock.write(user)
       sock.write(Bytes[pass.size.to_u8])
       sock.write(pass)
       sock.flush
-      reply = socks5_read(sock, 2)
+      reply = Socks5.read_exactly(sock, 2)
       !!(reply && reply[1] == 0)
     end
 
@@ -510,15 +501,15 @@ module Gori::Proxy
     # what makes Tor and a jump host into a network gori cannot otherwise see work at all, and
     # gori deliberately does not resolve names on the dial path anyway (see parse_ip).
     private def self.socks5_connect(sock : TCPSocket, host : String, port : Int32) : Bool
-      sock.write(Bytes[SOCKS_VERSION, SOCKS_CMD_CONNECT, 0_u8])
+      sock.write(Bytes[Socks5::VERSION, Socks5::CMD_CONNECT, 0_u8])
       return false unless socks5_write_address(sock, host)
       sock.write(Bytes[(port >> 8).to_u8, (port & 0xFF).to_u8])
       sock.flush
 
-      return false unless (reply = socks5_read(sock, 4)) && reply[0] == SOCKS_VERSION
+      return false unless (reply = Socks5.read_exactly(sock, 4)) && reply[0] == Socks5::VERSION
       return false unless reply[1] == 0 # REP: 0 = succeeded; 1-8 are the failure codes
       return false unless bound = socks5_bound_length(sock, reply[3])
-      !!socks5_read(sock, bound + 2) # BND.ADDR + BND.PORT — drained, not used
+      !!Socks5.read_exactly(sock, bound + 2) # BND.ADDR + BND.PORT — drained, not used
     end
 
     # How many bytes BND.ADDR occupies for `atyp`, consuming the length byte for a DOMAIN
@@ -526,58 +517,28 @@ module Gori::Proxy
     # the socket cannot be trusted to be positioned at the start of the origin stream.
     private def self.socks5_bound_length(sock : TCPSocket, atyp : UInt8) : Int32?
       case atyp
-      when SOCKS_ATYP_IPV4   then 4
-      when SOCKS_ATYP_IPV6   then 16
-      when SOCKS_ATYP_DOMAIN then socks5_read(sock, 1).try(&.[0].to_i)
+      when Socks5::ATYP_IPV4   then 4
+      when Socks5::ATYP_IPV6   then 16
+      when Socks5::ATYP_DOMAIN then Socks5.read_exactly(sock, 1).try(&.[0].to_i)
       end
     end
 
-    # ATYP + address. False when a hostname is too long to encode (see SOCKS_MAX_FIELD).
+    # ATYP + address. False when a hostname is too long to encode (see Socks5::MAX_FIELD).
     # A host arriving bracketed ("[::1]") is an IPv6 literal — the brackets are URL syntax and
     # must not reach the wire, where the address is 16 raw bytes.
     private def self.socks5_write_address(sock : TCPSocket, host : String) : Bool
       bare = bare_host(host)
       if ip = parse_ip(bare)
         v4 = ip.family == Socket::Family::INET
-        sock.write(Bytes[v4 ? SOCKS_ATYP_IPV4 : SOCKS_ATYP_IPV6])
-        sock.write(socks5_address_bytes(ip))
+        sock.write(Bytes[v4 ? Socks5::ATYP_IPV4 : Socks5::ATYP_IPV6])
+        sock.write(Socks5.address_bytes(ip))
         return true
       end
       name = host.to_slice
-      return false if name.empty? || name.size > SOCKS_MAX_FIELD
-      sock.write(Bytes[SOCKS_ATYP_DOMAIN, name.size.to_u8])
+      return false if name.empty? || name.size > Socks5::MAX_FIELD
+      sock.write(Bytes[Socks5::ATYP_DOMAIN, name.size.to_u8])
       sock.write(name)
       true
-    end
-
-    # An IP literal's network-order bytes: 4 for IPv4, 16 for IPv6. IPv4 is read off the
-    # canonical dotted text; IPv6 is copied out of the sockaddr the OS already parsed, rather
-    # than re-implementing "::" expansion here (in6_addr is exactly the 16 address bytes).
-    private def self.socks5_address_bytes(ip : Socket::IPAddress) : Bytes
-      return socks5_ipv4_bytes(ip) if ip.family == Socket::Family::INET
-      socks5_ipv6_bytes(ip)
-    end
-
-    private def self.socks5_ipv4_bytes(ip : Socket::IPAddress) : Bytes
-      out = Bytes.new(4)
-      ip.address.split('.').each_with_index { |octet, i| out[i] = octet.to_u8 }
-      out
-    end
-
-    private def self.socks5_ipv6_bytes(ip : Socket::IPAddress) : Bytes
-      addr = ip.to_unsafe.as(Pointer(LibC::SockaddrIn6)).value.sin6_addr
-      ptr = pointerof(addr).as(Pointer(UInt8))
-      out = Bytes.new(16)
-      16.times { |i| out[i] = ptr[i] }
-      out
-    end
-
-    # Read exactly `n` bytes, or nil on EOF/short read — every SOCKS field is fixed-length, so a
-    # partial read is a protocol failure, not something to proceed past.
-    private def self.socks5_read(sock : TCPSocket, n : Int32) : Bytes?
-      return Bytes.empty if n == 0
-      buf = Bytes.new(n)
-      sock.read_fully?(buf) ? buf : nil
     end
 
     # Bounds on the upstream proxy's CONNECT reply so a hostile/broken proxy can't

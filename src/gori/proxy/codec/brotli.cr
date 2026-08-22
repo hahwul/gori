@@ -10,6 +10,17 @@ module Gori::Proxy::Codec
     # mid-stream → returns what was produced). `max_out` caps output as a
     # decompression-bomb guard.
     def self.decode(input : Bytes, max_out : Int32) : Bytes
+      decode_full(input, max_out)[0]
+    end
+
+    # :ditto: — plus whether the stream ENDED cleanly (the decoder reported SUCCESS rather
+    # than running out of input or erroring).
+    #
+    # The flag exists because brotli has no magic number and no framing a caller can check:
+    # "produced nothing" is the only other signal, and it means "this was never brotli" and
+    # "this is a valid stream of an empty payload" equally. The workbench has to tell those
+    # apart; the display path does not care and takes whatever decoded.
+    def self.decode_full(input : Bytes, max_out : Int32) : {Bytes, Bool}
       {% if flag?(:without_native_codecs) %}
         raise Gori::Error.new("brotli decoder not built in")
       {% else %}
@@ -21,6 +32,7 @@ module Gori::Proxy::Codec
           avail_in = LibC::SizeT.new(input.size)
           next_in = input.to_unsafe
           total = LibC::SizeT.new(0)
+          clean = false
           loop do
             avail_out = LibC::SizeT.new(buf.size)
             next_out = buf.to_unsafe
@@ -30,11 +42,19 @@ module Gori::Proxy::Codec
             produced = buf.size - avail_out.to_i32
             out.write(buf[0, produced]) if produced > 0
             # 0=ERROR 1=SUCCESS 2=NEEDS_MORE_INPUT(truncated) 3=NEEDS_MORE_OUTPUT
-            break unless result == 3         # only NEEDS_MORE_OUTPUT continues
+            clean = true if result == 1
+            # NEEDS_MORE_INPUT is where a TRUNCATED body lands, and stopping there was throwing
+            # away everything the decoder still held. With a large window (the default for a
+            # CDN-sized body) libbrotlidec swallows the whole truncated input in ONE call,
+            # hands back one 64 KiB buffer and asks for more input — so a 4 MB body cut
+            # anywhere decoded to exactly 65,536 bytes, silently, whatever the capture cap had
+            # actually kept. `has_more_output` is the decoder's own answer to "is there more in
+            # you", and draining on it recovers the rest.
+            break unless result == 3 || (result == 2 && LibBrotliDec.has_more_output(state) != 0)
             break if produced == 0           # no progress → bail (defensive)
             break if out.bytesize >= max_out # bomb guard
           end
-          out.to_slice
+          {out.to_slice, clean}
         ensure
           LibBrotliDec.destroy_instance(state)
         end
@@ -48,6 +68,7 @@ end
   lib LibBrotliDec
     fun create_instance = BrotliDecoderCreateInstance(alloc : Void*, free : Void*, opaque : Void*) : Void*
     fun destroy_instance = BrotliDecoderDestroyInstance(state : Void*) : Void
+    fun has_more_output = BrotliDecoderHasMoreOutput(state : Void*) : Int32
     fun decompress_stream = BrotliDecoderDecompressStream(
       state : Void*, available_in : LibC::SizeT*, next_in : UInt8**,
       available_out : LibC::SizeT*, next_out : UInt8**, total_out : LibC::SizeT*,

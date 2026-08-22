@@ -125,13 +125,13 @@ gori understands the protocols it carries:
 |----------|---------|
 | **HTTP/1.1** | Full capture and repeater |
 | **HTTP/2** | Relay after ALPN with per-stream intercept and head rules, raw frame log, HPACK decode, stream → flow assembly |
-| **HTTP/3** | Not intercepted; `Alt-Svc` `h3` is surfaced so you know the client may bypass |
+| **HTTP/3** | Not intercepted; `Alt-Svc` `h3` is surfaced so you know the client may bypass, and `network.strip_alt_svc` removes it so the client cannot |
 | **WebSocket** over HTTP/1.1 (`Upgrade`) | Live message capture, repeater, per-message intercept (opt in with `proto:ws`), and Match & Replace on messages. Compression is removed from the handshake (see below) |
 | **WebSocket** over HTTP/2 (RFC 8441) | Message capture, shown and exported everywhere the HTTP/1.1 kind is. No per-message intercept, no Match & Replace on messages, no Repeater replay (see below) |
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf decoded from the wire format without a `.proto` (see below) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
-gori does not intercept HTTP/3; Alt-Svc h3 is surfaced so you know the client may bypass.
+**gori does not intercept HTTP/3.** QUIC is UDP and every gori listener is a TCP socket, so an origin answering `Alt-Svc: h3=":443"` is offering the client a way out of the proxy. By default gori surfaces that offer and leaves it in place, so you can see it happen and decide. Turning on [`network.strip_alt_svc`](/reference/config/#strip-alt-svc) removes the `Alt-Svc` fields advertising `h3` from the response the client receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go. (A client that learns an h3 route some other way — a DNS `HTTPS` record — is beyond what any response-side strip can reach.) It removes those fields and nothing else: `Alt-Svc: clear` stays, because it tells the client to forget alternatives it has already cached, and a non-h3 alternative like `h2=":8443"` stays too, because that is another TCP port and still comes through gori.
 
 **A WebSocket through gori is never compressed.** gori removes `Sec-WebSocket-Extensions` from the handshake it relays, so `permessage-deflate` is never negotiated and every captured frame is the message that was sent. Without that removal the two peers would agree on compression that gori does not decode, and History, the detail view, `gori run history show`, the MCP tools and export would all show you a deflate stream while presenting it as the payload. Removing the offer is the price of a capture you can trust: an app that would have used compression does not get it while it goes through gori. If you need a particular host's sockets relayed exactly as they are, put the offer back with a Match & Replace head rule on the request. The strip runs *before* Match & Replace so that a rule can do this: restore `Sec-WebSocket-Extensions` and the origin is really offered the extension, so gori relays its acceptance untouched and the two peers negotiate compression as they would without a proxy. The flow is still captured, with a `[gori]` notice on it saying the frames you are looking at are that extension's encoded bytes rather than the messages. [TLS passthrough](/reference/config/#tls-passthrough) also leaves the connection alone, but captures nothing at all for it — reach for the rule first, and for passthrough when you want the host out of gori entirely.
 
@@ -159,6 +159,18 @@ Two payloads deliberately stay hex, on every surface:
 - **A grpc-web trailer frame.** Its payload is ASCII header lines, not protobuf.
 
 The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` and the MCP `get_flow` tool (both as `grpc_messages[].protobuf`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected — the octets stay reachable either way.
+
+### MessagePack and CBOR {#binary-documents}
+
+A body whose `Content-Type` says `application/msgpack` or `application/cbor` (including the `+msgpack` / `+cbor` suffixes) is rendered as JSON in the detail pane, under the same `p` toggle everything else reflows with. Without it these bodies hit the binary placeholder and the hex view, because both formats encode the integer `0` as a NUL byte and essentially every real one trips the binary sniff.
+
+**The JSON is a projection, not a re-encoding.** Both formats carry things JSON has no room for, and every one of them comes back *named* rather than folded away: `{"$bin": "…"}` for a byte string, `{"$ext": "…", "$ext_type": n}` for a MessagePack extension, `{"$tag": n, "value": …}` for a CBOR tag (with `$bignum` and `$time` beside the raw value, never instead of it), `{"$str_invalid_utf8": "…"}` for text that is not, and a decimal string for an integer past what a JSON number holds exactly. A reader that quietly coerced any of those would be inventing evidence.
+
+One ambiguity is accepted rather than papered over: a document whose own map key is literally `$bin` or `$tag` renders the same shape a wrapper does. Escaping every key in every body to defend against the one body that does this would make the common body harder to read, and the bytes are one `^X` away when it matters.
+
+Because it is a projection, it is never written back over anything you are about to send: formatting a msgpack request body in the Repeater editor is refused rather than replacing your bytes with something that cannot become them again. A document that ends mid-value renders what it read and says so in the pane's note — the ordinary case for a body cut short by the capture cap. The bytes stay one `^X` away throughout, and the same rendering is in `gori run show --format json` and MCP `get_flow` as `binary_documents[]`.
+
+The dispatch is on the content type alone — never a sniff. A body labelled `application/octet-stream` is not offered to either reader, because a reader with no schema will make *something* of any bytes, and a rendering that is wrong is worse than a hex dump that is right. The Decoder tab (`msgpack-decode`, `cbor-decode`) is where an unlabelled body goes, because there the operator is the one who decided what it is.
 
 On top of the wire protocols, gori decodes common payloads inline:
 
@@ -510,6 +522,8 @@ Add it under `listeners` in `settings.json` and point `iptables` / `pf` at it �
 The certificate still has to be trusted on the client: transparent mode removes the proxy *setting*, not the need for gori's CA.
 
 If a **reverse listener** would also work for your target, prefer it. It declares the destination outright, so it needs no firewall rule and none of the destination is taken from what the client sent.
+
+And if the client can be pointed at a proxy but not at an HTTP one — `ALL_PROXY=socks5://127.0.0.1:1080`, a runtime whose only proxy setting is SOCKS — run a **socks5 listener** instead. The client names its destination in the SOCKS handshake, so there is no firewall rule and nothing to recover from an SNI or a `Host` header; everything after the handshake is intercepted exactly as on the transparent path. It serves `CONNECT` with no authentication, and a refusal — a destination the Sandbox excludes, a client asking for `UDP ASSOCIATE` — is answered with the reply code RFC 1928 defines and recorded as a flow, so it reads in History instead of being a connection that closed without a reason. See [SOCKS5 mode](/reference/config/#socks5-mode).
 
 ## When a Pinned App Is in the Way
 

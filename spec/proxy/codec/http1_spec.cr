@@ -284,4 +284,58 @@ describe Gori::Proxy::Codec::Http1 do
       end
     end
   end
+
+  describe ".strip_header_lines" do
+    it "drops the lines the block accepts and copies every other byte verbatim" do
+      raw = bytes("HTTP/1.1 200 OK\r\nX-A: 1\r\nAlt-Svc: h3\r\nX-B: 2\r\n\r\n")
+      seen = [] of String
+      kept = Http1.strip_header_lines(raw, "alt-svc") do |value|
+        seen << String.new(value)
+        true
+      end
+      seen.should eq(["h3"])
+      String.new(kept).should eq("HTTP/1.1 200 OK\r\nX-A: 1\r\nX-B: 2\r\n\r\n")
+    end
+
+    it "returns the INPUT slice when the block dropped nothing" do
+      # Identity, not equality: this is what keeps a head the caller decided against editing on
+      # the byte-exact forwarding path (P7) instead of shipping a copy of itself.
+      raw = bytes("HTTP/1.1 200 OK\r\nAlt-Svc: h2\r\n\r\n")
+      kept = Http1.strip_header_lines(raw, "alt-svc") { false }
+      kept.to_unsafe.should eq(raw.to_unsafe)
+    end
+
+    it "never treats the start-line as a header line" do
+      # A request target can contain a colon, and a status line always does. Matching the
+      # start-line as `name: value` is how a strip would eat the message's first line.
+      raw = bytes("alt-svc: /x HTTP/1.1\r\nHost: h\r\n\r\n")
+      kept = Http1.strip_header_lines(raw, "alt-svc") { true }
+      String.new(kept).should eq("alt-svc: /x HTTP/1.1\r\nHost: h\r\n\r\n")
+    end
+  end
+
+  describe ".header_line_value" do
+    it "matches the field-name exactly, case-insensitively, and trims OWS off the value" do
+      Http1.header_line_value(bytes("Alt-Svc:  h3=\":443\"  \r\n"), "alt-svc")
+        .try { |v| String.new(v) }.should eq("h3=\":443\"")
+      Http1.header_line_value(bytes("ALT-SVC: h3\r\n"), "alt-svc").should_not be_nil
+    end
+
+    it "does not match a prefix, a suffix, or a colon-less line" do
+      Http1.header_line_value(bytes("X-Alt-Svc: h3\r\n"), "alt-svc").should be_nil
+      Http1.header_line_value(bytes("Alt-Svc-Extra: h3\r\n"), "alt-svc").should be_nil
+      Http1.header_line_value(bytes("\r\n"), "alt-svc").should be_nil
+    end
+
+    it "returns an empty view for a valueless field rather than nil" do
+      # "the field is present and says nothing" and "the field is absent" are different answers.
+      Http1.header_line_value(bytes("Alt-Svc:\r\n"), "alt-svc").try(&.size).should eq(0)
+    end
+
+    it "returns a VIEW into the head, never a copy" do
+      raw = bytes("Alt-Svc: h3\r\n")
+      value = Http1.header_line_value(raw, "alt-svc").not_nil!
+      value.to_unsafe.should eq(raw.to_unsafe + 9)
+    end
+  end
 end

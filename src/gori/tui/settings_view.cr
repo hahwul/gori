@@ -38,6 +38,7 @@ module Gori::Tui
       Field.new("Capture body limit (MiB)", "max body bytes captured + stored per flow — MiB (min 1); applies to NEW flows only"),
       Field.new("HTTP/2", "auto follows the origin's ALPN; off forces HTTP/1.1 on every tunnelled connection (for reproducing a finding on h1) — ←/→ cycles",
         choices: Settings::HTTP2_MODES),
+      Field.new("Strip HTTP/3 Alt-Svc", "remove Alt-Svc alternatives advertising h3 from the response the client gets, so a browser cannot switch to QUIC/UDP where gori sees nothing — Alt-Svc: clear and non-h3 alternatives are left alone; ←/→/space toggles", bool: true),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Upstream rules",
         "per-host routing / SOCKS5 / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
@@ -297,7 +298,7 @@ module Gori::Tui
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
                   Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), rule_count_label(Settings.outbound_tls.size, "entry", "entries"), hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off", passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), rule_count_label(Settings.outbound_tls.size, "entry", "entries"), hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -320,6 +321,7 @@ module Gori::Tui
         Settings.io_timeout_secs.to_s,
         Settings.capture_max_mib.to_s,
         Settings.http2,
+        Settings.strip_alt_svc? ? "on" : "off",
         passthrough_label(Settings.tls_passthrough),
         rule_count_label(Settings.upstream_rules.size, "rule"),
         rule_count_label(Settings.outbound_tls.size, "entry", "entries"),
@@ -715,7 +717,7 @@ module Gori::Tui
         return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
-      passthrough = passthrough_from_label(@values[9])
+      passthrough = passthrough_from_label(@values[10]) # index 9 is the Strip HTTP/3 Alt-Svc bool inserted above it
       if err = Settings.tls_passthrough_error(passthrough)
         @status = "invalid TLS passthrough host"
         return err
@@ -740,6 +742,7 @@ module Gori::Tui
       Settings.io_timeout_secs = it
       Settings.capture_max_mib = cap
       Settings.http2 = @values[8]
+      Settings.strip_alt_svc = @values[9] == "on"
       Settings.tls_passthrough = passthrough
       @values = network_values
       persist

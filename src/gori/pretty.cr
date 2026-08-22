@@ -4,6 +4,9 @@ require "base64"
 require "mime/multipart"
 require "./graphql"
 require "./media_type"
+require "./binary_document"
+require "./msgpack"
+require "./cbor"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -49,6 +52,11 @@ module Gori
       ct = MediaType.of(head) # original case (boundary is case-sensitive), params kept
       ctl = ct.try(&.downcase)
 
+      # A binary DOCUMENT first, and before the text sniffs: its bytes are not text, so every
+      # sniff below would be reading a String built out of arbitrary octets to no purpose. The
+      # content-type has to say so — this is a dispatch, not a guess (`MediaType.binary_document?`).
+      return try_binary_doc(body, ct) if MediaType.binary_document?(ct)
+
       # Content sniffs FIRST — JWT/GraphQL masquerade under generic content-types.
       if r = try_jwt(str)
         return r
@@ -59,6 +67,15 @@ module Gori
       # loses the document; ask the GraphQL parser first and fall back to the field list.
       return try_graphql_body(body, ct) || try_form(str) if MediaType.form_urlencoded?(ct)
       return try_multipart(body, ct) if ct && MediaType.multipart?(ct)
+      markup_or_graphql(body, str, ct, ctl)
+    rescue
+      nil # last-resort net: Pretty must never raise into the render path
+    end
+
+    # The TAIL of `format`'s chain, split out so the whole dispatch is not one method past
+    # every complexity metric. The ORDER is the contract and is unchanged — a markup type
+    # first, then the GraphQL byte sniff that runs when no content-type described the body.
+    private def markup_or_graphql(body : Bytes, str : String, ct : String?, ctl : String?) : Result?
       return try_xml(str) if ctl && ctl.includes?("xml")
       return try_html(str) if ctl && ctl.includes?("html")
       # Last: a GraphQL body under a content-type that does not describe it — `text/plain`,
@@ -68,8 +85,35 @@ module Gori
       # 1 MiB JSON parse.
       return try_graphql_body(body, ct) if graphql_sniffable?(body, ct)
       nil
+    end
+
+    # ---- binary documents (MessagePack / CBOR) -----------------------------
+
+    # A body somebody serialized rather than wrote. Rendered as the JSON projection its reader
+    # produces — types JSON cannot hold come back NAMED, so nothing is folded away — and styled
+    # as JSON, because that is what the pane is now showing (`kind`, the same override GraphQL
+    # and JWT use).
+    #
+    # `BinaryDocument.render` is nil for a body whose bytes are not the document its header
+    # claims, and that nil is the whole point: the caller then falls through to the ordinary
+    # binary placeholder and the hex view. A reader with no schema makes SOMETHING of any
+    # bytes, so without that test a PNG labelled `application/msgpack` rendered as a
+    # plausible-looking map with the hex pointer suppressed.
+    #
+    # The reader's text is used VERBATIM, indented as it is built. Re-parsing it to pretty-print
+    # (`JSON.parse(json).to_pretty_json`) merged duplicate members — so a document carrying the
+    # same key twice, which is a fact about the body and often the point of it, lost one of them
+    # on the one surface an operator looks at, while the headless projection kept both.
+    private def try_binary_doc(body : Bytes, ct : String?) : Result?
+      format, r = BinaryDocument.render(body, ct, indent: "  ") || return nil
+      return nil if r.json.bytesize > MAX_OUT_PRETTY
+      note = String.build do |io|
+        io << "decoded: " << format
+        io << " (partial — the document ends mid-value)" unless r.complete
+      end
+      Result.new(r.json.to_slice, note, kind: :json)
     rescue
-      nil # last-resort net: Pretty must never raise into the render path
+      nil # last-resort net, the same one `format` carries: never raise into the render path
     end
 
     # ---- content-type ------------------------------------------------------
@@ -457,6 +501,14 @@ module Gori
     # Pretty-prints a raw HTTP request body in-place, preserving any §...§ markers.
     # Returns the formatted body string on success, or nil on failure.
     def format_request(head : String, body : String) : String?
+      # NOT for a binary document. This method's result REPLACES the operator's editor buffer
+      # (`RepeaterView#format_body` → `@editor.set_text`), and the msgpack/CBOR rendering is a
+      # PROJECTION: `{"$bin": …}` is a description of bytes, not bytes, and nothing re-encodes
+      # it. Formatting one here would overwrite a request the operator is about to send with
+      # something that cannot become it again — the operator's own bytes, destroyed by a
+      # display feature (P7). The reader is still one `p` away in the response pane and in the
+      # Decoder tab, where nothing is replaced.
+      return nil if MediaType.binary_document?(MediaType.of(head.to_slice))
       markers = [] of String
 
       # 1. Extract and replace all markers with unique safe numeric strings.

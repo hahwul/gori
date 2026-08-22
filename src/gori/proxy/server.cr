@@ -51,13 +51,18 @@ module Gori::Proxy
     # path, which is the one thing the provenance rule forbids.
     getter? rewrite_host : Bool
 
+    # A SOCKS5 listener (RFC 1928): the client NAMES its destination in a handshake and gori
+    # MITMs what follows. Mutually exclusive with `transparent`/`origin` — `Settings::Listener`
+    # carries one mode string, and `serve_connection` branches on the four in order.
+    getter? socks5 : Bool
+
     def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
                    max_connections : Int32 = MAX_CONNECTIONS,
                    @transparent : Bool = false, @target_port : Int32 = 0,
                    @origin : {String, String, Int32}? = nil, @rewrite_host : Bool = false,
-                   @extractor : ResponseExtract? = nil)
+                   @extractor : ResponseExtract? = nil, @socks5 : Bool = false)
       @server = nil.as(TCPServer?)
       @running = false
       @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
@@ -67,7 +72,15 @@ module Gori::Proxy
       @socket_dst_logged = false
       @derived_dst_logged = false
       @missing_h2c_dst_logged = false
+      # Refusal sentences this listener has already written to `gori.log`. The FLOW is the record
+      # an operator reads; this bounds the log against a client that reconnects forever.
+      @socks5_logged = Set(String).new
     end
+
+    # How many distinct SOCKS5 refusal sentences one listener writes to `gori.log`. Same shape
+    # and the same reason as `ClientConn::COMPRESSED_SKIP_LOG_CAP`: the vocabulary is small and
+    # bounded, and a client cycling through it must not grow the set for the process's life.
+    SOCKS5_LOG_CAP = 8
 
     # How many ports past the requested one to probe before giving up to ephemeral.
     FALLBACK_TRIES = 16
@@ -179,7 +192,9 @@ module Gori::Proxy
         # a peer that RST'd between accept and here makes local_address raise, which
         # the rescue below turns into a clean close.
         local_host = (client.local_address.address rescue nil)
-        if org = @origin
+        if @socks5
+          serve_socks5(client, local_host)
+        elsif org = @origin
           serve_reverse(client, org)
         elsif @transparent
           serve_transparent(client)
@@ -261,7 +276,7 @@ module Gori::Proxy
       # this client an ALPN offer it never received — the TLS-terminating half of the same
       # listener is `serve_reverse_tls`, and it stamps what its handshake actually observed.
       ClientConn.new(client, scheme, @sink,
-        fixed_host: host, fixed_port: port, tls_upstream: scheme == "https",
+        fixed_host: host, fixed_port: port, listener_pinned: true, tls_upstream: scheme == "https",
         rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
         self_addr: {@host, @port}, rewrite_fixed_host: @rewrite_host, extractor: @extractor,
         h2_offer: H2Offer::Cleartext, client_tls: false).run
@@ -276,7 +291,7 @@ module Gori::Proxy
     #
     # From `intercept` onward this is byte-for-byte the CONNECT path, so ALPN reflection and
     # capture behave identically. Every DROP path closes the client socket explicitly, for the
-    # reason spelled out on `serve_transparent_tls`.
+    # reason spelled out on `serve_pinned_tls`.
     private def serve_reverse_tls(client : TCPSocket, origin : {String, String, Int32}) : Nil
       scheme, host, port = origin
       tls = @tls
@@ -316,7 +331,7 @@ module Gori::Proxy
     #     preface, so there is nothing to downgrade to; relaying anyway would make "force
     #     HTTP/1.1" quietly untrue on this socket, which is worse than a visible refusal.
     #   * the SANDBOX — the host gate (`sandbox_blocks_host?`), which is what this listener's
-    #     own TLS branch already applies (`serve_reverse_tls`, `serve_transparent_tls`), NOT
+    #     own TLS branch already applies (`serve_reverse_tls`, `serve_pinned_tls`), NOT
     #     `handle_connect`'s blanket "sandbox on ⇒ refuse the tunnel". Two reasons, and neither
     #     depends on how the CONNECT-path gate is settled elsewhere. First, `H2::StreamGate`
     #     has carried a hard PER-STREAM sandbox gate since #492 step 4, so the h2 relay is not
@@ -331,7 +346,7 @@ module Gori::Proxy
     #
     # Every refusal CLOSES the socket. Nothing else will: ownership never passes to a
     # `ClientConn#run` on this path, and the accept fiber's rescue only covers pre-run setup —
-    # the same reasoning `serve_transparent_tls` spells out.
+    # the same reasoning `serve_pinned_tls` spells out.
     private def serve_h2c(client : TCPSocket, host : String, port : Int32,
                           origin_dst : {String, Int32}?) : Nil
       if Settings.http2_disabled?
@@ -369,6 +384,158 @@ module Gori::Proxy
     # the ORIGIN, which is exactly the shape those guards would misread. Without them,
     # `resolve_forward` already resolves origin-form from the Host header, which IS transparent
     # forwarding; nothing further is needed for cleartext.
+    # A SOCKS5 listener (RFC 1928). The client NAMES its destination in a handshake and gori
+    # MITMs what follows — the mode for a client that can be pointed at a proxy but not at an
+    # HTTP one (`ALL_PROXY=socks5://…`, a runtime whose only proxy setting is SOCKS).
+    #
+    # After the handshake this is the transparent path with a better answer: the destination
+    # arrived DECLARED, so nothing downstream has to recover it from an SNI or a `Host` header,
+    # and `client.peek` still routes the first byte the way both other listeners do (the
+    # handshake read exactly its own bytes, and any the client sent ahead stay buffered on the
+    # same socket).
+    #
+    # THE GUARDS ARE HERE AND NOT INHERITED. `serve_transparent` deliberately carries no
+    # self-loop test — the kernel's `OrigDst` already refuses its own address, and nothing else
+    # chooses that destination. SOCKS5 hands the choice to the client, which is the CONNECT
+    # threat model, so it gets the CONNECT answer: both gates run before `succeeded` goes back,
+    # and each refusal is a reply code the client can report rather than a dropped connection.
+    private def serve_socks5(client : TCPSocket, local_host : String?) : Nil
+      bind = (client.local_address rescue nil)
+      # A LOCAL, and it has to be: one `Proxy::Server` serves every connection this listener
+      # accepts, each in its own fiber, so a per-connection fact kept on the object would be
+      # read back by whichever connection asked next.
+      result = begin
+        Socks5.negotiate(client, bind)
+      rescue IO::TimeoutError
+        # A client that connected and said NOTHING — the #755 shape, and this listener is one
+        # more place it can land (a client waiting for a banner it will never get, or a
+        # speculative connection). Nothing was named yet, so there is nothing to name it by.
+        ClientConn.record_silent_client(@sink, "http", "", 0, client_tls: false)
+        return close_client(client)
+      end
+      if target = result.target
+        return unless socks5_allowed?(client, target, bind, local_host)
+        Socks5.grant(client, bind)
+        serve_socks5_target(client, target, local_host)
+      else
+        # A connection that closed WITHOUT SAYING ANYTHING is not recorded, and this is the one
+        # refusal that is not: a bare connect-and-close is a port scan, a health check or a
+        # speculative preconnect, and the other three listener modes record nothing for it
+        # either. Left in, it was one flow and one log line per TCP connection — measured at 50
+        # flows for 50 connects — which fills the project with rows about nobody and drowns the
+        # History the tool exists to produce. Every refusal where the client actually said
+        # something is still on the record: that is a client doing something worth seeing.
+        socks5_refused(client, result.refusal, record: !result.silent?)
+      end
+    end
+
+    # The two gates a SOCKS5 CONNECT must pass, answered in the protocol's own terms. Both
+    # exist on the forward-proxy CONNECT path for the same reason (client_conn.cr) — this is
+    # the only other listener where the client, not the operator and not the kernel, decides
+    # where gori dials.
+    private def socks5_allowed?(client : TCPSocket, target : Socks5::Target,
+                                bind : Socket::IPAddress?, local_host : String?) : Bool
+      if serves_target?(target, local_host)
+        Socks5.refuse(client, Socks5::REP_NOT_ALLOWED, bind)
+        socks5_refused(client, "the request named a socket gori is serving " \
+                               "(#{BindAddress.authority(target.host, target.port)}), which would " \
+                               "dial this proxy through itself", target)
+        return false
+      end
+      if (ic = @interceptor) && ic.sandbox_blocks_host?(target.host)
+        Socks5.refuse(client, Socks5::REP_NOT_ALLOWED, bind)
+        socks5_refused(client, "the Sandbox excludes #{target.host} — no connection was made", target)
+        return false
+      end
+      true
+    end
+
+    # Would dialling this target land on a socket gori is serving? Asked of a destination the
+    # CLIENT chose, which is what makes it worth asking at all — the transparent listener's
+    # comes from the kernel and the reverse listener's from the config.
+    #
+    # `Upstream.loops_to_self?` for THIS listener, because it resolves host overrides first: an
+    # override pointing back here is a loop the raw name does not show. Then the same question
+    # for every OTHER socket gori serves — the primary forward-proxy bind and each configured
+    # listener — because a SOCKS5 client can name a sibling, which no per-listener test sees.
+    #
+    # `Upstream.addresses_self?` and NOT `Settings`' bind-coexistence test. That one answers
+    # "could these two sockets bind beside each other", where a wildcard matches every address
+    # of its family — right for validating config, catastrophic here: under the documented
+    # `bind_host: 0.0.0.0` setup it made EVERY host on gori's own port look like gori, so a
+    # SOCKS5 CONNECT to any ordinary `:8080` target was refused with a flow claiming the client
+    # had named gori itself. `addresses_self?` requires the TARGET to be loopback, unspecified
+    # or the bind address, which is the question actually being asked.
+    private def serves_target?(target : Socks5::Target, local_host : String?) : Bool
+      return true if Upstream.loops_to_self?(target.host, target.port, @host_overrides,
+                       {@host, @port}, local_host)
+      addrs = [{Settings.effective_bind_host, Settings.effective_bind_port}]
+      Settings.listeners.each { |l| addrs << {l.host, l.port} }
+      addrs.any? { |(h, p)| Upstream.addresses_self?(target.host, target.port, {h, p}, local_host) }
+    end
+
+    # Route the granted connection on its first byte, exactly as the transparent listener does.
+    private def serve_socks5_target(client : TCPSocket, target : Socks5::Target,
+                                    local_host : String?) : Nil
+      # `peek_first`, the REVERSE listener's peek, and not `peek_transparent_first`: both record
+      # the #755 silent-client flow, but the transparent one RECOVERS the destination it files
+      # under (`OrigDst` answers nil here, so it would invent `""`:80) while this one is handed
+      # the destination that was declared — which on this listener is the client's own CONNECT.
+      # It re-raises after recording, so the timeout still ends the connection.
+      first = peek_first(client, "http", target.host, target.port)
+      # The TWO-byte ClientHello test (#755), not the one-byte one the other two listeners use:
+      # a SOCKS5 listener is where a non-HTTP protocol is most likely to arrive — `ssh -D` is
+      # what most people point at one — and feeding an SSH banner into an OpenSSL server
+      # handshake because its first octet happened to be 0x16 helps nobody.
+      dst = {target.host, target.port}
+      if first && Tls::ClientHello.record_start?(first)
+        serve_pinned_tls(client, dst)
+      elsif h2c_preface?(first)
+        # `origin_dst: nil` — the reverse listener's answer, not the transparent one's. That
+        # argument exists to PIN a dial to an address the kernel named when the request's own
+        # name might be something else; here the name IS the request, so a pin would only be a
+        # second copy of it wearing a label ("the kernel said so") that is not true.
+        serve_h2c(client, target.host, target.port, origin_dst: nil)
+      else
+        # `fixed_host`/`fixed_port`, the REVERSE listener's shape rather than the transparent
+        # one's `origin_dst`. The client DECLARED this authority, so it is what History, scope
+        # and the sandbox must be told — `origin_dst` would pin only the DIAL and leave a `Host`
+        # header the client also chose deciding everything else. `rewrite_fixed_host` stays
+        # false: the operator did not ask for the request to be rewritten, and those are the
+        # client's own bytes (P7).
+        #
+        # `self_addr` + `local_host` arm `loops_to_self?` inside `ClientConn` too. Not because a
+        # later request can name a different host — with `fixed_host` set, `resolve_forward`
+        # holds every ordinary request to the declared destination, absolute-form included, and
+        # the one shape that skipped it (`CONNECT`) is now refused outright on a pinned
+        # connection. They are passed because that pair is what a pinned `ClientConn` is given
+        # everywhere (the reverse listener does the same), and a guard that is armed for a case
+        # that cannot arise costs nothing and survives the day the pin changes.
+        ClientConn.new(client, "http", @sink, fixed_host: target.host, fixed_port: target.port,
+          listener_pinned: true,
+          rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
+          self_addr: {@host, @port}, local_host: local_host, extractor: @extractor,
+          h2_offer: H2Offer::Cleartext, client_tls: false).run
+      end
+    end
+
+    # A refused handshake, on the record. `gori.log` is where an operator does not look, and a
+    # SOCKS listener that closes connections in silence is indistinguishable from a broken one —
+    # which is the whole lesson of #729/#755 one protocol over.
+    private def socks5_refused(client : TCPSocket, reason : String?,
+                               target : Socks5::Target? = nil, record : Bool = true) : Nil
+      if reason && record
+        # Bounded the way `log_compressed_skip` is, and for the same reason: the sentences are
+        # few, the connections offering them are not.
+        if @socks5_logged.size < SOCKS5_LOG_CAP && @socks5_logged.add?(reason)
+          ::Log.warn { "socks5 #{BindAddress.authority(@host, @port)}: refused — #{reason}" }
+        end
+        ClientConn.record_listener_refusal(@sink, target.try(&.host) || "", target.try(&.port) || 0,
+          "SOCKS5 refused: #{reason}")
+      end
+      close_client(client)
+    end
+
     private def serve_transparent(client : TCPSocket) : Nil
       first = peek_transparent_first(client)
       tls = !!(first && !first.empty? && first[0] == Tls::ClientHello::RECORD_HANDSHAKE)
@@ -378,7 +545,7 @@ module Gori::Proxy
       # covering the address as well as the port.
       dst = transparent_dst(client, tls)
       if tls
-        serve_transparent_tls(client, dst)
+        serve_pinned_tls(client, dst)
       elsif h2c_preface?(first)
         serve_transparent_h2c(client, dst)
       else
@@ -494,7 +661,12 @@ module Gori::Proxy
     # ClientConn or to the TLS socket (whose sync_close tears down the transport). A path that
     # merely returned would leave the client blocked until its own timeout and leak the fd —
     # one per connection, so a client that always fails the gate would exhaust them.
-    private def serve_transparent_tls(client : TCPSocket, dst : {String, Int32}?) : Nil
+    # A TLS connection whose destination was DECLARED rather than requested in-band — by the
+    # kernel on a transparent listener, or by the client's own SOCKS5 CONNECT. Both arrive the
+    # same way: bytes that open with a ClientHello and a `{host, port}` from outside the stream.
+    # (It was `serve_transparent_tls` until the SOCKS5 listener became its second caller; the
+    # body never was transparent-specific.)
+    private def serve_pinned_tls(client : TCPSocket, dst : {String, Int32}?) : Nil
       tls = @tls
       return close_client(client) unless tls
       sni, consumed = Tls::ClientHello.peek_sni(client)

@@ -15,6 +15,17 @@ module Gori::Decoder
   # (e.g. Base64.strict_encode, NOT Base64.encode which MIME-wraps with newlines;
   # URI.encode_www_form, NOT the deprecated URI.encode; String#hexbytes?, not the
   # raising #hexbytes). The catalog is pure data — the engine lives in registry/chain.
+  # Why the brotli/zstd converters cannot run, or nil when they can. Both come from the same
+  # build flag — the two `@[Link]` blocks sit under one `{% unless %}`, so a half-linked build
+  # cannot exist — and the answer is prefixed with the converter's own name because that is
+  # what the two readers of `unusable` expect: `Fuzz::Plan` and the Repeater's pre-send check
+  # both collect these into one list, and an unprefixed sentence leaves an operator with
+  # several marked positions unable to tell which token is the one that cannot run.
+  private def self.native_codec_reason(name : String) : String?
+    return nil if Gori::Proxy::Codec::Brotli::AVAILABLE
+    "#{name}: this gori was built with -Dwithout_native_codecs, so libbrotlidec/libzstd are not linked in"
+  end
+
   def self.default_registry : Registry
     r = Registry.new
 
@@ -123,6 +134,29 @@ module Gori::Decoder
     r.register bytes("raw-inflate", "inflate-raw",
       category: Category::Compression, direction: Direction::Decode,
       description: "Raw DEFLATE decompress (RFC 1951, 32 MiB cap)") { |b| Codecs.inflate_raw(b) }
+    # DECOMPRESS only: gori links the brotli DECODER library and wraps libzstd's decompressor,
+    # because what a proxy needs is to read what an origin sent. Registered even when the build
+    # dropped them, carrying the reason — a `-Dwithout_native_codecs` build should say which
+    # build it is, not make `br` look like a typo.
+    r.register bytes("brotli-decompress", "brotli", "br", "unbrotli",
+      category: Category::Compression, direction: Direction::Decode,
+      description: "Brotli decompress (Content-Encoding: br — tolerant, 32 MiB cap)",
+      unusable: native_codec_reason("brotli-decompress")) { |b| Codecs.brotli_decompress(b) }
+    r.register bytes("zstd-decompress", "zstd", "unzstd",
+      category: Category::Compression, direction: Direction::Decode,
+      description: "Zstandard decompress (Content-Encoding: zstd — tolerant, 32 MiB cap)",
+      unusable: native_codec_reason("zstd-decompress")) { |b| Codecs.zstd_decompress(b) }
+
+    # ---------------- SERIALIZATION ----------------
+    # One direction only, and the direction that matters: these read a body somebody else
+    # wrote. The JSON is a PROJECTION — types JSON cannot hold come back named rather than
+    # folded away — so it is for reading, not for re-encoding into the original document.
+    r.register bytes("msgpack-decode", "msgpack", "mpack", "unmsgpack",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "MessagePack → JSON (schema-less; $bin / $ext / $timestamp are named)") { |b| Codecs.msgpack_to_json(b) }
+    r.register bytes("cbor-decode", "cbor", "uncbor",
+      category: Category::Serialization, direction: Direction::Decode,
+      description: "CBOR → JSON (RFC 8949, schema-less; $bin / $tag / $bignum are named)") { |b| Codecs.cbor_to_json(b) }
 
     # ---------------- TOKEN ----------------
     r.register encode("jwt-decode", "jwt",

@@ -3150,7 +3150,8 @@ module Gori::Tui
       # wide/emoji graphemes among the bytes desync the terminal's cursor tracking, so
       # the diff-renderer leaves stray glyphs it can never reach (the reported "잔상").
       # Show a placeholder and point at the byte-exact hex view (^X), like Burp/mitmproxy.
-      if (b = src) && !b.empty? && binary_body?(b)
+      doc = binary_document_view(head, src)
+      if (b = src) && !b.empty? && binary_body?(b) && doc.nil?
         head_lines = Highlight.message_windowed(head, nil, request).head
         head_lines << Highlight::Line.new
         head_lines << [Highlight::Span.new(
@@ -3160,7 +3161,18 @@ module Gori::Tui
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
       # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
       # the styler when the reflow is no longer the content-type's language.
-      pretty = @pretty ? Pretty.format(head, src) : nil
+      # `doc` when there was one — reusing it rather than parsing the body a second time on
+      # every redraw, which is what a bare `Pretty.format` here did whenever the header claimed
+      # a document and the render came back nil (a lying header, or a projection over the size
+      # ceiling): the whole parse repeated per frame for a body that was never going to render.
+      pretty = doc || (@pretty ? Pretty.format(head, src) : nil)
+      # A binary document's note rides the DECODE note, not the reflow's silence. A reflow
+      # rearranges the body's own text and the operator asked for it with `p`; this pane is
+      # showing a different FORMAT from the one on the wire, and a reader who cannot tell that
+      # from the pane would report the origin as sending JSON.
+      if d = doc
+        decode_note = decode_note ? "#{decode_note} · #{d.note}" : d.note
+      end
       pretty_kind = pretty.try(&.kind)
       win = Highlight.message_windowed(head, pretty.try(&.bytes) || src, request, kind: pretty_kind)
       if decode_note
@@ -3184,6 +3196,23 @@ module Gori::Tui
     # A body is treated as binary (→ hex view, not text) when a NUL byte appears in its
     # leading bytes — the classic git/grep detector. Real text, including UTF-8 Korean/
     # CJK/emoji, never contains NUL; images, fonts, media and protobufs do.
+    # A msgpack / CBOR body rendered as JSON, or nil when this is not one (or the reflow is
+    # off, or the bytes are not the document the header claims).
+    #
+    # Attempted BEFORE the binary placeholder, and the placeholder skipped only when it
+    # produced something. Both formats encode the integer 0 as a NUL byte, so essentially every
+    # real body of either trips the NUL sniff — without this the pretty branch below it is dead
+    # code for exactly the two formats it was added for. Exempting on the content-type ALONE
+    # would be worse than not doing it: raw bytes into the pane whenever the reflow is off
+    # (`p`) or the header lied, which is the terminal-corrupting garbage the placeholder is for.
+    #
+    # It also spares the redraw a second parse: `build_detail_view` reuses this result rather
+    # than calling `Pretty.format` again below.
+    private def binary_document_view(head : Bytes?, src : Bytes?) : Pretty::Result?
+      return nil unless @pretty && MediaType.binary_document?(MediaType.of(head))
+      Pretty.format(head, src)
+    end
+
     private def binary_body?(bytes : Bytes) : Bool
       n = {bytes.size, BINARY_SNIFF_LIMIT}.min
       n.times { |i| return true if bytes[i] == 0u8 }

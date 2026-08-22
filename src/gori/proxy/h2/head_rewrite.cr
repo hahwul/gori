@@ -3,6 +3,7 @@ require "./hpack"
 require "./head_codec"
 require "./assembler"
 require "../head_rewriter"
+require "../../alt_svc"
 require "../extractor"
 require "../upstream"
 
@@ -115,6 +116,7 @@ module Gori::Proxy::H2
       @engaged = false
       @warned = false
       @warned_unfaithful = false
+      @warned_alt_svc = false
       @warned_coalesced = false
       @warned_live_rule = false
       @buf = [] of Frame::Header
@@ -343,6 +345,23 @@ module Gori::Proxy::H2
       # `block.stream_id`, which is why the intercept-path warnings said the right thing while
       # the rule-path ones did not.
       stream_id = first.stream_id
+      # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), HTTP/2's half — and the half
+      # that matters, because an origin advertising h3 answered THIS request over h2. Done on
+      # the decoded fields rather than through `rewrite_response`'s h1 text: the text seam
+      # refuses any head it cannot round-trip faithfully (`h1_unfaithful_reason`), which would
+      # skip the strip on exactly the heads most worth stripping, and it would put the field
+      # through a String round-trip for nothing. Before `head_text` too, so the projection, the
+      # text an intercept editor shows and the bytes on the wire all say the same thing.
+      # `message_head?` and not merely `!request`: a trailer block and a PUSH_PROMISE both
+      # arrive on this direction, neither carries `:status`, and neither is a head a client
+      # acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK passthrough
+      # (the latch below is one-way) on a field nothing reads — and a hostile origin could
+      # close that latch at will by putting `alt-svc` in a trailer.
+      alt_svc_stripped = false
+      if !request && message_head?(fields, request) && (pruned = strip_alt_svc(fields, stream_id))
+        fields = pruned
+        alt_svc_stripped = true
+      end
       head = head_text(fields, first, request)
       # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
@@ -351,7 +370,9 @@ module Gori::Proxy::H2
       notice_unreachable(fields) if request && head
       rewritten = head ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
-      built = if rewritten.nil? && !@engaged
+      # `alt_svc_stripped` forces the re-encode branch: the passthrough one forwards `snapshot`,
+      # the frames exactly as they ARRIVED, which still carry the field this just removed.
+      built = if rewritten.nil? && !alt_svc_stripped && !@engaged
                 # Unchanged, and this direction has never re-encoded: byte-exact passthrough,
                 # which is also what keeps the peer's HPACK table driven by the original encoder.
                 # `snapshot`, not `@buf` — `@buf` was cleared above.
@@ -434,6 +455,51 @@ module Gori::Proxy::H2
       # format has no room for. Stay byte-exact and leave the latch alone rather than
       # re-encoding for a change that cannot reach the wire.
       restored == fields ? nil : restored
+    end
+
+    # The response fields with every h3-advertising `Alt-Svc` removed, or nil when there was
+    # nothing to remove — which is the common case and the one that has to stay free, so the
+    # switch is tested before the field walk and nil means "forward as you would have".
+    #
+    # THE COST IS THE LATCH, and it is the reason this is opt-in rather than a default. A
+    # non-nil answer engages the re-encode (see the class comment): from this block on, every
+    # header block in this direction is re-encoded for the life of the connection, and gori's
+    # encoder does not index (`indexing: false`), so the origin's HPACK compression is given up
+    # for every later response on that connection too. That is a bytes-on-the-wire cost the
+    # operator is buying visibility with, not a hazard — mixing passthrough and re-encoded
+    # blocks is the unsound configuration, and engaging on the first strip cannot produce one.
+    #
+    # The advisory is per MESSAGE, like `note_skipped`: "what happened to THIS response" is a
+    # question the operator asks while reading History, and the flow is where they are.
+    private def strip_alt_svc(fields : Array(HPACK::Field), stream_id : UInt32) : Array(HPACK::Field)?
+      return nil unless Settings.strip_alt_svc?
+      removed = nil.as(Array(String)?)
+      kept = fields.reject do |f|
+        # RFC 9113 §8.2.1 requires lowercase field names, but a peer's bytes are a peer's
+        # bytes: matched case-insensitively so a non-conforming origin cannot opt itself out.
+        next false unless f.name.compare(Gori::AltSvc::FIELD_NAME, case_insensitive: true) == 0
+        ev = Gori::AltSvc.h3_evidence(f.value)
+        next false unless ev
+        (removed ||= [] of String) << ev
+        true
+      end
+      return nil unless removed
+      # Once per direction per connection, like `warn_unfaithful`: the per-message record is the
+      # advisory below, and this line is for the operator debugging a client that stopped using
+      # QUIC — who is reading `gori.log`, not one flow. It also says the latch closed, which is
+      # a property of the CONNECTION and would be a lie repeated per stream.
+      unless @warned_alt_svc
+        @warned_alt_svc = true
+        ::Log.info do
+          "h2 #{@host}: removed an Alt-Svc HTTP/3 advertisement (#{removed.first}) from a response " \
+          "(settings network.strip_alt_svc). Response heads on this connection are re-encoded " \
+          "from here on"
+        end
+      end
+      @assembler.note_advisory(stream_id,
+        "#{Gori::AltSvc.removal_note(removed)} This connection re-encodes its response heads " \
+        "from here on, so the raw frame log holds gori's HPACK, not the origin's.")
+      kept
     end
 
     # A message head carries `:method` (request) / `:status` (response). Trailers carry

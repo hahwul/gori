@@ -100,7 +100,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 
 | Section | Fields |
 |---------|--------|
-| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), Hostname overrides (opener) |
+| **Network** | Bind IP, Bind Port, Upstream proxy, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules (read-only), Outbound TLS (read-only), Hostname overrides (opener) |
 | **Tabs** | Opener: show/hide and reorder the top tab bar |
 
 Network here is the **global default**. A project can pin its own bind address, port, and upstream from the **Project** tab, and those win for that project. See [Configuration](/getting-started/configuration/#network) for the full precedence order.

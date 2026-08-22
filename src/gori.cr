@@ -16,14 +16,19 @@ module Gori
   end
 end
 
+require "./gori/proxy/socks5"
 require "./gori/proxy/codec/message"
 require "./gori/proxy/codec/http1"
+require "./gori/alt_svc"
 require "./gori/proxy/codec/body"
 require "./gori/proxy/codec/content_decode"
 require "./gori/proxy/h2/frame"
 require "./gori/proxy/h2/hpack"
 require "./gori/proxy/h2/grpc"
 require "./gori/protobuf"
+require "./gori/binary_document"
+require "./gori/msgpack"
+require "./gori/cbor"
 require "./gori/proxy/h2/assembler"
 require "./gori/proxy/h2/relay"
 require "./gori/proxy/prefix_io"

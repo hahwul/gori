@@ -111,6 +111,29 @@ private def req(path : String) : Array({String, String})
   [{":method", "GET"}, {":scheme", "https"}, {":authority", "api.example.com"}, {":path", path}]
 end
 
+# One header block carrying an `Alt-Svc`, fed through `direction` with the h3 strip in the
+# state the example is about. Yields what the client would receive. The switch is process-
+# global, so it is restored whatever the example does.
+private def with_strip(value : String, on : Bool, direction = "in", &)
+  before = Gori::Settings.strip_alt_svc?
+  begin
+    Gori::Settings.strip_alt_svc = on
+    pipe, assembler, sink = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: direction)
+    # A response projects onto the request that opened its stream, so the "in" examples need
+    # one — fed straight to the assembler, the way `Relay` would have on the other direction.
+    if direction == "in"
+      assembler.feed("out", headers(1_u32, HPACK::Encoder.new.encode(req("/a"))))
+    end
+    fields = direction == "in" ? [{":status", "200"}, {"alt-svc", value}] : req("/a") + [{"alt-svc", value}]
+    block = HPACK::Encoder.new.encode(fields)
+    emitted = [] of Frame::Header
+    pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed(direction, f, pre) }
+    yield pipe, emitted, block, sink
+  ensure
+    Gori::Settings.strip_alt_svc = before
+  end
+end
+
 describe Gori::Proxy::H2::HeadRewrite do
   it "forwards a head no rule changes byte-exact, and stays unengaged" do
     pipe, assembler, _ = pipeline(SubRewriter.new("/secret", "/rewritten"))
@@ -290,6 +313,94 @@ describe Gori::Proxy::H2::HeadRewrite do
     pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
     HPACK::Decoder.new.decode(emitted.first.payload)
       .find { |(n, _)| n == ":status" }.not_nil![1].should eq("503")
+  end
+
+  describe "the h3 Alt-Svc strip (settings network.strip_alt_svc)" do
+    it "removes it from what the client receives, and re-encodes the block to do it" do
+      with_strip(%(h3=":443"; ma=86400), on: true) do |pipe, emitted, _, sink|
+        peer = HPACK::Decoder.new.decode(emitted.first.payload)
+        peer.find { |(n, _)| n == "alt-svc" }.should be_nil
+        peer.find { |(n, _)| n == ":status" }.not_nil![1].should eq("200")
+        # The passthrough branch would have forwarded the frame AS IT ARRIVED, which still
+        # carries the field — so the strip has to engage the re-encode, and stay engaged.
+        pipe.engaged?.should be_true
+      end
+    end
+
+    it "tells the flow what it removed" do
+      with_strip(%(h3=":443"), on: true) do |_, _, _, sink|
+        advisory = sink.responses.first.advisory.to_s
+        advisory.should contain("Alt-Svc")
+        advisory.should contain(%(h3=":443"))
+        advisory.should contain("network.strip_alt_svc")
+      end
+    end
+
+    it "forwards the head byte-exact when the switch is off — which is the default" do
+      with_strip(%(h3=":443"), on: false) do |pipe, emitted, block, _|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      end
+    end
+
+    it "leaves an Alt-Svc that advertises no h3 alone, switch on, and stays unengaged" do
+      # `clear` and a plain h2 alternative cost gori no visibility. Engaging the HPACK
+      # re-encode for them would spend the connection's compression on nothing.
+      with_strip("clear", on: true) do |pipe, emitted, block, _|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      end
+      with_strip(%(h2=":8443"), on: true) do |pipe, emitted, block, _|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      end
+    end
+
+    it "leaves a TRAILER block alone, so a hostile origin cannot close the latch with one" do
+      # `Alt-Svc` in a trailer is a field no client acts on, and stripping it would spend the
+      # connection's HPACK passthrough — one-way, for the rest of the connection — on nothing.
+      before = Gori::Settings.strip_alt_svc?
+      begin
+        Gori::Settings.strip_alt_svc = true
+        pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+        sender = HPACK::Encoder.new
+        head = sender.encode([{":status", "200"}])
+        trailer = sender.encode([{"grpc-status", "0"}, {"alt-svc", %(h3=":443")}])
+        emitted = [] of Frame::Header
+        pipe.accept(headers(1_u32, head, Frame::END_HEADERS)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        pipe.accept(headers(1_u32, trailer, Frame::END_HEADERS | Frame::END_STREAM)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        emitted[1].payload.should eq(trailer)
+        pipe.engaged?.should be_false
+      ensure
+        Gori::Settings.strip_alt_svc = before
+      end
+    end
+
+    it "leaves a PUSH_PROMISE alone — it is a request head arriving on the response side" do
+      before = Gori::Settings.strip_alt_svc?
+      begin
+        Gori::Settings.strip_alt_svc = true
+        pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+        block = HPACK::Encoder.new.encode(req("/a") + [{"alt-svc", %(h3=":443")}])
+        payload = Bytes[0, 0, 0, 2] + block # the promised stream id prefixes the block
+        frame = Frame::Header.new(Frame::Type::PushPromise.value, Frame::END_HEADERS, 1_u32, payload)
+        emitted = [] of Frame::Header
+        pipe.accept(frame) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        emitted.first.payload.should eq(payload)
+        pipe.engaged?.should be_false
+      ensure
+        Gori::Settings.strip_alt_svc = before
+      end
+    end
+
+    it "never touches a REQUEST head, whatever it carries" do
+      # `Alt-Svc` is a response header; a request field by that name is the client's own bytes
+      # and none of gori's business (P7).
+      with_strip(%(h3=":443"), on: true, direction: "out") do |pipe, emitted, block, _|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      end
+    end
   end
 
   it "keeps a head-block decode from happening twice (the projection comes from the relay)" do

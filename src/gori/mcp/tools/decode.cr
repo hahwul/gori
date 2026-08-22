@@ -135,7 +135,9 @@ module Gori
           "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
           "'base64-decode > gunzip', 'url-encode', 'sha256'. Common converters: base64, " \
           "base64-decode, url-encode, url-encode-all, url-decode, hex, hex-decode, gzip, gunzip, " \
-          "deflate, inflate, raw-deflate, raw-inflate, jwt-decode, html-encode, md5, sha256, crc32, " \
+          "deflate, inflate, raw-deflate, raw-inflate, brotli, zstd (both decompress-only), " \
+          "msgpack-decode, cbor-decode (binary document -> JSON), " \
+          "jwt-decode, html-encode, md5, sha256, crc32, " \
           "decimal, binary, rot47, quoted-printable, punycode-encode, punycode-decode, base36, " \
           "base62, xml-escape, shell-escape, powershell-escape, c-string-escape, homoglyph, typo. " \
           "An unknown token returns the full list." do |s|

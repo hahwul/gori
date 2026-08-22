@@ -13,6 +13,7 @@ module Gori::Tui
   #
   #   reverse      127.0.0.1:9000   → https://api.acme.test:443    up
   #   transparent  127.0.0.1:8443                                  up
+  #   socks5       127.0.0.1:1080                                  up
   #   proxy        192.168.1.4:8070                        could not bind
   #
   # This is the second half of the #499 address decision. The primary bind stays THE proxy

@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "file_utils"
 
 private def with_listeners(primary_host : String, primary_port : Int32,
                            entries : Array(Gori::Settings::Listener), &)
@@ -211,6 +212,45 @@ describe Gori::Settings do
       listener("127.0.0.1", 9000, "reverse", origin: "https://api.acme.test")
         .origin_target.should eq({"https", "api.acme.test", 443})
       listener("127.0.0.1", 9000, "transparent").origin_target.should be_nil
+    end
+  end
+
+  describe "socks5 listeners" do
+    it "is a mode of its own, and the fields that belong to the other modes stay refused" do
+      # No new validation was written for this mode: the existing refusals are spelled
+      # `!transparent?` and `!reverse?`, so a socks5 entry inherits both. This pins that, because
+      # the day one of them is rewritten as `proxy?` the inheritance disappears silently.
+      with_listeners("127.0.0.1", 8070, [] of Gori::Settings::Listener) do
+        Gori::Settings.listener_error(listener("127.0.0.1", 1080, "socks5")).should be_nil
+        Gori::Settings.listener_error(listener("127.0.0.1", 1080, "socks5", 443))
+          .to_s.should contain("target_port only applies to a transparent listener")
+        Gori::Settings.listener_error(listener("127.0.0.1", 1080, "socks5", 0, "https://a.test"))
+          .to_s.should contain("origin only applies to a reverse listener")
+        Gori::Settings.listener_error(listener("127.0.0.1", 1080, "socks5", 0, "", true))
+          .to_s.should contain("rewrite_host only applies to a reverse listener")
+      end
+    end
+
+    it "round-trips through the settings file as its own mode" do
+      # The load path DROPS an entry whose mode it does not know (rather than defaulting it to
+      # `proxy`, which would expose an unintended forward proxy), so a mode that serializes but
+      # does not parse back would silently delete the operator's listener on the next start.
+      dir = File.tempname("gori-socks5-listener")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        Gori::Settings.listeners = [listener("127.0.0.1", 1080, "socks5")]
+        Gori::Settings.save.should be_true
+        Gori::Settings.listeners = [] of Gori::Settings::Listener
+        Gori::Settings.load
+        Gori::Settings.listeners.map(&.mode).should eq(["socks5"])
+        Gori::Settings.listeners.first.socks5?.should be_true
+      ensure
+        Gori::Settings.listeners = [] of Gori::Settings::Listener
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+      end
     end
   end
 

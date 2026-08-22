@@ -122,7 +122,7 @@ module Gori::Proxy::Tls
     # CLIENT_IO_TIMEOUT armed in `Server` (`IO::TimeoutError`) — a browser's speculative
     # preconnect, or a NAT'd mobile client that half-opens.
     #
-    # Two of the three callers own nothing else that would close it (`serve_transparent_tls`,
+    # Two of the three callers own nothing else that would close it (`serve_pinned_tls`,
     # `serve_reverse_tls` both end on the intercept call); the CONNECT path and the
     # self-page reach `ClientConn#run`'s ensure, where this is a harmless early close —
     # every close path here is rescue-guarded, so the double close is a no-op. Same

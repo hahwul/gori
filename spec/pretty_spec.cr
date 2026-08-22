@@ -16,6 +16,19 @@ private def jwt_token : String
   "#{h}.#{p}.c2ln"
 end
 
+# {"a": 1, "b": <2 raw bytes>} in MessagePack, and {"a": 1} in CBOR.
+private def msgpack_body : Bytes
+  Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe]
+end
+
+private def cbor_body : Bytes
+  Bytes[0xa1, 0x61, 0x61, 0x01]
+end
+
+private def head_ct(ct : String) : Bytes
+  "HTTP/1.1 200 OK\r\nContent-Type: #{ct}\r\n\r\n".to_slice
+end
+
 describe Gori::Pretty do
   describe "JSON" do
     it "reflows minified JSON (kind stays content-type-derived)" do
@@ -313,6 +326,86 @@ describe Gori::Pretty do
     # which is the display half of the same "gori did not notice this is JSON" family.
     it "pretty-prints a vendor json type with no +json suffix (AWS)" do
       pretty("application/x-amz-json-1.1", %({"a":1,"b":[1,2]})).not_nil!.note.should eq("pretty: json")
+    end
+  end
+  describe "binary documents" do
+    it "renders a MessagePack body as JSON, and styles the pane as JSON" do
+      r = Gori::Pretty.format(head_ct("application/msgpack"), msgpack_body).not_nil!
+      String.new(r.bytes).should contain(%("$bin": "//4="))
+      r.note.should eq("decoded: msgpack")
+      r.kind.should eq(:json) # the pane is showing JSON now, whatever the content-type says
+    end
+
+    it "renders a CBOR body, including the `+cbor` structured-syntax suffix" do
+      Gori::Pretty.format(head_ct("application/cbor"), cbor_body).not_nil!.note.should eq("decoded: cbor")
+      Gori::Pretty.format(head_ct("application/senml+cbor"), cbor_body).not_nil!.note.should eq("decoded: cbor")
+    end
+
+    it "says so when the document ends mid-value rather than pretending it is whole" do
+      r = Gori::Pretty.format(head_ct("application/msgpack"), Bytes[0x93, 0x01, 0x02]).not_nil!
+      r.note.should contain("partial")
+      String.new(r.bytes).should contain("$partial") # the marker names WHERE it stopped
+    end
+
+    it "keeps a document's duplicate members instead of merging them away" do
+      # The rendering used to be re-parsed to pretty-print it, and `JSON.parse` keeps the last
+      # of two identical keys. A body deliberately built around which member a downstream
+      # parser keeps is exactly the body an operator is looking at, and the pane silently
+      # showed one of them while the headless projection showed both.
+      dup = Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x61, 0x02] # {"a": 1, "a": 2}
+      text = String.new(Gori::Pretty.format(head_ct("application/msgpack"), dup).not_nil!.bytes)
+      text.scan(/"a"/).size.should eq(2)
+    end
+
+    it "leaves a body raw when its bytes are not the document the content-type claims" do
+      # nil = the caller shows the ordinary binary placeholder and the hex view. A reader with
+      # no schema makes SOMETHING of any bytes, so the test cannot be "did it render" — it is
+      # "did it get to the END of the body", which only a real document or a truncated one does.
+      Gori::Pretty.format(head_ct("application/msgpack"), Bytes[0xc1, 0xc1]).should be_nil
+      # A PNG of a size a PNG actually is. A dozen bytes cannot be told apart from a truncated
+      # document — `0x89` opens a fixmap of 9 and runs out just as a cut-off body would — and
+      # that residual is stated in `BinaryDocument::Rendering#describes?` rather than papered
+      # over; at any real size the reader stops with bytes to go and the fallback holds.
+      rng = Random.new(5)
+      png = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] +
+            Bytes.new(20_000) { rng.rand(256).to_u8 }
+      Gori::Pretty.format(head_ct("application/msgpack"), png).should be_nil
+      Gori::Pretty.format(head_ct("application/cbor"), png).should be_nil
+      gz = Bytes[0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03]
+      Gori::Pretty.format(head_ct("application/msgpack"), gz).should be_nil
+      Gori::Pretty.format(head_ct("application/msgpack"), %({"a":1,"b":"hi"}).to_slice).should be_nil
+      Gori::Pretty.format(head_ct("application/cbor"), "<html><body>x</body></html>".to_slice).should be_nil
+    end
+
+    it "still renders a body the capture cap cut short — the case that wears the same flag" do
+      # Truncation and a lying header are both "incomplete". The one that is still this body is
+      # the one the reader consumed ENTIRELY and wanted more of.
+      cut = Bytes[0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62] # {"a": 1, "b": <cut>
+      r = Gori::Pretty.format(head_ct("application/msgpack"), cut).not_nil!
+      String.new(r.bytes).should contain(%("a": 1))
+      r.note.should contain("partial")
+    end
+
+    it "never formats a binary document in the REQUEST editor, whose buffer it replaces" do
+      # `format_request`'s result is written back over the operator's request. The projection
+      # cannot be re-encoded, so formatting one there would destroy the bytes they were about
+      # to send — the one thing this codebase does not do to operator bytes.
+      head = "POST /rpc HTTP/1.1\r\nContent-Type: application/msgpack\r\n"
+      Gori::Pretty.format_request(head, String.new(msgpack_body)).should be_nil
+      Gori::Pretty.format_request("POST /a HTTP/1.1\r\nContent-Type: application/cbor\r\n",
+        String.new(cbor_body)).should be_nil
+      # A JSON request body still formats, which is what the key is for.
+      Gori::Pretty.format_request("POST /a HTTP/1.1\r\nContent-Type: application/json\r\n",
+        %({"a":1})).should_not be_nil
+    end
+
+    it "does not dispatch on a content-type that merely mentions the word" do
+      # Precision belongs to dispatch: handing an arbitrary body to a binary reader because
+      # its type contained "cbor" would render whatever the reader made of unrelated bytes.
+      Gori::Pretty.format(head_ct("text/plain; note=cbor"), cbor_body).should be_nil
+      # A CBOR *sequence* is several documents; this reader takes one, and rendering the first
+      # while dropping the rest is the silent-truncation shape.
+      Gori::Pretty.format(head_ct("application/cbor-seq"), cbor_body).should be_nil
     end
   end
 end

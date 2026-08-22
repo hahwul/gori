@@ -1,4 +1,5 @@
 require "../codec/message"
+require "../codec/http1"
 
 module Gori::Proxy::WS
   # The one header gori removes from a WebSocket handshake it relays (#518).
@@ -112,34 +113,14 @@ module Gori::Proxy::WS
     # regardless: `Codec::Body.request_framing` rejects the whole request
     # (`Http1.obfuscated_header?`) before it is forwarded.
     def self.strip_extensions(head : Bytes) : Bytes
-      io = IO::Memory.new(head.size)
-      pos = 0
-      start_line = true
-      while pos < head.size
-        lf = head.index(0x0a_u8, pos)
-        stop = lf ? lf + 1 : head.size # the line INCLUDING its terminator
-        line = head[pos, stop - pos]
-        io.write(line) if start_line || !extensions_line?(line)
-        start_line = false
-        pos = stop
-      end
-      io.to_slice
+      Codec::Http1.strip_header_lines(head, EXTENSIONS_NAME) { true }
     end
 
     # True when the header line's field-name is exactly `Sec-WebSocket-Extensions`
     # (ASCII case-insensitive). A colon-less line (the blank line that ends the head,
     # or a garbage line) never matches.
     private def self.extensions_line?(line : Bytes) : Bool
-      colon = line.index(0x3a_u8) # ':'
-      return false unless colon
-      return false unless colon == EXTENSIONS_NAME.bytesize
-      name = EXTENSIONS_NAME.to_slice
-      colon.times do |i|
-        b = line.unsafe_fetch(i)
-        b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # ASCII 'A'..'Z' → lower
-        return false unless b == name.unsafe_fetch(i)
-      end
-      true
+      !Codec::Http1.header_line_value(line, EXTENSIONS_NAME).nil?
     end
   end
 end

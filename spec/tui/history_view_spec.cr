@@ -816,6 +816,51 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "renders a MessagePack body as JSON instead of the binary placeholder" do
+    # Both msgpack and CBOR encode the integer 0 as a NUL byte, so essentially every real body
+    # of either trips the NUL sniff — without the exemption the pretty branch below it is dead
+    # code for exactly the two formats it was added for.
+    tmp_store do |store|
+      # {"a": 0, "b": <2 raw bytes>} — the integer 0 IS a NUL byte in both formats, which is
+      # exactly why the placeholder would otherwise swallow the body.
+      body = Bytes[0x82, 0xa1, 0x61, 0x00, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe]
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/rpc", http_version: "HTTP/1.1",
+        head: "GET /rpc HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: application/msgpack\r\n\r\n".to_slice,
+        body: body, content_type: "application/msgpack"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      # The placeholder is skipped only when a RENDERING exists, so the reflow has to be on —
+      # exempting on the content-type alone would dump the raw bytes into the pane with `p` off.
+      raw = MemoryBackend.new(90, 20)
+      view.render_detail(Screen.new(raw), Rect.new(0, 0, 90, 20))
+      raw.contains?("binary body").should be_true
+
+      view.pretty = true
+      backend = MemoryBackend.new(90, 20)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 90, 20))
+      backend.contains?(%("a": 0)).should be_true # the document, as JSON
+      backend.contains?("$bin").should be_true    # what JSON cannot hold, named
+      backend.contains?("decoded: msgpack").should be_true
+      backend.contains?("binary body").should be_false # NOT the placeholder
+
+      # The bytes are still one keypress away, which is what makes the rendering safe to offer.
+      view.toggle_detail_hex
+      hex = MemoryBackend.new(90, 20)
+      view.render_detail(Screen.new(hex), Rect.new(0, 0, 90, 20))
+      hex.contains?("00000000").should be_true
+    end
+  end
+
   it "shows a placeholder for a binary response body instead of rendering it as text" do
     tmp_store do |store|
       # A webp-ish body: RIFF header + a NUL byte (the binary marker) + bytes that,

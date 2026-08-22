@@ -242,6 +242,49 @@ describe "h2c prior knowledge on a listener (#737)" do
     end
   end
 
+  describe "socks5 listener" do
+    # The third listener that can carry prior knowledge, and the one with the best answer for
+    # it: h2c has no `Host` header, no SNI and an `:authority` locked inside HPACK state, so the
+    # transparent branch has to drop it when the kernel cannot say. A SOCKS5 client NAMED the
+    # destination before sending a byte of h2.
+    it "relays prior knowledge to the destination the SOCKS5 handshake named" do
+      origin_port = start_h2c_origin("socks5-h2c-ok")
+      sink = RecSink.new
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, socks5: true)
+      proxy.start
+      begin
+        client = TCPSocket.new("127.0.0.1", proxy.port)
+        client.read_timeout = 15.seconds
+        # RFC 1928: greeting, then CONNECT 127.0.0.1:<origin> as a DOMAIN.
+        client.write(Bytes[5, 1, 0])
+        client.flush
+        selection = Bytes.new(2)
+        client.read_fully?(selection).should be_truthy
+        name = "127.0.0.1".to_slice
+        client.write(Bytes[5, 1, 0, 3, name.size.to_u8])
+        client.write(name)
+        client.write(Bytes[(origin_port >> 8).to_u8, (origin_port & 0xFF).to_u8])
+        client.flush
+        reply = Bytes.new(4)
+        client.read_fully?(reply).should be_truthy
+        reply[1].should eq(0_u8)
+        client.read_fully?(Bytes.new(reply[3] == 1_u8 ? 6 : 18))
+
+        send_h2c_request(client, "declared.test")
+        head, body = read_h2c_response(client)
+        client.close
+
+        head.should be_true
+        body.should eq("socks5-h2c-ok")
+        await_capture(sink)
+        sink.requests.first.http_version.should eq("HTTP/2")
+        sink.responses.first.status.should eq(200)
+      ensure
+        proxy.stop
+      end
+    end
+  end
+
   describe "transparent listener" do
     # h2c is the one transparent branch with no second source for the destination: no Host
     # header, no SNI, and the `:authority` is inside the connection's HPACK state. With no

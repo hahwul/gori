@@ -233,7 +233,8 @@ module Gori
       ExtraListener.new(l, Proxy::Server.new(l.host, l.port, sink, tls: tunnel,
         rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
         transparent: l.transparent?, target_port: l.target_port,
-        origin: l.origin_target, rewrite_host: l.rewrite_host, extractor: bindings))
+        origin: l.origin_target, rewrite_host: l.rewrite_host, extractor: bindings,
+        socks5: l.socks5?))
     end
 
     # The one spelling of a bind failure. `listener_rows` matches a failure back to its server by
@@ -425,8 +426,10 @@ module Gori
         s = e.server
         addr = authority_of(s)
         org = s.origin
-        ListenerRow.new(s.host, s.port,
-          s.origin ? "reverse" : (s.transparent? ? "transparent" : "proxy"),
+        # The mode the operator DECLARED, not one derived back out of the server's fields. The
+        # derivation had to be extended for every new mode and could only ever answer with the
+        # ones it could tell apart from the outside; `spec` is the entry that built this socket.
+        ListenerRow.new(s.host, s.port, e.spec.mode,
           org ? "#{org[0]}://#{Gori::BindAddress.authority(org[1], org[2])}" : "",
           s.listening?,
           @listener_errors.find(&.starts_with?("#{addr} —")))

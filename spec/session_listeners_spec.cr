@@ -187,6 +187,33 @@ describe Gori::Session, "#reconcile_listeners! (#508)" do
     end
   end
 
+  it "reports each listener under the mode it was DECLARED with" do
+    # The row's mode used to be reconstructed from the server's fields —
+    # `origin ? "reverse" : (transparent? ? "transparent" : "proxy")` — which could only ever
+    # answer with the modes it could tell apart from the outside. A socks5 listener came back
+    # labelled "proxy", which is the one label that would send an operator looking for a
+    # forward proxy that is not there.
+    a, b, c = free_port, free_port, free_port
+    with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}, "mode": "socks5"},
+                              {"host": "127.0.0.1", "port": #{b}, "mode": "transparent"},
+                              {"host": "127.0.0.1", "port": #{c}}])) do |session, _|
+      servers_row(session, a).mode.should eq("socks5")
+      servers_row(session, b).mode.should eq("transparent")
+      servers_row(session, c).mode.should eq("proxy")
+
+      # And the socket really is one: the readout and the behaviour were decoupled the moment
+      # the row stopped being derived from the server, so `build_listener` dropping
+      # `socks5: l.socks5?` would leave the overlay saying "socks5" over a forward proxy.
+      sock = TCPSocket.new("127.0.0.1", a, connect_timeout: 2.seconds)
+      sock.write(Bytes[5, 1, 0])
+      sock.flush
+      selection = Bytes.new(2)
+      sock.read_fully?(selection).should be_truthy
+      selection.should eq(Bytes[5, 0]) # VER, NO-AUTH — RFC 1928 §3
+      sock.close
+    end
+  end
+
   it "clears the drift notice once the edit has been applied" do
     a, b = free_port, free_port
     with_reconcile_session(%([{"host": "127.0.0.1", "port": #{a}}])) do |session, cfg|
