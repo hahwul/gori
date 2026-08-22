@@ -137,6 +137,7 @@ gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
+gori mcp --install-hermes        # Hermes        (~/.hermes/config.yaml)
 ```
 
 Add `--read-only` to hand a project to an untrusted agent (read tools only, no live requests). The

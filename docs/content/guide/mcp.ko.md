@@ -74,8 +74,9 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+| `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
 
-Claude Desktop을 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 그대로 따라갑니다.
+Claude Desktop과 Hermes를 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 모두 같은 위치에 설정을 둡니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop만 Electron의 앱 데이터 디렉터리를 따릅니다. macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)입니다. gori는 이 변수를 읽으므로 Nix나 home-manager처럼 세션에서 값을 옮겨 둔 환경도 그대로 따라갑니다.
 
 예외는 **Flatpak** Claude Desktop입니다. 이 빌드는 샌드박스 안쪽의 `XDG_CONFIG_HOME`(`~/.var/app/<app-id>/config/Claude/`)을 읽는데, 호스트 셸에서 실행되는 gori는 그 값을 볼 수 없습니다. 이 경우 gori는 `~/.config/Claude/claude_desktop_config.json`에 쓰고 그 경로를 출력하니, 파일을 샌드박스 디렉터리로 직접 복사하세요. 설치 명령은 항상 실제로 쓴 파일을 출력하므로, 그 줄을 사용 중인 빌드가 읽는 위치와 맞춰 보세요.
 
@@ -83,10 +84,11 @@ Claude Desktop을 뺀 나머지 클라이언트는 macOS·Linux·Windows에서 �
 gori mcp --install-claude-code
 gori mcp --install-codex
 gori mcp --install-grok
+gori mcp --install-hermes
 gori mcp --install-claude-code --install-codex  # 한 번에 여러 클라이언트
 ```
 
-Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML을 사용합니다. 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다.
+Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다(JSON이 아닙니다). 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 이 파일들을 파싱 트리에서 다시 뽑아내지 않고 텍스트로 편집하므로 설정 주변에 적어 둔 메모가 그대로 남습니다. 안전하게 끼워 넣을 수 없는 설정 파일은 고쳐 쓰지 않고 그 사실을 알립니다.
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 

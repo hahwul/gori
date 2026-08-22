@@ -8,7 +8,7 @@ gori는 하나의 프로젝트와 하나의 엔진 위에 세 가지 진입점�
 
 TUI 안에는 채팅 창이 없습니다. 모델과 클라이언트는 직접 골라 가져오고, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 그러면 에이전트가 트래픽을 읽고 사용자와 똑같은 도구를 구동합니다. 전체 도구 목록과 더 깊은 주제(라이브 인터셉트, 설계 근거)는 [MCP 서버 가이드](/ko/guide/mcp/)를 참고하세요.
 
-> **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok 등)를 준비하세요.
+> **시작하기 전에.** [gori를 설치](/ko/getting-started/installation/)하고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes 등)를 준비하세요.
 
 ## 1. 클라이언트에 서버 설치하기 {#1-install-the-server-into-your-client}
 
@@ -20,6 +20,7 @@ gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
+gori mcp --install-hermes        # Hermes
 ```
 
 | 플래그 | 클라이언트 | 작성되는 설정 |
@@ -29,10 +30,11 @@ gori mcp --install-grok          # Grok
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+| `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
 
-각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 JSON이 아니라 TOML `[mcp_servers.gori]` 테이블을 사용합니다. 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
+각 명령은 작성한 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 사용합니다(JSON이 아닙니다). 설치 후에는 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요.
 
-플랫폼마다 위치가 달라지는 건 Claude Desktop뿐입니다. Electron의 앱 데이터 디렉터리를 따라 macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)에 씁니다. gori가 이 변수를 읽으므로 Nix나 home-manager처럼 값을 옮겨 둔 세션도 따라갑니다. Flatpak 빌드는 예외로, 샌드박스 안쪽의 값을 읽기 때문에 출력된 파일을 `~/.var/app/<app-id>/config/Claude/`로 직접 복사해야 합니다.
+플랫폼마다 위치가 달라지는 건 Claude Desktop과 Hermes뿐입니다. Hermes는 `$HERMES_HOME`이 설정돼 있으면 그 값을, 없으면 `~/.hermes`(Windows는 `%LOCALAPPDATA%\hermes`)를 읽습니다. Claude Desktop은 Electron의 앱 데이터 디렉터리를 따라 macOS는 `~/Library/Application Support/Claude/`, Windows는 `%APPDATA%\Claude\`, Linux는 `$XDG_CONFIG_HOME/Claude/`(기본값 `~/.config/Claude/`)에 씁니다. gori가 이 변수를 읽으므로 Nix나 home-manager처럼 값을 옮겨 둔 세션도 따라갑니다. Flatpak 빌드는 예외로, 샌드박스 안쪽의 값을 읽기 때문에 출력된 파일을 `~/.var/app/<app-id>/config/Claude/`로 직접 복사해야 합니다.
 
 직접 연결하고 싶다면? 서버는 그저 stdio 위의 `gori mcp` 명령입니다. 추가 인자 없이 이 명령을 MCP 클라이언트에 가리키기만 하면 됩니다.
 

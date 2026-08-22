@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `gori mcp --install-hermes` writes the server into Hermes' `~/.hermes/config.yaml` (or `$HERMES_HOME`), the first YAML client alongside the JSON and TOML ones. Sibling servers, their `env:` keys and the comments around them are left as they are. (#785)
+
 - The History and Target filter bars are clickable: `v:` opens the view picker, `f:follow`, `g:fold` and `⇧S scope` toggle what their chords do, and a click on the query readout beside them opens the filter for typing. (#782)
 
 - History views: `v` picks a named filter the list narrows to, and it is a **mode** rather than a query you retype. `src:` made the common scopings expressible; this makes them stick. The view is ANDed **over** the filter bar, exactly as the `⇧S` scope lens is — so `/ status:5xx` refines the view instead of replacing it, which is the whole difference between a mode and a query. A lowercase `v:name` chip sits left of `f:follow` — abbreviated where the name is wider than the row (`History + Repeater` shows as `v:history+rptr`) — and the choice persists per project across restarts.

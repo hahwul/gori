@@ -11,6 +11,21 @@ describe Gori::MCP::Install do
       Gori::MCP::Install.config_path("grok").should eq(File.join(ENV["HOME"], ".grok", "config.toml"))
     end
 
+    it "maps hermes to ~/.hermes/config.yaml, or HERMES_HOME" do
+      # Pinned to a literal, not rebuilt from `hermes_home`: an expectation that calls the
+      # function under test moves with it, and only the `config.yaml` half would have failed.
+      old_hermes = ENV["HERMES_HOME"]?
+      ENV.delete("HERMES_HOME")
+      begin
+        Gori::MCP::Install.config_path("hermes").should eq(
+          File.join(ENV["HOME"], ".hermes", "config.yaml"))
+        ENV["HERMES_HOME"] = "/opt/hermes-eng"
+        Gori::MCP::Install.config_path("hermes").should eq("/opt/hermes-eng/config.yaml")
+      ensure
+        old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+      end
+    end
+
     it "maps claude-code to ~/.claude.json" do
       Gori::MCP::Install.config_path("claude-code").should eq(File.join(ENV["HOME"], ".claude.json"))
     end
@@ -72,6 +87,246 @@ describe Gori::MCP::Install do
         .should eq("/home/u/.config/Claude/claude_desktop_config.json")
       Gori::MCP::Install.claude_desktop_path(home, :linux, xdg_config_home: ".config")
         .should eq("/home/u/.config/Claude/claude_desktop_config.json")
+    end
+  end
+
+  describe ".hermes_home" do
+    # Same rule as claude_desktop_path: every branch asserted from every host, because the
+    # one branch this platform cannot execute is the one that stays wrong.
+    home = "/home/u"
+
+    it "uses ~/.hermes on darwin and linux" do
+      Gori::MCP::Install.hermes_home(home, :darwin, hermes_home_env: nil, local_appdata: nil)
+        .should eq("/home/u/.hermes")
+      Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: nil, local_appdata: nil)
+        .should eq("/home/u/.hermes")
+    end
+
+    it "uses %LOCALAPPDATA% on windows, falling back to AppData/Local" do
+      Gori::MCP::Install.hermes_home(home, :windows, hermes_home_env: nil,
+        local_appdata: "C:/Users/u/AppData/Local").should eq("C:/Users/u/AppData/Local/hermes")
+      Gori::MCP::Install.hermes_home(home, :windows, hermes_home_env: nil, local_appdata: nil)
+        .should eq("/home/u/AppData/Local/hermes")
+      Gori::MCP::Install.hermes_home(home, :windows, hermes_home_env: nil, local_appdata: "")
+        .should eq("/home/u/AppData/Local/hermes")
+    end
+
+    it "lets HERMES_HOME win on every platform" do
+      # A profile-per-engagement setup moves it, and the agent reads the variable on every
+      # launch — install anywhere else and the client never sees the server.
+      Gori::MCP::Install.hermes_home(home, :darwin, hermes_home_env: "/opt/h").should eq("/opt/h")
+      Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "/opt/h").should eq("/opt/h")
+      Gori::MCP::Install.hermes_home(home, :windows, hermes_home_env: "D:/h").should eq("D:/h")
+    end
+
+    it "ignores an empty or all-whitespace HERMES_HOME" do
+      # Hermes strips the variable before testing it, so " " is unset to the agent; honoring
+      # it here would install into a directory named " " that nothing reads.
+      Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "").should eq("/home/u/.hermes")
+      Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "   ").should eq("/home/u/.hermes")
+    end
+  end
+
+  describe ".upsert_yaml_server" do
+    body = ["command: \"/bin/gori\"", "args:", "  - \"mcp\""]
+
+    it "appends the whole block to a file that has no mcp_servers" do
+      text = Gori::MCP::Install.upsert_yaml_server("model:\n  default: claude-sonnet-5\n",
+        "mcp_servers", "gori", body)
+      text.should eq(<<-YAML)
+        model:
+          default: claude-sonnet-5
+
+        mcp_servers:
+          gori:
+            command: "/bin/gori"
+            args:
+              - "mcp"\n
+        YAML
+    end
+
+    it "writes the block into an empty document" do
+      Gori::MCP::Install.upsert_yaml_server("", "mcp_servers", "gori", body)
+        .should eq("mcp_servers:\n  gori:\n    command: \"/bin/gori\"\n    args:\n      - \"mcp\"\n")
+    end
+
+    it "keeps sibling servers, their secrets, and the comments around them" do
+      # The whole reason this splices lines instead of re-emitting a parse tree: a hermes
+      # config.yaml is mostly commented documentation, and the servers beside gori hold
+      # their own API keys.
+      existing = <<-YAML
+        model:
+          provider: anthropic
+
+        # ── MCP servers ──────────────────────────────
+        mcp_servers:
+          github:
+            command: "npx"
+            args: ["-y", "@modelcontextprotocol/server-github"]
+            env:
+              GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_secret"
+
+        plugins:
+          enabled:
+            - orca-status\n
+        YAML
+      text = Gori::MCP::Install.upsert_yaml_server(existing, "mcp_servers", "gori", body)
+      text.should contain("# ── MCP servers ──────────────────────────────")
+      text.should contain("GITHUB_PERSONAL_ACCESS_TOKEN: \"ghp_secret\"")
+      text.should contain("provider: anthropic")
+      text.should contain("    - orca-status")
+      # The new entry sits inside the block, not after the `plugins:` section that follows it.
+      text.index("  gori:").not_nil!.should be < text.index("plugins:").not_nil!
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+      YAML.parse(text)["plugins"]["enabled"][0].as_s.should eq("orca-status")
+    end
+
+    it "replaces an existing gori entry instead of adding a second one" do
+      existing = <<-YAML
+        mcp_servers:
+          gori:
+            command: "/old/gori"
+            args:
+              - "mcp"
+              - "--project=old"
+            env:
+              STALE: "1"
+          keep:
+            command: "keep"\n
+        YAML
+      text = Gori::MCP::Install.upsert_yaml_server(existing, "mcp_servers", "gori", body)
+      text.scan("  gori:").size.should eq(1)
+      text.should_not contain("/old/gori")
+      text.should_not contain("--project=old")
+      text.should_not contain("STALE")
+      parsed = YAML.parse(text)
+      parsed["mcp_servers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp"])
+      parsed["mcp_servers"]["keep"]["command"].as_s.should eq("keep")
+    end
+
+    it "keeps the block's own indentation" do
+      # A four-space block gets a four-space entry: one entry at a different depth from its
+      # siblings is a parse error, not a style difference.
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "mcp_servers:\n    other:\n        command: \"o\"\n", "mcp_servers", "gori", body)
+      text.should contain("\n    gori:\n        command: \"/bin/gori\"\n        args:\n")
+      YAML.parse(text)["mcp_servers"]["other"]["command"].as_s.should eq("o")
+    end
+
+    it "expands an inline-empty mcp_servers into a block" do
+      ["mcp_servers: {}", "mcp_servers: null", "mcp_servers: ~"].each do |line|
+        text = Gori::MCP::Install.upsert_yaml_server("#{line}\nmodel: x\n",
+          "mcp_servers", "gori", body)
+        YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+        YAML.parse(text)["model"].as_s.should eq("x")
+      end
+    end
+
+    it "refuses an mcp_servers written as a populated flow mapping" do
+      # Splicing indented lines under it would leave the servers already inside unreachable.
+      expect_raises(Exception, /written inline/) do
+        Gori::MCP::Install.upsert_yaml_server(%(mcp_servers: {github: {command: "npx"}}\n),
+          "mcp_servers", "gori", body)
+      end
+    end
+
+    it "refuses an mcp_servers that holds a sequence" do
+      expect_raises(Exception, /sequence/) do
+        Gori::MCP::Install.upsert_yaml_server("mcp_servers:\n  - name: github\n",
+          "mcp_servers", "gori", body)
+      end
+    end
+
+    it "does not mistake a nested args sequence for one" do
+      # `args:`' items are sequence lines too; only the block's OWN indent decides.
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "mcp_servers:\n  other:\n    args:\n      - \"-y\"\n", "mcp_servers", "gori", body)
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+
+    it "does not end the block at a column-0 comment between entries" do
+      existing = "mcp_servers:\n  a:\n    command: \"a\"\n# a note\n  b:\n    command: \"b\"\n"
+      text = Gori::MCP::Install.upsert_yaml_server(existing, "mcp_servers", "gori", body)
+      text.should contain("# a note")
+      parsed = YAML.parse(text)
+      parsed["mcp_servers"]["a"]["command"].as_s.should eq("a")
+      parsed["mcp_servers"]["b"]["command"].as_s.should eq("b")
+      parsed["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+
+    it "matches a quoted key and leaves a look-alike nested key alone" do
+      existing = "mcp_servers:\n  \"gori\":\n    command: \"/old\"\n  other:\n    gori: \"no\"\n"
+      text = Gori::MCP::Install.upsert_yaml_server(existing, "mcp_servers", "gori", body)
+      text.should_not contain("/old")
+      parsed = YAML.parse(text)
+      parsed["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+      parsed["mcp_servers"]["other"]["gori"].as_s.should eq("no")
+    end
+
+    it "leaves an ordinary mcp_servers line exactly as the user wrote it" do
+      # Re-emitting the key canonically looked free: it deletes a comment on that line and
+      # unquotes a quoted key, and the readback guard cannot see either — the gori entry is
+      # perfect while the line above it lost what the user wrote.
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "mcp_servers:  # my servers, do not remove\n  a:\n    command: \"a\"\n",
+        "mcp_servers", "gori", body)
+      text.should contain("mcp_servers:  # my servers, do not remove")
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "\"mcp_servers\":\n  a:\n    command: \"a\"\n", "mcp_servers", "gori", body)
+      text.should contain("\"mcp_servers\":")
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+
+    it "expands an inline-empty mcp_servers that carries a comment or inner spaces" do
+      # `{}` is the case the expansion exists for, and a placeholder line is exactly where a
+      # trailing comment lives — refusing that shape refuses the most common first install.
+      {"mcp_servers: {} # none yet", "mcp_servers: {  }", "mcp_servers: ~  # unset"}.each do |line|
+        text = Gori::MCP::Install.upsert_yaml_server("#{line}\nmodel: x\n",
+          "mcp_servers", "gori", body)
+        YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+        YAML.parse(text)["model"].as_s.should eq("x")
+      end
+      # The comment survives the value being dropped.
+      Gori::MCP::Install.upsert_yaml_server("mcp_servers: {} # none yet\n",
+        "mcp_servers", "gori", body).should contain("mcp_servers: # none yet")
+    end
+
+    it "appends above a trailing comment inside the block, not below it" do
+      # `# add more servers below` is an invitation, not a caption for whatever lands under
+      # it — and appending past it made it read as gori's own.
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "mcp_servers:\n  a:\n    command: \"a\"\n\n  # add more servers below\n",
+        "mcp_servers", "gori", body)
+      text.index("  gori:").not_nil!.should be < text.index("# add more servers below").not_nil!
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+
+    it "leaves a mostly-LF file on LF, one stray CRLF line and all" do
+      # A whole-file `includes?("\r\n")` turned an installer that adds one entry into a
+      # whole-file diff in somebody's dotfiles repo.
+      text = Gori::MCP::Install.upsert_yaml_server(
+        "model: x\r\nplugins: y\nmcp_servers:\n  a:\n    command: \"a\"\n",
+        "mcp_servers", "gori", body)
+      text.should contain("model: x\r\n") # the line that had one keeps it
+      text.should contain("plugins: y\n")
+      text.should_not contain("plugins: y\r")
+      text.should contain("  gori:\n") # a line gori added follows the majority (LF)
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+
+    it "keeps a CRLF file on CRLF" do
+      text = Gori::MCP::Install.upsert_yaml_server("model: x\r\n", "mcp_servers", "gori", body)
+      text.should_not match(/[^\r]\n/)
+      YAML.parse(text)["mcp_servers"]["gori"]["command"].as_s.should eq("/bin/gori")
+    end
+  end
+
+  describe ".yaml_string" do
+    it "always quotes, and escapes what would re-parse" do
+      Gori::MCP::Install.yaml_string("/bin/gori").should eq(%("/bin/gori"))
+      Gori::MCP::Install.yaml_string(%(a"b\\c)).should eq(%("a\\"b\\\\c"))
+      Gori::MCP::Install.yaml_string("a\nb\tc").should eq(%("a\\nb\\tc"))
+      Gori::MCP::Install.yaml_string("a\u0001b").should eq(%("a\\x01b"))
     end
   end
 
@@ -371,6 +626,171 @@ describe Gori::MCP::Install do
           text.should_not contain(%(command = "/opt/gori"\n))
         ensure
           old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+        end
+      end
+    end
+
+    it "writes a YAML mcp_servers.gori entry for hermes and updates in place" do
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-#{Random::Secure.hex(4)}")
+        hermes_dir = File.join(home, ".hermes")
+        Dir.mkdir_p(hermes_dir)
+        config = File.join(hermes_dir, "config.yaml")
+        File.write(config, <<-YAML)
+          model:
+            provider: anthropic
+
+          # keep me
+          mcp_servers:
+            github:
+              command: "npx"
+              env:
+                GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_secret"\n
+          YAML
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        ENV["HOME"] = home
+        ENV.delete("HERMES_HOME")
+        begin
+          path = Gori::MCP::Install.install("hermes", exe_path: "/opt/gori/bin/gori",
+            project: "demo")
+          path.should eq(config)
+          # Second install updates rather than duplicating.
+          Gori::MCP::Install.install("hermes", exe_path: "/opt/gori2", read_only: true)
+          text = File.read(config)
+          text.should contain("# keep me")
+          text.scan("  gori:").size.should eq(1)
+          text.should_not contain("--project=demo")
+          parsed = YAML.parse(text)
+          parsed["model"]["provider"].as_s.should eq("anthropic")
+          parsed["mcp_servers"]["github"]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"].as_s
+            .should eq("ghp_secret")
+          parsed["mcp_servers"]["gori"]["command"].as_s.should eq("/opt/gori2")
+          parsed["mcp_servers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp", "--read-only"])
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+        end
+      end
+    end
+
+    it "creates the hermes config under HERMES_HOME when there is none yet" do
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-env-#{Random::Secure.hex(4)}")
+        profile = File.join(home, "profiles", "engagement")
+        Dir.mkdir_p(home)
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        old_appdata = ENV["LOCALAPPDATA"]?
+        ENV["HOME"] = home
+        ENV["HERMES_HOME"] = profile
+        # A Windows host reads LOCALAPPDATA on the default path; HERMES_HOME wins over it,
+        # and the var is kept inside the temp tree so a regression cannot escape the sandbox.
+        ENV["LOCALAPPDATA"] = File.join(home, "AppData", "Local")
+        begin
+          path = Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          path.should eq(File.join(profile, "config.yaml"))
+          YAML.parse(File.read(path))["mcp_servers"]["gori"]["command"].as_s.should eq("/opt/gori")
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+          old_appdata ? (ENV["LOCALAPPDATA"] = old_appdata) : ENV.delete("LOCALAPPDATA")
+        end
+      end
+    end
+
+    it "refuses to clobber a hermes config that is not valid YAML" do
+      # The file holds the user's providers, plugins and every other server's keys — a
+      # hand-edit error must not be answered by replacing it with a two-line file.
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-bad-#{Random::Secure.hex(4)}")
+        Dir.mkdir_p(File.join(home, ".hermes"))
+        bad = File.join(home, ".hermes", "config.yaml")
+        File.write(bad, "model: [unterminated\n")
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        ENV["HOME"] = home
+        ENV.delete("HERMES_HOME")
+        begin
+          expect_raises(Exception, /Refusing to overwrite/) do
+            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          end
+          File.read(bad).should eq("model: [unterminated\n")
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+        end
+      end
+    end
+
+    it "refuses a hermes config whose document is not a mapping" do
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-seq-#{Random::Secure.hex(4)}")
+        Dir.mkdir_p(File.join(home, ".hermes"))
+        bad = File.join(home, ".hermes", "config.yaml")
+        File.write(bad, "- a\n- b\n")
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        ENV["HOME"] = home
+        ENV.delete("HERMES_HOME")
+        begin
+          expect_raises(Exception, /isn't a YAML mapping/) do
+            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          end
+          File.read(bad).should eq("- a\n- b\n")
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+        end
+      end
+    end
+
+    it "refuses a hermes config where the spliced entry would not be the one read back" do
+      # Two documents, and `mcp_servers` lives in the second: the splice edits the first one
+      # it finds and the client parses a different one. Text editing can be wrong in ways
+      # only a re-read catches, which is why install_yaml re-parses before it writes — and
+      # why the file on disk is still the one the user had.
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-docs-#{Random::Secure.hex(4)}")
+        Dir.mkdir_p(File.join(home, ".hermes"))
+        config = File.join(home, ".hermes", "config.yaml")
+        original = "model: x\n---\nmcp_servers:\n  other:\n    command: \"o\"\n"
+        File.write(config, original)
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        ENV["HOME"] = home
+        ENV.delete("HERMES_HOME")
+        begin
+          expect_raises(Exception, /did not read back as written/) do
+            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          end
+          File.read(config).should eq(original)
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
+        end
+      end
+    end
+
+    it "keeps the hermes config's permissions and leaves no temp file behind" do
+      Dir.tempdir.try do |base|
+        home = File.join(base, "home-hermes-perm-#{Random::Secure.hex(4)}")
+        dir = File.join(home, ".hermes")
+        Dir.mkdir_p(dir)
+        config = File.join(dir, "config.yaml")
+        File.write(config, "model:\n  provider: anthropic\n")
+        File.chmod(config, 0o600)
+        old_home = ENV["HOME"]?
+        old_hermes = ENV["HERMES_HOME"]?
+        ENV["HOME"] = home
+        ENV.delete("HERMES_HOME")
+        begin
+          Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          File.info(config).permissions.should eq(File::Permissions.new(0o600))
+          Dir.children(dir).sort.should eq(["config.yaml"])
+        ensure
+          old_home ? (ENV["HOME"] = old_home) : ENV.delete("HOME")
+          old_hermes ? (ENV["HERMES_HOME"] = old_hermes) : ENV.delete("HERMES_HOME")
         end
       end
     end
