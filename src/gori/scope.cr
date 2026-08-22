@@ -79,11 +79,22 @@ module Gori
       # bare host. Mirrors the SQL `filter` branch-for-branch so the live lens and the
       # History/Sitemap SQL view never disagree.
       def matches?(url : String, host : String) : Bool
+        matches?(url, host, url.downcase)
+      end
+
+      # Same match, but the caller supplies the already-lowercased url. A `string` rule
+      # compares against `url.downcase`, and a Scope evaluator runs EVERY rule against the
+      # SAME url — so the 2-arg form re-lowercased the whole url once per string rule (53
+      # copies for a 53-exclude scope, on every proxied request). The evaluators lower it
+      # ONCE and pass it here; `url_down` is IGNORED for host/regex rules, so the result is
+      # byte-identical to the 2-arg form. `url` (unlowered) is kept for the regex subject,
+      # which scrubs but must not case-fold.
+      def matches?(url : String, host : String, url_down : String) : Bool
         case @match_type
         when "host"
           host_match?(host)
         when "string"
-          url.downcase.includes?(@pattern_down)
+          url_down.includes?(@pattern_down)
         when "regex"
           r = @regex
           return false unless r
@@ -120,7 +131,19 @@ module Gori
     # the TUI render fiber (the sole writer), matching `enabled?`'s discipline.
     getter? sandbox : Bool
 
+    # The include/exclude partition of @rules, precomputed once per rule-list swap. Every
+    # per-request evaluator below split @rules with `@rules.select(&.include?)` — a fresh
+    # Array minted on EVERY proxied request (and CONNECT). The rules are immutable and only
+    # ever REPLACED (never edited in place, see the ctor note), so the partition is derived
+    # here alongside the pointer swap instead, exactly as each Rule precomputes its own
+    # regex/lowercased pattern. Swapped together with @rules under @mutex, so a matcher reads
+    # a consistent {rules, includes, excludes} triple. `assign_rules` is the one writer.
+    @includes : Array(Rule)
+    @excludes : Array(Rule)
+
     def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool, @sandbox : Bool = false)
+      @includes = @rules.select(&.include?)
+      @excludes = @rules.select(&.exclude?)
       # @rules/@enabled are read on the PROXY hot path (in_scope_url?/may_match_host?/
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
@@ -203,11 +226,10 @@ module Gori
     # short-circuits its own inactive case before calling, so it never reaches the guard.
     private def host_in_scope_unlocked?(host : String) : Bool
       return false if @rules.empty?
-      includes = @rules.select(&.include?)
-      inc_ok = includes.empty? ||
-               includes.any? { |r| r.host_type? && r.matches?("", host) } ||
-               includes.any? { |r| !r.host_type? }
-      excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
+      inc_ok = @includes.empty? ||
+               @includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+               @includes.any? { |r| !r.host_type? }
+      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host) }
       inc_ok && !excluded
     end
 
@@ -235,7 +257,19 @@ module Gori
     # scanner (Discover) applies in every containment mode, INDEPENDENT of includes and the
     # display lens. (matches_url? requires includes; this asks only "is it carved out?".)
     def excluded?(url : String, host : String) : Bool
-      @mutex.synchronize { @rules.any? { |r| r.exclude? && r.matches?(url, host) } }
+      url_down = url.downcase # once, OUTSIDE the hot-path lock — see Rule#matches?(_, _, url_down)
+      @mutex.synchronize { @excludes.any? { |r| r.matches?(url, host, url_down) } }
+    end
+
+    # The id of the first INCLUDE rule that matches — the audit trail the active-sender gate
+    # (`Outbound#evaluate`) stamps on a request it has ALREADY confirmed allowlisted. It used
+    # to re-walk the whole rule list (`rules.find { |r| r.include? && r.matches? }`) and
+    # re-lower the url once per include; this reuses the precomputed @includes and lowers the
+    # url once, like the allowlist evaluators, and reads under @mutex rather than off the bare
+    # getter. @includes keeps @rules order, so the first match is the same rule as before.
+    def matching_include_id(url : String, host : String) : Int64?
+      url_down = url.downcase
+      @mutex.synchronize { @includes.find { |r| r.matches?(url, host, url_down) }.try(&.id) }
     end
 
     # The ALLOWLIST evaluation (callers hold @mutex): true ⇔ at least one INCLUDE rule
@@ -246,10 +280,10 @@ module Gori
     # because an empty or excludes-only scope is not an "allowed range" to probe or let
     # through — it's the whole internet minus a few hosts.
     private def allowlisted_unlocked?(url : String, host : String) : Bool
-      includes = @rules.select(&.include?)
-      return false if includes.empty?
-      includes.any?(&.matches?(url, host)) &&
-        @rules.none? { |r| r.exclude? && r.matches?(url, host) }
+      return false if @includes.empty?
+      url_down = url.downcase
+      @includes.any? { |r| r.matches?(url, host, url_down) } &&
+        @excludes.none? { |r| r.matches?(url, host, url_down) }
     end
 
     # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
@@ -257,9 +291,9 @@ module Gori
     # requires that); still guards empty for defense-in-depth.
     private def matches_url_unlocked?(url : String, host : String) : Bool
       return false if @rules.empty?
-      includes = @rules.select(&.include?)
-      inc_ok = includes.empty? || includes.any?(&.matches?(url, host))
-      inc_ok && @rules.none? { |r| r.exclude? && r.matches?(url, host) }
+      url_down = url.downcase
+      inc_ok = @includes.empty? || @includes.any? { |r| r.matches?(url, host, url_down) }
+      inc_ok && @excludes.none? { |r| r.matches?(url, host, url_down) }
     end
 
     # Conservative HOST-level check behind `Interceptor#intercepts_host?`, made BEFORE any
@@ -308,11 +342,10 @@ module Gori
     # its path might match on this host) AND no HOST-level exclude fully covers it. Mirrors
     # host_in_scope_unlocked? but with the allowlist's empty-includes ⇒ false rule.
     private def host_allowlisted_unlocked?(host : String) : Bool
-      includes = @rules.select(&.include?)
-      return false if includes.empty?
-      inc_ok = includes.any? { |r| r.host_type? && r.matches?("", host) } ||
-               includes.any? { |r| !r.host_type? }
-      excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
+      return false if @includes.empty?
+      inc_ok = @includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+               @includes.any? { |r| !r.host_type? }
+      excluded = @excludes.any? { |r| r.host_type? && r.matches?("", host) }
       inc_ok && !excluded
     end
 
@@ -516,7 +549,7 @@ module Gori
       enabled = @store.setting(SETTING_ENABLED) == "1"
       sandbox = @store.setting(SETTING_SANDBOX) == "1"
       @mutex.synchronize do
-        @rules = fresh
+        assign_rules(fresh)
         @enabled = enabled
         @sandbox = sandbox
       end
@@ -725,7 +758,16 @@ module Gori
     # constructor — and only the pointer swap is guarded.
     private def reload_rules : Nil
       fresh = Scope.load_rules(@store)
-      @mutex.synchronize { @rules = fresh }
+      @mutex.synchronize { assign_rules(fresh) }
+    end
+
+    # Swap in a new rule list and re-derive the include/exclude partition from it. The one
+    # writer of @rules/@includes/@excludes — callers hold @mutex, so the three stay a
+    # consistent triple for any concurrent matcher.
+    private def assign_rules(fresh : Array(Rule)) : Nil
+      @rules = fresh
+      @includes = fresh.select(&.include?)
+      @excludes = fresh.select(&.exclude?)
     end
 
     # Flag writers: the in-memory field is swapped under @mutex (the hot path reads it
