@@ -8,7 +8,7 @@ gori has three entry points over one project and one engine: `gori` (the TUI, fo
 
 There is no chat window inside the TUI. You bring your own model and client; gori exposes the project over a clean tool interface, and the agent reads your traffic and drives the same tools you do. For the full tool catalog and deeper topics (live intercept, the design rationale), see the [MCP Server guide](/guide/mcp/).
 
-> **Before you begin.** [Install gori](/getting-started/installation/) and have an MCP-capable client ready (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, and others).
+> **Before you begin.** [Install gori](/getting-started/installation/) and have an MCP-capable client ready (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others).
 
 ## 1. Install the server into your client
 
@@ -20,6 +20,7 @@ gori mcp --install-claude        # Claude Desktop
 gori mcp --install-codex         # OpenAI Codex
 gori mcp --install-agy           # Antigravity CLI
 gori mcp --install-grok          # Grok
+gori mcp --install-hermes        # Hermes
 ```
 
 | Flag | Client | Config written |
@@ -29,10 +30,11 @@ gori mcp --install-grok          # Grok
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+| `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
 
-Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, not JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
+Each command prints the file it wrote and the exact launch command it recorded. Codex and Grok use a TOML `[mcp_servers.gori]` table, and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
-Only Claude Desktop's location differs per platform — it follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
+Only Claude Desktop and Hermes vary per platform. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop's location — it follows Electron's app-data directory: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux, which gori reads so a Nix or home-manager session that moves it is followed too. A Flatpak build is the exception: it reads that variable inside its own sandbox, so copy the printed file into `~/.var/app/<app-id>/config/Claude/` yourself.
 
 Wiring it up by hand instead? The server is just the `gori mcp` command over stdio. Point any MCP client at that command with no extra arguments.
 

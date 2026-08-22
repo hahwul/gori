@@ -74,8 +74,9 @@ gori can write the MCP configuration for common clients for you:
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
+| `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
 
-Every client except Claude Desktop keeps its config in the same place on macOS, Linux and Windows. Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` — defaulting to `~/.config/Claude/` — on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
+Every client except Claude Desktop and Hermes keeps its config in the same place on macOS, Linux and Windows. Hermes reads `$HERMES_HOME` when it is set, and otherwise `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). Claude Desktop follows Electron's app-data directory instead: `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` — defaulting to `~/.config/Claude/` — on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.
 
 The exception is a **Flatpak** Claude Desktop: it reads `XDG_CONFIG_HOME` from inside its own sandbox (`~/.var/app/<app-id>/config/Claude/`), which the host shell running gori cannot see. There gori writes `~/.config/Claude/claude_desktop_config.json` and prints that path — copy it into the app's sandbox directory yourself. Every install command prints the file it wrote, so check that line against where your build actually reads.
 
@@ -83,10 +84,11 @@ The exception is a **Flatpak** Claude Desktop: it reads `XDG_CONFIG_HOME` from i
 gori mcp --install-claude-code
 gori mcp --install-codex
 gori mcp --install-grok
+gori mcp --install-hermes
 gori mcp --install-claude-code --install-codex  # several clients in one run
 ```
 
-Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart the client (or re-open the session) after installing so it reloads MCP servers. Existing config files are updated in place: other servers, tables and comments are preserved, the file's permissions are kept, and the replacement is atomic so an interrupted install can never truncate it.
+Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes YAML with an `mcp_servers:` entry, rather than JSON. Restart the client (or re-open the session) after installing so it reloads MCP servers. Existing config files are updated in place: other servers, tables and comments are preserved, the file's permissions are kept, and the replacement is atomic so an interrupted install can never truncate it. gori edits these files as text rather than re-emitting them from a parse tree, so the documentation you keep around your own settings survives the install; a config it cannot splice safely is reported and left alone rather than rewritten.
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 

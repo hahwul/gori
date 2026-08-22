@@ -9,7 +9,7 @@ group = "Wrap up"
 
 gori has no chat window, and that is deliberate: the intelligence lives outside the tool, reached over MCP. You bring the model and the client; gori exposes the project over a clean tool interface, so you choose what runs, your traffic isn't shipped anywhere you didn't intend, and every move the agent makes shows up in the same TUI you're already watching. This playbook connects an agent to a project you already captured and puts it to work — about ten minutes, most of it a one-time install.
 
-> **Before you begin.** You need an existing project with captured traffic — ideally the one from the earlier playbooks — and an MCP-capable client (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, and others). An agent can send real requests, so keep the project scoped to a target you are authorized to test.
+> **Before you begin.** You need an existing project with captured traffic — ideally the one from the earlier playbooks — and an MCP-capable client (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others). An agent can send real requests, so keep the project scoped to a target you are authorized to test.
 
 ## 1. Install the MCP server
 
@@ -19,7 +19,7 @@ gori has no chat window, and that is deliberate: the intelligence lives outside 
 gori mcp --install-claude-code   # Claude Code
 ```
 
-Other hosts install the same way: `--install-claude` (Claude Desktop), `--install-codex` (OpenAI Codex), `--install-agy` (Antigravity), `--install-grok` (Grok). Each command prints the file it wrote and the exact launch command it recorded; Codex and Grok write a TOML `[mcp_servers.gori]` table rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
+Other hosts install the same way: `--install-claude` (Claude Desktop), `--install-codex` (OpenAI Codex), `--install-agy` (Antigravity), `--install-grok` (Grok), `--install-hermes` (Hermes). Each command prints the file it wrote and the exact launch command it recorded; Codex and Grok write a TOML `[mcp_servers.gori]` table and Hermes a YAML `mcp_servers:` entry, rather than JSON. Restart the client (or reopen the session) afterward so it reloads its MCP servers.
 
 Two choices ride along into that recorded command. **Read-only vs. full access**: by default the agent also gets the action tools (`send_request`, issue writes, the intercept mutators); add `--read-only` to expose only the read tools. **Which project**: run the install from inside your engagement's Git repository and gori path-binds that workspace to its own project; from anywhere else the server starts unbound and the agent picks a project over tools. Pin one explicitly with `--project` or `--db`, and it is written into the recorded command with an absolute path:
 

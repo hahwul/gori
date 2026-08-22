@@ -9,7 +9,7 @@ group = "마무리"
 
 gori에는 채팅 창이 없고, 이는 의도적입니다. 인텔리전스는 도구 바깥에 살고, MCP로 도달합니다. 당신이 모델과 클라이언트를 가져오면 gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 그래서 무엇이 돌지 당신이 고르고, 트래픽은 당신이 의도하지 않은 어디로도 실려 가지 않으며, 에이전트의 모든 동작이 이미 당신이 보고 있는 그 TUI에 나타납니다. 이 플레이북은 이미 캡처한 프로젝트에 에이전트를 붙여 일을 시킵니다 — 약 10분이며, 대부분은 한 번뿐인 설치입니다.
 
-> **시작하기 전에.** 캡처된 트래픽이 담긴 기존 프로젝트가 필요합니다 — 앞선 플레이북의 그 프로젝트가 이상적입니다 — 그리고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok 등)가 필요합니다. 에이전트는 실제 요청을 보낼 수 있으니, 테스트 권한이 있는 대상으로 프로젝트 스코프를 잡아 두세요.
+> **시작하기 전에.** 캡처된 트래픽이 담긴 기존 프로젝트가 필요합니다 — 앞선 플레이북의 그 프로젝트가 이상적입니다 — 그리고 MCP를 지원하는 클라이언트(Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes 등)가 필요합니다. 에이전트는 실제 요청을 보낼 수 있으니, 테스트 권한이 있는 대상으로 프로젝트 스코프를 잡아 두세요.
 
 ## 1. MCP 서버 설치 {#1-install-the-mcp-server}
 
@@ -19,7 +19,7 @@ gori에는 채팅 창이 없고, 이는 의도적입니다. 인텔리전스는 �
 gori mcp --install-claude-code   # Claude Code
 ```
 
-다른 호스트도 같은 방식으로 설치합니다: `--install-claude`(Claude Desktop), `--install-codex`(OpenAI Codex), `--install-agy`(Antigravity), `--install-grok`(Grok). 각 명령은 쓴 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 JSON이 아니라 TOML `[mcp_servers.gori]` 테이블을 씁니다. 이후 클라이언트를 재시작(또는 세션을 다시 열기)해 MCP 서버를 다시 읽게 하세요.
+다른 호스트도 같은 방식으로 설치합니다: `--install-claude`(Claude Desktop), `--install-codex`(OpenAI Codex), `--install-agy`(Antigravity), `--install-grok`(Grok), `--install-hermes`(Hermes). 각 명령은 쓴 파일과 기록한 정확한 실행 명령을 출력합니다. Codex와 Grok은 TOML `[mcp_servers.gori]` 테이블을, Hermes는 YAML `mcp_servers:` 항목을 씁니다(JSON이 아닙니다). 이후 클라이언트를 재시작(또는 세션을 다시 열기)해 MCP 서버를 다시 읽게 하세요.
 
 두 가지 선택이 그 기록된 명령에 함께 실립니다. **읽기 전용 대 전체 접근**: 기본적으로 에이전트는 액티브 도구(`send_request`, 이슈 쓰기, 인터셉트 뮤테이터)도 받습니다. `--read-only`를 더하면 읽기 도구만 노출됩니다. **어느 프로젝트**: 엔게이지먼트의 Git 저장소 안에서 설치를 실행하면 gori가 그 워크스페이스를 자체 프로젝트에 경로-바인딩합니다. 그 밖에서는 서버가 언바운드로 시작하고 에이전트가 도구로 프로젝트를 고릅니다. `--project`나 `--db`로 명시적으로 고정하면, 절대 경로로 기록된 명령에 쓰입니다:
 
