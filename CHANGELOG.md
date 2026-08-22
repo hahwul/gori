@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A `socks5` listener mode: the client names its destination in an RFC 1928 handshake and gori intercepts what follows, for a client that can be pointed at a proxy but not an HTTP one. NO-AUTH and CONNECT only; a `CONNECT` to any fixed-destination listener is now refused (#PR).
+
 - `network.strip_alt_svc` removes the `Alt-Svc` fields advertising HTTP/3 before the client sees them, so a browser cannot switch to QUIC and leave the proxy unseen. Off by default; `Alt-Svc: clear` and non-h3 alternatives are never touched (#PR).
 
 - `gori mcp --install-hermes` writes the server into Hermes' `~/.hermes/config.yaml` (or `$HERMES_HOME`), the first YAML client alongside the JSON and TOML ones. Sibling servers, their `env:` keys and the comments around them are left as they are. (#785)

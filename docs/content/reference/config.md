@@ -78,7 +78,7 @@ It is also the answer for a **non-HTTP protocol** on the same path — MQTT, AMQ
 
 A protocol that opens with a *text* line (SSH's `SSH-2.0-…` banner, an SMTP greeting) is **not** detected, on purpose: on the first line it is indistinguishable from a deliberately malformed request line, and gori forwards those verbatim rather than second-guessing your payload. Such a connection still waits out the head timeout. Reach for passthrough there too.
 
-It also covers the two shapes with no bytes to judge. A **server-speaks-first** protocol — SMTP, IMAP, POP3, MySQL, where the *server* greets first — has its client connect and send nothing at all, so there is nothing to classify; the connection is now recorded as a `no request` flow naming that shape once the read times out, instead of dying in silence. On a reverse or transparent listener that flow names the origin the client was dialling — declared for the reverse one, read from the kernel's redirect for the transparent one where the platform answers — which for a redirected `:25` or `:143` is the whole diagnosis and the host to list here. On the forward-proxy listener there is no name to record — nothing arrived to carry one — so there the flow's advice is to keep gori off that port instead.
+It also covers the two shapes with no bytes to judge. A **server-speaks-first** protocol — SMTP, IMAP, POP3, MySQL, where the *server* greets first — has its client connect and send nothing at all, so there is nothing to classify; the connection is now recorded as a `no request` flow naming that shape once the read times out, instead of dying in silence. On a reverse or transparent listener that flow names the origin the client was dialling — declared for the reverse one, read from the kernel's redirect for the transparent one where the platform answers — which for a redirected `:25` or `:143` is the whole diagnosis and the host to list here. On a socks5 listener it names the destination the client asked for, once the handshake got that far; before that there is nothing to name. On the forward-proxy listener there is no name to record — nothing arrived to carry one — so there the flow's advice is to keep gori off that port instead.
 
 A **non-TLS payload inside `CONNECT`** — `ssh -o ProxyCommand='nc -X connect proxy:8080 %h %p'`, the ordinary corporate-proxy pattern — is refused with a flow that names the byte it opened with, rather than being fed to a TLS handshake it can never complete. Listing the host makes it work: a listed host is relayed byte-exact, with no peek at what it speaks. The same peek now identifies an `h2c` tunnel by its full `PRI * HTTP/2.0` preface rather than by its first byte, so a plaintext `POST` or `PROPFIND` tunnelled to port 80 is refused like any other undecodable payload instead of being handed to the HTTP/2 relay.
 
@@ -124,7 +124,8 @@ Additional sockets the proxy accepts on, alongside the primary `network.bind_hos
     { "host": "192.168.1.10", "port": 8081, "mode": "proxy" },
     { "host": "127.0.0.1", "port": 8080, "mode": "transparent", "target_port": 80 },
     { "host": "127.0.0.1", "port": 8443, "mode": "transparent", "target_port": 443 },
-    { "host": "0.0.0.0", "port": 9000, "mode": "reverse", "origin": "https://api.example.com" }
+    { "host": "0.0.0.0", "port": 9000, "mode": "reverse", "origin": "https://api.example.com" },
+    { "host": "127.0.0.1", "port": 1080, "mode": "socks5" }
   ]
 }
 ```
@@ -133,12 +134,12 @@ Additional sockets the proxy accepts on, alongside the primary `network.bind_hos
 |-----|------|---------|-------------|
 | `host` | string | — | Listen address. Required |
 | `port` | integer | — | Listen port. Required |
-| `mode` | string | `"proxy"` | `proxy`, `transparent` or `reverse`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
+| `mode` | string | `"proxy"` | `proxy`, `transparent`, `reverse` or `socks5`. An unknown mode drops the entry rather than defaulting to `proxy`, which could expose an unintended forward proxy on a LAN address |
 | `target_port` | integer | `80` / `443` | Transparent only: the upstream port to use when the kernel cannot say which one the client dialled. Advisory — see [Transparent mode](#transparent-mode) |
 | `origin` | string | — | Reverse only, required: the absolute `http(s)` URL to forward to |
 | `rewrite_host` | boolean | `false` | Reverse only: replace the forwarded `Host` with the origin's authority |
 
-A field used in the wrong mode is **rejected**, not ignored — `target_port` outside transparent, `origin` or `rewrite_host` outside reverse. Silently dropping it would leave a config that reads as if it does something it does not.
+A field used in the wrong mode is **rejected**, not ignored — `target_port` outside transparent, `origin` or `rewrite_host` outside reverse. Silently dropping it would leave a config that reads as if it does something it does not. A `socks5` entry therefore carries `host`, `port` and `mode` and nothing else: all three of those fields belong to the other two modes.
 
 The primary bind stays a scalar on purpose. It is not "an address gori listens on"; it is *the forward-proxy endpoint you configure a client against*, and that is singular by construction. It stays what the status bar, the statusline JSON, the capture-status sidecar and the live rebind all report. Additional listeners are an **inventory** instead: a `listeners:N` chip appears beside the listen chip whenever any are configured, and opens a read-only list of every one with its mode, address, origin and status. The chip turns red as `listeners:N/M` when one of them is not up.
 
@@ -201,6 +202,26 @@ Because the destination is configuration rather than derivation, it has none of 
 **`rewrite_host`.** A conventional reverse proxy rewrites `Host` to the upstream's name. gori does not do that implicitly: rewriting is a mutation of your client's bytes on the live path, so it is opt-in. With `rewrite_host: false` (the default) the client's `Host` reaches the origin byte for byte. With it on, the `Host` is replaced with the origin's authority — one field, with the rest of the head untouched, and a duplicated `Host` collapsed to one.
 
 Scope works as everywhere else: the Sandbox and `exclude` rules apply unchanged, gated per request and before the TLS handshake. The `include` list stays a lens over captured traffic rather than a gate here, because a reverse listener forwards what a client sent and never originates a request of its own.
+
+#### SOCKS5 mode
+
+A SOCKS5 listener (RFC 1928) takes its destination from the client in a handshake, then intercepts everything that follows — TLS, HTTP/2 prior knowledge, or plain HTTP, routed on its first bytes the way the other listeners route theirs. (One difference, deliberate: the TLS test here reads two bytes rather than one, because a SOCKS listener is where a non-HTTP protocol is most likely to arrive — `ssh -D` is what most people point at one — and a payload whose first octet happens to be `0x16` should not be fed to a TLS handshake it cannot finish.)
+
+```json
+{ "host": "127.0.0.1", "port": 1080, "mode": "socks5" }
+```
+
+This is the mode for a client that *can* be pointed at a proxy, just not at an HTTP one: `ALL_PROXY=socks5://127.0.0.1:1080`, a runtime whose only proxy setting is SOCKS, a tool that speaks SOCKS and nothing else. gori already speaks the other end of the same protocol — an [`upstream_rules`](#upstream_rules) entry with `"kind": "socks5"` reaches an origin *through* somebody else's SOCKS proxy — so the word appears twice in this file, pointing opposite ways. This one is inbound.
+
+The destination arrives **declared**, which is what it has over transparent mode: no kernel redirect rule, and nothing has to recover the destination from an SNI or a `Host` header. On a cleartext connection a request whose `Host` names somewhere else is still sent where the handshake said, and the handshake's authority is what History records, while the client's own header is forwarded byte for byte. On a TLS connection the SNI supplies the *name* instead — the leaf is minted for it, the passthrough list and the Sandbox match on it, and it is what History shows — while the connection is dialled at the destination the handshake declared: the same split [transparent mode](#transparent-mode) has between the name and the address. A ClientHello carrying no SNI falls back to the declared destination for both.
+
+**NO-AUTH only.** A client that offers no method gori serves is told so with RFC 1928's `0xFF` and closed. The forward-proxy listener beside it has no authentication either, and a SOCKS listener asking for a password would be claiming an access control the rest of the process does not have.
+
+**CONNECT only.** `BIND` and `UDP ASSOCIATE` are refused with reply code `0x07` rather than by hanging up, so the client reports the real cause. BIND needs a socket opened on the client's behalf and UDP ASSOCIATE is a datagram relay, and every gori listener is a TCP socket — the same reason [HTTP/3 is out of reach](#strip-alt-svc).
+
+Two things are checked before gori answers `succeeded`, and each is refused with reply code `0x02` ("not allowed by ruleset") rather than a dropped connection: a destination naming any socket gori is serving — this listener, a sibling, or the primary bind — which would dial this proxy through itself, and a host the Sandbox excludes. Both gates exist on the forward proxy's `CONNECT` path for the same reason: on those two listeners the *client* names the destination outright, where a transparent listener is steered by the kernel first and only falls back to what the client said.
+
+Every refusal is recorded in the project as a flow carrying its reason, too. A client pointed at the wrong port, one asking for UDP, one that opened with something that is not SOCKS at all — each shows up in History instead of being a connection that closed without saying why.
 
 ### upstream_rules
 

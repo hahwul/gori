@@ -129,7 +129,7 @@ private def with_transparent_conn(sink : FlowSink, default_port : Int32,
   end
 end
 
-# `Server#serve_transparent_tls`'s MITM branch: `host` is the name read off the ClientHello,
+# `Server#serve_pinned_tls`'s MITM branch: `host` is the name read off the ClientHello,
 # `dial_addr` the kernel's address. No PrefixIO — nothing was consumed here, so the accepted
 # socket still holds the ClientHello for OpenSSL, exactly as on the reverse path.
 private def with_transparent_tls(sink : FlowSink, ca_dir : String, host : String,

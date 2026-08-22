@@ -1511,8 +1511,10 @@ hosts leave the capture path (P4).
 
 **The listener peek needed the record too, not just `ClientConn`.** `Server#serve_reverse` and
 `#serve_transparent` route on `client.peek`, which blocks *before* any `ClientConn` exists — and
-those two listeners are the only ones a plaintext server-speaks-first protocol can reach, since
-SMTP/IMAP cannot traverse a forward proxy without a CONNECT. Recording only in the request loop
+those listeners are the only ones a plaintext server-speaks-first protocol can reach, since
+SMTP/IMAP cannot traverse a forward proxy without a CONNECT. (The `socks5` listener, added later,
+is a third: it reuses `peek_first` and records the same way, plus its own record for a client that
+never sends the greeting.) Recording only in the request loop
 would therefore have put the fix everywhere except where #729 says it matters most. Hence
 `ClientConn.record_silent_client` in class form: one sentence, reachable without an instance. Those
 two sites re-raise after recording, so the accept path still closes the fd and frees the slot — the
@@ -1609,3 +1611,72 @@ head it left behind cost the client a 200 it had been receiving with the switch 
 obs-fold continuation is dropped with the field it belongs to, and the block is handed the
 JOINED value — more than the projection records, deliberately, because this decides what
 leaves the machine rather than what gori filed.
+
+### 2026-08-22: a SOCKS5 listener is the pinned-destination path, with the CONNECT threat model
+
+Refines: [P1](#p1), [P7](#p7). No issue — the inbound half of a protocol-coverage sweep.
+
+gori spoke SOCKS5 in one direction only. `network.upstream_rules` has reached an origin THROUGH
+someone else's SOCKS proxy for some time (`ssh -D`, Tor, a jump host), while a client that can be
+pointed at a proxy but not at an HTTP one — `ALL_PROXY=socks5://`, a runtime whose only proxy
+setting is SOCKS — had no way in short of a kernel redirect rule. The `socks5` listener mode is
+that way in.
+
+**It is not a new MITM path.** After the handshake, a SOCKS5 connection is the transparent
+listener's situation with a better answer: a `{host, port}` from outside the byte stream, routed
+on the first byte into the same three arms. `serve_transparent_tls` became `serve_pinned_tls`
+when it acquired its second caller, which is what the body always was — TLS whose destination
+was DECLARED rather than requested in-band, by the kernel or by a CONNECT request.
+
+**The cleartext arm takes `fixed_host`, not `origin_dst`.** The reverse listener's shape, not
+the transparent one's. `origin_dst` pins the DIAL and nothing else, which is right when the
+destination came from the kernel and the `Host` header is the only name anyone has; here the
+client DECLARED an authority, so on that arm the authority is what History and the scope gate
+are told, and a `Host` the same client also chose does not outrank it. The header still goes to
+the origin byte-exact (P7) — it is the client's own bytes, and gori is not being asked to
+rewrite them. `CONNECT` is refused outright on any pinned connection, reverse included: it is
+the one request shape that never reaches `resolve_forward`, so answering it at all would make
+the pinned destination negotiable by the client that was just pinned to it.
+
+**On the TLS arm the SNI still wins the NAME**, and that is not the same claim reversed. A
+certificate has to be minted for the name the client is about to verify, so `serve_pinned_tls`
+keeps `sni || dst[0]` — the leaf, the passthrough list, the Sandbox and History all follow the
+SNI — while the DIAL is pinned to the declared destination. That is the split transparent mode
+already had between a name and an address, and it is why `dial_addr` carries the SOCKS
+destination rather than replacing the name with it. A ClientHello with no SNI falls back to the
+declared destination for both.
+
+**The guards do not come with the path.** `serve_transparent` deliberately carries no self-loop
+test: `OrigDst.lookup` already refuses the socket's own address, and on that listener nothing
+else chooses a destination. SOCKS5 hands the choice to the client, which is the forward-proxy
+CONNECT threat model, so it gets the CONNECT answer — the loop test and the Sandbox gate both
+run BEFORE `succeeded` goes back, and each refusal is a reply code (0x02, "not allowed by
+ruleset") the client can report rather than a connection that drops for no stated reason. Two
+tests and not one: `loops_to_self?` resolves host overrides first, so an override pointing back
+at this listener is a loop the raw name does not show, while `Settings.serving_address?` is the
+one a SOCKS5 client makes reachable at all — it can name a SIBLING socket, the primary
+forward-proxy bind included, which no per-listener test sees. On the CLEARTEXT arm the
+per-request `loops_to_self?` inside `ClientConn` stays armed on top of both (that one is per
+REQUEST, and a keep-alive connection can carry a request for a host the handshake never named);
+the TLS and h2c arms have no per-request leg to arm, which is why the handshake gate is where
+this is decided rather than an extra layer of defence.
+
+**Every refusal is a flow**, which is #729 and #755's lesson one protocol over. A SOCKS listener
+that closes connections in silence is indistinguishable from a broken one, and the population
+that reaches this listener by mistake — an HTTP client pointed at the wrong port, a tool asking
+for UDP ASSOCIATE — is exactly the one that needs to be told.
+
+Two deliberate refusals in the protocol itself. **NO-AUTH only**: the forward-proxy listener
+beside it has no authentication either, and a SOCKS listener asking for a password would be
+claiming an access control the rest of the process does not have. **CONNECT only**: BIND needs
+a socket opened on the client's behalf, and UDP ASSOCIATE is a datagram relay — the same reason
+HTTP/3 is out of reach, since every listener here is a TCP socket. Both are answered with the
+code RFC 1928 defines rather than by hanging up.
+
+The wire vocabulary has one home (`Proxy::Socks5`) and both ends use it. gori is now a SOCKS5
+client and a SOCKS5 server in the same process; two spellings of what a byte means is how those
+two would drift. The first-byte test on this listener is the TWO-byte `ClientHello.record_start?`
+(#755) rather than the one-byte test the other listeners use, because a SOCKS listener is where
+a non-HTTP protocol is most likely to arrive — `ssh -D` is what most people point at one — and
+feeding an SSH banner into an OpenSSL server handshake because its first octet happened to be
+0x16 helps nobody.

@@ -16,6 +16,7 @@ module Gori
   end
 end
 
+require "./gori/proxy/socks5"
 require "./gori/proxy/codec/message"
 require "./gori/proxy/codec/http1"
 require "./gori/alt_svc"

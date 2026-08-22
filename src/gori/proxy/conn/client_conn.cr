@@ -151,6 +151,7 @@ module Gori::Proxy
     # original head is what History shows, exactly as with a Match&Replace-free forward.
     def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
+                   @listener_pinned : Bool = false,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
@@ -1995,6 +1996,23 @@ module Gori::Proxy
     private def handle_connect(req : Codec::RawRequest) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
 
+      # A LISTENER-pinned connection is not a forward proxy. The destination was settled before
+      # this request existed — a reverse listener's declared origin, or the client's own SOCKS5
+      # CONNECT — and `resolve_forward` holds every ordinary request to it. `CONNECT` is the one
+      # shape that never reaches `resolve_forward`, so without this it walks straight out of the
+      # pin: a granted SOCKS5 tunnel to one host, then one line of HTTP, and gori opens a blind
+      # byte tunnel somewhere else entirely with no flow to show for it. Refused whatever
+      # authority it names, including the pinned one — the socket never advertised proxy
+      # semantics, and answering at all is what makes the destination negotiable.
+      #
+      # `@listener_pinned`, not `@fixed_host`. The TLS MITM tunnel pins its inner `ClientConn`
+      # the same way (`Tls::Tunnel#intercept`), and there the client DID negotiate a proxy hop —
+      # gori answered its `CONNECT`. A second `CONNECT` inside that tunnel is a client testing an
+      # upstream proxy through gori, which worked before this guard existed and still does.
+      if @listener_pinned && (fixed = @fixed_host)
+        return refuse_connect_on_pinned(req, fixed, host, port)
+      end
+
       return false if connect_answered_locally?(host, port)
 
       if (tls = @tls) && !Settings.tls_passthrough?(host)
@@ -2453,12 +2471,12 @@ module Gori::Proxy
         client_tls: @client_tls)
     end
 
-    # The same record, addressable WITHOUT a ClientConn — because on two listeners there isn't
-    # one yet when this shape happens. `Server#serve_reverse` and `#serve_transparent` route on
-    # `client.peek`, which blocks BEFORE any `ClientConn` is constructed, so a peer that connects
-    # and says nothing times out there and never reaches `read_client_head`. Those are also the
-    # only listeners a plaintext server-speaks-first protocol can arrive on at all — SMTP/IMAP
-    # cannot traverse a forward proxy without CONNECT — so leaving them out would have put the
+    # The same record, addressable WITHOUT a ClientConn — because on three listeners there isn't
+    # one yet when this shape happens. `Server#serve_reverse`, `#serve_transparent` and
+    # `#serve_socks5` route on `client.peek`, which blocks BEFORE any `ClientConn` is constructed,
+    # so a peer that connects and says nothing times out there and never reaches
+    # `read_client_head`. Those are also the only listeners a plaintext server-speaks-first
+    # protocol can arrive on at all — SMTP/IMAP cannot traverse a forward proxy without CONNECT — so leaving them out would have put the
     # fix everywhere except where it is needed (#729 says the transparent listener "matters more
     # here than anywhere else"). One method, so the sentence cannot fork.
     def self.record_silent_client(sink : FlowSink, scheme : String, host : String, port : Int32,
@@ -2473,6 +2491,35 @@ module Gori::Proxy
         "never sends. #{non_http_remedy(host, client_tls)}. Harmless alternative: a speculative " \
         "preconnect, a connection a browser opened ahead of a request it never made, looks " \
         "identical and needs nothing done about it"))
+    end
+
+    # A `CONNECT` sent to a listener whose destination was already settled. Answered 403 — not
+    # 502, which would read as "the origin is down", and not a dropped connection, which would
+    # read as gori being broken — and recorded, because a client doing this is either misconfigured
+    # or probing, and both are worth seeing.
+    private def refuse_connect_on_pinned(req : Codec::RawRequest, fixed : String,
+                                         host : String, port : Int32) : Bool
+      message = "CONNECT refused: this listener serves a fixed destination " \
+                "(#{Gori::BindAddress.authority(fixed, @fixed_port)}) and is not a forward proxy, " \
+                "so it will not open a tunnel to #{Gori::BindAddress.authority(host, port)}. " \
+                "Point the client at gori's proxy listener if it needs one"
+      ::Log.warn { message }
+      record_error(req, @scheme, host, port, now_us, message)
+      @io.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_slice)
+      @io.flush rescue nil
+      false
+    end
+
+    # A connection a LISTENER refused before any request existed, on the record. Same shape and
+    # the same reason as `record_silent_client` above: the refusal is a fact about a client that
+    # tried to use gori, and `gori.log` is where an operator does not look. `host`/`port` are
+    # whatever the refusal knew — empty and 0 when it was refused before naming a destination.
+    def self.record_listener_refusal(sink : FlowSink, host : String, port : Int32,
+                                     message : String) : Nil
+      flow_id = sink.on_request(FlowMapper.request(Codec::Http1.parse_request_head(Bytes.new(0)),
+        scheme: "http", host: host, port: port, created_at: now_us, body: nil,
+        source: FlowSource::Kind::Proxy))
+      sink.on_response(FlowMapper.error_response(flow_id, message))
     end
 
     # The remedy sentence shared by the two ways a connection can turn out not to be HTTP — bytes

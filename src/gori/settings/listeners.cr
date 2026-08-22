@@ -44,7 +44,15 @@ module Gori::Settings
   #               with none of the derivation's failure modes, and no kernel rule: the client
   #               just has to reach this socket. This is what makes gori usable against a
   #               client that cannot be pointed at a proxy at all.
-  LISTENER_MODES = ["proxy", "transparent", "reverse"]
+  # socks5      — a SOCKS5 proxy (RFC 1928): the client asks for a destination by name and gori
+  #               MITMs what follows, exactly as on the transparent path but with the
+  #               destination DECLARED by the client rather than recovered from the kernel, an
+  #               SNI or a `Host` header. For the client that can be pointed at a proxy but not
+  #               at an HTTP one — an `ALL_PROXY=socks5://` tool, a runtime whose only proxy
+  #               setting is SOCKS. gori already speaks the other end of this protocol
+  #               (`network.upstream_rules`, kind `socks5`); this is the same vocabulary,
+  #               inbound. NO-AUTH only, like the `proxy` listener beside it.
+  LISTENER_MODES = ["proxy", "transparent", "reverse", "socks5"]
 
   # One additional listener. `target_port` is the port gori dials upstream for a TRANSPARENT
   # connection when the kernel will not say — the redirect rule's intent, declared, so the
@@ -80,6 +88,10 @@ module Gori::Settings
 
     def reverse? : Bool
       mode == "reverse"
+    end
+
+    def socks5? : Bool
+      mode == "socks5"
     end
 
     # The upstream port for a transparent connection the kernel could not answer for, when the

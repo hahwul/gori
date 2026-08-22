@@ -511,6 +511,8 @@ The certificate still has to be trusted on the client: transparent mode removes 
 
 If a **reverse listener** would also work for your target, prefer it. It declares the destination outright, so it needs no firewall rule and none of the destination is taken from what the client sent.
 
+And if the client can be pointed at a proxy but not at an HTTP one — `ALL_PROXY=socks5://127.0.0.1:1080`, a runtime whose only proxy setting is SOCKS — run a **socks5 listener** instead. The client names its destination in the SOCKS handshake, so there is no firewall rule and nothing to recover from an SNI or a `Host` header; everything after the handshake is intercepted exactly as on the transparent path. It serves `CONNECT` with no authentication, and a refusal — a destination the Sandbox excludes, a client asking for `UDP ASSOCIATE` — is answered with the reply code RFC 1928 defines and recorded as a flow, so it reads in History instead of being a connection that closed without a reason. See [SOCKS5 mode](/reference/config/#socks5-mode).
+
 ## When a Pinned App Is in the Way
 
 gori intercepts every HTTPS connection, which breaks any client that pins certificates — a mobile app, an auto-updater, a background agent. On a phone or a shared machine that traffic arrives whether you want it or not, and it fails loudly while you are trying to test something else.
