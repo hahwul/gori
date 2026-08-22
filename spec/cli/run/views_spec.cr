@@ -66,3 +66,33 @@ describe "gori run views --format=json" do
     json_for(v, nil).as_h["active"].as_bool.should be_false
   end
 end
+
+describe "gori run history — the empty-listing sentence" do
+  it "names the view that narrowed, not only the query" do
+    # A `--view` that matched nothing printed a bare "no flows": the one surface with a channel
+    # for WHY, silent about the newest reason a listing can be short. `--in-scope` beside it has
+    # always said so, and the TUI's empty state names the view outright.
+    Gori::CLI::Run.empty_listing_note(nil, nil, false).should eq("no flows")
+    Gori::CLI::Run.empty_listing_note(nil, "Errors", false)
+      .should eq(%(no flows in the "Errors" view))
+    Gori::CLI::Run.empty_listing_note("status:200", "Errors", false)
+      .should eq(%(no flows match "status:200" in the "Errors" view))
+    Gori::CLI::Run.empty_listing_note("status:200", "Errors", true)
+      .should eq(%(no flows match "status:200" in scope in the "Errors" view))
+  end
+
+  it "stays quiet about All, which excluded nothing" do
+    # The caller passes nil for a non-narrowing view. Naming it would send an operator looking
+    # at a lens that had no part in the answer.
+    Gori::CLI::Run.empty_listing_note("status:200", nil, false)
+      .should eq(%(no flows match "status:200"))
+  end
+
+  it "names both lenses on an empty HAR too" do
+    Gori::CLI::Run.empty_har_note(nil, nil).should eq("no flows written to the HAR")
+    Gori::CLI::Run.empty_har_note("status:200", "Errors")
+      .should eq(%(no flows written to the HAR (query "status:200", view "Errors")))
+    Gori::CLI::Run.empty_har_note(nil, "Errors")
+      .should eq(%(no flows written to the HAR (view "Errors")))
+  end
+end

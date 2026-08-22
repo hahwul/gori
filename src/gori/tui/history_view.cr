@@ -442,7 +442,12 @@ module Gori::Tui
       view = active_view
       view_filter = SavedViews.filter(view, scope: lens)
       @view_broken = view_filter.nil?
-      @query_note = query_note_for(query_filter, store, lens)
+      # The view's compiled filter is HANDED to the note, not recomputed there. Two independent
+      # `SavedViews.filter` calls per reload is one QL parse too many on a path that re-runs on
+      # every filter flush during capture — and, worse, two places deciding what the active view
+      # compiles to, which is a drift waiting to happen the next time one of them grows a
+      # condition.
+      @query_note = query_note_for(query_filter, store, lens, view_filter)
       # A non-blank query that compiles to EMPTY (every term invalid — a typo'd field,
       # a bad numeric like dur:>2sec, an unterminated value) must NOT fall through to a
       # match-all search: that would show EVERY flow while the bar claims a filter is
@@ -489,14 +494,14 @@ module Gori::Tui
     # valid filter that genuinely has no matches) — surfaced in the empty-state hint so a
     # typo'd status:/dur:/size: or a broken body~[regex isn't misread as "no traffic".
     private def query_note_for(filter : QL::Filter, store : Store,
-                               lens : QL::ScopeLens?) : String?
+                               lens : QL::ScopeLens?, view_filter : QL::Filter?) : String?
       # A VIEW can read the trigram index too (`body:`, free text), and with a blank bar this
       # method used to return before the backlog probe — so during a capture burst the list
       # under-reported with no signal at all, which is the exact silence `fts_backlog_note`
       # exists to break. The CLI and MCP both drain-or-refuse for a view; the TUI must not
       # stall, so it says so instead.
       if @query.blank?
-        return nil unless (v = active_view) && (vf = SavedViews.filter(v, scope: lens))
+        return nil unless active_view && (vf = view_filter)
         return fts_backlog_note(vf, store)
       end
       return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)

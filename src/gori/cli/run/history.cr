@@ -421,6 +421,11 @@ module Gori
           # picker ANDs it over the filter bar. Resolved project > global > builtin, the same
           # precedence `SavedViews.resolve_by_name` gives every surface.
           view_filter = QL::EMPTY
+          # The RESOLVED name of a view that actually narrowed, for the empty-listing message
+          # below. Resolved rather than as-typed (`--view errors` is the `Errors` view), and nil
+          # for `All`, whose query is empty: naming a lens that excluded nothing would send an
+          # operator looking at a view for an answer the view had no part in.
+          view_label : String? = nil
           if vn = view_name
             unless view = SavedViews.resolve_by_name(store, vn)
               known = SavedViews.names(store).join(", ")
@@ -435,6 +440,7 @@ module Gori
               abort "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`"
             end
             view_filter = f
+            view_label = view.name if view.narrowing?
           end
 
           scope_unconfigured = false
@@ -511,21 +517,48 @@ module Gori
               store.recent_flows(limit)
             end
           if format == :har
-            emit_har(store, rows, query, limit)
+            emit_har(store, rows, query, view_label, limit)
           elsif format == :json
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
             rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id)) }
           elsif rows.empty?
-            scoped = in_scope ? " in scope" : ""
-            STDERR.puts "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}"
+            STDERR.puts empty_listing_note(query, view_label, in_scope)
           else
             rows.each { |r| puts CLI::Output.flow_row_text(r) }
           end
         ensure
           store.close
         end
+      end
+
+      # The sentence an empty listing prints. It names EVERY lens that narrowed the answer, not
+      # just the query: a `--view` that matched nothing used to print a bare "no flows", so the
+      # one surface with a channel for WHY stayed silent about the newest reason a listing can
+      # be short — while `--in-scope` right beside it said so, and while the TUI's empty state
+      # names the view outright. "I saw no traffic" and "a standing filter excluded it" must not
+      # read the same on a security proxy.
+      #
+      # `view` is the RESOLVED name and is nil for `All`, whose query is empty — naming a lens
+      # that excluded nothing would send an operator looking at a view for an answer it had no
+      # part in.
+      #
+      # Public for the reason `view_row` is: the command ends in `exit`, so the printed shape is
+      # the only part of it a spec can pin.
+      def self.empty_listing_note(query : String?, view : String?, in_scope : Bool) : String
+        scoped = in_scope ? " in scope" : ""
+        viewed = view ? " in the #{view.inspect} view" : ""
+        "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}"
+      end
+
+      # The HAR half of the same sentence — parenthesised rather than prose because it trails a
+      # `gori run history:` prefix, and both lenses for the same reason as above: an export that
+      # is empty because a standing view excluded everything must not read like one taken against
+      # a project with no traffic.
+      def self.empty_har_note(query : String?, view : String?) : String
+        why = [query ? "query #{query.inspect}" : nil, view ? "view #{view.inspect}" : nil].compact
+        "no flows written to the HAR#{why.empty? ? "" : " (#{why.join(", ")})"}"
       end
 
       # The whole QL result set as ONE HAR 1.2 log (#495).
@@ -540,7 +573,7 @@ module Gori
       # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
       # the failure this file keeps having to fix.
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
-                                limit : Int32) : Nil
+                                view : String?, limit : Int32) : Nil
         details = rows.reverse.each.compact_map { |r| store.get_flow(r.id) }
         # The transcript lookup. `Export::Har.log` calls this for EVERY flow, including the
         # ones that are plainly HTTP — deliberately, and it is the point of #742: "does this
@@ -563,7 +596,7 @@ module Gori
         STDOUT.puts
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
-          STDERR.puts "gori run history: no flows written to the HAR#{query ? " (query #{query.inspect})" : ""}"
+          STDERR.puts "gori run history: #{empty_har_note(query, view)}"
         elsif rows.size >= limit
           # A file handed to someone else must not quietly be the newest 50 of 5000. The
           # listing formats share this default, but there a short page is obvious on screen

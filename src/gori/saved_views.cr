@@ -200,6 +200,7 @@ module Gori
       n = name.strip
       return "enter a name" if n.empty?
       return "name is longer than #{NAME_MAX} characters" if n.size > NAME_MAX
+      return "name contains a control character" if control_char?(n)
       # A name that collides with a builtin would be unreachable by `--view`, since resolution
       # prefers the saved one and the operator loses the builtin instead.
       if BUILTINS.any? { |b| b.name.downcase == n.downcase }
@@ -223,6 +224,7 @@ module Gori
     # answer identically under either lens.
     def self.unusable_query_reason(query : String) : String?
       return "enter a query" if query.blank?
+      return "query contains a control character" if control_char?(query)
       if bad = unknown_fields(query).first?
         return "unknown field `#{bad}:` — see the query language reference"
       end
@@ -235,6 +237,24 @@ module Gori
         return "`#{bad}` is not a value that field takes — it would be dropped, and the view would show more"
       end
       nil
+    end
+
+    # A C0 control or DEL anywhere in the string.
+    #
+    # Both halves of a view are TEXT THAT GETS PRINTED — the name into the `v:` chip, the picker,
+    # every toast and `gori run views list`; the query into the picker's detail column and the
+    # activation toast. The TUI's grid substitutes a control cell with a space (`Screen::ASCII_CELL`),
+    # but a terminal written to directly does not: an ESC in a name emits its own sequence out of
+    # `gori run views list`, and a newline breaks that listing's one-line-per-view contract, which
+    # is the shape a script reading it depends on.
+    #
+    # Refused rather than escaped at each of the five print sites, for exactly the reason this
+    # validator exists: the TUI's name prompt cannot type a control character, but
+    # `gori run views add`, MCP `create_view` and a hand-edited settings.json all can, and a rule
+    # only one of the three enforces is not a rule. Existing rows are left alone — the tolerant
+    # parsers keep them loadable, so this narrows what can be WRITTEN, not what can be read.
+    private def self.control_char?(s : String) : Bool
+      s.each_char.any? { |c| c.ord < 0x20 || c.ord == 0x7f }
     end
 
     # Field names a view's query uses that QL does not know. `QL.known_field?` rather than

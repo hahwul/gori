@@ -25,6 +25,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     active = history_controller.view.active_view
     bar = history_controller.view.query
     lp = LibraryPicker.new("HISTORY VIEW", view_rows(views, active, bar), "view", "activate")
+    # Open ON the view that is on. This card is a MODE selector, not a "load one of your saved
+    # recipes" library like the Decoder's and the Rewriter's — the two the picker was built for,
+    # where nothing is currently loaded and row 0 is the only honest place to start. Here there
+    # always IS a current answer, so parking the cursor on row 0 made ↑/↓ step from somewhere the
+    # operator is not, and made `●` something they had to go find. `views` and the rows are built
+    # in the same order, so the array index IS the visual position on a card with no filter typed
+    # yet.
+    lp.set_selected(views.index { |v| active_view_matches?(v, active) } || 0)
     lp.on_commit = -> {
       # Index against the SAME array the rows were built from, and re-resolve by KEY rather than
       # trusting the position: the two stores can be edited from the CLI, from MCP or by a peer
@@ -102,7 +110,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # (↵) is a mode that leaves what the operator typed alone, which is the whole point of #776.
   # Re-saving under the same name updates the view.
   private def edit_view_query(view : SavedViews::View?) : Nil
-    return unless view
+    # nil is the `+ Save current filter…` row (see `view_at`). SAY so, rather than letting the
+    # card come down on a keystroke that did nothing — ^X on the same row already answers, and
+    # a silent dismissal is indistinguishable from ^E having worked.
+    unless view
+      @toast = "pick a view to edit — ↵ on this row saves the filter instead"
+      return
+    end
     unless view.narrowing?
       @toast = "#{view.name} has no query to edit"
       return
