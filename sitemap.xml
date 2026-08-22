@@ -1,0 +1,536 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://gori.hahwul.com/ko/reference/cli/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/cli/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/cli/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/reference/cli/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/cli/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/cli/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/reference/query-language/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/query-language/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/query-language/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/reference/config/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/config/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/config/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/reference/config/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/config/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/config/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/reference/query-language/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/query-language/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/query-language/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/decoder/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/decoder/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/decoder/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/repeater-and-fuzzer/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/repeater-and-fuzzer/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/settings/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/settings/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/settings/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/scripting/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scripting/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scripting/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/themes/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/themes/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/themes/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/proxy/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/proxy/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/proxy/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/scanning/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scanning/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scanning/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/oast/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/oast/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/oast/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/sequencer/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/sequencer/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/sequencer/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/jwt/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/jwt/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/jwt/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/decoder/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/decoder/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/decoder/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/hotkeys/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/hotkeys/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/hotkeys/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/proxy/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/proxy/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/proxy/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/jwt/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/jwt/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/jwt/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/authorize/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/authorize/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/authorize/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/mcp/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/mcp/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/mcp/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/scripting/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scripting/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scripting/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/repeater-and-fuzzer/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/authorize/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/authorize/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/authorize/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/hotkeys/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/hotkeys/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/hotkeys/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/themes/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/themes/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/themes/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/oast/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/oast/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/oast/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/settings/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/settings/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/settings/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/sequencer/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/sequencer/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/sequencer/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/mcp/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/mcp/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/mcp/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/scanning/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scanning/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scanning/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/getting-started/quick-start/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/quick-start/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/quick-start/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/getting-started/quick-start/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/quick-start/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/quick-start/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/getting-started/installation/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/installation/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/installation/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/getting-started/configuration/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/configuration/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/configuration/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/getting-started/configuration/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/configuration/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/configuration/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/getting-started/installation/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/installation/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/installation/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/getting-started/ai-setup/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/ai-setup/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/ai-setup/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/getting-started/ai-setup/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/ai-setup/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/ai-setup/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/attack-a-jwt/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/attack-a-jwt/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/grade-token-randomness/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/grade-token-randomness/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/triage-and-report/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/triage-and-report/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/triage-and-report/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/map-the-attack-surface/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/intercept-and-modify/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/intercept-and-modify/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/fuzz-a-parameter/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/set-up-an-engagement/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/set-up-an-engagement/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/carry-a-session/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/carry-a-session/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/carry-a-session/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/triage-and-report/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/triage-and-report/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/triage-and-report/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/decode-and-transform/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/decode-and-transform/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/map-the-attack-surface/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/map-the-attack-surface/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/crack-and-forge-cookies/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/attack-a-jwt/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/attack-a-jwt/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/set-up-an-engagement/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/intercept-and-modify/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/intercept-and-modify/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/decode-and-transform/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/decode-and-transform/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/grade-token-randomness/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/grade-token-randomness/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/carry-a-session/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/carry-a-session/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/carry-a-session/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/reference/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/reference/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/guide/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/guide/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/getting-started/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/getting-started/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/getting-started/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/getting-started/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/ko/playbooks/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/playbooks/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/" />
+    <xhtml:link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/" />
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/tags/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/categories/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://gori.hahwul.com/authors/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>

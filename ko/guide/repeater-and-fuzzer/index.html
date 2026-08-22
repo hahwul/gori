@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다.">
+  <title>Repeater &amp; Fuzzer - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Repeater &amp; Fuzzer">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">
+  <meta property="og:description" content="요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Repeater &amp; Fuzzer">
+  <meta name="twitter:description" content="요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다.">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Repeater \u0026 Fuzzer","url":"https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/","description":"요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"Repeater \u0026 Fuzzer"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">플레이북</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/playbooks/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">기초</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/">엔게이지먼트 준비</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/">공격면 매핑</a></li>
+      
+      
+      <li class="sidebar-subhead">수동 루프</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/">플로우 중 가로채기 및 수정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/">파라미터 퍼징</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/carry-a-session/">세션 유지</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/">데이터 디코드와 변환</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/">JWT 공격</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/">세션 쿠키 크랙과 위조</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/">토큰 랜덤성 평가</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/">OAST로 블라인드 취약점 확인</a></li>
+      
+      
+      <li class="sidebar-subhead">마무리</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/triage-and-report/">트리아지와 리포트</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/">AI 코파일럿 세션 실행</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/" class="active" aria-current="page">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/authorize/">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scripting/">스크립팅</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Repeater &amp; Fuzzer</h1>
+    <p>흥미로운 플로우를 캡처했다면, <strong>Repeater</strong>와 <strong>Fuzzer</strong>가 그 플로우를 테스트하는 곳입니다.</p>
+<h2 id="repeater">Repeater</h2>
+<p>Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어느 부분이든 편집한 뒤, 다시 보냅니다. 응답, 소요 시간, 이전 응답과의 diff가 나란히 표시됩니다. 세션은 프로젝트와 함께 유지되므로 나중에 다시 돌아올 수 있습니다.</p>
+<p>세션이 수십 개 쌓이면 칩 스트립이 스크롤되기 시작하고, <code>←</code>/<code>→</code>로 훑어 찾는 건 더 이상 현실적이지 않습니다. 스트립 위 어느 칩에서든 **<code>f</code>**를 누르면 전체 세션 목록이 뜹니다. 타이핑하면 이름·메서드·경로·대상 호스트·<code>#태그</code>로 걸러지고, <code>Enter</code>로 고른 세션으로 점프합니다. 같은 목록이 스트립 왼쪽 끝의 <strong><code>⌕</code></strong> 뒤에도 있습니다 — 클릭하거나, 첫 칩에서 <code>←</code>로 이동하면 됩니다. Fuzzer, Notes, Decoder, JWT, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립에 동일하게 있습니다.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 1152ms 만에 재전송된 200 상태 줄을 갖춘 gori Repeater 탭">
+  <figcaption><strong>Repeater</strong>: 왼쪽에 편집 가능한 요청, 오른쪽에 실시간 응답과 소요 시간, 이전 전송과의 diff.</figcaption>
+</figure>
+<p>Repeater는 HTTP/1 이상을 다룹니다.</p>
+<ul>
+<li><strong>HTTP/2</strong> 요청은 실제 h2 연결로 재전송됩니다.</li>
+<li><strong>WebSocket</strong> 리피터는 핸드셰이크를 연 뒤 메시지를 <strong>한 번에 하나씩</strong> 재생합니다. 하나를 보내고, 서버의 응답이 잠잠해질 때까지 받아낸 다음에야 그다음 메시지가 나갑니다.</li>
+<li><strong>gRPC</strong> 리피터는 프레이밍된 메시지를 위해 HTTP/2 엔진을 재사용합니다. 단항(unary) 호출 — 정확히 하나의 프레이밍된 메시지 — 은 <code>^X</code>로 페이로드를 헥스 편집할 수 있고, 메시지가 0개이거나 여러 개인 본문은 그대로 재전송됩니다. 메시지 앞의 5바이트 길이 접두사는 요청 카드의 <code>␣F:FRAME</code> 토글이 결정합니다. 이 탭에서는 기본값이 <strong>켜짐</strong>이라, 편집한 단항 메시지가 올바른 형식으로 나가고 원본 서버가 호출을 받아들입니다. <strong>끄면</strong> 편집한 페이로드 앞에 캡처된 접두사가 그대로 붙습니다 — 페이로드와 어긋나는 접두사 자체가 표준적인 gRPC 파서 테스트이기 때문입니다. 헤드리스에서는 기본값이 반대입니다. <code>gori run repeater send</code>(MCP <code>send_request</code>)는 <code>--reframe-grpc</code> / <code>reframe_grpc: true</code>를 주지 않는 한 접두사를 캡처된 그대로 보냅니다.</li>
+<li><strong>decode</strong> 모드는 편집된 SAML / GraphQL 페이로드를 전송 시 다시 인코드합니다. (JWT를 디코드하거나 편집하려면 <a href="/ko/guide/decoder/">Decoder</a> 탭의 <code>jwt-decode</code>를 사용하세요.)</li>
+</ul>
+<p>WebSocket에서는 이 &quot;하나씩&quot; 순서가 핵심입니다. 소켓은 대화를 실어 나르므로, 세 번째 메시지가 두 번째의 응답에 의존하는 스크립트는 gori가 그 사이에 기다려 줄 때만 충실하게 재생됩니다. 그리고 그때 트랜스크립트는 보낸 것 전부를 받은 것 전부보다 앞에 나열하는 대신 실제 전선 순서대로 읽힙니다. 여기서 세 가지가 따라옵니다.</p>
+<ul>
+<li><strong>메시지마다 최소한 한 번의 정적 구간이 듭니다</strong>(기본값은 서버 침묵 3초). 아무것도 응답하지 않는 서버를 상대로 한 긴 스크립트가 가장 느린 경우입니다.</li>
+<li><strong>상대가 멈추면 gori도 멈춥니다.</strong> 서버가 <code>CLOSE</code>를 보내거나 연결이 끊기면, 남은 스크립트는 아무도 읽지 않는 소켓에 쓰이지 <em>않습니다</em> — RFC 6455도 <code>CLOSE</code> 이후의 데이터 프레임을 금지합니다. 결과에는 실제로 몇 개가 나갔는지가 적힙니다.</li>
+<li><strong>당신이 쓴 <code>CLOSE</code>는 멈추지 않습니다.</strong> 자신의 <code>CLOSE</code> 뒤에 데이터를 보내는 것은 프로토콜 테스트이고, Repeater는 그것을 실행하게 해 줍니다 — 마스킹하지 않은 프레임, 홀로 있는 continuation, 페이로드와 어긋나는 길이 헤더와 마찬가지로요.</li>
+</ul>
+<p>gori는 <code>permessage-deflate</code>를 협상하지 않으며, 캡처 쪽도 프레임 페이로드를 도착한 그대로 저장합니다. 따라서 압축된 연결에서 캡처한 세션은 <em>압축된</em> 바이트를 담고 있어 재생할 수 없습니다. 브라우저에서 압축을 끄고 다시 캡처하세요.</p>
+<p>명령줄에서 Repeater를 실행하고, 선택적으로 새 대상을 지정할 수 있습니다.</p>
+<pre><code class="language-bash hljs">gori run repeater &lt;flow-id&gt; --target https://staging.example.com --diff
+</code></pre>
+<h2 id="environment-variables">환경 변수</h2>
+<p>아웃바운드 요청은 <code>$KEY</code> 스타일 치환을 지원합니다. 토큰은 에디터에서 리터럴 텍스트로 남아 있다가, Repeater, Fuzzer, Miner, Intercept 포워드, <code>gori run</code>, MCP <code>send_request</code>에서 전송 시점에만 확장됩니다.</p>
+<p>변수는 두 곳에서 정의합니다(키 충돌 시 프로젝트가 우선).</p>
+<table>
+<thead>
+<tr>
+<th>레이어</th>
+<th>위치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Global</strong></td>
+<td>Preferences(<code>Ctrl-,</code>) → <strong>Editor &amp; Keys</strong> → <strong>Env</strong>, <code>Ctrl-P</code> → <strong>Settings: Env</strong>, 또는 <code>settings.json</code>의 <code>env</code> 섹션</td>
+</tr>
+<tr>
+<td><strong>Project</strong></td>
+<td><strong>Project</strong> 탭 → <strong>ENV</strong> 패널 (<code>a</code> 추가, <code>e</code> 편집, <code>d</code> 삭제)</td>
+</tr>
+</tbody>
+</table>
+<p>기본 접두사는 <code>$</code>입니다(ENV space 메뉴의 <strong>Change prefix</strong>나 설정의 <code>env.prefix</code>로 변경 가능). 키는 <code>A-Z a-z _</code>로 시작해 <code>A-Z a-z 0-9 _</code>가 이어집니다.</p>
+<p>알 수 없는 토큰은 요청이 <em>표시</em>되는 곳에서는 리터럴 텍스트로 그대로 남습니다. 에디터는 입력한 그대로를 유지하고, 하이라이터가 미등록 토큰을 등록된 토큰과 다르게 칠합니다. 다만 전송되지는 않습니다. Repeater, Fuzzer, Miner, Sequencer, Discover는 요청 라인, 헤더, 타깃에 아무것으로도 해석되지 않는 변수가 남아 있으면 그 이름을 대며 실행을 거부합니다. minimize, 편집한 intercept forward, WebSocket 메시지도 마찬가지입니다. 변수를 설정하거나 토큰을 지우세요. 검사 범위는 요청 head뿐입니다. 바디 안의 <code>$</code>는 바이트로 취급하므로 바이너리 업로드는 그대로 재전송됩니다. WebSocket <strong>텍스트</strong> 메시지는 head가 없으므로 페이로드 전체를 검사하고, <strong>바이너리</strong> 메시지는 검사하지도 확장하지도 않습니다.</p>
+<pre><code class="language-http hljs">GET /api/me HTTP/1.1
+Host: api.example.com
+Authorization: Bearer $TOKEN
+</code></pre>
+<p>캡처된 트래픽에 나타나는 값은 복사하거나 표시할 때 다시 <code>$KEY</code>로 마스킹할 수 있어, 비밀 값이 원시 문자열이 아니라 토큰으로 유지됩니다.</p>
+<h2 id="fuzzer">Fuzzer</h2>
+<p>Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하고, 페이로드 세트를 붙이고, 응답을 매칭하면서 요청 행렬을 전송합니다.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/fuzzer.svg" alt="강조된 마커 위치를 보여주는 요청 템플릿, 페이로드 세트 설정 패널, 전송된 요청 결과 테이블, 분포 사이드바를 갖춘 gori Fuzzer 탭">
+  <figcaption><strong>Fuzzer</strong>: 템플릿의 <code>§…§</code> 마커, CONFIG의 페이로드 세트와 모드, 실시간 결과 테이블, 상태 / 크기 분포 사이드바.</figcaption>
+</figure>
+<h3 id="attack-modes">공격 모드</h3>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sniper</code></td>
+<td>한 번에 한 위치씩, 단일 페이로드 세트를 순환 (기본값)</td>
+</tr>
+<tr>
+<td><code>batteringram</code></td>
+<td>표시된 모든 위치에 같은 페이로드</td>
+</tr>
+<tr>
+<td><code>pitchfork</code></td>
+<td>병렬 세트: 각 세트의 <em>n</em> 번째 페이로드를 함께</td>
+</tr>
+<tr>
+<td><code>clusterbomb</code></td>
+<td>모든 세트에 걸친 모든 조합</td>
+</tr>
+</tbody>
+</table>
+<h3 id="positions-and-payloads">위치와 페이로드</h3>
+<p>요청에서 <code>§…§</code> 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(<code>sqli</code>, <code>xss</code>, <code>traversal</code>, <code>format-string</code>, <code>bad-strings</code>, <code>command-injection</code> — 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.</p>
+<p>마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 <code>Ctrl-Y</code>를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. <a href="/ko/guide/decoder/#building-a-chain">Decoder 라이브러리에 저장해 둔 체인</a>은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: <code>§admin¦myenc &gt; url-encode§</code>. Repeater 마커도 동일합니다.</p>
+<h3 id="matching">매칭</h3>
+<p>ffuf 스타일 matcher와 filter로 status, size, words, lines, 본문 정규식에 대해 결과를 필터링합니다. 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.</p>
+<h3 id="framing-a-sweep">스윕의 프레이밍</h3>
+<p><code>Content-Length</code>는 페이로드가 삽입될 때마다 다시 계산되므로 일반적인 스윕은 항상 일관된 상태를 유지합니다. <code>--verbatim</code>(MCP <code>update_content_length: false</code>)은 이 계산을 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다.</p>
+<p>gRPC 템플릿에는 두 번째 길이 선언 — 각 메시지 앞의 5바이트 접두사 — 이 있으며, 기본값은 반대입니다. gori는 페이로드가 남긴 그대로 두고, 실행이 끝날 때 한 번 알려줍니다(<code>2 of 3 requests left it stale</code>, MCP <code>fuzz_status</code>의 <code>grpc_stale_prefix</code>). 의도적으로 잘못된 접두사를 테스트할 때는 이것이 맞는 동작이지만, 평범한 단항 호출을 스윕하는데 모든 요청이 프레이밍 계층에서 거부된다면 원하는 동작이 아닙니다. <code>--reframe-grpc</code>(MCP <code>reframe_grpc: true</code>, 또는 Fuzzer ADVANCED 카드의 <strong>gRPC reframe (unary)</strong> 토글)는 요청마다 접두사를 다시 계산합니다. 세 표면 모두 기본값은 꺼짐이며, 단일 메시지에만 적용됩니다. 클라이언트 스트리밍 본문, <code>grpc-web-text</code> 본문, 그리고 이미 프레이밍이 깨진 시드는 그대로 두고 여전히 보고합니다.</p>
+<h3 id="connection-reuse">연결 재사용</h3>
+<p>스윕은 하나의 HTTP/1.1 연결을 여러 요청에 재사용합니다. 요청마다가 아니라 워커마다 TCP 핸드셰이크를(그리고 <code>https</code>라면 TLS 핸드셰이크까지) 한 번만 치릅니다. 원격 오리진을 대상으로 할 때 대개 이것이 실행 시간의 가장 큰 비용입니다.</p>
+<p>프레이밍이 명확하다고 증명할 수 없는 요청은 설정과 무관하게 소켓을 공유하지 않습니다. 실제 본문 길이와 어긋나는 <code>Content-Length</code>, <code>CL</code>+<code>TE</code>, 난독화된 프레이밍 헤더, <code>Connection: close</code>, <code>Upgrade</code>는 각각 자기 연결을 받습니다. 스머글링 페이로드가 다음 페이로드의 결과를 오프레이밍할 수 없다는 뜻입니다. 대상의 동작이 연결 단위일 때(연결 범위 rate limit, 연결로 고정하는 로드 밸런서) 또는 keep-alive 처리 자체를 시험할 때는 <code>--no-keep-alive</code>(CLI), <code>keep_alive: false</code>(MCP), Fuzzer ADVANCED 오버레이의 <strong>Keep-alive</strong> 토글로 재사용을 끕니다.</p>
+<p><code>gori run fuzz</code>는 실제로 치른 비용을 함께 출력합니다: <code>connections · 50 dialed · 2950 reused</code>.</p>
+<h3 id="running-headless">헤드리스 실행</h3>
+<pre><code class="language-bash hljs">gori run fuzz &lt;flow-id&gt; \
+  --auto \
+  --wordlist params.txt \
+  --mode sniper \
+  --mc 200,302 \
+  --fs 0
+</code></pre>
+<p>소스는 캡처된 플로우(<code>--flow</code>), 저장된 HTTP 리피터 세션(<code>--repeater</code>), 원시 요청 파일(<code>--request</code>), 또는 stdin이 될 수 있습니다. 출력은 <code>text</code>, <code>json</code>, <code>jsonl</code>입니다.</p>
+<p><strong>TUI의 Repeater 전송은 History에 기록됩니다.</strong> 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(<code>sent → 200 in 391ms · History #84</code>). Settings → General → <em>Record Repeater sends</em>에서 끌 수 있습니다. WebSocket 전송과 send-group은 기록되지 않으며(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다) 상태줄이 한 번 그렇게 알려 줍니다.</p>
+<p>나머지는 그대로 opt-in이고, 헤드리스 표면은 각자의 호출별 인자를 유지하므로 이 설정 때문에 스크립트 동작이 바뀌지 않습니다. <code>gori run repeater send --record-history</code>는 전송을 플로우로 기록하고 그 id를 출력하며(기본 off), <code>gori run fuzz --record-history=none|matched|all</code>은 전송한 각 요청+응답을 기록하고(<code>matched</code>는 매칭된 행만, <code>all</code>은 매 전송, 5000개 상한), MCP <code>send_request</code>는 <code>record_history:false</code>를 넘기지 않는 한 기록합니다.</p>
+<p>기록된 플로우는 모두 출처를 말합니다 — History의 <strong>SRC</strong> 열, 그리고 쿼리의 <code>src:repeater</code> /
+<code>src:fuzzer</code> / <code>src:gori</code> — 그래서 재전송이 대상 클라이언트가 만든 트래픽으로 잘못 읽히지
+않습니다. <a href="/ko/guide/proxy/#flow-source">이 플로우는 어디서 왔나</a>를 보세요.</p>
+<p>두 도구 모두, 기록된 플로우는 <strong>와이어에 나간 그대로의 요청</strong>입니다. 활성 세션 슬롯의 헤더 오버레이와 전송 시점에 치환된 <code>$NAME</code> 값이 그 안에 들어 있으므로, 그 플로우를 재전송·비교·스캔하면 조립 전 초안이나 템플릿이 아니라 실제 전송을 재현합니다. (Fuzzer의 결과 <em>행</em>은 여전히 렌더된 템플릿을 보여줍니다. &quot;Repeater로 보내기&quot;가 그 바이트로 탭을 시드하고, 슬롯은 전송할 때마다 적용되기 때문입니다.)</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/decoder/">Decoder</a>: 로컬 인코드/디코드/해시 체인</li>
+<li><a href="/ko/guide/scanning/">Scanning &amp; Issues</a>: Probe와 Param Miner</li>
+<li><a href="/ko/reference/cli/">CLI Reference</a>: 모든 <code>run</code> 플래그</li>
+<li><a href="/ko/guide/mcp/">MCP Server</a>: 에이전트로 퍼징 구동</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

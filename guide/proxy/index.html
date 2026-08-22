@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <title>Proxy &amp; History - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Proxy &amp; History">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/proxy/">
+  <meta property="og:description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Proxy &amp; History">
+  <meta name="twitter:description" content="Capture traffic, intercept requests, scope your target, and inspect every protocol.">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/proxy/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Proxy \u0026 History","url":"https://gori.hahwul.com/guide/proxy/","description":"Capture traffic, intercept requests, scope your target, and inspect every protocol."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Proxy \u0026 History"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/proxy/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/proxy/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/proxy/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/proxy/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+<aside class="docs-sidebar">
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Playbooks</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/playbooks/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Foundations</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">Set up an engagement</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">Map the attack surface</a></li>
+      
+      
+      <li class="sidebar-subhead">The manual loop</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">Intercept and modify in flight</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">Fuzz a parameter</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/carry-a-session/">Carry a session</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/decode-and-transform/">Decode and transform data</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">Attack a JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">Crack and forge session cookies</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">Grade token randomness</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">Confirm blind vulnerabilities with OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Wrap up</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/triage-and-report/">Triage and report</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">Run an AI co-pilot session</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/" class="active" aria-current="page">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    <h1>Proxy &amp; History</h1>
+    <p>The proxy sits between your client and the upstream server, records each exchange as a <em>flow</em>, and stores it in the current project. <strong>History</strong> is where you read those flows back.</p>
+<h2 id="capturing-traffic">Capturing Traffic</h2>
+<p>Start gori and point your client at <code>127.0.0.1:8070</code> (see the <a href="/getting-started/quick-start/">Quick Start</a>). Toggle capture at any time with <code>c</code>. Turning it off lets traffic pass through without being recorded, which is handy while you set up.</p>
+<p>Once a client is pointed at the proxy, <code>http://gori.proxy/</code> serves gori's info page and CA download. It is a reserved name answered locally, so it never reaches the network — useful on a phone, where the proxy usually gets configured before the certificate. A client with no proxy configured gets the same page by browsing to the listen address directly.</p>
+<p>Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size, and the flow detail view in the TUI draws an explicit banner showing captured vs. wire bytes and how to raise <code>capture_max_mib</code> under Settings → Network). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.</p>
+<blockquote>
+<p><strong>HTTPS &amp; upstream verification.</strong> For HTTPS, gori verifies the origin server's certificate against your system CA trust store, resolved automatically from standard locations (and honouring <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code>). If none is found — e.g. a minimal container — verification fails and those flows are recorded as errors; set <code>SSL_CERT_FILE=/path/to/ca-bundle.crt</code>, or run with <code>--insecure-upstream</code> (Settings → <strong>Network → verify upstream</strong>). This is separate from trusting gori's own root CA in your <em>client</em>, which is what lets gori decrypt the traffic in the first place.</p>
+</blockquote>
+<figure class="tui-shot">
+  <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
+  <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
+</figure>
+<h2 id="intercept">Intercept</h2>
+<p>Press <code>i</code> to enable <strong>Intercept</strong>. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
+</figure>
+<p>The queue takes the same <strong>multi-select</strong> as the History list (<a href="#marking-flows">Marking flows</a>, below): <code>t</code> marks the held message under the cursor and steps down, <code>Shift-↑</code> / <code>Shift-↓</code> extend a contiguous range, <code>Shift-T</code> marks the whole queue, and <code>Esc</code> clears. Forward (<code>f</code>) and drop (<code>d</code>) then act on <strong>the marks if any are set, else the cursor row</strong>, so a burst of holds can be released or killed in one keystroke — <code>Shift-F</code> still forwards the entire queue whether anything is marked or not. Marked rows get a full bar in the gutter and the filter row shows a live <code>3 marked</code> count; a mark disappears the moment its message leaves the queue, so the count never outlives what is on screen.</p>
+<p>Reading a held message needs no marks and no editor: <code>Shift-←</code> / <code>Shift-→</code> scroll the preview sideways and <code>PgUp</code> / <code>PgDn</code> / <code>Home</code> / <code>End</code> scroll it vertically, leaving the held bytes untouched.</p>
+<h3 id="what-gets-held">What gets held</h3>
+<p>Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (<code>101</code>), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. <strong>WebSocket messages are held too, but only if you ask for them</strong> — see <a href="#intercept-websocket">Intercept on WebSocket</a> below. The request that opened the socket is held like any other request.</p>
+<h3 id="intercept-websocket">Intercept on WebSocket</h3>
+<p><strong>A WebSocket message is held only when the catch condition contains <code>proto:ws</code>.</strong> Nothing else arms it — not a blank condition, not <code>host:acme.test</code>, not any direction setting. That is the exact opposite of the rule for HTTP, where a blank condition holds everything, and it is deliberate: a browser tolerates one stalled request, but a trading or chat socket carrying tens of messages a second, frozen whole because you typed a host filter, is not a state you can drain your way out of.</p>
+<p>So the condition to type is <code>proto:ws</code>, optionally narrowed:</p>
+<pre><code>proto:ws body:subscribe          hold only messages containing &quot;subscribe&quot;
+proto:ws host:acme.test          hold only this socket's messages
+</code></pre>
+<p><code>body:</code> is a substring of the message payload and matches WebSocket messages only — at an HTTP hold gate the bytes do not exist yet. The <code>c:REQ</code> / <code>c:RES</code> chip works as usual: <code>REQ</code> is client → server, <code>RES</code> is server → client.</p>
+<p>A held message goes in the same queue as a held request, with a <code>WS↑</code> or <code>WS↓</code> badge, the socket that carries it, and the start of the payload. Forward, drop, edit and the marks all work the same way. What is different:</p>
+<ul>
+<li><strong>Catch has to be on before the socket opens.</strong> gori decides once, at the <code>101</code>, whether a socket needs the holding path. Turning catch on — or adding <code>proto:ws</code> — reaches the <em>next</em> handshake, not the connection already running. Reconnect the client. Narrowing the condition afterwards does take effect immediately.</li>
+<li><strong>A held message blocks its whole direction</strong> until you decide it. Later messages from that peer queue behind it, and they are released in arrival order however you decide them — decide message 5 before 3 and it still goes out third. The <strong>opposite direction keeps running</strong>, and so do <code>PING</code>/<code>PONG</code> in both, so the socket does not die while you read. There is no way to let one message past another; a WebSocket has no message identifiers to reorder.</li>
+<li><strong>A dropped message is invisible to both endpoints.</strong> Nothing is written, and a WebSocket stream has no message identity for the peer to notice a hole in — no error, no gap, no retry. That is weaker than dropping an HTTP/1.1 request (which answers a <code>502</code>) or an HTTP/2 one (which cancels the stream), and gori keeps no message-log row for it either. If you need the attempt on record, note it yourself.</li>
+<li><strong>A binary message (opcode 2) opens the hex editor</strong>, not the text one. <code>↵</code> / <code>e</code> gives you the same byte editor the Repeater's <code>Ctrl-X</code> does: <code>0</code>-<code>9</code>/<code>a</code>-<code>f</code> overtype the nibble under the cursor, <code>Ins</code> inserts a <code>00</code> byte, <code>Del</code>/<code>⌫</code> remove one, arrows and <code>Home</code>/<code>End</code> move. The bytes never become a string, so protobuf, msgpack and CBOR survive an edit intact — which is why the text editor is not offered here, and why <code>Ctrl-E</code> (external editor) is refused on one. The card says <code>HEX</code> where it says <code>EDIT</code> on a text message, and the queue row shows the size instead of a preview.</li>
+<li><strong>Editing a text message changes its line endings.</strong> The editor normalises <code>CRLF</code> to <code>LF</code>, shared with the Repeater and the HTTP intercept editor. <code>$NAME</code> bindings are <em>not</em> expanded in a WebSocket payload — a <code>$</code> there is a byte, not a reference — so what you type is what is sent.</li>
+<li><strong>An edited message is re-framed as one frame</strong> and a client → server message is re-masked with a fresh key, exactly as a <a href="#match-replace-websocket">Match &amp; Replace rule</a> does. A message you forward unchanged keeps the sender's own frame and mask key.</li>
+<li><strong>A hold has about 5 seconds left once the peer closes the other direction.</strong> gori waits that long for the closing handshake to finish and then tears the socket down; anything still held is forwarded unedited. The same happens if a <code>CLOSE</code> arrives in the direction you are holding — everything undecided goes out in order, then the <code>CLOSE</code>, because the protocol forbids data frames after one.</li>
+<li><strong>Only data messages are held.</strong> <code>PING</code>, <code>PONG</code> and <code>CLOSE</code> always pass: holding a ping breaks keepalive by construction, and holding a close strands the tunnel.</li>
+<li><strong>A very deep queue is released for you.</strong> Past about 1 MiB queued behind a held message, or on a frame too large to buffer, the hold fails open — everything queued forwards unedited, with one line in <code>gori.log</code>. A WebSocket has no application-level flow control, so nothing slows the sender down while you read. A queue that deep usually means the condition is too wide.</li>
+</ul>
+<p>Match &amp; Replace runs <strong>before</strong> the hold, so what you see in the editor is what your rules produced, and what you forward is what goes out.</p>
+<h3 id="intercept-on-http2">Intercept on HTTP/2</h3>
+<p>Intercept works on HTTP/2 without downgrading the connection, so gRPC clients keep working while catch is on, and streams are held <strong>individually</strong> — holding one request does not freeze the tab. Four things differ from HTTP/1.1:</p>
+<ul>
+<li>
+<p><strong>The body is held when gori can buffer it, and only then.</strong> A message that declares a <code>Content-Length</code> of 1 MiB or less — and one with no body at all, which is most page loads — is held whole: you see and edit head <em>and</em> body, and on forward the <code>DATA</code> frames are rebuilt from your bytes with the <code>Content-Length</code> you sent, exactly as on HTTP/1.1. Its queue row appears once the whole message has arrived, not when its head does, which is also HTTP/1.1's timing.</p>
+<p>Everything else is held <strong>head-only</strong>: a streaming upload or response with no declared length (SSE, gRPC streams), a body over the ceiling, or a padded body. Those bodies stream past the gate untouched, a body typed into the editor is refused rather than silently dropped, and <code>Content-Length</code> stays as the sender set it. The intercept editor, <code>gori run intercept get</code> and the MCP <code>intercept_get</code> tool all say which kind of hold you have before you write an edit — and the body of a head-only hold is still fully visible in History afterwards.</p>
+</li>
+<li>
+<p><strong>Drop cancels the stream</strong> rather than answering with a <code>502</code> page. The client sees a cancelled request (gRPC reports <code>CANCELLED</code>); the connection and every other stream on it stay up. History records the drop exactly as it does on HTTP/1.1.</p>
+</li>
+<li>
+<p><strong>A held request delays later requests on the same connection.</strong> HTTP/2 requires new streams to reach the origin in order, so requests that start <em>after</em> a held one wait for your decision — including while gori is still buffering that request's body. Requests already in flight keep uploading, all responses keep arriving, and a held <em>response</em> delays nothing at all.</p>
+</li>
+<li>
+<p><strong>Match &amp; Replace on a <em>body</em> still downgrades the connection to HTTP/1.1</strong>, even though a hold can now edit one. They are different bargains: a hold buffers a single message you are already waiting on, under a length it can see, while a body rule would have to rewrite every matching message unattended — including the streaming ones a hold declines to buffer.</p>
+</li>
+</ul>
+<p>Everything a head rule cannot express on HTTP/2 (<a href="#head-rules-on-http2">Head rules on HTTP/2</a>, below) applies to a head you edit by hand too.</p>
+<h2 id="scope">Scope</h2>
+<p>Scope keeps a large session focused on your target. In the <strong>Project</strong> tab you define include/exclude rules by host, string, or regular expression. Toggle the <strong>scope lens</strong> with <code>s</code> to filter the views down to in-scope traffic, and use scope to gate what Intercept and the scanners act on.</p>
+<h3 id="sandbox">Sandbox</h3>
+<p>The <strong>Sandbox</strong> is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the <strong>Project</strong> tab's <strong>NETWORK</strong> pane, or from anywhere via the command palette (<code>Ctrl-P</code> → <strong>Toggle sandbox</strong>) — default: off. While it's on, the capture proxy forwards only the requests your scope <em>allows</em>. Everything else is blocked before it reaches the origin and recorded as an aborted flow so the attempt stays visible. On HTTP/1.1 the client gets a <code>403</code> with an <code>X-Gori-Sandbox: blocked</code> header; on HTTP/2 the blocked stream is cancelled (<code>RST_STREAM</code> with <code>CANCEL</code>) and the rest of the connection keeps working. &quot;Allowed&quot; means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.</p>
+<p>Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red <code>sandbox</code> chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.</p>
+<p>The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP <code>send_request</code> tool enforce scope on their own (they refuse an out-of-scope target with <code>SCOPE_BLOCKED</code>). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the <code>CONNECT</code> step, and every request on a host that gets through is checked individually. That per-request check runs on HTTP/2 as well, per stream, so the sandbox no longer costs a host its protocol and gRPC clients keep working while it's on. Cleartext HTTP/2 tunnelled inside <code>CONNECT</code> (h2c, rare) gets the same per-stream check as any other HTTP/2 connection: the tunnel opens, and each out-of-scope stream on it is cancelled individually.</p>
+<h2 id="sitemap">Sitemap</h2>
+<p>The <strong>Sitemap</strong> tab collapses History into a deduplicated tree of <code>host → path</code> endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Press <code>g</code> to fold path-param ids, so <code>/user/1</code> and <code>/user/2</code> share one node and <code>/user/&lt;uuid&gt;</code> collapses into a single <code>{uuid}</code>. Query strings fold on their own axis: <code>/search?q=widgets</code> and <code>/search?q=&lt;payload&gt;</code> are one <code>/search</code> row, expandable to the variants, and <code>⇧G</code> turns that off.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
+</figure>
+<h3 id="marking-paths-multi-select">Marking paths (multi-select)</h3>
+<p>The tree takes the same <strong>multi-select</strong> as the History list (<a href="#marking-flows">Marking flows</a>, below). Press <code>t</code> to <strong>mark</strong> the path under the cursor and step down, so a run of <code>t</code> marks consecutive rows; <code>Shift-↑</code> / <code>Shift-↓</code> extend a contiguous range from where you started; <code>Esc</code> clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live <code>3 marked</code> count (plus how many are currently off-screen — a mark under a collapsed subtree stays marked). Letting go of <code>Shift</code> and pressing a plain <code>↑</code> / <code>↓</code> hands the range back, the way a GUI list collapses its highlight; marks you placed with <code>t</code> stay, and the wheel only scrolls.</p>
+<p>Marks change <strong>what the action menu acts on</strong>, not which actions exist — the effective target is <em>the marks if any are set, else the cursor row</em>:</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Key</th>
+<th>Over marks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tag path</td>
+<td><code>Shift-T</code></td>
+<td>One editor, one memo, applied to every marked path (blank clears them all)</td>
+</tr>
+<tr>
+<td>Send to Repeater</td>
+<td><code>r</code></td>
+<td>One sub-tab per marked endpoint, deduplicated by captured flow (max 20)</td>
+</tr>
+</tbody>
+</table>
+<p>So <code>/ status:5xx</code> → mark the paths that matter → <code>Shift-T</code> → <code>auth</code> tags the lot, and <code>tag:auth</code> brings them back later. The menu title reads <code>SPACE · 3 MARKED</code> and the entries rename themselves (<code>Tag 3 paths</code>, <code>Send 3 paths to Repeater</code>). Discover and the Sequencer stay single-target — they scan one subtree / collect one endpoint's token — and their menu entries say <code>(cursor)</code> while marks are set.</p>
+<p>Note that <strong><code>t</code> marks and <code>Shift-T</code> tags</strong> — tagging moved off <code>t</code> so that <code>t</code> means the same thing in both lists. A synthetic <code>{uuid}</code> / <code>[1, 2, 3 …]</code> fold is not a real path, so it can't be marked or tagged: a range sweeps over it, and <code>t</code> on one says so. Unlike History there is no &quot;mark all&quot;: on a tree that would sweep hosts and folders into the same batch as the endpoints under them.</p>
+<h2 id="protocol-support">Protocol Support</h2>
+<p>gori understands the protocols it carries:</p>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Support</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTTP/1.1</strong></td>
+<td>Full capture and repeater</td>
+</tr>
+<tr>
+<td><strong>HTTP/2</strong></td>
+<td>Relay after ALPN with per-stream intercept and head rules, raw frame log, HPACK decode, stream → flow assembly</td>
+</tr>
+<tr>
+<td><strong>HTTP/3</strong></td>
+<td>Not intercepted; <code>Alt-Svc</code> <code>h3</code> is surfaced so you know the client may bypass, and <code>network.strip_alt_svc</code> removes it so the client cannot</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong> over HTTP/1.1 (<code>Upgrade</code>)</td>
+<td>Live message capture, repeater, per-message intercept (opt in with <code>proto:ws</code>), and Match &amp; Replace on messages. Compression is removed from the handshake (see below)</td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong> over HTTP/2 (RFC 8441)</td>
+<td>Message capture, shown and exported everywhere the HTTP/1.1 kind is. No per-message intercept, no Match &amp; Replace on messages, no Repeater replay (see below)</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td>Framed over HTTP/2 with status trailers; protobuf decoded from the wire format without a <code>.proto</code> (see below)</td>
+</tr>
+<tr>
+<td><strong>Server-Sent Events</strong></td>
+<td>Parsed into discrete events at display time</td>
+</tr>
+</tbody>
+</table>
+<p><strong>gori does not intercept HTTP/3.</strong> QUIC is UDP and every gori listener is a TCP socket, so an origin answering <code>Alt-Svc: h3=&quot;:443&quot;</code> is offering the client a way out of the proxy. By default gori surfaces that offer and leaves it in place, so you can see it happen and decide. Turning on <a href="/reference/config/#strip-alt-svc"><code>network.strip_alt_svc</code></a> removes the <code>Alt-Svc</code> fields advertising <code>h3</code> from the response the client receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go. (A client that learns an h3 route some other way — a DNS <code>HTTPS</code> record — is beyond what any response-side strip can reach.) It removes those fields and nothing else: <code>Alt-Svc: clear</code> stays, because it tells the client to forget alternatives it has already cached, and a non-h3 alternative like <code>h2=&quot;:8443&quot;</code> stays too, because that is another TCP port and still comes through gori.</p>
+<p><strong>A WebSocket through gori is never compressed.</strong> gori removes <code>Sec-WebSocket-Extensions</code> from the handshake it relays, so <code>permessage-deflate</code> is never negotiated and every captured frame is the message that was sent. Without that removal the two peers would agree on compression that gori does not decode, and History, the detail view, <code>gori run history show</code>, the MCP tools and export would all show you a deflate stream while presenting it as the payload. Removing the offer is the price of a capture you can trust: an app that would have used compression does not get it while it goes through gori. If you need a particular host's sockets relayed exactly as they are, put the offer back with a Match &amp; Replace head rule on the request. The strip runs <em>before</em> Match &amp; Replace so that a rule can do this: restore <code>Sec-WebSocket-Extensions</code> and the origin is really offered the extension, so gori relays its acceptance untouched and the two peers negotiate compression as they would without a proxy. The flow is still captured, with a <code>[gori]</code> notice on it saying the frames you are looking at are that extension's encoded bytes rather than the messages. <a href="/reference/config/#tls-passthrough">TLS passthrough</a> also leaves the connection alone, but captures nothing at all for it — reach for the rule first, and for passthrough when you want the host out of gori entirely.</p>
+<h3 id="websocket-http2">WebSocket over HTTP/2</h3>
+<p>Modern browsers open a WebSocket over HTTP/2 when the origin advertises <code>SETTINGS_ENABLE_CONNECT_PROTOCOL</code>, using the extended <code>CONNECT</code> of RFC 8441 instead of the HTTP/1.1 <code>Upgrade:</code> handshake. gori relays that advertisement verbatim, so a client is entitled to take the path — and gori reads the socket when it does. RFC 8441 replaces the handshake and nothing else, so the frames are the same RFC 6455 frames, read by the same codec: a finding does not depend on which handshake opened the socket.</p>
+<p><strong>Capture is the same. Editing is not.</strong> The transcript shows up in History's MESSAGES pane, <code>gori run history show</code>, the MCP <code>get_flow</code> tool and HAR export, exactly as an HTTP/1.1 socket's does. Three things are HTTP/1.1-only:</p>
+<ul>
+<li><strong>Per-message intercept and Match &amp; Replace on messages.</strong> Both would have to rewrite a DATA frame to a <em>different length</em>, and on HTTP/2 that deadlocks against the peer's flow-control window. gori reads the frames from a copy, after they are already on the wire, so nothing here resizes a frame or writes to a socket. The flow carries a <code>[gori]</code> advisory saying which half of the support it got, rather than leaving you to infer it from an empty result.</li>
+<li><strong>Repeater replay.</strong> Seeding is refused on all three surfaces, and each says why: the capture holds <code>CONNECT /path HTTP/2</code> with a <code>:protocol</code> pseudo-header, and gori's WebSocket engine replays a socket only from an HTTP/1.1 <code>Upgrade</code> handshake. Replaying the <em>frames</em> is not the problem — the handshake is. gori will not invent a <code>GET … Upgrade: websocket</code> with a <code>Sec-WebSocket-Key</code> the client never sent and file it under this flow's provenance. You still get an ordinary HTTP tab, because the <code>CONNECT</code> really is an h2 request and sending it really does work; the status line names the captured frames it is not carrying and points at History for them.</li>
+<li><strong>A per-connection ceiling.</strong> gori reads at most 8 extended <code>CONNECT</code> streams concurrently on one HTTP/2 connection. Past that a stream is relayed byte-for-byte with no transcript at all, and its advisory says that is what happened — a browser opens a handful of sockets per origin, so this is a bound on pathological cases rather than a limit you meet by working normally.</li>
+</ul>
+<p><strong>Filtering finds these.</strong> The PROTO column reads <code>WSS</code> and <code>proto:ws</code> returns an RFC 8441 socket alongside an HTTP/1.1 one, because gori records the extended <code>CONNECT</code>'s <code>:protocol</code> token on the flow at capture time rather than deciding from the <code>101</code> an h2 handshake never carries. <code>proto:wss</code> still means the TLS one specifically. Two things this deliberately does not do: an extended <code>CONNECT</code> carrying <code>connect-udp</code> (RFC 9298) or <code>connect-ip</code> (RFC 9484) is not RFC 6455 framing and does not match, and a handshake the origin <em>refused</em> is an ordinary failed request — no socket was opened — exactly as a rejected HTTP/1.1 handshake is. Flows captured by a gori older than this stay unclassified rather than being guessed at retroactively; re-capture to label them.</p>
+<h3 id="protobuf">protobuf without a <code>.proto</code></h3>
+<p>gori decodes gRPC payloads from the protobuf wire format itself. There is no schema: field <em>names</em> and declared types live in a <code>.proto</code>, and gori does not read one, so what you get is numbered fields with their wire types — varints, fixed32/fixed64, and length-delimited payloads — nested as deeply as the bytes nest.</p>
+<p><strong>Ambiguity is reported, not resolved.</strong> Without a schema a length-delimited field is genuinely several things at once: it is always raw bytes, it is a string when the payload is valid UTF-8, and it is a nested message when the payload parses cleanly as one. gori lists every reading that fits and shows each of them, under a one-line note saying none is authoritative. Picking a winner is the failure this decoder is written to avoid — a guess that reads as a fact is worse than the bytes.</p>
+<p>Two payloads deliberately stay hex, on every surface:</p>
+<ul>
+<li><strong>A compressed message.</strong> The gRPC frame's <code>0x01</code> flag says the payload is compressed, and <code>grpc-encoding</code> names the codec. Compressed bytes are not a protobuf message until something inflates them, and gori does not, so the frame is shown as bytes with a note saying why.</li>
+<li><strong>A grpc-web trailer frame.</strong> Its payload is ASCII header lines, not protobuf.</li>
+</ul>
+<p>The tree is on every surface: the TUI's History and Repeater panes (<code>p</code> toggles between the tree and the byte preview; <code>^X</code> still gives the byte-exact dump), <code>gori run history show --format json</code> and the MCP <code>get_flow</code> tool (both as <code>grpc_messages[].protobuf</code>). A truncated or hostile message decodes as far as it parses and is marked <code>complete: false</code> rather than being rejected — the octets stay reachable either way.</p>
+<h3 id="binary-documents">MessagePack and CBOR</h3>
+<p>A body whose <code>Content-Type</code> says <code>application/msgpack</code> or <code>application/cbor</code> (including the <code>+msgpack</code> / <code>+cbor</code> suffixes) is rendered as JSON in the detail pane, under the same <code>p</code> toggle everything else reflows with. Without it these bodies hit the binary placeholder and the hex view, because both formats encode the integer <code>0</code> as a NUL byte and essentially every real one trips the binary sniff.</p>
+<p><strong>The JSON is a projection, not a re-encoding.</strong> Both formats carry things JSON has no room for, and every one of them comes back <em>named</em> rather than folded away: <code>{&quot;$bin&quot;: &quot;…&quot;}</code> for a byte string, <code>{&quot;$ext&quot;: &quot;…&quot;, &quot;$ext_type&quot;: n}</code> for a MessagePack extension, <code>{&quot;$tag&quot;: n, &quot;value&quot;: …}</code> for a CBOR tag (with <code>$bignum</code> and <code>$time</code> beside the raw value, never instead of it), <code>{&quot;$str_invalid_utf8&quot;: &quot;…&quot;}</code> for text that is not, and a decimal string for an integer past what a JSON number holds exactly. A reader that quietly coerced any of those would be inventing evidence.</p>
+<p>One ambiguity is accepted rather than papered over: a document whose own map key is literally <code>$bin</code> or <code>$tag</code> renders the same shape a wrapper does. Escaping every key in every body to defend against the one body that does this would make the common body harder to read, and the bytes are one <code>^X</code> away when it matters.</p>
+<p>Because it is a projection, it is never written back over anything you are about to send: formatting a msgpack request body in the Repeater editor is refused rather than replacing your bytes with something that cannot become them again. A document that ends mid-value renders what it read and says so in the pane's note — the ordinary case for a body cut short by the capture cap. The bytes stay one <code>^X</code> away throughout, and the same rendering is in <code>gori run show --format json</code> and MCP <code>get_flow</code> as <code>binary_documents[]</code>.</p>
+<p>The dispatch is on the content type alone — never a sniff. A body labelled <code>application/octet-stream</code> is not offered to either reader, because a reader with no schema will make <em>something</em> of any bytes, and a rendering that is wrong is worse than a hex dump that is right. The Decoder tab (<code>msgpack-decode</code>, <code>cbor-decode</code>) is where an unlabelled body goes, because there the operator is the one who decided what it is.</p>
+<p>On top of the wire protocols, gori decodes common payloads inline:</p>
+<ul>
+<li><strong>JWT</strong>: header and payload decoded from <code>Authorization</code>, cookies, URLs, and bodies (signatures are shown but never verified).</li>
+<li><strong>SAML</strong>: base64 (and DEFLATE for the redirect binding) decoded for <code>SAMLRequest</code> / <code>SAMLResponse</code>.</li>
+<li><strong>GraphQL</strong>: <code>query</code>, <code>operationName</code>, and <code>variables</code> parsed from POST bodies and <code>?query=</code> parameters.</li>
+<li><strong>Form params</strong>: <code>application/x-www-form-urlencoded</code> and <code>multipart/form-data</code> request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).</li>
+</ul>
+<h2 id="flow-source">Where a flow came from</h2>
+<p>History is not only what your browser did. gori's own tools write into it too — an MCP
+<code>send_request</code> records by default, a Discover crawl persists what it fetched, a Repeater send
+is recorded from the TUI (and on request from <code>gori run</code>), a fuzz sweep can be, and <code>import</code>
+reads somebody else's capture in. All of them used to be indistinguishable from captured
+traffic, which matters the moment History is read as evidence: &quot;the target answered this&quot; and
+&quot;I made this happen&quot; are different claims.</p>
+<p>The <strong>SRC</strong> column says which. <code>PROXY</code> is traffic a client sent through gori; <code>RPTR</code>, <code>FUZZ</code>,
+<code>CRAWL</code> and friends are requests gori made; <code>IMPRT</code> was read in from a file. The detail pane
+spells it out under the request — <code>sent by gori — repeater (tui) #4</code> — naming the surface it
+came from and the session behind it, so a row can be traced back to the tab that produced it.</p>
+<p>Filter on it with <a href="/reference/query-language/#src-provenance"><code>src:</code></a>:</p>
+<pre><code class="language-text hljs">src:proxy        read History as traffic that really happened
+src:gori         only what gori put on the wire
+-src:repeater    everything except your own resends
+</code></pre>
+<p>A colour rule takes the same term, so <code>src:gori</code> + a strip marker keeps your own traffic
+visually separate while you scroll. Flows captured before the upgrade that added this carry no
+source: they show <code>—</code> and match neither direction, because gori will not guess at a provenance
+no capture recorded.</p>
+<p><strong>Repeater sends are recorded by default</strong>, and Settings → General → <em>Record Repeater sends</em>
+turns that off. It governs the TUI only — <code>gori run repeater send</code> still needs
+<code>--record-history</code> (off by default) and MCP <code>send_request</code> still takes <code>record_history</code> (on by
+default), so no script's behaviour moves under it. WebSocket sends and send-groups are not
+recorded; the status line says so once.</p>
+<h2 id="filtering-history">Filtering History</h2>
+<p>History is searchable with gori's <a href="/reference/query-language/">query language</a>. A few examples:</p>
+<pre><code class="language-text hljs">status:5xx                  flows that errored
+host:api.example.com        a single host
+method:POST body:password   POST requests mentioning &quot;password&quot;
+dur:&gt;500                    responses slower than 500 ms
+path~/admin/                path matching a regex
+</code></pre>
+<p>Type a query in the History filter bar, or run it headless:</p>
+<pre><code class="language-bash hljs">gori run history -q 'status:5xx host:api.example.com'
+</code></pre>
+<h2 id="views-v">Views (<code>v</code>)</h2>
+<p>A <strong>view</strong> is a named query the list narrows to, and it is a <strong>mode</strong>: press <code>v</code>, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar — a view is ANDed <em>over</em> whatever you type, the same way the <code>⇧S</code> scope lens is, so <code>/ status:5xx</code> refines the view instead of replacing it. The filter row carries a <code>v:name</code> chip so what you are looking at is never a guess — lowercase like the <code>f:follow</code> and <code>⇧S scope</code> chips beside it, and abbreviated where a name is too wide for the row (<code>History + Repeater</code> shows as <code>v:history+rptr</code>). The name itself is unchanged everywhere it is a name — the picker, <code>gori run views</code>, <code>--view</code>, MCP — and <code>--view</code> ignores case, so <code>--view history</code> finds <code>History</code>.</p>
+<p>Seven views ship with every project, on two axes. The <strong>source</strong> views answer <em>is this evidence about the target, or something gori did?</em>; the <strong>protocol</strong> ones answer <em>which conversation am I reading?</em></p>
+<table>
+<thead>
+<tr>
+<th>View</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>All</strong></td>
+<td>everything</td>
+</tr>
+<tr>
+<td><strong>History</strong></td>
+<td><code>src:proxy</code> — only traffic a client actually sent through gori</td>
+</tr>
+<tr>
+<td><strong>History + Repeater</strong></td>
+<td><code>src:proxy OR src:repeater</code> — that, plus your own resends. <strong>The default</strong></td>
+</tr>
+<tr>
+<td><strong>WebSocket</strong></td>
+<td><code>proto:ws</code> — sockets, cleartext and TLS alike</td>
+</tr>
+<tr>
+<td><strong>gRPC</strong></td>
+<td><code>proto:grpc</code></td>
+</tr>
+<tr>
+<td><strong>SSE</strong></td>
+<td><code>proto:sse</code> — server-sent event streams</td>
+</tr>
+<tr>
+<td><strong>Errors</strong></td>
+<td><code>status:&gt;=400</code></td>
+</tr>
+</tbody>
+</table>
+<p>The two axes are deliberately <strong>not</strong> pre-combined: a view named <code>WebSocket</code> that also excluded an imported socket would be lying about its own name. They compose through the lens instead — pick <code>History + Repeater</code> and type <code>proto:ws</code>, and you get the intersection without either built-in having to anticipate the other.</p>
+<p><strong>A new project opens on <code>History + Repeater</code>,</strong> not <code>All</code>. The flows gori's own crawler, fuzzer and importer wrote are not evidence about the target, and a list that mixes them in is the defect <code>src:</code> exists to fix — the default just fixes it for people who never type the term. Repeater is <em>in</em> because a resend is your own deliberate act on a real endpoint, and reading its response beside the captured one is the point of the tab. One exception: a project captured <strong>before gori recorded provenance</strong> opens on <code>All</code> instead, because <code>src:</code> matches those rows in neither direction and the usual default would show an empty list.</p>
+<p>Type a filter you want to keep and the picker's <strong><code>+ Save current filter as a view…</code></strong> row names it. You are asked where it lives:</p>
+<ul>
+<li><strong>Project</strong> — this engagement only. Where a <code>host:api.acme.test scope:in</code> belongs.</li>
+<li><strong>Global</strong> — every project, in <code>settings.json</code>. Where a <code>src:</code> view belongs.</li>
+</ul>
+<p>Inside the picker, <code>^E</code> loads a view's query back into the filter bar to edit (saving it under the same name updates it), and <code>^X</code> deletes one. Built-ins cannot be edited or deleted. Saving a name that already exists in the <em>other</em> scope <strong>moves</strong> the view there rather than leaving two.</p>
+<p>The active view is remembered per project across restarts, like the scope lens. If a view is deleted from another gori while you have it on, History drops back to <strong>All</strong> and says so rather than filtering by something that no longer exists.</p>
+<p>Views are a project object, not a TUI convenience — all three surfaces read them:</p>
+<pre><code class="language-bash hljs">gori run views                                   # list, with the active one marked
+gori run views add 'acme errors' -q 'host:api.acme.test status:5xx'
+gori run views add 'proxied' -q 'src:proxy' --scope global
+gori run views set 'acme errors' -q 'status:&gt;=500'
+gori run views scope 'acme errors' --to global   # re-home it
+gori run views rm 'acme errors'
+gori run history --view 'History' -q 'status:5xx'
+</code></pre>
+<p>MCP has the same set: <code>list_views</code>, <code>create_view</code>, <code>update_view</code>, <code>delete_view</code>, and a <code>view</code> argument on <code>list_history</code>.</p>
+<p>One caveat worth knowing before the list looks broken: a flow captured <strong>before gori recorded provenance</strong> carries no source, and <code>src:</code> matches it in <a href="/reference/query-language/#src-provenance">neither direction</a>. So the <code>History</code> view on an older project can be empty however much traffic it holds — the empty state says so, and <strong>All</strong> shows everything.</p>
+<p>A view's query is checked when you save it, not when it runs. One whose every term would be dropped is refused outright, because it would narrow <em>nothing</em> while the <code>v:</code> chip claimed otherwise.</p>
+<h2 id="marking-flows-multi-select">Marking flows (multi-select)</h2>
+<p>Press <code>t</code> to <strong>mark</strong> the flow under the cursor and step to the next older one, so a run of <code>t</code> marks consecutive rows (in either list order). <code>Shift-↑</code> / <code>Shift-↓</code> extend a contiguous range from where you started, <code>Shift-T</code> marks everything the current filter shows, and <code>Esc</code> clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live <code>3 marked</code> count.</p>
+<p>Letting go of <code>Shift</code> ends the range: a plain <code>↑</code> / <code>↓</code> (or <code>PgUp</code> / <code>PgDn</code>, or a click on another row) hands the range back and moves on, the way a GUI list collapses its highlight. Marks you placed deliberately with <code>t</code> or <code>Shift-T</code> stay — that is what makes a discontiguous set possible, since you arrow between them without <code>Shift</code>. The mouse wheel only scrolls, so it never drops a mark.</p>
+<p>Marks change <strong>what the space menu acts on</strong>, not which actions exist:</p>
+<blockquote>
+<p>the effective target is <strong>the marks if any are set, else the cursor row</strong></p>
+</blockquote>
+<p>So <code>/ status:5xx</code> → <code>Shift-T</code> → <code>Space</code> → <code>X</code> deletes every error in one confirm, and <code>Space</code> → <code>Y</code> copies all their URLs. The menu title reads <code>SPACE · 3 MARKED</code> and the entries rename themselves (<code>Delete 3 flows</code>, <code>Mine 3 flows</code>) so a batch is never a surprise.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Key</th>
+<th>Over marks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Copy</td>
+<td><code>y</code></td>
+<td>The URL list (one per line)</td>
+</tr>
+<tr>
+<td>Copy as…</td>
+<td><code>Space</code> <code>Y</code></td>
+<td>urls / host list / cURL / raw requests / raw responses / req+res pairs</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td><code>Space</code> <code>X</code></td>
+<td>One confirm for the whole set</td>
+</tr>
+<tr>
+<td>Link…</td>
+<td><code>Space</code> <code>k</code></td>
+<td>One card lists every issue and note (plus <code>+ New issue…</code> / <code>+ New note…</code>); pick or create once, attach every flow</td>
+</tr>
+<tr>
+<td>Add issue</td>
+<td><code>Shift-F</code></td>
+<td>One issue with every flow as evidence</td>
+</tr>
+<tr>
+<td>Repeater / Fuzzer</td>
+<td><code>Ctrl-R</code> / <code>Shift-I</code></td>
+<td>One sub-tab per flow (max 20)</td>
+</tr>
+<tr>
+<td>Mine parameters</td>
+<td><code>Space</code> <code>m</code></td>
+<td>One config popup, one session per flow (max 20)</td>
+</tr>
+<tr>
+<td>Run active scan</td>
+<td><code>Space</code> <code>A</code></td>
+<td>The request estimate is summed across the set</td>
+</tr>
+<tr>
+<td>Add host to scope</td>
+<td><code>Space</code> <code>h</code></td>
+<td>Hosts deduplicated — 12 flows on 2 hosts adds 2 rules</td>
+</tr>
+<tr>
+<td>Send to Comparer</td>
+<td><code>Space</code> <code>c</code></td>
+<td>Exactly 2 marked fills A (older) and B (newer) directly</td>
+</tr>
+</tbody>
+</table>
+<p>Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request — marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer); their menu entries say <code>(cursor)</code> while marks are set.</p>
+<h2 id="match-replace-rewriter-tab">Match &amp; Replace (Rewriter tab)</h2>
+<p>The <strong>Rewriter</strong> tab is the Match &amp; Replace editor: rules that rewrite requests and responses in flight. It sits on the tab bar right of Comparer, and the command palette reaches it too (<code>Ctrl-P</code> → <strong>Match &amp; Replace</strong>, or <strong>Go to Rewriter</strong>).</p>
+<p>Each rule has an operation:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Replace</strong></td>
+<td>Find and replace text in the head or body, by literal substring or regex</td>
+</tr>
+<tr>
+<td><strong>Add header</strong></td>
+<td>Append a <code>Name: value</code> header</td>
+</tr>
+<tr>
+<td><strong>Set header</strong></td>
+<td>Replace a header&#39;s value by name, or add it if absent</td>
+</tr>
+<tr>
+<td><strong>Remove header</strong></td>
+<td>Drop a header by name</td>
+</tr>
+<tr>
+<td><strong>Short circuit</strong></td>
+<td>Answer the request from the rule, without dialing the origin at all</td>
+</tr>
+</tbody>
+</table>
+<p>A <strong>Replace</strong> rule targets the request or response, and the <strong>head</strong> (request/status line + headers), the <strong>body</strong> (the entity), or <strong>ws</strong> (a WebSocket message — see <a href="#match-replace-websocket">Match &amp; Replace on WebSocket</a> below). Choose literal or regex matching; a regex replacement supports <code>$1</code>/<code>$2</code> capture-group interpolation (write <code>$$</code> for a literal <code>$</code>). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.</p>
+<p>Scope any rule to a <strong>host</strong> glob so it only fires for matching traffic: a plain string matches as a substring (<code>example.com</code> matches <code>api.example.com</code>), and <code>*</code> is a wildcard (<code>*.example.com</code>). Leave it empty to apply to every host.</p>
+<p>Manage the list with <code>a</code> add, <code>e</code>/<code>Enter</code> edit, <code>x</code> enable/disable, <code>d</code> delete, <code>s</code> global/project, <code>Shift-J</code>/<code>Shift-K</code> reorder (rules apply top to bottom), and <code>space</code> for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.</p>
+<p>Under the list sits an editable <strong>sample</strong> message and, beside it, the same message after the enabled rules run. Paste a real captured request in there to see what your rules do to it before you turn them loose. The sample is saved with the project, like the rules it previews.</p>
+<h3 id="global-and-project-rules">Global and project rules</h3>
+<p>Every rule lives in one of two places, shown in the <code>G</code>/<code>P</code> column of the list:</p>
+<ul>
+<li><strong>Project</strong> rules are stored in the project database. They are what this engagement needs and nothing else sees them.</li>
+<li><strong>Global</strong> rules are stored in the <code>rewriter</code> section of <code>settings.json</code> and apply in <strong>every</strong> project — a standing policy like &quot;strip CSP on <code>*.corp.internal</code>&quot; that you do not want to rebuild per engagement.</li>
+</ul>
+<p>Set the scope in the editor's <code>scope:</code> row when you create a rule, or press <code>s</code> on the list to move an existing one between the two. The rule keeps its fields and its state where you are standing; what changes is who else sees it.</p>
+<p>Global rules apply <strong>first</strong>, in their own order, then the project's own — the standing layer, then the local one. <code>Shift-J</code>/<code>Shift-K</code> reorder within a scope and never across it, because the boundary is not a position.</p>
+<p>A global rule carries a <strong>default</strong> on/off state, and a project may disagree with it:</p>
+<ul>
+<li><code>x</code> toggles the rule <strong>in this project</strong>. For a global rule that writes an override, and the row is marked <code>G*</code>.</li>
+<li><code>Shift-X</code> (space menu: <strong>Enable/disable everywhere</strong>) flips the global default itself, which every project that has not overridden it follows.</li>
+<li>Toggling back to the default <strong>removes</strong> the override, so the project follows the library again — including later changes to it.</li>
+</ul>
+<p>Deleting a global rule removes it from every project. A running gori in another window picks up global changes when its rules reload (reopen the Rewriter tab), and a second gori <strong>process</strong> only on restart.</p>
+<p>Headless, <code>--scope=global</code> addresses the library on every subcommand: <code>gori run rewriter add --scope=global …</code>, <code>gori run rewriter disable 3 --scope=global</code> (this project's override) and <code>--everywhere</code> on top of that for the default. The MCP rule tools take the same <code>scope</code> argument.</p>
+<blockquote>
+<p>Upgrading from the old saved-rule <strong>library</strong> (<code>s</code>/<code>o</code>): its entries are adopted as global rules, <strong>disabled</strong>, the first time gori reads the file. A preset did nothing until you loaded it, so none of them start rewriting traffic on their own; arm the ones you want with <code>x</code>.</p>
+</blockquote>
+<p>A <strong>body</strong> rule buffers the message to rewrite it and re-syncs <code>Content-Length</code> automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed body is <strong>refused rather than rewritten</strong>: gori does not decompress on the forwarding path, and running a pattern over compressed bytes can match inside the compressed stream by coincidence and corrupt it — a single common byte is enough, with no error and a recalculated <code>Content-Length</code> to make it look consistent. So the rule does not fire and the response goes through byte-exact. This covers compression declared either way — <code>Content-Encoding: gzip</code>/<code>br</code>/… and a compression layer in <code>Transfer-Encoding</code> — but not plain <code>Transfer-Encoding: chunked</code>, which is framing rather than compression and is de-chunked to the entity before your rule sees it. Streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. <strong>A body rule still forces matching hosts to HTTP/1.1</strong> — a downgrade decided once, when the connection is set up, so a rule enabled while an HTTP/2 connection is already open applies to nothing carried by that connection until the client opens a new one. On HTTP/2 Match &amp; Replace applies to heads; body rewriting there is not implemented and is not planned, because HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream. So a body rule takes its hosts down to HTTP/1.1, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. <code>gori.log</code> records that once per host, naming the host and the reason.</p>
+<h3 id="match-replace-websocket">Match &amp; Replace on WebSocket</h3>
+<p>Set <strong>part</strong> to <code>ws</code> and the rule rewrites WebSocket messages instead of an HTTP head or body. <strong>Target picks the direction</strong>: <code>request</code> is client → server, <code>response</code> is server → client. Everything else works the same way — literal or regex, capture groups, <code>$NAME</code> bindings, and the host glob, which is matched against the host that opened the socket.</p>
+<pre><code>gori run rewriter add --target=request --part=ws --find='&quot;role&quot;:&quot;user&quot;' --value='&quot;role&quot;:&quot;admin&quot;'
+</code></pre>
+<p>The rule fires on the whole message, reassembled from its fragments, so a pattern that spans a fragment boundary still matches. It is deliberately a separate part rather than a flavour of <code>body</code>: an existing body rule never starts rewriting frames because you turned WebSocket on.</p>
+<p>Six things are worth knowing before you rely on it:</p>
+<ul>
+<li><strong>A rule takes effect on the next handshake, not the open socket.</strong> gori decides once, at the <code>101</code>, whether a socket needs the rewriting path. Reconnect the client after enabling a rule.</li>
+<li><strong>Only text messages are rewritten.</strong> A binary message (opcode 2) is carried through untouched, because a text find/replace over protobuf or msgpack corrupts rather than edits. So is a text message that is not valid UTF-8.</li>
+<li><strong>A rewritten message is re-framed as one frame</strong>, and a client → server message is re-masked with a fresh key. Once the length changes the sender's fragmentation cannot be reproduced. A message no rule changed is forwarded as the peer's own frame, mask key and all.</li>
+<li><strong>Header and short-circuit operations cannot use <code>ws</code>.</strong> A WebSocket message has no headers, and a stub answers a request that a message is not. gori refuses the combination instead of quietly turning it into an HTTP head rule.</li>
+<li><strong>The message log records what gori sent</strong>, not what arrived — the same rule the rest of the proxy follows, so History shows the bytes the peer actually saw.</li>
+<li><strong>A message larger than 16 MiB is forwarded untouched</strong>, as is any single frame past the same cap. The rewrite needs the whole message in memory and a long-lived socket should not be able to grow the proxy heap without bound.</li>
+</ul>
+<p>A rule rewrites in flight and nothing pauses. To stop a message and decide about it by hand, hold it instead — see <a href="#intercept-websocket">Intercept on WebSocket</a>. The two compose: rules run first, and the editor shows you their output.</p>
+<h3 id="short-circuit-answer-without-an-origin">Short circuit — answer without an origin</h3>
+<p>The other four operations rewrite a message that already exists. <strong>Short circuit</strong> answers instead: the request is matched, gori replies with a response you wrote, and the origin is never dialed. That covers what a Replace rule structurally cannot — the endpoint 404s or 500s, the origin is offline or behind an auth wall, or the body has to be constructed rather than derived.</p>
+<p>It is how you ask <em>&quot;is this check enforced anywhere but the client?&quot;</em>: force an authorization probe to return <code>{&quot;isAdmin&quot;: true}</code>, flip an entitlement the client is trusted to honour, inject a payload into a JSON field to reach a DOM sink, or serve a malformed body to test the client's parsing.</p>
+<p>The rule matches the <strong>request head</strong> (literal or regex, host glob as usual) and carries the response you want. Write it as a raw HTTP response — press <code>Enter</code> on the <code>response:</code> row to open the editor:</p>
+<pre><code>200 OK
+Content-Type: application/json
+
+{&quot;isAdmin&quot;: true}
+</code></pre>
+<p>The first line is the status; <code>200</code>, <code>200 OK</code> and <code>HTTP/1.1 200 OK</code> all work, and an omitted reason phrase is filled in for you. Lines up to the blank line are headers, and everything after it is the body, byte for byte as you typed it. For a large or binary stub, set <strong>body file</strong> to a path instead: gori serves that file's bytes as the body and re-reads it whenever it changes on disk, so you can edit the stub outside gori and see it on the next request.</p>
+<p><code>Content-Length</code> is always re-derived from the bytes gori actually sends — a <code>Content-Length</code> or <code>Transfer-Encoding</code> in your rule is dropped, because one that disagreed with the body would desync the next request on a keep-alive connection. Everything else goes out exactly as written; gori adds no header of its own.</p>
+<p>If the rule cannot be honoured (the response doesn't parse, the body file is gone) gori answers <code>502</code> with <code>X-Gori-Short-Circuit: error</code> and records the reason on the flow. It does <strong>not</strong> fall through to the origin: you declared the request contained, and leaking a payload because a stub file was deleted is the worse failure.</p>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li><strong>Short-circuited flows are marked in History.</strong> They show <code>STUB</code> in the <code>PROTO</code> column and no duration, because there was no round trip. Filter with <code>stub:true</code> to review them, or <code>stub:false</code> to read History as traffic that really happened — worth doing before you screenshot anything.</li>
+<li><strong>Probe skips them.</strong> A passive rule reading a stub is reading your bytes, not the target's, and an active probe would compare a canned baseline against a live origin. Both refuse, so a stub can never manufacture a finding.</li>
+</ul>
+<p><strong>A short-circuit rule forces matching hosts to HTTP/1.1</strong>, the way a body rule does: the h2 relay has no way to answer a request locally, so a stub rule left on an h2 connection would silently let the request through to the origin — the one thing it exists to prevent. <code>gori.log</code> records that once per host, naming the host and the reason. An h2-only client (gRPC) will not connect while a stub rule is enabled.</p>
+<h3 id="head-rules-on-http2">Head rules on HTTP/2</h3>
+<p>Head rules apply to HTTP/2 without downgrading the connection, so gRPC keeps working. Rules are written against the same head the flow detail view shows (<code>GET /path HTTP/2</code>, a <code>Host:</code> line standing in for <code>:authority</code>, lowercase field names), and that is what they run against on the wire. A few things behave differently from HTTP/1.1 because HTTP/2 has no place for them:</p>
+<ul>
+<li>The start line reads <code>HTTP/2</code>, and responses carry no reason phrase. A rule written against <code>HTTP/1.1</code> or <code>200 OK</code> won't match, and a rule that writes a version or a reason phrase has it dropped.</li>
+<li>Field names go out lowercase, so a rule that only changes a name's capitalization does nothing.</li>
+<li><code>Cookie</code> stays split across however many lines the client sent, so a pattern spanning the whole cookie string may not match.</li>
+<li><code>:scheme</code> isn't reachable, and <code>Content-Length</code> is restored from the original head (the body streams untouched).</li>
+<li>Trailers and server-pushed heads aren't rewritten, so gRPC's <code>grpc-status</code> isn't reachable from a rule.</li>
+<li>A rule that adds <code>Connection</code>, <code>Keep-Alive</code>, <code>Transfer-Encoding</code> or <code>Upgrade</code> is sent as written. HTTP/2 forbids those, so the peer will reset the stream, which is deliberate: those bytes are yours to send.</li>
+</ul>
+<p>Head rules take effect on connections opened after you save. A rule enabled while a long-lived HTTP/2 connection is already open applies from that connection's next request head. Body, short-circuit and body-scoped extract rules do not: they work by taking the host down to HTTP/1.1, that downgrade is decided once when the connection is set up, and an open HTTP/2 connection is never taken back — so one enabled mid-connection fires on nothing the client sends over it until it reconnects, and <code>gori.log</code> records that once per connection.</p>
+<p>The same rules are scriptable headless: <code>gori run rewriter</code> (list / add / rm / enable / disable / preview) and the MCP <code>create_rule</code> / <code>update_rule</code> / <code>list_rules</code> / <code>preview_rule</code> tools. Both carry the <code>scope</code> argument, so a global rule can be created and toggled without opening the TUI.</p>
+<h2 id="colouring-rows-colormarker-tab">Colouring rows (Colormarker tab)</h2>
+<p>Marks are for the set you are working on right now. A <strong>colour rule</strong> is standing: it says &quot;any 5xx on this engagement is red&quot; once, and every matching row stays red as traffic arrives. Same idea as ZAP's neonmarker, driven by a condition rather than a tag.</p>
+<p>The tab is <strong>hidden by default</strong> — show it from <code>settings:tabs</code>, where it sits next to Rewriter.</p>
+<p>Each rule carries a condition, a colour, and a style:</p>
+<table>
+<thead>
+<tr>
+<th>Style</th>
+<th>What it draws</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>full</code></td>
+<td>Tints the whole History row&#39;s background</td>
+</tr>
+<tr>
+<td><code>strip</code></td>
+<td>Paints one colour cell in a narrow column ahead of <code>TIME</code> — a stripe down the left edge of the list</td>
+</tr>
+</tbody>
+</table>
+<p>Both styles coexist: use <code>strip</code> for noise you want to be able to skip past, <code>full</code> for the rows you want to be unable to miss. Six colours (<code>red</code>, <code>orange</code>, <code>yellow</code>, <code>green</code>, <code>blue</code>, <code>purple</code>), resolved through the active theme, so they read correctly on light and dark palettes alike.</p>
+<p>The tint <strong>mixes into</strong> the cursor and mark bands rather than replacing them, so a selected coloured row still reads as selected, and a marked one keeps its full gutter bar. The swatch column is only reserved while a <code>strip</code> rule is enabled, so a project with no colour rules renders exactly as before.</p>
+<p><strong>The first enabled match wins.</strong> This is the one place Colormarker differs from the Rewriter next door: rewrite rules <em>compose</em> — every enabled rule runs, in order — while colour rules <em>resolve</em>, so the first match paints the row and the rest are never consulted. Order is therefore a real decision, not a tiebreak: <code>Shift-J</code> / <code>Shift-K</code> reorder, and global rules resolve before project ones, so a standing policy outranks a local layer.</p>
+<p>Conditions use the same boolean grammar the conditional-intercept bar speaks — <code>host:</code>, <code>path:</code>, <code>method:</code>, <code>scheme:</code>, <code>status:</code>, <code>proto:</code>, plus <code>AND</code> / <code>OR</code> / <code>NOT</code>, <code>-negation</code> and <code>(grouping)</code>. <code>Tab</code> on the <code>when:</code> row completes the token under the caret. Three things behave differently from the History search bar, and gori refuses or warns rather than letting you discover them from an empty list:</p>
+<ul>
+<li><strong><code>body:</code> never matches here.</strong> A History row carries no payload.</li>
+<li><strong><code>host:</code> is a substring, not a DNS-label glob.</strong> <code>host:alpha.test</code> also matches <code>xalpha.test</code>.</li>
+<li><strong>There is no <code>header:</code> / <code>size:</code> / <code>dur:</code> / <code>url:</code> / <code>stub:</code>.</strong> Those need a query, and a colour is decided while the row is being drawn. An unknown field is refused — left alone it would quietly become a free-text search and the rule would never fire.</li>
+</ul>
+<p>A rule lives either in this project or in the <strong>global library</strong> every project reads, exactly like a Match &amp; Replace rule: <code>s</code> moves it between the two, <code>x</code> toggles it here, and <code>Shift-X</code> flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again — so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Key</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add / edit a rule</td>
+<td><code>a</code> / <code>Enter</code> or <code>e</code></td>
+</tr>
+<tr>
+<td>Enable or disable here</td>
+<td><code>x</code></td>
+</tr>
+<tr>
+<td>Flip a global rule&#39;s default everywhere</td>
+<td><code>Shift-X</code></td>
+</tr>
+<tr>
+<td>Move between project and global</td>
+<td><code>s</code></td>
+</tr>
+<tr>
+<td>Reorder (changes which rule wins)</td>
+<td><code>Shift-J</code> / <code>Shift-K</code></td>
+</tr>
+<tr>
+<td>Delete</td>
+<td><code>d</code></td>
+</tr>
+</tbody>
+</table>
+<p>The rule form previews as you type: how many recent flows the condition <strong>matches</strong>, and how many it would actually <strong>paint</strong> — the two differ when an earlier rule already claims the row.</p>
+<p>Scriptable headless too: <code>gori run colormarker</code> (list / add / rm / enable / disable / move / preview) and the MCP <code>create_color_rule</code> / <code>list_color_rules</code> / <code>move_color_rule</code> / <code>preview_color_rule</code> tools.</p>
+<h2 id="session-bindings">Session bindings</h2>
+<p>A rotating token — a session cookie, a CSRF field, a bearer — is worth nothing to a rule that has to spell it out in advance. A <strong>binding</strong> is a name gori fills in at send time from something it saw in a response, and it has two halves that are two separate rows:</p>
+<ul>
+<li>an <strong>extract rule</strong> (Rewriter tab, <code>extract</code> sub-tab) reads a value out of a response and binds a name to it. It carries a condition in the intercept-filter grammar (<code>path:/login AND status:200</code>), an optional host glob, and a descriptor: a cookie, a response header, a regex over the body, a JSON path, or a byte range.</li>
+<li>an ordinary <strong>Match &amp; Replace rule</strong> writes it back out. A replacement of <code>$SESSION</code> in a <code>set header</code> rule, or in a body <code>replace</code>, is resolved when the request goes out rather than when the rule was saved.</li>
+</ul>
+<p>One name is written by exactly one extract rule; a second rule claiming the same name is refused when you save it, with the reason. A name that is declared but not yet bound does <strong>not</strong> go out empty and does not go out as the literal <code>$SESSION</code> — the rule is skipped and the reason lands in the events feed.</p>
+<p>Extraction runs on <strong>traffic through the proxy</strong> and on <strong>sends you made by hand</strong> (a Repeater tab). It deliberately does <strong>not</strong> run on a sweep — Fuzzer, Miner, Discover, or an active Probe. A sweep sends attacker-shaped payloads, and a response echoing one back could rebind your session to a payload-derived value that then went out on every later request.</p>
+<p>It also runs on the bytes that were <strong>delivered</strong>: after Match &amp; Replace, and after whatever you decided at the intercept gate. A response you edited binds what you edited; a response you dropped binds nothing, because the browser never got it.</p>
+<p><strong>Where the value lives.</strong> In memory, for as long as the project is open. The rule is saved; the value never is — not in <code>settings.json</code>, not in the project database. A token restored on reopen is stale by construction, and re-extracting it costs one request. A bound value never appears in the events feed, in an issue, in a note or in a log line. It <strong>does</strong> appear in captured traffic, because that is where it came from — masking a capture would be a lie about the wire.</p>
+<p><strong>What a body descriptor costs.</strong> A cookie or header descriptor reads the response head, which every response is parsed for anyway, so it costs nothing and works on HTTP/2. A regex, JSON path or byte-range descriptor needs the response body, so gori buffers the response instead of streaming it — the same trade a Match &amp; Replace body rule makes — and <strong>forces matching hosts to HTTP/1.1</strong>, for the same reason a body rule does: HTTP/2 DATA frames are relayed untouched. Only hosts the rule's own glob matches are downgraded, and <code>gori.log</code> records that once per host with the reason. Streaming responses (SSE, close-delimited, WebSocket upgrades) and bodies over the buffering ceiling are never buffered, so a body descriptor cannot read them; when its condition selects one anyway, the events feed says so rather than reporting that the selector found nothing.</p>
+<p>Compressed bodies <strong>are</strong> decoded before a body descriptor runs, so a CSRF token in a gzipped HTML page is reachable — unlike a Match &amp; Replace body pattern, which matches the entity as it arrived. The same descriptor means the same thing whether the proxy or a Repeater send saw the response.</p>
+<p>The <code>bindings</code> sub-tab lists every name, whether it is bound, which rule wrote it, and a masked preview. Headless: <code>gori run rewriter extract</code> / <code>gori run rewriter bindings</code>, and the MCP <code>create_extract_rule</code> / <code>update_extract_rule</code> / <code>list_extract_rules</code> tools.</p>
+<h2 id="import">Import</h2>
+<p>You don't have to capture everything live. From the command palette (<code>Ctrl-P</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Import: HAR</strong></td>
+<td>Browser or proxy HAR export → full request/response flows</td>
+</tr>
+<tr>
+<td><strong>Import: URLs</strong></td>
+<td>Text file, one URL per line → skeleton request flows</td>
+</tr>
+<tr>
+<td><strong>Import: OpenAPI</strong></td>
+<td>OpenAPI/Swagger JSON or YAML → one request template per operation</td>
+</tr>
+<tr>
+<td><strong>Import: Postman</strong></td>
+<td>Postman Collection v2 export → one request template per saved request</td>
+</tr>
+<tr>
+<td><strong>Import: Insomnia</strong></td>
+<td>Insomnia v4 JSON export → one request template per saved request</td>
+</tr>
+<tr>
+<td><strong>Import: Burp</strong></td>
+<td>Burp Suite saved items (XML) → full request/response flows, byte-exact</td>
+</tr>
+</tbody>
+</table>
+<p>Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.</p>
+<p><strong>HAR carries WebSocket messages, in both directions.</strong> A captured socket exports as its real <code>101</code> handshake with the message log beside it in Chrome DevTools' <code>_webSocketMessages</code> field — never as a fabricated HTTP exchange — and importing that HAR restores the messages onto the flow, so the transcript survives a hand-off and shows up in the WebSocket pane, <code>gori run show</code>, and a re-export unchanged. Each message keeps its direction, its opcode (control frames — <code>CLOSE</code> with its code and reason, <code>PING</code>, <code>PONG</code> — included), its bytes (base64 when they are not valid UTF-8, so a binary or deliberately invalid-UTF-8 frame round-trips exactly), and its timestamp to the millisecond. gori's own <code>[gori] …</code> advisory rows travel with it, since where they sit in the stream is what names the frames they are about. Two things a HAR cannot hold: the per-frame shape (<code>FIN</code>/<code>RSV</code>/mask key/fragment count) — use <code>--format json</code> or <code>raw</code> for that — and a socket whose transcript is <em>empty</em>, which is still skipped and counted, because the handshake alone is not the exchange.</p>
+<p><strong>Postman and Insomnia</strong> resolve <code>{{variables}}</code> from the collection's own variable list (Insomnia: from the exported environments). A request whose URL still holds an unresolved variable is skipped rather than stored with a literal <code>{{baseUrl}}</code> host — if every request is skipped that way, the error names the variables so you know what to add. Folder nesting is walked in full, and auth seeds <code>bearer</code>, <code>basic</code>, and header API keys; token-exchange schemes (OAuth, AWS SigV4, NTLM, …) are left for you to fill in.</p>
+<p><strong>Burp</strong> items keep their wire bytes exactly as saved — odd spacing, duplicate headers, a deliberately wrong <code>Content-Length</code>, a CRLF in the request target. A hand-forged request replays from the Repeater byte-for-byte, which is the point of importing from Burp rather than re-describing the request.</p>
+<p>The same sources are scriptable headless: <code>gori run import --postman PATH</code> (and <code>--har</code> / <code>--urls</code> / <code>--oas</code> / <code>--insomnia</code> / <code>--burp</code>), and the MCP <code>import_flows</code> tool.</p>
+<h2 id="host-overrides">Host Overrides</h2>
+<p>Host overrides are a <code>/etc/hosts</code>-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>Precedence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Project</strong></td>
+<td><strong>Project</strong> tab → HOST OVERRIDES pane (<code>a</code> / <code>e</code> / <code>d</code>)</td>
+<td>Wins on collision</td>
+</tr>
+<tr>
+<td><strong>Global</strong></td>
+<td>Preferences (<code>Ctrl-,</code>) → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, <code>Ctrl-P</code> → <strong>Settings: Hostnames</strong>, or <code>hostname_overrides</code> in <code>settings.json</code></td>
+<td>Fallback</td>
+</tr>
+</tbody>
+</table>
+<p>Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the <code>Host</code> header intact.</p>
+<h2 id="clients-that-cannot-use-a-proxy">Clients That Cannot Use a Proxy</h2>
+<p>Some clients ignore proxy settings entirely — embedded devices, statically-linked binaries, anything that never reads <code>HTTP_PROXY</code>. For those, run a <strong>transparent listener</strong> and redirect traffic into it with your firewall; no client-side configuration is needed at all.</p>
+<p>gori recovers the destination from the kernel where it can (<code>SO_ORIGINAL_DST</code> on Linux, a <code>pf</code> lookup on macOS, which needs root). That answer decides which machine the connection reaches, while the client's <code>Host</code> header or TLS SNI still supplies the name — the one the certificate is minted for, that scope matches, and that History shows. Where the kernel cannot answer, the name is resolved as the destination too. The log says which source decided, so a destination that looks wrong is traceable.</p>
+<p>Add it under <code>listeners</code> in <code>settings.json</code> and point <code>iptables</code> / <code>pf</code> at it — see the <a href="/reference/config/#listeners"><code>listeners</code> reference</a> for the config keys and the redirect rules. Captured flows, scope, the Sandbox and the passthrough list all behave exactly as on the normal proxy path.</p>
+<p>The certificate still has to be trusted on the client: transparent mode removes the proxy <em>setting</em>, not the need for gori's CA.</p>
+<p>If a <strong>reverse listener</strong> would also work for your target, prefer it. It declares the destination outright, so it needs no firewall rule and none of the destination is taken from what the client sent.</p>
+<p>And if the client can be pointed at a proxy but not at an HTTP one — <code>ALL_PROXY=socks5://127.0.0.1:1080</code>, a runtime whose only proxy setting is SOCKS — run a <strong>socks5 listener</strong> instead. The client names its destination in the SOCKS handshake, so there is no firewall rule and nothing to recover from an SNI or a <code>Host</code> header; everything after the handshake is intercepted exactly as on the transparent path. It serves <code>CONNECT</code> with no authentication, and a refusal — a destination the Sandbox excludes, a client asking for <code>UDP ASSOCIATE</code> — is answered with the reply code RFC 1928 defines and recorded as a flow, so it reads in History instead of being a connection that closed without a reason. See <a href="/reference/config/#socks5-mode">SOCKS5 mode</a>.</p>
+<h2 id="when-a-pinned-app-is-in-the-way">When a Pinned App Is in the Way</h2>
+<p>gori intercepts every HTTPS connection, which breaks any client that pins certificates — a mobile app, an auto-updater, a background agent. On a phone or a shared machine that traffic arrives whether you want it or not, and it fails loudly while you are trying to test something else.</p>
+<p>List those hosts under <strong>TLS passthrough</strong> (Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong>, comma-separated, or <code>network.tls_passthrough</code> in <code>settings.json</code>). A listed host is relayed as an opaque tunnel: the client sees the origin's real certificate and works normally. Nothing is captured for it, which is the trade.</p>
+<p>Scope will not do this for you. Scope decides what is recorded and acted on; an out-of-scope host is still decrypted. Passthrough is the only setting that keeps gori's hands off the TLS itself. See the <a href="/reference/config/#tls-passthrough"><code>tls_passthrough</code> reference</a> for pattern syntax.</p>
+<p>A bypassed host leaves no flow anywhere, so the top bar grows a yellow <code>bypass:N</code> chip the first time one is relayed. Click it (or run <strong>TLS passthrough hosts</strong> from the command palette) for the list: each host with the rule that matched, when it was first seen, and how many connections it covered. The list is session-wide, not per project, because the setting is global.</p>
+<h2 id="project-tab">Project Tab</h2>
+<p>The <strong>Project</strong> home tab is more than a summary. Under the overview sits a sub-tab strip: <code>←</code>/<code>→</code> switch cards, <code>↓</code>/<code>Enter</code> drop into the one showing, and <code>Esc</code> (or <code>↑</code> at the top) comes back up to the strip.</p>
+<p>The overview band carries the project's own facts: name, directory, its registry short id and
+bound workspace, the proxy address with whether capture is live, flow and byte counts, confirmed
+issues (with unreviewed Probe hits alongside), database size, when it was created and last
+touched, and the technologies Probe fingerprinted. It lays those out in two columns on a wide
+terminal and folds them into one summary line per group on a short one, so a narrow window loses
+detail rather than whole facts.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
+  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>Sub-tab</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DESCRIPTION</strong></td>
+<td>Free-form project notes</td>
+</tr>
+<tr>
+<td><strong>SCOPE</strong></td>
+<td>Include/exclude rules (host, string, or regex)</td>
+</tr>
+<tr>
+<td><strong>HOST OVERRIDES</strong></td>
+<td>Per-project dial map</td>
+</tr>
+<tr>
+<td><strong>ENV</strong></td>
+<td>Per-project <code>$KEY</code> variables for outbound requests. See <a href="/guide/repeater-and-fuzzer/#environment-variables">Repeater &amp; Fuzzer</a></td>
+</tr>
+<tr>
+<td><strong>NETWORK</strong></td>
+<td>Scope-lens + <strong>sandbox</strong> toggles, plus per-project network pins (bind / upstream) that override the global Settings default</td>
+</tr>
+</tbody>
+</table>
+<p>Scope rules and host overrides are also scriptable: <code>gori run project scope add --kind=include --type=host --pattern=api.example.com</code>, <code>gori run project host-override add --host=api.example.com --ip=10.0.0.1</code>. Full flags are in the <a href="/reference/cli/#run-project">CLI Reference</a>.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a>: act on the flows you capture</li>
+<li><a href="/guide/decoder/">Decoder</a>: encode, decode, and hash without leaving the TUI</li>
+<li><a href="/guide/scanning/">Scanning &amp; Issues</a>: automated and manual analysis</li>
+<li><a href="/reference/query-language/">Query Language</a>: the full filter syntax</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+<footer class="docs-footer">
+  <div class="footer-mark">
+    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+    </a>
+    <p class="footer-love">Built with Love</p>
+  </div>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>
