@@ -81,6 +81,19 @@ class Gori::Tui::RepeaterView
     @resp_pretty_applied
   end
 
+  # The last send's {head, body} as WIRE BYTES — nil when nothing has been sent, or when the
+  # send errored and there is no response to hand out.
+  #
+  # For a consumer that needs the RESPONSE ITSELF rather than the pane's rendering of it: the
+  # desktop preview (`Gori::ExternalOpen`) decodes the body against this head, which the plain
+  # lines `resp_copy_all_text` produces could not be reconstructed from. `result.ok?` is the
+  # same gate `resp_hex_bytes` below uses, and for the same reason.
+  def response_wire : {Bytes, Bytes?}?
+    result = @result
+    return nil unless result && result.ok?
+    {result.head, result.body}
+  end
+
   # Combined head+body of the last result (hex source), cached; nil when not sent
   # or errored. Invalidated when a new result is applied (reset_result_caches).
   private def resp_hex_bytes : Bytes?

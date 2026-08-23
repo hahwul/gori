@@ -316,6 +316,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_copy_all
   end
 
+  def repeater_open_response_external : Nil
+    @calls << :repeater_open_response_external
+  end
+
   def repeater_read_mode? : Bool
     false
   end
@@ -1099,6 +1103,10 @@ private class FakeContext < ExecContext
 
   def comparer_add_selected : Nil
     @calls << :comparer_add_selected
+  end
+
+  def open_response_external : Nil
+    @calls << :open_response_external
   end
 
   def comparer_new : Nil

@@ -95,6 +95,16 @@ module Gori::Tui
     def initialize(@registry : Verb::Registry)
       @entries = [] of Verb::Definition
       @selected = 0
+      # The row offset ←/→ AIMS for, kept across a run of column moves — a text editor's
+      # "desired column", and here for the same reason editors have one.
+      #
+      # Without it the two directions do not round-trip: a → whose landing offset holds a
+      # GROUP HEADER falls to the nearest entry row, and the ← back then measures from THAT
+      # offset and finds a different entry than the one it started on. The method's contract
+      # is "keeping its row offset within the column"; this is what keeps it. Every other way
+      # the selection moves (↑/↓, a click, a fresh open) clears it, so the stickiness lasts
+      # exactly as long as the operator is walking sideways.
+      @col_off = nil.as(Int32?)
       @scroll = 0  # top visible row (display-row space) — keeps the selection on-screen
       @title_w = 0 # widest entry title, cached at open() (drives the popup width)
       # Empty ⇒ single flat column, no headers (today's exact pre-grouping layout).
@@ -123,6 +133,7 @@ module Gori::Tui
       @ctx = ctx
       @selected = 0
       @scroll = 0
+      @col_off = nil
       all = @registry.for_scope(scope, ctx).select(&.menu_key)
       common = all.select { |v| v.section == :common }
       context = section == :common ? [] of Verb::Definition : all.select { |v| v.section == section }
@@ -208,6 +219,7 @@ module Gori::Tui
     def move(delta : Int32) : Nil
       return if @entries.empty?
       @selected = (@selected + delta).clamp(0, @entries.size - 1)
+      @col_off = nil # ↑/↓ redefine where sideways aims from — see @col_off
     end
 
     # Move the selection one COLUMN left/right, keeping its row offset within the column.
@@ -225,7 +237,14 @@ module Gori::Tui
       rows = g.rows
       sel_row = rows.index { |r| r.entry == @selected } || 0
       col = sel_row // g.col_rows
-      off = sel_row % g.col_rows
+      # The offset this move AIMS for, which is not always the one the selection sits at —
+      # see @col_off. Falls back to the live position for the first move of a run.
+      #
+      # CLAMPED to the grid in hand, because the grid is a function of the popup's live size:
+      # a resize between two sideways moves can shorten the columns under a remembered aim,
+      # and an aim past `col_rows` fails every offset the scan below produces — ←/→ would go
+      # quietly dead until something else cleared it.
+      off = ({@col_off || (sel_row % g.col_rows), 0}.max).clamp(0, g.col_rows - 1)
       target = (col + delta).clamp(0, g.ncols - 1)
       return if target == col
       base = target * g.col_rows
@@ -235,6 +254,10 @@ module Gori::Tui
           next unless row = rows[base + o]?
           if idx = row.entry
             @selected = idx
+            # The AIM is kept, not `o`: the landing offset may have been displaced by a
+            # header, and remembering the displaced one is exactly what stopped ←/→ from
+            # returning where it came from.
+            @col_off = off
             return
           end
         end
@@ -253,6 +276,7 @@ module Gori::Tui
     # Sets the active entry, clamped to the populated range (for click-select).
     def set_selected(idx : Int32) : Nil
       @selected = idx.clamp(0, {@entries.size - 1, 0}.max)
+      @col_off = nil # a click names a new place to aim from — see @col_off
     end
 
     # The full row list this frame: a dim header row per group (only when ≥2

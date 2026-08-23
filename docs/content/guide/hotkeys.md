@@ -69,6 +69,8 @@ Some keys can't be rebound because the terminal or gori needs them:
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier — see [Command modifier](#command-modifier) below.
 
+  `Ctrl-G` / `Ctrl-F` act on whichever multi-line pane has focus: the Repeater's request and response, the History detail, the Intercept editor, Notes, the Project description, the Decoder's INPUT and OUTPUT, and the Fuzzer's template and result detail. `Tab` switches find to find & replace on the six that are editable — everything else is read-only, and the prompt says so rather than offering a swap it cannot make.
+
 Flow-control/signal chords like `Ctrl-S` are **not** reserved; gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on `Ctrl-S`).
 
 ## OS Default Profiles

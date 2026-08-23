@@ -205,7 +205,8 @@ module Gori::Tui
       ]},
       {"EDITORS", [
         Item.new("^G · ^F", "go to line · find (↵/↑↓ step)"),
-        Item.new("^F then tab", "find & replace — ↵ swaps every match (one undo step)"),
+        Item.new("  where", "Repeater · History detail · Intercept · Notes · Project · Decoder · Fuzzer"),
+        Item.new("^F then tab", "find & replace — ↵ swaps every match (one undo step); editable panes only"),
         Item.new("^E", "open the field in $EDITOR"),
         Item.new("^B", "reveal whitespace"),
       ]},

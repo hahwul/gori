@@ -112,6 +112,20 @@ module Gori::Tui
       (0 <= idx < @fuzzers.size) ? @fuzzers[idx].view : nil
     end
 
+    # ^G/^F name the focused pane — the TEMPLATE editor and the RESULT detail, the tab's two
+    # multi-line surfaces. TARGET is one line, CONFIG is a form and RESULTS is a table the
+    # tab filters with its own `matched-only` + sort rather than a text find, so none of the
+    # three has a line to jump to.
+    #
+    # The CHAIN sub-pane sits on top of the TEMPLATE column and takes its keys when active
+    # (`chain_pane_active?`), so it is excluded for the same reason the Decoder's chain is:
+    # the find prompt would search a document the pane is not editing.
+    def goto_symbol : Symbol?
+      return nil unless v = current_view
+      return :fuzz_detail if v.focus == :detail
+      :fuzz_template if v.focus == :template && !v.chain_pane_active?
+    end
+
     def body_badge : Symbol
       v = current_view
       return :body unless v
@@ -154,11 +168,11 @@ module Gori::Tui
           # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
           "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
         else
-          "i/↵ edit · #{read_common} · #{marks} · ^O config · #{run} run · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{marks} · ^F find · ^O config · #{run} run · ↹ pane · esc tabs"
         end
       when :config  then config_hint(v, run)
       when :results then "↑/↓ select · ↵ detail · o sort · m matched · v dist · #{run} run · #{stop} stop · space cmds · ↹ pane"
-      when :detail  then "↑/↓ move · #{read_common} · ←/→ pane · esc back"
+      when :detail  then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else               "↹/esc tabs"
       end
     end

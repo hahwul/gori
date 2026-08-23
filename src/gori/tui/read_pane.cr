@@ -74,6 +74,12 @@ module Gori::Tui
 
     @size = 0
     @line_at : (Int32 -> String) = ->(_i : Int32) { "" }
+    # Active ^F query → its matches are banded in `render`. Empty is the resting state: a
+    # pane carries no query until the shell opens a find prompt over it, and `close_search`
+    # pushes "" back. Owned here rather than in each pane so every ReadPane-backed view gets
+    # the band from one place — the hand-rolled `Wrap.mark_search` call sites this component
+    # was extracted from are exactly the drift that argument is about.
+    @search_hl = ""
 
     # `gutter` draws 1-based line numbers (`Gutter`), like the Decoder OUTPUT and the Repeater
     # panes; a pane whose rows are not source lines (the Comparer's diff rows, a field list)
@@ -133,6 +139,24 @@ module Gori::Tui
 
     def line(i : Int32) : String
       i >= 0 && i < @size ? @line_at.call(i) : ""
+    end
+
+    # The ^F query to band in `render`. "" clears it.
+    setter search_hl : String
+
+    # ^F search: 0-based indices of the lines containing `query`, case-insensitively.
+    #
+    # Materialises every line through `line_at`, which is why this is an ACTION rather than
+    # something the render path does: the two panes wired to it back `line_at` with an
+    # `Array(String)` already in hand, so a call is an index rather than an allocation. A
+    # pane whose provider builds its lines lazily (`Highlight::BodyLines`) would pay per line
+    # here — fine for one keystroke, and the reason this is not called per frame.
+    def search_lines(query : String) : Array(Int32)
+      hits = [] of Int32
+      return hits if query.empty? || empty?
+      q = query.downcase
+      (0...@size).each { |i| hits << i if @line_at.call(i).downcase.includes?(q) }
+      hits
     end
 
     # Drop the caret, the selection and both scroll offsets — the pane is showing different
@@ -428,12 +452,24 @@ module Gori::Tui
       # case wrap exists to display.
       cached_li = -1
       cached_line = ""
+      # Hoisted beside the line for the same reason the line itself is: `mark_search` scans a
+      # downcased copy of the WHOLE logical line, so computing it inside the row loop would
+      # downcase a viewport-filling line once per drawn row. Built only while a query is live.
+      cached_lower = ""
       rows.each_with_index do |vr, i|
         if vr.li != cached_li
           cached_li = vr.li
           cached_line = @line_at.call(vr.li)
+          cached_lower = @search_hl.empty? ? "" : cached_line.downcase
         end
         draw_row(screen, rect, rect.y + i, vr, cached_line, gw, cw, focused, styled_at, fg, bg)
+        # Between the text and the chrome ON PURPOSE: the band goes OVER the drawn glyphs (it
+        # is what makes a match findable at a glance) and UNDER the caret/selection, so the
+        # match the ^F prompt just jumped to still shows where the cursor sits inside it.
+        unless @search_hl.empty?
+          Wrap.mark_search(screen, rect.x + gw, rect.y + i, cached_line, vr.a, vr.b,
+            @search_hl, rect.x + gw + cw, xoff: @xscroll, lower: cached_lower)
+        end
         paint_chrome(screen, rect.x + gw, rect.y + i, vr, cached_line, spans, focused, cw)
       end
       # The gauge stays in LOGICAL lines under wrap — a deliberate approximation, matching

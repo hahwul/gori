@@ -43,6 +43,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :project           then project_controller.view.goto_line(n)
     when :detail            then history_controller.view.goto_detail_line(n)
     when :intercept         then intercept_controller.view.edit_goto_line(n)
+    when :decoder_input     then decoder_controller.input_area.goto_line(n)
+    when :decoder_output    then decoder_controller.goto_output_line(n)
+    when :fuzz_template     then fuzzer_controller.current_view.try(&.goto_template_line(n))
+    when :fuzz_detail       then fuzzer_controller.current_view.try(&.goto_detail_line(n))
     end
   end
 
@@ -54,6 +58,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :project           then project_controller.view.search_lines(query)
     when :detail            then history_controller.view.detail_search_lines(query)
     when :intercept         then intercept_controller.view.edit_search_lines(query)
+    when :decoder_input     then decoder_controller.input_area.search_lines(query)
+    when :decoder_output    then decoder_controller.output_search_lines(query)
+    when :fuzz_template     then fuzzer_controller.current_view.try(&.template_search_lines(query)) || [] of Int32
+    when :fuzz_detail       then fuzzer_controller.current_view.try(&.detail_search_lines(query)) || [] of Int32
     else                         [] of Int32
     end
   end
@@ -68,6 +76,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :project           then project_controller.view.search_hl = q
     when :detail            then history_controller.view.search_hl = q
     when :intercept         then intercept_controller.view.search_hl = q
+    when :decoder_input     then decoder_controller.input_area.search_hl = q
+    when :decoder_output    then decoder_controller.output_search_hl = q
+    when :fuzz_template     then fuzzer_controller.current_view.try(&.template_search_hl=(q))
+    when :fuzz_detail       then fuzzer_controller.current_view.try(&.detail_search_hl=(q))
     end
   end
 
@@ -120,10 +132,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Targets whose backing view is an editable TextArea. The read-only panes
-  # (:repeater_response, :detail) have no mutation path at all.
+  # (:repeater_response, :detail, :decoder_output, :fuzz_detail) have no mutation path at all.
   private def replace_target? : Bool
     case @search_target
     when :repeater_request, :notes, :project, :intercept then true
+    when :decoder_input, :fuzz_template                  then true
     else                                                      false
     end
   end
@@ -136,6 +149,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :notes            then notes_controller.view.match_count(@search_buffer)
     when :project          then project_controller.view.match_count(@search_buffer)
     when :intercept        then intercept_controller.view.edit_match_count(@search_buffer)
+    when :decoder_input    then decoder_controller.input_area.match_count(@search_buffer)
+    when :fuzz_template    then fuzzer_controller.current_view.try(&.template_match_count(@search_buffer)) || 0
     else                        0
     end
   end
@@ -178,6 +193,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         when :notes            then notes_controller.view.replace_matches(query, replacement)
         when :project          then project_controller.view.replace_matches(query, replacement)
         when :intercept        then intercept_controller.view.edit_replace_matches(query, replacement)
+        when :decoder_input    then decoder_controller.input_replace_matches(query, replacement)
+        when :fuzz_template    then fuzzer_controller.current_view.try(&.template_replace_matches(query, replacement)) || 0
         else                        0
         end
     # The replace is done, so drop the prompt: it would otherwise sit there advertising

@@ -302,7 +302,31 @@ So `/ status:5xx` → `Shift-T` → `Space` → `X` deletes every error in one c
 | Add host to scope | `Space` `h` | Hosts deduplicated — 12 flows on 2 hosts adds 2 rules |
 | Send to Comparer | `Space` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
 
-Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request — marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer); their menu entries say `(cursor)` while marks are set.
+Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request — marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser); their menu entries say `(cursor)` while marks are set.
+
+## Open a response in the browser {#open-in-browser}
+
+A terminal cannot lay out a page, show you a PNG, or paginate a PDF. `Space` `Shift-B` hands the response to something that can: gori writes the **decoded** body to a file under `~/.gori/preview/` and opens it with your desktop's opener (`open` on macOS, `xdg-open` on Linux).
+
+It is on three surfaces, all the same action:
+
+| Where | Key | Opens |
+|-------|-----|-------|
+| History list | `Space` `Shift-B` | The cursor row's response |
+| History detail | `Space` `Shift-B` | The open flow's response |
+| Repeater | `Space` `Shift-B` | The active sub-tab's last response |
+
+Four things are worth knowing before you press it.
+
+**The body is decoded, the headers are not included.** gori stores wire bytes, so most real responses on disk are gzip/br/zstd; a `file://` URL carries no `Content-Encoding`, so the preview holds the inflated document. Only the body goes in the file — the headers are already on screen in the pane you invoked it from.
+
+**The extension is gori's, never the target's.** It comes from a fixed allowlist keyed on the response's own media type (`text/html` → `.html`, `image/png` → `.png`, an `application/vnd.api+json` → `.json`), and anything unrecognised becomes `.txt` or `.bin`. A hostile `Content-Type` cannot pick what your desktop dispatches on. The file *name* is built from the flow id and a timestamp, so no captured byte reaches it either.
+
+**Relative assets will not load.** gori does not inject a `<base href>`, because that would make the page fetch its real CSS and JS from the live origin — traffic you did not ask for. So a page whose assets are relative renders unstyled. This shows you what the *response* said; point the [proxied browser](#clients-without-proxy) at the URL when you want what the *site* looks like.
+
+**HTML runs.** Opening a target's page in a browser executes its JavaScript, from a `file://` origin that cannot reach the target's cookies — the same bargain Burp's "Show response in browser" makes. gori does not strip scripts, because a neutered render is a different document from the one under test. The status line says so when the document is one a browser will execute, which is why the key is `Shift-B` rather than a bare letter.
+
+The preview directory is gori's, mode `0700`, and swept to the newest 32 files on every write; wiping `~/.gori` takes it with them.
 
 ## Match & Replace (Rewriter tab)
 

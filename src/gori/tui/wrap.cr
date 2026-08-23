@@ -321,12 +321,19 @@ module Gori::Tui
     # least showed the match once you scrolled to it. So the scan runs over the WHOLE
     # logical line and each match is clipped to the row — a straddling match is highlighted
     # on BOTH rows it occupies, which is also what the reader expects to see.
+    # `lower` is `line.downcase`, supplied by a caller that already has it. The scan needs a
+    # downcased copy of the WHOLE logical line (see above), so a wrapped line that fills the
+    # viewport would otherwise pay for one `downcase` of the entire line PER DRAWN ROW — on
+    # the Decoder OUTPUT that line can be a multi-MB minified body. A caller drawing one row
+    # at a time hoists it beside the line itself and hands it in; anything else omits it and
+    # gets exactly the old behaviour.
     def self.mark_search(screen : Screen, x : Int32, y : Int32, line : String,
                          a : Int32, b : Int32, query : String, max_x : Int32,
-                         conceal : Array({Int32, Int32})? = nil, xoff : Int32 = 0) : Nil
+                         conceal : Array({Int32, Int32})? = nil, xoff : Int32 = 0,
+                         lower : String? = nil) : Nil
       return if query.empty? || line.empty? || a >= b
       q = query.downcase
-      dl = line.downcase
+      dl = lower || line.downcase
       # Match in the downcased copy, then slice the ORIGINAL to preserve case — valid only
       # while downcase is 1:1. For the rare char that changes length under it (U+0130 'İ'
       # → "i" + U+0307) fall back to the downcased string for the COLUMN as well as the

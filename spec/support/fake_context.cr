@@ -366,6 +366,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:repeater_copy_all)
   end
 
+  def repeater_open_response_external : Nil
+    rec(:repeater_open_response_external)
+  end
+
   property repeater_read_mode : Bool = false # settable so grouped-menu specs can exercise the read-mode verbs
 
   def repeater_read_mode? : Bool
@@ -1096,6 +1100,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def comparer_add_selected : Nil
     rec(:comparer_add_selected)
+  end
+
+  def open_response_external : Nil
+    rec(:open_response_external)
   end
 
   def comparer_add_repeater : Nil

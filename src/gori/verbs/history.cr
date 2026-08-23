@@ -138,6 +138,23 @@ module Gori
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
         Verb::Scope::Body, available: history_targets, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
 
+      # Write the selected flow's decoded response body out and hand it to the desktop's
+      # opener — the terminal's one way to actually SEE a page, an image or a PDF.
+      #
+      # `history_selected`, not `history_targets`: this is deliberately single-target even
+      # with marks set, because N marked flows would mean N windows opening at once.
+      #
+      # Menu-only, on ⇧B. Lowercase `b` was the obvious key and is free HERE, but it is
+      # `detail.toggle-ws` in the drill-in — and one action answering to two different keys
+      # depending on which pane you invoked it from is worse than one key that is slightly
+      # less obvious. The capital also sits with the scope's other loud verbs (⇧T mark-all,
+      # ⇧F add issue, ⇧A active scan): this one leaves the process and runs the target's
+      # scripts, so it should not be a bare letter.
+      r.register Verb::Definition.new(
+        "history.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
+        Verb::Scope::Body, [] of Verb::Chord,
+        available: history_selected, mnemonic: 'B', group: :view) { |ctx| ctx.open_response_external; nil }
+
       # Manually run the Probe ACTIVE checks (reflected params, CORS) against the selected flow,
       # regardless of the Probe mode — opens a confirm dialog with the expected request count.
       # Menu-only ('A'); mirrors detail.probe-active in the drill-in.
@@ -199,6 +216,13 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
         Verb::Scope::Repeater, available: in_repeater_read, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
+
+      # History's open-in-browser for the response IN HAND. `in_repeater` rather than a
+      # has-a-response gate: the refusal names what is missing ("send the request first"),
+      # which teaches more than a verb that quietly is not there.
+      r.register Verb::Definition.new(
+        "repeater.open-browser", "Open response in browser", "Write this tab's decoded response body to a file and open it in the desktop viewer",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'B') { |ctx| ctx.repeater_open_response_external; nil }
 
       r.register Verb::Definition.new(
         "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
@@ -438,6 +462,12 @@ module Gori
       r.register Verb::Definition.new(
         "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
         Verb::Scope::HistoryDetail, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
+
+      # The drill-in's twin of history.open-browser, and the place it is reached from most:
+      # the moment you want a page rendered is the moment you are reading its bytes.
+      r.register Verb::Definition.new(
+        "detail.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
+        Verb::Scope::HistoryDetail, mnemonic: 'B', group: :view) { |ctx| ctx.open_response_external; nil }
 
       # Copy the selection (or current line) from the navigable detail text — flow copy
       # lives in the space menu only (history.copy / detail.copy-flow).
