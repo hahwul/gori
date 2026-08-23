@@ -185,22 +185,25 @@ describe "Gori::Verbs.register_issues" do
   end
 
   describe "export" do
-    it "passes the right format symbol per export verb" do
-      {"issues.export-md" => "markdown", "issues.export-json" => "json"}.each do |id, format|
-        r[id].scope.should eq(Gori::Verb::Scope::Global) # palette-reachable from anywhere
+    it "asks for the format instead of naming one, from the palette and from the tab key" do
+      # The format used to live in the verb NAME (issues.export-md / -json, plus a
+      # Markdown-only key), so every new format cost a palette entry and the tab key could
+      # only ever reach one of them. Both entries now open the same picker.
+      r["issues.export"].scope.should eq(Gori::Verb::Scope::Global) # palette-reachable from anywhere
+      r["issues.export-key"].scope.should eq(Gori::Verb::Scope::Issues)
+      %w[issues.export issues.export-key].each do |id|
         ctx = FakeExecContext.new
         r[id].call(ctx)
-        ctx.call_names.should eq([:issues_export])
-        ctx.args_for(:issues_export).should eq([format])
+        ctx.call_names.should eq([:issues_export_pick])
       end
     end
 
-    it "defaults the Issues-scope export key to the human-readable Markdown report" do
-      verb = r["issues.export-key"]
-      verb.scope.should eq(Gori::Verb::Scope::Issues)
-      ctx = FakeExecContext.new
-      verb.call(ctx)
-      ctx.args_for(:issues_export).should eq(["markdown"])
+    it "no longer registers a verb per format" do
+      # A user keybinding naming one of these is discarded rather than raising:
+      # Hotkeys.rebindable_overrides filters overrides through `registry[id]?`.
+      %w[issues.export-md issues.export-json].each { |id| r[id]?.should be_nil }
+      # …and exactly one export entry reaches the palette, not one per format.
+      r.select { |v| v.id.starts_with?("issues.export") }.size.should eq(2)
     end
 
     it "binds export to ⇧E — the SAME key Notes uses — and leaves 'x' to Select line" do
@@ -221,15 +224,12 @@ describe "Gori::Verbs.register_issues" do
       r.select(&.scope.issues?).compact_map(&.menu_key).should_not contain('x')
     end
 
-    it "keeps all three entries on the SAME intent now that the path comes from a popup" do
-      # The destination moved from a hardcoded <project dir>/issues.{md,json} to an
-      # ExportOverlay prompt, but that is purely a shell concern: the verb ids, scopes,
-      # chords and the issues_export(format) signature all had to stay put, so anything
-      # bound to them (palette entries, user keybindings, the MCP/CLI surfaces) is untouched.
-      %w[issues.export-md issues.export-json issues.export-key].each do |id|
-        ctx = FakeExecContext.new
-        r[id].call(ctx)
-        ctx.call_names.should eq([:issues_export])
+    it "still describes itself as a prompt, not a write" do
+      # Both the destination AND the format now come from popups, so the ellipsis is load
+      # bearing: neither entry writes anything on its own.
+      %w[issues.export issues.export-key].each do |id|
+        r[id].title.should end_with("…")
+        r[id].description.should contain("asks for the format")
       end
     end
   end

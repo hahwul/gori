@@ -878,6 +878,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:issue_repeater_flow)
   end
 
+  def issues_export_pick : Nil
+    rec(:issues_export_pick)
+  end
+
   def issues_export(format : Symbol) : Nil
     rec(:issues_export, format)
   end

@@ -8,6 +8,10 @@ shards:
     git: https://github.com/crystal-lang/crystal-db.git
     version: 0.14.0
 
+  sarif:
+    git: https://github.com/hahwul/sarif.cr.git
+    version: 0.2.0
+
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
     version: 0.23.0

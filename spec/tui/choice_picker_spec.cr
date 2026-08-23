@@ -126,6 +126,37 @@ describe "ChoicePicker — Overlay contract" do
     p.handle_click(h.area, box.x - 1, box.y).should eq(:cancel)
   end
 
+  describe ".for_export_format" do
+    it "marks no row 'current' but still defaults to Markdown" do
+      # Unlike its three siblings this picker SETS nothing — it asks a one-off question, so a
+      # "● current" marker would claim a state that doesn't exist. Passing -1 gets that for
+      # free while `@selected` still parks on row 0, the report ⇧E used to write outright.
+      p = ChoicePicker.for_export_format
+      p.selected.should eq(0)
+      p.selected_value.should eq(0) # :markdown — see Runner::EXPORT_FORMATS
+      h = OverlayHarness.new(ChoicePicker.for_export_format)
+      h.rendered?("● current").should be_false
+      h.rendered?("EXPORT ISSUES AS").should be_true
+    end
+
+    it "commits a format on its mnemonic, in one keystroke" do
+      {'m' => 0, 'j' => 1, 's' => 2}.each do |key, value|
+        h = OverlayHarness.new(ChoicePicker.for_export_format)
+        h.press(Termisu::Input::Key::LowerA, key)
+        h.commits.should eq(1)
+        h.overlay.as(ChoicePicker).selected_value.should eq(value)
+      end
+    end
+
+    it "indexes Runner::EXPORT_FORMATS — the picker holds labels, the Runner holds symbols" do
+      # A row whose value has no symbol behind it would silently export the wrong format.
+      p = ChoicePicker.for_export_format
+      (0..2).each { |i| Gori::Tui::Runner::EXPORT_FORMATS[i]?.should_not be_nil }
+      p.set_selected(2)
+      Gori::Tui::Runner::EXPORT_FORMATS[p.selected_value].should eq(:sarif)
+    end
+  end
+
   # The harness default area is the whole screen, which is roomier than the `layout.body`
   # production hands over, so this path needs an explicit rect: with no card drawn there is
   # nothing to click, and a click must dismiss rather than act on a phantom row.

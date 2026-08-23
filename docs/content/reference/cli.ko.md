@@ -623,6 +623,7 @@ gori run decoder list                           # every converter (name, categor
 
 ```bash
 gori run issues --format markdown --export report.md
+gori run issues --format sarif --export issues.sarif    # GitHub code scanning / CI 대시보드에 업로드
 gori run notes --all
 ```
 
@@ -635,8 +636,12 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 
 | Option | Description |
 |--------|-------------|
+| `--format` | `text`(기본) \| `json` \| `markdown` \| `sarif` — TUI의 Export가 쓰는 것과 같은 리포트 |
+| `--export=PATH` | STDOUT 대신 `PATH`에 기록(바이트 그대로. STDOUT은 이스케이프를 제거) |
 | `create` | `-t`/`--title` (필수), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+
+`--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
 
 노트도 읽고 쓸 수 있습니다. 인자 없이 `notes`를 실행하면 목록을 보여주고(`*`가 활성 노트), `notes <n>`은 인덱스로 하나를 출력합니다:
 

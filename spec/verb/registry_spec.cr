@@ -865,6 +865,10 @@ private class FakeContext < ExecContext
     nil
   end
 
+  def issues_export_pick : Nil
+    @calls << :issues_export_pick
+  end
+
   def issues_export(format : Symbol) : Nil
     @calls << :issues_export
   end

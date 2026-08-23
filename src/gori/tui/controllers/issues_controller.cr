@@ -602,7 +602,11 @@ module Gori::Tui
         @host.status("no issues to export")
         return true
       end
-      content = format == :json ? Issues::Export.json(issues, store) : Issues::Export.markdown(issues, store, @host.session.project.name)
+      content = case format
+                when :json  then Issues::Export.json(issues, store)
+                when :sarif then Issues::Export.sarif(issues, store, @host.session.project.name)
+                else             Issues::Export.markdown(issues, store, @host.session.project.name)
+                end
       File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
       msg = "exported #{issues.size} issue#{issues.size == 1 ? "" : "s"} → #{path}"
       # Only warn when the report landed INSIDE the ephemeral project dir. The path used to

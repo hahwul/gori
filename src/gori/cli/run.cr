@@ -1080,6 +1080,7 @@ module Gori
               when "curl"           then :curl
               when "paths"          then :paths
               when "markdown", "md" then :markdown
+              when "sarif"          then :sarif
               else                       abort "gori run: unknown --format '#{v}'"
               end
         abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})" unless allowed.includes?(sym)
