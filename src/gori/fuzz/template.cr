@@ -1,4 +1,5 @@
 require "../decoder"
+require "../proxy/ws/frame" # OP_TEXT — `auto_mark_payload` marks text frames only
 
 module Gori::Fuzz
   # A base request with marked payload positions. The marked TEXT is the single
@@ -366,8 +367,19 @@ module Gori::Fuzz
     # swallowed under `0 errors` (#567/H3 Finding 1). Kept separate from `apply_chains` so the
     # Repeater preview and baseline seeds — which have no per-row surface — need no change.
     def apply_chains_reported(payloads : Array(String), registry : Decoder::Registry) : Array({String, String?})
+      Template.apply_chains_reported(@positions, payloads, registry)
+    end
+
+    # The same pass over an EXPLICIT position list, for a composite whose positions do not all
+    # live in one `Template` — `Fuzz::WsScript`, whose global position space spans a handshake
+    # template and one per outbound frame. A class method rather than a second copy inside the
+    # script: a `¦chain` that ran one way on an HTTP sweep and another on a WebSocket one would
+    # be exactly the drift `Codec::Http1.request_token_safe?`'s "one home" rule names, and the
+    # failure wording below is operator-facing text that must not fork.
+    def self.apply_chains_reported(positions : Array(Position), payloads : Array(String),
+                                   registry : Decoder::Registry) : Array({String, String?})
       payloads.map_with_index do |p, k|
-        spec = @positions[k]?.try(&.chain)
+        spec = positions[k]?.try(&.chain)
         next {p, nil} if spec.nil? || spec.empty?
         res = Decoder.run(registry, p.to_slice, spec)
         if res.ok? && (o = res.output)
@@ -382,7 +394,7 @@ module Gori::Fuzz
     # `gori run decoder` already prints one screen away — "chain '<spec>' step '<name>'
     # failed: <message>" — so the row says WHY the payload went out raw, not merely that it
     # did. Read-only over Decoder's public `ChainResult` (the codec package owns that struct).
-    private def chain_failure_reason(spec : String, res : Decoder::ChainResult) : String
+    private def self.chain_failure_reason(spec : String, res : Decoder::ChainResult) : String
       if (i = res.failed_at) && (step = res.steps[i]?)
         detail = step.error || (step.state.unknown? ? "unknown converter" : "failed")
         "chain '#{spec}' step '#{step.name}' failed: #{detail}"
@@ -460,6 +472,34 @@ module Gori::Fuzz
       out = hlines.join(eol)
       out = "#{out}#{sep}#{body && !body.empty? ? mark_body(head, body) : body}" if bidx
       out
+    end
+
+    # `auto_mark` for a WebSocket FRAME payload.
+    #
+    # A frame has no head — no request line to find a query string in, no `Cookie:` header to
+    # split — so the head half of `auto_mark` has nothing to do here and the value-marking half
+    # is the whole job. `mark_body` content-sniffs (a JSON document's scalars, an urlencoded
+    # body's pair values, else nothing), which is the right answer for a frame:
+    # `{"op":"§sub§"}` is what a WebSocket app's parameters actually look like.
+    #
+    # TEXT frames ONLY, and that guard is load-bearing rather than tidiness. `mark_body`'s
+    # urlencoded sniff (`looks_urlencoded?`) asks only for an `=` and no newline, which a
+    # BINARY frame satisfies by accident all the time — a protobuf or msgpack payload carrying
+    # byte 0x3D and no 0x0A was split on `&`/`=` and marked, so `08 3d ff fe 01 02 26 77 3d 32`
+    # came out as two bogus positions in the middle of a length-prefixed field. The bytes
+    # survived (this layer is byte-oriented), but the sweep then replaced structural bytes the
+    # operator never nominated. Opcode is the only thing that actually says "this is text".
+    #
+    # An empty `head` is passed deliberately: `mark_body` reads it only for `content-type`, and
+    # a frame declares none — so the sniff falls through to the payload's own shape, which is
+    # the only evidence there is.
+    #
+    # A no-op once any `§` is present, matching `auto_mark`'s own contract: the operator has
+    # already said where the positions are.
+    def self.auto_mark_payload(text : String, opcode : Int32 = 1) : String
+      return text unless opcode == Gori::Proxy::WS::OP_TEXT
+      return text if text.includes?(MARKER)
+      mark_body("", text)
     end
 
     # Toggle a `§…§` marker around the token at char index `cursor`. Inside an
@@ -690,7 +730,8 @@ module Gori::Fuzz
       end.join(sep)
     end
 
-    private def self.mark_body(head : String, body : String) : String
+    # Not private: `auto_mark_payload` marks a WebSocket frame, which has a body and no head.
+    protected def self.mark_body(head : String, body : String) : String
       ct = (header_value(head, "content-type") || "").downcase
       trimmed = body.strip
       if urlencoded_body?(head, body)

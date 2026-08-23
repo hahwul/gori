@@ -1723,3 +1723,72 @@ in `skipped`: `skipped` means a malformed entry, and a .NET WSDL publishing `Foo
 `FooSoap` is not damaged. When nothing at all was generated the first note becomes the error
 message, so "every port here is HTTP GET/POST" is a sentence the operator gets to read instead
 of the generic "no flows found".
+
+### 2026-08-23: the Fuzzer sweeps a WebSocket, and the handshake is part 0 of its position space
+
+The Repeater could re-establish a WebSocket and replay its frames; the Fuzzer could not touch
+one. `gori run fuzz --repeater N` and MCP `fuzz_start{repeater_id}` both refused a WS session in
+so many words ("the Fuzzer sweeps HTTP requests, not a framed WebSocket exchange"), which left
+the one protocol gori captures, filters (`proto:ws`), intercepts, exports and replays with no
+path to the tool an operator reaches for after all of those. gRPC never had this gap and never
+needed one: it is a content type over h2, and the Fuzzer has ridden h2 since it existed.
+
+**One variation is one whole session** — dial, handshake, the payload-spliced frame script,
+drain, close. The alternative, reusing one socket across payloads, is faster and dishonest: a
+WebSocket is not request/response, so nothing attributes an inbound frame to the payload that
+provoked it, and the engine's own `WsEngine.exchange` interleaves send-and-drain precisely
+because a burst cannot be read back in step. Concurrency therefore means N simultaneous sockets,
+which is what it costs to get an answer that means anything.
+
+**A `Fuzz::WsScript` composes one `Template` per part under ONE global position index space**,
+rather than a flat delimited pseudo-document. A frame payload is arbitrary bytes — a BIN frame, a
+protobuf, a deliberately-invalid-UTF-8 §8.1 test — so no sentinel is safe (P0), and every
+buffer-level pass in the pipeline would read a non-request: `urlencoded_positions` would find a
+"form body" past the first blank line and `AutoEncode` would percent-encode into a JSON frame.
+The composite works because every attack mode, `--mark`, each `¦chain` and the payload-set
+contract are defined over the payload-VALUE vector and not over a buffer — so `Mode`,
+`Generator`'s four mode methods, `PayloadSet` and `refuse_unusable_chains` are untouched.
+
+**The handshake is part 0 of that space, not an un-fuzzable prefix.** A WS upgrade head IS an
+ordinary HTTP request head, so `Template` already fits it; marking `Sec-WebSocket-Protocol` or a
+cookie in the upgrade is a real test that would otherwise need a refusal. It also keeps the four
+passes that read a request as a request — `urlencoded_positions`, `AutoEncode`,
+`ContentLength.sync_at`, `Outbound.request_target` — aimed at the one part that is one. The
+frames get none of them, and `emit_ws` deliberately does not `shift_spans` a frame across the
+handshake's Content-Length rewrite: they are separate buffers, and shifting would move each
+frame's payload exclusion off the payload.
+
+**The result is ADAPTED into `Repeater::Result`, not made first-class.** `Fuzz::Sender#send_ws`
+synthesizes head = the handshake head (so `status` is the 101 and `--mh` works) and body = the
+inbound DATA payloads concatenated, so `Fuzz::Matcher` needs no WebSocket branch and every
+surface keeps working. Three exclusions from that body are load-bearing: outbound rows (else a
+`--mr` naming the payload self-matches), CONTROL frames (a clean `1000 Normal` close was
+appending `\x03\xE8` to every body until a spec caught it), and gori's own `[gori]` advisory
+rows. `truncated` maps onto the existing `incomplete?` rather than inventing a second spelling,
+and `timed_out` stays false because a WS drain ends on idle by design.
+
+What the row gains is the pair a constant 101 cannot express — `ws_close_code` and
+`ws_frames_in` — on the exact precedent of `grpc_status`/`grpc_message`, which exist because a
+gRPC `:status` is 200 whether the call was granted or denied. Measured against a local origin
+refusing quoted input: three payloads, three `101 · matched` rows, and `close 1000` / `close
+1000` / `close 1008` as the only bit separating them.
+
+**Refusals are `Fuzz::WsError < Gori::Error`, not new `PlanError::Reason` members.** That enum is
+`case … in`-exhausted by three surfaces, one of which is the TUI Fuzzer tab — out of scope here,
+and unable to produce a WebSocket refusal at all. Same argument `ChainError` already makes: a
+refusal with no per-surface idiom ("`--race` is HTTP-only" reads identically everywhere) is
+written once by the builder and carried by each surface's existing `Gori::Error` path. Only two
+things are genuinely refused — `race_count`, and frames handed to a template with no `Upgrade:`
+— plus `--http2` and `--record-history` at the surfaces. The merely INERT knobs
+(`follow_redirects`, `timeout`, `auto_calibrate`) are reported through `Plan#ws_ignored_knobs`
+instead: refusing a run over a flag that changes nothing is hostile, and staying silent is how an
+operator comes to believe a sweep followed redirects it never followed.
+
+`--record-history` is refused rather than faked. A recorded WS variation would be a flow whose
+head declares `Upgrade: websocket` — so `FlowDetail#websocket?` answers true — carrying a 101
+with a synthesized body no 101 has and ZERO `ws_messages` rows: it renders as a WebSocket with an
+empty transcript, and re-seeding a repeater from it yields a session with no frames. The honest
+version (the handshake as a flow PLUS the transcript through `insert_ws_messages`) needs
+`Fuzz::Result` to retain the transcript under `keep_bodies`, which is a retention-budget change
+of its own. The TUI Fuzzer tab stays HTTP-only for now, which is the one place this round leaves
+the three surfaces short of parity.

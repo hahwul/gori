@@ -65,6 +65,20 @@ module Gori::Fuzz
   class ChainError < Gori::Error
   end
 
+  # A WebSocket run asked for something only an HTTP sweep has, or handed frames to a template
+  # that has no handshake to ride them.
+  #
+  # Deliberately NOT a `PlanError::Reason`. That enum is the machine-readable fact behind a
+  # sentence each surface writes in its own idiom, and AGENTS.md lists adding a member to it as
+  # a trap: three surfaces `case … in` it exhaustively, and one of them is the TUI Fuzzer tab,
+  # which has no WebSocket path at all and so can never produce this refusal — a new member
+  # would drag it into the diff to handle a case it cannot reach. Same shape and the same
+  # argument as `ChainError` directly above: these refusals have no surface idiom to write
+  # (`--race is HTTP-only` reads identically on the CLI and on MCP), so the builder writes the
+  # sentence once and every surface's existing `Gori::Error` path carries it unchanged.
+  class WsError < Gori::Error
+  end
+
   # A normalized, surface-independent description of ONE fuzz run.
   #
   # Each surface's remaining job is to parse ITS OWN input format into this — `OptionParser`
@@ -149,6 +163,17 @@ module Gori::Fuzz
     # substitutes while the capture's own `$filter` stays the origin byte it is. Ignored
     # unless `evidence?` — a draft expands the full table and always has.
     property env_vars : Hash(String, String)?
+    # The outbound WebSocket frame script, or nil for an ordinary HTTP sweep.
+    #
+    # NON-NIL AND NON-EMPTY is the "this is a WebSocket run" bit — there is no separate boolean,
+    # so the two cannot disagree. An EMPTY array folds to an ordinary HTTP sweep rather than to
+    # a handshake-only framed run: see `build_ws_script`, which is where that is decided for
+    # every surface at once.
+    #
+    # `template` still carries the handshake, which is why nothing else here needed a WS
+    # spelling: the handshake is part 0 of the run's position space (see `Fuzz::WsScript`), so
+    # `auto_mark`, `marks`, `sources`, `processors` and `auto_encode` all keep their meaning.
+    property ws_messages : Array(WsMessageSource)?
 
     def initialize(@template : String = "",
                    *,
@@ -166,7 +191,8 @@ module Gori::Fuzz
                    @verify : Bool = true,
                    @sni : String? = nil,
                    @overrides : Gori::HostOverrides? = nil,
-                   @env_vars : Hash(String, String)? = nil)
+                   @env_vars : Hash(String, String)? = nil,
+                   @ws_messages : Array(WsMessageSource)? = nil)
     end
   end
 
@@ -222,6 +248,24 @@ module Gori::Fuzz
     # request so a surface can say it ONCE, up front, and name the flag that turns it off.
     # False when the knob is already off, or when the declared length was correct anyway.
     getter? rewrites_content_length : Bool
+    # The marked WebSocket script, or nil for an ordinary HTTP sweep. `template` above stays the
+    # HANDSHAKE template in either case — it is part 0 of the script's position space — so a
+    # surface reading `plan.template` keeps its type and its meaning.
+    getter ws_script : WsScript?
+    # Config knobs this run cannot honour because it is a WebSocket sweep.
+    #
+    # SYMBOLS, not sentences: each surface names its own control (`--follow-redirects` on the
+    # CLI, `follow_redirects` on MCP), which is the same division of labour `PlanError::Reason`
+    # exists for. A fact about the run that only the builder can see, said ONCE, up front — the
+    # contract `shadowed_marks` and `rewrites_content_length?` already have.
+    #
+    # These are IGNORED, not refused, and the distinction is deliberate. `--follow-redirects`
+    # names a hop a 101-or-error exchange cannot produce, `--timeout` names a per-operation
+    # bound `WsEngine` does not take (it paces on `--idle-ms`), and `--ac` would open a full
+    # session per calibration sample. All three are inert rather than wrong, and refusing a
+    # whole run over an inert flag is hostile — while staying silent about it is how an operator
+    # comes to believe a sweep followed redirects it never followed.
+    getter ws_ignored_knobs : Array(Symbol)
 
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
@@ -229,7 +273,20 @@ module Gori::Fuzz
                    @mark_matches : Array({String, Int32}), @pool : ConnPool? = nil,
                    @rewrites_content_length : Bool = false,
                    @shadowed_marks : Array(String) = [] of String,
-                   @auto_encode : AutoEncode = AutoEncode.none)
+                   @auto_encode : AutoEncode = AutoEncode.none,
+                   @ws_script : WsScript? = nil,
+                   @ws_ignored_knobs : Array(Symbol) = [] of Symbol)
+    end
+
+    # Does this run sweep a WebSocket script rather than an HTTP request?
+    def websocket? : Bool
+      !@ws_script.nil?
+    end
+
+    # The run's TOTAL marked positions, across every part. `template.position_count` is the
+    # handshake's alone on a WS run, so a surface that reports "N positions" must ask this.
+    def position_count : Int32
+      (ws = @ws_script) ? ws.position_count : @template.position_count
     end
 
     # Candidate request count, or nil when unknown / Int64-overflowing. Reads the payload
@@ -272,25 +329,68 @@ module Gori::Fuzz
         else
           String.new(Env.expand_wire(options.template))
         end
-      text = Template.auto_mark(text) if options.auto_mark?
+      # The FRAME payloads, expanded on the same provenance axis as the head one line up: a
+      # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
+      # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
+      # LF→CRLF promotion to make and nothing in it is a message boundary.
+      ws_texts = options.ws_messages.try(&.map { |m| m.evidence ? m.payload : Env.expand(m.payload) })
+
+      if options.auto_mark?
+        text = Template.auto_mark(text)
+        # A frame gets the BODY-shaped marker pass (`auto_mark_payload`): it has no request line
+        # and no `Cookie:` header, so the head half of `auto_mark` has nothing to mark there.
+        # The OPCODE rides along — that pass marks TEXT frames only, because its urlencoded
+        # sniff would otherwise carve positions out of a binary payload that happens to carry
+        # an `=` (see there).
+        if (sources = options.ws_messages) && (texts = ws_texts)
+          ws_texts = texts.map_with_index { |t, i| Template.auto_mark_payload(t, sources[i].opcode) }
+        end
+      end
+
       shadowed_marks = [] of String
       mark_matches = options.marks.map do |tok|
         text, count, shadowed = wrap_token(text, tok)
+        # Across EVERY part. A `--mark` aimed at a value that lives in a frame would otherwise
+        # report `{token, 0}` and mark nothing, while the operator watched the flag they typed
+        # do nothing to the payload they typed it for. The counts sum.
+        #
+        # `shadowed` ORs, and `&&` here was a bug. `wrap_token` returns `shadowed == false` for
+        # a part that does not CONTAIN the token at all, so ANDing made a token shadowed only if
+        # every part contained it and had it marked already — which for a two-part script is
+        # almost never. Since `shadowed_marks` is reported only when the total `count` is also
+        # zero (i.e. the mark added no position ANYWHERE), OR is the right fold: at least one
+        # part had occurrences that were all already inside a `§…§`, and no part made a new
+        # position. With `&&` the operator got no note at all that their `--mark` did nothing.
+        if texts = ws_texts
+          texts.map_with_index do |t, i|
+            t2, c2, sh2 = wrap_token(t, tok)
+            texts[i] = t2
+            count += c2
+            shadowed ||= sh2
+          end
+        end
         # It occurred, and every occurrence was already marked — see `shadowed_marks`. A token
         # that DID make positions is not listed: it landed, and the count says so.
         shadowed_marks << tok if shadowed && count.zero?
         {tok, count}
       end
       template = Template.parse(text, options.http2?)
+
+      # The WebSocket script, when this is a WS run. Built here — after marking, before every
+      # guard below — because from this point on `marked` is what the whole builder reads, and
+      # the two shapes answer the same protocol (see `Fuzz::WsScript`).
+      ws_script = build_ws_script(options, template, ws_texts)
+      marked = ws_script || template
+      ws_ignored = ws_script ? ws_ignored_knobs(options.config) : [] of Symbol
       # A race group is N copies of ONE request, not a payload-substitution sweep — see
       # `Config#race_count` — so it has no use for §…§ positions or payload sets at all, and
       # both guards below (and NoPayloads, one screen down) are skipped when it is set.
       race_count = validate_race_count(options.config.race_count)
-      raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if template.position_count == 0 && !race_count
+      raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if marked.position_count == 0 && !race_count
       # The twin of `refuse_unresolved`, one line down and for the same reason: a `¦chain` this
       # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See
       # `refuse_unusable_chains`.
-      refuse_unusable_chains(template, Decoder.shared_registry)
+      refuse_unusable_chains(marked.positions, Decoder.shared_registry)
 
       # The string the Layer-1 scope check matches on, taken from the template's BASELINE
       # rendering (every position = its own default) rather than the raw text. The TUI's
@@ -323,7 +423,7 @@ module Gori::Fuzz
       auto_encode = AutoEncode.build(template, options.processors, options.auto_encode?)
       # The shared decoder registry applies each position's inline `¦chain` at render time.
       # Wired here so a new surface cannot forget it and silently send un-transformed payloads.
-      generator = Generator.new(template, gen_sets, config, registry: Decoder.shared_registry,
+      generator = Generator.new(marked, gen_sets, config, registry: Decoder.shared_registry,
         auto_encode: auto_encode)
       # gRPC framing, decided ONCE off the seed rendering: a template that declares
       # `content-type: application/grpc` and whose body frames cleanly has a 5-byte length
@@ -347,16 +447,87 @@ module Gori::Fuzz
       # template rendered with them.
       sender = Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
-        keep_alive: config.keep_alive?,
+        # Forced OFF for a WebSocket run, silently. One variation is one session on its own
+        # socket, which `WsEngine` closes in its own `ensure` — there is nothing for the pool
+        # to park. Silently because `keep_alive` DEFAULTS true, so reporting it as ignored
+        # would fire on every WS run for a choice the operator never made; `Plan#pool` is then
+        # nil and the surfaces' handshake-count line naturally prints nothing.
+        keep_alive: config.keep_alive? && ws_script.nil?,
         idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY),
-        evidence: options.evidence?)
+        evidence: options.evidence?,
+        ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?)
       new(engine: Engine.new(generator, matcher, sender, config), generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
         pool: sender.pool,
         rewrites_content_length: config.update_content_length? &&
                                  generator.baseline_request != generator.baseline_raw,
-        shadowed_marks: shadowed_marks, auto_encode: auto_encode)
+        shadowed_marks: shadowed_marks, auto_encode: auto_encode,
+        ws_script: ws_script, ws_ignored_knobs: ws_ignored)
+    end
+
+    # The marked WebSocket script, or nil when this is an ordinary HTTP sweep.
+    #
+    # `ws_messages` non-nil IS the "this is a WebSocket run" bit — see `PlanOptions#ws_messages`
+    # — so the only question left here is whether the run is COHERENT, and there is exactly one
+    # way it can fail to be: frames with no handshake to ride. `WsEngine.upgrade_request?` is
+    # the single source of truth for "is this a WebSocket gori can re-establish" (`ws_engine.cr`
+    # says so), and it is asked of the MARKED text rather than the raw options, so a `--mark`
+    # that landed inside `Upgrade: websocket` is judged on the head that will actually be sent.
+    #
+    # Every surface also refuses this before `Plan.build`, in its own idiom and before anything
+    # dials. This is the backstop, not the report.
+    private def self.build_ws_script(options : PlanOptions, handshake : Template,
+                                     texts : Array(String)?) : WsScript?
+      sources = options.ws_messages
+      return nil unless sources && texts
+      # NO FRAMES = an ordinary HTTP sweep, decided HERE so every surface folds the same way.
+      # A handshake-only script is exactly what an HTTP sweep of the same bytes already is, and
+      # taking the framed path for it costs a real socket and a real handshake per payload to
+      # send nothing — then waits out `WsEngine`'s no-frames branch (HANDSHAKE_TIMEOUT, 15 s)
+      # instead of the milliseconds the HTTP sweep takes. Reachable without anyone asking for
+      # it: a captured socket the client never wrote to, or one whose only `out` rows were
+      # gori's own `[gori]` advisories, seeds an EMPTY list — and a bare `Array` is truthy.
+      return nil if sources.empty?
+      # `Proxy::WS.upgrade_request?`, not `WsEngine`'s delegate: that predicate's documented
+      # home is the codec, and `WsEngine.upgrade_request?` is where the REPEATER asks it.
+      # Same bytes, same answer, one home.
+      unless Gori::Proxy::WS.upgrade_request?(String.new(handshake.render(handshake.default_payloads)))
+        raise WsError.new("#{sources.size} WebSocket frame#{sources.size == 1 ? "" : "s"} were given, " \
+                          "but this template declares no `Upgrade: websocket` handshake for them to ride. " \
+                          "Seed from a WebSocket flow or repeater session, or drop the frames to sweep it as HTTP")
+      end
+      # RFC 8441 extended CONNECT is a real WebSocket that this path cannot re-establish:
+      # `WsEngine` writes an h1 upgrade and accepts nothing but a 101. Refused rather than
+      # degraded, because degrading would sweep the CONNECT as an ordinary h2 request and
+      # report rows about an exchange that carried no frames.
+      if options.http2?
+        raise WsError.new("--http2 and a WebSocket script cannot combine: gori re-establishes a " \
+                          "WebSocket with an HTTP/1.1 upgrade handshake and accepts nothing but a 101 " \
+                          "(RFC 8441 extended CONNECT has no send path). Sweep it over HTTP/1.1, or drop " \
+                          "the frames to sweep the handshake itself as an h2 request")
+      end
+      if options.config.race_count
+        raise WsError.new("--race and a WebSocket script cannot combine: a race group is N byte-identical " \
+                          "copies of ONE request released together, which bypasses payload substitution " \
+                          "entirely and has no framed-exchange form. Drop the frames to race the handshake")
+      end
+      frames = sources.map_with_index do |m, i|
+        # `http2: false` per part, always: a frame is not an HTTP message, and the flag only
+        # ever reaches `Template#http2?`, which nothing on this path reads.
+        FrameTemplate.new(Template.parse(texts[i], false), m.opcode, m.shape, m.evidence)
+      end
+      WsScript.build(handshake, frames)
+    end
+
+    # Knobs a WebSocket run cannot honour — see `Plan#ws_ignored_knobs` for why these are
+    # reported rather than refused.
+    private def self.ws_ignored_knobs(config : Config) : Array(Symbol)
+      out = [] of Symbol
+      out << :follow_redirects if config.follow_redirects?
+      out << :timeout if config.timeout
+      out << :auto_calibrate if config.auto_calibrate?
+      out
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent
@@ -439,9 +610,10 @@ module Gori::Fuzz
     # isn't valid input for it" (`base64-decode` over a `§admin§` default raises, and refusing
     # that run would block a legitimate sweep). Asking whether the converter can run at all
     # answers the first question and leaves the second — genuinely per-payload — alone.
-    private def self.refuse_unusable_chains(template : Template, registry : Decoder::Registry) : Nil
+    private def self.refuse_unusable_chains(positions : Array(Template::Position),
+                                            registry : Decoder::Registry) : Nil
       bad = [] of String
-      template.positions.each do |pos|
+      positions.each do |pos|
         next if pos.chain.empty?
         Decoder.parse_spec(pos.chain).each do |tok|
           conv = registry[tok]?

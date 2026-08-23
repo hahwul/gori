@@ -81,7 +81,8 @@ end
 
 # A store carrying one repeater session (#749's `--repeater` / `repeater_id` seed), yielded as
 # {db path, repeater id}. `request` is the stored wire request; a WS handshake makes it a
-# WebSocket session the fuzz seed must refuse.
+# WebSocket session, which the fuzz seed now SWEEPS (handshake + stored frames) rather than
+# refusing — see the WebSocket cases below.
 private def with_repeater_store(target : String, request : String, sni : String? = nil, &)
   path = File.tempname("gori-repseed", ".db")
   store = Gori::Store.open(path)
@@ -147,7 +148,8 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
   describe "gori run fuzz --flow" do
     it "escapes the capture's § and does not scrub it" do
       with_seed_store(seed_body) do |(path, id, wire)|
-        text, target, http2, evidence = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path)
+        seed = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path)
+        text, target, http2, evidence = seed.text, seed.target, seed.http2, seed.evidence
         seed_assertions.call(text, wire)
         evidence.should be_true # unchanged: a --flow template is a CAPTURE
         target.should eq("http://h.test")
@@ -160,7 +162,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
     # that fired on the wrong bytes, and the `.scrub` removal on its own.
     it "seeds a capture with no § byte-identically, invalid UTF-8 included" do
       with_seed_store(plain_body) do |(path, id, wire)|
-        text, _, _, _ = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path)
+        text = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path).text
         text.to_slice.to_a.should eq(wire) # WAS: ff fe → ef bf bd ef bf bd
       end
     end
@@ -169,7 +171,7 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
     it "leaves a valid multibyte capture alone" do
       body = %({"이름":"관리자","e":"🐿️"}).to_slice
       with_seed_store(body) do |(path, id, wire)|
-        text, _, _, _ = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path)
+        text = Gori::CLI::Run.fuzz_source_for_spec(id, nil, path).text
         text.to_slice.to_a.should eq(wire)
       end
     end
@@ -180,7 +182,8 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       file = File.tempname("gori-fuzzreq", ".txt")
       begin
         File.write(file, "GET /?x=§1§ HTTP/1.1\r\nHost: h.test\r\n\r\n")
-        text, _, _, evidence = Gori::CLI::Run.fuzz_source_for_spec(nil, file, nil)
+        seed = Gori::CLI::Run.fuzz_source_for_spec(nil, file, nil)
+        text, evidence = seed.text, seed.evidence
         Gori::Fuzz::Template.parse(text).position_count.should eq(1)
         evidence.should be_false
       ensure
@@ -192,7 +195,8 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
   describe "gori run fuzz --repeater (#749)" do
     it "seeds from an HTTP repeater session: markers escaped, evidence FALSE, target/http2 from the session" do
       with_repeater_store("http://r.test", "GET /r?q=§SEED§ HTTP/1.1\r\nHost: r.test\r\n\r\n") do |(path, id)|
-        text, target, http2, evidence = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path)
+        seed = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path)
+        text, target, http2, evidence = seed.text, seed.target, seed.http2, seed.evidence
         Gori::Fuzz::Template.parse(text).position_count.should eq(0) # the session's § is literal, escaped
         text.should contain("§§SEED§§")
         evidence.should be_false # a repeater session is an authored draft — $NAME expands
@@ -206,13 +210,63 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
     # the handshake, where `repeater send N` succeeds.
     it "carries the session's stored SNI into the seed" do
       with_repeater_store("https://r.test", "GET /s HTTP/1.1\r\nHost: r.test\r\n\r\n", sni: "pinned.example") do |(path, id)|
-        _, _, _, _, sni = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path)
+        sni = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path).sni
         sni.should eq("pinned.example")
       end
     end
 
-    # The WS-refusal path aborts (calls exit) on the CLI, so it is asserted on the MCP surface
-    # below, where the same guard raises a catchable FuzzArgError.
+    # A WebSocket session seeds its handshake AND its stored outbound frames — the refusal
+    # that used to live here is gone. The frames are the half that matters, so they are
+    # asserted directly rather than through the handshake.
+    it "seeds a WebSocket session's handshake and its stored outbound frames" do
+      handshake = "GET /ws HTTP/1.1\r\nHost: r.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      with_repeater_store("http://r.test", handshake) do |(path, id)|
+        store = Gori::Store.open(path)
+        begin
+          store.update_repeater_ws_messages(id, [
+            Gori::Store::WsOutMessage.text(%({"op":"sub","q":"§SEED§"})),
+            Gori::Store::WsOutMessage.new(9, Bytes[0x01, 0x02]),
+          ])
+        ensure
+          store.close
+        end
+        seed = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path)
+        Gori::Proxy::WS.upgrade_request?(seed.text).should be_true
+        ws = seed.ws.should_not be_nil
+        ws.size.should eq(2)
+        # The frame's own `§` is ESCAPED, exactly as the handshake's is: it is the app's text,
+        # not a position anyone marked. Without this the sweep would replace the app's own
+        # `SEED` with every payload in the set, with no --auto and no --mark passed.
+        ws[0].payload.should contain("§§SEED§§")
+        Gori::Fuzz::Template.parse(ws[0].payload).position_count.should eq(0)
+        # The SHAPE survives: a PING is not folded to TEXT (`WsEngine::OutMsg`'s own defect).
+        ws[1].opcode.should eq(9)
+        ws[1].payload.bytes.should eq([0x01, 0x02])
+      end
+    end
+
+    # gori's own `[gori] …` advisory rows are diagnostics it wrote ABOUT the socket, not frames
+    # the client sent. Seeding one would put gori's sentence on the wire as a TEXT message —
+    # the defect `CLI::Run.ws_seed_rows` exists to prevent, reached here from the fuzz side.
+    it "drops gori advisory rows from a WebSocket seed" do
+      handshake = "GET /ws HTTP/1.1\r\nHost: r.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      with_repeater_store("http://r.test", handshake) do |(path, id)|
+        store = Gori::Store.open(path)
+        begin
+          store.update_repeater_ws_messages(id, [
+            Gori::Store::WsOutMessage.text("real frame"),
+            Gori::Store::WsOutMessage.text("#{Gori::Proxy::WS::NOTICE_PREFIX}a cap tripped"),
+          ])
+        ensure
+          store.close
+        end
+        ws = Gori::CLI::Run.fuzz_source_repeater_for_spec(id, path).ws.should_not be_nil
+        ws.size.should eq(1)
+        ws[0].payload.should eq("real frame")
+      end
+    end
   end
 
   describe "MCP fuzz_start{flow_id}" do
@@ -310,16 +364,22 @@ describe "a captured fuzz seed is evidence, not a template the site wrote" do
       end
     end
 
-    it "refuses a WebSocket repeater session with a named FuzzArgError" do
+    # This case used to assert a REFUSAL ("the Fuzzer sweeps HTTP requests, not a framed
+    # WebSocket exchange"), which was the asymmetry the WebSocket sweep closed: the Repeater
+    # could replay the exchange and the Fuzzer would not touch it. It now seeds, and what the
+    # seed must carry is the handshake — the frames come from `fuzz_ws_messages`, asserted in
+    # `spec/fuzz/ws_seed_spec.cr`.
+    it "seeds a WebSocket repeater session's handshake instead of refusing it" do
       handshake = "GET /ws HTTP/1.1\r\nHost: r.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
       with_repeater_store("http://r.test", handshake) do |(path, id)|
         store = Gori::Store.open(path)
         begin
           tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-          expect_raises(Gori::MCP::Tools::FuzzArgError, /WebSocket session/) do
-            tools.fuzz_template_source_for_spec(%({"repeater_id":#{id}}))
-          end
+          text, target, _http2, evidence = tools.fuzz_template_source_for_spec(%({"repeater_id":#{id}}))
+          Gori::Proxy::WS.upgrade_request?(text).should be_true
+          target.should eq("http://r.test")
+          evidence.should be_false # a repeater session is an authored draft, WS or not
         ensure
           store.close
         end

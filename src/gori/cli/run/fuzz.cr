@@ -6,6 +6,22 @@ module Gori
     module Run
       FUZZ_AUTO_CAP = 100_000_i64 # above this (or unknown), require --force
 
+      # What a `--flow` / `--repeater` / `--request` / stdin source resolved to.
+      #
+      # A record rather than the tuple this used to be: WebSocket seeding added a sixth member,
+      # and a six-wide positional tuple destructured at the call site is exactly the shape that
+      # let `Repeater::Result`'s same-typed tail get written into the wrong field twice (see its
+      # constructor comment).
+      record FuzzSeed,
+        text : String,
+        target : String?,
+        http2 : Bool,
+        evidence : Bool,
+        sni : String?,
+        # The session's outbound frames, or nil when the seed is not a WebSocket. Non-nil is
+        # what makes this a WS run — see `Fuzz::PlanOptions#ws_messages`.
+        ws : Array(Fuzz::WsMessageSource)? = nil
+
       private def self.cmd_fuzz(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -43,12 +59,16 @@ module Gori
         fail_if_no_matches = false
         record_policy = :none
         matcher = Fuzz::Matcher.new(keep_bodies: :none)
+        ws_overrides = [] of Fuzz::WsMessageSource
+        ws_idle_ms : Int64? = nil
+        ws_keep_key = false
+        ws_http_only = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run fuzz [<flow-id>] [options]   (mark positions with §…§)"
           p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
-          p.on("--repeater=ID", "Seed the template from a saved HTTP repeater session (ids from `gori run repeater list`; WebSocket sessions are refused)") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
+          p.on("--repeater=ID", "Seed the template from a saved repeater session (ids from `gori run repeater list`). A WebSocket session seeds its handshake AND its outbound frames — mark positions in the frames and each variation runs one full RFC 6455 session") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
           p.on("--request=FILE", "Read a raw HTTP request (may contain §…§) as the template") { |v| request_file = v }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -58,6 +78,11 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--auto", "Auto-mark every query / cookie / body parameter value") { auto = true }
           p.on("--mark=TOKEN", "Mark each literal TOKEN occurrence as a position (repeatable)") { |v| marks << v }
+          p.on("--message=TEXT", "WebSocket: outbound text frame (repeatable; may carry §…§ positions; replaces the seed's stored frames)") { |v| ws_overrides << Fuzz::WsMessageSource.new(1, v) }
+          p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_overrides << fuzz_message_frame(v) }
+          p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
+          p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
+          p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the upgrade handshake goes out as an ordinary request and the 101 is read as a response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
           p.on("--mode=MODE", "sniper (default) | batteringram | pitchfork | clusterbomb") { |v| mode = parse_mode(v) }
           p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file (repeatable; order → positions)") { |v| sources << Fuzz::WordlistFile.new(v) }
           p.on("--preset=NAME", "Payload set: a built-in preset (#{Fuzz::Presets.names.join("|")}); NAME:FILE merges a user file into it") { |v| sources << parse_preset(v) }
@@ -162,10 +187,69 @@ module Gori
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
         hydrate_project_env(project_name, db_path) if project_name || db_path
-        text, default_target, src_h2, evidence, src_sni = fuzz_source(flow_id, repeater_id, request_file, project_name, db_path)
+        seed = fuzz_source(flow_id, repeater_id, request_file, project_name, db_path)
+        text = seed.text
+        default_target = seed.target
+        evidence = seed.evidence
         # An explicit --sni wins; otherwise the source's own (a repeater session's stored SNI).
-        sni ||= src_sni
-        http2 = force_h2 || src_h2
+        sni ||= seed.sni
+        http2 = force_h2 || seed.http2
+
+        # ── the WebSocket decision, taken once ────────────────────────────────────────────
+        #
+        # By the SEED, not by a `--ws` flag: a template either declares an `Upgrade: websocket`
+        # handshake or it does not, and asking the operator to say so again is a second source
+        # of truth that can disagree with the bytes. `--ws-http-only` is the inverse escape
+        # hatch, and it is a real test rather than a fallback — sweeping the handshake as an
+        # ordinary request is what finds an origin that answers 200 to an upgrade.
+        # `presence`, not the bare array: an EMPTY seed is a WebSocket capture whose only `out`
+        # rows were gori's own advisories, or a server-push socket the client never wrote to.
+        # A bare `Array` is truthy, so that used to make a FRAMED run with nothing to send —
+        # every variation dialed a real socket, handshook, sent no frame, and then sat in
+        # `WsEngine`'s no-frames branch until HANDSHAKE_TIMEOUT (15 s) instead of the
+        # milliseconds an HTTP sweep of the identical bytes costs. A handshake-only script IS
+        # that HTTP sweep, so fold to it. MCP folds the same way (`fuzz_ws_messages`).
+        ws_seed = seed.ws.try { |f| f.empty? ? nil : f }
+        # Assigned into a FRESH local first: `ws_idle_ms` is captured by the OptionParser block,
+        # so Crystal keeps it `Int64?` at every later read and neither `||` nor a `.nil?` guard
+        # narrows it in place. Clamped to the same 100–60000 window `gori run repeater send
+        # --idle-ms` uses, so the two commands pace a session identically; unset falls through
+        # to the transport's own default rather than a second copy of the number.
+        ws_idle = (v = ws_idle_ms) ? v.clamp(100_i64, 60_000_i64).milliseconds : Repeater::WsEngine::DEFAULT_IDLE
+        websocket = !ws_http_only && (ws_seed || !ws_overrides.empty?) &&
+                    Gori::Proxy::WS.upgrade_request?(text)
+        # `--message` / `--message-frame` REPLACE the seed's stored frames, the same rule
+        # `gori run repeater send` applies (its `--message` overrides the session's rows).
+        ws_messages = websocket ? (ws_overrides.empty? ? ws_seed : ws_overrides) : nil
+
+        # Every refusal below fires BEFORE anything dials. A refusal that arrives after the
+        # traffic is not a refusal — the argument `fuzz_preflight`'s own comment makes.
+        unless websocket
+          if !ws_overrides.empty?
+            abort "gori run fuzz: --message / --message-frame describe a WebSocket exchange, but " \
+                  "#{ws_http_only ? "--ws-http-only sweeps this template as plain HTTP" : "this template declares no `Upgrade: websocket` handshake"}"
+          end
+          if ws_idle_ms || ws_keep_key
+            abort "gori run fuzz: --idle-ms / --ws-keep-key apply to a WebSocket exchange, but " \
+                  "#{ws_http_only ? "--ws-http-only sweeps this template as plain HTTP" : "this template declares no `Upgrade: websocket` handshake"}"
+          end
+        end
+        if websocket
+          if race
+            abort "gori run fuzz: --race is HTTP-only — a race group is N byte-identical copies of ONE " \
+                  "request released together, which bypasses payload substitution entirely and has no " \
+                  "framed-exchange form. Add --ws-http-only to race the handshake itself"
+          end
+          if force_h2
+            abort "gori run fuzz: --http2 and a WebSocket sweep cannot combine — gori re-establishes a " \
+                  "WebSocket with an HTTP/1.1 upgrade and accepts nothing but a 101 (RFC 8441 extended " \
+                  "CONNECT has no send path). Add --ws-http-only to sweep the handshake as an h2 request"
+          end
+          if record_policy != :none
+            abort "gori run fuzz: #{Fuzz::HistoryRecord::WS_UNSUPPORTED}. Add --ws-http-only to sweep " \
+                  "the handshake as an ordinary request, which does record"
+          end
+        end
 
         # `--record-history` retains each Result's rendered request/response bytes so they can be
         # written as flows — the retention axis both the matcher and the run config gate on.
@@ -191,7 +275,10 @@ module Gori
             retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
             keep_bodies: record_policy, keep_alive: keep_alive, max_requests: max_requests,
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,
-            race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice }),
+            race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
+            ws_idle: ws_idle,
+            ws_keep_key: ws_keep_key),
+          ws_messages: ws_messages,
           matcher: matcher, verify: !insecure, sni: sni,
           overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id))
         # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
@@ -213,10 +300,18 @@ module Gori
         rescue ex : Fuzz::PlanError
           outbound.close
           abort "gori run fuzz: #{fuzz_plan_error(ex, text)}"
+          # `Gori::Error` too — `Fuzz::ChainError` and `Fuzz::WsError` are both raised by the
+          # builder and both were escaping this rescue, so the gate stayed OPEN on the way out
+          # (`CLI.run`'s own `rescue ex : Error` prints the message but never runs the
+          # `outbound.close` this block exists for).
+        rescue ex : Gori::Error
+          outbound.close
+          abort "gori run fuzz: #{ex.message}"
         end
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
         note_fuzz_auto_encode(plan)
+        note_fuzz_ws_ignored(plan)
         # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
         # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
         # sends and a configured --race-warmup cannot be honored. Say so rather than drop it
@@ -256,7 +351,8 @@ module Gori
           plan.engine.calibrate_baseline if auto_cal
           run_fuzz_stream(plan.engine, total, race, origin.scheme, origin.host, origin.port, format,
             fail_if_no_matches, plan.pool, max_requests, plan.config.reframe_grpc?,
-            record_store: record_store, record_policy: record_policy, http2: http2)
+            record_store: record_store, record_policy: record_policy, http2: http2,
+            websocket: plan.websocket?)
         ensure
           outbound.close
           record_store.try(&.close)
@@ -361,15 +457,35 @@ module Gori
                     "%c0%af / %2e%2e%2f probes aimed at the origin's own decoder arrive as text)"
       end
 
+      # Knobs this run cannot honour because it is a WebSocket sweep. Said ONCE, up front, with
+      # each flag under the name this command spells it — `Plan#ws_ignored_knobs` hands over
+      # symbols precisely so the CLI and MCP can each use their own.
+      #
+      # A note and not a refusal: none of the three is WRONG, each is simply inert here (see
+      # `Plan#ws_ignored_knobs`). Refusing a run over an inert flag is hostile; saying nothing
+      # is how an operator comes to believe a sweep followed redirects it never followed.
+      private def self.note_fuzz_ws_ignored(plan : Fuzz::Plan) : Nil
+        return if plan.ws_ignored_knobs.empty?
+        named = plan.ws_ignored_knobs.map do |k|
+          case k
+          when :follow_redirects then "--follow-redirects (a WebSocket session ends in a 101 or an error — there is no 3xx to follow)"
+          when :timeout          then "--timeout (the WebSocket path paces itself with --idle-ms)"
+          when :auto_calibrate   then "--ac (a calibration sample is a FULL session, so it would perform the script's side effects before the sweep)"
+          else                        k.to_s
+          end
+        end
+        STDERR.puts "gori run fuzz: note: ignored on a WebSocket sweep — #{named.join("; ")}"
+      end
+
       # {template text, default target (nil for file/stdin), http2, is-evidence, sni} from the
       # chosen source. `is-evidence` is PROVENANCE, not a knob: only the `--flow` branch
       # hands back captured bytes, and only that branch may therefore skip the draft-time
       # passes (see `Fuzz::PlanOptions#evidence?`). `sni` is the SOURCE's stored SNI (only a
       # repeater session carries one) and is a DEFAULT — an explicit `--sni` still wins.
       private def self.fuzz_source(flow_id : Int64?, repeater_id : Int64?, request_file : String?,
-                                   project_name : String?, db_path : String?) : {String, String?, Bool, Bool, String?}
+                                   project_name : String?, db_path : String?) : FuzzSeed
         if file = request_file
-          {read_input_file(file, "gori run fuzz"), nil, false, false, nil}
+          FuzzSeed.new(read_input_file(file, "gori run fuzz"), nil, false, false, nil)
         elsif rid = repeater_id
           fuzz_source_repeater(rid, project_name, db_path)
         elsif id = flow_id
@@ -403,29 +519,46 @@ module Gori
           #     then resynced Content-Length to the corruption — measured, `ff fe 01 02` went
           #     out as `ef bf bd ef bf bd 01 02`. `Template.parse`/`render` are byte-oriented,
           #     so nothing downstream needed the scrub in the first place.
-          {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true, nil}
+          # A captured WebSocket flow seeds its outbound frames too, so `--flow N` on a socket
+          # sweeps the exchange rather than re-issuing the handshake. `Proxy::WS.upgrade_request?`
+          # and not `detail.websocket?`: the latter is TRUE for an RFC 8441 extended CONNECT over
+          # h2, which is a real WebSocket that this path cannot re-establish (`WsEngine` writes an
+          # h1 upgrade). Seeding frames onto one would build a script no engine can send.
+          hs = String.new(Fuzz::Template.escape_literal_markers(built.bytes))
+          ws = Gori::Proxy::WS.upgrade_request?(hs) ? fuzz_ws_seed_flow(id, project_name, db_path) : nil
+          FuzzSeed.new(hs, built.target, built.http2, true, nil, ws)
         elsif !STDIN.tty?
-          {STDIN.gets_to_end, nil, false, false, nil}
+          FuzzSeed.new(STDIN.gets_to_end, nil, false, false, nil)
         else
           abort "gori run fuzz: no source — give a <flow-id>, --flow/--repeater/--request, or pipe a request on stdin"
         end
       end
 
-      # Seed the template from a saved HTTP repeater session (#749). A WebSocket session is
-      # refused with a named reason: `Fuzz::Engine` sweeps HTTP requests, and a WS session's
-      # bytes are an `Upgrade:` handshake for a framed exchange the fuzzer cannot drive.
+      # Seed the template from a saved repeater session (#749).
+      #
+      # A WebSocket session used to be refused here ("the Fuzzer sweeps HTTP requests, not a
+      # framed WebSocket exchange"), which was the asymmetry this path existed on the wrong side
+      # of: `gori run repeater send N` replays the exchange and `gori run fuzz --repeater N`
+      # would not sweep it. It now seeds the handshake AND the session's outbound frames, and
+      # the frames are where the positions go.
       private def self.fuzz_source_repeater(id : Int64, project_name : String?,
-                                            db_path : String?) : {String, String?, Bool, Bool, String?}
+                                            db_path : String?) : FuzzSeed
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        rec = begin
-          store.get_repeater(id)
+        rec, ws_rows = begin
+          r = store.get_repeater(id)
+          # Fetched while the store is open, and only for a session that IS one — the same
+          # read `cmd_repeater_send_ws` makes one command over.
+          rows = r && Repeater::WsEngine.upgrade_request?(String.new(r.request)) ? store.ws_messages_for_repeater(id) : nil
+          {r, rows}
         ensure
           store.close
         end
         abort "gori run fuzz: no repeater session ##{id}" unless rec
-        if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-          abort "gori run fuzz: repeater ##{id} is a WebSocket session — the Fuzzer sweeps HTTP requests, not a framed WebSocket exchange. Seed from an HTTP repeater, or send it with `gori run repeater send`"
-        end
+        # `evidence` per FRAME mirrors `cmd_repeater_send_ws`: a session SEEDED from a captured
+        # flow holds the client's recorded frames (evidence), while one built from
+        # `--request-raw` or MCP `ws_out_messages` holds the operator's draft (not).
+        seeded = !rec.flow_id.nil?
+        ws = ws_rows.try { |stored| fuzz_ws_seed_rows(stored, seeded) }
         # Markers are escaped, exactly as the `--flow` seed does: `§` is U+00A7 ordinary text a
         # stored request may carry, and the fuzz POSITIONS are what `--auto`/`--mark` define
         # here — an un-escaped `§` in the session would become a live position nobody marked.
@@ -434,7 +567,74 @@ module Gori
         # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
         # origin) must be swept against THAT name, or `fuzz --repeater N` reaches a different
         # vhost — or fails the handshake — where `repeater send N` succeeds.
-        {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni}
+        FuzzSeed.new(String.new(Fuzz::Template.escape_literal_markers(rec.request)),
+          rec.target, rec.http2?, false, rec.sni, ws)
+      end
+
+      # A captured flow's outbound frames, as a fuzz seed. `evidence: true` throughout — every
+      # row here was recorded by the WS relay, not typed by anyone.
+      private def self.fuzz_ws_seed_flow(id : Int64, project_name : String?,
+                                         db_path : String?) : Array(Fuzz::WsMessageSource)
+        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        rows = begin
+          store.ws_messages(id)
+        ensure
+          store.close
+        end
+        fuzz_ws_seed_rows(rows, true)
+      end
+
+      # Stored WebSocket rows → fuzz frame sources.
+      #
+      # Through `Run.ws_seed_rows`, the shared filter every seed reader goes through: it keeps
+      # the `out` direction and drops gori's own `[gori]` advisory rows, which are diagnostics
+      # gori wrote ABOUT the socket and not frames the client sent — replaying one would put a
+      # 242-byte sentence on the wire as a TEXT message. The drop is announced for the reason
+      # that helper's own comment gives: a seed silently holding fewer frames than the capture
+      # is the same class of problem as one holding an extra.
+      #
+      # Every payload goes through `Template.escape_literal_markers`, exactly as the handshake
+      # does one method up and for exactly the same reason: `§` is U+00A7, ordinary text a
+      # captured frame carries for reasons that have nothing to do with gori, and an unescaped
+      # `§…§` pair in a JSON frame would become a live position nobody marked — the sweep would
+      # then replace the app's own text with every payload in the set. `--message` /
+      # `--message-frame` text is a DRAFT and is deliberately not escaped: the operator typed
+      # that `§` and means it.
+      private def self.fuzz_ws_seed_rows(rows : Array(Store::WsMessage),
+                                         evidence : Bool) : Array(Fuzz::WsMessageSource)
+        kept, dropped = Run.ws_seed_rows(rows)
+        STDERR.puts "gori run fuzz: #{Run.ws_notice_dropped_note(dropped)}" if dropped > 0
+        kept.map do |m|
+          # `Run.seed_shape`, not `m.shape` — the same filter every other seed path uses (the
+          # repeater CLI, MCP, the TUI). It carries `fin`/`rsv` across, because replaying an
+          # RSV1 frame as RSV1 is why it was recorded, and DROPS the captured `mask_key`: a
+          # masking key is a §5.3 nonce, so pinning the recorded one onto every frame of every
+          # variation would put one fixed nonce on a ten-thousand-request sweep. It drops the
+          # captured `declared_len` for the same reason it cannot survive a splice — the payload
+          # length is about to change per payload, and a stale declaration would be a framing
+          # test nobody asked for rather than the one the operator marked.
+          Fuzz::WsMessageSource.new(m.opcode,
+            String.new(Fuzz::Template.escape_literal_markers(m.payload)),
+            Run.seed_shape(m.shape), evidence)
+        end
+      end
+
+      # `--message-frame`. The grammar is shared with `gori run repeater send` and MCP
+      # (`Repeater::WsFrameSpec`) so a script authors the same frame whichever surface it drives;
+      # only the abort's idiom is this command's.
+      private def self.fuzz_message_frame(spec : String) : Fuzz::WsMessageSource
+        msg, err, kind = Repeater::WsFrameSpec.parse_kind(spec)
+        abort "gori run fuzz --message-frame: #{err || "could not parse the frame"}" unless msg
+        # PROVENANCE again, one grammar deeper. `text=` is text the operator TYPED, so a `§` in
+        # it is a position they meant and it goes through untouched — the same rule `--message`
+        # follows. `hex=` / `b64=` are RAW BYTES they supplied, where nobody typed a `§`: the
+        # byte pair `C2 A7` occurring twice inside a protobuf or a compressed blob would
+        # otherwise open a live fuzz position and the sweep would overwrite the operator's own
+        # bytes, which is the byte-exactness invariant this codebase treats as P0. Escaping
+        # keeps them: `render` puts the single `§` back on the wire.
+        payload = String.new(msg.payload)
+        payload = String.new(Fuzz::Template.escape_literal_markers(msg.payload)) unless kind == "text"
+        Fuzz::WsMessageSource.new(msg.opcode, payload, msg.shape, false)
       end
 
       # `total` is the candidate count `fuzz_preflight` already resolved and gated — the caller
@@ -446,7 +646,7 @@ module Gori
                                        max_requests : Int64? = nil,
                                        reframe_grpc : Bool = false,
                                        record_store : Store? = nil, record_policy : Symbol = :none,
-                                       http2 : Bool = false) : Nil
+                                       http2 : Bool = false, websocket : Bool = false) : Nil
         matched = 0
         errored = 0
         recorded = 0
@@ -471,7 +671,7 @@ module Gori
             # Record BEFORE the emit gate: a recorded flow is evidence whether or not this row
             # is printed (a matched-only listing still records `all`). Bounded by MAX so an
             # `all` sweep of a huge set cannot grow the DB without end — the drop is announced.
-            if (rs = record_store) && Fuzz::HistoryRecord.records?(record_policy, r)
+            if (rs = record_store) && Fuzz::HistoryRecord.records?(record_policy, r, websocket)
               if recorded >= Fuzz::HistoryRecord::MAX
                 record_truncated = true
               else
@@ -480,7 +680,8 @@ module Gori
                 # read-only DB, and an operator who asked for evidence would get neither the
                 # evidence nor a reason.
                 fid = Fuzz::HistoryRecord.record(rs, r, scheme: scheme, host: host, port: port, http2: http2,
-                  source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) do |ex|
+                  source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli,
+                  websocket: websocket) do |ex|
                   unless record_failed
                     record_failed = true
                     STDERR.puts "gori run fuzz: could not record to History: #{ex.message} (further record errors suppressed)"
@@ -591,6 +792,22 @@ module Gori
         end
       end
 
+      # A WebSocket session came back with a non-fatal ADVISORY — a handshake whose
+      # `Sec-WebSocket-Accept` did not verify, a delivery gori could not confirm, a script that
+      # stopped early because the peer sent CLOSE, or a transcript a capture cap cut short.
+      #
+      # Reported rather than counted as an error, for the reason `Progress#ws_notes` gives: the
+      # session ran and its response is real evidence, so folding these into `errors` would both
+      # inflate the tally and flip a clean run's exit code. Reported rather than dropped, because
+      # "50 sent · 0 errors" over 50 half-delivered scripts is the silent false negative this
+      # whole field exists to prevent.
+      private def self.warn_fuzz_ws_notes(p : Fuzz::Progress) : Nil
+        return unless p.ws_notes > 0
+        STDERR.puts "gori run fuzz: note: #{p.ws_notes} WebSocket " \
+                    "session#{p.ws_notes == 1 ? "" : "s"} reported an advisory" \
+                    "#{p.ws_note_reason ? " — first: #{p.ws_note_reason}" : ""}"
+      end
+
       # `matched` is already the race's win signal the moment `--mc`/`--fc` names the success
       # response (Matcher's status/size/word/line/regex predicates all default to "pass" with
       # nothing set) — no separate race-verdict field exists. Say so once, since an operator
@@ -618,6 +835,7 @@ module Gori
         STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ev.stopped ? " (stopped)" : ""}"
         warn_fuzz_budget(p, max_requests)
         warn_fuzz_grpc_framing(p, reframe_grpc)
+        warn_fuzz_ws_notes(p)
         warn_fuzz_race(p, race, matcher_constrained)
         # Sends stopped BEFORE the socket (Sandbox, an exclude rule). They already appear as
         # per-row errors, but a run that is 100% refused reads as "the target is down" unless

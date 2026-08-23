@@ -279,6 +279,19 @@ module Gori
           if gm = r.grpc_message
             j.field "grpc_message", gm.scrub
           end
+          # The WebSocket SESSION's outcome, for the same reason the two gRPC fields above
+          # exist: `status` is 101 for every successful handshake there is, so a sweep whose
+          # payloads all made the origin close with `1008 Policy Violation` was byte-identical
+          # in JSON to one it accepted. `ws_frames_in` counts the INBOUND frames gori kept
+          # (its own `[gori]` advisory rows excluded) — `length` is those payloads
+          # concatenated and cannot distinguish one long answer from many short ones. Emitted
+          # only when the row carried them, so an HTTP run's JSON is unchanged.
+          if fi = r.ws_frames_in
+            j.field "ws_frames_in", fi
+          end
+          if cc = r.ws_close_code
+            j.field "ws_close_code", cc
+          end
           # `--extract` is a regex capture out of the RESPONSE BODY, so this is arbitrary
           # origin bytes BY CONSTRUCTION — the sharpest instance of the class in this file,
           # and the one the `payloads` fix above did not cover. MCP wraps it in `text()`.
@@ -541,6 +554,7 @@ module Gori
             io << "  grpc " << gs << ' ' << Proxy::H2::Grpc.status_name(gs)
             io << " · " << r.grpc_message if r.grpc_message
           end
+          fuzz_row_ws(io, r)
           io << "  ⟦" << r.extracted << '⟧' if r.extracted
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
@@ -559,6 +573,20 @@ module Gori
             io << "  " << Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
           end
         end
+      end
+
+      # The WebSocket half of a fuzz row. A separate method rather than two more branches inline:
+      # `fuzz_row_text` sits exactly at the complexity limit, and these are the only clauses in
+      # it that describe a different protocol.
+      #
+      # For a WebSocket row the `101` to its left is a constant — exactly as a gRPC target's
+      # `200` is — so THIS is what the session actually did. `frames` is the INBOUND count,
+      # because `length` is those frames' bytes concatenated and cannot tell one 90-byte answer
+      # from thirty 3-byte keepalives. Nothing is written for an HTTP row.
+      private def self.fuzz_row_ws(io : IO, r : Fuzz::Result) : Nil
+        return unless fi = r.ws_frames_in
+        io << "  ws " << fi << (fi == 1 ? " frame" : " frames")
+        (cc = r.ws_close_code) && (io << " · close " << cc)
       end
 
       # --- authorize (access control) -----------------------------------------

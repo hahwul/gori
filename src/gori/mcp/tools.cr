@@ -406,6 +406,15 @@ module Gori
         property grpc_stale = 0_i64
         property grpc_requests = 0_i64
         property grpc_stale_reason : String? = nil
+        # WebSocket sessions that came back with a non-fatal ADVISORY, and the first one's
+        # sentence (`Fuzz::Progress#ws_notes`). Zero for every non-WebSocket run, and
+        # `fuzz_status` omits the pair entirely then.
+        # This job took the FRAMED WebSocket path. Read by the history recorder, which must not
+        # write a manufactured WebSocket flow — and must keep writing ordinary ones for a
+        # `ws_http_only` run over the same handshake bytes. See `Fuzz::HistoryRecord#record`.
+        property? websocket = false
+        property ws_notes = 0_i64
+        property ws_note_reason : String? = nil
         # Whether the run asked for `reframe_grpc` — read only to word `grpc_stale_prefix_reason`,
         # since the remedy an agent should act on differs by whether it already passed it.
         property? reframe_grpc = false

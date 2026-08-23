@@ -149,6 +149,43 @@ module Gori::Fuzz
     def send_race(jobs : Array(Job), warmup : Bytes? = nil, timeout : Time::Span? = nil) : Array(Repeater::Result)
       jobs.map { |j| send(j.bytes, j.payload_spans) }
     end
+
+    # One WebSocket variation: dial, do the RFC 6455 handshake, send the payload-spliced frame
+    # script, drain the origin's answer, close. Returns the SYNTHESIZED `Repeater::Result` the
+    # matcher reads (head = the handshake head, body = the concatenated inbound payloads) plus
+    # the facts that struct has no field for — see `WsOutcome`.
+    #
+    # A CONCRETE DEFAULT that ERRORS, and both halves of that are deliberate:
+    #
+    # * concrete, for the reason `send_pipeline` and `send_race` are — every wrapper backend and
+    #   every spec double stays a three-line class with no WS logic to write.
+    # * an ERROR rather than a fallback to `send(handshake)`. Sending the upgrade as a plain
+    #   HTTP request would put a real request on the wire, read the 101 as a response, and
+    #   return a plausible-looking row that proves nothing about the frames the run was about —
+    #   the same silent-degradation trap `CappedBackend#send_race`'s comment records. A caller
+    #   that genuinely wants the handshake swept as HTTP asks for it by name (`--ws-http-only`),
+    #   which produces an ordinary HTTP job and never reaches here.
+    #
+    # `verbatim` is the HANDSHAKE's payload spans; each frame carries its own
+    # (`WsFrame#payload_spans`), because they are separate buffers.
+    def send_ws(handshake : Bytes, frames : Array(WsFrame),
+                verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
+      {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
+        "this backend cannot send a WebSocket session"), WsOutcome.failed}
+    end
+
+    # WebSocket sessions that came back with a non-fatal ADVISORY, and the first one's sentence.
+    # Zero for every HTTP run and for a clean WS one. Reported here rather than folded into
+    # `Result#error` for the reason `Progress#ws_notes` gives: the session ran and its response
+    # is real evidence, so an unconfirmed delivery must not flip a clean run's exit code — and
+    # must not vanish either.
+    def ws_notes : Int64
+      0_i64
+    end
+
+    def ws_note_reason : String?
+      nil
+    end
   end
 
   # Production backend over the Repeater engines (fresh connection per send — there is
@@ -236,11 +273,18 @@ module Gori::Fuzz
     # keep-alive to avoid. See `Authorize::Engine.live`.
     getter? slot_overlay : Bool
 
+    # WebSocket sessions that came back with a non-fatal advisory, and the first one's sentence.
+    # See `Backend#ws_notes`.
+    getter ws_notes : Int64 = 0_i64
+    getter ws_note_reason : String? = nil
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
-                   @evidence : Bool = false, @slot_overlay : Bool = true)
+                   @evidence : Bool = false, @slot_overlay : Bool = true,
+                   @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
+                   @ws_keep_key : Bool = false)
       # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
       # a separate change with its own stream-state rules.
       @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
@@ -323,6 +367,103 @@ module Gori::Fuzz
       # identity the slot is supposed to apply per send), so the wire rides separately, for
       # the recorder alone. See `Fuzz::HistoryRecord`.
       result.with_wire(bytes)
+    end
+
+    # One WebSocket variation — see `Backend#send_ws`. Mirrors `send` above pass for pass, and
+    # `Repeater::Sender#send_ws` seam for seam; where the two differ, the reason is named.
+    def send_ws(handshake : Bytes, frames : Array(WsFrame),
+                verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
+      # PROVENANCE by widening, exactly as `send` does it: on an evidence run no byte of the
+      # handshake was authored by anyone, so the caller's exclusion grows to the whole buffer.
+      # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
+      # populations mix in one script — a `--message` override sits beside seeded rows.
+      verbatim = Backend.all_verbatim(handshake) if @evidence
+      wire = Gori::Env.expand_bindings(handshake, verbatim)
+      # The handshake takes the session-slot overlay and the frames do not. It IS an HTTP
+      # request head — the session a WebSocket rides is chosen there — while a frame has no
+      # header lines for a header-only overlay to write. `Repeater::Sender#send_ws` draws the
+      # line in the same place and for the same reason.
+      wire = Gori::Env.overlay_slot(wire) if @slot_overlay
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire))
+        @blocked += 1
+        @blocked_reason ||= err
+        return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
+      end
+      msgs = frames.map do |f|
+        payload = f.evidence ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans)
+        # `f.shape` rides along. Rebuilding without it silently resets every frame a binding
+        # touched back to FIN=1 / RSV=0 / fresh-mask — the one defect
+        # `Repeater::Sender#expand_messages` names in its own comment.
+        Repeater::WsEngine::OutMsg.new(f.opcode, payload, f.shape, f.evidence)
+      end
+      res = Repeater::WsEngine.send(wire, msgs,
+        scheme: @origin.scheme, host: @origin.host, port: @origin.port,
+        verify_upstream: @verify, sni: @sni, idle: @ws_idle,
+        overrides: @overrides, keep_key: @ws_keep_key)
+      if note = res.note || res.truncated
+        @ws_notes += 1
+        @ws_note_reason ||= note
+      end
+      # `inbound_count` only when the socket actually opened: on a refused handshake there is no
+      # transcript, and reporting `0 frames` would state that the origin answered nothing rather
+      # than that nothing was ever asked. See `WsOutcome#frames_in`.
+      frames = res.upgraded? ? inbound_count(res) : nil
+      {adapt_ws(res).with_wire(wire), WsOutcome.new(res.close_code, frames, res.note, res.truncated)}
+    end
+
+    # A `WsEngine::Result` in the shape `Fuzz::Matcher` already reads, so the matcher needs no
+    # WebSocket branch at all: status/length/words/lines, `--mr`/`--fr`, `--mh` and `--extract`
+    # keep their one implementation.
+    #
+    #   head → the handshake response head, so `status` is the 101 and `--mh
+    #          'sec-websocket-accept'` works. Parsed, not hand-built.
+    #   body → the INBOUND payloads concatenated, which is what a WS response IS to a matcher.
+    #
+    # Two judgement calls, both load-bearing:
+    #
+    # * `[gori]` NOTICE rows are EXCLUDED from the body. `WsEngine`'s drain appends synthetic
+    #   advisory rows into `messages` (a cap it tripped, a control-frame flood it parked), and
+    #   concatenating those would let `--mr` match gori's own sentence and report a finding the
+    #   origin never sent. `Proxy::WS.notice?` is the same predicate the seed side filters with.
+    # * `incomplete` ← `truncated`, and `timed_out` stays FALSE. "The captured transcript is
+    #   short of what the server sent" is exactly what `incomplete?` already means, so it gets
+    #   the existing field rather than a second spelling. `timed_out` would be wrong: a WS drain
+    #   ends on idle BY DESIGN, so setting it would fire on every healthy session and make
+    #   `CLI::Run.incomplete_reason` blame a stall that never happened.
+    private def adapt_ws(res : Repeater::WsEngine::Result) : Repeater::Result
+      head = res.handshake_head
+      resp = head.empty? ? nil : (Proxy::Codec::Http1.parse_response_head(head) rescue nil)
+      body = IO::Memory.new
+      res.messages.each { |m| body.write(m.payload) if inbound_data?(m) }
+      Repeater::Result.new(head, body.to_slice, resp, res.duration_us, res.error,
+        !res.truncated.nil?, delivered: res.upgraded?)
+    end
+
+    # Inbound DATA rows — the count a row reports as `ws_frames_in`, and exactly the population
+    # `adapt_ws` concatenates into the body, so the two can never describe different frames.
+    private def inbound_count(res : Repeater::WsEngine::Result) : Int32
+      res.messages.count { |m| inbound_data?(m) }
+    end
+
+    # Is this transcript row inbound RESPONSE CONTENT?
+    #
+    # Three exclusions, and each one is a body the matcher must not see:
+    #
+    # * OUTBOUND rows. The transcript interleaves both directions; concatenating `out` would put
+    #   the payload gori just sent into the body it is matched against, so every `--mr` naming
+    #   the payload would self-match.
+    # * CONTROL frames (§5.5, opcode ≥ 8). A CLOSE's payload is a 2-byte status code plus an
+    #   optional reason and a PING's is keepalive filler — none of it is the origin ANSWERING.
+    #   Measured before this guard: a clean `1000 Normal` close appended `\x03\xE8` to every
+    #   body, so `length` was 2 bytes long on every row and an exact-length matcher never fired.
+    #   The close code is not lost — it rides `WsOutcome#close_code`, where a matcher can use it
+    #   as the discriminator a constant 101 cannot be.
+    # * gori's own `[gori] …` NOTICE rows. `WsEngine`'s drain appends these synthetic advisories
+    #   when a cap trips; they are diagnostics gori wrote ABOUT the socket, so letting one into
+    #   the body would let `--mr` report a finding the origin never sent. Same predicate the
+    #   seed side filters with (`CLI::Run.ws_seed_rows`).
+    private def inbound_data?(m : Repeater::WsEngine::Message) : Bool
+      m.direction == "in" && m.opcode < Gori::Proxy::WS::OP_CLOSE && !Gori::Proxy::WS.notice?(m.payload)
     end
 
     def close : Nil
@@ -584,6 +725,32 @@ module Gori::Fuzz
       @inner.send_race(jobs, warmup: warmup, timeout: timeout)
     end
 
+    # NOT a default delegation, for exactly the reason `send_race` above is not: `Fuzz::Engine`
+    # ALWAYS wraps its backend in this, so without an explicit override every WebSocket run
+    # would resolve to `Backend#send_ws`'s erroring default and report "this backend cannot send
+    # a WebSocket session" on every row, with a live `Sender` sitting one layer down.
+    #
+    # ONE charge per SESSION, not per frame. The cap is a request budget a tester works against,
+    # and a WS session is one connection and one handshake however many frames ride it — the
+    # same accounting `send_race` uses for a group.
+    def send_ws(handshake : Bytes, frames : Array(WsFrame),
+                verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
+      if cap_reached?
+        return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR), WsOutcome.failed}
+      end
+      @sent += 1
+      @inner.send_ws(handshake, frames, verbatim)
+    end
+
+    # Delegated, as `blocked` is and for the same reason: this wrapper is what the Engine holds.
+    def ws_notes : Int64
+      @inner.ws_notes
+    end
+
+    def ws_note_reason : String?
+      @inner.ws_note_reason
+    end
+
     def close : Nil
       @inner.close
     end
@@ -625,6 +792,28 @@ module Gori::Fuzz
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
       @inner.send(bytes, verbatim)
+    end
+
+    # Gated on the HANDSHAKE's request target — that is the request this session actually puts
+    # on the wire, and the origin it reaches. The frames carry no request line for
+    # `Outbound.request_target` to read and no separate destination to judge.
+    def send_ws(handshake : Bytes, frames : Array(WsFrame),
+                verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
+      o = origin
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake))
+        @blocked += 1
+        @blocked_reason ||= err
+        return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
+      end
+      @inner.send_ws(handshake, frames, verbatim)
+    end
+
+    def ws_notes : Int64
+      @inner.ws_notes
+    end
+
+    def ws_note_reason : String?
+      @inner.ws_note_reason
     end
 
     def close : Nil
@@ -783,6 +972,12 @@ module Gori::Fuzz
       # attempt"). The matcher's length-reflection baseline is meaningless for a group of N
       # byte-identical sends anyway, so skip it outright rather than special-case it downstream.
       return if @race_count
+      # A WebSocket run, for the same argument one line up. `Generator#calibration_requests`
+      # returns nothing on a WS script, so this is belt-and-braces — but the reason is worth
+      # having at the call site: a sample is a FULL session, and calibrating would perform the
+      # script's side effects up to CALIBRATION_SAMPLES times before the sweep proper, which is
+      # exactly what `Config#race_warmup`'s doc forbids. `Plan#ws_ignored_knobs` reports it.
+      return if @generator.ws?
       wanted = CALIBRATION_SAMPLES
       if (cap = @config.max_requests) && cap > 0
         room = cap - 1
@@ -982,6 +1177,9 @@ module Gori::Fuzz
     # ── per-request ──────────────────────────────────────────────────────────────
 
     private def run_one(job : Job) : Result
+      if frames = job.ws_frames
+        return run_one_ws(job, frames)
+      end
       attempts = 0
       resent_count = 0
       loop do
@@ -1016,6 +1214,35 @@ module Gori::Fuzz
         end
         raw = follow_redirects(raw) if @config.follow_redirects? && raw.error.nil?
         return @matcher.build(job, raw, resent_count: resent_count)
+      end
+    end
+
+    # One WebSocket variation. The retry loop and the gate-refusal branch are `run_one`'s,
+    # deliberately kept rather than simplified away: a dial or handshake failure is as
+    # retryable as any other network error, and a refused handshake is a BLOCKED PAYLOAD UNIT
+    # counted once, never retried — the same two facts, for the same reasons, on both paths.
+    #
+    # What is absent is `follow_redirects`. A WebSocket session ends in a 101 or an error;
+    # there is no 3xx for a hop to follow, so calling it would be dead code that reads as if
+    # redirect-following were a thing a WS run could do. `Plan#ws_ignored_knobs` says so once,
+    # up front, instead.
+    private def run_one_ws(job : Job, frames : Array(WsFrame)) : Result
+      attempts = 0
+      resent_count = 0
+      loop do
+        raw, ws = @backend.send_ws(job.bytes, frames, job.payload_spans)
+        if gate_refused?(raw.error)
+          @blocked += 1
+          @blocked_reason ||= raw.error
+          return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
+        end
+        if raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+          attempts += 1
+          resent_count += 1
+          sleep @config.retry_pause
+          next
+        end
+        return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
       end
     end
 
@@ -1184,7 +1411,8 @@ module Gori::Fuzz
       # gate-refused payload's retries and its redirect hops and poisons `all_blocked`.
       Progress.new(@sent, total, @matched, @errors, @blocked, @blocked_reason,
         @backend.sent + @backend.extra_requests,
-        @matcher.grpc_stale, @matcher.grpc_requests, @matcher.grpc_stale_reason)
+        @matcher.grpc_stale, @matcher.grpc_requests, @matcher.grpc_stale_reason,
+        @backend.ws_notes, @backend.ws_note_reason)
     end
   end
 end

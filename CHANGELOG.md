@@ -4,6 +4,8 @@
 
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.
 
+- The Fuzzer sweeps a WebSocket exchange: mark `§…§` positions in the outbound frames (and in the handshake) and each payload runs one full RFC 6455 session, with the inbound frames matched as the response body and the close code on every row. `gori run fuzz --repeater N` and MCP `fuzz_start` seed a WebSocket session's frames instead of refusing it, `--message` / `--message-frame` / `--idle-ms` / `--ws-keep-key` author them, and `--ws-http-only` sweeps the handshake as a plain request (#795).
+
 - The NEW / EDIT ISSUE card's severity steps with `←`/`→`, the way every other cycler in the TUI does; `⇥` now moves between the title and the severity row rather than being the only control that changed it (#789).
 
 - The History detail's MESSAGES pane shows a WebSocket frame's shape, as `gori run show` and the Repeater transcript already did: a PING, a PONG, a CLOSE with its code and reason, a message reassembled from several frames, an RSV bit and a client frame sent UNMASKED were all one indistinguishable `«binary Nb»` line in the one place an operator reads while working a socket (#787).
