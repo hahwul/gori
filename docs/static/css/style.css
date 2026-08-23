@@ -654,6 +654,64 @@ kbd {
   opacity: 0.9;
 }
 
+/* A slow glint sweeping the hero photograph: a brightened copy of the very
+   same frame (scrims included, so the layers cancel exactly) revealed through
+   a narrow travelling band. Brightness is multiplicative, so the gold rings —
+   the brightest pixels in the frame — catch nearly all of the light while the
+   marble stays night. Both keyframe ends park the band off-frame, so the
+   reduced-motion freeze (and the rest between sweeps) shows nothing. */
+.hero-glint {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: min(120vh, 70rem);
+  pointer-events: none;
+  -webkit-mask: linear-gradient(180deg, #000 58%, transparent 100%);
+  mask: linear-gradient(180deg, #000 58%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-glint::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(96deg, rgb(6 8 14 / 0.78) 0%, rgb(6 8 14 / 0.42) 34%, rgb(6 8 14 / 0) 58%),
+      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
+      url("../images/hero-orbits.webp") 66% 24% / cover no-repeat;
+    filter: brightness(1.5) saturate(1.15);
+    opacity: 0.55;
+    -webkit-mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
+    mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
+    animation: hero-glint 11s linear infinite;
+  }
+
+  /* Match the inverted base frame, then lift the result toward paper so the
+     sweep reads as sheen on the bronze rather than a shadow. */
+  :root[data-theme="light"] .hero-glint::before {
+    filter: invert(1) hue-rotate(180deg) saturate(0.82) brightness(1.22);
+    opacity: 0.5;
+  }
+}
+
+/* mask-size is 300% wide, so position 0%→100% carries the band from past the
+   right edge to past the left one; the tail of the cycle is a quiet rest. */
+@keyframes hero-glint {
+  0% {
+    -webkit-mask-position: 0% 0;
+    mask-position: 0% 0;
+  }
+  55% {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  100% {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+}
+
 .home-hero,
 .home-showcase,
 .home-paths,
@@ -3215,6 +3273,17 @@ html.search-lock body {
      of the ring knot so the bright crossing stays out from under the lede. */
   .home-main::before {
     height: min(90vh, 46rem);
+    background:
+      linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
+      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
+      url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
+  }
+
+  .hero-glint {
+    height: min(90vh, 46rem);
+  }
+
+  .hero-glint::before {
     background:
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
       linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
