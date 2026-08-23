@@ -110,7 +110,7 @@ module Gori
       "secret_in_body", "error_stack_leak", "secret_in_ws",
       "missing_sri", "jwt_sensitive_claims", "secret_in_url", "exposed_config",
       "cookie_no_secure", "cookie_no_httponly", "cookie_no_samesite",
-      "cookie_samesite_none_insecure", "cookie_prefix_violation",
+      "cookie_samesite_none_insecure", "cookie_prefix_violation", "cookie_broad_domain",
     }
 
     def self.accumulate_evidence?(code : String) : Bool

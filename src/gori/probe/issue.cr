@@ -114,12 +114,17 @@ module Gori
       "weak_referrer_policy"           => "Replace Referrer-Policy: unsafe-url with strict-origin-when-cross-origin or no-referrer so full URLs (and query tokens) are not leaked cross-origin.",
       "missing_permissions_policy"     => "Send a Permissions-Policy that disables or tightly scopes powerful features (camera, microphone, geolocation, payment, …) by default.",
       "weak_permissions_policy"        => "Do not allow high-risk features for all origins (*); use () to disable or (self) / an explicit origin allowlist.",
+      "missing_coop"                   => "Send Cross-Origin-Opener-Policy: same-origin (or same-origin-allow-popups where popups must keep their opener) so a cross-origin page opened from — or opening — this document cannot retain a window.opener reference for tabnabbing or cross-window XS-Leaks.",
+      "csp_missing_base_uri"           => "Add a base-uri directive (base-uri 'self' or 'none') to the CSP: base-uri has no default-src fallback, so without it an injected <base href> re-points every relative script/resource URL at an attacker origin and walks around the script-src allowlist.",
+      "mime_sniff_html"                => "Serve the response with its true Content-Type and send X-Content-Type-Options: nosniff so a browser never sniffs a body into HTML; the body here is HTML/script under a sniffable type, so it can execute in this origin. Serve user-supplied files from a separate origin or as Content-Disposition: attachment.",
+      "mime_json_as_html"              => "Label JSON responses application/json (with charset=utf-8), not text/html: rendering an API payload as a document makes any user-controlled value in it execute as markup (stored/reflected XSS).",
       "cacheable_json"                 => "Send Cache-Control: no-store (and typically no-cache, private) on JSON/API responses so browsers and shared caches do not retain tokens, PII, or account data.",
       "cookie_no_secure"               => "Add the Secure attribute so the cookie is only sent over HTTPS.",
       "cookie_no_httponly"             => "Add HttpOnly so client-side script cannot read the cookie.",
       "cookie_no_samesite"             => "Add SameSite=Lax/Strict to reduce CSRF exposure.",
       "cookie_samesite_none_insecure"  => "SameSite=None requires the Secure attribute; add Secure or use SameSite=Lax/Strict.",
       "cookie_prefix_violation"        => "A __Host-/__Secure- prefixed cookie must satisfy its rules or the browser silently rejects it: both require Secure, and __Host- also requires Path=/ and no Domain attribute.",
+      "cookie_broad_domain"            => "Drop the Domain attribute so the cookie stays host-only, or scope it to the narrowest domain that needs it — a parent Domain ships the cookie to every sibling subdomain, so a takeover or a vulnerable app on any of them can read the session or overwrite it (cookie tossing).",
       "insecure_basic_auth"            => "Serve authentication over HTTPS only; HTTP Basic credentials are Base64 (effectively cleartext) and are exposed to any network observer over http://.",
       "secret_in_url"                  => "Move credentials/tokens out of the URL (they leak via logs, history, and Referer) into headers or the body.",
       "cors_wildcard"                  => "Avoid Access-Control-Allow-Origin: * for credentialed/sensitive endpoints; echo a vetted allowlisted origin instead.",
@@ -138,6 +143,7 @@ module Gori
       "insecure_form_action"           => "Point the form action at an HTTPS URL; a form submitting to http:// sends everything the user enters (credentials included) in cleartext.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",
       "backslash_powered"              => "A probe found this parameter reaches a server-side string interpreter: appending a lone backslash perturbed the response while a doubled (escaped) backslash did not — the tell of an unescaped injection context (SQL, template/expression, command, …). Treat the value as untrusted: use parameterized queries / a safe API, or context-correctly escape it, then confirm the injection class manually.",
+      "sqli_error_based"               => "A probe appended a quote to this parameter and the server returned a database parser error, so the value reaches a SQL statement unescaped (error-based SQL injection). Use parameterized queries / prepared statements — never string-concatenate user input into SQL — return generic errors to clients (log the detail server-side), and confirm the injection manually.",
       "graphql_introspection"          => "Disable GraphQL introspection in production; the full schema it returns maps the entire API surface for an attacker.",
       "lfi_param_traversal"            => "A probe re-fetched the same resource through a folded `..` in this parameter (e.g. file=x/../doc.pdf returned byte-identical content while a control subdir did not), so the value is used as a filesystem path with `..` resolved — a path-traversal / local-file-inclusion vector. Canonicalize the resolved path and confirm it stays within an allowlisted base directory; reject `..`, encoded separators, and absolute paths, or map the parameter to an internal id instead of a path.",
       "open_redirect"                  => "A probe confirmed this parameter controls the redirect target: replacing it with an external host made the server issue a Location to that host. Validate redirect targets against an allowlist (or permit only relative, same-origin paths), and never build a Location from an unvalidated request parameter.",
@@ -155,6 +161,7 @@ module Gori
       "jwt_weak_alg"                   => "The token's alg is outside the standard JWS set, so how the verifier handles it is unpredictable. Use a registered algorithm (EdDSA / ES256 / RS256, or HS256 with a high-entropy secret) and validate it against a server-side allowlist.",
       "jwt_no_expiry"                  => "The token carries no exp claim, so it stays valid until the signing key changes. Issue short-lived access tokens with exp (and refresh tokens for longevity), and reject tokens without one.",
       "jwt_sensitive_claims"           => "JWT payloads are base64url, not encrypted — anything in them is readable by the client and by anyone who sees the token. Keep roles/permissions and personal data server-side (or in an encrypted JWE) and reference them by an opaque subject id.",
+      "jwt_key_injection_header"       => "The token's header carries jku/x5u/jwk — it names, or embeds, the key the verifier should trust. Pin verification to a preconfigured server-side key set: never fetch a token-supplied jku/x5u URL and never trust an embedded jwk, and reject tokens whose header carries them. Otherwise an attacker signs with their own key (and jku/x5u also make the server fetch an attacker URL — SSRF).",
       "sourcemap_exposed"              => "The script points at its source map, from which the original, unminified sources are reconstructable. Stop deploying .map files to production (or serve them only to authenticated/internal clients) and drop the sourceMappingURL comment from production builds.",
       "missing_sri"                    => "A cross-origin script/stylesheet is loaded with no integrity hash, so whoever controls that third party controls this page. Add integrity=\"sha384-…\" plus crossorigin=\"anonymous\", pin the exact version, or self-host the asset.",
       "exposed_config"                 => "A server-side configuration or diagnostic artifact is being served to clients (the evidence names which). Remove it from the web root or block it at the edge, then treat every credential it contained as compromised and rotate it: a readable .env / wp-config / .htpasswd hands over live secrets outright, a .git/config lets the whole repository be reconstructed, and phpinfo() / Spring actuator env expose paths, versions, and environment variables that make every other attack cheaper. Deny dotfiles and VCS directories at the reverse proxy rather than relying on the application not to route them.",
@@ -194,6 +201,9 @@ module Gori
     #     own token is the design (see Secrets::JWT), so stamping a CWE on it would re-create the
     #     exact "a High that fires everywhere" problem splitting these codes out was meant to fix.
     #   * `custom_*` — the operator's own rule; only they know what it means.
+    #   * `cookie_broad_domain` — an Info hardening note (a Domain scoped to a parent domain).
+    #     No CWE fits it cleanly (1275 is SameSite; 565/732/668 all overreach), so it stays
+    #     unmapped rather than borrowing a specific-sounding but wrong id.
     # `cwe` returns nil for these, and every surface omits the field rather than inventing one.
     CWE = {
       # --- transport / headers -----------------------------------------------------------
@@ -209,6 +219,8 @@ module Gori
       "missing_x_content_type_options" => {693, "Protection Mechanism Failure"},
       "missing_permissions_policy"     => {693, "Protection Mechanism Failure"},
       "weak_permissions_policy"        => {693, "Protection Mechanism Failure"},
+      "missing_coop"                   => {693, "Protection Mechanism Failure"},
+      "csp_missing_base_uri"           => {693, "Protection Mechanism Failure"},
       "missing_x_frame_options"        => {1021, "Improper Restriction of Rendered UI Layers or Frames"},
       "missing_referrer_policy"        => {200, "Exposure of Sensitive Information to an Unauthorized Actor"},
       "weak_referrer_policy"           => {200, "Exposure of Sensitive Information to an Unauthorized Actor"},
@@ -242,6 +254,8 @@ module Gori
       "reflected_param"           => {79, "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"},
       "dom_xss"                   => {79, "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"},
       "inline_js_uri"             => {79, "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"},
+      "mime_sniff_html"           => {79, "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"},
+      "mime_json_as_html"         => {79, "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"},
       "prototype_pollution"       => {1321, "Improperly Controlled Modification of Object Prototype Attributes ('Prototype Pollution')"},
       "prototype_pollution_param" => {1321, "Improperly Controlled Modification of Object Prototype Attributes ('Prototype Pollution')"},
       "dom_clobbering"            => {913, "Improper Control of Dynamically-Managed Code Resources"},
@@ -253,6 +267,7 @@ module Gori
       "open_redirect"          => {601, "URL Redirection to Untrusted Site ('Open Redirect')"},
       "crlf_injection"         => {113, "Improper Neutralization of CRLF Sequences in HTTP Headers ('HTTP Request/Response Splitting')"},
       "ssti"                   => {1336, "Improper Neutralization of Special Elements Used in a Template Engine"},
+      "sqli_error_based"       => {89, "Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"},
       "backslash_powered"      => {20, "Improper Input Validation"},
       "host_header_injection"  => {20, "Improper Input Validation"},
       "request_smuggling_clte" => {444, "Inconsistent Interpretation of HTTP Requests ('HTTP Request/Response Smuggling')"},
@@ -265,6 +280,7 @@ module Gori
       "nextjs_action_no_auth"     => {306, "Missing Authentication for Critical Function"},
       "ssrf_oast"                 => {918, "Server-Side Request Forgery (SSRF)"},
       "jwt_alg_none"              => {347, "Improper Verification of Cryptographic Signature"},
+      "jwt_key_injection_header"  => {347, "Improper Verification of Cryptographic Signature"},
       "jwt_weak_alg"              => {327, "Use of a Broken or Risky Cryptographic Algorithm"},
       "jwt_no_expiry"             => {613, "Insufficient Session Expiration"},
     }

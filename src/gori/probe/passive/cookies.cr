@@ -11,10 +11,13 @@ module Gori
       # A cookie that is being CLEARED (empty value + Max-Age=0 or an Expires attribute — the
       # logout/reset pattern) carries no secret, so its missing flags are suppressed as noise;
       # only live cookies are scored.
+      #
+      # Also scores the cookie's Domain= SCOPE, which is hygiene of a different kind: not a
+      # missing flag but a deliberately widened audience (see `broad_domain`).
       class Cookies < Rule
         def info : RuleInfo
           RuleInfo.new("cookies", "Cookie flags",
-            "Checks Set-Cookie hygiene: Secure, HttpOnly, SameSite, and __Host-/__Secure- prefix rules.",
+            "Checks Set-Cookie hygiene: Secure, HttpOnly, SameSite, __Host-/__Secure- prefix rules, and an over-broad Domain scope.",
             Category::COOKIES)
         end
 
@@ -38,6 +41,20 @@ module Gori
             expires_val = segs[1..].map(&.strip).find(&.downcase.starts_with?("expires=")).try(&.partition('=').[2].strip)
             # A cookie being deleted holds no secret — skip its hygiene (avoids logout/reset FPs).
             next if deletion?(value, flags, expires_val)
+
+            # Scope, not flags: a Domain= naming a PARENT of the request host ships this cookie
+            # to every sibling subdomain too. Emitted with Detection.new rather than the
+            # `cookie` helper because that helper fixes the evidence at the bare cookie name,
+            # and the operator needs to see WHICH domain it was widened to.
+            # NOT for a __Host- cookie: that prefix forbids Domain outright, so the browser
+            # REJECTS the whole cookie — it is shared with nobody, so the "widened audience"
+            # claim would be false here. `check_prefix` already reports that as
+            # cookie_prefix_violation; a broad-domain finding on top of it is a pure FP.
+            if !name.starts_with?(HOST_PREFIX) && (dom = broad_domain(ctx, flags))
+              acc << Detection.new("cookie_broad_domain", Category::COOKIES, ctx.host, ctx.url,
+                "Cookie scoped to a parent domain", Store::Severity::Info,
+                "#{name} (Domain=#{dom})", ctx.fid)
+            end
 
             has_secure = flags.includes?("secure")
             prefixed = check_prefix(ctx, name, flags, has_secure, acc)
@@ -120,6 +137,32 @@ module Gori
         private def emit_prefix(ctx : Context, name : String, missing : Array(String), acc : Array(Detection)) : Nil
           acc << cookie(ctx, "cookie_prefix_violation", "Cookie violates its #{name.starts_with?(HOST_PREFIX) ? "__Host-" : "__Secure-"} prefix rules",
             Store::Severity::Medium, "#{name}: needs #{missing.join(" + ")}")
+        end
+
+        # The cookie's Domain= — normalised, leading "." dropped — when it scopes the cookie to a
+        # STRICT PARENT of the request host; nil otherwise. `app.example.com` setting
+        # `Domain=example.com` also sends the cookie to `anything-else.example.com`, so one
+        # attacker-influenced sibling (a subdomain takeover, a vulnerable app next door) can read
+        # the session or toss a cookie back. Info, not a finding: a broad Domain is frequently
+        # deliberate (SSO shared across subdomains), so this is a hardening note.
+        #
+        # Only the STRICT widening fires, which is what keeps it quiet:
+        #   * host == domain — the apex serving its own cookie — is the common, intended shape,
+        #     and flagging it would put an Info on nearly every site.
+        #   * a Domain that does not cover the host at all is browser-REJECTED, so the cookie is
+        #     never shared with anyone and there is nothing to report.
+        #   * no Domain attribute is a host-only cookie: correctly scoped by construction.
+        # `flags` arrives already stripped + lowercased, so the comparison needs only the host
+        # downcased to match it.
+        private def broad_domain(ctx : Context, flags : Array(String)) : String?
+          domain = flags.find(&.starts_with?("domain=")).try { |f| f.split('=', 2)[1]?.try(&.strip) }
+          return nil if domain.nil? || domain.empty?
+          # A single leading dot is the RFC 2965 spelling of the same scope (".example.com"),
+          # not a different domain — normalise it away so the evidence reads consistently.
+          domain = domain.lchop('.')
+          return nil if domain.empty?
+          host = ctx.host.downcase
+          (host != domain && host.ends_with?(".#{domain}")) ? domain : nil
         end
 
         private def cookie(ctx : Context, code : String, title : String, sev : Store::Severity, name : String) : Detection
