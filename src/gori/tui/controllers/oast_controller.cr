@@ -876,11 +876,12 @@ module Gori::Tui
         return
       end
       header_y = inner.y
+      pw = provider_col_w(inner, ordered)
       screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg)
       screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg)
       screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg)
       screen.text(inner.x + 36, header_y, "DESTINATION", Theme.muted, Theme.bg)
-      screen.text(inner.right - 18, header_y, "PROVIDER", Theme.muted, Theme.bg)
+      screen.text(inner.right - pw, header_y, "PROVIDER", Theme.muted, Theme.bg)
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
       return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
@@ -892,20 +893,37 @@ module Gori::Tui
       ordered[@cb_scroll, visible]?.try &.each_with_index do |row, i|
         py = rows_rect.y + i
         abs = @cb_scroll + i
-        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused)
+        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused, pw)
       end
     end
 
-    private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool, focused : Bool) : Nil
+    # The PROVIDER column's width. It was pinned at 17 columns hard against the right edge, so a
+    # provider named after its own domain (`Demo OAST (oast.demo.test)`) truncated to
+    # `Demo OAST (oast.…` on a 200-column terminal while a hundred blank columns sat in
+    # DESTINATION beside it — the one field with a bounded, known length losing to the one that
+    # can be any length. It takes what the widest provider IN THE WHOLE FILTERED LIST needs
+    # (never just the visible slice, or the column would jitter as the list scrolls), floored at
+    # the 17 it always had and capped at a third of the pane so DESTINATION keeps the majority.
+    PROVIDER_COL_MIN = 17
+
+    private def provider_col_w(inner : Rect, rows : Array(CbRow)) : Int32
+      widest = rows.max_of? { |r| Screen.draw_width(r.provider) } || 0
+      widest.clamp(PROVIDER_COL_MIN, {inner.w // 3, PROVIDER_COL_MIN}.max)
+    end
+
+    private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool,
+                                  focused : Bool, pw : Int32) : Nil
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(rect.x, py, rect.w, 1), bg)
       screen.cell(rect.x, py, sel ? '▎' : ' ', Theme.accent, bg)
       screen.text(rect.x + 2, py, row.protocol, protocol_hue(row.protocol), bg, width: 6)
       screen.text(rect.x + 9, py, row.method || "—", Theme.text, bg, width: 8)
       screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: 17)
-      dw = {rect.right - 18 - (rect.x + 36), 6}.max
+      # One blank column between the two variable-width runs, so a destination that fills its
+      # cell does not read as one token with the provider behind it.
+      dw = {rect.right - pw - 1 - (rect.x + 36), 6}.max
       screen.text(rect.x + 36, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
-      screen.text(rect.right - 18, py, row.provider, Theme.muted, bg, width: 17)
+      screen.text(rect.right - pw, py, row.provider, Theme.muted, bg, width: pw)
     end
 
     private def protocol_hue(proto : String) : Color

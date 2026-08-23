@@ -84,18 +84,33 @@ module Gori::Tui
     # Returns the x it drew at, or nil when it drew nothing — so a caller can CHAIN something
     # further left (the Repeater hangs an `⚠ incomplete` marker off the meta it just placed)
     # without re-deriving a position this method already computed.
+    # The annotation rides the hairline as ` META `, the same padded run `Frame.card` gives
+    # its title and every badge helper below gives its label. Unpadded it butted straight into
+    # the dashes on both sides — `╭─ COLORMARKER ─────8/9 enabled─╮`, and a one-token meta
+    # (`╭─ PREVIEW INPUT ────REQ─╮`, `╭─ FINDINGS ─────0─╮`) read as debris on the border
+    # rather than as a label. This was the ONLY border decoration in the module that did not
+    # pad itself.
     def self.border_meta(screen : Screen, rect : Rect, title : String, meta : String,
                          bg : Color = Theme.bg, fg : Color = Theme.muted,
                          min_x : Int32? = nil, right_edge : Int32? = nil) : Int32?
       return nil if meta.empty? || rect.w < 4
       stop = min_x || (rect.x + 2 + (title.empty? ? 0 : Screen.draw_width(title) + 2))
-      # `right_edge` (exclusive) for a border that ALREADY carries a badge: the meta right-aligns
-      # to the left of it instead of to the card's corner. Discover's RUNS card is the case —
-      # `border_meta` ran before the run badge and was simply overpainted by it.
-      x = (right_edge || (rect.right - 2)) - Screen.draw_width(meta)
+      x = border_meta_x(rect, meta, right_edge)
       return nil if x <= stop
-      screen.text(x, rect.y, meta, fg, bg)
+      screen.text(x, rect.y, " #{meta} ", fg, bg)
       x
+    end
+
+    # Where `border_meta` puts that run's left edge — padding included, and the x it returns.
+    # Exposed so a caller whose own chrome must stop clear of the meta reads the number off
+    # the same derivation instead of rebuilding it (the gRPC transcript's ` p: ` chip limit
+    # did, and would have drifted by the padding).
+    #
+    # `right_edge` (exclusive) for a border that ALREADY carries a badge: the meta right-aligns
+    # to the left of it instead of to the card's corner. Discover's RUNS card is the case —
+    # `border_meta` ran before the run badge and was simply overpainted by it.
+    def self.border_meta_x(rect : Rect, meta : String, right_edge : Int32? = nil) : Int32
+      (right_edge || (rect.right - 2)) - Screen.draw_width(meta) - 2
     end
 
     # A slim vertical scroll gauge riding the right border of a framed content area.

@@ -158,9 +158,10 @@ module Gori::Tui
       # the same two colours the editors use. That is the operator's answer to "did my login
       # actually bind it" without leaving the row.
       nm = "$#{rule.name}"
-      screen.text(x, py, nm, bound ? Theme.env_known : Theme.env_unknown, bg,
-        bound ? Attribute::None : Attribute::Italic)
-      x += nm.size + 1
+      # `width:` like every other run on the row: an unclipped draw of a name the operator
+      # typed paints straight through the card's right hairline on a narrow terminal.
+      x = screen.text(x, py, nm, bound ? Theme.env_known : Theme.env_unknown, bg,
+        bound ? Attribute::None : Attribute::Italic, width: {rect.right - x, 0}.max) + 1
       fg = rule.enabled? ? (selected ? Theme.text_bright : Theme.text) : Theme.muted
       cond = rule.match_filter.presence || "any message"
       x = clipped(screen, rect, x, py, "⟵ #{cond}", fg, bg)
@@ -170,11 +171,15 @@ module Gori::Tui
 
     # Draw one clipped run and answer where the next one starts. Returns `x` unchanged once
     # the row is full, so a following run draws nothing rather than wrapping.
+    #
+    # Where the next run starts is what `screen.text` RETURNS — the x it reached, in columns.
+    # Deriving it again as `x + text.size + 1` counted characters, so a run holding Hangul (a
+    # `$세션토큰` binding, a `path:/로그인` filter) advanced by half its cells and the run
+    # after it was drawn back over the one before: `$세션 ⟵ path:/로그⟵ jsonpath $.토`.
     private def clipped(screen : Screen, rect : Rect, x : Int32, py : Int32,
                         text : String, fg : Color, bg : Color) : Int32
       return x if x >= rect.right
-      screen.text(x, py, text, fg, bg, width: {rect.right - x, 0}.max)
-      x + text.size + 1
+      screen.text(x, py, text, fg, bg, width: {rect.right - x, 0}.max) + 1
     end
 
     private def render_binding_row(screen : Screen, rect : Rect, row : Bindings::Row,
@@ -184,19 +189,16 @@ module Gori::Tui
       screen.cell(rect.x, py, selected ? '▎' : ' ', Theme.accent, bg)
       x = rect.x + 2
       nm = "$#{row.name}"
-      screen.text(x, py, nm, row.bound? ? Theme.env_known : Theme.env_unknown, bg,
-        row.bound? ? Attribute::None : Attribute::Italic)
-      x += nm.size + 1
+      x = screen.text(x, py, nm, row.bound? ? Theme.env_known : Theme.env_unknown, bg,
+        row.bound? ? Attribute::None : Attribute::Italic, width: {rect.right - x, 0}.max) + 1
       # `preview`, never the value: this row is the ONE place the operator sees a binding at
       # all, and it is still masked. The full value exists only in the captured traffic it
       # came from, where P7 says it must stay readable.
-      screen.text(x, py, row.preview, row.bound? ? Theme.text : Theme.muted, bg,
-        width: {rect.right - x, 0}.max)
-      x += row.preview.size + 2
+      x = screen.text(x, py, row.preview, row.bound? ? Theme.text : Theme.muted, bg,
+        width: {rect.right - x, 0}.max) + 2
       if x < rect.right
         age = (t = row.bound_at) ? relative_time(now - t) : (row.enabled ? "waiting" : "rule off")
-        screen.text(x, py, age, Theme.muted, bg, width: {rect.right - x, 0}.max)
-        x += age.size + 2
+        x = screen.text(x, py, age, Theme.muted, bg, width: {rect.right - x, 0}.max) + 2
       end
       screen.text(x, py, row.descriptor, Theme.muted, bg, width: {rect.right - x, 0}.max) if x < rect.right
     end
@@ -312,17 +314,17 @@ module Gori::Tui
       screen.text(x, py, rule.target.request? ? "REQ" : "RES", fg, bg)
       x += 4
       tag = op_tag(rule)
-      screen.text(x, py, tag, fg, bg)
-      x += tag.size + 1
+      x = screen.text(x, py, tag, fg, bg) + 1
+      # Column count, not character count — see `clipped` above. A rule named or scoped in
+      # Hangul used to have its own name overwritten by the `@host` and the description
+      # behind it.
       unless rule.name.empty?
         nm = "[#{rule.name}]"
-        screen.text(x, py, nm, Theme.accent, bg, width: {rect.right - x, 0}.max)
-        x += nm.size + 1
+        x = screen.text(x, py, nm, Theme.accent, bg, width: {rect.right - x, 0}.max) + 1
       end
       unless rule.host.empty?
         hs = "@#{rule.host}"
-        screen.text(x, py, hs, Theme.muted, bg, width: {rect.right - x, 0}.max)
-        x += hs.size + 1
+        x = screen.text(x, py, hs, Theme.muted, bg, width: {rect.right - x, 0}.max) + 1
       end
       desc = describe(rule)
       screen.text(x, py, desc, fg, bg, width: {rect.right - x, 1}.max) if x < rect.right

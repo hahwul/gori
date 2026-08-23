@@ -83,4 +83,24 @@ describe Gori::Tui::ColormarkerView do
       end
     end
   end
+
+  # The row's own width arithmetic. Every field right of the swatch is user text, and `render_row`
+  # used to advance `x` by `String#size` — CHARACTERS — after drawing it. For a rule named in
+  # Hangul that is half the cells it actually painted, so the match filter behind the name was
+  # written back over it and the row came out as
+  # `[한글 규칙 이름 — 아주 길게 늘 host:      .  국 ]`. The fix is to advance by what
+  # `screen.text` returns (the x it reached, in columns), which is what the Sitemap's tag column
+  # already does.
+  describe "#render" do
+    it "does not draw a rule's filter back over a name written in wide characters" do
+      backend = MemoryBackend.new(90, 5)
+      rule = Gori::Store::ColorRule.new(1_i64, true, "host:쇼핑몰.한국", "cyan",
+        Gori::Store::MarkerStyle::Strip, "한글 규칙 이름")
+      view.render(Screen.new(backend), Rect.new(0, 0, 90, 5), [rule], 0, 0, 1, false)
+      # Compacted, because a width-2 glyph owns two grid cells and only fills the first: what
+      # matters is that every glyph of both runs survives, in order, with the filter AFTER the
+      # closing bracket instead of on top of the name.
+      backend.row(1).delete(' ').should contain("[한글규칙이름]host:쇼핑몰.한국")
+    end
+  end
 end
