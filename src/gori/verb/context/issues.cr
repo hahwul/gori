@@ -45,5 +45,6 @@ abstract class Gori::Verb::ExecContext
   abstract def issue_links : Nil                    # open the links overlay for the open issue
   abstract def issue_open_link : Nil                # open the selected related item in its tab
   abstract def issue_link_move(delta : Int32) : Nil # move selection in the RELATED list
-  abstract def issues_export(format : Symbol) : Nil # :markdown | :json → project dir
+  abstract def issues_export_pick : Nil             # ask for the format, then the path
+  abstract def issues_export(format : Symbol) : Nil # :markdown | :json | :sarif → asks for the path
 end

@@ -81,13 +81,26 @@ When the issues are triaged, export them as a single Markdown document a teammat
 gori run issues --format markdown --export report.md
 ```
 
+In the TUI the same report is `⇧E` on the Issues tab: pick the format, then the destination path.
+
+When the report is going to a machine rather than a person, export SARIF instead — the format GitHub code scanning, DefectDojo and Azure DevOps ingest:
+
+```bash
+gori run issues --format sarif --export issues.sarif
+gh api -X POST /repos/OWNER/REPO/code-scanning/sarifs \
+  -f commit_sha="$(git rev-parse HEAD)" -f ref=refs/heads/main \
+  -f sarif="$(gzip -c issues.sarif | base64 | tr -d '\n')"
+```
+
+Each issue arrives as one result carrying its URL, its severity, and — when you linked a flow — the actual request and response as `webRequest`/`webResponse`. An issue you triaged to `false-positive` or `resolved` exports as a SARIF *suppression*, so dismissing a finding in gori dismisses it in the dashboard rather than filing it again.
+
 To hand over the raw traffic behind a finding — not just the write-up — export a History query as one HAR log. It writes to STDOUT, loads into Burp, Charles, or a browser's network panel, and imports straight back into gori:
 
 ```bash
 gori run history -q 'host:api.example.com status:200' --format har > evidence.har
 ```
 
-**Checkpoint.** `report.md` exists on disk and reads as a severity-ordered list of your issues; `evidence.har` carries the flows behind them.
+**Checkpoint.** `report.md` exists on disk and reads as a severity-ordered list of your issues; `evidence.har` carries the flows behind them. If you exported SARIF, `jq '.runs[0].results | length' issues.sarif` matches your issue count.
 
 ## Next Steps
 

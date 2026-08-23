@@ -2,6 +2,7 @@ require "json"
 require "./store"
 require "./links"
 require "./proxy/codec/content_decode"
+require "./issues_export/sarif" # Export.sarif — the SARIF 2.1.0 sibling of .markdown/.json
 
 module Gori
   module Issues
@@ -18,40 +19,66 @@ module Gori
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
           issues.each do |f|
-            flow = f.flow_id.try { |fid| store.get_flow(fid) }
-            io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
-            io << "- **Severity:** " << f.severity.label << "\n"
-            io << "- **Status:** " << f.status.label << "\n"
-            io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
-            if fid = f.flow_id
-              io << "- **Flow:** "
-              if flow
-                # method/target/host are captured (attacker/server-controlled) data — an embedded
-                # newline (reachable via an h2 :path/:method pseudo-header) would break the one-line
-                # structure, so sanitize them like f.title/f.host above.
-                # `Url.absolute_form?`, not `starts_with?("http")`: the loose test calls
-                # `httpbin.org/x` absolute and drops the host, and misses `HTTP://` (schemes
-                # are case-insensitive, RFC 3986 3.1) so an uppercase target came out doubled
-                # as `a.testHTTP://a.test/x`. Composed by hand rather than via `Url.location`
-                # only because each part has to be `one_line`d first.
-                loc = Url.absolute_form?(flow.row.target) ? one_line(flow.row.target) : "#{one_line(flow.row.host)}#{one_line(flow.row.target)}"
-                io << one_line(flow.row.method) << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
-              else
-                io << "#" << fid << " (no longer captured)\n"
-              end
-            end
-            append_related_links(io, f, store)
-            # notes is multi-line by design (free text) — scrub_controls fixes invalid UTF-8
-            # AND strips terminal escape sequences (ESC/BEL/OSC/CSI) so a notes value carrying
-            # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
-            # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
-            io << "\n" << scrub_controls(f.notes) << "\n" unless f.notes.strip.empty?
-            if flow
-              append_evidence(io, "Request", flow.request_head, flow.request_body)
-              append_evidence(io, "Response", flow.response_head, flow.response_body)
-            end
+            append_issue(io, f, f.flow_id.try { |fid| store.get_flow(fid) }, resolve_issue_links(f, store))
           end
         end
+      end
+
+      # The Markdown for ONE issue, heading included — the body of `markdown`'s loop, split out
+      # because the SARIF exporter puts this same block in each result's `message.markdown`, so a
+      # dashboard renders exactly what the operator already reads in the TUI's report. The leading
+      # "\n" separates the blocks, exactly as it did inside the loop.
+      #
+      # `flow` and `resolved_links` arrive PRE-FETCHED rather than being read here, so a caller
+      # that needs them for something else too (the SARIF exporter needs the flow for
+      # webRequest/webResponse and the links for a property bag) pays for one store read per
+      # issue instead of three.
+      #
+      # `evidence: false` omits the fenced request/response blocks. The SARIF exporter passes it
+      # because those same bytes already ride structurally in `webRequest`/`webResponse`, and
+      # embedding them twice roughly DOUBLED the document — enough to push an engagement past
+      # the size limit on a `gh api .../code-scanning/sarifs` upload.
+      private def self.append_issue(io : String::Builder, f : Store::Issue, flow : Store::FlowDetail?,
+                                    resolved_links : Array(Links::Resolved), evidence : Bool = true) : Nil
+        io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
+        io << "- **Severity:** " << f.severity.label << "\n"
+        io << "- **Status:** " << f.status.label << "\n"
+        io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
+        if fid = f.flow_id
+          io << "- **Flow:** "
+          if flow
+            # method/target/host are captured (attacker/server-controlled) data — an embedded
+            # newline (reachable via an h2 :path/:method pseudo-header) would break the one-line
+            # structure, so sanitize them like f.title/f.host above.
+            # `Url.absolute_form?`, not `starts_with?("http")`: the loose test calls
+            # `httpbin.org/x` absolute and drops the host, and misses `HTTP://` (schemes
+            # are case-insensitive, RFC 3986 3.1) so an uppercase target came out doubled
+            # as `a.testHTTP://a.test/x`. Composed by hand rather than via `Url.location`
+            # only because each part has to be `one_line`d first.
+            loc = Url.absolute_form?(flow.row.target) ? one_line(flow.row.target) : "#{one_line(flow.row.host)}#{one_line(flow.row.target)}"
+            io << one_line(flow.row.method) << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
+          else
+            io << "#" << fid << " (no longer captured)\n"
+          end
+        end
+        append_related_links(io, resolved_links)
+        # notes is multi-line by design (free text) — scrub_controls fixes invalid UTF-8
+        # AND strips terminal escape sequences (ESC/BEL/OSC/CSI) so a notes value carrying
+        # an OSC "set window title" can't drive a TTY when the report is printed/`cat`d,
+        # yet keeps its newlines (unlike one_line, which would flatten title/host to a line).
+        io << "\n" << scrub_controls(f.notes) << "\n" unless f.notes.strip.empty?
+        if flow && evidence
+          append_evidence(io, "Request", flow.request_head, flow.request_body)
+          append_evidence(io, "Response", flow.response_head, flow.response_body)
+        end
+      end
+
+      # An issue's related workbench entities, resolved for display. One place, because both
+      # Markdown (`append_related_links`) and SARIF (a `gori/links` property bag) need the same
+      # list and reading it twice per issue is two round-trips for one answer.
+      protected def self.resolve_issue_links(f : Store::Issue, store : Store) : Array(Links::Resolved)
+        Links.resolve_all(store,
+          Links.dedupe_issue_flow(store.list_links(Store::LinkOwnerKind::Issue, f.id), f.flow_id))
       end
 
       def self.json(issues : Array(Store::Issue), store : Store? = nil) : String
@@ -117,12 +144,10 @@ module Gori
         scrub_only(s).gsub(/[[:cntrl:]]+/, " ").strip
       end
 
-      private def self.append_related_links(io : String::Builder, f : Store::Issue, store : Store) : Nil
-        links = store.list_links(Store::LinkOwnerKind::Issue, f.id)
-        links = Links.dedupe_issue_flow(links, f.flow_id)
-        return if links.empty?
+      private def self.append_related_links(io : String::Builder, resolved : Array(Links::Resolved)) : Nil
+        return if resolved.empty?
         io << "\n### Related\n\n"
-        Links.resolve_all(store, links).each do |res|
+        resolved.each do |res|
           io << "- **" << res.tag << "** " << one_line(res.url)
           io << " — " << one_line(res.label)
           io << " (stale)" if res.stale?
@@ -157,6 +182,45 @@ module Gori
         end
       end
 
+      # The displayable view of ONE captured body, and the single place the evidence rules live:
+      # de-chunk + inflate Content-Encoding, cap at EVIDENCE_CAP, cut on a codepoint boundary,
+      # and DROP a body whose readable prefix isn't valid UTF-8 rather than emit mojibake. Shared
+      # by the Markdown report (which fences `text` and prints a note for `binary?`) and the SARIF
+      # exporter (which puts `text` in the result's webRequest/webResponse body), so the two can
+      # never disagree about what a body says or how much of it survived.
+      #
+      # `size` is the DECODED byte count — what the note reports — not the stored wire size.
+      record BodyEvidence, text : String?, size : Int32, truncated : Bool do
+        # A body that was there but could not be shown, as opposed to no body at all. The two
+        # differ in the report: one prints "[binary body omitted, N bytes]", the other nothing.
+        def binary? : Bool
+          text.nil? && size > 0
+        end
+
+        def truncated? : Bool
+          truncated
+        end
+      end
+
+      private def self.body_evidence(head : Bytes, body : Bytes?) : BodyEvidence
+        return BodyEvidence.new(nil, 0, false) if body.nil? || body.empty?
+        # De-chunk + inflate Content-Encoding for display, mirroring `gori run show` and the
+        # TUI detail view — otherwise a chunked body embeds its wire-format chunk framing
+        # verbatim, and a gzip/br/deflate body (the common case for real HTTPS traffic) fails
+        # the valid-UTF-8 check below and gets dropped as "binary", silently discarding the
+        # evidence a shared report exists to preserve.
+        decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
+        display_body = decoded || body
+        truncated = display_body.size > EVIDENCE_CAP
+        # Decide text-vs-binary on the readable PREFIX (≤ cap), not the whole body: a body
+        # that is valid text up to the cap but has a stray byte deeper still shows its
+        # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
+        # multi-byte char split at exactly `cap` isn't misread as binary.
+        slice = truncated ? trim_to_codepoint_boundary(display_body[0, EVIDENCE_CAP]) : display_body
+        text = String.new(slice)
+        BodyEvidence.new(text.valid_encoding? ? text : nil, display_body.size, truncated)
+      end
+
       private def self.append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil
         return if head.nil? || head.empty?
         cap = EVIDENCE_CAP
@@ -172,25 +236,12 @@ module Gori
           hslice = head.size > cap ? head[0, cap] : head
           c << String.new(hslice).scrub.rstrip
           c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
-          if body && !body.empty?
-            # De-chunk + inflate Content-Encoding for display, mirroring `gori run show` and the
-            # TUI detail view — otherwise a chunked body embeds its wire-format chunk framing
-            # verbatim, and a gzip/br/deflate body (the common case for real HTTPS traffic) fails
-            # the valid-UTF-8 check below and gets dropped as "binary", silently discarding the
-            # evidence a shared report exists to preserve.
-            decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
-            display_body = decoded || body
-            # Decide text-vs-binary on the readable PREFIX (≤ cap), not the whole body: a body
-            # that is valid text up to the cap but has a stray byte deeper still shows its
-            # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
-            # multi-byte char split at exactly `cap` isn't misread as binary.
-            slice = display_body.size > cap ? trim_to_codepoint_boundary(display_body[0, cap]) : display_body
-            if String.new(slice).valid_encoding?
-              c << "\n\n" << String.new(slice)
-              c << "\n\n[… body truncated, #{display_body.size} bytes total …]" if display_body.size > cap
-            else
-              c << "\n\n[binary body omitted, #{display_body.size} bytes]"
-            end
+          ev = body_evidence(head, body)
+          if text = ev.text
+            c << "\n\n" << text
+            c << "\n\n[… body truncated, #{ev.size} bytes total …]" if ev.truncated?
+          elsif ev.binary?
+            c << "\n\n[binary body omitted, #{ev.size} bytes]"
           end
         end
         fence = "`" * fence_len(content)

@@ -64,6 +64,21 @@ module Gori::Tui
       ], current, :probe_mode)
     end
 
+    # The Issues tab's export FORMAT picker (kind :export_format — the Runner hands the pick
+    # on to the destination-path popup). Unlike its three siblings this picker sets nothing:
+    # it answers a question the operator is being asked once, so `current` is -1 and no row
+    # wears the "● current" marker, while `@selected` still parks on Markdown (the report
+    # ⇧E used to write outright) as the default an ↵ without moving accepts.
+    #
+    # Values are indices into `Runner::EXPORT_FORMATS`, which is where the symbols live.
+    def self.for_export_format : ChoicePicker
+      new("EXPORT ISSUES AS", [
+        Choice.new("MARKDOWN — the human-readable report", 'm', Theme.accent, 0),
+        Choice.new("JSON — the stable machine shape", 'j', Theme.text, 1),
+        Choice.new("SARIF — for GitHub code scanning / CI dashboards", 's', Theme.orange, 2),
+      ], -1, :export_format)
+    end
+
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::Choice

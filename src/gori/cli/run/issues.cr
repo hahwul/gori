@@ -37,7 +37,7 @@ module Gori
                      "  gori run issues delete <issue-id>"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json | markdown") { |v| format = parse_format(v, [:text, :json, :markdown]) }
+          p.on("--format=FMT", "Output: text (default) | json | markdown | sarif") { |v| format = parse_format(v, [:text, :json, :markdown, :sarif]) }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
@@ -54,6 +54,9 @@ module Gori
         # connection — and so the abort below runs after a clean close.
         result = begin
           issues = store.issues
+          # `text` to STDOUT only: every other format has a meaningful empty document (an empty
+          # JSON array, a header-only report, a SARIF log with `results: []` — which is how a CI
+          # gate learns the scan RAN and found nothing), and an --export always writes a file.
           if issues.empty? && format == :text && export_path.nil?
             STDERR.puts "no issues"
             return
@@ -62,6 +65,7 @@ module Gori
             case format
             when :json     then Issues::Export.json(issues, store)
             when :markdown then Issues::Export.markdown(issues, store, project.name)
+            when :sarif    then Issues::Export.sarif(issues, store, project.name)
             else                issues_text(issues)
             end
           {content, issues.size}

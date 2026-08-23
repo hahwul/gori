@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "json"
 
-# `gori run issues` — the text listing row, and the JSON / Markdown reports the
+# `gori run issues` — the text listing row, and the JSON / Markdown / SARIF reports the
 # `--format` and `--export` flags write (Issues::Export, shared with the TUI's
-# issues.export-md / issues.export-json verbs).
+# issues.export verb).
 
 private def with_store(&)
   path = File.tempname("gori-cliissues", ".db")
@@ -154,6 +154,22 @@ describe "gori run issues --format markdown" do
       # one blank line between the last header and the body — not three
       md.should contain("Content-Length: 9\n\nuser=root")
       md.should_not contain("Content-Length: 9\n\n\nuser=root")
+    end
+  end
+
+  it "is what the SARIF export wraps too — one module, so CLI and TUI can't drift" do
+    # `gori run issues --format sarif --export PATH` and the TUI's Export → SARIF both go
+    # through `Issues::Export.sarif` and both append the same missing trailing newline
+    # (JSON::Builder emits none), so the two surfaces write byte-identical files.
+    with_store do |store|
+      issues = [issue(1_i64, "Reflected XSS", Gori::Store::Severity::High, "shop.test", nil,
+        "encode on output")]
+      content = Gori::Issues::Export.sarif(issues, store, "demo")
+      content.ends_with?('\n').should be_false                      # …so both callers add one
+      written = content.ends_with?('\n') ? content : "#{content}\n" # the shared write rule
+      parsed = JSON.parse(written)
+      parsed["runs"][0]["tool"]["driver"]["name"].as_s.should eq("gori")
+      parsed["runs"][0]["results"][0]["properties"]["gori/project"].as_s.should eq("demo")
     end
   end
 

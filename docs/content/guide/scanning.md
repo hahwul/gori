@@ -102,7 +102,10 @@ Discover sends real, unsolicited traffic to the target. Only run it against syst
 
 ```bash
 gori run issues --format markdown --export report.md
+gori run issues --format sarif --export issues.sarif   # for GitHub code scanning / a CI dashboard
 ```
+
+In the TUI, `⇧E` asks for the format and then the destination path. See [Export the report](/playbooks/triage-and-report/#5-export-the-report) for what a SARIF result carries.
 
 ### Marking issues (multi-select)
 

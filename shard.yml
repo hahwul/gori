@@ -28,6 +28,9 @@ dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
     version: ~> 0.23
+  sarif:
+    github: hahwul/sarif.cr
+    version: ~> 0.2
 
 development_dependencies:
   ameba:

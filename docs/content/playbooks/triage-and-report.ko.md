@@ -81,13 +81,26 @@ gori run notes --all
 gori run issues --format markdown --export report.md
 ```
 
+TUI에서는 Issues 탭의 `⇧E`가 같은 리포트입니다. 형식을 고르고, 저장 경로를 고르면 됩니다.
+
+리포트를 사람이 아니라 기계가 읽는다면 SARIF로 내보내세요. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다:
+
+```bash
+gori run issues --format sarif --export issues.sarif
+gh api -X POST /repos/OWNER/REPO/code-scanning/sarifs \
+  -f commit_sha="$(git rev-parse HEAD)" -f ref=refs/heads/main \
+  -f sarif="$(gzip -c issues.sarif | base64 | tr -d '\n')"
+```
+
+이슈 하나가 result 하나로, URL과 심각도를 싣고 도착합니다. 플로우를 링크해 두었다면 실제 요청·응답이 `webRequest`/`webResponse`로 함께 갑니다. `false-positive`나 `resolved`로 트리아지한 이슈는 SARIF *suppression*으로 나가므로, gori에서 정리한 발견은 대시보드에서도 정리된 상태로 남고 다시 열리지 않습니다.
+
 발견 뒤의 원본 트래픽까지 — 요약본만이 아니라 — 넘기려면, History 쿼리를 하나의 HAR 로그로 내보내세요. STDOUT으로 쓰이고, Burp·Charles·브라우저 네트워크 패널로 불러들일 수 있으며, gori로 그대로 다시 임포트됩니다:
 
 ```bash
 gori run history -q 'host:api.example.com status:200' --format har > evidence.har
 ```
 
-**체크포인트.** `report.md`가 디스크에 존재하고 심각도 순으로 정렬된 이슈 목록으로 읽히며, `evidence.har`가 그 뒤의 플로우들을 담습니다.
+**체크포인트.** `report.md`가 디스크에 존재하고 심각도 순으로 정렬된 이슈 목록으로 읽히며, `evidence.har`가 그 뒤의 플로우들을 담습니다. SARIF로 내보냈다면 `jq '.runs[0].results | length' issues.sarif`가 이슈 개수와 일치합니다.
 
 ## 다음 단계 {#next-steps}
 

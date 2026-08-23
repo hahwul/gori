@@ -194,16 +194,42 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issue_link_move(delta)
   end
 
-  # Ask where to write the report, then write it. The empty-store check happens BEFORE the
-  # popup (asking for a path and then refusing to write is worse than not asking), and uses
-  # count_issues rather than materializing store.issues here and again in the controller.
+  # The export formats, in the order `ChoicePicker.for_export_format` lists them — its
+  # `Choice#value` is an index into this array, so the picker holds the labels and this
+  # holds the symbols, and neither spells the other's half.
+  EXPORT_FORMATS = [:markdown, :json, :sarif]
+
+  # Step one: WHICH format. Asked rather than baked into the verb because the answer changes
+  # per export — the same finding goes to a teammate as Markdown and to CI as SARIF — and a
+  # verb per format meant a new palette entry every time a format was added.
+  #
+  # The empty-store check happens BEFORE the picker for the reason it used to happen before
+  # the path popup: asking two questions and then refusing to write is worse than not asking.
+  # It uses count_issues rather than materializing store.issues here and again downstream.
+  def issues_export_pick : Nil
+    if @session.store.count_issues == 0
+      @toast = "no issues to export"
+      return
+    end
+    # A modal opened from inside another's commit is not closed afterwards (see
+    # `close_active_overlay`) — the same seam `open_view_scope` rides for its two-step.
+    open_choice_picker(ChoicePicker.for_export_format) do |p|
+      issues_export(EXPORT_FORMATS[p.selected_value]? || :markdown)
+    end
+  end
+
+  # Step two: WHERE to write it. Still reachable on its own — `gori run issues --export` has
+  # no picker, and a caller that already knows the format should not have to open one.
   def issues_export(format : Symbol) : Nil
     if @session.store.count_issues == 0
       @toast = "no issues to export"
       return
     end
-    ext = format == :json ? "json" : "md"
-    kind = format == :json ? :issues_json : :issues_md
+    ext, kind = case format
+                when :json  then {"json", :issues_json}
+                when :sarif then {"sarif", :issues_sarif}
+                else             {"md", :issues_md}
+                end
     open_export(kind, File.join(Dir.current, "issues.#{ext}")) { |p| issues_controller.issues_export_to(format, p) }
   end
 end

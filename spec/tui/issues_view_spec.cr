@@ -482,8 +482,8 @@ describe "Issues verbs" do
     keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
     keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
     keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
-    # export is a chord-less Global palette verb
-    reg["issues.export-md"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
-    reg["issues.export-json"]?.should_not be_nil
+    # export is a chord-less Global palette verb; the FORMAT comes from a picker, not the id
+    reg["issues.export"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
+    keymap.lookup(Gori::Verb::Chord.new("e", shift: true), Gori::Verb::Scope::Issues).should eq("issues.export-key")
   end
 end
