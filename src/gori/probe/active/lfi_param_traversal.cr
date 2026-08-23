@@ -1,7 +1,7 @@
 require "uri"
 require "./types"
-require "../../miner/inject"
-require "../../fuzz/content_length"
+require "./insertion_points"
+require "../../miner/types"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 
@@ -9,7 +9,7 @@ module Gori
   module Probe
     module Active
       # Active parameter path-traversal / LFI probe (a self-referential byte differential, sibling of
-      # NginxAliasTraversal but keyed on a PARAMETER value instead of the URL path). When a query
+      # NginxAliasTraversal but keyed on a PARAMETER value instead of the URL path). When a
       # parameter names a file the server reads off disk (`?file=doc.pdf`, `?page=home.html`), an
       # un-canonicalized read resolves `..` segments — the local-file-inclusion / path-traversal
       # class. Passive analysis cannot tell such a parameter apart from any other string.
@@ -31,12 +31,13 @@ module Gori
       #   * 2xx captured status with a non-empty body — there must be a real served resource + baseline.
       #   * a PATH-LIKE parameter (value holds a `/` or a file extension, or a known file-ish name) whose
       #     value does not already contain `..` — so arbitrary params aren't probed.
+      # Insertion points come from the shared `InsertionPoints` model (query today).
       class LfiParamTraversal < Rule
         FOLD     = "x/../"      # value -> x/../value          (literal ..)
         ENC_FOLD = "x/%2e%2e/"  # value -> x/%2e%2e/value      (encoded .. — defeats a literal-".." filter)
         CONTROL  = "x/zzznope/" # value -> x/zzznope/value     (a real subdir that cannot normalize back)
 
-        # Query-param names that conventionally carry a filesystem path/filename — and little else.
+        # Param names that conventionally carry a filesystem path/filename — and little else.
         # `name`, `url`, `view`, `page`, and `load` were dropped: `?name=John`, `?view=grid`, and
         # `?page=2` are ordinary application parameters, and this name list is checked REGARDLESS
         # of the value, so each of them alone sent three probes at a large share of all traffic.
@@ -63,20 +64,19 @@ module Gori
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1], g[4])
+          s, slot = gate(detail, opts) || return nil
+          InsertionPoints.dedup_key("lfi_param_traversal", detail, s.method, s.path, [slot])
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          g = gate(detail, opts) || return nil
-          method_up, path, pairs, idx, name = g
-          body = detail.request_body
-          fold = rebuild_query(detail.request_head, body, path, with_prefix(pairs, idx, FOLD))
+          s, slot = gate(detail, opts) || return nil
+          fold = InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(prefix: FOLD)}])
           followups = [
-            rebuild_query(detail.request_head, body, path, with_prefix(pairs, idx, ENC_FOLD)),
-            rebuild_query(detail.request_head, body, path, with_prefix(pairs, idx, CONTROL)),
+            InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(prefix: ENC_FOLD)}]),
+            InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(prefix: CONTROL)}]),
           ]
-          Plan.new(fold, [Param.new("query", name, "")], key_string(detail, method_up, path, name), followups)
+          key = InsertionPoints.dedup_key("lfi_param_traversal", detail, s.method, s.path, [slot])
+          Plan.new(fold, [Param.new(slot.loc.label, slot.name, "")], key, followups)
         end
 
         # The differential: flag High iff a folded variant (literal or encoded `..`) returned
@@ -118,47 +118,26 @@ module Gori
           nil
         end
 
-        # Shared gate for plan + dedup_key. Returns {METHOD, path, all query pairs verbatim, the index
-        # of the first path-like pair, its DECODED name} for an eligible GET with such a param, else nil.
-        private def gate(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Int32, String}?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless diff_method_allowed?(method_up, opts)
+        # Shared gate for plan + dedup_key. Returns {surface, the first path-like slot (name
+        # scrubbed for PCRE/evidence safety)} for an eligible flow, else nil. The scrub stays here
+        # rather than in InsertionPoints: `path_like?` runs PCRE (`FILE_EXT`/`NUMERIC_VALUE`) over
+        # the value, and Crystal's Regex RAISES on non-UTF-8; the module keeps values UNSCRUBBED so
+        # rules that re-send them (all the others) preserve bytes, and lfi scrubs at the point of use.
+        private def gate(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, InsertionPoints::Slot}?
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless diff_method_allowed?(s.method, opts)
           status = detail.row.status
           return nil unless status && (200..299).includes?(status)
           rb = detail.response_body
           return nil if rb.nil? || rb.empty?
-          path, query = split_target(Active.origin_form(target))
-          return nil if query.empty?
-          pairs = query.split('&')
-          found = first_pathlike(pairs) || return nil
-          {method_up, path, pairs, found[0], found[1]}
-        end
-
-        # {index, decoded name} of the first path-like query pair whose value does not already contain
-        # `..`, or nil.
-        private def first_pathlike(pairs : Array(String)) : {Int32, String}?
-          pairs.each_with_index do |pair, i|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            raw_name = pair[0...eq]
-            next if raw_name.empty?
-            raw_value = pair[(eq + 1)..]
-            next if raw_value.empty?
-            dvalue = decode(raw_value)
-            next if dvalue.includes?("..") # already-traversing / degenerate
-            dname = decode(raw_name)
-            return {i, dname} if path_like?(dname, dvalue)
+          found = s.slots.find do |slot|
+            next false if slot.raw_value.empty?
+            v = slot.value.scrub
+            next false if v.includes?("..") # already-traversing / degenerate
+            path_like?(slot.name.scrub, v)
           end
-          nil
-        end
-
-        # rule + host:PORT + METHOD + path + param name (a traversal is per-parameter). Length-prefix
-        # the name so an odd char can't collide with the path segment.
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String
-          "lfi_param_traversal|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
+          return nil unless found
+          {s, found.copy_with(name: found.name.scrub)}
         end
 
         # Path-like: the value carries a `/` or a file-extension tell, or the name is a conventional
@@ -167,38 +146,6 @@ module Gori
           return true if value.includes?('/')
           return true if FILE_EXT.matches?(value)
           KNOWN_FILE_PARAMS.includes?(name.downcase) && !NUMERIC_VALUE.matches?(value)
-        end
-
-        # A copy of the query pairs with pair `idx`'s value prefixed (name kept verbatim, every other
-        # segment untouched).
-        private def with_prefix(pairs : Array(String), idx : Int32, prefix : String) : String
-          dup = pairs.dup
-          pair = dup[idx]
-          if eq = pair.index('=')
-            dup[idx] = "#{pair[0...eq]}=#{prefix}#{pair[(eq + 1)..]}"
-          end
-          dup.join('&')
-        end
-
-        # Percent-decoded AND scrubbed. The scrub is not cosmetic: `path_like?` runs PCRE
-        # (`FILE_EXT`, `NUMERIC_VALUE`) over this, and Crystal's Regex RAISES
-        # `ArgumentError: UTF-8 error: illegal byte` on a subject that is not valid UTF-8 —
-        # which `%FF` decodes to. Every other rule that PCREs a URL scrubs first and says why
-        # (`passive/secret_in_url.cr`, `security_headers.cr`, `cors.cr`); this one did not, and
-        # its callers make that a crash rather than a skipped rule: the TUI's `A` estimate
-        # reaches it through `Analyzer#active_estimate` with no `rescue` in the event loop, and
-        # `scan_detail`'s blanket rescue silently drops every ACTIVE rule registered after it.
-        private def decode(s : String) : String
-          URI.decode_www_form(s).scrub
-        rescue
-          s.scrub
-        end
-
-        # {path, query-without-'?'} — query is "" when the target has none.
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
         end
 
         private def probe_status(result : Repeater::Result) : Int32
@@ -217,25 +164,6 @@ module Gori
           decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
           b = decoded || body
           b[0, {b.size, BODY_CAP}.min]
-        end
-
-        # Reassemble the request with a new query on the request line, preserving the body and
-        # re-syncing Content-Length (mirrors ReflectedParam#rebuild / BackslashPowered#rebuild_query).
-        private def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end

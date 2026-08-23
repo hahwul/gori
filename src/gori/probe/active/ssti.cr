@@ -1,8 +1,7 @@
 require "uri"
 require "./types"
+require "./insertion_points"
 require "../../miner/types"
-require "../../miner/inject"
-require "../../fuzz/content_length"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 
@@ -27,7 +26,8 @@ module Gori
       #   * the DOUBLE product — a coincidental constant would have to read `49` in A and `56` in B at
       #     the same canary region, which distinct fresh canaries make impossible.
       # Gated to body-comparable methods (GET by default, HEAD out; Options#allow_unsafe widens), since
-      # the confirmation reads response bodies.
+      # the confirmation reads response bodies. Insertion points come from the shared
+      # `InsertionPoints` model (query today).
       class Ssti < Rule
         # Fresh-canary-wrapped polyglot values are built per param; these are the two arithmetic
         # products (chosen away from common page constants like 7 / 100).
@@ -47,28 +47,29 @@ module Gori
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless diff_method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          names = [] of String
-          each_param_name(query) { |raw| names << decode_name(raw) }
-          return nil if names.empty? || names.size > opts.max_params
-          build_dedup_key(detail, method_up, path, names)
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless diff_method_allowed?(s.method, opts)
+          return nil if s.slots.empty? || s.slots.size > opts.max_params
+          InsertionPoints.dedup_key("ssti", detail, s.method, s.path, s.slots)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless diff_method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          params = harvest(query)
-          return nil if params.empty? || params.size > opts.max_params
-          probe_a = rebuild(detail.request_head, path, inject(query, params, EXPR_A), detail.request_body)
-          probe_b = rebuild(detail.request_head, path, inject(query, params, EXPR_B), detail.request_body)
-          key = build_dedup_key(detail, method_up, path, params.map(&.name))
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless diff_method_allowed?(s.method, opts)
+          return nil if s.slots.empty? || s.slots.size > opts.max_params
+
+          params = [] of Param
+          changes_a = [] of {InsertionPoints::Slot, InsertionPoints::Change}
+          changes_b = [] of {InsertionPoints::Slot, InsertionPoints::Change}
+          s.slots.each do |slot|
+            canary = Miner::Canary.fresh
+            params << Param.new(slot.loc.label, slot.name, canary)
+            changes_a << {slot, InsertionPoints::Change.new(replace: polyglot(canary, EXPR_A))}
+            changes_b << {slot, InsertionPoints::Change.new(replace: polyglot(canary, EXPR_B))}
+          end
+          probe_a = InsertionPoints.build(detail, changes_a)
+          probe_b = InsertionPoints.build(detail, changes_b)
+          key = InsertionPoints.dedup_key("ssti", detail, s.method, s.path, s.slots)
           Plan.new(probe_a, params, key, [probe_b])
         end
 
@@ -118,71 +119,6 @@ module Gori
           canary + "{{" + expr + "}}" + "${" + expr + "}" + "\#{" + expr + "}" + "<%= " + expr + " %>" + canary
         end
 
-        # A copy of the query with every k=v value replaced by the canary-wrapped polyglot for `expr`
-        # (URL-encoded so the markers survive the request line; the alnum canary passes through).
-        private def inject(query : String, params : Array(Param), expr : String) : String
-          idx = 0
-          query.split('&').map do |pair|
-            next pair if pair.empty?
-            eq = pair.index('=')
-            next pair unless eq
-            name = pair[0...eq]
-            next pair if name.empty?
-            p = params[idx]
-            idx += 1
-            # space_to_plus:false → spaces become %20, not +. The `<%= E %>` (ERB) branch has spaces;
-            # a server that url-decodes %XX but leaves `+` literal would otherwise see `<%=+E+%>` and
-            # never evaluate it. %20 is decoded to a space universally.
-            "#{name}=#{URI.encode_www_form(polyglot(p.canary, expr), space_to_plus: false)}"
-          end.join('&')
-        end
-
-        # One Param{query, decoded name, fresh canary} per valid k=v query pair — canary shared across
-        # the A/B probes so `between` locates the same region in each.
-        private def harvest(query : String) : Array(Param)
-          params = [] of Param
-          return params if query.empty?
-          query.split('&').each do |pair|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            name = pair[0...eq]
-            next if name.empty?
-            params << Param.new("query", decode_name(name), Miner::Canary.fresh)
-          end
-          params
-        end
-
-        private def each_param_name(query : String, & : String ->)
-          return if query.empty?
-          query.split('&').each do |pair|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            name = pair[0...eq]
-            next if name.empty?
-            yield name
-          end
-        end
-
-        private def build_dedup_key(detail : Store::FlowDetail, method_upcase : String, path : String,
-                                    names : Array(String)) : String
-          sig = names.map { |n| "#{n.bytesize}:#{n}@query" }.sort!.join(",")
-          "ssti|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{sig}"
-        end
-
-        private def decode_name(name : String) : String
-          URI.decode_www_form(name)
-        rescue
-          name
-        end
-
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
-        end
-
         private def decoded_text(result : Repeater::Result) : String
           decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
           bytes = decoded || result.body
@@ -190,23 +126,6 @@ module Gori
           String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
         rescue
           ""
-        end
-
-        private def rebuild(orig_head : Bytes, path : String, new_query : String, body : Bytes?) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end

@@ -1,8 +1,7 @@
 require "uri"
 require "./types"
-require "../../miner/inject"
-require "../../fuzz/engine"
-require "../../fuzz/content_length"
+require "./insertion_points"
+require "../../miner/types"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 
@@ -15,7 +14,7 @@ module Gori
       # string INTERPRETER (SQL, a template/expression engine, a shell, …) — without relying on a
       # specific error message — by exploiting how a backslash escapes.
       #
-      # For each query parameter it sends three requests that carry the param's ORIGINAL value with a
+      # For each parameter it sends three requests that carry the param's ORIGINAL value with a
       # suffix appended:
       #   baseline  value          (unchanged)
       #   single    value\         (a lone trailing backslash)
@@ -38,15 +37,16 @@ module Gori
       # out; by default GET only (POST/PUT/… are never auto-probed — they mutate state), but an
       # explicit opt-in (Options#allow_unsafe: the manual per-flow scan or AGGRESSIVE mode) widens
       # it to any body-bearing method. Capped at MAX_PROBE_PARAMS params (raised under AGGRESSIVE)
-      # so a wide query can't blow up the request count.
+      # so a wide param set can't blow up the request count. Insertion points come from the shared
+      # `InsertionPoints` model (query today).
       class BackslashPowered < Rule
-        # Probe at most this many params per flow (in query order). Bounds the request count and
-        # keeps the automatic scan light-touch; a wider query is still covered for its first params.
-        # AGGRESSIVE (opts.aggressive) raises the cap for deeper coverage on an authorized target.
+        # Probe at most this many params per flow (in enumeration order, across all locations).
+        # Bounds the request count and keeps the automatic scan light-touch; a wider set is still
+        # covered for its first params. AGGRESSIVE (opts.aggressive) raises the cap.
         MAX_PROBE_PARAMS            =  3
         MAX_PROBE_PARAMS_AGGRESSIVE = 10
 
-        # Appended (URL-encoded, so it decodes to a real backslash server-side) to a param's value.
+        # Appended (URL-encoded, wire-ready, so it decodes to a real backslash server-side).
         SINGLE = "%5C"    # one backslash  →  value\
         DOUBLE = "%5C%5C" # two backslashes →  value\\
 
@@ -64,22 +64,14 @@ module Gori
           4..(2 + 2 * MAX_PROBE_PARAMS)
         end
 
-        # Dedup key WITHOUT rebuilding probes — derived from the same `injectables` gate `plan` uses,
-        # so it is byte-identical to `plan(detail).dedup_key` and nil in exactly the same cases
-        # (verified by the equivalence spec).
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          g = injectables(detail, opts)
-          return nil unless g
-          method_up, path, pairs, probe = g
-          build_dedup_key(detail, method_up, path, probe.map { |i| decode_name(pair_name(pairs[i])) })
+          s, slots = injectables(detail, opts) || return nil
+          InsertionPoints.dedup_key("backslash_powered", detail, s.method, s.path, slots)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          g = injectables(detail, opts)
-          return nil unless g
-          method_up, path, pairs, probe = g
-          body = detail.request_body
-          baseline = rebuild_query(detail.request_head, body, path, pairs.join('&'))
+          s, slots = injectables(detail, opts) || return nil
+          baseline = InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)
           # A SECOND, identical baseline, sent first among the follow-ups. The whole rule is a
           # difference test against the baseline fingerprint, which silently assumed the endpoint
           # answers the same request the same way twice. When it does not — an intermittent 503, a
@@ -87,21 +79,17 @@ module Gori
           # on a `\` leg and not its `\\` leg reproduces the exact asymmetry this rule reports, and
           # every param gets its own roll of that die. Measuring the endpoint against itself costs
           # one request and turns "we cannot tell" into a decline instead of a finding.
-          followups = [rebuild_query(detail.request_head, body, path, pairs.join('&'))]
+          followups = [InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)]
           params = [] of Param
-          probe.each do |idx|
-            pair = pairs[idx]
-            eq = pair.index('=').not_nil!
-            name = pair[0...eq]
-            value = pair[(eq + 1)..]
+          slots.each do |slot|
             # Order matters: single (`\`) then double (`\\`) — detections_all reads them back at
             # results[2 + 2*i] / results[3 + 2*i] for the i-th param (results[0] and results[1]
             # are the two baselines).
-            followups << rebuild_query(detail.request_head, body, path, with_value(pairs, idx, name, value + SINGLE))
-            followups << rebuild_query(detail.request_head, body, path, with_value(pairs, idx, name, value + DOUBLE))
-            params << Param.new("query", decode_name(name), value)
+            followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: SINGLE)}])
+            followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: DOUBLE)}])
+            params << Param.new(slot.loc.label, slot.name, slot.raw_value)
           end
-          key = build_dedup_key(detail, method_up, path, params.map(&.name))
+          key = InsertionPoints.dedup_key("backslash_powered", detail, s.method, s.path, slots)
           Plan.new(baseline, params, key, followups)
         end
 
@@ -139,54 +127,19 @@ module Gori
         end
 
         # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
-        # Returns {METHOD, path, all query pairs verbatim, indices of the first ≤MAX_PROBE_PARAMS
-        # pairs that are real k=v params} for a GET carrying ≥1 such param, else nil.
-        private def injectables(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Array(Int32)}?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
+        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil. The cap
+        # spans ALL enumerated locations at once, so a wide param set can't blow up the request count.
+        private def injectables(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
           # Body-differential gate: the comparison reads response BODIES (HEAD has none), so HEAD is
           # always out. By default GET only — the automatic scan never auto-re-sends a state-changing
           # method — but opts.allow_unsafe (manual per-flow scan / AGGRESSIVE mode) widens to
-          # POST/PUT/PATCH/DELETE, whose query params can still be interpreted server-side.
-          return nil unless diff_method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          return nil if query.empty?
+          # POST/PUT/PATCH/DELETE, whose params can still be interpreted server-side.
+          return nil unless diff_method_allowed?(s.method, opts)
           cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
-          pairs = query.split('&')
-          probe = [] of Int32
-          pairs.each_with_index do |pair, i|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            next if pair[0...eq].empty?
-            probe << i
-            break if probe.size >= cap
-          end
-          return nil if probe.empty?
-          {method_up, path, pairs, probe}
-        end
-
-        # Key by rule + host:PORT + METHOD + path + sorted (length-prefixed) probed-param names, so
-        # the same host on another port/service is a distinct surface and a name containing ','/':'
-        # can't collide with a different set. Sorted → a reordered query dedups to one probe.
-        private def build_dedup_key(detail : Store::FlowDetail, method_upcase : String, path : String,
-                                    names : Array(String)) : String
-          sig = names.map { |n| "#{n.bytesize}:#{n}" }.sort!.join(",")
-          "backslash_powered|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{sig}"
-        end
-
-        private def pair_name(pair : String) : String
-          eq = pair.index('=')
-          eq ? pair[0...eq] : pair
-        end
-
-        # A copy of the query pairs with pair `idx` replaced by "name=value" (every other segment,
-        # including bare flags and empties, kept verbatim).
-        private def with_value(pairs : Array(String), idx : Int32, name : String, value : String) : String
-          dup = pairs.dup
-          dup[idx] = "#{name}=#{value}"
-          dup.join('&')
+          slots = s.slots.first(cap)
+          return nil if slots.empty?
+          {s, slots}
         end
 
         # {baseline fingerprint, whether body LENGTH is part of it} — but only when the endpoint
@@ -274,39 +227,6 @@ module Gori
           else
             ""
           end
-        end
-
-        # {path, query-without-'?'} — query is "" when the target has none.
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
-        end
-
-        private def decode_name(name : String) : String
-          URI.decode_www_form(name)
-        rescue
-          name
-        end
-
-        # Reassemble the request with a new query on the request line, preserving the original body
-        # and re-syncing Content-Length (mirrors ReflectedParam#rebuild; a lone GET has no body, so
-        # this just carries any CL through untouched).
-        private def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end

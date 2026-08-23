@@ -1,10 +1,9 @@
 require "uri"
 require "json"
 require "./types"
+require "./insertion_points"
 require "../../miner/types"
-require "../../miner/inject"
 require "../../fuzz/engine"
-require "../../fuzz/content_length"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 
@@ -15,6 +14,11 @@ module Gori
       # (query / form / JSON) with a distinct canary, sends ONE request, and reports the
       # parameters whose canary echoes back — grading each by whether the echo was ENCODED.
       # Gated to safe methods so an automatic probe never mutates server state.
+      #
+      # Insertion points come from the shared `InsertionPoints` model (query + form + JSON); the
+      # rule keeps its own method gate + param cap + canary-grading. A GET/HEAD rarely carries a
+      # body, so the form/JSON surfaces materialize almost only under `allow_unsafe` (which admits
+      # body-bearing methods) — the method gate, not a special case, does that.
       #
       # The canary carries a MARKER of the four characters that decide whether a reflection is
       # exploitable: `"`, `'`, `<`, `>`. An alphanumeric canary on its own cannot answer that
@@ -30,7 +34,7 @@ module Gori
       #   * none survived       — the value was escaped, stripped, or encoded. Still worth knowing
       #                           as a reflection point, so it is reported at Info rather than
       #                           dropped, but it is not an XSS finding.
-      # A partial survival is read in order, so `"'&lt;&gt;` reports `"'` — an escaped `<` stops
+      # A partial survival is read in order, so `"'<>` reports `"'` — an escaped `<` stops
       # the run exactly where the server's filter did.
       class ReflectedParam < Rule
         # Appended to every canary. Sent URL-encoded (query/form) or JSON-escaped (body), so the
@@ -50,125 +54,32 @@ module Gori
             Category::ACTIVE)
         end
 
-        # The dedup key WITHOUT generating canaries or rebuilding the request — extracts the same
-        # (name, location) set `plan` derives from canary_pairs/canary_json (same skip rules), so
-        # the key is byte-identical to `plan(detail).dedup_key`. Returns nil in exactly the cases
-        # `plan` does (malformed / unsafe method / no params / too many). Verified against `plan`
-        # by the equivalence spec.
+        # The dedup key WITHOUT generating canaries or rebuilding the request — derived from the
+        # same `InsertionPoints.enumerate` gate `plan` uses (same skip rules, same cap), so it is
+        # byte-identical to `plan(detail).dedup_key` and nil in exactly the same cases.
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          # Start-line-only fast path: the key needs only method + target, so a non-eligible method
-          # or malformed head is rejected WITHOUT allocating the whole header block. The dominant
-          # bodyless GET/HEAD never parses headers; only a request that actually carries a body
-          # falls through to a full parse (for Content-Type). Byte-identical to plan's key.
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          names = [] of {String, String} # {name, location}, matching Param.{name, location}
-          each_param_name(query) { |raw| names << {decode_name(raw), "query"} }
-          body = detail.request_body
-          if body && !body.empty?
-            # Full parse ONLY when a body exists — reuse HeaderList#get? so the Content-Type
-            # last-match / case-insensitive semantics stay IDENTICAL to plan's (never hand-rolled).
-            req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
-            ct = (req.headers.get?("Content-Type") || "").downcase
-            if ct.includes?("x-www-form-urlencoded")
-              # Not `.scrub`: the body is captured bytes and this key must stay
-              # byte-identical to `plan`'s (see `canary_pairs` below), which reads the
-              # same un-scrubbed text to build the request it actually SENDS.
-              each_param_name(String.new(body)) { |raw| names << {decode_name(raw), "form"} }
-            elsif ct.includes?("json")
-              each_json_string_key(body) { |k| names << {k, "json"} }
-            end
-          end
-          return nil if names.empty? || names.size > opts.max_params
-          build_dedup_key(detail, method_up, path, names)
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless method_allowed?(s.method, opts)
+          return nil if s.slots.empty? || s.slots.size > opts.max_params
+          InsertionPoints.dedup_key("reflected_param", detail, s.method, s.path, s.slots)
         end
 
         # Build a probe from a captured flow, or nil if there is nothing reflectable.
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
-          return nil if req.malformed?
-          return nil unless method_allowed?(req.method.upcase, opts)
-          # A plaintext forward-proxy flow is captured ABSOLUTE-form ("GET http://h/p"); the
-          # probe is sent DIRECT to the origin (Fuzz::Sender → Repeater::Engine, no rewrite),
-          # so normalize to origin-form here the way the regular repeater path (FlowRequest)
-          # does — some origins reject an absolute-form target on a non-proxied request.
-          path, query = split_target(Active.origin_form(req.target))
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless method_allowed?(s.method, opts)
+          return nil if s.slots.empty? || s.slots.size > opts.max_params
 
           params = [] of Param
-          new_query, qp = canary_pairs(query, "query")
-          params.concat(qp)
-
-          body = detail.request_body
-          new_body = body
-          if body && !body.empty?
-            ct = (req.headers.get?("Content-Type") || "").downcase
-            if ct.includes?("x-www-form-urlencoded")
-              # Not `.scrub`: this rebuilds the BODY THE PROBE SENDS. `canary_pairs` only
-              # ever emits a fresh canary for a param's VALUE — never reads it back — but
-              # every param NAME and every pair the split/`=` scan skips (no `=`, empty
-              # name) is copied out of this text verbatim. Scrubbing first meant an
-              # untouched, unrelated field carrying a raw non-UTF-8 byte reached the origin
-              # as three `U+FFFD` bytes instead of the one the operator's capture had.
-              # `String#split(Char)`/`#index`/`#[]` only slice on byte offsets found by
-              # scanning, so the un-scrubbed text is safe to split.
-              nb, fp = canary_pairs(String.new(body), "form")
-              params.concat(fp)
-              new_body = nb.to_slice
-            elsif ct.includes?("json")
-              nb, jp = canary_json(body)
-              if nb
-                params.concat(jp)
-                new_body = nb
-              end
-            end
+          changes = [] of {InsertionPoints::Slot, InsertionPoints::Change}
+          s.slots.each do |slot|
+            canary = Miner::Canary.fresh
+            params << Param.new(slot.loc.label, slot.name, canary)
+            changes << {slot, InsertionPoints::Change.new(replace: ReflectedParam.probe_value(canary))}
           end
-
-          return nil if params.empty? || params.size > opts.max_params
-          request = rebuild(detail.request_head, path, new_query, new_body)
-          # Same key builder `dedup_key` uses, fed the built params — so the pre-build dedup key
-          # and this one can't drift.
-          key = build_dedup_key(detail, req.method.upcase, path, params.map { |p| {p.name, p.location} })
+          request = InsertionPoints.build(detail, changes)
+          key = InsertionPoints.dedup_key("reflected_param", detail, s.method, s.path, s.slots)
           Plan.new(request, params, key)
-        end
-
-        # Key by rule + host:PORT + METHOD + path + (name@location) so the same host on a different
-        # port/service is a distinct surface. Length-prefix each name so a param name containing
-        # '@'/','/':' can't collide with a different multi-param set. Sorted → order-independent.
-        private def build_dedup_key(detail : Store::FlowDetail, method_upcase : String, path : String,
-                                    names : Array({String, String})) : String
-          sig = names.map { |(name, loc)| "#{name.bytesize}:#{name}@#{loc}" }.sort!.join(",")
-          "reflected_param|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{sig}"
-        end
-
-        # The valid k=v names of an &-joined string — the SAME skip rules canary_pairs applies
-        # (empty pair / no '=' / empty name are skipped), yielding the RAW (pre-decode) name.
-        private def each_param_name(text : String, & : String ->)
-          return if text.empty?
-          text.split('&').each do |pair|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            name = pair[0...eq]
-            next if name.empty?
-            yield name
-          end
-        end
-
-        # The top-level JSON keys with a STRING value — the SAME fields canary_json canaries.
-        # Not `.scrub`: must read the same bytes `canary_json` does, or a key name carrying
-        # invalid UTF-8 would compute a different dedup key than `plan` does. `JSON.parse`
-        # does not require valid UTF-8 inside a string body to parse it.
-        private def each_json_string_key(body : Bytes, & : String ->)
-          h = begin
-            JSON.parse(String.new(body)).as_h?
-          rescue JSON::ParseException
-            nil
-          end
-          return unless h
-          h.each { |k, v| yield k if v.as_s? }
         end
 
         # Interpret the probe's response: at most ONE Detection, graded by the strongest echo seen
@@ -270,96 +181,6 @@ module Gori
           (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
         rescue
           ""
-        end
-
-        # {path, query-without-'?'} — query is "" when the target has none.
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
-        end
-
-        # Replace every k=v value in an &-joined string with a fresh canary, keeping bare flags
-        # and empty segments verbatim. Returns {rebuilt string, params}.
-        private def canary_pairs(text : String, location : String) : {String, Array(Param)}
-          params = [] of Param
-          return {text, params} if text.empty?
-          rebuilt = text.split('&').map do |pair|
-            next pair if pair.empty?
-            eq = pair.index('=')
-            next pair unless eq
-            name = pair[0...eq]
-            next pair if name.empty?
-            canary = Miner::Canary.fresh
-            params << Param.new(location, decode_name(name), canary)
-            # URL-encoded: the marker carries `"'<>`, which have no business sitting raw in a
-            # request line (the alnum canary alone needed no encoding). space_to_plus:false for
-            # the same reason Ssti#inject uses it — `+` is not universally decoded back to a space.
-            "#{name}=#{URI.encode_www_form(ReflectedParam.probe_value(canary), space_to_plus: false)}"
-          end.join('&')
-          {rebuilt, params}
-        end
-
-        private def decode_name(name : String) : String
-          URI.decode_www_form(name)
-        rescue
-          name
-        end
-
-        # Replace top-level JSON string values with canaries; nil unless the root is an object
-        # with at least one string field.
-        #
-        # Not `.scrub`: this rebuilds the BODY THE PROBE SENDS. Every string field NOT chosen
-        # for a canary is carried through as the `JSON::Any` this parse produced (`merged[k] =
-        # v`), so scrubbing first meant any non-canaried string field holding a raw non-UTF-8
-        # byte reached the origin as `U+FFFD`. `JSON.parse` does not require its input to be
-        # valid UTF-8 to parse a string value's bytes, and `to_json` round-trips them as-is.
-        private def canary_json(body : Bytes) : {Bytes?, Array(Param)}
-          params = [] of Param
-          h = begin
-            JSON.parse(String.new(body)).as_h?
-          rescue JSON::ParseException
-            nil
-          end
-          return {nil, params} unless h
-          merged = {} of String => JSON::Any
-          h.each do |k, v|
-            if v.as_s?
-              canary = Miner::Canary.fresh
-              params << Param.new("json", k, canary)
-              # `to_json` escapes the marker's `"` for the wire; the server decodes it back, so
-              # what it reflects is the real character — exactly what `survived` needs to read.
-              merged[k] = JSON::Any.new(ReflectedParam.probe_value(canary))
-            else
-              merged[k] = v
-            end
-          end
-          return {nil, params} if params.empty?
-          {merged.to_json.to_slice, params}
-        end
-
-        # Reassemble the request with the canary-stuffed request-line + body, re-syncing
-        # Content-Length when the body changed.
-        private def rebuild(orig_head : Bytes, path : String, new_query : String,
-                            new_body : Bytes?) : Bytes
-          # detail.request_head always ends in CRLFCRLF (read_head contract) and a well-formed
-          # head has no earlier blank line, so Inject.split keys off that terminator regardless
-          # of whether the body is appended. Splitting orig_head directly is byte-identical to
-          # the old "concat head+body, split, discard the body half" — one alloc+copy fewer.
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              new_target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{new_target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          body = new_body || Bytes.empty
-          io.write(body) unless body.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end
