@@ -8,7 +8,7 @@ module Gori
       # What a captured JWT PLAINLY STATES about itself. `secret_in_url` already flags a
       # JWT-shaped value carried in the query string (a leak); this rule goes one level in and
       # decodes the tokens a flow actually authenticates with — `Authorization: Bearer …`, a
-      # request `Cookie` value, and a response `Set-Cookie` value — reporting four things the
+      # request `Cookie` value, and a response `Set-Cookie` value — reporting five things the
       # header/payload declare outright:
       #
       #   * `alg: "none"`      — an unsigned token in live use (High; unmistakable binary signal)
@@ -16,6 +16,8 @@ module Gori
       #                          is anyone's guess (Low)
       #   * no `exp` claim     — the token never expires on its own (Low)
       #   * sensitive claims   — role/permission/PII claim NAMES in the payload (Info)
+      #   * `jku`/`x5u`/`jwk`  — key-resolution parameters in the HEADER: the token telling the
+      #                          verifier which key to trust (Medium)
       #
       # Zero-request and DECODE-ONLY: passive analysis cannot verify a signature or recover a
       # secret, so nothing here asserts the server would *accept* a tampered token — that is the
@@ -30,7 +32,7 @@ module Gori
       class JwtWeaknesses < Rule
         def info : RuleInfo
           RuleInfo.new("jwt", "JWT weaknesses",
-            "Decodes JWTs carried in Authorization/Cookie/Set-Cookie and flags alg:none, non-standard algorithms, missing expiry, and sensitive claim names.",
+            "Decodes JWTs carried in Authorization/Cookie/Set-Cookie and flags alg:none, non-standard algorithms, key-injection header parameters (jku/x5u/jwk), missing expiry, and sensitive claim names.",
             Category::HEADERS)
         end
 
@@ -58,6 +60,12 @@ module Gori
                             "email", "email_address", "phone", "phone_number", "mobile",
                             "ssn", "birthdate", "address", "gender"]
         MAX_CLAIM_NAMES = 6 # cap the evidence list; the sample flow has the rest
+
+        # JOSE header parameters that tell the verifier WHERE the signing key comes from, in a
+        # fixed order so the evidence string is stable across flows and merges into one issue
+        # group. Matched case-insensitively against top-level header keys (JOSE parameter names
+        # are lowercase by registry, but a hand-rolled issuer is not bound by that).
+        KEY_INJECTION_PARAMS = ["jku", "x5u", "jwk"]
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           seen = Set(String).new
@@ -118,10 +126,17 @@ module Gori
         # --- checks -------------------------------------------------------------------------
 
         private def inspect_token(ctx : Context, acc : Array(Detection), location : String, token : String) : Nil
-          alg = Gori::Jwt.token_alg(token)
-          return if alg.nil? # header doesn't base64url-decode to a JSON object with an alg
+          # Decode the header ONCE and share it: `alg` and the jku/x5u/jwk params both live in it,
+          # and this is the always-on passive path (every flow, up to MAX_TOKENS per flow). The nil
+          # guard is exactly the old `Gori::Jwt.token_alg(token).nil?` one — a header that isn't a
+          # JSON object, or carries no string `alg`, is not a token we can say anything about.
+          header = header_object(token)
+          return if header.nil?
+          alg = header["alg"]?.try(&.as_s?)
+          return if alg.nil?
           check_alg(ctx, acc, location, alg)
           check_claims(ctx, acc, location, token)
+          check_header_params(ctx, acc, location, header)
         end
 
         private def check_alg(ctx : Context, acc : Array(Detection), location : String, alg : String) : Nil
@@ -149,6 +164,31 @@ module Gori
             "Sensitive claims in a JWT payload", Store::Severity::Info, names.join(", "))
         end
 
+        # `jku` and `x5u` point the verifier at a URL CARRIED IN THE TOKEN to fetch the signing
+        # key (JWK Set / X.509 chain) from; `jwk` embeds the public key in the token outright. A
+        # verifier that trusts any of them accepts a key the token's bearer chose, so an attacker
+        # signs with their own key — or hosts their own JWKS, which additionally makes the
+        # verifier fetch an attacker-named URL (SSRF) — and forges arbitrary valid tokens: a full
+        # authentication bypass. Legitimate first-party tokens essentially never carry these, so
+        # the mere presence is high-signal and low-FP.
+        #
+        # Medium, not High: consistent with this file's decode-only philosophy, a passive decode
+        # cannot tell whether the verifier HONOURS the parameter — only that the token declares
+        # it. Confirming it is the active/manual `jwt_attacks` path.
+        #
+        # `kid` is deliberately NOT flagged: it is present in the majority of real tokens and is
+        # not itself a weakness — its injection risk lives entirely in how the server resolves
+        # it (SQL/path lookup), which nothing in the token can reveal.
+        private def check_header_params(ctx : Context, acc : Array(Detection), location : String,
+                                        header : Hash(String, JSON::Any)) : Nil
+          keys = header.keys.map(&.downcase)
+          found = KEY_INJECTION_PARAMS.select { |name| keys.includes?(name) }
+          return if found.empty?
+          acc << det(ctx, "jwt_key_injection_header", Category::HEADERS,
+            "JWT header carries a key-injection parameter (jku/x5u/jwk)", Store::Severity::Medium,
+            "#{location}: header has #{found.join("/")}")
+        end
+
         # Top-level claim names that are in SENSITIVE_CLAIMS, in SENSITIVE_CLAIMS order (so the
         # evidence string is stable across flows and merges cleanly into one issue group).
         private def sensitive_names(claims : Hash(String, JSON::Any)) : Array(String)
@@ -166,6 +206,17 @@ module Gori
         # or plain garbage — all of which are outside what a passive decode can say anything about).
         private def payload_object(token : String) : Hash(String, JSON::Any)?
           seg = token.split('.')[1]?
+          return nil if seg.nil? || seg.empty?
+          JSON.parse(String.new(Base64.decode(seg))).as_h?
+        rescue
+          nil
+        end
+
+        # The header segment as a JSON object, or nil when it isn't one — the same decode-or-nil
+        # contract as `payload_object`, on segment [0]. `token_alg` already reads this segment,
+        # but only for `alg`; the header params need the whole object.
+        private def header_object(token : String) : Hash(String, JSON::Any)?
+          seg = token.split('.')[0]?
           return nil if seg.nil? || seg.empty?
           JSON.parse(String.new(Base64.decode(seg))).as_h?
         rescue

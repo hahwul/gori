@@ -4,6 +4,7 @@ require "./passive/rule"
 require "./passive/tech"
 require "./passive/secret_in_url"
 require "./passive/security_headers"
+require "./passive/mime_confusion"
 require "./passive/cacheable_api"
 require "./passive/cookies"
 require "./passive/cors"
@@ -38,6 +39,7 @@ module Gori
         Tech.new,
         SecretInUrl.new,
         SecurityHeaders.new,
+        MimeConfusion.new,
         CacheableApi.new,
         Cookies.new,
         Cors.new,

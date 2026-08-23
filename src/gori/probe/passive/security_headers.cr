@@ -20,8 +20,9 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("security_headers", "Security headers",
-            "Checks for missing or weak HSTS, CSP (incl. report-only-only), X-Frame-Options, " \
-            "X-Content-Type-Options, Referrer-Policy, and Permissions-Policy.",
+            "Checks for missing or weak HSTS, CSP (incl. report-only-only and a missing base-uri), " \
+            "X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and " \
+            "Cross-Origin-Opener-Policy.",
             Category::HEADERS)
         end
 
@@ -67,6 +68,22 @@ module Gori
           if csp
             dirs = parse_csp(csp)
             acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, csp[0, 80]) if weak_csp?(dirs)
+            # base-uri is one of the few directives with NO fallback to default-src: omit it and
+            # the document's base URL stays attacker-controllable. An injected `<base href>` (a
+            # single tag, no script execution needed) re-points every RELATIVE script/resource URL
+            # at the attacker's origin, so a carefully allowlisted script-src is walked around
+            # rather than broken. Google's CSP Evaluator flags the same gap. Only asked of the
+            # ENFORCING policy (this branch) — a report-only header blocks nothing, and the
+            # report-only-only case already gets csp_report_only.
+            #
+            # Gated on there being a resource-source allowlist to WALK AROUND — script-src, its
+            # default-src fallback, or object-src. A transport/clickjacking-only policy
+            # (`upgrade-insecure-requests`, `frame-ancestors 'none'`) restricts no script source,
+            # so there is nothing for a rebased relative URL to bypass and base-uri is moot;
+            # firing there would be pure noise (this is also the only context CSP Evaluator flags).
+            if dirs["base-uri"]?.nil? && (dirs.has_key?("script-src") || dirs.has_key?("default-src") || dirs.has_key?("object-src"))
+              acc << hdr(ctx, "csp_missing_base_uri", "CSP without base-uri (base-tag hijacking)", Store::Severity::Low)
+            end
           else
             dirs = nil
             # Report-Only alone does not enforce — flag that specifically instead of a bare
@@ -93,6 +110,16 @@ module Gori
           if h.get?("X-Content-Type-Options").try(&.downcase.strip) != "nosniff"
             acc << hdr(ctx, "missing_x_content_type_options", "Missing X-Content-Type-Options: nosniff", Store::Severity::Low)
           end
+          # Of the three Cross-Origin-* isolation headers, only COOP is worth a standalone
+          # finding. COEP and CORP matter for `crossOriginIsolated` (SharedArrayBuffer, precise
+          # timers) — a capability most sites neither have nor want, so flagging their absence is
+          # pure noise. COOP absence is a real hardening gap on its own: without it a page opened
+          # via window.open / target=_blank keeps a cross-origin `window.opener` reference, which
+          # is the lever for tabnabbing and the browsing-context XS-Leaks. PRESENCE is the whole
+          # test — any value counts, `unsafe-none` included: it is the browser default, so
+          # flagging it would just re-report every unset document under a second code. Info, not
+          # Low: broad hardening, not a directly exploitable defect.
+          acc << hdr(ctx, "missing_coop", "Missing Cross-Origin-Opener-Policy", Store::Severity::Info) if h.get?("Cross-Origin-Opener-Policy").nil?
           check_referrer_policy(ctx, h, acc)
           check_permissions_policy(ctx, h, acc)
         end

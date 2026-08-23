@@ -3148,11 +3148,11 @@ describe "Gori::Probe::Active (manual run estimate)" do
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       est = a.active_estimate(detail)
-      # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection and ssti,
-      # which reuse the same reflectable-query-param gate.
-      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "ssti"])
-      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) = 13
-      est.sum { |e| e.requests.end }.should eq(13)
+      # reflected_param, cors_reflection, backslash_powered all apply — plus crlf_injection, ssti,
+      # and sqli_error_based, which reuse the same reflectable-query-param gate.
+      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "crlf_injection", "reflected_param", "sqli_error_based", "ssti"])
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤8) + crlf_injection (1) + ssti (2) + sqli_error_based (≤5) = 18
+      est.sum { |e| e.requests.end }.should eq(18)
     end
   end
 
@@ -3164,9 +3164,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
         target: "/search?q=hi")
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
-      # RULES order (cors_reflection disabled): reflected_param, backslash_powered, then the other
-      # reflectable-query-param rules crlf_injection and ssti.
-      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "crlf_injection", "ssti"])
+      # RULES order (cors_reflection disabled): reflected_param, backslash_powered, sqli_error_based,
+      # then the other reflectable-query-param rules crlf_injection and ssti.
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered", "sqli_error_based", "crlf_injection", "ssti"])
     end
   end
 
@@ -4509,8 +4509,10 @@ describe "Gori::Probe.cwe" do
   it "leaves exactly the deliberately unmapped codes without a CWE" do
     unmapped = Gori::Probe::REMEDIATION.keys.reject { |c| Gori::Probe::CWE.has_key?(c) }
     # jwt_in_body/jwt_in_ws are Info notes on where tokens flow — handing the client its own
-    # token is the design, not a weakness (see Passive::Secrets::JWT).
-    unmapped.sort.should eq(["jwt_in_body", "jwt_in_ws"])
+    # token is the design, not a weakness (see Passive::Secrets::JWT). cookie_broad_domain is an
+    # Info hardening note (a Domain scoped to a parent domain) that no CWE fits cleanly — 1275 is
+    # SameSite, 565/732/668 all overreach — so it stays unmapped rather than borrowing a wrong id.
+    unmapped.sort.should eq(["cookie_broad_domain", "jwt_in_body", "jwt_in_ws"])
   end
 
   it "renders the canonical CWE-<id> identifier and name" do
