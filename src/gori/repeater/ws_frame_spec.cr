@@ -47,7 +47,7 @@ module Gori
         property mask_key : Bytes? = nil
         property declared : Int32? = nil
         property payload = Bytes.empty
-        property payload_kind : String? = nil
+        property payload_kind : String? = nil # read back by `parse_kind`
 
         # nil on success, else the error naming the field. One `when` per field, each one
         # statement long — the branchiness is the grammar's, and it belongs in one place.
@@ -134,26 +134,41 @@ module Gori
       # {message, nil} or {nil, error}. Never raises: every surface here reports rather than
       # aborts mid-parse, and the error names the field so a script can fix it.
       def self.parse(spec : String) : {Store::WsOutMessage?, String?}
+        msg, err, _kind = parse_kind(spec)
+        {msg, err}
+      end
+
+      # `parse`, plus WHICH payload form the operator used: `"text"`, `"hex"`, `"b64"`, or nil
+      # for a spec that named no payload at all.
+      #
+      # Exposed for the one caller that must treat typed text and raw bytes differently — the
+      # fuzz seed (`gori run fuzz --message-frame`), which escapes `§` into the `§§` literal for
+      # a `hex=`/`b64=` payload and leaves a `text=` one alone. An operator who wrote `text=§v§`
+      # typed those markers and means them; one who pasted `hex=…c2a7…` supplied bytes and never
+      # typed a `§` in their life, so letting that byte pair open a fuzz position would rewrite
+      # the payload under them. Returned rather than re-scanned by the caller, because the key
+      # grammar has one home and this is it.
+      def self.parse_kind(spec : String) : {Store::WsOutMessage?, String?, String?}
         f = Fields.new
         rest = spec
         until rest.empty?
           eq = rest.index('=')
-          return {nil, "bad --message-frame field #{rest.split(',').first.inspect} (expected key=value)"} unless eq
+          return {nil, "bad --message-frame field #{rest.split(',').first.inspect} (expected key=value)", nil} unless eq
           key = rest[0, eq].strip.downcase
           # `text=` is the payload and swallows the remainder verbatim — commas and all, so a
           # payload may contain the delimiter without an escape nobody would remember.
           if key == "text"
             err = f.set(key, rest[(eq + 1)..])
-            return {nil, err} if err
+            return {nil, err, nil} if err
             break
           end
           comma = rest.index(',', eq)
           value = comma ? rest[(eq + 1)...comma] : rest[(eq + 1)..]
           rest = comma ? rest[(comma + 1)..] : ""
           err = f.set(key, value)
-          return {nil, err} if err
+          return {nil, err, nil} if err
         end
-        {f.message, nil}
+        {f.message, nil, f.payload_kind}
       end
 
       protected def self.bool(v : String) : Bool?

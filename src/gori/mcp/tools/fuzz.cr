@@ -16,7 +16,7 @@ module Gori
 
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total, http2, shadowed_marks = build_fuzz_job(h, ob)
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored = build_fuzz_job(h, ob)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
@@ -30,6 +30,7 @@ module Gori
           optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
+        fjob.websocket = !ws_frames.nil?
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
         # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
         # `fuzz_config` applies, so a second accessor on the plan would only be a second place
@@ -51,9 +52,42 @@ module Gori
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field "record_history", fjob.record_history.to_s; j.field("budget_warning", warn) if warn; j.field("marks_warning", marks_warn) if marks_warn; emit_scope(j, sc) } })
+        Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn))
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
+      end
+
+      # `fuzz_start`'s reply object.
+      #
+      # Extracted from the call site rather than grown there: it was already a single
+      # 400-column line, and the WebSocket fields need a conditional pair, which as an inline
+      # `if` inside two nested curly blocks is unreadable and unformattable.
+      #
+      # `websocket` / `ws_frames_out` appear only when this IS a WebSocket sweep, and
+      # `ignored_args` only when non-empty — the discipline `budget_warning` and
+      # `marks_warning` already follow, so an HTTP job's echo is byte-identical to what it was.
+      # `ignored_args` names the knobs a WS run cannot honour (see `Fuzz::Plan#ws_ignored_knobs`):
+      # inert rather than wrong, so reported and not refused — but an agent that passed
+      # `follow_redirects` and heard nothing would conclude the sweep followed them.
+      private def fuzz_start_echo(id : String, total : Int64?, fjob : FuzzJob, sc,
+                                  ws_frames : Int32?, ws_ignored : Array(Symbol),
+                                  warn : String?, marks_warn : String?) : String
+        JSON.build do |j|
+          j.object do
+            j.field "job_id", id
+            j.field "total", total
+            j.field "status", "running"
+            j.field "record_history", fjob.record_history.to_s
+            if wf = ws_frames
+              j.field "websocket", true
+              j.field "ws_frames_out", wf
+            end
+            j.field("ignored_args", ws_ignored.map(&.to_s)) unless ws_ignored.empty?
+            j.field("budget_warning", warn) if warn
+            j.field("marks_warning", marks_warn) if marks_warn
+            emit_scope(j, sc)
+          end
+        end
       end
 
       # Background drain (runs during the stdio loop's blocking read). Stores results
@@ -137,7 +171,7 @@ module Gori
         Fuzz::HistoryRecord.record(store, r,
           scheme: origin.scheme, host: origin.host, port: origin.port, http2: http2,
           source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Mcp,
-          source_ref: fjob.id) do |ex|
+          source_ref: fjob.id, websocket: fjob.websocket?) do |ex|
           fjob.drain_errors += 1
           Log.warn(exception: ex) { "fuzz history record failed" } if fjob.drain_errors <= DRAIN_LOG_CAP
         end
@@ -160,6 +194,8 @@ module Gori
         fjob.grpc_stale = p.grpc_stale
         fjob.grpc_requests = p.grpc_requests
         fjob.grpc_stale_reason = p.grpc_stale_reason
+        fjob.ws_notes = p.ws_notes
+        fjob.ws_note_reason = p.ws_note_reason
       end
 
       private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?) : Nil
@@ -255,6 +291,19 @@ module Gori
                   "(pass reframe_grpc:true to recompute it)"
                 end
             end
+            # A WebSocket session came back with a non-fatal advisory — an accept-header
+            # mismatch, an unconfirmed delivery, a script the peer's CLOSE cut short, or a
+            # transcript a capture cap truncated. NOT counted in `errors`: the session ran and
+            # its response is real evidence, so folding these in would inflate the tally and
+            # flip a clean job's verdict. Emitted only when it happened, so a non-WebSocket
+            # job's status object is unchanged.
+            if fjob.ws_notes > 0
+              j.field "ws_notes", fjob.ws_notes
+              j.field "ws_note_reason",
+                "#{Serialize.text(fjob.ws_note_reason)} — #{fjob.ws_notes} " \
+                "session#{fjob.ws_notes == 1 ? "" : "s"} reported it; the responses are real, " \
+                "but the transcript may be short of what the origin sent"
+            end
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
             j.field "record_history", fjob.record_history.to_s
@@ -333,10 +382,37 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String)}
+      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol)}
         text, default_target, src_h2, evidence, src_sni = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
+        # The WebSocket decision, by the SEED rather than by a flag — the same rule
+        # `gori run fuzz` follows: a template either declares an `Upgrade: websocket` handshake
+        # or it does not, and a second source of truth could disagree with the bytes.
+        # `ws_http_only` is the inverse escape hatch, and sweeping the handshake as an ordinary
+        # request is a real test (an origin that answers 200 to an upgrade), not a fallback.
+        ws_messages = fuzz_ws_messages(h, text)
+        if ws_messages
+          # Refused BEFORE the sweep dials. Each of these is a genuine incompatibility rather
+          # than an inert flag — the inert ones are reported by `Plan#ws_ignored_knobs`.
+          if optional_int_arg(h, "race_count")
+            raise FuzzArgError.new("race_count is HTTP-only — a race group is N byte-identical copies " \
+                                   "of ONE request released together, which bypasses payload substitution " \
+                                   "entirely and has no framed-exchange form. Pass ws_http_only:true to " \
+                                   "race the handshake itself")
+          end
+          if bool_arg(h, "http2", false)
+            raise FuzzArgError.new("http2 and a WebSocket sweep cannot combine — gori re-establishes a " \
+                                   "WebSocket with an HTTP/1.1 upgrade and accepts nothing but a 101 " \
+                                   "(RFC 8441 extended CONNECT has no send path). Pass ws_http_only:true " \
+                                   "to sweep the handshake as an h2 request")
+          end
+          if fuzz_record_policy(h) != :none
+            raise FuzzArgError.new("#{Fuzz::HistoryRecord::WS_UNSUPPORTED}. Pass ws_http_only:true to " \
+                                   "sweep the handshake as an ordinary request, which does record")
+          end
+          use_h2 = false
+        end
         options = Fuzz::PlanOptions.new(text,
           # A `flow_id` template is CAPTURED evidence; a `template` string is the caller's
           # draft. See `Fuzz::PlanOptions#evidence?`.
@@ -359,9 +435,14 @@ module Gori
           # create_repeater{sni} → send_request{repeater_id}, i.e. not a sweep at all.
           # An explicit `sni` wins; otherwise the source's own (a repeater session's stored SNI).
           sni: str(h, "sni") || src_sni,
-          overrides: HostOverrides.load(store))
+          overrides: HostOverrides.load(store),
+          ws_messages: ws_messages)
         plan = Fuzz::Plan.build(options, ob)
-        {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks}
+        # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,
+        # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded
+        # from a `repeater_id` cannot otherwise tell whether its frames were picked up.
+        {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks,
+         plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -472,9 +553,6 @@ module Gori
         if rid = optional_int_arg(h, "repeater_id")
           rec = store.get_repeater(rid)
           raise FuzzArgError.new("no repeater session #{rid}") unless rec
-          if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-            raise FuzzArgError.new("repeater #{rid} is a WebSocket session — the Fuzzer sweeps HTTP requests, not a framed WebSocket exchange (use send_websocket, or seed from an HTTP repeater)")
-          end
           # Markers escaped like the flow_id seed (a stored `§` is literal text, not a position),
           # but evidence is FALSE: a repeater session is the operator's authored draft and its
           # `$NAME` bindings expand, the same as send_request from a repeater.
@@ -484,6 +562,116 @@ module Gori
           return {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni}
         end
         raise FuzzArgError.new("provide a 'template' (raw request with §…§), a 'flow_id', or a 'repeater_id'")
+      end
+
+      # The caller's own `messages` array — a DRAFT they authored, so `evidence: false`: a `$KEY`
+      # in it resolves and a `§` in it is theirs to mean.
+      #
+      # Entries go through `ws_out_message_item`, the ONE parser `send_websocket` and
+      # `ws_out_messages` use, so a named opcode, a `fin:0`, an `rsv`, a `mask_key` and a
+      # disagreeing `len` mean here exactly what they mean there. Re-reading the keys locally is
+      # the defect that method's own comment records: `as_i?` returns nil for a NAMED opcode and
+      # `as_bool?` for the `0`/`1` the schema advertises, so a PING went out as TEXT and `fin:0`
+      # as FIN=1, with `isError:false`.
+      private def fuzz_ws_override(raw : JSON::Any) : Array(Fuzz::WsMessageSource)
+        arr = raw.as_a? || (raw.as_s?.try { |t| JSON.parse(t).as_a? })
+        raise FuzzArgError.new("'messages' must be a JSON array of frames") unless arr
+        arr.map do |item|
+          msg, err = ws_out_message_item(item)
+          raise FuzzArgError.new(ws_entry_error("messages", item, err)) unless msg
+          Fuzz::WsMessageSource.new(msg.opcode, String.new(msg.payload), msg.shape, false)
+        end
+      end
+
+      # The outbound WebSocket frame script for this sweep, or nil when it is not a WS run.
+      #
+      # nil means "sweep this as HTTP", and there are three ways to get it: the template
+      # declares no `Upgrade: websocket` handshake, the caller passed `ws_http_only:true`, or
+      # the seed is a WebSocket but carries no frames and the caller named none — which would be
+      # a handshake-only script, i.e. exactly what an HTTP sweep of the same bytes already is.
+      #
+      # `messages` REPLACES the seed's stored frames, the same rule `gori run fuzz --message` and
+      # `gori run repeater send --message` both apply. Entries go through
+      # `ws_out_message_item` — the ONE parser `send_websocket` and `ws_out_messages` use — so a
+      # named opcode, a `fin:0`, an `rsv`, a `mask_key` and a disagreeing `len` mean here exactly
+      # what they mean there. Re-deriving them would reintroduce the defect that comment records
+      # (a PING sent as TEXT, a CLOSE as BINARY, with `isError:false`).
+      private def fuzz_ws_messages(h, text : String) : Array(Fuzz::WsMessageSource)?
+        given = h["messages"]?
+        upgrade = Gori::Proxy::WS.upgrade_request?(text)
+        http_only = bool_arg(h, "ws_http_only", false)
+        # An explicit `messages` that cannot be sent is REFUSED, never dropped. Returning nil
+        # here — which is what this did — ran the sweep as plain HTTP with the agent's whole
+        # frame script silently discarded, `websocket`/`ws_frames_out` absent from the echo and
+        # no error anywhere. `gori run fuzz` aborts on both of these, and an agent has less
+        # ability than a human to notice the omission, not more. `Plan.build`'s `WsError`
+        # backstop cannot catch it either: the early return means it never sees the frames.
+        if given
+          unless upgrade
+            raise FuzzArgError.new("'messages' describes a WebSocket exchange, but this template " \
+                                   "declares no `Upgrade: websocket` handshake for the frames to ride. " \
+                                   "Seed from a WebSocket flow_id/repeater_id, or drop 'messages' to " \
+                                   "sweep it as HTTP")
+          end
+          if http_only
+            raise FuzzArgError.new("'messages' and ws_http_only:true contradict each other — " \
+                                   "ws_http_only sweeps the handshake as an ordinary HTTP request, " \
+                                   "which sends no frames. Drop one of the two")
+          end
+          return fuzz_ws_override(given)
+        end
+        return nil if http_only || !upgrade
+        fuzz_ws_seed(h)
+      end
+
+      # The frames a `flow_id` / `repeater_id` seed carries, or nil when it carries none.
+      # Split from `fuzz_ws_messages` so neither half sits over the complexity limit; the
+      # refusals above are about the CALLER's arguments, this is about the STORE's rows.
+      private def fuzz_ws_seed(h) : Array(Fuzz::WsMessageSource)?
+        flow_id = optional_int_arg(h, "flow_id")
+        repeater_id = optional_int_arg(h, "repeater_id")
+        rows =
+          if flow_id
+            store.ws_messages(flow_id)
+          elsif repeater_id
+            store.ws_messages_for_repeater(repeater_id)
+          end
+        return nil unless rows
+        # `Run.ws_seed_rows` is the shared filter every seed reader goes through: `out` direction
+        # only, minus gori's own `[gori]` advisory rows — those are diagnostics gori wrote ABOUT
+        # the socket, and replaying one would put gori's sentence on the wire as a TEXT frame.
+        kept, dropped = CLI::Run.ws_seed_rows(rows)
+        # Said, not swallowed: a seed holding fewer frames than the capture is the same class of
+        # problem as one holding an extra, which is why `ws_notice_dropped_note` exists as one
+        # sentence for every surface. `send_websocket` puts it on its own result; here the only
+        # channel a background job has is the log.
+        Log.info { "fuzz_start: #{CLI::Run.ws_notice_dropped_note(dropped)}" } if dropped > 0
+        # No frames left: a handshake-only script is exactly what an HTTP sweep of the same
+        # bytes already is, and dialing a real socket per payload to send nothing would just
+        # wait out the drain. `gori run fuzz` folds the same way.
+        return nil if kept.empty?
+        # Markers escaped per frame, exactly as the handshake seed escapes them and for the same
+        # reason: `§` is U+00A7, ordinary text a captured frame carries for reasons unrelated to
+        # gori, and an unescaped `§…§` pair would become a live position nobody marked.
+        #
+        # `evidence` mirrors the handshake's provenance on each path — a `flow_id` seed is a
+        # CAPTURE, and a `repeater_id` seed is a capture only when the session was itself seeded
+        # from a flow. Same rule as `send_websocket`.
+        seeded =
+          if flow_id
+            true
+          elsif repeater_id
+            !!store.get_repeater(repeater_id).try { |r| !r.flow_id.nil? }
+          else
+            false
+          end
+        kept.map do |m|
+          # `seed_shape` drops the captured mask key and declared length — see the CLI seed's
+          # comment; a nonce pinned across a whole sweep is the defect it prevents.
+          Fuzz::WsMessageSource.new(m.opcode,
+            String.new(Fuzz::Template.escape_literal_markers(m.payload)),
+            CLI::Run.seed_shape(m.shape), seeded)
+        end
       end
 
       private def fuzz_mode(h) : Fuzz::Mode
@@ -862,6 +1050,12 @@ module Gori
         cfg.follow_redirects = bool_arg(h, "follow_redirects", cfg.follow_redirects?)
         optional_int_arg(h, "max_redirects").try { |v| cfg.max_redirects = v.clamp(0_i64, 50_i64).to_i }
         cfg.auto_calibrate = bool_arg(h, "auto_calibrate", cfg.auto_calibrate?)
+        # WebSocket pacing. Clamped to the same 100-60000 window `gori run fuzz --idle-ms` and
+        # `gori run repeater send --idle-ms` use, so a session paces identically whichever
+        # surface drives it. `timeout` is NOT its synonym — `WsEngine` takes no per-operation
+        # bound — which is why a WS run reports `timeout` as ignored rather than folding it here.
+        optional_int_arg(h, "idle_ms").try { |v| cfg.ws_idle = v.clamp(100_i64, 60_000_i64).milliseconds }
+        cfg.ws_keep_key = bool_arg(h, "keep_sec_websocket_key", cfg.ws_keep_key?)
         optional_int_arg(h, "throttle_ms").try { |v| cfg.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # `gori run fuzz --verbatim` and `intercept_forward_edit{update_content_length:false}`
         # both reach this knob; fuzz_start could not, so the whole CL-desync probe class (a
@@ -914,7 +1108,7 @@ module Gori
           "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
           s.field "template", strprop("raw HTTP request with §…§ position markers")
           s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
-          s.field "repeater_id", intprop("seed the template from a saved HTTP repeater session id (instead of template/flow_id); a WebSocket session is refused")
+          s.field "repeater_id", intprop("seed the template from a saved repeater session id (instead of template/flow_id). A WebSocket session seeds its handshake AND its outbound frames — see 'messages'")
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
           s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template. An occurrence already inside a §…§ (or flush against one) is skipped — re-wrapping it would merge the two positions — and a token left with none of its own is named in `marks_warning`")
@@ -944,6 +1138,10 @@ module Gori
           s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
           s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")
           s.field "race_warmup", strprop("race_count only: a raw HTTP request sent, and its response fully read, on each connection BEFORE it holds the race request — equalizes per-connection TLS-handshake/accept latency, which narrows the achievable release window. Sent EXACTLY as given (no §…§, no Env expansion) — use something harmless (e.g. a plain GET) against the same origin, never the race request itself (which would perform its side effect once per connection before the timed attempt).")
+          s.field "messages", ws_out_messages_prop(%(WebSocket only: the outbound frame script, REPLACING the frames a flow_id/repeater_id seed carried. Each entry is a plain string (a TEXT frame), a WsFrameSpec string ("opcode=ping,text=hi"), or the object form — the same grammar send_websocket takes. Mark §…§ positions IN THESE PAYLOADS: that is what a WebSocket sweep fuzzes. One variation = one full RFC 6455 session (dial, handshake, send the script, drain, close), so concurrency N means N simultaneous sockets. A WebSocket seed with no frames and no 'messages' is swept as plain HTTP.))
+          s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout after the first inbound frame (100-60000, default 3000). This is the WebSocket path's pacing knob — 'timeout' is NOT its synonym and is reported in 'ignored_args' on a WS run.")
+          s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session instead of a fresh one, so an absent / short / duplicate / non-base64 key can itself be the thing under test (default false).")
+          s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the upgrade handshake goes out as an ordinary request and the 101 is read as a response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / http2 / record_history against a WebSocket seed, all three of which are refused on the framed path.")
         end
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \

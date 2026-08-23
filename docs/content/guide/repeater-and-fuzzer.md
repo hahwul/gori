@@ -98,6 +98,33 @@ Filter results with ffuf-style matchers and filters on status, size, words, line
 
 A gRPC template carries a second length declaration — the 5-byte prefix in front of each message — and it gets the opposite default: gori leaves it exactly as the payload left it, and says so once at the end of the run (`2 of 3 requests left it stale`, `grpc_stale_prefix` in MCP `fuzz_status`). That is the right answer when a deliberately-wrong prefix is what you are testing, and the wrong one when you are sweeping an ordinary unary call and every request is being rejected at the framing layer. `--reframe-grpc` (MCP `reframe_grpc: true`, or the **gRPC reframe (unary)** toggle on the Fuzzer's ADVANCED card) recomputes it per request. It is off by default on all three surfaces, and it only touches a single message: a client-streaming body, a `grpc-web-text` body, and a seed whose framing was already broken are left alone and still reported.
 
+### Fuzzing a WebSocket
+
+A WebSocket session is swept like any other target, with one difference that follows from the protocol: **one payload is one whole session**. gori dials, does the RFC 6455 handshake, sends your frame script with the payload spliced in, drains the origin's answer and closes — then does it again for the next payload. A socket is a conversation, not a request/response pair, so nothing else would attribute an answer to the payload that provoked it. Concurrency therefore means that many simultaneous sockets.
+
+Mark `§…§` positions **in the frames**, which is where a WebSocket app's parameters live:
+
+```bash
+gori run fuzz --repeater 7 \
+  --message '{"op":"login","user":"§admin§"}' \
+  --payloads-preset sqli
+```
+
+`--repeater N` on a WebSocket session seeds the handshake **and** the frames the session stored, so a captured exchange is swept as it was recorded; `--flow N` does the same from a captured socket. `--message` / `--message-frame` replace those frames when you want to author your own — `--message-frame` takes the same `opcode=…,fin=…,rsv=…,mask=…,len=…,hex=|b64=|text=` grammar as `gori run repeater send`, so a PING, a CLOSE with a chosen code, an unmasked client frame or a length that disagrees with its payload are all reachable. `--idle-ms` sets the per-session silence timeout and `--ws-keep-key` sends the template's own `Sec-WebSocket-Key` so an absent or malformed key can itself be the test.
+
+The **handshake is a position space too**: mark a header or a query value in the upgrade and it sweeps alongside the frames, in one run. And `--ws-http-only` goes the other way — it sends the handshake as an ordinary request and reads the 101 as a response, which is how you test an origin that answers 200 to an upgrade.
+
+Results read like any other sweep, because the inbound frames **are** the response body: `--mr`, `--mh`, `--extract`, size and word matching all work unchanged. Two extra fields carry what the handshake's status cannot, since a successful upgrade is `101` on every row whether the origin liked the payload or not:
+
+```
+#1     bob                       101   30B   1w   1.4ms  ws 1 frame · close 1000
+#2     admin'--                  101   31B   5w   1.5ms  ws 1 frame · close 1008
+```
+
+`ws_close_code` and `ws_frames_in` appear in `--format json` and in MCP `fuzz_results` the same way, and only on WebSocket rows.
+
+Four knobs do not apply. `--race` and `--http2` are refused outright — a race group is byte-identical copies of one request, and gori re-establishes a socket with an HTTP/1.1 upgrade (RFC 8441 extended CONNECT has no send path) — and so is `--record-history`, because a framed exchange is not a request/response flow and writing one would produce a History entry that claims to be a WebSocket with an empty transcript. `--follow-redirects`, `--timeout` and `--ac` are simply inert here and the run says so once, up front, rather than pretending otherwise. Each refusal names `--ws-http-only` where that is the way to get what you asked for — under that flag the run is an ordinary HTTP sweep, so all three work, recording included. A WebSocket seed that carries no outbound frames is swept as plain HTTP too: a handshake-only “framed” run would dial a socket per payload just to send nothing.
+
 ### Connection Reuse
 
 A sweep reuses one HTTP/1.1 connection across many requests, so a run pays one TCP — and, on `https`, one TLS — handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.

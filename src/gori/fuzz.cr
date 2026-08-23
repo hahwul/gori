@@ -4,6 +4,7 @@
 require "./fuzz/types"
 require "./fuzz/content_length"
 require "./fuzz/template"
+require "./fuzz/ws_script"
 require "./fuzz/payload"
 require "./fuzz/presets"
 require "./fuzz/auto_encode"

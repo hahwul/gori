@@ -31,13 +31,21 @@ module Gori::Fuzz
     # this request substitutes — see `Fuzz::AutoEncode`, which is where the decision is
     # taken (`Fuzz::Plan.build`). Defaults to the no-op, so a Generator built directly
     # renders exactly what it always did.
-    def initialize(@template : Template, @sets : Array(PayloadSet), @config : Config,
+    # `marked` is a `Template` for an ordinary HTTP sweep and a `WsScript` for a WebSocket one.
+    # A UNION rather than two Generators or an abstract base: every attack mode, the totals, the
+    # chain pass and the payload-set contract are defined over the payload-VALUE vector, and both
+    # types answer that vector identically (`position_count`, `positions`, `default_payloads`,
+    # `apply_chains{,_reported}`). Only the SPLICE differs — one buffer versus a handshake plus N
+    # frames — so only `emit` and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/
+    # `cluster`/`recurse`/`total` are untouched.
+    def initialize(marked : Template | WsScript, @sets : Array(PayloadSet), @config : Config,
                    @registry : Decoder::Registry? = nil,
                    @auto_encode : AutoEncode = AutoEncode.none)
+      @marked = marked
       # Whether ANY marked position carries an inline `¦chain`. Computed once over the
       # immutable template so the per-request `chained` hot path can skip apply_chains'
       # array allocation entirely on the common no-chain template (auto_mark / bare §v§).
-      @has_chains = @template.positions.any? { |p| !p.chain.empty? }
+      @has_chains = @marked.positions.any? { |p| !p.chain.empty? }
       # Does this run re-length-prefix its gRPC bodies? ONE decision, taken off the seed
       # rendering, never per request (P6): `reframable_template?` reads the head as a String
       # to find content-type, which is fine once and not fine ten thousand times. The knob is
@@ -58,6 +66,13 @@ module Gori::Fuzz
       @reframe_grpc ? GrpcVerdict.reframe(bytes) : bytes
     end
 
+    # Does this run sweep a WebSocket script rather than an HTTP request? Read by `Fuzz::Engine`
+    # (which routes `run_one` and skips `calibrate_baseline`) and by `Fuzz::Plan` (which reports
+    # the knobs a WS run cannot honour).
+    def ws? : Bool
+      @marked.is_a?(WsScript)
+    end
+
     def mode : Mode
       @config.mode
     end
@@ -67,7 +82,7 @@ module Gori::Fuzz
     # sizes; an unknown-length set could end the lockstep sooner).
     def total : Int64?
       case @config.mode
-      when .sniper?        then mul(@template.position_count.to_i64, set_size(0))
+      when .sniper?        then mul(@marked.position_count.to_i64, set_size(0))
       when .battering_ram? then set_size(0)
       when .pitchfork?     then pitchfork_total
       when .cluster_bomb?  then cluster_total
@@ -98,7 +113,17 @@ module Gori::Fuzz
     # declaring `Content-Length: 5` over a ten-byte body is the CL-desync probe itself, and
     # a sweep that silently corrects it tests something else and reports success.
     def baseline_raw : Bytes
-      @template.render(chained(@template.default_payloads))
+      values = chained(@marked.default_payloads)
+      # On a WS script this is the HANDSHAKE, which is what every caller of `baseline_raw`
+      # wants: `Outbound.request_target` needs a request line, `GrpcVerdict.framed_template?`
+      # and `reframable_template?` need a content-type head (and correctly answer "no" for an
+      # upgrade), and `Plan#rewrites_content_length?` asks about the one part that declares a
+      # length. The frames are rendered and dropped here — a bounded, plan-time cost, and
+      # cheaper than a second render path that could disagree with `emit`'s.
+      if script = @marked.as?(WsScript)
+        return script.render_spans(values).handshake
+      end
+      @marked.as(Template).render(values)
     end
 
     # `n` synthetic requests for auto-calibration (Engine#calibrate_baseline): each
@@ -111,11 +136,21 @@ module Gori::Fuzz
     # grows with payload length) apart from ordinary noise. Returns {request bytes,
     # total injected payload length across all positions} per sample.
     def calibration_requests(n : Int32) : Array({Bytes, Int32})
-      count = @template.position_count
+      # Empty on a WebSocket script, and `Engine#calibrate_baseline` also returns early on
+      # `ws?` — belt and braces, for the reason a race run gets the same treatment there: each
+      # sample would open a FULL session and perform the script's side effects, up to
+      # CALIBRATION_SAMPLES times, before the sweep proper. That is exactly what
+      # `Config#race_warmup`'s doc forbids ("never the race request itself"). Rendering the
+      # handshake alone and calling it a sample would be worse than skipping: it measures a
+      # 101 no payload can change, so every baseline would be identical and `--ac` would
+      # calibrate the sweep away.
+      return [] of {Bytes, Int32} if ws?
+      template = @marked.as(Template) # narrowed by the guard above
+      count = template.position_count
       (0...n).map do |i|
         plen = CALIBRATION_BASE_LEN + i * CALIBRATION_STEP
         payloads = Array.new(count) { random_nonce(plen) }
-        raw = @template.render(chained(payloads))
+        raw = template.render(chained(payloads))
         bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
         {reframed(bytes), plen * count}
       end
@@ -127,8 +162,8 @@ module Gori::Fuzz
       set = @sets[0]?
       return if set.nil?
       idx = 0_i64
-      defaults = @template.default_payloads
-      (0...@template.position_count).each do |p|
+      defaults = @marked.default_payloads
+      (0...@marked.position_count).each do |p|
         set.each do |v|
           payloads = defaults.dup
           payloads[p] = v
@@ -142,7 +177,7 @@ module Gori::Fuzz
       set = @sets[0]?
       return if set.nil?
       idx = 0_i64
-      n = @template.position_count
+      n = @marked.position_count
       set.each do |v|
         emit_to.call(emit(idx, Array.new(n, v), nil))
         idx += 1
@@ -150,7 +185,7 @@ module Gori::Fuzz
     end
 
     private def pitchfork(emit_to : Job ->) : Nil
-      count = @template.position_count
+      count = @marked.position_count
       return if count == 0
       # Open inside the begin so a raise on the k-th open_iterator (e.g. a wordlist file
       # removed after preflight) still closes the 0..k-1 already opened, rather than
@@ -175,7 +210,7 @@ module Gori::Fuzz
     end
 
     private def cluster(emit_to : Job ->) : Nil
-      count = @template.position_count
+      count = @marked.position_count
       return if count == 0
       idx = 0_i64
       acc = Array.new(count, "")
@@ -206,7 +241,10 @@ module Gori::Fuzz
       # to be legal there. (A position that declares a chain opts OUT of this entirely — see
       # `AutoEncode.build` — so in practice the two never stack.)
       values = @auto_encode.apply(values, pos)
-      raw, spans = @template.render_spans(values)
+      if script = @marked.as?(WsScript)
+        return emit_ws(script, idx, payloads, pos, values, chain_error)
+      end
+      raw, spans = @marked.as(Template).render_spans(values)
       bytes = raw
       if @config.update_content_length?
         bytes, at, delta = ContentLength.sync_at(raw, @config.add_content_length_when_missing?)
@@ -217,6 +255,31 @@ module Gori::Fuzz
       # `chain_error` names any position whose `¦chain` could not run on its payload, so a
       # request that went out with the transform SKIPPED is not reported as a clean send.
       Job.new(idx, payloads, pos, bytes, spans, chain_error)
+    end
+
+    # One WebSocket variation: the handshake plus the rendered outbound frame script.
+    #
+    # The Content-Length pass runs over the HANDSHAKE ONLY, and `shift_spans` is applied ONLY
+    # to the handshake's spans. That restriction is the point, not an omission: the frames are
+    # separate buffers, so shifting their offsets by a delta computed over a different slice
+    # would silently move each frame's payload exclusion off the payload — and that exclusion is
+    # the one thing standing between `--payloads '$TOKEN'` and the live session credential going
+    # out in a frame (`Env.expand_bindings_frame`). A frame declares no length of its own
+    # anyway; `WS.encode` writes its header after the send seam.
+    #
+    # `reframed` is not applied either. It is the gRPC 5-byte length prefix, which is an h2
+    # body concern; a WS run's `@reframe_grpc` is false by construction (`baseline_raw` is an
+    # upgrade head, which `reframable_template?` refuses), so calling it would be a no-op that
+    # reads as if gRPC-over-WebSocket were a supported combination.
+    private def emit_ws(script : WsScript, idx : Int64, payloads : Array(String),
+                        pos : Int32?, values : Array(String), chain_error : String?) : Job
+      r = script.render_spans(values)
+      hs, spans = r.handshake, r.handshake_spans
+      if @config.update_content_length?
+        hs, at, delta = ContentLength.sync_at(hs, @config.add_content_length_when_missing?)
+        spans = shift_spans(spans, at, delta) unless delta == 0
+      end
+      Job.new(idx, payloads, pos, hs, spans, chain_error, r.frames)
     end
 
     # `spans` moved across the Content-Length rewrite, which is the one pass that runs
@@ -247,7 +310,7 @@ module Gori::Fuzz
     private def chained(payloads : Array(String)) : Array(String)
       # No registry, or no position has a chain ⇒ apply_chains is a per-element identity, so
       # return payloads verbatim (byte-for-byte the same wire request) and skip its allocation.
-      (reg = @registry) && @has_chains ? @template.apply_chains(payloads, reg) : payloads
+      (reg = @registry) && @has_chains ? @marked.apply_chains(payloads, reg) : payloads
     end
 
     # Like `chained`, but for a REPORTED request: also returns the first position's chain
@@ -256,7 +319,7 @@ module Gori::Fuzz
     # extra allocation, so the common `auto_mark` / bare `§v§` sweep is unchanged.
     private def chained_reported(payloads : Array(String)) : {Array(String), String?}
       return {payloads, nil} unless (reg = @registry) && @has_chains
-      transformed = @template.apply_chains_reported(payloads, reg)
+      transformed = @marked.apply_chains_reported(payloads, reg)
       # First failing position wins the row's reason; a request with several failing chains is
       # still one wrong-on-the-wire request, and the first named cause is enough to act on.
       err = transformed.each.compact_map(&.[1]).first?
@@ -272,7 +335,7 @@ module Gori::Fuzz
     end
 
     private def pitchfork_total : Int64?
-      known = (0...@template.position_count).compact_map { |p| @sets[p]?.try(&.size) }
+      known = (0...@marked.position_count).compact_map { |p| @sets[p]?.try(&.size) }
       known.empty? ? nil : known.min
     end
 
@@ -282,7 +345,7 @@ module Gori::Fuzz
       # otherwise a run with fewer payload sets than positions reports an unknown
       # ('?') total and demands --force, even though it's perfectly bounded.
       acc = 1_i64.as(Int64?)
-      (0...@template.position_count).each { |p| acc = mul(acc, set_for(p).size) }
+      (0...@marked.position_count).each { |p| acc = mul(acc, set_for(p).size) }
       acc
     end
 

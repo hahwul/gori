@@ -360,6 +360,19 @@ module Gori
             j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
           end
           j.field "grpc_message", text(r.grpc_message) if r.grpc_message
+          # The WebSocket SESSION's outcome, for the same reason the gRPC pair above exists:
+          # `status` is 101 for every successful handshake, so a sweep whose payloads all made
+          # the origin close with `1008 Policy Violation` was indistinguishable from one it
+          # accepted. `ws_frames_in` counts the INBOUND frames gori kept (its own `[gori]`
+          # advisory rows excluded) — `length` is those payloads concatenated and cannot tell
+          # one long answer from many short ones. Emitted only when the row carried them, so an
+          # HTTP run's results are unchanged.
+          if fi = r.ws_frames_in
+            j.field "ws_frames_in", fi
+          end
+          if cc = r.ws_close_code
+            j.field "ws_close_code", cc
+          end
           j.field "extracted", text(r.extracted)
           # This variation's request reached the origin TWICE: the keep-alive pool found its
           # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when

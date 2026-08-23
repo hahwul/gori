@@ -1,3 +1,6 @@
+require "../proxy/ws/frame"     # Proxy::WS::Shape — the frame shape a WS fuzz job carries
+require "../repeater/ws_engine" # WsEngine::DEFAULT_IDLE — the WS transport's own pacing default
+
 module Gori
   # The fuzzer / intruder engine: takes a base HTTP request with marked positions,
   # substitutes payloads into them, and sends the variations concurrently while
@@ -42,6 +45,60 @@ module Gori
       end
     end
 
+    # One outbound WebSocket frame as a SURFACE hands it in — before marking and before the
+    # template parse. `payload` is marked TEXT and may carry `§…§`, exactly as
+    # `PlanOptions#template` does: a Crystal String holds arbitrary bytes and the whole marking
+    # layer is byte-oriented (see `Template`), so a BIN frame's payload survives it intact.
+    #
+    # Deliberately NOT `Store::WsOutMessage`. This module never depends on Store (see
+    # `src/gori/fuzz.cr`), and each surface already holds the conversion at its own edge — the
+    # CLI reads `ws_messages_for_repeater`, MCP parses its `messages` array.
+    record WsMessageSource,
+      opcode : Int32,
+      payload : String,
+      shape : Proxy::WS::Shape = Proxy::WS::Shape::DEFAULT,
+      evidence : Bool = false
+
+    # One RENDERED outbound frame of one variation: payloads spliced, spans computed.
+    #
+    # `payload_spans` are offsets into THIS FRAME's payload, not into the job's handshake — the
+    # frames are separate buffers. That is also why the handshake's Content-Length pass must
+    # never `shift_spans` these: shifting a frame's spans by a delta computed over a different
+    # buffer silently corrupts the one exclusion that keeps a `$TOKEN` payload out of the live
+    # session table (`Env.expand_bindings_frame`).
+    record WsFrame,
+      opcode : Int32,
+      payload : Bytes,
+      shape : Proxy::WS::Shape,
+      evidence : Bool = false,
+      payload_spans : Array({Int32, Int32}) = [] of {Int32, Int32}
+
+    # The WebSocket facts of one session that `Repeater::Result` has no field for — and must not
+    # grow one for: that struct is shared with every other engine, the same argument
+    # `Engine#gate_refused?` makes for keeping the gate's contract in two string constants.
+    #
+    # `truncated` is NOT carried here: it means "the captured transcript is SHORT of what the
+    # server sent", which is precisely `Repeater::Result#incomplete?`, so the adapter maps it
+    # there rather than inventing a second spelling. `note` — a handshake accept mismatch, an
+    # unconfirmed delivery, a script that stopped early because the peer sent CLOSE — is a
+    # per-RUN advisory and rides `Progress#ws_notes`, beside `grpc_stale`.
+    record WsOutcome,
+      close_code : Int32?,
+      # NILABLE, and `0` would be a different claim. A session that never upgraded — a dial
+      # failure, a scope-gate refusal, a `max_requests` stop — received no frames because it
+      # never opened a socket, which is not the same fact as "the origin answered nothing".
+      # `Result#ws_frames_in` documents itself as nil in exactly that case, and every reader
+      # tests presence (`if fi = r.ws_frames_in`), so a `0` printed `ws 0 frames` on an errored
+      # row and emitted `"ws_frames_in": 0` into JSON and MCP.
+      frames_in : Int32?,
+      note : String?,
+      truncated : String? do
+      # The outcome of a session that never happened (a refused or unsupported send).
+      def self.failed : WsOutcome
+        new(nil, nil, nil, nil)
+      end
+    end
+
     # One concrete request to send: `bytes` already has payloads substituted and
     # Content-Length synced. `position` is the fuzzed position for Sniper (nil
     # otherwise). `index` is the monotonic emit order (results stream back out of
@@ -67,7 +124,12 @@ module Gori
       position : Int32?,
       bytes : Bytes,
       payload_spans : Array({Int32, Int32}) = [] of {Int32, Int32},
-      chain_error : String? = nil
+      chain_error : String? = nil,
+      # The rendered outbound frame script, or nil for an ordinary HTTP job. When set, `bytes`
+      # is the HANDSHAKE — so `Outbound.request_target(job.bytes)`, `Result#request` and
+      # `HistoryRecord.split_head_body` all keep reading an HTTP request head, and the
+      # handshake is itself part 0 of the run's position space (see `Fuzz::WsScript`).
+      ws_frames : Array(WsFrame)? = nil
 
     # One emitted result row. `length`/`words`/`lines` are computed over the DECODED
     # response body (gzip/deflate/br/zstd inflated). `head`/`body`/`request` are
@@ -157,11 +219,41 @@ module Gori
         @resent_count > 0
       end
 
+      # The RFC 6455 close code the origin sent, and how many INBOUND frames this variation's
+      # session carried. nil on every non-WebSocket row, and on a WS session that never
+      # upgraded — the same shape and the same argument as `grpc_status`/`grpc_message` above:
+      # carried per row, emitted only when present, so an HTTP run's output is unchanged.
+      #
+      # `status` cannot carry either. For a WebSocket the handshake status is 101 BY
+      # DEFINITION, so a sweep whose payloads all made the origin close with `1008 Policy
+      # Violation` produced output byte-identical to one it accepted — `101 · matched` on every
+      # row. And `length` counts the concatenated inbound BYTES, which cannot distinguish one
+      # 90-byte answer from thirty 3-byte keepalives.
+      getter ws_close_code : Int32?
+      getter ws_frames_in : Int32?
+
+      # KEYWORD-ONLY, for the reason `Repeater::Result`'s tail is (see its comment): three
+      # same-typed nilable scalars appended by three different fixers is exactly how `retried`
+      # and `timed_out` got written into each other's field twice.
       def initialize(@index, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
                      @head = nil, @body = nil, @request = nil, @retried = false,
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
-                     @timed_out = false, @resent_count = 0, @wire = nil)
+                     @timed_out = false, @resent_count = 0, @wire = nil, *,
+                     @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil)
+      end
+
+      # The same row carrying its session's WebSocket facts. A copy-returning method rather
+      # than two more arguments threaded through `Matcher#build`: the matcher is the one build
+      # site for every `Fuzz::Result` and it reads the SYNTHESIZED `Repeater::Result` alone —
+      # keeping it ignorant of `WsOutcome` is what makes "the matcher is unchanged" true rather
+      # than nearly true. `Engine#run_one_ws` applies this at the one seam that has both.
+      def with_ws(o : WsOutcome) : Result
+        Result.new(@index, @payloads, @position, @status, @length, @words, @lines,
+          @duration_us, @error, @matched, @incomplete, @extracted,
+          @head, @body, @request, @retried, @chain_error, @grpc_status, @grpc_message,
+          @timed_out, @resent_count, @wire,
+          ws_close_code: o.close_code, ws_frames_in: o.frames_in)
       end
     end
 
@@ -200,7 +292,19 @@ module Gori
       # one line that says so, the counterpart of the `--verbatim` note Content-Length gets.
       grpc_stale : Int64 = 0_i64,
       grpc_requests : Int64 = 0_i64,
-      grpc_stale_reason : String? = nil
+      grpc_stale_reason : String? = nil,
+      # WebSocket sessions that came back with a non-fatal ADVISORY, and the first one's
+      # sentence: a handshake whose `Sec-WebSocket-Accept` did not verify, a delivery the
+      # engine could not confirm, a script that stopped early because the peer sent CLOSE, or a
+      # transcript a capture cap cut short.
+      #
+      # Carried on Progress for the reason `blocked`/`grpc_stale` are — a surface that must not
+      # report a half-delivered sweep as `50 sent · 0 errors` only ever sees events. NOT folded
+      # into `errors`: the session ran and its response is real evidence, so counting it as a
+      # failed send would both inflate the error tally and flip the exit code of a clean run.
+      # And not dropped, which is the silent false negative this field exists to prevent.
+      ws_notes : Int64 = 0_i64,
+      ws_note_reason : String? = nil
 
     # Engine → consumer events. A union (not a class hierarchy) so `Channel(Event)`
     # carries them without boxing surprises. Progress is droppable (latest wins);
@@ -271,6 +375,20 @@ module Gori
       # the race request itself as its own warm-up would perform a non-idempotent action once
       # before the timed attempt.
       property race_warmup : Bytes?
+      # WebSocket only: the gap of server silence that ends each session's drain, and whether to
+      # send the template's own `Sec-WebSocket-Key` rather than a fresh one per session.
+      #
+      # `ws_idle` is the WS transport's pacing knob and `timeout` is NOT its synonym —
+      # `WsEngine.send` takes `idle`/`deadline` and no per-operation timeout at all, which is
+      # what `gori run repeater send --timeout`'s own help text already says. Keeping them
+      # separate is why a WS run can report `timeout` as ignored instead of quietly honouring
+      # neither.
+      #
+      # `ws_keep_key` lets an absent, short, duplicate or non-base64 key be the thing under
+      # test; without it every session dials with a fresh conforming key and that test is
+      # unreachable. Same spelling and same default as `Repeater::Plan#send_ws`.
+      property ws_idle : Time::Span
+      property? ws_keep_key : Bool
 
       def initialize(@mode : Mode = Mode::Sniper,
                      @concurrency : Int32 = 20,
@@ -290,7 +408,9 @@ module Gori
                      @max_requests : Int64? = nil,
                      @keep_alive : Bool = true,
                      @race_count : Int32? = nil,
-                     @race_warmup : Bytes? = nil)
+                     @race_warmup : Bytes? = nil,
+                     @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
+                     @ws_keep_key : Bool = false)
       end
     end
   end

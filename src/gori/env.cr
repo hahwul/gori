@@ -478,6 +478,36 @@ module Gori
       expand(text, guard_boundary ? boundary_safe(vals) : vals, prefix, escape: Escape::Consume)
     end
 
+    # A WebSocket FRAME payload. All body, and that is the whole of why it needs its own door
+    # rather than a flag on either overload above:
+    #
+    #   * no HEAD/BODY split — there is no head, so `head_body_boundary` on a frame either finds
+    #     a CRLFCRLF the payload happens to contain (splitting a JSON document in half) or finds
+    #     none and calls the WHOLE frame a head, which then withholds every CR/LF-carrying value.
+    #   * no CONTENT-LENGTH delta — a frame declares its length in its own header, which
+    #     `WS.encode` writes AFTER this pass, so there is nothing here to re-sync.
+    #   * no BOUNDARY-FORGING withholding — there are no header lines for a CR/LF to forge one
+    #     into, which is the reason `Repeater::Sender#expand_messages` reaches for the String
+    #     overload with `guard_boundary: false` today, and why a PEM block or a formatted JSON
+    #     sub-document must survive as a binding value here.
+    #
+    # `verbatim` is what that path has never had, and it is the point of this method: the FUZZ
+    # PAYLOAD's own span inside the frame. `--payloads '$TOKEN'` aimed at a WebSocket app is the
+    # operator's test case — SSTI, env reflection, a GraphQL `$id` — and substituting the live
+    # session credential there both sends a frame nobody wrote and puts a real credential on the
+    # wire. The Bytes overload's own comment makes this argument for the HTTP half; a frame is
+    # where it had no implementation.
+    def self.expand_bindings_frame(payload : Bytes,
+                                   verbatim : Array({Int32, Int32})? = nil) : Bytes
+      prefix = Settings.env_prefix
+      return payload if prefix.empty? || !contains_prefix?(payload, prefix)
+      vals = binding_values
+      # See the Bytes overload: this is also the seam that CONSUMES `$$`, so an empty table is
+      # not on its own a reason to skip.
+      return payload if vals.empty? && !contains_escape?(payload, prefix)
+      expand(String.new(payload), vals, prefix, verbatim, Escape::Consume).to_slice
+    end
+
     # `spans` restricted to `[from, to)` and rebased so 0 is `from` — what a half of a
     # head/body split needs when the caller's offsets are into the whole message. Returns
     # nil (not an empty Array) when nothing survives, so the scans below keep their
