@@ -147,7 +147,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope` — `project` (default) or `global`, which applies in every project |
 | `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope` — `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
-| `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file into History |
+| `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History |
 | `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |
 | `set_sitemap_tag` | Pin a free-text memo onto a sitemap path |
 | `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |

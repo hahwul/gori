@@ -485,6 +485,7 @@ Content-Type: application/json
 | **Import: Postman** | Postman Collection v2 익스포트 → 저장된 요청마다 요청 템플릿 하나 |
 | **Import: Insomnia** | Insomnia v4 JSON 익스포트 → 저장된 요청마다 요청 템플릿 하나 |
 | **Import: Burp** | Burp Suite 저장 항목(XML) → 전체 요청/응답 플로우, 바이트 단위 그대로 |
+| **Import: WSDL** | WSDL 1.1 서비스 설명서(XML) → 오퍼레이션마다 SOAP 요청 템플릿 하나 |
 
 형식이 잘못된 항목은 전체 임포트를 중단시키지 않고 건너뜁니다. 임포트된 플로우는 캡처된 트래픽처럼 History에 들어오므로, 똑같이 필터링하고 Repeater로 재전송하거나 퍼징·스캔할 수 있습니다.
 
@@ -494,7 +495,9 @@ Content-Type: application/json
 
 **Burp** 항목은 저장된 그대로의 wire 바이트를 유지합니다. 이상한 공백, 중복 헤더, 일부러 틀린 `Content-Length`, 요청 타깃 안의 CRLF까지 그대로입니다. 손으로 만든 요청이 Repeater에서 바이트 단위로 똑같이 재전송된다는 점이, 요청을 다시 기술하는 대신 Burp에서 가져오는 이유입니다.
 
-같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(그리고 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp`)와 MCP의 `import_flows` 도구입니다.
+**WSDL**은 서비스가 게시한 SOAP 포트마다 오퍼레이션당 SOAP 요청 템플릿 하나를 만듭니다. SOAP 1.1(`SOAPAction`, `text/xml`)과 SOAP 1.2(`action` 미디어 타입 파라미터, `application/soap+xml`)를 모두 다루므로, 두 버전을 함께 게시하는 엔드포인트는 요청 하나가 아니라 둘로 들어옵니다. 본문은 `<wsdl:types>` 안의 XSD에서 뽑아낸 스켈레톤이며, 내장 타입마다 유효한 플레이스홀더를 채워 스키마를 검증하는 게이트웨이도 시드 요청을 통과시킵니다. 재귀 타입은 첫 반복에서 멈추고 직접 중첩하라는 주석을 남깁니다. WSDL 1.1만 읽고, `http:binding`(GET/POST) 포트와 HTTP가 아닌 트랜스포트는 이유와 함께 건너뛸 뿐 손상으로 세지 않으며, 외부 `xsd:import` 파일은 가져오지 않고, `<!DOCTYPE>`는 아예 거부합니다 — 서비스 설명서는 문서이지, 재전송해 달라고 건넨 wire 바이트가 아니기 때문입니다.
+
+같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(그리고 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl`)와 MCP의 `import_flows` 도구입니다.
 
 ## 호스트 오버라이드 {#host-overrides}
 

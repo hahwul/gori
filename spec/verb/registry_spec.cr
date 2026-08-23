@@ -1496,6 +1496,10 @@ private class FakeContext < ExecContext
   def import_burp : Nil
     @calls << :import_burp
   end
+
+  def import_wsdl : Nil
+    @calls << :import_wsdl
+  end
 end
 
 describe Gori::Verb do

@@ -8,7 +8,7 @@ require "../import"
 
 module Gori::Tui
   # Centered popup collecting the source path for palette → "Import: HAR / URLs /
-  # OpenAPI". One path field with an inline PathComplete dropdown — CAImportOverlay's
+  # OpenAPI / …". One path field with an inline PathComplete dropdown — CAImportOverlay's
   # shape minus its second field.
   #
   # This REPLACED a one-row prompt on the status bar. A filesystem path is long and the
@@ -52,6 +52,7 @@ module Gori::Tui
       when :postman  then "Build request templates from a Postman Collection v2 export."
       when :insomnia then "Build request templates from an Insomnia v4 JSON export."
       when :burp     then "Load saved Burp items into History — request and response, byte-exact."
+      when :wsdl     then "Build request templates from a WSDL 1.1 service — one per operation."
       else                "Load flows into History."
       end
     end

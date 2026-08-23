@@ -2,6 +2,7 @@ require "base64"
 require "time"
 require "./builder"
 require "./raw"
+require "./xml_text"
 
 module Gori
   module Import
@@ -172,10 +173,12 @@ module Gori
         el = element(src, name)
         return "" unless el
         _, inner = el
-        text = cdata?(inner) ? uncdata(inner) : unescape(inner)
+        text = XmlText.cdata?(inner) ? XmlText.uncdata(inner) : XmlText.unescape(inner)
         text.valid_encoding? ? text : text.scrub
       end
 
+      # The wire-byte path. `XmlText.unescape` is byte-wise for THIS caller's sake — see
+      # the contract note in xml_text.cr.
       # `<request base64="true">` is the default; `base64="false"` means the message sits
       # inline as CDATA (Burp only does this for wholly-textual messages).
       private def self.bytes_of(src : String, name : String) : Bytes?
@@ -186,103 +189,8 @@ module Gori
         if attrs.includes?(%(base64="true")) || attrs.includes?("base64='true'")
           Base64.decode(inner.strip)
         else
-          (cdata?(inner) ? uncdata(inner) : unescape(inner)).to_slice
+          (XmlText.cdata?(inner) ? XmlText.uncdata(inner) : XmlText.unescape(inner)).to_slice
         end
-      end
-
-      private def self.cdata?(inner : String) : Bool
-        inner.lstrip.starts_with?("<![CDATA[")
-      end
-
-      # CDATA content is literal by definition — never entity-decoded.
-      private def self.uncdata(inner : String) : String
-        s = inner.strip
-        s = s[9..] if s.starts_with?("<![CDATA[")
-        s = s[0...-3] if s.ends_with?("]]>")
-        s
-      end
-
-      AMP       = 0x26_u8 # '&'
-      HASH      = 0x23_u8 # '#'
-      LOWER_X   = 0x78_u8 # 'x'
-      SEMICOLON = 0x3B_u8 # ';'
-
-      # `&name;` / `&#123;` / `&#x1f;` decoding, done BYTE-wise.
-      #
-      # This was `text.gsub(ENTITY) { … }` over `/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/`, and a
-      # Regexp gsub walks its subject as chars — `bytes_of` calls this for a non-base64
-      # `<request>` that is not CDATA-wrapped, i.e. on wire bytes (see `parse_file`). The
-      # grammar is entirely ASCII, so a byte scan reads exactly what that pattern did and
-      # copies everything else through untouched.
-      private def self.unescape(text : String) : String
-        raw = text.to_slice
-        return text unless raw.includes?(AMP)
-        io = IO::Memory.new(raw.size)
-        i = 0
-        while i < raw.size
-          if raw[i] == AMP && (hit = entity_at(raw, i))
-            replacement, width = hit
-            io << replacement
-            i += width
-          else
-            io.write_byte(raw[i])
-            i += 1
-          end
-        end
-        String.new(io.to_slice)
-      end
-
-      # {replacement text, bytes consumed} for the entity starting at `raw[at] == '&'`, or
-      # nil when what follows is not one — in which case the caller copies the `&` through,
-      # which is what the old pattern's "no match" did. Deliberately as strict as that
-      # pattern was, uppercase `&#X41;` included: it never matched `#x[0-9a-fA-F]+`, so it
-      # stayed verbatim then and stays verbatim now.
-      private def self.entity_at(raw : Bytes, at : Int32) : {String, Int32}?
-        j = at + 1
-        return nil if j >= raw.size
-        numeric = raw[j] == HASH
-        j += 1 if numeric
-        hex = numeric && j < raw.size && raw[j] == LOWER_X
-        j += 1 if hex
-        stop = entity_body_end(raw, j, numeric, hex)
-        return nil unless stop
-        name = String.new(raw[j, stop - j])
-        text = numeric ? numeric_entity(name, hex) : NAMED_ENTITIES[name]?
-        text ? {text, stop + 1 - at} : nil
-      end
-
-      # Index of the `;` closing an entity body that starts at `from`, or nil when what sits
-      # there is not one: an empty body, a byte outside the branch's class, or no `;` at all.
-      private def self.entity_body_end(raw : Bytes, from : Int32, numeric : Bool, hex : Bool) : Int32?
-        j = from
-        while j < raw.size && entity_body_byte?(raw[j], numeric, hex)
-          j += 1
-        end
-        return nil if j == from || j >= raw.size || raw[j] != SEMICOLON
-        j
-      end
-
-      # An unknown named entity resolves to nil, i.e. stays verbatim rather than vanishing.
-      NAMED_ENTITIES = {"amp" => "&", "lt" => "<", "gt" => ">", "quot" => "\"", "apos" => "'"}
-
-      # `&#123;` / `&#x1f;`. nil for a codepoint that is not a `Char` (out of range, or a
-      # lone surrogate) and for one too large to parse — both stay verbatim, as they did.
-      private def self.numeric_entity(digits : String, hex : Bool) : String?
-        (hex ? digits.to_i?(16) : digits.to_i?).try { |cp| safe_chr(cp) }
-      end
-
-      # `[0-9a-fA-F]` / `[0-9]` / `[a-zA-Z]`, per the branch the `&` opened.
-      private def self.entity_body_byte?(b : UInt8, numeric : Bool, hex : Bool) : Bool
-        digit = 0x30_u8 <= b <= 0x39_u8
-        return digit || (0x61_u8 <= b <= 0x66_u8) || (0x41_u8 <= b <= 0x46_u8) if hex
-        return digit if numeric
-        (0x61_u8 <= b <= 0x7A_u8) || (0x41_u8 <= b <= 0x5A_u8)
-      end
-
-      private def self.safe_chr(codepoint : Int32) : String?
-        return nil unless 0 <= codepoint <= Char::MAX_CODEPOINT
-        return nil if 0xD800 <= codepoint <= 0xDFFF # lone surrogate — not a Char
-        codepoint.unsafe_chr.to_s
       end
     end
   end

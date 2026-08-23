@@ -5,6 +5,8 @@ require "./import/oas"
 require "./import/postman"
 require "./import/insomnia"
 require "./import/burp"
+require "./import/xml_mini"
+require "./import/wsdl"
 
 module Gori
   # Bulk-import captured flows from HAR files, URL lists, OpenAPI specs, Postman or
@@ -29,7 +31,7 @@ module Gori
 
     # The human name of each source, in ONE place. The TUI card title, the TUI toast and the
     # CLI result line all read it, so they cannot drift apart as sources are added — the
-    # comment in `ImportOverlay#label` promised one source of truth and, with six formats,
+    # comment in `ImportOverlay#label` promised one source of truth and, with seven formats,
     # three parallel `case`s is where that promise breaks.
     LABELS = {
       :har      => "HAR",
@@ -38,6 +40,7 @@ module Gori
       :postman  => "Postman",
       :insomnia => "Insomnia",
       :burp     => "Burp",
+      :wsdl     => "WSDL",
     }
 
     def self.label(kind : Symbol) : String
@@ -85,6 +88,10 @@ module Gori
 
     def self.from_burp(path : String, prov : Provenance = Provenance.none) : ParseResult
       Burp.parse_file(path, prov)
+    end
+
+    def self.from_wsdl(path : String, prov : Provenance = Provenance.none) : ParseResult
+      Wsdl.parse_file(path, prov)
     end
 
     # Pairs per store write. The whole file used to go in as ONE `insert_import_batch`, which
@@ -155,6 +162,7 @@ module Gori
         when :postman  then from_postman(expanded, prov)
         when :insomnia then from_insomnia(expanded, prov)
         when :burp     then from_burp(expanded, prov)
+        when :wsdl     then from_wsdl(expanded, prov)
         else                raise Gori::Error.new("unknown import kind: #{kind}")
         end
       rescue ex : File::Error

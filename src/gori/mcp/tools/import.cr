@@ -6,10 +6,10 @@ module Gori
   module MCP
     class Tools
       # Bulk-import flows into the project's History from a HAR export, a URL list, an
-      # OpenAPI/Swagger spec, a Postman or Insomnia collection, or a Burp item export —
-      # the MCP counterpart of `gori run import`. `path` is resolved on the MCP SERVER's
-      # filesystem (same trust boundary as send_request/repeater — this process runs
-      # locally alongside the agent).
+      # OpenAPI/Swagger spec, a Postman or Insomnia collection, a Burp item export, or a
+      # WSDL 1.1 service description — the MCP counterpart of `gori run import`. `path` is
+      # resolved on the MCP SERVER's filesystem (same trust boundary as send_request/repeater
+      # — this process runs locally alongside the agent).
       KINDS = {
         "har"      => :har,
         "urls"     => :urls,
@@ -17,6 +17,7 @@ module Gori
         "postman"  => :postman,
         "insomnia" => :insomnia,
         "burp"     => :burp,
+        "wsdl"     => :wsdl,
       }
 
       private def import_flows(h) : Result
@@ -59,12 +60,12 @@ module Gori
 
         tool j, "import_flows",
           "Bulk-import flows into the project's History from a HAR export, a URL list, an " \
-          "OpenAPI/Swagger spec, a Postman Collection v2 or Insomnia v4 export, or a Burp Suite " \
-          "item export — the MCP equivalent of `gori run import`. `path` is read from " \
-          "the MCP SERVER's local filesystem (this process runs locally, same trust boundary as " \
-          "send_request). Only `har` and `burp` carry responses; the rest import request " \
-          "templates with no response." do |s|
-          s.field "kind", strprop("har | urls | oas | postman | insomnia | burp"), required: true
+          "OpenAPI/Swagger spec, a Postman Collection v2 or Insomnia v4 export, a Burp Suite " \
+          "item export, or a WSDL 1.1 service description (SOAP 1.1/1.2) — the MCP equivalent " \
+          "of `gori run import`. `path` is read from the MCP SERVER's local filesystem (this " \
+          "process runs locally, same trust boundary as send_request). Only `har` and `burp` " \
+          "carry responses; the rest import request templates with no response." do |s|
+          s.field "kind", strprop("har | urls | oas | postman | insomnia | burp | wsdl"), required: true
           s.field "path", strprop("filesystem path to the source file"), required: true
         end
       end

@@ -1680,3 +1680,46 @@ two would drift. The first-byte test on this listener is the TWO-byte `ClientHel
 a non-HTTP protocol is most likely to arrive — `ssh -D` is what most people point at one — and
 feeding an SSH banner into an OpenSSL server handshake because its first octet happened to be
 0x16 helps nobody.
+
+### 2026-08-23: a service description is a document, not the operator's payload
+
+**Decision.** `Import::XmlMini` — the namespace-aware reader `Import::Wsdl` is built on —
+REFUSES a `<!DOCTYPE>` outright, rather than ignoring it and carrying on. That is stricter than
+P7, and the strictness is the point: the axis P7 actually names is provenance, and a WSDL is
+not the class of bytes P7 protects.
+
+`Import::Raw` is the P7 path. A Burp item's `<request>` holds the wire bytes the operator
+captured and will replay; a lying `Content-Length`, a CRLF in the target and a duplicate `Host`
+are the payload, and `import/burp.cr` goes out of its way not to scrub them. `Import::Burp`'s
+own fixtures carry a benign DOCTYPE, because Burp writes one.
+
+A WSDL holds no such bytes. It is a description gori READS in order to build a request that did
+not exist before, and every octet of it reaches the wire only after passing through the XSD
+skeleton generator. Nothing in it is evidence. So the two questions a DOCTYPE raises have
+different answers than they would on the capture path:
+
+* **Ignoring is not neutral.** An undeclared `&payload;` left in the document decodes to
+  nothing, and the `<soap:address location="&payload;/svc">` it sat in becomes a silently WRONG
+  endpoint — an import reported as a success that seeds requests at the wrong host. A refusal
+  with a message is strictly better than a quietly corrupted seed request.
+* **Refusing costs nothing.** Neither WSDL 1.1 nor XML Schema has any use for a DTD, so a
+  DOCTYPE in a `.wsdl` is a generator bug or an attack, and no working document is lost.
+
+The security consequence is a side effect of that, not the argument for it, and it is closed at
+the root rather than by a counter someone has to remember to check. No external entity can be
+declared, and `XmlMini` has no file or network I/O to dereference one with — so there is no XXE.
+No internal general entity and no parameter entity can be declared, and `XmlText::NAMED_ENTITIES`
+is the fixed five-entry XML predefined table where an unknown `&foo;` stays VERBATIM rather than
+expanding — so entity expansion is O(1) in the input by construction, and billion-laughs has
+nothing to expand. The same reasoning is why `Import::Wsdl` never follows an `xsd:import`
+`schemaLocation`: an importer that fetches one is an importer with the I/O this reader exists
+to not have.
+
+Two smaller consequences of the same distinction. `XmlMini` SCRUBS invalid UTF-8 on the way in,
+where `Import::Burp` must not — a byte that cannot be text has no meaning in a document whose
+only outputs are names, URLs and placeholder values. And an out-of-scope PORT (an
+`http:binding`, a JMS transport, a relative address) is reported as a NOTE rather than counted
+in `skipped`: `skipped` means a malformed entry, and a .NET WSDL publishing `FooHttpGet` beside
+`FooSoap` is not damaged. When nothing at all was generated the first note becomes the error
+message, so "every port here is HTTP GET/POST" is a sentence the operator gets to read instead
+of the generic "no flows found".

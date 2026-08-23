@@ -69,7 +69,7 @@ gori run <subcommand> [verb] [options]
 | `probe issues` · `dismiss` · `promote` · `delete` | 저장된 Probe 발견 항목 트리아지 |
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
 | `discover` | 엔드포인트를 스파이더링 & 브루트포스하여 Sitemap으로 반영 |
-| `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp 파일에서 History로 플로우 일괄 임포트 |
+| `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일에서 History로 플로우 일괄 임포트 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
@@ -472,6 +472,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--postman=PATH` | Postman Collection v2 익스포트(JSON) |
 | `--insomnia=PATH` | Insomnia v4 익스포트(JSON) |
 | `--burp=PATH` | Burp Suite 항목 익스포트(XML) — 요청 **과** 응답, 바이트 단위 그대로 |
+| `--wsdl=PATH` | WSDL 1.1 서비스 설명서(XML) — 오퍼레이션마다 SOAP 요청 템플릿 하나 |
 | `--project=NAME` | 임포트할 프로젝트(기본값: 가장 최근에 사용한 프로젝트) |
 | `--db=PATH` | 임포트할 SQLite db 파일을 직접 지정(없으면 생성) |
 | `--format` | `text`(기본) 또는 `json` |

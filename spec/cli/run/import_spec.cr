@@ -30,7 +30,8 @@ end
 describe "gori run import" do
   it "maps each source flag to its {kind, path}" do
     {har: "a.har", urls: "urls.txt", oas: "api.yaml",
-     postman: "c.postman_collection.json", insomnia: "i.json", burp: "items.xml"}.each do |kind, path|
+     postman: "c.postman_collection.json", insomnia: "i.json", burp: "items.xml",
+     wsdl: "service.wsdl"}.each do |kind, path|
       Gori::CLI::Run.import_source_for_spec(only(kind, path)).should eq({kind, path})
     end
   end
@@ -77,7 +78,7 @@ describe "gori run import" do
     # One table (Import::LABELS) feeds the CLI line, the overlay title and the TUI toast, so
     # they cannot drift apart as sources are added.
     {har: "HAR", urls: "URLs", oas: "OpenAPI",
-     postman: "Postman", insomnia: "Insomnia", burp: "Burp"}.each do |kind, label|
+     postman: "Postman", insomnia: "Insomnia", burp: "Burp", wsdl: "WSDL"}.each do |kind, label|
       Gori::CLI::Run.import_result_text_for_spec(kind, "f", Gori::Import::Result.new(count: 1))
         .should eq("imported 1 flow from #{label} · f")
       Gori::Tui::ImportOverlay.new(kind).label.should eq(label)

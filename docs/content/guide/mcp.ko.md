@@ -146,7 +146,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다 — `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
 | `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다 — `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절하는데, 아무것도 좁히지 못하면서 모든 표면의 칩은 좁히고 있다고 주장하게 되기 때문입니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
-| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp 파일을 History로 일괄 임포트 |
+| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일을 History로 일괄 임포트 |
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |

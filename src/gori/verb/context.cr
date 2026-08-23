@@ -168,6 +168,7 @@ module Gori
       abstract def import_postman : Nil
       abstract def import_insomnia : Nil
       abstract def import_burp : Nil
+      abstract def import_wsdl : Nil
     end
   end
 end

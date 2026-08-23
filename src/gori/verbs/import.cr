@@ -21,6 +21,9 @@ module Gori
       r.register Verb::Definition.new(
         "import.burp", "Import: Burp", "Import saved Burp items (request + response) into History",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_burp; nil }
+      r.register Verb::Definition.new(
+        "import.wsdl", "Import: WSDL", "Import SOAP request templates from a WSDL 1.1 service description",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_wsdl; nil }
     end
   end
 end
