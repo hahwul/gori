@@ -126,8 +126,17 @@ module Gori::Tui
       @fields[:host].value.strip
     end
 
+    # The find pattern — or, for a header op, the header NAME.
+    #
+    # Stripped only for the NAME case: ` X-Trace ` and `X-Trace` name one header and the
+    # spaces could only ever be a typo. Every other op matches this field against BYTES, so it
+    # is kept verbatim, exactly as `replacement` below is. A `replace` rule finding `" token "`
+    # or a regex anchored on a trailing space is an ordinary thing to write — and `gori run
+    # rewriter add` / the MCP `create_rule` do not strip, so opening such a rule HERE and
+    # saving any other field silently changed which bytes it matched.
     def pattern : String
-      @fields[:pattern].value.strip
+      raw = @fields[:pattern].value
+      header_op? ? raw.strip : raw
     end
 
     # The replacement / header value keeps interior + trailing spaces (a header value or

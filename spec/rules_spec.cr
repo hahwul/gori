@@ -75,6 +75,14 @@ describe Gori::Rules do
       Gori::Rules.host_matches?("*example.com", "notexample.com").should be_true
     end
 
+    it "anchors the wildcard at the ABSOLUTE end, so a trailing newline is not a match" do
+      # `$` in PCRE2 also matches just before a final newline, and a host is not always a
+      # parsed name: an h2 `:authority` is peer-controlled HPACK bytes. `\z` is what makes
+      # this test mean "the whole host", the way the DNS-label branch already does.
+      Gori::Rules.host_matches?("*.example.com", "api.example.com\n").should be_false
+      Gori::Rules.host_matches?("*.example.com", "api.example.com").should be_true
+    end
+
     it "handles a leading-dot glob and a bracketed IPv6 literal (the store's host spelling)" do
       Gori::Rules.host_matches?(".example.com", "api.example.com").should be_true
       Gori::Rules.host_matches?(".example.com", "example.com").should be_false
@@ -219,6 +227,52 @@ describe Gori::Rules do
       out.should contain("User-Agent: gori") # value replaced, original name casing kept
       out.should_not contain("Cookie:")      # removed
       out.should contain("Host: a")          # untouched
+    end
+  end
+
+  # A head is SUPPOSED to be CRLF the whole way down, but a bare-LF header line is exactly the
+  # shape a smuggling probe puts on the wire — and gori is the tool an operator points at one.
+  # The three header ops used to split the head on ONE spelling (`eol_of`, answered for the
+  # whole head), so a single bare-LF break made them read two headers as one line.
+  it "treats a bare-LF header line as its own line, in every header op" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "Host", "", op: Gori::Store::RuleOp::RemoveHeader)
+      mixed = "GET / HTTP/1.1\r\nHost: a\nX-Keep: 1\r\n\r\n".to_slice
+      # `X-Keep` used to go with it: the two were one "line" after a CRLF split.
+      String.new(rules.rewrite_request(mixed, "")).should eq("GET / HTTP/1.1\r\nX-Keep: 1\r\n\r\n")
+    end
+
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "Host", "z", op: Gori::Store::RuleOp::SetHeader)
+      mixed = "GET / HTTP/1.1\r\nHost: a\nX-Keep: 1\r\n\r\n".to_slice
+      # …and `set_header` overwrote it out of existence, which is worse: nothing says it went.
+      # Each line keeps the terminator it arrived with (P7).
+      String.new(rules.rewrite_request(mixed, "")).should eq("GET / HTTP/1.1\r\nHost: z\nX-Keep: 1\r\n\r\n")
+    end
+  end
+
+  # `add_header` located the blank line with `rindex(eol + eol)`, one spelling for the whole
+  # head, so a head terminated `\n\n` with a CRLF anywhere above it had the new header appended
+  # AFTER the terminator — into the BODY, where an origin never reads it as a header at all.
+  it "puts an added header before the blank line whichever way the terminator is spelled" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "X-Trace", "on", op: Gori::Store::RuleOp::AddHeader)
+      String.new(rules.rewrite_request("GET / HTTP/1.1\r\nHost: a\n\n".to_slice, ""))
+        .should eq("GET / HTTP/1.1\r\nHost: a\nX-Trace: on\r\n\n")
+      String.new(rules.rewrite_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, ""))
+        .should eq("GET / HTTP/1.1\r\nHost: a\r\nX-Trace: on\r\n\r\n")
+      String.new(rules.rewrite_request("GET / HTTP/1.1\nHost: a\n\n".to_slice, ""))
+        .should eq("GET / HTTP/1.1\nHost: a\nX-Trace: on\n\n")
+      # A head with no terminator at all — what the preview seam hands `apply` after
+      # `split_message` has taken the blank line off. Trailing bare LF, CRLF above it.
+      rules.transform_message("GET / HTTP/1.1\r\nHost: a\n", Gori::Store::RuleTarget::Request, "")
+        .should eq("GET / HTTP/1.1\r\nHost: a\nX-Trace: on\r\n")
     end
   end
 

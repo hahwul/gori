@@ -594,8 +594,16 @@ module Gori::Tui
       @out.select_line
     end
 
+    # Both panes, for the same reason `rewriter_selection_active?` answers for both: the verb
+    # that calls this is gated on THAT predicate, so a ⇧arrow band built in the INPUT editor
+    # made "Clear selection" appear in the menu and then do nothing — the one gesture that
+    # offers itself and refuses.
     def rewriter_clear_selection : Nil
-      @out.clear_selection
+      return unless @sub == :rules
+      case @focus
+      when :preview_in  then @preview_input.clear_selection
+      when :preview_out then @out.clear_selection
+      end
     end
 
     # `y`: the selection, or the whole transformed sample when nothing is selected. The pane is

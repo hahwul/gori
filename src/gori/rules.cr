@@ -926,54 +926,93 @@ module Gori
       "#{items[0..-2].join(", ")} and #{items[-1]}"
     end
 
-    # The line terminator a head uses — CRLF for real HTTP, LF as a fallback so a
-    # hand-authored / test head still round-trips.
+    # The EOL to give a header line this code ADDS — CRLF for real HTTP, LF as a fallback so
+    # a hand-authored / test head still round-trips. It answers for the head as a WHOLE, which
+    # is all a new line needs; existing lines keep whatever spelling they arrived with, which
+    # is `head_lines`' job.
     private def eol_of(text : String) : String
       text.includes?("\r\n") ? "\r\n" : "\n"
     end
 
-    # Append `Name: value` as the LAST header, just before the terminating blank line
-    # (preserving the head's own EOL). If the head has no blank-line terminator, append.
+    # `head` split at its LINE breaks, every line still carrying its own trailing `\r` when it
+    # had one. The last element is the remainder after the final newline (usually ""), not a
+    # line.
+    #
+    # Splitting on LF and keeping the CR is the whole point. A head is SUPPOSED to be CRLF the
+    # whole way down, but a bare-LF header line is exactly the shape a request-smuggling probe
+    # puts on the wire — and gori is the tool an operator points at those. The three ops below
+    # used to split on `eol_of`, one answer for the whole head, so a single bare-LF break made
+    # them read two headers as one "line":
+    #
+    #   `GET / HTTP/1.1\r\nHost: a\nX-Keep: 1\r\n\r\n`
+    #     remove_header "Host"  dropped `X-Keep: 1` with it
+    #     set_header    "Host"  overwrote `X-Keep: 1` out of existence
+    #
+    # …and a head whose terminator was `\n\n` while a CRLF appeared earlier had
+    # `add_header`'s `rindex("\r\n\r\n")` miss, so the new header was appended AFTER the blank
+    # line — into the BODY, where the origin never reads it as a header at all. All three are
+    # silent: the operator sees a rule that "ran" and a header that is gone, or absent.
+    private def head_lines(head : String) : Array(String)
+      head.split('\n')
+    end
+
+    # Whether a `head_lines` entry is a BLANK line: empty, or the lone `\r` such an entry keeps
+    # when the head is CRLF-delimited. Everything else below reads the entry as-is — a `:` and
+    # the field name in front of it both sit before the trailing CR, so nothing has to chomp it
+    # off (and allocate a second String per header line on a per-message path) to find them.
+    private def blank_line?(line : String) : Bool
+      line.empty? || line == "\r"
+    end
+
+    # Where the blank line that TERMINATES the head sits in `head_lines`, or nil when the head
+    # carries none — the preview path splits the separator off (`split_message`) and a
+    # hand-authored sample may simply not have one. Index 0 is the start line and the trailing
+    # element is the remainder after the last newline, so neither is a candidate.
+    private def terminator_index(lines : Array(String)) : Int32?
+      (1...lines.size - 1).find { |i| blank_line?(lines[i]) }
+    end
+
+    # Append `Name: value` as the LAST header, just before the terminating blank line. If the
+    # head has no blank-line terminator, append at the end.
     private def head_add_header(head : String, name : String, value : String) : String
       eol = eol_of(head)
       line = "#{name}: #{value}"
-      term = eol + eol
-      if idx = head.rindex(term)
-        "#{head[0, idx]}#{eol}#{line}#{head[idx..]}"
-      elsif head.ends_with?(eol)
+      lines = head_lines(head)
+      if i = terminator_index(lines)
+        lines.insert(i, eol == "\r\n" ? "#{line}\r" : line)
+        lines.join('\n')
+      elsif head.ends_with?('\n')
         "#{head}#{line}#{eol}"
       else
         "#{head}#{eol}#{line}"
       end
     end
 
-    # Replace the value of every header named `name` (case-insensitive, original casing
-    # kept); if none exists, append it (upsert). The start line and blank line are left
-    # untouched.
+    # Replace the value of every header named `name` (case-insensitive, original casing and
+    # the line's own terminator kept); if none exists, append it (upsert). The start line and
+    # blank lines are left untouched.
     private def head_set_header(head : String, name : String, value : String) : String
-      eol = eol_of(head)
       target = name.downcase
       found = false
-      out = head.split(eol).map_with_index do |ln, i|
-        next ln if i == 0 || ln.empty?
+      out = head_lines(head).map_with_index do |ln, i|
+        next ln if i == 0 || blank_line?(ln)
         if (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
           found = true
-          "#{ln[0, ci]}: #{value}"
+          ln.ends_with?('\r') ? "#{ln[0, ci]}: #{value}\r" : "#{ln[0, ci]}: #{value}"
         else
           ln
         end
       end
-      found ? out.join(eol) : head_add_header(head, name, value)
+      found ? out.join('\n') : head_add_header(head, name, value)
     end
 
     # Drop every header line named `name` (case-insensitive). The start line (index 0)
     # and any blank lines are always kept, so the head stays well-formed.
     private def head_remove_header(head : String, name : String) : String
-      eol = eol_of(head)
       target = name.downcase
       kept = [] of String
-      head.split(eol).each_with_index do |ln, i|
-        if i == 0 || ln.empty?
+      head_lines(head).each_with_index do |ln, i|
+        if i == 0 || blank_line?(ln)
           kept << ln
         elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
           # drop this header
@@ -981,7 +1020,7 @@ module Gori
           kept << ln
         end
       end
-      kept.join(eol)
+      kept.join('\n')
     end
 
     private def host_matches?(glob : String, host : String) : Bool
@@ -1006,7 +1045,11 @@ module Gori
         # runs on the hot path for EVERY request/response head while any head rule is active
         # (including messages the rule doesn't target — the scope test is what decides that),
         # so an uncached Regex.new here was a PCRE2 compile per message. SafeRegexp memoises.
-        rx = "^#{Regex.escape(g).gsub("\\*", ".*")}$"
+        # `\A`/`\z`, not `^`/`$`: PCRE2's `$` also matches just BEFORE a trailing newline, so
+        # a host carrying one — an `:authority` is peer-controlled HPACK bytes, not a parsed
+        # name — satisfied a glob it does not equal. The absolute anchors are what make this
+        # test mean "the whole host", the way the DNS-label branch below already does.
+        rx = "\\A#{Regex.escape(g).gsub("\\*", ".*")}\\z"
         begin
           SafeRegexp.compile(rx).matches?(h)
         rescue
