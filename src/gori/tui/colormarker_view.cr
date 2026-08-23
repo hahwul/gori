@@ -148,12 +148,16 @@ module Gori::Tui
 
       fg = rule.enabled? ? (selected ? Theme.text_bright : Theme.text) : Theme.muted
       style = rule.style.label.ljust(5)
-      screen.text(x, py, style, Theme.muted, bg)
-      x += style.size + 1
+      x = screen.text(x, py, style, Theme.muted, bg) + 1
       unless rule.name.empty?
+        # `screen.text` answers the x it actually reached, in COLUMNS. `x += nm.size` counted
+        # CHARACTERS, so a rule named in Hangul (or with an emoji in it) advanced by half the
+        # cells it drew and the filter behind it was written back over the name — the row read
+        # `[한글 규칙 이름 — 아주 길게 늘 host:      .  국 ]`, with the wide glyphs whose lead
+        # cell got overwritten left as blanks. Same measure/draw split as `draw_tag_column` in
+        # the Sitemap: never re-derive a width the draw already returned.
         nm = "[#{rule.name}]"
-        screen.text(x, py, nm, Theme.accent, bg, width: {rect.right - x, 0}.max)
-        x += nm.size + 1
+        x = screen.text(x, py, nm, Theme.accent, bg, width: {rect.right - x, 0}.max) + 1
       end
       screen.text(x, py, rule.match_filter, fg, bg, width: {rect.right - x, 1}.max) if x < rect.right
     end

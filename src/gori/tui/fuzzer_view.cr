@@ -2559,8 +2559,10 @@ module Gori::Tui
       # Left: the live count. Right: keyed toggle badges (sort value · matched · dist) so
       # each results toggle's shortcut rides the border, not just the bottom hint bar.
       count = results_count_label
-      screen.text(rect.x + 11, rect.y, count, Theme.muted, Theme.bg) # +11 clears the " RESULTS " title
-      min_x = rect.x + 11 + count.size + 1                           # badges never overwrite the count
+      # +11 clears the " RESULTS " title; the trailing space keeps the count off the hairline
+      # that resumes after it (`╭─ RESULTS 0 sent · 0 hit────` read as one glued token).
+      screen.text(rect.x + 11, rect.y, "#{count} ", Theme.muted, Theme.bg)
+      min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
       rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "v", "DIST", @show_dist)
       rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "m", "MATCH", @matched_only)
       Frame.toggle_badge(screen, rx, rect.y, min_x, "o", @sort.to_s, false) # sort: a value chip, never lit

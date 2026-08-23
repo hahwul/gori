@@ -349,7 +349,12 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "ENVIRONMENT", border: Theme.border_focus)
-      meta = "#{@items.size} var#{@items.size == 1 ? "" : "s"}"
+      # `global` in the meta, because this card has a TWIN: the Project tab's Env pane, with the
+      # same title, holding a different list. This one is layered UNDER it (the project wins on
+      # a clash), and an operator reading `ENVIRONMENT · no env vars` here while `$API` resolves
+      # in the editor behind it has been told nothing about which of the two they are looking at.
+      # Same word the Rewriter and Colormarker rows carry as `G`.
+      meta = "global · #{@items.size} var#{@items.size == 1 ? "" : "s"}"
       Frame.border_meta(screen, box, "ENVIRONMENT", meta, bg: Theme.panel)
       draw_prefix_row(screen, box, box.y + 1)
       screen.text(box.x + 3, box.y + 2, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)

@@ -67,7 +67,7 @@ class Gori::Tui::RepeaterView
   # sitting on a border where the draw painted nothing at all.
   private def grpc_chrome_limit(rect : Rect) : Int32
     if d = @result.try(&.duration_us)
-      rect.right - 2 - Screen.draw_width(Fmt.dur(d)) # border_meta's own left edge
+      Frame.border_meta_x(rect, Fmt.dur(d)) # the meta's own left edge, padding included
     else
       rect.right - 1 # keep the corner
     end

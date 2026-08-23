@@ -544,6 +544,38 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # The MESSAGES pane was the last of three renderers of the same rows, and the only one that
+  # showed none of V7's frame shape: `gori run show` printed `[PING] hb` and
+  # `[CLOSE] 1000 session expired`, the Repeater transcript printed the same through
+  # `shape_label`, and this pane printed `«binary 2b»` for both. What an operator reads while
+  # working a socket was the surface that could not tell a heartbeat from a teardown.
+  it "names a control frame, a fragmented message and a masking violation in MESSAGES" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      # §5.1 says a client frame MUST be masked, so `masked: false` outbound is the violation
+      # worth a word — and the same flag inbound is the norm, which is why it is not one.
+      store.insert_ws_message(id, "out", 1, "subscribe".to_slice,
+        shape: Gori::Store::WsShape.new(masked: false))
+      store.insert_ws_message(id, "in", 1, "reassembled".to_slice,
+        shape: Gori::Store::WsShape.new(frames: 3))
+      store.insert_ws_message(id, "out", 9, "hb".to_slice)
+      # §5.5.1: two bytes of status code, then the reason.
+      store.insert_ws_message(id, "in", 8, Bytes[0x03, 0xE8] + "session expired".to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> MESSAGES
+
+      backend = MemoryBackend.new(120, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 16))
+      backend.contains?("[UNMASKED] subscribe").should be_true
+      backend.contains?("[3 frames] reassembled").should be_true
+      backend.contains?("[PING] hb").should be_true
+      backend.contains?("[CLOSE] 1000 session expired").should be_true
+    end
+  end
+
   # `Proto` is the single source of truth the PROTO column and the QL `proto:` filter both
   # defer to, and it read only the RESPONSE's content type — so a gRPC call showed as GRPC
   # exactly when it SUCCEEDED. A still-Pending one, and one answered by a proxy's `text/html`

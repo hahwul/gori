@@ -975,9 +975,13 @@ module Gori
       # (scrubbed) payload; binary frames print a size + short hex preview.
       private def self.ws_message_text(m : Store::WsMessage) : String
         arrow = m.direction == "out" ? "→" : "←"
-        shape = Output.ws_shape_note(m)
+        # `Store::WsMessage#shape_note` / `#control_detail`, not a local copy: the TUI's History
+        # pane reads the same two, and a helper it calls cannot live under `CLI::`. `term_safe`
+        # stays HERE because it is this surface's question — these bytes are about to be written
+        # to a real terminal.
+        shape = m.shape_note
         if m.control?
-          "#{arrow} #{shape} #{Output.ws_control_detail(m)}"
+          "#{arrow} #{shape} #{Output.term_safe(m.control_detail)}"
         elsif m.text?
           "#{arrow}#{shape.empty? ? "" : " #{shape}"} #{CLI::Output.term_safe_multiline(String.new(m.payload).scrub)}"
         else

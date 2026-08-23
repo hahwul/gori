@@ -876,11 +876,12 @@ module Gori::Tui
         return
       end
       header_y = inner.y
+      pw = provider_col_w(inner, ordered)
       screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg)
       screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg)
       screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg)
-      screen.text(inner.x + 36, header_y, "DESTINATION", Theme.muted, Theme.bg)
-      screen.text(inner.right - 18, header_y, "PROVIDER", Theme.muted, Theme.bg)
+      screen.text(inner.x + DEST_COL_X, header_y, "DESTINATION", Theme.muted, Theme.bg)
+      screen.text(inner.right - pw, header_y, "PROVIDER", Theme.muted, Theme.bg)
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
       return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
@@ -892,20 +893,51 @@ module Gori::Tui
       ordered[@cb_scroll, visible]?.try &.each_with_index do |row, i|
         py = rows_rect.y + i
         abs = @cb_scroll + i
-        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused)
+        draw_callback_row(screen, rows_rect, py, row, abs == @cb_sel, focused, pw)
       end
     end
 
-    private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool, focused : Bool) : Nil
+    # The PROVIDER column's width. It was pinned at 17 columns hard against the right edge, so a
+    # provider named after its own domain (`Demo OAST (oast.demo.test)`) truncated to
+    # `Demo OAST (oast.…` on a 200-column terminal while a hundred blank columns sat in
+    # DESTINATION beside it — the one field with a bounded, known length losing to the one that
+    # can be any length.
+    #
+    # So it takes what the widest provider needs, but only out of the SLACK: DESTINATION is
+    # served first, and PROVIDER may grow into what is left over. A share of the pane (a third,
+    # say) is the wrong ceiling and was the first thing tried — at 80 columns it handed PROVIDER
+    # 24 and squeezed DESTINATION to `a1b2c3d4.o…`, which inverts the priority, since the
+    # destination is the evidence and the provider is a label. With no slack this returns the 17
+    # it always was, so a narrow pane lays out exactly as it did before.
+    #
+    # Both measures are over the WHOLE filtered list, never the visible slice: a width derived
+    # from what is on screen makes the column jitter as the list scrolls.
+    PROVIDER_COL_MIN = 17
+
+    # Where DESTINATION starts, relative to the table's left edge.
+    DEST_COL_X = 36
+
+    private def provider_col_w(inner : Rect, rows : Array(CbRow)) : Int32
+      widest = rows.max_of? { |r| Screen.draw_width(r.provider) } || 0
+      dest_need = rows.max_of? { |r| Screen.draw_width(r.destination) } || 0
+      # -1 for the blank column `draw_callback_row` keeps between the two runs.
+      slack = inner.w - DEST_COL_X - 1 - dest_need
+      widest.clamp(PROVIDER_COL_MIN, {slack, PROVIDER_COL_MIN}.max)
+    end
+
+    private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool,
+                                  focused : Bool, pw : Int32) : Nil
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(rect.x, py, rect.w, 1), bg)
       screen.cell(rect.x, py, sel ? '▎' : ' ', Theme.accent, bg)
       screen.text(rect.x + 2, py, row.protocol, protocol_hue(row.protocol), bg, width: 6)
       screen.text(rect.x + 9, py, row.method || "—", Theme.text, bg, width: 8)
       screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: 17)
-      dw = {rect.right - 18 - (rect.x + 36), 6}.max
-      screen.text(rect.x + 36, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
-      screen.text(rect.right - 18, py, row.provider, Theme.muted, bg, width: 17)
+      # One blank column between the two variable-width runs, so a destination that fills its
+      # cell does not read as one token with the provider behind it.
+      dw = {rect.right - pw - 1 - (rect.x + DEST_COL_X), 6}.max
+      screen.text(rect.x + DEST_COL_X, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
+      screen.text(rect.right - pw, py, row.provider, Theme.muted, bg, width: pw)
     end
 
     private def protocol_hue(proto : String) : Color

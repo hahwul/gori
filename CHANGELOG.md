@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The History detail's MESSAGES pane shows a WebSocket frame's shape, as `gori run show` and the Repeater transcript already did: a PING, a PONG, a CLOSE with its code and reason, a message reassembled from several frames, an RSV bit and a client frame sent UNMASKED were all one indistinguishable `«binary Nb»` line in the one place an operator reads while working a socket (#787).
+
+- The two pairs of identically-titled cards say which list they are: Settings' ENVIRONMENT and HOSTNAME OVERRIDES are marked `global`, the Project tab's ENVIRONMENT and HOST OVERRIDES `project` — the global pair is layered under the project one, and neither said so (#787).
+
+- A Colormarker or Rewriter rule named in wide characters (Hangul, an emoji) drew its own row over itself: every field after the name was placed by counting CHARACTERS, so the filter behind it landed inside the name and the two-column glyphs whose lead cell it overwrote came out blank. Those rows now advance by the columns they actually drew; the OAST callbacks table's PROVIDER column takes the width it needs out of whatever DESTINATION does not, instead of a fixed 17 with a hundred blank columns beside it; and a card's border annotation (`8/9 enabled`, `REQ`, a bare count) is spaced clear of the hairline it used to butt into (#787).
+
 - A truncated brotli body decoded to exactly 65,536 bytes and a multi-frame zstd body to its first frame only; both now decode in full, which the detail view, the Comparer and every headless read of a decoded body see (#786).
 
 - The Decoder reads brotli, zstd, MessagePack and CBOR, and a MessagePack or CBOR body renders as JSON in the detail pane when its `Content-Type` says so. The JSON is a projection — `$bin`, `$tag` and `$ext` name what JSON cannot hold — never bytes to send back (#786).

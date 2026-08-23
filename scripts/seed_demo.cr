@@ -7,8 +7,13 @@
 #   Colormarker                                                       — History row-colour rules
 #   OAST                                                              — an out-of-band listener with callbacks
 #   Probe                                                             — passive scan + active findings + custom rules
-#   Decoder / JWT / Comparer                                          — pre-loaded sub-tabs and material
+#   Decoder                                                           — pre-loaded conversion sub-tabs
+#   Authorize                                                         — the identities (session slots) to replay as
 #   Env (bindings)                                                    — project `$KEY` vars a Repeater tab uses
+#
+# The JWT and Comparer tabs keep NO per-project state, so nothing can be seeded into them.
+# Their material is one keystroke away instead: the Decoder's `session JWT` sub-tab holds the
+# token, and History's space menu sends any flow to either tab.
 #
 # The captured traffic covers every PROTO label History can print — HTTP/HTTPS, WS/WSS,
 # GRPC/GRPCS, SSE/SSES and a short-circuited STUB — over both transports, plus the shapes
@@ -24,6 +29,12 @@
 # run, a zero-width space, a body the capture cap cut at 2 KB of 2.5 GB, and a 3.5-hour long
 # poll. That is the "Act five" section, and it exists to be LOOKED AT: a rendering defect in
 # a column is not something a spec can assert, only something a demo can show.
+#
+# "Act six" carries that exercise into the lists that are NOT History — a colour rule, a
+# rewrite rule, a binding, a sitemap tag, a Repeater tab and two issues named in Hangul or
+# Hebrew, because a row of user text laid out by hand is a column too. It also fills the
+# three panes that used to open empty: the Repeater's stored RESPONSE (including one send
+# that never connected), the saved-view library, and the Authorize identity list.
 #
 #   crystal run scripts/seed_demo.cr
 #
@@ -1664,10 +1675,14 @@ store.set_repeater_tags(ids[:repeater_ssrf], "ssrf oast")
 
 # One tab opens with its LAST response already in the pane (V11 persists it), so the
 # Repeater tab isn't empty until you send — and the Comparer has a second body to diff.
-idor_resp_head = "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\nContent-Length: 96\r\n\r\n"
+# Content-Length off the body rather than a literal: it was 96 over 82 bytes of JSON, which
+# is a truncated response as far as every reader of these bytes is concerned. Act six seeds
+# three more of these; that helper does the same arithmetic for the same reason.
+idor_resp_body = %({"id":2,"name":"Bob","email":"bob@demo.test","role":"admin","phone":"+1-555-0102"})
+idor_resp_head = "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
+                 "Content-Length: #{idor_resp_body.bytesize}\r\n\r\n"
 store.update_repeater_response(ids[:repeater_idor], idor_resp_head.to_slice,
-  %({"id":2,"name":"Bob","email":"bob@demo.test","role":"admin","phone":"+1-555-0102"}).to_slice,
-  nil, 34_000_i64)
+  idor_resp_body.to_slice, nil, 34_000_i64)
 
 fuzz_template = replay_req("GET", "api.demo.test", "/v1/users/§1§",
   {"Authorization" => "Bearer #{jwt}"})
@@ -2167,7 +2182,7 @@ add_flow(store, tick.call, host: "xn--352bl7khqr.xn--3e0b707e", target: "/이벤
 # arithmetic has to be measuring DISPLAY columns and not bytes or characters — a Hangul
 # syllable is one character, three bytes and two columns wide, and only one of those three
 # numbers lays the column out correctly.
-add_flow(store, tick.call, host: "쇼핑몰.한국", target: "/api/주문/9",
+ids[:hangul_order] = add_flow(store, tick.call, host: "쇼핑몰.한국", target: "/api/주문/9",
   req_headers: {"Authorization" => "Bearer #{jwt}"},
   status: 200, reason: "OK", ctype: "application/json",
   resp_body: %({"주문번호":9,"상태":"결제완료","금액":3998}), dur_us: 74_000_i64)
@@ -2590,6 +2605,136 @@ store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Flow, ws_id)
 store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Repeater, ids[:repeater_hahwul])
 
 puts "• inserted entity links on issues + notes"
+
+# --- Act six: the lists beside History, and the tabs that opened empty -------
+# Act five stressed History's columns. Every OTHER tab draws the same kind of row — a
+# fixed strip of user-supplied text, laid out by hand — and until now the demo handed
+# every one of them nothing but short ASCII: rules called "legacy stack", hosts called
+# `api.demo.test`, tabs called "XSS PoC". A list that has never been given a Hangul
+# name has never had its width arithmetic tested, and that arithmetic is exactly what
+# a demo can show and a spec cannot guess at.
+#
+# It also fills three tabs that opened with nothing in them at all — the Repeater's
+# RESPONSE pane, the History view library, and the Authorize identity list — because
+# "this tab is empty" and "this tab is broken" look the same from the outside.
+
+# ## Repeater responses
+#
+# `repeaters` carries the LAST response beside the request (`response_head` / `_body` /
+# `_error` / `_duration_us`), and the tab restores it on open — so a seeded tab can
+# arrive already answered instead of reading "— not sent — press ^R to resend —". That
+# is what gives `d:diff`, `^X:hex` and `p:pretty` something to work on before the
+# operator has sent anything, and it is the only way the demo shows a repeater send that
+# FAILED without making a network call. (The IDOR tab already carried one — these are the
+# other three, and they share its Content-Length-from-the-body rule.)
+repeater_resp = ->(status : String, headers : String, body : String) {
+  head = "HTTP/1.1 #{status}\r\nDate: Thu, 19 Jun 2026 09:20:00 GMT\r\n#{headers}" \
+         "Content-Length: #{body.bytesize}\r\n\r\n"
+  {head.to_slice, body.to_slice}
+}
+
+# The XSS tab, answered: the payload comes back inside the page, so the diff against the
+# captured flow is the finding itself.
+xss_body = "<!doctype html><html><head><title>Search — Demo Shop</title></head><body>" \
+           "<h1>Results for <script>alert(1)</script></h1><p>0 products found.</p></body></html>\n"
+xss_head, xss_bytes = repeater_resp.call("200 OK", "Content-Type: text/html; charset=utf-8\r\n", xss_body)
+store.update_repeater_response(ids[:repeater_xss], xss_head, xss_bytes, nil, 61_000_i64)
+
+# The OAuth tab, answered with a REFUSAL — a send that reached the origin and came back
+# 4xx is a different state from one that never connected, and the tab has to show both.
+token_body = %({"error":"invalid_grant","error_description":"refresh token expired"})
+token_head, token_bytes = repeater_resp.call("401 Unauthorized",
+  "Content-Type: application/json\r\nWWW-Authenticate: Bearer error=\"invalid_grant\"\r\n", token_body)
+store.update_repeater_response(ids[:repeater_token], token_head, token_bytes, nil, 121_000_i64)
+
+# …and the tab whose send never got an answer at all. `response_error` with an empty head
+# is the shape a dial failure leaves behind, and it is the one a demo can never produce by
+# running something.
+store.update_repeater_response(ids[:repeater_bound], Bytes.empty, nil,
+  "dial tcp: no route to host (api.demo.test:443)", 5_002_000_i64)
+
+# ## The History view library (#776)
+#
+# `v` opens the view picker; with an empty library it opens onto nothing. These are the
+# lenses this dataset actually rewards — each one is a query that returns a different
+# slice of the same 120-odd flows. The global half of the library lives in settings.json;
+# these are the project's own, and they follow the db rather than the operator.
+store.insert_saved_view("errors", "status:5xx OR status:4xx")
+store.insert_saved_view("sent by gori", "src:gori")
+store.insert_saved_view("sockets", "proto:ws OR proto:wss")
+store.insert_saved_view("webdav", "method:PROPFIND OR method:PROPPATCH OR method:REPORT OR method:SEARCH")
+store.insert_saved_view("slow (>1s)", "dur:>1s")
+store.insert_saved_view("big bodies", "size:>100k")
+# A view named in Hangul, for the same reason the rules below are: the picker lays each
+# query out in a column beside the name, and no name it had ever been given was wider on
+# screen than it is long in characters.
+store.insert_saved_view("한글 호스트", "host:쇼핑몰.한국 OR host:xn--352bl7khqr.xn--3e0b707e")
+
+# ## Authorize identities (= session slots)
+#
+# The Authorize tab replays one request as several identities; the identities are project
+# state (`Store::SESSION_SLOTS_KEY`) and the queue is not, so this is the half a seeder can
+# fill — and without it the tab's `i` list is empty and "send to Authorize" has nothing to
+# replay AS. `customer` claims the `token` extract rule, so its `$token` resolves from ITS
+# OWN binding table rather than the global one; `anonymous` strips credentials instead of
+# setting them, which is the comparison that finds a missing authorization check.
+admin_jwt = make_jwt(WEAK_SECRET,
+  %({"alg":"HS256","typ":"JWT"}),
+  %({"sub":"2","name":"bob","role":"admin","iss":"api.demo.test","iat":1718787600,"exp":1718791200}))
+store.set_setting(S::SESSION_SLOTS_KEY, SessionSlot.serialize([
+  SessionSlot.as_captured,
+  SessionSlot.new("anonymous", remove_headers: ["Authorization", "Cookie"]),
+  SessionSlot.new("customer", [{"Authorization", "Bearer $token"}], rules: ["token"]),
+  SessionSlot.new("admin", [{"Authorization", "Bearer #{admin_jwt}"}, {"X-Demo-Role", "admin"}]),
+]))
+
+# ## The wide-character half
+#
+# Everything below is the Act-five exercise applied to the lists that are NOT History. Each
+# row is a plausible artefact of working a Korean-language target — which is the point: none
+# of it is a synthetic torture string, and all of it is text a rule name, an issue title or a
+# tab name will really hold.
+store.insert_color_rule("host:쇼핑몰.한국 OR host:xn--352bl7khqr.xn--3e0b707e",
+  S::MarkerColor::Blue.label, S::MarkerStyle::Strip, "한글 호스트 (U-label · A-label)")
+
+store.insert_rule(S::RuleTarget::Response, S::RulePart::Body,
+  "결제완료", "결제취소",
+  op: S::RuleOp::Replace, match_kind: S::MatchKind::Literal,
+  name: "주문 상태 뒤집기 (한글 본문)", host: "쇼핑몰.한국", enabled: false)
+
+store.insert_extract_rule("주문번호", "host:쇼핑몰.한국 path:/api/주문",
+  ExtractKind::JsonPath, selector: "주문번호", host: "쇼핑몰.한국", enabled: false)
+
+store.set_sitemap_tag("쇼핑몰.한국", "/api/주문/9", "주문 조회 — 인증 없음")
+
+# A tab whose NAME, TAGS and TARGET are all wide — the sub-tab strip measures all three.
+hangul_req = replay_req("GET", "쇼핑몰.한국", "/api/주문/9",
+  {"Authorization" => "Bearer #{jwt}"})
+ids[:repeater_hangul] = store.insert_repeater("https://쇼핑몰.한국", hangul_req.to_slice,
+  false, true, ids[:hangul_order], 7)
+store.set_repeater_name(ids[:repeater_hangul], "주문 조회 재전송")
+store.set_repeater_tags(ids[:repeater_hangul], "한글 idor")
+
+# Two issues in the two scripts the list has never had to lay out: a Hangul title against
+# the longest host in the dataset (the two runs compete for the same row), and a
+# right-to-left title, which reverses the visual order of everything in the cell.
+h1 = store.insert_issue(
+  "주문 조회 API가 다른 사용자의 개인정보(주소·전화번호)를 그대로 반환함 🔥",
+  S::Severity::High, "쇼핑몰.한국", ids[:hangul_order])
+store.update_issue(h1, notes: "customer 토큰으로 /api/주문/9 를 호출하면 다른 사용자의 " \
+                              "주문·주소·전화번호가 그대로 내려온다.\n객체 단위 인가 검사가 없음.\n" \
+                              "Fix: 인증 주체가 해당 주문의 소유자인지 확인할 것.", status: S::Status::Confirmed)
+
+h2 = store.insert_issue("דוח מכירות רבעוני נגיש ללא אימות", S::Severity::Medium,
+  "acme-corporation-staging-eu-central-1.tenants.internal.services.demo.test", nil)
+store.update_issue(h2, notes: "The quarterly sales report under /api/v3/... is served to an " \
+                              "unauthenticated request. Title kept in the reporter's own language on purpose: " \
+                              "the ISSUES list right-aligns the host against it, and a right-to-left run is where " \
+                              "a cell laid out by character count comes apart.")
+
+puts "• inserted act-six list stress: 3 repeater responses (1 dial failure), 7 saved views, " \
+     "4 session slots, and Hangul/RTL names on a colour rule, a rewrite rule, a binding, " \
+     "a sitemap tag, a repeater tab and 2 issues"
 
 # --- Notes doc (multi-tab, stable ids for entity_links) --------------------
 NOTE_TOOLS = 3_i64

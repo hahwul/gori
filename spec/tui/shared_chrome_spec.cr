@@ -152,9 +152,21 @@ describe Gori::Tui::Frame do
     it "right-aligns the annotation two cells inside the card's right edge" do
       backend = MemoryBackend.new(40, 10)
       Frame.border_meta(Screen.new(backend), card, "SCOPE", "7 rules")
-      # "7 rules" is 7 cells ending at x = 37, so it starts at 31 — two clear of the edge, which
-      # is where `Frame.card` puts its right border and corner.
-      backend.row(0)[31, 7].should eq("7 rules")
+      # The run is ` 7 rules ` (padded like the card title and every badge), 9 cells ending at
+      # x = 37 — two clear of the edge, where `Frame.card` puts its right border and corner.
+      # So the text itself sits at 30, and cell 37 is the trailing space that keeps it off the
+      # hairline resuming behind it.
+      backend.row(0)[30, 7].should eq("7 rules")
+      backend.row(0)[29].should eq(' ')
+      backend.row(0)[37].should eq(' ')
+    end
+
+    it "answers the same left edge it drew at" do
+      # `border_meta_x` is what a caller whose chrome must clear the meta reads; the draw and
+      # that answer may not drift (the gRPC transcript's chip limit is derived from it).
+      backend = MemoryBackend.new(40, 10)
+      x = Frame.border_meta(Screen.new(backend), card, "SCOPE", "7 rules")
+      x.should eq(Frame.border_meta_x(card, "7 rules"))
     end
 
     it "draws nothing rather than landing on the title" do
