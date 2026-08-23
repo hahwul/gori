@@ -62,6 +62,21 @@ describe Gori::Tui::RewriterRuleOverlay do
     ov.valid?.should be_true # "()" compiles
   end
 
+  # `replacement` has always kept its spaces ("a header value or a replacement may legitimately
+  # contain them"); `pattern` stripped them, and for every op but the header three that field is
+  # BYTES the rule matches against. `gori run rewriter add` and the MCP `create_rule` do not
+  # strip, so opening such a rule here and saving any other field silently changed what it
+  # matched.
+  it "keeps a replace pattern's whitespace verbatim, and strips only a header NAME" do
+    rule = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Body, " token ", "x")
+    RewriterRuleOverlay.editing(rule).pattern.should eq(" token ")
+
+    named = Gori::Store::MatchRule.new(2_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, " X-Trace ", "on", Gori::Store::RuleOp::AddHeader)
+    RewriterRuleOverlay.editing(named).pattern.should eq("X-Trace")
+  end
+
   it "seeds edit mode from an existing rule" do
     rule = Gori::Store::MatchRule.new(7_i64, true, Gori::Store::RuleTarget::Response,
       Gori::Store::RulePart::Body, "old", "new",
