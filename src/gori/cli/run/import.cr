@@ -1,9 +1,9 @@
 # `gori run import` — bulk-import captured flows into the project's History from a
 # HAR export, a URL list, an OpenAPI/Swagger spec, a Postman or Insomnia collection,
-# or a Burp item export (the CLI counterpart of the TUI's Import overlay). Exactly one
-# source flag is required. Import WRITES flows, so it resolves its target like
-# `discover` (--db create-or-reopen, else an existing project — never silently a fresh
-# default).
+# a Burp item export, or a WSDL 1.1 service description (the CLI counterpart of the
+# TUI's Import overlay). Exactly one source flag is required. Import WRITES flows, so it
+# resolves its target like `discover` (--db create-or-reopen, else an existing project —
+# never silently a fresh default).
 module Gori
   module CLI
     module Run
@@ -12,7 +12,8 @@ module Gori
         project_name : String? = nil
         format = :text
         # One entry per source flag, in the order they appear in --help. Adding a format
-        # means adding a row here and a `p.on` below — nothing else in this file.
+        # means a row here, a bullet in the banner ABOVE the flags, and a `p.on` below —
+        # the banner spells every flag out by hand, so three edits, not two.
         sources = {
           :har      => nil.as(String?),
           :urls     => nil.as(String?),
@@ -20,23 +21,26 @@ module Gori
           :postman  => nil.as(String?),
           :insomnia => nil.as(String?),
           :burp     => nil.as(String?),
+          :wsdl     => nil.as(String?),
         }
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH) [options]\n\n" \
+          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
                      "  --urls      a text file of URLs, one per line (# comments and blanks ignored)\n" \
                      "  --oas       request templates from an OpenAPI/Swagger spec (JSON or YAML)\n" \
                      "  --postman   request templates from a Postman Collection v2 export (JSON)\n" \
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
-                     "  --burp      saved Burp items (XML) — request AND response, byte-exact"
+                     "  --burp      saved Burp items (XML) — request AND response, byte-exact\n" \
+                     "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)"
           p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| sources[:har] = v }
           p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| sources[:urls] = v }
           p.on("--oas=PATH", "Import an OpenAPI/Swagger spec (JSON or YAML)") { |v| sources[:oas] = v }
           p.on("--postman=PATH", "Import a Postman Collection v2 export") { |v| sources[:postman] = v }
           p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export") { |v| sources[:insomnia] = v }
           p.on("--burp=PATH", "Import a Burp Suite item export (XML)") { |v| sources[:burp] = v }
+          p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2)") { |v| sources[:wsdl] = v }
           p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }

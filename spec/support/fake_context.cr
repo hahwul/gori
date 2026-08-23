@@ -1602,6 +1602,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   def import_burp : Nil
     rec(:import_burp)
   end
+
+  def import_wsdl : Nil
+    rec(:import_wsdl)
+  end
 end
 
 # Fire one verb on a fresh recording context and return the intents it dispatched, IN

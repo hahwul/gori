@@ -3213,7 +3213,7 @@ module Gori::Tui
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
-    # --- Import path popup (palette → import.har/urls/oas/postman/insomnia/burp) ---
+    # --- Import path popup (palette → import.har/urls/oas/postman/insomnia/burp/wsdl) ---
 
     private def open_import(kind : Symbol) : Nil
       ov = ImportOverlay.new(kind)
@@ -4716,6 +4716,10 @@ module Gori::Tui
 
     def import_burp : Nil
       open_import(:burp)
+    end
+
+    def import_wsdl : Nil
+      open_import(:wsdl)
     end
 
     # Palette / verb entry (`settings.*`): nothing to return to, so an editor opened here

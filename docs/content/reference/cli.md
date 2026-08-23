@@ -69,7 +69,7 @@ gori run <subcommand> [verb] [options]
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
-| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp file |
+| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
@@ -505,6 +505,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--postman=PATH` | A Postman Collection v2 export (JSON) |
 | `--insomnia=PATH` | An Insomnia v4 export (JSON) |
 | `--burp=PATH` | A Burp Suite item export (XML) — request **and** response, byte-exact |
+| `--wsdl=PATH` | A WSDL 1.1 service description (XML) — one SOAP request template per operation |
 | `--project=NAME` | Project to import into (default: most-recently-active) |
 | `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
 | `--format` | `text` (default) or `json` |
