@@ -1,7 +1,7 @@
 require "uri"
 require "./types"
-require "../../miner/inject"
-require "../../fuzz/content_length"
+require "./insertion_points"
+require "../../miner/types"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 
@@ -15,10 +15,10 @@ module Gori
       # string…") straight into the response. That leaked, database-specific error message is the
       # tell this rule confirms.
       #
-      # For each query parameter it sends a baseline (the ORIGINAL query, unchanged) plus one probe
-      # per param whose value is the param's ORIGINAL value with a syntax-breaking suffix appended
-      # (URL-encoded `'"`), every other param left alone. A param is flagged ONLY when a specific
-      # DB-error signature appears in the PROBE body and is ABSENT from the baseline body.
+      # For each injectable parameter it sends a baseline (the ORIGINAL request, unchanged) plus one
+      # probe per param whose value is the param's ORIGINAL value with a syntax-breaking suffix
+      # appended (URL-encoded `'"`), every other param left alone. A param is flagged ONLY when a
+      # specific DB-error signature appears in the PROBE body and is ABSENT from the baseline body.
       #
       # Two FP guards stack — the same shape the SSTI rule uses to prove EVALUATION rather than
       # reflection:
@@ -38,17 +38,18 @@ module Gori
       # catches the endpoints that DO leak a verbose DB error — including NUMERIC contexts (`id=42`
       # → `id=42'"`), where the backslash-escaping asymmetry does not appear because a lone `\` in a
       # numeric literal is not an escape. The two together cover both the quiet (structural) and the
-      # loud (error-leaking) faces of the same injection surface.
+      # loud (error-leaking) faces of the same injection surface. Insertion points come from the
+      # shared `InsertionPoints` model (query today).
       class ErrorBasedSqli < Rule
-        # Probe at most this many query params per flow (in query order). Bounds the request count
-        # so a wide query stays light-touch; AGGRESSIVE (opts.aggressive) raises the cap.
+        # Probe at most this many params per flow (in enumeration order, across all locations).
+        # Bounds the request count so a wide param set stays light-touch; AGGRESSIVE raises the cap.
         MAX_PROBE_PARAMS            =  3
         MAX_PROBE_PARAMS_AGGRESSIVE = 10
 
-        # Appended (URL-encoded) to a param's ORIGINAL value. Decodes server-side to a single quote
-        # followed by a double quote — one of the two breaks whichever string literal the value
-        # sits in, and the unmatched quote errors most numeric contexts too. We only ever send this;
-        # we never send any signature string, so a matched signature is proof of a real DB error.
+        # Appended (URL-encoded, wire-ready) to a param's ORIGINAL value. Decodes server-side to a
+        # single quote followed by a double quote — one of the two breaks whichever string literal
+        # the value sits in, and the unmatched quote errors most numeric contexts too. We only ever
+        # send this; we never send any signature string, so a matched signature proves a real DB error.
         PAYLOAD = "%27%22" # → '"
 
         # Curated, DB-specific parser/driver diagnostics, matched case-insensitively as substrings
@@ -109,23 +110,15 @@ module Gori
           3..(2 + MAX_PROBE_PARAMS)
         end
 
-        # Dedup key WITHOUT rebuilding probes — derived from the same `injectables` gate `plan` uses,
-        # so it is byte-identical to `plan(detail).dedup_key` and nil in exactly the same cases
-        # (verified by the equivalence spec).
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          g = injectables(detail, opts)
-          return nil unless g
-          method_up, path, pairs, probe = g
-          build_dedup_key(detail, method_up, path, probe.map { |i| decode_name(pair_name(pairs[i])) })
+          s, slots = injectables(detail, opts) || return nil
+          InsertionPoints.dedup_key("sqli_error_based", detail, s.method, s.path, slots)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          g = injectables(detail, opts)
-          return nil unless g
-          method_up, path, pairs, probe = g
-          body = detail.request_body
-          # Baseline: the ORIGINAL query, unchanged (results[0]).
-          baseline = rebuild_query(detail.request_head, body, path, pairs.join('&'))
+          s, slots = injectables(detail, opts) || return nil
+          # Baseline: the ORIGINAL request, unchanged (results[0]).
+          baseline = InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)
           # A SECOND identical baseline, sent first among the follow-ups (results[1]) — the
           # stability guard BackslashPowered uses. This rule is a difference test against the
           # baseline; on a self-varying endpoint (an intermittent 5xx that renders a verbose
@@ -133,19 +126,15 @@ module Gori
           # a probe leg but not a SINGLE baseline reproduces the exact differential we report, once
           # per param. Requiring the signature to be absent from BOTH baselines turns "we cannot
           # tell" into a decline instead of a High false positive.
-          followups = [rebuild_query(detail.request_head, body, path, pairs.join('&'))]
+          followups = [InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)]
           params = [] of Param
-          probe.each do |idx|
-            pair = pairs[idx]
-            eq = pair.index('=').not_nil!
-            name = pair[0...eq]
-            value = pair[(eq + 1)..]
+          slots.each do |slot|
             # One followup per param: that param's value = original + PAYLOAD, all others verbatim.
-            # Appended after the two baselines, so params[i]'s probe is results[2 + i].
-            followups << rebuild_query(detail.request_head, body, path, with_value(pairs, idx, name, value + PAYLOAD))
-            params << Param.new("query", decode_name(name), value)
+            # Appended after the two baselines, so slots[i]'s probe is results[2 + i].
+            followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: PAYLOAD)}])
+            params << Param.new(slot.loc.label, slot.name, slot.raw_value)
           end
-          key = build_dedup_key(detail, method_up, path, params.map(&.name))
+          key = InsertionPoints.dedup_key("sqli_error_based", detail, s.method, s.path, slots)
           Plan.new(baseline, params, key, followups)
         end
 
@@ -203,67 +192,19 @@ module Gori
         end
 
         # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
-        # Returns {METHOD, path, all query pairs verbatim, indices of the first ≤MAX_PROBE_PARAMS
-        # pairs that are real k=v params} for a GET carrying ≥1 such param, else nil.
-        private def injectables(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Array(Int32)}?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
+        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil. The cap
+        # spans ALL enumerated locations at once, so a wide param set can't blow up the request count.
+        private def injectables(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
           # Body-differential gate: the comparison reads response BODIES (HEAD has none), so HEAD is
           # always out. By default GET only — the automatic scan never auto-re-sends a state-changing
           # method — but opts.allow_unsafe (manual per-flow scan / AGGRESSIVE mode) widens to
-          # POST/PUT/PATCH/DELETE, whose query params can still reach a SQL statement.
-          return nil unless diff_method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          return nil if query.empty?
+          # POST/PUT/PATCH/DELETE, whose params can still reach a SQL statement.
+          return nil unless diff_method_allowed?(s.method, opts)
           cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
-          pairs = query.split('&')
-          probe = [] of Int32
-          pairs.each_with_index do |pair, i|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            next if pair[0...eq].empty?
-            probe << i
-            break if probe.size >= cap
-          end
-          return nil if probe.empty?
-          {method_up, path, pairs, probe}
-        end
-
-        # Key by rule + host:PORT + METHOD + path + sorted (length-prefixed) probed-param names, so
-        # the same host on another port/service is a distinct surface and a name containing ','/':'
-        # can't collide with a different set. Sorted → a reordered query dedups to one probe.
-        private def build_dedup_key(detail : Store::FlowDetail, method_upcase : String, path : String,
-                                    names : Array(String)) : String
-          sig = names.map { |n| "#{n.bytesize}:#{n}" }.sort!.join(",")
-          "sqli_error_based|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{sig}"
-        end
-
-        private def pair_name(pair : String) : String
-          eq = pair.index('=')
-          eq ? pair[0...eq] : pair
-        end
-
-        # A copy of the query pairs with pair `idx` replaced by "name=value" (every other segment,
-        # including bare flags and empties, kept verbatim).
-        private def with_value(pairs : Array(String), idx : Int32, name : String, value : String) : String
-          dup = pairs.dup
-          dup[idx] = "#{name}=#{value}"
-          dup.join('&')
-        end
-
-        private def decode_name(name : String) : String
-          URI.decode_www_form(name)
-        rescue
-          name
-        end
-
-        # {path, query-without-'?'} — query is "" when the target has none.
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
+          slots = s.slots.first(cap)
+          return nil if slots.empty?
+          {s, slots}
         end
 
         # Decode + scrub the response body to text, capped at BODY_CAP. Scrubbing makes the
@@ -275,25 +216,6 @@ module Gori
           String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
         rescue
           ""
-        end
-
-        # Reassemble the request with a new query on the request line, preserving the original body
-        # and re-syncing Content-Length (mirrors BackslashPowered#rebuild_query).
-        private def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end

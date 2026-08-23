@@ -699,9 +699,10 @@ module Gori::Miner
 
     # Yield each CRLF/LF-delimited line of `bytes` as a String, skipping any line that is not
     # valid UTF-8 (a binary multipart part) rather than scrubbing it into one. EMPTY lines are
-    # yielded: `multipart_names` reads the blank line as the end of a part's header block, and
-    # the head walkers ignore a line with no colon anyway.
-    private def self.each_ascii_line(bytes : Bytes, & : String ->) : Nil
+    # yielded: `multipart_names` reads the blank line as the end of a part.'s header block, and
+    # the head walkers ignore a line with no colon anyway. Public so Probe::Active::InsertionPoints
+    # walks request-head lines with the SAME byte-safe (invalid-UTF-8-skipping) semantics.
+    def self.each_ascii_line(bytes : Bytes, & : String ->) : Nil
       start = 0
       i = 0
       while i <= bytes.size
@@ -753,8 +754,9 @@ module Gori::Miner
       c.ascii_letter? || c.ascii_number? || "!#$%&'*+-.^_`|~".includes?(c)
     end
 
-    # Strip CR/LF from an injected header/cookie value (header smuggling guard).
-    private def self.sanitize_value(v : String) : String
+    # Strip CR/LF from an injected header/cookie value (header smuggling guard). Public so
+    # Probe::Active::InsertionPoints shares the one header-smuggling guard.
+    def self.sanitize_value(v : String) : String
       v.delete("\r\n")
     end
   end

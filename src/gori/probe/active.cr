@@ -1,4 +1,5 @@
 require "./active/types"
+require "./active/insertion_points"
 require "./active/reflected_param"
 require "./active/error_based_sqli"
 require "./active/cors_reflection"
