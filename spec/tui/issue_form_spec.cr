@@ -5,7 +5,7 @@ require "../support/overlay_harness"
 include Gori::Tui
 
 describe Gori::Tui::IssueForm do
-  it "cycles severity (tab) and carries an edit id for re-titling" do
+  it "cycles severity and carries an edit id for re-titling" do
     form = IssueForm.new("GET /x", "acme.test", 7_i64)
     form.severity.should eq(Gori::Store::Severity::Medium) # default
     form.severity_cycle(1)
@@ -70,14 +70,76 @@ describe Gori::Tui::IssueForm do
     form.title.should eq("ISSUE")
   end
 
-  it "cycles severity on tab / shift-tab without touching the title" do
+  # ⇥ used to BE the severity control, which left this the one cycler in the tree the arrows
+  # did not drive. It now picks the row, and ←/→ step whatever row it picked — the model
+  # CustomRuleOverlay, FuzzSetOverlay and PreferencesView all already ran.
+  it "moves the row cursor on tab / shift-tab without touching the title or the severity" do
     h = OverlayHarness.new(IssueForm.new("keep"))
     form = h.overlay.as(IssueForm)
     h.press(Termisu::Input::Key::Tab)
-    form.severity.should eq(Gori::Store::Severity::High)
+    form.sel.should eq(IssueForm::ROW_SEV)
     h.press(Termisu::Input::Key::BackTab)
-    form.severity.should eq(Gori::Store::Severity::Medium)
+    form.sel.should eq(IssueForm::ROW_TITLE)
+    form.severity.should eq(Gori::Store::Severity::Medium) # ⇥ alone changes nothing now
     form.issue_title.should eq("keep")
+  end
+
+  # Two rows, so the cursor wraps: ⇥ off the severity row lands back on the title rather than
+  # sticking at the end of a form this small.
+  it "wraps the row cursor and also moves it with ↑/↓" do
+    h = OverlayHarness.new(IssueForm.new)
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Down)
+    form.sel.should eq(IssueForm::ROW_SEV)
+    h.press(Termisu::Input::Key::Tab) # wraps
+    form.sel.should eq(IssueForm::ROW_TITLE)
+    h.press(Termisu::Input::Key::Up) # wraps the other way
+    form.sel.should eq(IssueForm::ROW_SEV)
+  end
+
+  it "steps severity with ←/→ once the row cursor is on it" do
+    h = OverlayHarness.new(IssueForm.new("keep"))
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Tab)
+    h.press(Termisu::Input::Key::Right)
+    form.severity.should eq(Gori::Store::Severity::High)
+    h.press(Termisu::Input::Key::Left)
+    h.press(Termisu::Input::Key::Left)
+    form.severity.should eq(Gori::Store::Severity::Low)
+    form.issue_title.should eq("keep") # the caret never moved, and no character was eaten
+  end
+
+  # Clamped, like the Issues list's own `[`/`]` step — a held → parks on CRITICAL instead of
+  # rolling over to INFO on the form that decides how loud the finding reads.
+  it "clamps the severity step at both ends" do
+    h = OverlayHarness.new(IssueForm.new)
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Tab)
+    5.times { h.press(Termisu::Input::Key::Right) }
+    form.severity.should eq(Gori::Store::Severity::Critical)
+    9.times { h.press(Termisu::Input::Key::Left) }
+    form.severity.should eq(Gori::Store::Severity::Info)
+  end
+
+  # A card opened to be typed into must not swallow the first characters because the cursor
+  # is parked on a cycler that has no use for them. Same rule FuzzSetOverlay's Type row runs.
+  it "pulls the row cursor back to the title when a character is typed on the severity row" do
+    h = OverlayHarness.new(IssueForm.new)
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Tab)
+    h.type("hi")
+    form.issue_title.should eq("hi")
+    form.sel.should eq(IssueForm::ROW_TITLE)
+    form.severity.should eq(Gori::Store::Severity::Medium) # the letters were not read as steps
+  end
+
+  # The hint strip is the only surface that says what ←/→ do right now, and `hint` is re-read
+  # every frame (Runner#key_hints), so it has to track the row cursor.
+  it "names the keys the focused row actually answers to" do
+    h = OverlayHarness.new(IssueForm.new)
+    h.overlay.hint.should contain("←/→ caret")
+    h.press(Termisu::Input::Key::Tab)
+    h.overlay.hint.should contain("←/→ severity")
   end
 
   it "commits on ↵ and cancels on esc" do
@@ -141,7 +203,7 @@ describe Gori::Tui::IssueForm do
     h.overlay.as(IssueForm).issue_title.should eq("ab!")
   end
 
-  # The severity row draws `severity ‹ MEDIUM ›  (tab to change)`. The chevrons and the hint
+  # The severity row draws `severity ‹ MEDIUM ›  (←/→ to change)`. The chevrons and the hint
   # both promise a step; before this the row was drawn and dead.
   it "steps severity from the row's own chevrons" do
     h = OverlayHarness.new(IssueForm.new)
@@ -150,6 +212,20 @@ describe Gori::Tui::IssueForm do
     form.severity.should eq(Gori::Store::Severity::Low)
     h.click_in_box(2 + IssueForm::SEV_PREFIX.size + form.severity.label.size + 1, IssueForm::SEV_ROW) # the › cell
     form.severity.should eq(Gori::Store::Severity::Medium)
+    form.sel.should eq(IssueForm::ROW_SEV) # the click also aimed the arrows at the row it hit
+  end
+
+  # …and the title row takes the cursor back, so a click-to-place-the-caret is immediately
+  # followed by arrows that MOVE that caret rather than the severity behind it.
+  it "returns the row cursor to the title when the title row is clicked" do
+    h = OverlayHarness.new(IssueForm.new("abcdef"))
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Tab)
+    h.click_in_box(13, IssueForm::TITLE_ROW)
+    form.sel.should eq(IssueForm::ROW_TITLE)
+    h.press(Termisu::Input::Key::Left)
+    h.type("X")
+    form.issue_title.should eq("abXcdef")
   end
 
   it "treats a click on the severity label as the forward step its hint advertises" do

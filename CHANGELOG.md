@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The NEW / EDIT ISSUE card's severity steps with `←`/`→`, the way every other cycler in the TUI does; `⇥` now moves between the title and the severity row rather than being the only control that changed it (#789).
+
 - The History detail's MESSAGES pane shows a WebSocket frame's shape, as `gori run show` and the Repeater transcript already did: a PING, a PONG, a CLOSE with its code and reason, a message reassembled from several frames, an RSV bit and a client frame sent UNMASKED were all one indistinguishable `«binary Nb»` line in the one place an operator reads while working a socket (#787).
 
 - The two pairs of identically-titled cards say which list they are: Settings' ENVIRONMENT and HOSTNAME OVERRIDES are marked `global`, the Project tab's ENVIRONMENT and HOST OVERRIDES `project` — the global pair is layered under the project one, and neither said so (#787).
