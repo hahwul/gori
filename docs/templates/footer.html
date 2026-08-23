@@ -1,4 +1,27 @@
 <footer class="docs-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+      <p class="footer-tagline">{{ "footer.tagline" | t }}</p>
+    </div>
+    <nav class="footer-col" aria-label="{{ "footer.docs" | t }}">
+      <h2>{{ "footer.docs" | t }}</h2>
+      <a href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "nav.start" | t }}</a>
+      <a href="{{ base_url }}{{ lang_prefix }}/playbooks/">{{ "nav.playbooks" | t }}</a>
+      <a href="{{ base_url }}{{ lang_prefix }}/guide/">{{ "nav.guide" | t }}</a>
+      <a href="{{ base_url }}{{ lang_prefix }}/reference/">{{ "nav.reference" | t }}</a>
+    </nav>
+    <nav class="footer-col" aria-label="{{ "footer.project" | t }}">
+      <h2>{{ "footer.project" | t }}</h2>
+      <a href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/hahwul/gori/releases" target="_blank" rel="noopener noreferrer">{{ "footer.releases" | t }}</a>
+      <a href="https://github.com/hahwul/gori/issues" target="_blank" rel="noopener noreferrer">{{ "footer.issues" | t }}</a>
+    </nav>
+  </div>
+  <div class="footer-bottom">
+    <p>Apache-2.0 · © hahwul</p>
+    <p>{{ "footer.built_with" | t }} <a href="https://github.com/hahwul/hwaro" target="_blank" rel="noopener noreferrer">Hwaro</a></p>
+  </div>
   <div class="footer-mark">
     <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
       <span class="hahwul-img" role="img" aria-label="hahwul"></span>

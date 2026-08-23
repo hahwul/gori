@@ -20,18 +20,10 @@ allow_extensions = ["jpg", "jpeg", "png", "gif", "svg", "webp"]
 [highlight]
 enabled = true
 mode = "client"
+# `theme` is inert here: header.html intentionally omits {{ highlight_css }}
+# and the GORIDARK/GORILIGHT theme is inlined in css/style.css instead.
 theme = "github"
 use_cdn = true
-
-[[taxonomies]]
-name = "tags"
-feed = true
-
-[[taxonomies]]
-name = "categories"
-
-[[taxonomies]]
-name = "authors"
 
 [sitemap]
 enabled = true
@@ -45,17 +37,12 @@ limit = 10
 enabled = true
 format = "fuse_json"
 
-# =============================================================================
-# OpenGraph & Twitter Cards (recommended for social sharing)
-# =============================================================================
-
 [og]
 type = "article"
 twitter_card = "summary_large_image"
-
-# =============================================================================
-# Markdown (commonly customized)
-# =============================================================================
+# Brand card rendered by tools/og-card/generate.sh; per-page override is an
+# `image` key in front matter.
+default_image = "/images/og-card.png"
 
 [markdown]
 emoji = true

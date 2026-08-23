@@ -1,1 +1,7 @@
-<div class="alert"><strong>{{ type | capitalize }}.</strong> {{ body | markdownify }}</div>
+{% set tone = type | default(value="note") | lower %}
+{% if tone == "info" %}{% set tone = "note" %}{% endif %}
+{% if tone == "success" %}{% set tone = "tip" %}{% endif %}
+<div class="alert alert--{{ tone | e }}">
+  {% if title %}<p class="alert-title">{{ title | e }}</p>{% endif %}
+  <div class="alert-body">{{ body | markdownify }}</div>
+</div>

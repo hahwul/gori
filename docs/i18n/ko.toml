@@ -47,10 +47,19 @@ overview = "개요"
 [section]
 in_this_section = "이 섹션의 문서"
 
+[footer]
+tagline = "루프 안에 앉으세요."
+docs = "문서"
+project = "프로젝트"
+releases = "릴리스"
+issues = "이슈"
+built_with = "만든 도구:"
+
 [notfound]
-title = "404 페이지를 찾을 수 없음"
+title = "페이지를 찾을 수 없음"
 body = "찾으시는 페이지가 존재하지 않습니다."
 home_link = "홈으로 돌아가기"
+search = "문서 검색"
 
 [home]
 kicker = "HTTP 인터셉트 프록시 · TUI"

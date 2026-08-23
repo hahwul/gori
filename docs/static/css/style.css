@@ -1,3 +1,28 @@
+/* Charis SIL — shipped locally (static/fonts, SIL OFL). A Latin reading serif
+   for editorial moments only (hero lede, the Meaning dictionary entry); Hangul
+   has no coverage here and falls through to Noto Sans KR per glyph. */
+@font-face {
+  font-family: "Charis SIL";
+  src: url("../fonts/charis-sil-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charis SIL";
+  src: url("../fonts/charis-sil-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charis SIL";
+  src: url("../fonts/charis-sil-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
   /* Overlay/tint bases as R G B triplets so they flip with the theme. The
@@ -43,12 +68,24 @@
   --radius: 14px;
   --radius-sm: 10px;
   --radius-pill: 999px;
+  /* Spacing scale (~1.4–1.5 ratio) fitted to the hand-tuned values already in
+     this file: 1–4 are the micro clusters, 5–8 the section-rhythm steps. Values
+     that sit deliberately off this ladder (0.62, 1.35, 4.5…) stay as literals. */
+  --space-1: 0.35rem;
+  --space-2: 0.55rem;
+  --space-3: 0.8rem;
+  --space-4: 1.05rem;
+  --space-5: 1.5rem;
+  --space-6: 2.2rem;
+  --space-7: 3.5rem;
+  --space-8: 6rem;
   --header-h: 68px;
   --sidebar-w: 284px;
   --toc-w: 220px;
   --content-max-w: 800px;
   --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Charis SIL", Georgia, "Noto Sans KR", "Apple SD Gothic Neo", serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 
@@ -617,6 +654,64 @@ kbd {
   opacity: 0.9;
 }
 
+/* A slow glint sweeping the hero photograph: a brightened copy of the very
+   same frame (scrims included, so the layers cancel exactly) revealed through
+   a narrow travelling band. Brightness is multiplicative, so the gold rings —
+   the brightest pixels in the frame — catch nearly all of the light while the
+   marble stays night. Both keyframe ends park the band off-frame, so the
+   reduced-motion freeze (and the rest between sweeps) shows nothing. */
+.hero-glint {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: min(120vh, 70rem);
+  pointer-events: none;
+  -webkit-mask: linear-gradient(180deg, #000 58%, transparent 100%);
+  mask: linear-gradient(180deg, #000 58%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-glint::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(96deg, rgb(6 8 14 / 0.78) 0%, rgb(6 8 14 / 0.42) 34%, rgb(6 8 14 / 0) 58%),
+      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
+      url("../images/hero-orbits.webp") 66% 24% / cover no-repeat;
+    filter: brightness(1.5) saturate(1.15);
+    opacity: 0.55;
+    -webkit-mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
+    mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
+    animation: hero-glint 11s linear infinite;
+  }
+
+  /* Match the inverted base frame, then lift the result toward paper so the
+     sweep reads as sheen on the bronze rather than a shadow. */
+  :root[data-theme="light"] .hero-glint::before {
+    filter: invert(1) hue-rotate(180deg) saturate(0.82) brightness(1.22);
+    opacity: 0.5;
+  }
+}
+
+/* mask-size is 300% wide, so position 0%→100% carries the band from past the
+   right edge to past the left one; the tail of the cycle is a quiet rest. */
+@keyframes hero-glint {
+  0% {
+    -webkit-mask-position: 0% 0;
+    mask-position: 0% 0;
+  }
+  55% {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  100% {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+}
+
 .home-hero,
 .home-showcase,
 .home-paths,
@@ -636,7 +731,7 @@ kbd {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 3.5rem 0 3rem;
+  padding: var(--space-7) 0 3rem;
 }
 
 .hero-copy {
@@ -682,6 +777,7 @@ kbd {
   max-width: 35rem;
   margin-top: 1.25rem;
   color: var(--muted);
+  font-family: var(--font-serif);
   font-size: 1.08rem;
   line-height: 1.75;
 }
@@ -870,7 +966,7 @@ kbd {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 0 3.5rem;
+  padding: 0 0 var(--space-7);
   /* Depth for the frame's reveal tilt (motion block); inert when static. */
   perspective: 1100px;
 }
@@ -905,7 +1001,7 @@ kbd {
 .home-paths {
   display: flex;
   justify-content: center;
-  padding: 1rem 0 6rem;
+  padding: 1rem 0 var(--space-8);
 }
 
 /* --lead/--link/--lap size the whole chain; the breakpoints only resize
@@ -1071,7 +1167,7 @@ kbd {
   grid-template-columns: minmax(340px, 0.92fr) minmax(0, 1.08fr);
   gap: 2rem;
   align-items: center;
-  padding: 2rem 0 6rem;
+  padding: 2rem 0 var(--space-8);
 }
 
 /* A gold-ringed disc matching the hero orb: the same ink-and-gold wallpaper art
@@ -1394,6 +1490,16 @@ kbd {
 
 /* Narrow: stack the seam vertically and turn the wire on its end. */
 @media (max-width: 720px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+  }
+
+  .footer-bottom {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
   .agent-seam {
     flex-direction: column;
     max-width: 26rem;
@@ -1556,9 +1662,9 @@ kbd {
 .home-meaning {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3.5rem;
+  gap: var(--space-7);
   align-items: center;
-  padding: 4.5rem 0 6rem;
+  padding: 4.5rem 0 var(--space-8);
   border-top: 1px solid var(--line);
 }
 
@@ -1582,7 +1688,8 @@ kbd {
 .meaning-def {
   max-width: 54ch;
   color: var(--muted);
-  font-size: 1.02rem;
+  font-family: var(--font-serif);
+  font-size: 1.06rem;
   line-height: 1.85;
   text-wrap: pretty;
 }
@@ -1966,7 +2073,7 @@ kbd {
 }
 
 .docs-main h2 {
-  margin: 3.5rem 0 0.8rem;
+  margin: var(--space-7) 0 var(--space-3);
   padding-top: 1.4rem;
   border-top: 1px solid var(--line);
   color: var(--heading);
@@ -1978,7 +2085,7 @@ kbd {
 }
 
 .docs-main > h1:first-child + h2 {
-  margin-top: 2.2rem;
+  margin-top: var(--space-6);
   padding-top: 0;
   border-top: 0;
 }
@@ -2092,7 +2199,7 @@ kbd {
 
 hr {
   height: 1px;
-  margin: 3.5rem 0;
+  margin: var(--space-7) 0;
   border: 0;
   background: var(--line);
 }
@@ -2339,6 +2446,37 @@ blockquote > :last-child,
   display: inline;
 }
 
+/* Variant alerts (the alert shortcode). One RGB custom property carries the
+   tone; border and wash are alpha tints of it, so both themes come free where
+   the base token flips (note/warning) — tip/danger get explicit light values.
+   Kept quiet on purpose: a hairline and a faint wash, no shouting stripes. */
+.alert--note    { --callout-rgb: var(--cloud-rgb); }
+.alert--tip     { --callout-rgb: 122 168 106; }
+.alert--warning { --callout-rgb: var(--accent-rgb); }
+.alert--danger  { --callout-rgb: 202 100 90; }
+
+:root[data-theme="light"] .alert--tip    { --callout-rgb: 86 128 72; }
+:root[data-theme="light"] .alert--danger { --callout-rgb: 176 70 60; }
+
+.alert[class*="alert--"] {
+  border-color: rgb(var(--callout-rgb) / 0.32);
+  background: rgb(var(--callout-rgb) / 0.06);
+}
+
+.alert-title {
+  margin: 0 0 var(--space-1);
+  color: rgb(var(--callout-rgb) / 0.95);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.alert-body > :last-child {
+  margin-bottom: 0;
+}
+
 /* An index of page titles, nothing more: a ruled two-column list, not a grid
    of cards sized for descriptions this listing does not carry. */
 ul.section-list {
@@ -2405,8 +2543,76 @@ nav.pagination a:hover,
   opacity: 0.52;
 }
 
-.taxonomy-desc {
+/* 404 — a full-width centered panel; the big numeral wears the same gilding
+   device as the wordmark (background-clip text over the gold-leaf ramp). */
+.notfound-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100dvh - var(--header-h));
+  width: min(100%, 1380px);
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-4);
+  text-align: center;
+}
+
+.notfound-code {
+  margin: 0;
+  color: var(--accent);
+  font-size: clamp(6rem, 18vw, 11rem);
+  font-weight: 780;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  background: var(--grad-gold-leaf);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.notfound-title {
+  margin: var(--space-4) 0 0;
+  color: var(--heading);
+  font-size: 1.72rem;
+  letter-spacing: -0.01em;
+}
+
+.notfound-body {
+  margin: var(--space-2) 0 0;
+  max-width: 34rem;
   color: var(--muted);
+}
+
+.notfound-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.notfound-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.notfound-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0.36rem 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.notfound-links a:hover {
+  border-color: var(--accent);
+  color: var(--heading);
 }
 
 .docs-footer {
@@ -2440,6 +2646,50 @@ nav.pagination a:hover,
 
 .docs-footer a:hover {
   color: var(--accent-strong);
+}
+
+/* Link columns: brand + two quiet nav stacks, closed by a hairline bottom
+   bar. Column heads borrow the TOC rail's mono uppercase voice. */
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: var(--space-6);
+  padding-bottom: var(--space-6);
+}
+
+.footer-brand .logo-word {
+  font-size: 1.3rem;
+}
+
+.footer-brand .footer-tagline {
+  margin-top: var(--space-2);
+  max-width: 26rem;
+  color: var(--quiet);
+}
+
+.footer-col h2 {
+  margin: 0 0 var(--space-3);
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.footer-col a {
+  display: block;
+  width: fit-content;
+  padding: var(--space-1) 0;
+  text-decoration: none;
+}
+
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line-soft);
 }
 
 /* hahwul mark — Built with Love (matches dalfox docs footer) */
@@ -3023,6 +3273,17 @@ html.search-lock body {
      of the ring knot so the bright crossing stays out from under the lede. */
   .home-main::before {
     height: min(90vh, 46rem);
+    background:
+      linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
+      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
+      url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
+  }
+
+  .hero-glint {
+    height: min(90vh, 46rem);
+  }
+
+  .hero-glint::before {
     background:
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
       linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
