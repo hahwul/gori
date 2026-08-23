@@ -259,6 +259,26 @@ module Gori::Tui
       @out.clear_selection
     end
 
+    # ^G go-to-line over the OUTPUT pane. `n` is 1-based (the shell's prompt takes what the
+    # gutter shows); `ReadPane` indexes from 0.
+    def goto_output_line(n : Int32, result : Decoder::ChainResult) : Nil
+      output_lines(result)
+      @out.goto_line(n - 1)
+    end
+
+    # ^F search over the OUTPUT pane: 0-based indices of the matching lines. Searches the text
+    # AS DISPLAYED — so a `^X`-forced HEX/B64 view is searched in that form, which is the point
+    # (finding a byte pattern in the hex dump is a different question from finding it in the
+    # decoded text, and the pane can only jump to a line it is actually drawing).
+    def output_search_lines(query : String, result : Decoder::ChainResult) : Array(Int32)
+      output_lines(result)
+      @out.search_lines(query)
+    end
+
+    def output_search_hl=(q : String) : Nil
+      @out.search_hl = q
+    end
+
     # The displayed OUTPUT split into lines, cached until the next recompute / mode
     # change (so an idle frame never re-encodes + re-splits a large output).
     private def output_lines(result : Decoder::ChainResult) : Array(String)

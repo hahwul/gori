@@ -65,6 +65,8 @@ Ctrl-P  → settings:hotkeys
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, 그리고 맨 `:`(명령줄).
 - **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
+  `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다 — 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
+
   이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 **두 번째 모디파이어**를 줄 수는 있습니다 — 아래 [커맨드 모디파이어](#command-modifier)를 참고하세요.
 
 `Ctrl-S` 같은 흐름 제어/시그널 키 조합은 예약되어 있지 **않습니다**. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 `Ctrl-S`로 제공됩니다).

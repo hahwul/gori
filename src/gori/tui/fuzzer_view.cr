@@ -1434,6 +1434,58 @@ module Gori::Tui
       @detail_read.copy_text
     end
 
+    # --- ^G/^F over the RESULT detail ---------------------------------------
+    # Every one re-sources first, for the reason `sync_detail_source` gives: a live re-sort can
+    # move the open row out from under a stale source, and a hit list computed against the old
+    # text would jump the caret to a line the pane is not showing.
+
+    # `n` is 1-based (what the gutter prints); `ReadPane` indexes from 0.
+    def goto_detail_line(n : Int32) : Nil
+      sync_detail_source
+      @detail_read.goto_line(n - 1)
+    end
+
+    # Searches the CURRENTLY-SHOWN sub-pane (REQUEST / RESPONSE / a decoded pane), because
+    # that is the text `detail_lines` is memoized on and the only one the caret can reach.
+    # Switching sub-panes with an open prompt re-runs this through `search_recompute`.
+    def detail_search_lines(query : String) : Array(Int32)
+      sync_detail_source
+      @detail_read.search_lines(query)
+    end
+
+    def detail_search_hl=(q : String) : Nil
+      @detail_read.search_hl = q
+    end
+
+    # --- ^G/^F over the TEMPLATE editor -------------------------------------
+    # The Repeater's request half spelled these first (`repeater_view/search.cr`); the two
+    # panes are the same `TextArea` holding the same captured request, so they answer the same
+    # way. No hex arm here — the Fuzzer template has no hex mode to go stale behind.
+
+    def goto_template_line(n : Int32) : Nil
+      @editor.goto_line(n)
+    end
+
+    def template_search_lines(query : String) : Array(Int32)
+      @editor.search_lines(query)
+    end
+
+    def template_match_count(query : String) : Int32
+      @editor.match_count(query)
+    end
+
+    # Find & replace over the template. Dirties the tab like any other edit, so the run's
+    # persisted template matches what the pane shows.
+    def template_replace_matches(query : String, replacement : String) : Int32
+      n = @editor.replace_matches(query, replacement)
+      @dirty = true if n > 0
+      n
+    end
+
+    def template_search_hl=(q : String) : Nil
+      @editor.search_hl = q
+    end
+
     def detail_copy_all_text : String
       detail_plain_lines.join("\n")
     end

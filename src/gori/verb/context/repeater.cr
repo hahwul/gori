@@ -33,4 +33,11 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_copy : Nil          # copy selection or current line (READ panes)
   abstract def repeater_copy_all : Nil      # copy the whole focused pane text
   abstract def repeater_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
+
+  # Open the ACTIVE sub-tab's last response in the desktop's viewer — History's
+  # `open_response_external` for a response that is not a stored flow but the result of the
+  # send in hand. Two intents rather than one because the two read their bytes from
+  # different places (a `Store::FlowDetail` vs the live `Repeater::Result`), which is the
+  # same split `repeater_copy` / `detail_copy_selection` already draw.
+  abstract def repeater_open_response_external : Nil
 end

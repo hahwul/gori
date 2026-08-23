@@ -49,4 +49,14 @@ abstract class Gori::Verb::ExecContext
   abstract def toggle_reveal : Nil
   # Toggle pretty-print of req/res bodies (display only; `p` in History detail).
   abstract def toggle_pretty : Nil
+
+  # Write the selected flow's DECODED response body to a preview file and hand it to the
+  # desktop's opener — the terminal's way to actually SEE a page, an image or a PDF.
+  #
+  # Its own intent rather than a `copy_as` variant because it leaves the process: a copy
+  # ends at the clipboard, this spawns a viewer against a file gori just wrote, and the two
+  # want different refusals (no body / no opener on this platform / the write failed).
+  # Single-target on purpose — it opens the CURSOR row even when marks are set, since N
+  # marked flows would mean N windows.
+  abstract def open_response_external : Nil
 end

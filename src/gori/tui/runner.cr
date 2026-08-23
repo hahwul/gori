@@ -104,6 +104,7 @@ require "./runner/comparer"
 require "./runner/decoder"
 require "./runner/discover"
 require "./runner/env"
+require "./runner/external_open"
 require "./runner/fuzzer"
 require "./runner/history"
 require "./runner/host_overrides"
@@ -4312,7 +4313,11 @@ module Gori::Tui
     # exclusion, so a future batch verb can't inherit a "(cursor)" it doesn't deserve. The other
     # single-only entries (query / follow / clear / scope-toggle / oast-copy) are
     # flow-independent, so a cursor note there would be noise.
-    HISTORY_CURSOR_ONLY = {"body.open", "history.sequence"}
+    # `history.open-browser` is here for a reason of its own: it COULD have been a batch verb
+    # and deliberately is not, because N marked flows would mean N windows opening at once.
+    # Without the note the menu would read as if ⇧B applied to all of them and then silently
+    # open one.
+    HISTORY_CURSOR_ONLY = {"body.open", "history.sequence", "history.open-browser"}
 
     # Retitle the History list's menu entries while marks are set, so the menu says what will
     # actually happen — "Delete 3 flows". MUST return nil when nothing is marked, so every

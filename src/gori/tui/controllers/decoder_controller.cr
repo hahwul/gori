@@ -319,6 +319,53 @@ module Gori::Tui
       cur.pane == :chain && @popup.open? && @popup_engaged
     end
 
+    # ^G/^F name the focused pane. The CHAIN is deliberately absent: it is a one-line spec
+    # ("base64 > sha256"), so go-to-line has nothing to reach and a find prompt would cover
+    # more of the screen than the text it searches.
+    #
+    # The INPUT is a `TextArea` and so is find-AND-REPLACE-able (the shell's ↹ arm), which is
+    # the pane where that is worth having — a decode is authored there. The OUTPUT is derived
+    # bytes and read-only, exactly like the Repeater's response half.
+    def goto_symbol : Symbol?
+      case cur.pane
+      when :input  then :decoder_input
+      when :output then :decoder_output
+      end
+    end
+
+    # --- ^G/^F targets (the shell drives these through `goto_symbol`) --------
+    # The `result` the OUTPUT pane derives its text from has to come from the live session, so
+    # these thin wrappers exist rather than the shell reaching for `cur` itself.
+
+    def goto_output_line(n : Int32) : Nil
+      s = cur
+      s.view.goto_output_line(n, s.result)
+    end
+
+    def output_search_lines(query : String) : Array(Int32)
+      s = cur
+      s.view.output_search_lines(query, s.result)
+    end
+
+    def output_search_hl=(q : String) : Nil
+      cur.view.output_search_hl = q
+    end
+
+    # The INPUT editor, for the shell's READ-ONLY find arms (search / count / goto / band).
+    def input_area : TextArea
+      cur.input
+    end
+
+    # Find & replace over INPUT. Its own method rather than `input_area.replace_matches`
+    # because a write to that buffer has to go through `touch`: every other edit path here
+    # does, and skipping it leaves the OUTPUT pane showing the chain's answer for the text
+    # that was there BEFORE the replace — a stale decode that looks like a real one.
+    def input_replace_matches(query : String, replacement : String) : Int32
+      n = cur.input.replace_matches(query, replacement)
+      touch if n > 0
+      n
+    end
+
     def handle_complete_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
@@ -468,12 +515,12 @@ module Gori::Tui
       when :output
         # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
         # so it is not re-listed here as a second, different action.
-        "↑/↓ move · ⇧arrows select · #{y} copy · ↑-top chain · space cmds · ^X mode · esc sub-tabs"
+        "↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · ^X mode · esc sub-tabs"
       when :input
         if s.input_mode == InputMode::Insert
-          "type to edit · ⇧arrows select · ^Y copy · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+          "type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
         else
-          "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs"
+          "i/↵ edit · ⇧arrows select · #{y} copy · ^F find · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs"
         end
       else
         ""
