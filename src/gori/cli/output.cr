@@ -194,33 +194,6 @@ module Gori
         String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
       end
 
-      # A WebSocket message's frame shape, as a bracketed note, EMPTY when there is nothing
-      # unusual to say. Silence is the point for the ordinary case: annotating every TEXT
-      # frame with `[TEXT fin=1 rsv=0]` would bury the one line that is not ordinary. A
-      # control frame always names itself, because until V7 it did not appear at all.
-      def self.ws_shape_note(m : Store::WsMessage) : String
-        s = m.shape
-        parts = [] of String
-        parts << (Store::WsOutMessage::OPCODE_NAMES[m.opcode]? || "op#{m.opcode}") if m.control?
-        parts << "fin=0" unless s.fin
-        parts << "rsv=#{s.rsv}" if s.rsv != 0
-        parts << "UNMASKED" if s.masked == false && m.direction == "out"
-        parts << "#{s.frames} frames" if s.frames > 1
-        parts.empty? ? "" : "[#{parts.join(' ')}]"
-      end
-
-      # The part of a control frame worth reading: a CLOSE's code and reason, a ping/pong's
-      # payload. This is the diagnostic that existed nowhere on the proxy path.
-      def self.ws_control_detail(m : Store::WsMessage) : String
-        if code = m.close_code
-          reason = m.close_reason.try { |r| String.new(r).scrub }
-          return reason && !reason.empty? ? "#{code} #{term_safe(reason)}" : code.to_s
-        end
-        return "(no payload)" if m.payload.empty?
-        body = String.new(m.payload)
-        body.valid_encoding? ? term_safe(body) : "0x#{m.payload.hexstring}"
-      end
-
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow) : String

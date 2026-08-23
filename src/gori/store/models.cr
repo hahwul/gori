@@ -412,6 +412,46 @@ module Gori
         @payload[2, @payload.size - 2]
       end
 
+      # This message's frame shape as a bracketed note, EMPTY when there is nothing unusual to
+      # say. Silence is the point for the ordinary case: annotating every TEXT frame with
+      # `[TEXT fin=1 rsv=0]` would bury the one line that is not ordinary. A control frame
+      # always names itself, because until V7 it did not appear at all.
+      #
+      # On the MODEL and not in `CLI::Output`, where it began, for the reason `emit_shape_json`
+      # below gives at length: three renderers read it — `gori run show`, the TUI's History
+      # MESSAGES pane and (through `WsOutMessage#shape_label`) the Repeater transcript — and a
+      # helper the TUI has to call may not live in the CLI. That edge is exactly how the
+      # History pane came to be the only one of the three showing none of this: a PING, a
+      # CLOSE with its code, a 3-frame message and an §5.1 masking violation all rendered
+      # `«binary Nb»` there while the other two spelled them out.
+      def shape_note : String
+        s = shape
+        parts = [] of String
+        parts << (WsOutMessage::OPCODE_NAMES[@opcode]? || "op#{@opcode}") if control?
+        parts << "fin=0" unless s.fin
+        parts << "rsv=#{s.rsv}" if s.rsv != 0
+        parts << "UNMASKED" if s.masked == false && @direction == "out"
+        parts << "#{s.frames} frames" if s.frames > 1
+        parts.empty? ? "" : "[#{parts.join(' ')}]"
+      end
+
+      # The part of a control frame worth reading: a CLOSE's code and reason, a ping/pong's
+      # payload. This is the diagnostic that existed nowhere on the proxy path.
+      #
+      # Returns the bytes as they are (scrubbed only for UTF-8 validity). A caller writing to a
+      # real terminal owns the control-character question — `CLI::Output.term_safe` for the
+      # CLI, `Screen`'s own cell mapping for the TUI — and answering it here would double-escape
+      # on one of the two.
+      def control_detail : String
+        if code = close_code
+          reason = close_reason.try { |r| String.new(r).scrub }
+          return reason && !reason.empty? ? "#{code} #{reason}" : code.to_s
+        end
+        return "(no payload)" if @payload.empty?
+        body = String.new(@payload)
+        body.valid_encoding? ? body.scrub : "0x#{@payload.hexstring}"
+      end
+
       # This message's frame SHAPE as JSON fields, emitted into an open object. Only what
       # departs from the default is written, so an ordinary message's object is exactly the
       # shape it was before V7 — a script keying off field presence is not broken by a feature

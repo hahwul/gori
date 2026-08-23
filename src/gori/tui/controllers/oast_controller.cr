@@ -880,7 +880,7 @@ module Gori::Tui
       screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg)
       screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg)
       screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg)
-      screen.text(inner.x + 36, header_y, "DESTINATION", Theme.muted, Theme.bg)
+      screen.text(inner.x + DEST_COL_X, header_y, "DESTINATION", Theme.muted, Theme.bg)
       screen.text(inner.right - pw, header_y, "PROVIDER", Theme.muted, Theme.bg)
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
@@ -901,14 +901,28 @@ module Gori::Tui
     # provider named after its own domain (`Demo OAST (oast.demo.test)`) truncated to
     # `Demo OAST (oast.…` on a 200-column terminal while a hundred blank columns sat in
     # DESTINATION beside it — the one field with a bounded, known length losing to the one that
-    # can be any length. It takes what the widest provider IN THE WHOLE FILTERED LIST needs
-    # (never just the visible slice, or the column would jitter as the list scrolls), floored at
-    # the 17 it always had and capped at a third of the pane so DESTINATION keeps the majority.
+    # can be any length.
+    #
+    # So it takes what the widest provider needs, but only out of the SLACK: DESTINATION is
+    # served first, and PROVIDER may grow into what is left over. A share of the pane (a third,
+    # say) is the wrong ceiling and was the first thing tried — at 80 columns it handed PROVIDER
+    # 24 and squeezed DESTINATION to `a1b2c3d4.o…`, which inverts the priority, since the
+    # destination is the evidence and the provider is a label. With no slack this returns the 17
+    # it always was, so a narrow pane lays out exactly as it did before.
+    #
+    # Both measures are over the WHOLE filtered list, never the visible slice: a width derived
+    # from what is on screen makes the column jitter as the list scrolls.
     PROVIDER_COL_MIN = 17
+
+    # Where DESTINATION starts, relative to the table's left edge.
+    DEST_COL_X = 36
 
     private def provider_col_w(inner : Rect, rows : Array(CbRow)) : Int32
       widest = rows.max_of? { |r| Screen.draw_width(r.provider) } || 0
-      widest.clamp(PROVIDER_COL_MIN, {inner.w // 3, PROVIDER_COL_MIN}.max)
+      dest_need = rows.max_of? { |r| Screen.draw_width(r.destination) } || 0
+      # -1 for the blank column `draw_callback_row` keeps between the two runs.
+      slack = inner.w - DEST_COL_X - 1 - dest_need
+      widest.clamp(PROVIDER_COL_MIN, {slack, PROVIDER_COL_MIN}.max)
     end
 
     private def draw_callback_row(screen : Screen, rect : Rect, py : Int32, row : CbRow, sel : Bool,
@@ -921,8 +935,8 @@ module Gori::Tui
       screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: 17)
       # One blank column between the two variable-width runs, so a destination that fills its
       # cell does not read as one token with the provider behind it.
-      dw = {rect.right - pw - 1 - (rect.x + 36), 6}.max
-      screen.text(rect.x + 36, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
+      dw = {rect.right - pw - 1 - (rect.x + DEST_COL_X), 6}.max
+      screen.text(rect.x + DEST_COL_X, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
       screen.text(rect.right - pw, py, row.provider, Theme.muted, bg, width: pw)
     end
 

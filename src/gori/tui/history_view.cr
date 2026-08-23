@@ -3316,11 +3316,32 @@ module Gori::Tui
       end
     end
 
+    # One line per captured frame: direction, the frame's SHAPE where it departs from an
+    # ordinary masked TEXT frame, then what it carried.
+    #
+    # This pane used to read `text?` and nothing else, so every other frame collapsed into
+    # `«binary Nb»` — a PING, a PONG, a CLOSE with its §5.5.1 code and reason, a message
+    # reassembled from three frames, an RSV bit set, a client frame sent UNMASKED in violation
+    # of §5.1 were all one indistinguishable line. `gori run show` and the Repeater transcript
+    # both spelled them out, off `Store::WsMessage#shape_note` and `WsOutMessage#shape_label`;
+    # this was the third renderer of the same rows, and the one an operator actually reads
+    # while working a socket. The facts are V7's; only this pane could not see them.
+    #
+    # No `term_safe` pass: `Screen` maps a control byte to its own cell, and `^B` reveals
+    # whitespace across the whole detail view. Scrubbing here would take that choice away.
     private def ws_lines(msgs : Array(Store::WsMessage)) : Array(String)
       return ["(no websocket messages)"] if msgs.empty?
       msgs.map do |m|
         arrow = m.direction == "out" ? "→" : "←"
-        m.text? ? "#{arrow} #{String.new(m.payload)}" : "#{arrow} «binary #{m.payload.size}b»"
+        note = m.shape_note
+        prefix = note.empty? ? arrow : "#{arrow} #{note}"
+        if m.control?
+          "#{prefix} #{m.control_detail}"
+        elsif m.text?
+          "#{prefix} #{String.new(m.payload)}"
+        else
+          "#{prefix} «binary #{m.payload.size}b»"
+        end
       end
     end
 

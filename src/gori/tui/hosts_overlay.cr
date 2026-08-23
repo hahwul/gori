@@ -315,7 +315,10 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "HOSTNAME OVERRIDES", border: Theme.border_focus)
-      meta = "#{@items.size} entr#{@items.size == 1 ? "y" : "ies"}"
+      # `global`, for the reason `EnvOverlay` gives: the Project tab's HOST OVERRIDES pane is
+      # this card's twin under a title one word apart, and the layering between them (project
+      # wins) is invisible unless each says which it is.
+      meta = "global · #{@items.size} entr#{@items.size == 1 ? "y" : "ies"}"
       Frame.border_meta(screen, box, "HOSTNAME OVERRIDES", meta, bg: Theme.panel)
       # A brief format example so the "IP HOSTNAME" entry shape is clear at a glance.
       screen.text(box.x + 3, box.y + 1, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)

@@ -1657,7 +1657,9 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "HOST OVERRIDES", bg: Theme.bg, border: Frame.pane_border(focused))
       n = @host_overrides.size
-      Frame.border_meta(screen, rect, "HOST OVERRIDES", n.to_s,
+      # `project`, against Settings' near-identically titled HOSTNAME OVERRIDES — these are
+      # layered OVER those, and a bare count said nothing about which list you are editing.
+      Frame.border_meta(screen, rect, "HOST OVERRIDES", "project · #{n}",
         fg: n > 0 ? Theme.text_bright : Theme.muted)
       render_overrides_list(screen, rect.inset(1, 1), focused)
     end
@@ -1743,7 +1745,9 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "ENVIRONMENT", bg: Theme.bg, border: Frame.pane_border(focused))
       n = @env_items.size
-      Frame.border_meta(screen, rect, "ENVIRONMENT", "prefix #{Settings.env_prefix} · #{n}")
+      # `project`, against the identically-titled GLOBAL card in Settings → Env that these
+      # vars are layered OVER. See `EnvOverlay#render`.
+      Frame.border_meta(screen, rect, "ENVIRONMENT", "project · prefix #{Settings.env_prefix} · #{n}")
       render_env_list(screen, rect.inset(1, 1), focused)
     end
 
