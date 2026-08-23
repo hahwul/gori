@@ -235,13 +235,22 @@ module Gori
         case version
         in Version::V11
           h << {"Content-Type", "text/xml; charset=utf-8"}
-          h << {"SOAPAction", %("#{action}")}
+          h << {"SOAPAction", quoted(action)}
         in Version::V12
           ct = "application/soap+xml; charset=utf-8"
-          ct += %(; action="#{action}") unless action.empty?
+          ct += "; action=#{quoted(action)}" unless action.empty?
           h << {"Content-Type", ct}
         end
         h
+      end
+
+      # `action` as an RFC 2045 quoted-string. A `soapAction` carrying a `"` — which is an
+      # ordinary attribute value in the WSDL, and one `&quot;` decodes to — would otherwise
+      # close the string early and hand the endpoint a `SOAPAction` / `Content-Type` it
+      # misparses. `Builder.reject_header_injection!` catches the CR/LF/NUL that would forge a
+      # message boundary; it has nothing to say about a quote that merely breaks a value.
+      private def self.quoted(action : String) : String
+        %("#{action.gsub('\\', "\\\\").gsub('"', "\\\"")}")
       end
 
       # --- the walk ------------------------------------------------------------

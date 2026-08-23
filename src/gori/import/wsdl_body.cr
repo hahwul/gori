@@ -160,6 +160,13 @@ module Gori
           "hexBinary"          => "676f7269",
         }
 
+        # One named XSD component on the chain currently being expanded, for the cycle guard in
+        # `content_of` / `global_element`. Elements and types are BOTH tracked and kept apart by
+        # `element`, because XSD gives them separate symbol spaces: `{urn:t}Add` can legitimately
+        # be a global element AND a complexType, and one flat list would call that a cycle.
+        record Step, element : Bool, name : QName
+        alias Trail = Array(Step)
+
         # An element's markup and, separately, the attributes that ride on its own tag.
         # `text` and `children` are alternatives: simple content sets the first, a particle
         # walk sets the second, and an empty element sets neither.
@@ -171,7 +178,7 @@ module Gori
           @prefixes = {} of String => String
           @used = Set(String).new(["soapenv"])
           @declarations = [] of {String, String}
-          @budget = MAX_BODY_NODES
+          @spent = 0
         end
 
         def prefix_for(uri : String, hint : String? = nil) : String
@@ -213,12 +220,12 @@ module Gori
             unless decl
               return comment_line(depth, "unresolved element #{qn_s(el)}#{hint_for(el[0])}")
             end
-            return global_element(decl, el[0], depth, [] of QName, 1)
+            return global_element(decl, el[0], depth, Trail.new, 1, 1)
           end
           unless ty
             raise Gori::Error.new("message part #{part.name.inspect} declares neither element= nor type=")
           end
-          content = content_of(ty, lookup(ty), ty[0], depth + 1, 1, [] of QName)
+          content = content_of(ty, lookup(ty), ty[0], depth + 1, 1, Trail.new)
           extra = ""
           if xsi_type && ty[0] == XSD_NS
             extra = %( #{prefix_for(XSI_NS, "xsi")}:type="#{prefix_for(XSD_NS, "xsd")}:#{ty[1]}")
@@ -229,10 +236,24 @@ module Gori
         # --- element declarations ------------------------------------------------
 
         private def global_element(decl : Node, ns : String, depth : Int32,
-                                   path : Array(QName), reps : Int32) : String
+                                   path : Trail, reps : Int32, level : Int32) : String
           name = decl.attr?("name")
           return comment_line(depth, "global element declaration with no name") unless name
-          content = decl_content(decl, ns, depth + 1, 1, path)
+          # An `<xsd:element ref=…>` cycle is a SECOND way to recurse forever, and neither of
+          # `content_of`'s guards sees it: `level` used to restart at 1 on every hop through
+          # here, and an element carrying an INLINE anonymous complexType names no type, so
+          # nothing was appended to the trail either. `<element name="A"><complexType><sequence>
+          # <element ref="tns:A"/>` then recursed until the process died on a stack overflow —
+          # a signal, not an exception, so `Wsdl.parse_file`'s per-operation rescue could not
+          # turn it into a `skipped`; it took the whole CLI, TUI or MCP server with it.
+          step = Step.new(true, {ns, name})
+          if path.includes?(step)
+            return comment_line(depth, "recursive element #{qn_s({ns, name})} — expand by hand")
+          end
+          trail = path + [step]
+          before = @spent
+          content = decl_content(decl, ns, depth + 1, level + 1, trail)
+          charge((reps - 1) * (@spent - before)) if reps > 1
           # A GLOBAL element is qualified by its own schema's targetNamespace, always —
           # elementFormDefault governs LOCAL names only.
           tag = ns.empty? ? name : "#{prefix_for(ns)}:#{name}"
@@ -240,7 +261,7 @@ module Gori
         end
 
         private def element_markup(decl : Node, owner_ns : String, depth : Int32,
-                                   level : Int32, path : Array(QName)) : String
+                                   level : Int32, path : Trail) : String
           if ref = decl.qname_attr?("ref")
             target = @schemas.elements[ref]?
             unless target
@@ -248,11 +269,19 @@ module Gori
             end
             # The referenced global element brings its own name, namespace and qualification;
             # only the occurrence count comes from the reference.
-            return global_element(target, ref[0], depth, path, occurs(decl))
+            return global_element(target, ref[0], depth, path, occurs(decl), level + 1)
           end
           name = decl.attr?("name")
           return "" unless name
+          before = @spent
           content = decl_content(decl, owner_ns, depth + 1, level + 1, path)
+          reps = occurs(decl)
+          # `render` writes the subtree string `reps` times, but it was BUILT — and therefore
+          # charged — once. Charging the copies here is what makes MAX_BODY_NODES bound the
+          # EMITTED body: under nested repeats the emitted count grows as the PRODUCT of the
+          # reps while a charge-on-construction budget grows linearly, so a 1.5 KB WSDL built a
+          # 1.27 GB body and still reported `skipped: 0`.
+          charge((reps - 1) * (@spent - before)) if reps > 1
           # `elementFormDefault="qualified"` (per schema, overridden by `form=` on one
           # element) decides whether LOCAL names are namespace-qualified. The default is
           # UNQUALIFIED; .NET emits qualified and Axis often does not, so it cannot be
@@ -260,13 +289,13 @@ module Gori
           # `xmlns=` on the wrapper, which would silently pull every unqualified CHILD into
           # the same namespace and produce a body that looks right and validates wrong.
           tag = qualified?(decl, owner_ns) && !owner_ns.empty? ? "#{prefix_for(owner_ns)}:#{name}" : name
-          render(tag, content, depth, occurs(decl))
+          render(tag, content, depth, reps)
         end
 
         # An inline anonymous type when the declaration has one, else its named `type=`,
         # else xsd:anyType.
         private def decl_content(decl : Node, owner_ns : String, depth : Int32,
-                                 level : Int32, path : Array(QName)) : Content
+                                 level : Int32, path : Trail) : Content
           inline = decl.element?(XSD_NS, "complexType") || decl.element?(XSD_NS, "simpleType")
           return content_of(nil, inline, owner_ns, depth, level, path) if inline
           ty = decl.qname_attr?("type")
@@ -277,7 +306,7 @@ module Gori
         # --- types ---------------------------------------------------------------
 
         private def content_of(type_qn : QName?, type_node : Node?, owner_ns : String,
-                               depth : Int32, level : Int32, path : Array(QName)) : Content
+                               depth : Int32, level : Int32, path : Trail) : Content
           if type_qn && type_qn[0] == XSD_NS
             return Content.new(text: builtin_text(type_qn[1]))
           end
@@ -289,10 +318,11 @@ module Gori
           end
           return Content.new(text: "string") unless type_node
           if type_qn
-            if path.includes?(type_qn)
+            step = Step.new(false, type_qn)
+            if path.includes?(step)
               return Content.new(children: comment_line(depth, "recursive type #{qn_s(type_qn)} — expand by hand"))
             end
-            path = path + [type_qn]
+            path = path + [step]
           end
           if level > XSD_MAX_DEPTH
             return Content.new(children: comment_line(depth, "nesting past #{XSD_MAX_DEPTH} levels — expand by hand"))
@@ -305,7 +335,7 @@ module Gori
         end
 
         private def simple_content(node : Node, owner_ns : String, depth : Int32,
-                                   level : Int32, path : Array(QName)) : Content
+                                   level : Int32, path : Trail) : Content
           if r = node.element?(XSD_NS, "restriction")
             # An enumeration wins over the base type's placeholder. A value outside the
             # enumeration is the single most common cause of a schema-validating gateway
@@ -340,30 +370,49 @@ module Gori
         end
 
         private def complex_content(node : Node, owner_ns : String, depth : Int32,
-                                    level : Int32, path : Array(QName)) : Content
+                                    level : Int32, path : Trail) : Content
           # simpleContent: the base's placeholder becomes the element's TEXT and the
           # extension's attributes ride on the same tag — `<amount currency="USD">1.0</amount>`
           # is this branch.
           if sc = node.element?(XSD_NS, "simpleContent")
-            if ext = sc.element?(XSD_NS, "extension") || sc.element?(XSD_NS, "restriction")
-              base = ext.qname_attr?("base")
-              text = base ? (content_of(base, lookup(base), base[0], depth, level + 1, path).text || "string") : "string"
-              return Content.new(text: text, attrs: attrs_of(ext))
+            derive = sc.element?(XSD_NS, "extension")
+            widen = !derive.nil?
+            derive ||= sc.element?(XSD_NS, "restriction")
+            if derive
+              text = "string"
+              inherited = ""
+              if base = derive.qname_attr?("base")
+                bc = content_of(base, lookup(base), base[0], depth, level + 1, path)
+                text = bc.text || "string"
+                # The base's own attributes, which a simpleContent EXTENSION inherits — a base
+                # that is itself a simpleContent complexType can declare `use="required"` ones,
+                # and dropping them emits a tag the service rejects. A RESTRICTION re-states
+                # what it keeps, so nothing carries over.
+                inherited = bc.attrs if widen
+              end
+              return Content.new(text: text, attrs: inherited + attrs_of(derive))
             end
           end
           if cc = node.element?(XSD_NS, "complexContent")
-            if ext = cc.element?(XSD_NS, "extension") || cc.element?(XSD_NS, "restriction")
+            derive = cc.element?(XSD_NS, "extension")
+            widen = !derive.nil?
+            derive ||= cc.element?(XSD_NS, "restriction")
+            if derive
               children = ""
               attrs = ""
-              if base = ext.qname_attr?("base")
-                # XSD extension APPENDS, so the BASE's particles go FIRST. Order is not
-                # cosmetic: a server unmarshalling by position rejects the reversed body.
+              # EXTENSION and RESTRICTION are not the same operation and must not share a
+              # branch. Extension APPENDS to the base's content model, so the base's particles
+              # go FIRST and order is not cosmetic — a server unmarshalling by position rejects
+              # the reversed body. Restriction REPLACES it: the derived type re-states every
+              # particle it keeps, so emitting the base's beside them both duplicates what was
+              # kept and re-adds what the restriction removed.
+              if widen && (base = derive.qname_attr?("base"))
                 bc = content_of(base, lookup(base), base[0], depth, level + 1, path)
                 children += bc.children
                 attrs += bc.attrs
               end
-              children += particles_of(ext.children, owner_ns, depth, level, path)
-              attrs += attrs_of(ext)
+              children += particles_of(derive.children, owner_ns, depth, level, path)
+              attrs += attrs_of(derive)
               return Content.new(children: children, attrs: attrs)
             end
           end
@@ -372,7 +421,7 @@ module Gori
         end
 
         private def particles_of(nodes : Array(Node), owner_ns : String, depth : Int32,
-                                 level : Int32, path : Array(QName)) : String
+                                 level : Int32, path : Trail) : String
           String.build do |io|
             nodes.each do |c|
               next unless c.uri == XSD_NS
@@ -448,9 +497,10 @@ module Gori
           "#{"  " * depth}<!-- #{message.gsub("--", "- -")} -->\n"
         end
 
-        private def charge : Nil
-          @budget -= 1
-          if @budget < 0
+        private def charge(n : Int32 = 1) : Nil
+          return if n <= 0
+          @spent += n
+          if @spent > MAX_BODY_NODES
             raise Gori::Error.new(
               "the SOAP body would exceed #{MAX_BODY_NODES} elements — this schema is too " \
               "wide to seed automatically")

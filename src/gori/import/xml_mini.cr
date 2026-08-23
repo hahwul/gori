@@ -176,7 +176,11 @@ module Gori
       # message rather than silently producing an empty half.
       def self.split_qname(value : String) : {String, String}
         i = value.index(':')
-        return {"", value} unless i && i > 0 && i < value.bytesize - 1
+        # `size`, not `bytesize`: `String#index` answers in CHARS, and comparing that against a
+        # byte count made the trailing-colon rule depend on how wide the name's characters are —
+        # `"a:"` correctly stayed whole while `"ä:"` split into a prefix `"ä"` that then raised
+        # `undeclared XML namespace prefix` instead of reaching the caller's error message.
+        return {"", value} unless i && i > 0 && i < value.size - 1
         {value[0...i], value[(i + 1)..]}
       end
 

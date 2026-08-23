@@ -80,6 +80,15 @@ describe Gori::Import::XmlMini do
       root.qname_attr?("type").should eq({"http://www.w3.org/2001/XMLSchema", "string"})
     end
 
+    it "measures the trailing-colon rule in characters, not bytes" do
+      # `String#index` answers in CHARS; comparing it against `bytesize` made the rule depend
+      # on how wide the name's characters are, so `"a:"` stayed whole while `"ä:"` split into a
+      # prefix and raised instead of reaching the caller's error message.
+      XmlMini.split_qname("a:").should eq({"", "a:"})
+      XmlMini.split_qname("\u{e4}:").should eq({"", "\u{e4}:"})
+      XmlMini.split_qname("\u{e4}:x").should eq({"\u{e4}", "x"})
+    end
+
     it "raises on a QName value whose prefix was never declared" do
       root = parse(%(<a type="ghost:Foo"/>))
       expect_raises(Gori::Error, /undeclared XML namespace prefix "ghost"/) { root.qname("ghost:Foo") }

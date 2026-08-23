@@ -122,6 +122,17 @@ describe Gori::Import::Wsdl do
     head_of(result).should contain(%(SOAPAction: ""))
   end
 
+  it "escapes a quote in soapAction rather than closing the quoted-string early" do
+    # `&quot;` in the WSDL decodes to a real quote, which would otherwise end the SOAPAction
+    # value (and, on SOAP 1.2, the `action=` media-type parameter) where the endpoint parses it.
+    result = parse(wsdl(bindings: %(<wsdl:binding name="B" type="tns:PT">) +
+                                  %(<soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>) +
+                                  %(<wsdl:operation name="Add"><soap:operation soapAction="a&quot;b"/>) +
+                                  %(<wsdl:input><soap:body use="literal"/></wsdl:input>) +
+                                  %(</wsdl:operation></wsdl:binding>)))
+    head_of(result).should contain(%(SOAPAction: "a\\"b"))
+  end
+
   it "builds an rpc/literal body from the message parts, in declaration order" do
     # The one structural difference from document/literal, and where a doc-only reader emits
     # a silently wrong envelope: ONE wrapper named by the OPERATION, whose children are one
@@ -358,6 +369,78 @@ describe Gori::Import::Wsdl do
       body = body_of(result)
       body.scan(/<ns1:child>/).size.should eq(1)
       body.should contain("recursive type {urn:t}Node")
+    end
+
+    it "stops an element `ref` cycle instead of recursing until the process dies" do
+      # A SECOND way to recurse forever, which neither of the type guards saw: an element
+      # carrying an INLINE anonymous complexType names no type, so nothing reached the cycle
+      # trail, and the depth counter used to restart at 1 on every hop through a `ref`. The
+      # result was a stack overflow — a signal, not an exception, so the per-operation rescue
+      # could not turn it into a `skipped`; it took the whole CLI/TUI/MCP process down.
+      result = parse(wsdl(types: <<-XSD))
+        <s:element name="Add"><s:complexType><s:sequence>
+          <s:element ref="tns:Add"/>
+        </s:sequence></s:complexType></s:element>
+        XSD
+      result.flows.size.should eq(1)
+      result.skipped.should eq(0)
+      body_of(result).should contain("recursive element {urn:t}Add")
+    end
+
+    it "charges a repeated subtree so the node budget bounds the EMITTED body" do
+      # `render` writes the subtree string `reps` times but builds it once, so a
+      # charge-on-construction budget grew linearly while the emitted count grew as the
+      # PRODUCT of the reps. Nested `maxOccurs="unbounded"` levels built a multi-gigabyte body
+      # and still reported `skipped: 0`. Now the copies are charged, so the operation is
+      # skipped and COUNTED rather than eating the machine.
+      levels = 20
+      types = String.build do |io|
+        io << %(<s:element name="Add" type="tns:T0"/>)
+        levels.times do |i|
+          io << %(<s:complexType name="T#{i}"><s:sequence>)
+          io << %(<s:element name="e#{i}" maxOccurs="unbounded" type="tns:T#{i + 1}"/>)
+          io << %(</s:sequence></s:complexType>)
+        end
+        io << %(<s:complexType name="T#{levels}"><s:sequence>) +
+              %(<s:element name="leaf" type="s:string"/></s:sequence></s:complexType>)
+      end
+      result = parse(wsdl(types: types))
+      result.flows.should be_empty
+      result.skipped.should eq(1)
+    end
+
+    it "replaces the base content model on a complexContent restriction, never appends to it" do
+      # Extension APPENDS and restriction REPLACES; sharing one branch both duplicated the
+      # particles a restriction kept and re-added the ones it removed, so a schema-validating
+      # gateway rejected the body before it reached any business logic.
+      result = parse(wsdl(types: <<-XSD))
+        <s:element name="Add" type="tns:Derived"/>
+        <s:complexType name="Base"><s:sequence>
+          <s:element name="a" type="s:string"/>
+          <s:element name="b" type="s:string"/>
+        </s:sequence></s:complexType>
+        <s:complexType name="Derived"><s:complexContent><s:restriction base="tns:Base">
+          <s:sequence><s:element name="a" type="s:string"/></s:sequence>
+        </s:restriction></s:complexContent></s:complexType>
+        XSD
+      body = body_of(result)
+      body.scan(/<ns1:a>/).size.should eq(1)
+      body.should_not contain("<ns1:b>")
+    end
+
+    it "keeps the base type's required attributes through a simpleContent extension" do
+      result = parse(wsdl(types: <<-XSD))
+        <s:element name="Add"><s:complexType><s:sequence>
+          <s:element name="amount" type="tns:Money"/>
+        </s:sequence></s:complexType></s:element>
+        <s:complexType name="Base"><s:simpleContent><s:extension base="s:decimal">
+          <s:attribute name="scale" type="s:int" use="required"/>
+        </s:extension></s:simpleContent></s:complexType>
+        <s:complexType name="Money"><s:simpleContent><s:extension base="tns:Base">
+          <s:attribute name="currency" type="s:string" fixed="USD"/>
+        </s:extension></s:simpleContent></s:complexType>
+        XSD
+      body_of(result).should contain(%(<ns1:amount scale="1" currency="USD">1.0</ns1:amount>))
     end
 
     it "comments an unresolvable type and names the schema it did not fetch" do
