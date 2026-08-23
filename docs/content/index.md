@@ -3,6 +3,7 @@ title = "Gori - Hack from the terminal"
 description = "Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
 +++
 
-**Sit in the loop.**
-
-gori (고리 is Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS intercepting proxy and web-hacking workbench that runs entirely in your terminal. It sits in the loop between your client and the target, records each request and response, and gives you the tools to inspect, replay, fuzz, and scan them without leaving the shell.
+<!-- The landing page is fully template-driven (templates/page.html, the
+     `page.section == ""` branch never outputs `content`). Only the front
+     matter above is consumed; anything written below this comment will not
+     be rendered. Landing copy lives in i18n/{en,ko}.toml under [home]. -->

@@ -1,12 +1,18 @@
 {% include "header.html" %}
 {% include "partials/nav.html" %}
 {% include "partials/search.html" %}
-<div class="docs-container">
-{% include "partials/sidebar.html" %}
-  <main id="main" class="docs-main">
-    <h1>{{ "notfound.title" | t }}</h1>
-    <p>{{ "notfound.body" | t }}</p>
-    <p><a href="{{ base_url }}{{ lang_prefix }}/">{{ "notfound.home_link" | t }}</a></p>
-  </main>
-</div>
+<main id="main" class="notfound-main">
+  <p class="notfound-code" aria-hidden="true">404</p>
+  <h1 class="notfound-title">{{ "notfound.title" | t }}</h1>
+  <p class="notfound-body">{{ "notfound.body" | t }}</p>
+  <div class="notfound-actions">
+    <button type="button" class="button button-primary" onclick="openSearch()">{{ "notfound.search" | t }}</button>
+    <a class="button button-secondary" href="{{ base_url }}{{ lang_prefix }}/">{{ "notfound.home_link" | t }}</a>
+  </div>
+  <nav class="notfound-links" aria-label="{{ "a11y.primary_nav" | t }}">
+    <a href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "nav.start" | t }}</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/guide/">{{ "nav.guide" | t }}</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/reference/">{{ "nav.reference" | t }}</a>
+  </nav>
+</main>
 {% include "footer.html" %}

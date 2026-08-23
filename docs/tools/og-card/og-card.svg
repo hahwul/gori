@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- gori social card (1200x630). Rendered once locally by generate.sh
+     (rsvg-convert) and committed as static/images/og-card.png — CI never
+     needs the tooling. The palette mirrors css/style.css: indigo-ink night
+     (#080a11) and the gold-leaf ramp (the grad-gold-leaf token). Text is minimal and
+     set in Helvetica Neue so macOS font metrics cannot break the layout. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="goldLeaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a67f36"/>
+      <stop offset="0.24" stop-color="#e6cf92"/>
+      <stop offset="0.48" stop-color="#c8a860"/>
+      <stop offset="0.72" stop-color="#8c6a2c"/>
+      <stop offset="1" stop-color="#ddc084"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#c8a860" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#c8a860" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#c8a860" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#080a11"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Faint oversize ring sweeping off-canvas behind the mark. -->
+  <circle cx="940" cy="290" r="330" fill="none" stroke="url(#goldLeaf)" stroke-opacity="0.14" stroke-width="2"/>
+  <circle cx="940" cy="290" r="252" fill="none" stroke="url(#goldLeaf)" stroke-opacity="0.09" stroke-width="1.5"/>
+
+  <!-- The gold gori mark (solid-gold traced SVG from the brand set). -->
+  <image xlink:href="gori-mark.svg" x="770" y="120" width="340" height="340"/>
+
+  <!-- Wordmark + tagline + host. -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="92" y="240" font-size="54" font-weight="500" letter-spacing="10" fill="#8d90a2">GORI</text>
+    <text x="88" y="352" font-size="84" font-weight="700" letter-spacing="-1.5" fill="#f6f5f1">Hack from</text>
+    <text x="88" y="448" font-size="84" font-weight="700" letter-spacing="-1.5" fill="#f6f5f1">the terminal.</text>
+    <text x="92" y="548" font-size="30" font-weight="400" fill="#c8a860">gori.hahwul.com</text>
+  </g>
+
+  <!-- Gold hairline footing the card. -->
+  <rect x="92" y="576" width="1016" height="2" fill="url(#goldLeaf)" fill-opacity="0.55"/>
+</svg>
