@@ -23,6 +23,18 @@ module Gori::Oast
 
     abstract def register(http : Http) : Session
     abstract def generate_payload(session : Session) : String
+
+    # New interactions, OLDEST FIRST. The order is part of the contract, not an accident of
+    # each server's API: every consumer treats a poll's result as chronological — the TUI
+    # appends to a list it renders reversed, the store's rowid order IS the display order after
+    # a reload, and `gori run oast` prints them as they come. A provider whose API answers
+    # newest-first (webhook.site, which must ask for that page to see recent hits at all) flips
+    # its batch back here rather than making three surfaces sort.
+    #
+    # A poll that CANNOT be answered raises. "Nothing came back" and "the server refused us"
+    # are the two states an out-of-band listener must never conflate: a rotated token, an
+    # expired webhook token or a rate limit would otherwise read exactly like a quiet target,
+    # for as long as the operator left it running.
     abstract def poll(http : Http, session : Session) : Array(Interaction)
 
     # Re-arm a Session rebuilt from the store so its ALREADY-PLANTED payloads keep resolving.
@@ -148,15 +160,27 @@ module Gori::Oast
     # A JSON body's item list: a bare array, or the first present of data/requests/events.
     protected def items_array(json : JSON::Any) : Array(JSON::Any)
       if arr = json.as_a?
-        arr
-      else
-        {"data", "requests", "events"}.each do |k|
-          if a = json[k]?.try(&.as_a?)
-            return a
-          end
-        end
-        [] of JSON::Any
+        return arr
       end
+      # `JSON::Any#[]?` RAISES on anything that is neither a Hash nor Nil, so a self-hosted
+      # endpoint answering `0` or `"ok"` with a 200 used to come out of `poll` as a stdlib
+      # "Expected Hash for #[]?" rather than as "this body carries no interactions". Read the
+      # object form only when there IS one — this is the deliberately tolerant provider.
+      obj = json.as_h? || return [] of JSON::Any
+      {"data", "requests", "events"}.each do |k|
+        if a = obj[k]?.try(&.as_a?)
+          return a
+        end
+      end
+      [] of JSON::Any
+    end
+
+    # The named array of a JSON OBJECT body, or empty. Same hazard as `items_array`: a poll
+    # body comes from a third-party server whose content this engine already treats as
+    # adversarial, and a bare array (or a scalar) where an object was expected must read as
+    # "no interactions", not as a crash the poller reports as a poll error.
+    protected def array_field(json : JSON::Any, key : String) : Array(JSON::Any)
+      json.as_h?.try(&.[key]?).try(&.as_a?) || [] of JSON::Any
     end
 
     # A monotonic-ish timestamp parse, tolerant of RFC3339 / epoch / missing → now.

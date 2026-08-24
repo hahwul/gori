@@ -32,9 +32,17 @@ module Gori::Oast
       payload[(idx + 4)..].split('&').first.downcase
     end
 
+    # 204 is "nothing logged" — the shape a hand-rolled endpoint most often takes for an empty
+    # buffer, and the same answer interactsh gives. Any OTHER non-200 RAISES rather than
+    # reading as an empty poll: this is the operator's own server, so a 401 from a rotated
+    # bearer token or a 502 from a restarted service is a fixable fault they must be told
+    # about, not a quiet target.
     def poll(http : Http, session : Session) : Array(Interaction)
       resp = http.request("GET", session.server_url, custom_headers)
-      return [] of Interaction unless resp.status == 200
+      return [] of Interaction if resp.status == 204
+      unless resp.status == 200
+        raise Gori::Error.new("custom-http poll: HTTP #{resp.status} #{snippet(resp.body)}")
+      end
       items_array(parse_json(resp.body)).compact_map { |it| to_interaction(it) }
     end
 

@@ -55,9 +55,19 @@ module Gori::Oast
         "#{session.server_url}/poll?id=#{session.correlation_id}&secret=#{session.secret}",
         auth_headers)
       return [] of Interaction if resp.status == 204
-      raise Gori::Error.new("interactsh poll: HTTP #{resp.status}") unless resp.status == 200
+      unless resp.status == 200
+        # The body carries the server's own reason (a wrong auth token, a correlation id it has
+        # forgotten), and it is the only thing distinguishing the fixable failures from each
+        # other in the one line the poller surfaces.
+        raise Gori::Error.new("interactsh poll: HTTP #{resp.status} #{snippet(resp.body)}")
+      end
 
-      json = parse_json(resp.body)
+      # `JSON::Any#[]?` raises on anything that is neither a Hash nor Nil, so a proxy's error
+      # page parsed as a bare array reached the poller as a stdlib "Expected Hash for #[]?".
+      json = parse_json(resp.body).as_h?
+      unless json
+        raise Gori::Error.new("interactsh poll: unexpected response shape (#{snippet(resp.body)})")
+      end
       data = json["data"]?.try(&.as_a?)
       return [] of Interaction unless data && !data.empty?
       aes_key_b64 = json["aes_key"]?.try(&.as_s?)

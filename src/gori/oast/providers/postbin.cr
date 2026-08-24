@@ -45,7 +45,15 @@ module Gori::Oast
           break
         end
         break if resp.status == 404 # bin drained
-        break unless resp.status == 200
+        unless resp.status == 200
+          # The SAME split the transport rescue above makes, for the same reason. A 429 (postb.in
+          # rate-limits a tight drain) or a 5xx used to read as "the bin is empty", so a listener
+          # that could not reach its bin at all looked exactly like one watching a quiet target.
+          # Re-raise when there is nothing to protect; keep what this cycle already shifted
+          # otherwise and report the failure on the next one.
+          raise Gori::Error.new("postbin poll: HTTP #{resp.status} #{snippet(resp.body)}") if out.empty?
+          break
+        end
         # Each shift has ALREADY removed this request from the bin server-side, so a raise on a
         # malformed body (a proxy error page or a rate-limit HTML served with a 200) would discard
         # every interaction shifted so far THIS cycle — unrecoverably, since the bin no longer

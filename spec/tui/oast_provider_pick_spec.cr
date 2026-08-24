@@ -195,6 +195,35 @@ private def with_providers(count : Int32, seed_callbacks : Bool = false, &)
   end
 end
 
+# A Provider that never touches a socket, minting a payload that NAMES its session — so an
+# example can say which listener a cross-tab insert resolved to.
+private class StubProvider < Gori::Oast::Provider
+  def initialize
+    super(Gori::Oast::ProviderKind::Interactsh, "https://oast.test", nil)
+  end
+
+  def register(http : Gori::Oast::Http) : Gori::Oast::Session
+    raise "not used"
+  end
+
+  def generate_payload(session : Gori::Oast::Session) : String
+    "#{session.correlation_id}.oast.test"
+  end
+
+  def poll(http : Gori::Oast::Http, session : Gori::Oast::Session) : Array(Gori::Oast::Interaction)
+    [] of Gori::Oast::Interaction
+  end
+end
+
+# Start a listener on `key` the way the register fiber does — through @reg_events and
+# apply_registration, the one place that builds a Listener.
+private def start_listener(c : OastController, key : String, corr : String) : Nil
+  session = Gori::Oast::Session.new(0_i64, Gori::Oast::ProviderKind::Interactsh,
+    "https://oast.test", corr, "sec", registered: true)
+  c.@reg_events.send(OastController::RegOk.new(session, StubProvider.new, key, nil, key, false))
+  c.drain_events
+end
+
 private def picker_row(key : String, name : String, live : Bool = false) : OastProviderPicker::Row
   OastProviderPicker::Row.new(key: key, name: name, kind: "interactsh",
     host: "oast.test", scope: "project", live: live)
@@ -343,5 +372,48 @@ describe Gori::Tui::OastProviderPicker do
     p = OastProviderPicker.new([] of OastProviderPicker::Row, "GET PAYLOAD FROM")
     p.overlay_box(Rect.new(0, 0, 80, 24)).should be_nil
     p.empty?.should be_true
+  end
+
+  # The cross-tab insert (`O` in Repeater/Fuzzer, `O` in History) mints from a LIVE listener,
+  # and used to take "the first active one" — @listeners order, which is registration order and
+  # nothing an operator can see. The payload bar is this tab's selector for every other action
+  # (`g`, ^R, ^X, and the callbacks table's own narrowing), so pointing it at a provider and
+  # then pressing `O` two tabs away has one obvious meaning, and it was not the one it got.
+  it "mints a cross-tab payload from the provider the bar is pointed at" do
+    with_providers(2) do |c, _|
+      keys = c.provider_pick_rows.map(&.key)
+      start_listener(c, keys[0], "corrone")
+      start_listener(c, keys[1], "corrtwo")
+
+      # All: no provider named, so the old fallback stands — the first live listener.
+      c.generate_for_insert.should eq("corrone.oast.test")
+
+      c.select_provider(keys[1]).should be_true
+      c.generate_for_insert.should eq("corrtwo.oast.test")
+
+      c.select_provider(keys[0]).should be_true
+      c.generate_for_insert.should eq("corrone.oast.test")
+
+      c.stop_all
+    end
+  end
+
+  # …and the bar pointing at a provider that is NOT listening must not silently mint from
+  # another one: `listener_for` is nil there, and the fallback is what the operator would have
+  # got before they touched the bar at all.
+  it "falls back to a live listener when the picked provider is not listening" do
+    with_providers(2) do |c, _|
+      keys = c.provider_pick_rows.map(&.key)
+      start_listener(c, keys[0], "corrone")
+      c.select_provider(keys[1]).should be_true
+      c.generate_for_insert.should eq("corrone.oast.test")
+      c.stop_all
+    end
+  end
+
+  it "has no payload to mint when nothing is listening" do
+    with_providers(2) do |c, _|
+      c.generate_for_insert.should be_nil
+    end
   end
 end

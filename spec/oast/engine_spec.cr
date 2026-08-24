@@ -106,6 +106,20 @@ private class RaisingAfterHttp < O::Http
   end
 end
 
+# Answers every request with one fixed {status, body}. The shape a MISCONFIGURED provider
+# takes — a rotated api key, an expired webhook token, a rate limit — which used to be
+# indistinguishable from a quiet target on four of the five backends.
+private class StatusHttp < O::Http
+  def initialize(@status : Int32, @body : String = "")
+  end
+
+  def request(method : String, url : String,
+              headers : Hash(String, String) = {} of String => String,
+              body : String? = nil) : O::Http::Response
+    O::Http::Response.new(@status, @body)
+  end
+end
+
 describe Gori::Oast do
   describe O::RsaKeyPair do
     it "generates a 2048 key and exports a valid SPKI PEM that round-trips" do
@@ -534,6 +548,91 @@ describe Gori::Oast do
     end
   end
 
+  # A poll answers exactly two questions, and they must never collapse into one: "what arrived"
+  # and "could we ask at all". interactsh has always raised on a bad status; the other four
+  # returned an empty array, so a listener that could not reach its provider — a rotated BOAST
+  # secret, a webhook.site token that expired on its own timer, a postb.in rate limit, a
+  # restarted self-hosted endpoint — read exactly like a target that never called home, for as
+  # long as the operator left it running. Every surface already reports a poll ERROR (the
+  # Poller emits OastErrorEvent, `gori run oast` prints "poll error:", MCP answers is_error);
+  # none of them had anything to report.
+  describe "a poll that could not be answered" do
+    it "raises for webhook.site (an expired token answers 404, a rotated api key 401)" do
+      session = O::Session.new(0_i64, O::ProviderKind::WebhookSite, "https://webhook.site", "uuid", "")
+      expect_raises(Gori::Error, /webhook\.site poll: HTTP 404/) do
+        O::WebhookSite.new("https://webhook.site").poll(StatusHttp.new(404, "no such token"), session)
+      end
+      expect_raises(Gori::Error, /webhook\.site poll: HTTP 401/) do
+        O::WebhookSite.new("https://webhook.site", "stale-key").poll(StatusHttp.new(401), session)
+      end
+    end
+
+    it "raises for BOAST (a wrong secret answers 401)" do
+      session = O::Session.new(0_i64, O::ProviderKind::Boast, "https://odiss.eu:2096/events", "id", "sec")
+      expect_raises(Gori::Error, /BOAST poll: HTTP 401/) do
+        O::Boast.new("https://odiss.eu:2096/events", "wrong").poll(StatusHttp.new(401, "unauthorized"), session)
+      end
+    end
+
+    it "raises for custom-http, but reads 204 as an empty buffer" do
+      session = O::Session.new(0_i64, O::ProviderKind::CustomHttp, "https://my.log/api", "corr", "")
+      provider = O::CustomHttp.new("https://my.log/api")
+      expect_raises(Gori::Error, /custom-http poll: HTTP 502/) do
+        provider.poll(StatusHttp.new(502, "<html>bad gateway</html>"), session)
+      end
+      # 204 is how a hand-rolled endpoint most often says "nothing logged" — and what
+      # interactsh says — so it stays a quiet empty poll rather than an error every 5 seconds.
+      provider.poll(StatusHttp.new(204), session).should be_empty
+    end
+
+    it "raises for postbin only when the cycle collected nothing (404 still means drained)" do
+      session = O::Session.new(0_i64, O::ProviderKind::Postbin, "https://www.postb.in", "bin1", "")
+      provider = O::Postbin.new("https://www.postb.in")
+      expect_raises(Gori::Error, /postbin poll: HTTP 429/) do
+        provider.poll(StatusHttp.new(429, "slow down"), session)
+      end
+      # A rate limit that lands PART WAY through a drain must not discard the requests already
+      # shifted — the bin no longer holds them. Same split the transport rescue beside it makes.
+      req = {"reqId" => "r1", "method" => "GET", "path" => "/bin1/n0nce", "inserted" => 1_700_000_000_000}.to_json
+      kept = provider.poll(SeqHttp.new([{200, req}, {429, "slow down"}]), session)
+      kept.map(&.unique_id).should eq(["r1"])
+      # A drained bin is not a failure.
+      provider.poll(StatusHttp.new(404), session).should be_empty
+    end
+
+    it "carries the interactsh server's own reason into the message" do
+      session = O::Session.new(0_i64, O::ProviderKind::Interactsh, "https://oast.test", "corr", "sec")
+      expect_raises(Gori::Error, /interactsh poll: HTTP 401 could not authenticate/) do
+        O::Interactsh.new("https://oast.test").poll(StatusHttp.new(401, "could not authenticate"), session)
+      end
+    end
+  end
+
+  # `JSON::Any#[]?` RAISES on anything that is neither a Hash nor Nil, so a 200 carrying a
+  # proxy's error page — or a self-hosted endpoint answering a bare scalar — used to surface as
+  # a stdlib "Expected Hash for #[]?" instead of as an engine error (or as "nothing arrived",
+  # which is what the tolerant provider means by it).
+  describe "a 200 whose body is not the expected shape" do
+    it "reads a scalar body as no interactions for custom-http" do
+      session = O::Session.new(0_i64, O::ProviderKind::CustomHttp, "https://my.log/api", "corr", "")
+      O::CustomHttp.new("https://my.log/api").poll(StatusHttp.new(200, "123"), session).should be_empty
+    end
+
+    it "reads a bare array as no events for BOAST and no data for webhook.site" do
+      bs = O::Session.new(0_i64, O::ProviderKind::Boast, "https://odiss.eu:2096/events", "id", "sec")
+      O::Boast.new("https://odiss.eu:2096/events", "sec").poll(StatusHttp.new(200, "[]"), bs).should be_empty
+      ws = O::Session.new(0_i64, O::ProviderKind::WebhookSite, "https://webhook.site", "uuid", "")
+      O::WebhookSite.new("https://webhook.site").poll(StatusHttp.new(200, "[]"), ws).should be_empty
+    end
+
+    it "raises a clean engine error for interactsh rather than a stdlib type message" do
+      session = O::Session.new(0_i64, O::ProviderKind::Interactsh, "https://oast.test", "corr", "sec")
+      expect_raises(Gori::Error, /unexpected response shape/) do
+        O::Interactsh.new("https://oast.test").poll(StatusHttp.new(200, "[]"), session)
+      end
+    end
+  end
+
   describe O::WebhookSite do
     it "keeps the payload nonce on an empty-body callback" do
       # generate_payload mints …/{uuid}/{nonce}; a GET with content:"" used to set
@@ -562,6 +661,25 @@ describe Gori::Oast do
       i.raw_request.should eq(hit)
       i.raw_request.should contain(nonce)
       i.method.should eq("GET")
+    end
+
+    it "hands the batch back OLDEST FIRST, whatever order the API paged it in" do
+      # `sorting=newest` is asked for so a live token's recent hits are on page 1 at all (the
+      # endpoint pages at 50) — but every consumer treats a poll as chronological: the tab
+      # appends to a list it renders reversed, and the rows reach the DB in poll order, so the
+      # order here is the order after a reload too. Three hits between two polls used to land
+      # in the callbacks table upside down.
+      body = {
+        "data" => [
+          {"uuid" => "c", "url" => "https://webhook.site/u/c", "created_at" => "2024-01-01T00:00:03Z"},
+          {"uuid" => "b", "url" => "https://webhook.site/u/b", "created_at" => "2024-01-01T00:00:02Z"},
+          {"uuid" => "a", "url" => "https://webhook.site/u/a", "created_at" => "2024-01-01T00:00:01Z"},
+        ],
+      }.to_json
+      session = O::Session.new(0_i64, O::ProviderKind::WebhookSite, "https://webhook.site", "u", "")
+      got = O::WebhookSite.new("https://webhook.site").poll(StatusHttp.new(200, body), session)
+      got.map(&.unique_id).should eq(["a", "b", "c"])
+      got.map(&.at).should eq(got.map(&.at).sort)
     end
   end
 end
