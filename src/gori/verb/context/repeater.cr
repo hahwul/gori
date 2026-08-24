@@ -38,6 +38,6 @@ abstract class Gori::Verb::ExecContext
   # `open_response_external` for a response that is not a stored flow but the result of the
   # send in hand. Two intents rather than one because the two read their bytes from
   # different places (a `Store::FlowDetail` vs the live `Repeater::Result`), which is the
-  # same split `repeater_copy` / `detail_copy_selection` already draw.
+  # same split `repeater_copy` / `detail_copy` already draw.
   abstract def repeater_open_response_external : Nil
 end

@@ -164,8 +164,8 @@ private class FakeContext < ExecContext
     @calls << :scroll_detail
   end
 
-  def detail_copy_selection : Nil
-    @calls << :detail_copy_selection
+  def detail_copy : Nil
+    @calls << :detail_copy
   end
 
   def toggle_detail_pane : Nil

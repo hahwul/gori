@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `y` in the History detail copies the WHOLE Request/Response pane when nothing is selected, instead of the caret's own line — the rule every other read pane already followed.
+
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.
 
 - The Fuzzer sweeps a WebSocket exchange: mark `§…§` positions in the outbound frames (and in the handshake) and each payload runs one full RFC 6455 session, with the inbound frames matched as the response body and the close code on every row. `gori run fuzz --repeater N` and MCP `fuzz_start` seed a WebSocket session's frames instead of refusing it, `--message` / `--message-frame` / `--idle-ms` / `--ws-keep-key` author them, and `--ws-http-only` sweeps the handshake as a plain request (#795).
