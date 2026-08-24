@@ -180,6 +180,42 @@ describe Gori::Import::XmlMini do
         XmlMini.parse(%(<a p="1" q="2" r="3"/>), tight)
       end
     end
+
+    it "charges text runs too, since nothing else counts them" do
+      # A comment is skipped without a charge, so `x<!---->` repeated is a text run every 8
+      # bytes and a million of them sit comfortably under max_bytes. `max_nodes` is the only
+      # ceiling in a position to say no.
+      tight = XmlMini::Limits.new(max_nodes: 4)
+      expect_raises(Gori::Error, /more than 4 nodes/) do
+        XmlMini.parse("<a>" + "x<!---->" * 10 + "</a>", tight)
+      end
+    end
+
+    it "does not charge the whitespace between two tags" do
+      # Which is most of a real WSDL: those runs are dropped, so they cost nothing.
+      tight = XmlMini::Limits.new(max_nodes: 3)
+      XmlMini.parse("<a>\n  <b/>\n  <c/>\n</a>", tight).children.size.should eq(2)
+    end
+  end
+
+  describe "character data" do
+    it "joins the runs a comment splits apart" do
+      parse("<a>x<!---->y<!---->z</a>").text.should eq("xyz")
+    end
+
+    it "stays linear in the number of runs" do
+      # `@text = t + s` per run copies everything already there, so a document that splits its
+      # character data finely was quadratic: 2 MB took 4.5 s and the 8 MiB ceiling ~70 s, on a
+      # path that runs on the TUI's own fiber with nothing to yield to (P6). 100 000 runs is
+      # the shape at ~800 KB; the assertion is that this spec finishes at all.
+      n = 100_000
+      doc = String.build do |io|
+        io << "<a>"
+        n.times { io << "x<!---->" }
+        io << "</a>"
+      end
+      XmlMini.parse(doc, XmlMini::Limits.new(max_nodes: n + 10)).text.size.should eq(n)
+    end
   end
 
   describe "security" do
