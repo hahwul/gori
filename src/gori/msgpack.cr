@@ -166,8 +166,8 @@ module Gori
       private def sized(j : JSON::Builder, b : UInt8, depth : Int32) : Nil
         case b
         when 0xc4..0xc6 then bin(j, len(1 << (b - 0xc4)))
-        when 0xc7..0xc9 then ext(j, len(1 << (b - 0xc7)), depth)
-        when 0xd4..0xd8 then ext(j, 1 << (b - 0xd4), depth, fixed: true)
+        when 0xc7..0xc9 then ext(j, len(1 << (b - 0xc7)))
+        when 0xd4..0xd8 then ext(j, 1 << (b - 0xd4))
         when 0xd9..0xdb then str(j, len(1 << (b - 0xd9)))
         when 0xdc, 0xdd then array(j, len(b == 0xdc ? 2 : 4), depth)
         when 0xde, 0xdf then map(j, len(b == 0xde ? 2 : 4), depth)
@@ -288,7 +288,7 @@ module Gori
       # msgpack-based protocol uses, so it is exactly what an operator is looking at. Type -1 is
       # the one the spec itself defines (a timestamp), and it is decoded because a timestamp
       # rendered as base64 is a fact withheld.
-      private def ext(j : JSON::Builder, n : Int32, depth : Int32, fixed : Bool = false) : Nil
+      private def ext(j : JSON::Builder, n : Int32) : Nil
         return bail(j, "malformed") if n < 0
         t = byte || return bail(j, "truncated")
         raw = take(n) || return bail(j, "truncated")
