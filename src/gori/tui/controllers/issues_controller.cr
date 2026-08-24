@@ -233,7 +233,7 @@ module Gori::Tui
       when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
       when c == 'x'                          then @issues.notes_select_line
-      when c == 'y'                          then issues_copy
+      when c == 'y'                          then issues_notes_copy
       else
         return false
       end
@@ -584,6 +584,14 @@ module Gori::Tui
       end
       written = Clipboard.copy(text)
       @host.status("copied notes to clipboard (#{written}b)#{Clipboard.note(written, text)}")
+    end
+
+    # `y` in the notes pane: the selection when one is held, else the WHOLE notes. The keymap's
+    # `issue.copy` (-> Runner#read_copy) has always answered that way, but this pane raw-
+    # dispatches `y` ahead of the keymap and fell back to the caret's LINE — so the chord the
+    # verb registers and the key the operator actually presses gave different answers.
+    def issues_notes_copy : Nil
+      issues_notes_selection_active? ? issues_copy : issues_copy_all
     end
 
     # Write the issue report to `path` (the destination came from ExportOverlay — this used

@@ -185,6 +185,10 @@ end
 
 private TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.sig"
 
+# A multi-line INPUT buffer: the whole point of the READ arm below is that its no-band answer
+# has to be more than the line the caret sits on, which a single-line token cannot show.
+private MULTILINE = "one\ntwo\nthree"
+
 describe "Gori::Tui::JwtController#jwt_copy_text" do
   describe "INPUT in INSERT" do
     it "takes the ⇧arrow band, not the whole token" do
@@ -209,6 +213,36 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
         ctl.handle_body_key(key(Termisu::Input::Key::LowerI, :none, 'i'))
         ctl.@sessions[ctl.@idx].input.selection?.should be_false
         ctl.jwt_copy_text.should eq(TOKEN)
+      end
+    end
+  end
+
+  # INPUT in READ is the pane that reads its band off the READ CURSOR rather than the editor,
+  # and it was the one arm of the four that fell back to the caret's LINE instead of the whole
+  # buffer — the rule `Runner#read_copy` states for every read pane in the tree, and the rule
+  # this tab's other three panes already followed through `band_or_all`. Multi-line INPUT is
+  # ordinary: `edit_input` maps ↵ to `insert_newline`, and a selection sent here from another
+  # tool arrives with whatever line breaks it had.
+  describe "INPUT in READ" do
+    it "takes the whole buffer when no band is live, not the caret's line" do
+      with_jwt_copy_controller do |ctl|
+        ctl.jwt_from_text(MULTILINE)
+        s = ctl.@sessions[ctl.@idx]
+        s.input_mode.should eq(InputMode::Read) # the pane opens in READ
+        s.input_read.selection?.should be_false
+        s.input_read.copy_text(s.input).should eq("one") # the old payload: line 0 alone
+        ctl.jwt_copy_text.should eq(MULTILINE)
+      end
+    end
+
+    it "takes the ⇧arrow band when one is live" do
+      with_jwt_copy_controller do |ctl|
+        ctl.jwt_from_text(MULTILINE)
+        s = ctl.@sessions[ctl.@idx]
+        3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
+
+        s.input_read.selection?.should be_true
+        ctl.jwt_copy_text.should eq("one")
       end
     end
   end

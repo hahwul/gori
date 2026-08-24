@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `y` in the History detail copies the WHOLE Request/Response pane when nothing is selected, instead of the caret's own line — the rule every other read pane already followed.
+- `y` with nothing selected copies the WHOLE pane, not the caret's own line: the History detail's Request/Response, the Project description, an Issue's notes and the JWT INPUT pane in READ all fell back to one line, so each disagreed with the `^Y` beside it and with every other read pane.
 
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.
 
