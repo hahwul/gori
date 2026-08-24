@@ -376,6 +376,14 @@ module Gori::Tui
       @detail_scroll = 0
     end
 
+    # True when ↑ has nowhere further to go inside the list, so the controller can hand
+    # focus back to the tab bar instead. The EMPTY queue counts as the top: the placeholder
+    # has no cursor at all, and leaving ↑ inert there made the tab a dead end you could
+    # only leave with esc.
+    def at_top? : Bool
+      @entries.empty? || @sel <= 0
+    end
+
     def move_row(delta : Int32) : Nil
       return if @entries.empty?
       @sel = (@sel + delta).clamp(0, @entries.size - 1)
