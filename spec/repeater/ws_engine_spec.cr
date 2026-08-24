@@ -411,6 +411,11 @@ describe Gori::Repeater::WsEngine do
       end
       conn << "HTTP/1.1 200 Connection Established\r\n\r\n"
       conn.flush rescue nil
+      # Drain the tunnelled request before closing. Unread bytes in the receive queue make the
+      # kernel answer close() with RST rather than FIN, and the client then reads ECONNRESET
+      # instead of the clean EOF this spec is about — which it did, intermittently, under the
+      # load of the full suite. No relay either way: the tunnel still produces nothing.
+      Gori::Proxy::Codec::Http1.read_head(conn) rescue nil
       conn.close rescue nil # no relay — the tunnel produced nothing
     end
 
