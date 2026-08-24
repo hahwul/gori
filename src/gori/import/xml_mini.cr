@@ -58,23 +58,30 @@ module Gori
         def initialize(@uri : String, @local : String, @prefix : String,
                        @attrs : Array(Attr), @ns : NsMap)
           @children = [] of Node
+          @runs = nil.as(Array(String)?)
           @text = nil.as(String?)
         end
 
         # Character data directly inside this element. Whitespace-only runs BETWEEN tags are
         # dropped (a WSDL is mostly those, and no caller wants them); CDATA is always kept
         # verbatim, whitespace included.
+        #
+        # Joined ON READ and memoized. The runs were concatenated on ARRIVAL (`@text = t + s`),
+        # which copies everything already there once per run: anything that splits character
+        # data — a comment, a CDATA section, an entity — makes another run, so `x<!---->`
+        # repeated is one run per 8 bytes and the copying is quadratic in the file. A 2 MB
+        # document took 4.5 s and the 8 MiB ceiling ~70 s, on a path that runs on the TUI's own
+        # fiber with nothing to yield to (P6): one import stalled the proxy with it.
         def text : String
-          @text || ""
+          runs = @runs
+          return "" unless runs
+          @text ||= runs.join
         end
 
         # :nodoc:
         def add_text(s : String) : Nil
-          if t = @text
-            @text = t + s
-          else
-            @text = s
-          end
+          (@runs ||= [] of String) << s
+          @text = nil
         end
 
         def name : QName
@@ -146,8 +153,11 @@ module Gori
       #   max_depth — `<a><a><a>…` costs one frame per level in the WSDL walk and again in
       #               the body generator. 256 is ~10x the deepest real schema.
       #   max_nodes — the backstop for a file legitimately under max_bytes but pathological
-      #               (millions of `<a/>`), and the ONLY guard bounding attribute count,
-      #               since attributes are charged against the same budget as elements.
+      #               (millions of `<a/>`), and the ONLY guard bounding attribute count and
+      #               TEXT-RUN count, since both are charged against the same budget as
+      #               elements. Text runs are charged because nothing else counts them: a
+      #               comment is skipped without a charge, so `x<!---->` repeated is a run
+      #               every 8 bytes and a million of them fit under max_bytes.
       record Limits,
         max_bytes : Int32 = 8 * 1024 * 1024,
         max_nodes : Int32 = 200_000,
@@ -244,6 +254,7 @@ module Gori
             # kept even though a whitespace-only text RUN is dropped: the author wrote the
             # section deliberately.
             node = @stack.last? || raise err("CDATA outside the root element")
+            charge(1)
             node.add_text(String.new(@raw[(@pos + 9)...close]))
             @pos = close + 3
           elsif starts_at?(@pos, "<!DOCTYPE")
@@ -424,6 +435,10 @@ module Gori
           # content is not a shape WSDL or XML Schema produces; CDATA (above) is kept
           # regardless, which is the escape hatch for a document that means its whitespace.
           return if chunk.blank?
+          # Charged like an element: a KEPT run is a thing this document made us hold, and
+          # `max_nodes` is the only ceiling that counts them. A whitespace-only run is dropped
+          # above and costs nothing, which is most of a real WSDL.
+          charge(1)
           @stack.last.add_text(XmlText.unescape(chunk))
         end
 
