@@ -362,7 +362,7 @@ module Gori::Fuzz
         # part had occurrences that were all already inside a `§…§`, and no part made a new
         # position. With `&&` the operator got no note at all that their `--mark` did nothing.
         if texts = ws_texts
-          texts.map_with_index do |t, i|
+          texts.each_with_index do |t, i|
             t2, c2, sh2 = wrap_token(t, tok)
             texts[i] = t2
             count += c2
