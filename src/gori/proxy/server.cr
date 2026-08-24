@@ -404,19 +404,20 @@ module Gori::Proxy
       # A LOCAL, and it has to be: one `Proxy::Server` serves every connection this listener
       # accepts, each in its own fiber, so a per-connection fact kept on the object would be
       # read back by whichever connection asked next.
-      result = begin
-        Socks5.negotiate(client, bind)
-      rescue IO::TimeoutError
-        # A client that connected and said NOTHING — the #755 shape, and this listener is one
-        # more place it can land (a client waiting for a banner it will never get, or a
-        # speculative connection). Nothing was named yet, so there is nothing to name it by.
-        ClientConn.record_silent_client(@sink, "http", "", 0, client_tls: false)
-        return close_client(client)
-      end
+      result = Socks5.negotiate(client, bind)
       if target = result.target
         return unless socks5_allowed?(client, target, bind, local_host)
         Socks5.grant(client, bind)
         serve_socks5_target(client, target, local_host)
+      elsif result.timed_out?
+        # A client that connected and said NOTHING while still holding the socket — the #755
+        # shape, and this listener is one more place it can land (a peer waiting for a banner
+        # it will never get, a speculative connection). Nothing was named, so there is nothing
+        # to name it by. `Socks5.negotiate` decides this and not a rescue here: a timeout PAST
+        # the greeting is a client that did speak, and the two used to arrive here as the same
+        # `IO::TimeoutError` and be filed as this one.
+        ClientConn.record_silent_client(@sink, "http", "", 0, client_tls: false)
+        close_client(client)
       else
         # A connection that closed WITHOUT SAYING ANYTHING is not recorded, and this is the one
         # refusal that is not: a bare connect-and-close is a port scan, a health check or a

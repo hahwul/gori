@@ -85,13 +85,22 @@ module Gori::Proxy
     # why it was refused. Exactly one is non-nil. A refusal has ALREADY been answered on the
     # wire in the form the RFC defines where there was one to send; the sentence is for the
     # operator, who otherwise gets a connection that closed for no stated reason.
-    record Negotiation, target : Target?, refusal : String?, silent : Bool = false do
-      # Did the client close without saying ANYTHING — no greeting at all? Its own answer,
-      # because a caller has to tell "a client did something gori refuses" (worth recording on
-      # the project) from "a TCP connection opened and closed" (a port scan, a health check, a
-      # speculative preconnect — which every other listener mode records nothing for).
+    record Negotiation, target : Target?, refusal : String?, silent : Bool = false,
+      timed_out : Bool = false do
+      # Did the client say ANYTHING — was there a greeting at all? Its own answer, because a
+      # caller has to tell "a client did something gori refuses" (worth recording on the
+      # project) from "a TCP connection opened and went nowhere" (a port scan, a health check,
+      # a speculative preconnect — which every other listener mode records nothing for).
       def silent? : Bool
         silent
+      end
+
+      # Silent AND still holding the socket open — the #755 shape, and a different fact from a
+      # silent client that HUNG UP. One is a peer waiting for a banner gori will never send
+      # (server-speaks-first on a port somebody redirected here), which is worth a flow; the
+      # other is a scan, which is not. Only ever true beside `silent`.
+      def timed_out? : Bool
+        timed_out
       end
     end
 
@@ -101,8 +110,21 @@ module Gori::Proxy
     # successful request: the caller has checks of its own to make (a target naming gori's own
     # listener is the obvious one) and `succeeded` is unsendable once retracted. Call `grant`
     # when the target is acceptable, `refuse` when it is not.
+    #
+    # A read that TIMES OUT is answered here rather than raised at the caller, and the point of
+    # that is the GREETING: a peer that connects and says nothing at all is the #755 shape and
+    # gets its own flow, while one that stops part-way through a handshake it started is a
+    # client doing something — two different records. Raised out of here, both arrived at the
+    # caller as one `IO::TimeoutError` and were filed as the first, so a client that had sent a
+    # greeting and a method list was recorded as never having spoken.
     def self.negotiate(io : IO, bind : Socket::IPAddress?) : Negotiation
-      greeting = read_exactly(io, 2)
+      greeting =
+        begin
+          read_exactly(io, 2)
+        rescue IO::TimeoutError
+          return Negotiation.new(nil, "the client opened a connection to this SOCKS5 listener " \
+                                      "and sent no greeting", silent: true, timed_out: true)
+        end
       unless greeting
         return Negotiation.new(nil, "the client closed before sending a SOCKS5 greeting", silent: true)
       end
@@ -123,6 +145,11 @@ module Gori::Proxy
       io.write(Bytes[VERSION, AUTH_NONE])
       io.flush
       request(io, bind)
+    rescue IO::TimeoutError
+      # PAST the greeting, so this client is not silent: it opened a SOCKS5 handshake and then
+      # stopped part-way through one. On the record like every other refusal where the client
+      # actually said something.
+      refused("the client stopped part-way through the SOCKS5 handshake and sent no more")
     end
 
     # VER CMD RSV ATYP DST.ADDR DST.PORT (§4).

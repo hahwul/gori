@@ -42,6 +42,26 @@ end
 # VER=5, one method, NO-AUTH — the greeting every client that reaches this listener sends.
 GREETING = Bytes[5_u8, 1_u8, 0_u8]
 
+# A peer that hands over `head` and then holds the socket open saying nothing. `IO::Memory`
+# cannot model this — it answers EOF, which is the OTHER thing a quiet client can do and the
+# one the listener deliberately records nothing for.
+private class StallingIO < IO
+  def initialize(@head : Bytes)
+    @pos = 0
+  end
+
+  def read(slice : Bytes) : Int32
+    raise IO::TimeoutError.new("read timed out") if @pos >= @head.size
+    n = Math.min(slice.size, @head.size - @pos)
+    slice[0, n].copy_from(@head[@pos, n])
+    @pos += n
+    n
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
 # --- socket-level helpers ------------------------------------------------------------------
 
 private def start_plain_origin(seen : Channel(String)) : Int32
@@ -242,6 +262,21 @@ describe Gori::Proxy::Socks5 do
     truncated.target.should be_nil
     truncated.refusal.to_s.should contain("closed in the middle")
     truncated.refusal.to_s.should_not contain("address type")
+  end
+
+  it "tells a client that says nothing from one that stops part-way through" do
+    # Both are `IO::TimeoutError` on the way up and were filed as the same thing: a flow saying
+    # the peer never spoke. Only the first is that. The second had sent a greeting and a method
+    # list, which is a client doing something — and the listener records the two differently.
+    silent = Socks5.negotiate(StallingIO.new(Bytes.empty), nil)
+    silent.silent?.should be_true
+    silent.timed_out?.should be_true
+    silent.refusal.to_s.should contain("no greeting")
+
+    partial = Socks5.negotiate(StallingIO.new(GREETING), nil)
+    partial.silent?.should be_false
+    partial.timed_out?.should be_false
+    partial.refusal.to_s.should contain("part-way through")
   end
 end
 
