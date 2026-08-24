@@ -38,6 +38,24 @@ module Gori
     # `0x90` (empty fixarray) is cheap per item and unbounded in aggregate.
     MAX_ITEMS = 100_000
 
+    # Output ceiling for ONE document. The two above bound the INPUT walk, and neither bounds
+    # the OUTPUT — which is not a function of the input's size here.
+    #
+    # A non-string map KEY is rendered as its own JSON text and that text becomes the member
+    # name (see `map`), so a map keyed on a MAP nests the inner rendering inside a JSON string
+    # once per level — and each level's escaping roughly doubles it. `81 81 81 …`, one byte per
+    # level, therefore grows the output as 2^depth: 57 bytes produced 1.6 GB, and 59 bytes
+    # reached the point where `String::Builder` refuses to grow and raised `IO::EOFError`
+    # straight out of `render` — the one thing this module promises never to do. `MAX_DEPTH`
+    # cannot fix it (the blow-up is well inside 32 levels) and a per-key length cap cannot
+    # either (`MAX_ITEMS` keys at any cap is still that cap × 100 000).
+    #
+    # Charged across the whole document, scratch key renders included, so it bounds the WORK
+    # and not merely what survives into the text. 8 MiB is `Pretty::MAX_OUT_PRETTY` — the cap
+    # the display path, which runs on every drawn flow, already discards above. The CBOR
+    # sibling carries the same ceiling for the same shape.
+    MAX_JSON_BYTES = 8 * 1024 * 1024
+
     # Render `data`, with everything a caller needs to decide whether the rendering is about
     # THIS body: see `BinaryDocument::Rendering`. `indent` pretty-prints; nil is compact.
     #
@@ -46,8 +64,14 @@ module Gori
     # body and often the point of it, and re-parsing would keep one and drop the other.
     def render(data : Bytes, *, max_depth : Int32 = MAX_DEPTH,
                indent : String? = nil) : BinaryDocument::Rendering
-      p = Parser.new(data, max_depth)
-      json = JSON.build(indent) { |j| p.value(j, 0) }
+      # An `IO::Memory` we own rather than `JSON.build`'s hidden `String::Builder`, so the
+      # parser can see how much it has produced and stop at `MAX_JSON_BYTES`. `JSON.build(io,
+      # indent)` is the same stdlib entry point the one-argument form wraps, so the text is
+      # byte-identical.
+      sink = IO::Memory.new
+      p = Parser.new(data, max_depth, sink)
+      JSON.build(sink, indent) { |j| p.value(j, 0) }
+      json = sink.to_s
       # Trailing bytes are not an error the parse can report from inside — MessagePack has no
       # document terminator, and a body may legitimately be a stream of concatenated objects —
       # but they DO mean this rendering is not the whole body, which is what `complete` means.
@@ -56,9 +80,13 @@ module Gori
       trailing = p.ok? && p.pos < data.size
       BinaryDocument::Rendering.new(json, p.ok? && p.pos == data.size, p.pos,
         trailing ? "trailing" : p.stop)
-    rescue JSON::Error
+    rescue JSON::Error | IO::Error
       # `JSON.build` can only fail on a builder misuse, which would be a bug here rather than
       # bad input. Report it as an incomplete parse rather than unwinding into a TUI draw (P7).
+      # `IO::Error` is caught for that reason and not for a reachable case: `String::Builder`
+      # answers a document past 2 GiB with `IO::EOFError`, which is how the unbounded-output
+      # defect surfaced, and `MAX_JSON_BYTES` is what actually stops it. The belief that the
+      # ceiling holds is not the contract.
       BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal")
     end
 
@@ -79,9 +107,21 @@ module Gori
       # running out of input is what happened, and every level above it only reports that.
       getter stop : String?
 
-      def initialize(@data : Bytes, @max_depth : Int32)
+      def initialize(@data : Bytes, @max_depth : Int32, @sink : IO::Memory)
         @items = 0
+        @spent = 0_i64
         @stop = nil.as(String?)
+      end
+
+      # Output bytes this document has cost so far: what is in the buffer being written now,
+      # plus every scratch key render that has already finished. The finished ones are counted
+      # even where their text was thrown away, because the ceiling bounds the WORK — a key
+      # rendered and discarded was still built. See `MAX_JSON_BYTES` and `key_text`.
+      #
+      # `Int64`, and not because a legal document reaches it: the very shape the ceiling exists
+      # for overflows an `Int32` sum, which would turn one unhandled exception into another.
+      private def produced : Int64
+        @spent + @sink.bytesize
       end
 
       # Read one value at `depth` and write it to `j`. Every exit that cannot continue clears
@@ -92,6 +132,9 @@ module Gori
         return bail(j, "max_depth") if depth > @max_depth
         @items += 1
         return bail(j, "max_items") if @items > MAX_ITEMS
+        # Entering: what has already been produced, including finished key renders. `key_text`
+        # tests again on the way OUT, and that one is the load-bearing half — see there.
+        return bail(j, "max_bytes") if produced >= MAX_JSON_BYTES
         b = byte || return bail(j, "truncated")
         # The one-byte forms, where the header IS the value or carries the length in its low
         # bits. Everything else has a separate length or width and goes to `headed`.
@@ -140,8 +183,35 @@ module Gori
       # used verbatim: `{"1": …}` for the integer 1, `{"[1,2]": …}` for an array. The map
       # carries `"$keys": "non-string"` beside it so the reader is not left guessing whether
       # `"1"` was a string on the wire.
+      #
+      # `@sink` follows the scratch buffer for the duration: this render is where the output
+      # blow-up happens (a key that is itself a map renders a whole subtree, and the level
+      # above nests THAT inside a JSON string), so it has to be inside `MAX_JSON_BYTES` while
+      # it runs and not only after it returns. Whatever it produced is charged either way — a
+      # key rendered is a key built, kept or not.
       def key_text(depth : Int32) : String
-        JSON.build { |j| value(j, depth) }
+        scratch = IO::Memory.new
+        outer, @sink = @sink, scratch
+        JSON.build(scratch) { |j| value(j, depth) }
+        @sink = outer
+        @spent += scratch.bytesize
+        # ON THE WAY OUT, and that is the whole guard. A map keyed on a map grows as the stack
+        # UNWINDS — every level nests the level below's finished text inside a JSON string —
+        # so the check `value` makes on the way IN sees an empty budget at every level and
+        # passes all of them. Testing here caps one level at roughly twice the one under it,
+        # so the first level to cross the ceiling is the last one built; clearing `@ok` stops
+        # `map`, and every level above it renders the marker instead.
+        #
+        # `@ok` alone would in fact stop the unwind today, because `value` refuses to run once
+        # it is clear. That is a property of this parser and not of the shape, and the CBOR
+        # sibling — which has no such latch — needed the explicit test; both carry it, so
+        # neither depends on the other's control flow staying as it is.
+        if produced >= MAX_JSON_BYTES
+          @ok = false
+          @stop ||= "max_bytes"
+          return %({"$partial":"max_bytes"})
+        end
+        scratch.to_s
       end
 
       # A declared count is NOT checked against the bytes that remain, and that is deliberate:
@@ -164,7 +234,16 @@ module Gori
             # one that really was. The CBOR sibling tests `head.major == 3` for this reason.
             str_key = string_header?(peek)
             k = key_text(depth + 1)
-            break unless @ok
+            unless @ok
+              # The KEY ran out (or hit a ceiling), so its marker went into the scratch builder
+              # and nothing has been written here — leaving the map to close as a bare `{}`,
+              # which says "an empty map" rather than "this stopped". `81 81 81 …` rendered
+              # exactly that: `{}`, with `complete` false and no reason anywhere in the text,
+              # and `Decoder::Codecs#document`'s `$partial` test then read it as a decode that
+              # worked. The CBOR sibling has always named it; this is the same sentence.
+              j.field("$partial", @stop || "stopped")
+              break
+            end
             if str_key && k.starts_with?('"')
               j.field(JSON.parse(k).as_s) { value(j, depth + 1) }
             else
