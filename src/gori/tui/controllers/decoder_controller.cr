@@ -964,6 +964,25 @@ module Gori::Tui
       s.view.reset_output_scroll
     end
 
+    # Re-derive EVERY open conversion, because the named-chain library just changed and a
+    # saved name is a chain step: a ^S or a ^X in the picker silently changes what
+    # `myenc > url-encode` means in every sub-tab at once, not just the one that was on
+    # screen. Without this the others kept a cached result — a sub-tab left showing
+    # "✗ myenc: unknown converter" after the very save that defined `myenc`, or a clean
+    # decode through a chain the ^X had just deleted — until some unrelated keystroke in it
+    # happened to call `touch`.
+    #
+    # The pane is only reset for the sub-tabs whose output actually moved: a scroll position
+    # is the operator's place in the text, and a library edit that means nothing to this
+    # conversion must not throw it away.
+    def library_changed : Nil
+      @sessions.each do |s|
+        before = s.result.output
+        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain)
+        s.view.reset_output_scroll unless before == s.result.output
+      end
+    end
+
     # ---- save / load named chains (global settings.json; the shell owns the modals) ----
     # The Runner builds NamePromptOverlay / LibraryPicker from these and calls back in — the
     # library itself is global, but WHICH conversion is being saved into it, and which one a
@@ -989,6 +1008,12 @@ module Gori::Tui
     # has to win — a library that could shadow `base64-decode` would change what every OTHER
     # saved chain, and every spec in every project, already means.
     def save_chain(name : String) : Nil
+      # Stored STRIPPED, and refused when that leaves nothing. `Registry.normalize` strips
+      # before it folds, so "  my enc  " already resolved as `my-enc` while the library row,
+      # the ^O picker and `delete_decoder_chain`'s exact-name match all carried the padding —
+      # and a name of pure whitespace normalized to "", which `Library.register_all` skips:
+      # the save reported success and left an entry no spec could ever reach.
+      name = name.strip
       if name.empty?
         @host.status("chain name required")
         return
@@ -1014,6 +1039,7 @@ module Gori::Tui
       # destinations now: the named chain goes to settings.json (global), the sessions to
       # this project's store, and each reports its own success.
       @dirty = false if @dirty && persist_sessions
+      library_changed # the new name is a callable step now — see the method
       if Settings.save
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
       else

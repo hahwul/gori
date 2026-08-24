@@ -87,6 +87,41 @@ describe Gori::Tui::DecoderView do
     tail_row.should be > head_row
   end
 
+  # The OUTPUT text is split on '\n' into the pane's lines, and the control-char sanitizer used
+  # to fold '\n' into '·' along with everything else — so every multi-line result (jwt-decode,
+  # msgpack/cbor → JSON, a `typo` variant list, an inflated body) arrived as ONE line: the
+  # gutter only ever numbered 1, ^G had nothing to reach, and ^F could only match line 0.
+  it "keeps a multi-line OUTPUT on separate lines, and still marks other control bytes" do
+    view = DecoderView.new
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.sig"
+    result = Gori::Decoder.run(REG, jwt.to_slice, "jwt-decode")
+    text = view.output_text(result)
+    text.lines.size.should be > 1
+    text.should contain("\n")
+    view.output_search_lines("payload", result).should_not be_empty
+    view.output_search_lines("payload", result).first.should be > 0 # a line the fold hid
+
+    # The rest of the C0 set is still substituted — that is what the sanitizer is FOR: a
+    # control byte reaches `screen.cell` as a blank, which reads as truncated output.
+    ctrl = Gori::Decoder.run(REG, "610062".to_slice, "hex-decode")
+    view.output_text(ctrl).should eq "a·b"
+  end
+
+  # `output_copy` (copy the whole pane) has always handed over the raw text; the SELECTION
+  # copy read the drawn lines, so it substituted '·' for the very bytes an operator was
+  # lifting out to paste somewhere else.
+  it "copies the OUTPUT verbatim, not the '·'-substituted view it draws" do
+    view = DecoderView.new
+    result = Gori::Decoder.run(REG, "610062".to_slice, "hex-decode") # "a\0b"
+    view.render(Screen.new(MemoryBackend.new(80, 30)), Rect.new(0, 0, 80, 30),
+      input: TextArea.new("610062"), chain: "hex-decode", chain_cx: 10, chain_pre: "",
+      result: result, pane: :output, focused: true, popup: ChainComplete.new)
+
+    view.output_text(result).should eq "a·b"           # drawn with the marker
+    view.output_copy(result).should eq "a\u0000b"      # whole-pane copy: the real byte
+    view.output_copy_text(result).should eq "a\u0000b" # caret line / selection: the same
+  end
+
   # `DecoderController#handle_output` pops focus up to the CHAIN field when `output_at_top?`,
   # so that predicate decides whether ↑ walks the pane or leaves it. Measured on the logical
   # line alone, a caret three rows into a wrapped line 0 answers true — and ↑ would abandon the
