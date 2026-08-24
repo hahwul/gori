@@ -110,6 +110,15 @@ module Gori::Tui
     record RegErr, message : String, provider_label : String, provider_key : String
     alias RegResult = RegOk | RegErr
 
+    # A deregister's outcome, carried back from the detached fiber that ran it. `error` is nil
+    # when the server let go of the state. It exists because "released" is a claim about a
+    # THIRD-PARTY server, not about local state: `gori run oast release` and the MCP
+    # `oast_release` both refuse to print it when the deregister failed (the correlation id is
+    # still live and its planted payloads still resolve), and the tab was the one surface
+    # saying it unconditionally — it fired the request off a fiber and announced success on the
+    # next line, before anything had answered.
+    record ReleaseResult, session_id : Int64, error : String?
+
     def initialize(host : Host)
       super(host)
       @providers = [] of Oast::ProviderConfig
@@ -138,6 +147,7 @@ module Gori::Tui
       @last_payload = nil.as(String?)
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
+      @release_events = Channel(ReleaseResult).new(8)
       @registering = Set(String).new # provider keys with a register round-trip in flight (dedup g/^R)
       @max_cb_id = 0_i64             # highest callback row id folded in (watermark for reconcile)
       @cb_version = 0                # bumped on any @callbacks mutation → invalidates the view caches
@@ -595,9 +605,11 @@ module Gori::Tui
         return @host.status("session ##{session_id} names an unknown provider type #{rec.kind}") unless kind
         config = provider_config_for(rec)
         deregister(Oast::Provider.build(kind, rec.server_url, config.try(&.token) || rec.token),
-          session_from_record(rec))
+          session_from_record(rec), report: true)
       end
-      @host.status("released session ##{session_id} — its callbacks stay")
+      # NOT "released" — the deregister is a network round trip that has not happened yet.
+      # `drain_releases` says which of the two it turned out to be.
+      @host.status("releasing session ##{session_id}…")
     end
 
     # Rebuild the engine Session from its row, and re-resolve the provider it belongs to.
@@ -643,16 +655,32 @@ module Gori::Tui
     private def stop_listener(listener : Listener, release : Bool = false) : Nil
       listener.poller.try(&.stop)
       @host.jobs.finish(listener.job_id, :stopped, "stopped") if listener.job_id != 0
-      deregister(listener.provider, listener.session) if release
+      deregister(listener.provider, listener.session, report: true) if release
       @listeners.delete(listener)
     end
 
-    # Best-effort release of server-side state, off the main fiber. `Provider#deregister` is
-    # documented never to raise, and the `rescue nil` is the belt to that braces: this runs
-    # detached, where an exception would take out the fiber with no one to report to.
-    private def deregister(provider : Oast::Provider, session : Oast::Session) : Nil
+    # Release server-side state, off the main fiber. This runs detached, so an exception here
+    # has no one to report to — hence the rescue — but `Provider#deregister` does raise in
+    # practice (interactsh refuses a status outside its accepted set), and swallowing that
+    # silently is what let the tab claim a release it never got.
+    #
+    # `report` is false for the ONE caller that is not an operator's release: the discard path
+    # in `apply_registration`, tearing down a fresh registration whose provider row vanished
+    # mid-flight. That session has no row — its id is still 0 — so a "released session #0"
+    # would name nothing the operator ever saw.
+    private def deregister(provider : Oast::Provider, session : Oast::Session,
+                           report : Bool = false) : Nil
       http = poll_http
-      spawn(name: "gori-oast-deregister") { provider.deregister(http, session) rescue nil }
+      ch = @release_events
+      sid = session.id
+      spawn(name: "gori-oast-deregister") do
+        begin
+          provider.deregister(http, session)
+          ch.send(ReleaseResult.new(sid, nil)) if report
+        rescue ex
+          ch.send(ReleaseResult.new(sid, ex.message || "provider error")) if report
+        end
+      end
     end
 
     private def deliver_payload(url : String) : Nil
@@ -666,10 +694,17 @@ module Gori::Tui
       @listeners.any?(&.active?)
     end
 
-    # Cross-tab: generate a fresh payload from the first active listener (LOCAL). nil when
-    # there is no listener (the caller toasts a hint).
+    # Cross-tab: generate a fresh payload from a live listener (LOCAL, no network). nil when
+    # there is none (the caller toasts a hint).
+    #
+    # The PICKED provider wins over "the first one running". The payload bar is the tab's
+    # selector for every other action — `g`, ^R, ^X and the callbacks table all key off it — so
+    # an operator who pointed it at their private interactsh and then pressed `O` in Repeater
+    # had every right to expect that provider's payload, and instead got whichever listener
+    # happened to sit first in @listeners. The bar's All position names no provider, so it
+    # falls through to the first active listener, which is what this always did.
     def generate_for_insert : String?
-      listener = @listeners.find(&.active?)
+      listener = listener_for(picked_provider.try(&.key)) || @listeners.find(&.active?)
       return nil unless listener
       url = listener.provider.generate_payload(listener.session)
       @last_payload = url
@@ -1327,6 +1362,7 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       applied = true if drain_registrations
+      applied = true if drain_releases
       # Pin the callback selection to the SAME callback across live inserts: each new callback
       # prepends to the newest-first display and shifts every index down, so a bare @cb_sel would
       # silently slide onto a neighbor (and flip an open detail). Capture its stable key, re-resolve.
@@ -1376,9 +1412,37 @@ module Gori::Tui
       applied
     end
 
+    # Say what the deregister actually did. A failure is a NOTIFICATION as well as a status
+    # line: the operator pressed `x` in the resume picker and moved on, and the thing they need
+    # to know is that a correlation id they believe is gone is still live on a third-party
+    # server with their payloads pointed at it — that must not scroll past in the status bar.
+    private def drain_releases : Bool
+      applied = false
+      while res = nonblocking_release
+        if err = res.error
+          msg = "could not release session ##{res.session_id} (#{err}) — payloads minted from it may still resolve"
+          @host.status(msg)
+          @host.notifications.push(:warn, msg, Jobs::Goto.new(:oast), source: "oast")
+        else
+          @host.status("released session ##{res.session_id} — its callbacks stay")
+        end
+        applied = true
+      end
+      applied
+    end
+
     private def nonblocking_reg : RegResult?
       select
       when r = @reg_events.receive
+        r
+      else
+        nil
+      end
+    end
+
+    private def nonblocking_release : ReleaseResult?
+      select
+      when r = @release_events.receive
         r
       else
         nil

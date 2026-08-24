@@ -173,6 +173,32 @@ private class SilentProvider < Gori::Oast::Provider
   end
 end
 
+# A provider whose deregister RAISES — which interactsh's really does, for any status outside
+# its accepted set. `Provider#deregister` is documented "best effort, never raises" and four of
+# the five honour that; the flagship is the one that does not, and it is the one whose
+# server-side state a release is actually trying to drop.
+private class RefusingProvider < SilentProvider
+  def deregister(http : Gori::Oast::Http, session : Gori::Oast::Session) : Nil
+    raise Gori::Error.new("interactsh deregister failed: HTTP 503")
+  end
+end
+
+# The registration result a resume produces, with a caller-chosen provider.
+private def resumed_reg_with(provider : Gori::Oast::Provider, session : Gori::Oast::Session,
+                             key : String) : OastController::RegOk
+  OastController::RegOk.new(session, provider, key, nil, "House interactsh", false, resumed: true)
+end
+
+# The deregister runs on a detached fiber, so the outcome lands on a LATER tick — exactly as it
+# does in the live loop. Pump the drain until it does (or give up, so a broken future never
+# hangs the suite).
+private def settle_release(controller : OastController) : Nil
+  20.times do
+    Fiber.yield
+    controller.drain_events
+  end
+end
+
 private RESUME_CA_ROOT = File.tempname("gori-oast-resume-ca")
 Spec.after_suite { FileUtils.rm_rf(RESUME_CA_ROOT) }
 
@@ -406,7 +432,10 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
       # a finished engagement is exactly when the findings matter most.
       session.store.oast_sessions.map(&.id).should contain(sid)
       session.store.oast_callbacks_since(0_i64).size.should eq(2)
-      host.statuses.last.should contain("callbacks stay")
+      # The deregister is a network round trip on a detached fiber, so the tab says what it is
+      # DOING here and what it DID on a later tick — see the release describe below, which pins
+      # both outcomes against providers that cannot reach a socket.
+      host.statuses.last.should contain("releasing session ##{sid}")
     end
   end
 end
@@ -514,6 +543,57 @@ describe "Gori::Tui::OastController — promoting a callback to an Issue" do
     with_oast_controller do |controller, _host, _session, _sid, _pid|
       controller.callback_selected?.should be_false
       controller.callback_issue_draft.should be_nil
+    end
+  end
+end
+
+# A release is a claim about a THIRD-PARTY server, and the tab was the one surface making it
+# without waiting for an answer: `deregister` is fired onto a detached fiber with a `rescue nil`
+# and the very next line printed "released session #N — its callbacks stay". `gori run oast
+# release` and the MCP `oast_release` both refuse to say that when the deregister failed, and
+# both say why: the correlation id is still registered and the payloads planted from it still
+# resolve. An operator told the opposite stops watching a listener that is still live.
+describe "Gori::Tui::OastController — releasing a session" do
+  it "reports what the deregister actually did, not that it was attempted" do
+    with_oast_controller do |controller, host, session, sid, pid|
+      engine = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+      controller.@reg_events.send(resumed_reg_with(SilentProvider.new, engine, "p_#{pid}"))
+      controller.drain_events
+
+      controller.release_session(sid)
+      # Not "released" yet — nothing has answered.
+      host.statuses.last.should contain("releasing session ##{sid}")
+      settle_release(controller)
+      host.statuses.last.should contain("released session ##{sid}")
+      host.statuses.last.should contain("callbacks stay")
+      # The listener is gone either way; the row and its callbacks are not.
+      controller.@listeners.should be_empty
+      session.store.oast_sessions.map(&.id).should contain(sid)
+    end
+  end
+
+  it "refuses to say released when the provider refused, and pushes it to the tray" do
+    with_oast_controller do |controller, host, session, sid, pid|
+      engine = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+      controller.@reg_events.send(resumed_reg_with(RefusingProvider.new, engine, "p_#{pid}"))
+      controller.drain_events
+
+      controller.release_session(sid)
+      settle_release(controller)
+
+      host.statuses.last.should contain("could not release session ##{sid}")
+      host.statuses.last.should contain("HTTP 503")
+      host.statuses.last.should contain("may still resolve")
+      # A status line scrolls past; a correlation id the operator believes is gone but is not
+      # has to survive them looking away.
+      note = host.notifications.latest
+      note.should_not be_nil
+      note.not_nil!.message.should contain("could not release session ##{sid}")
+      note.not_nil!.level.should eq(:warn)
+      # Still no local loss: releasing drops the LISTENER, never the evidence.
+      session.store.oast_sessions.map(&.id).should contain(sid)
     end
   end
 end

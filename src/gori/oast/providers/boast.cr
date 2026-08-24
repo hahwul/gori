@@ -27,11 +27,15 @@ module Gori::Oast
       "#{Crypto.random_id(10)}.#{session.correlation_id}.#{payload_host}"
     end
 
+    # A non-200 RAISES rather than reading as an empty poll: BOAST answers 401 for a wrong or
+    # rotated secret, which is precisely the misconfiguration that makes a listener collect
+    # nothing forever while looking exactly like a quiet target.
     def poll(http : Http, session : Session) : Array(Interaction)
       resp = http.request("GET", session.server_url, secret_headers)
-      return [] of Interaction unless resp.status == 200
-      events = parse_json(resp.body)["events"]?.try(&.as_a?) || [] of JSON::Any
-      events.compact_map { |ev| to_interaction(ev) }
+      unless resp.status == 200
+        raise Gori::Error.new("BOAST poll: HTTP #{resp.status} #{snippet(resp.body)}")
+      end
+      array_field(parse_json(resp.body), "events").compact_map { |ev| to_interaction(ev) }
     end
 
     private def secret_headers : Hash(String, String)

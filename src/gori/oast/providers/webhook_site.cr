@@ -28,13 +28,25 @@ module Gori::Oast
       "#{base_url}/#{session.correlation_id}/#{Crypto.random_id(10)}"
     end
 
+    # `sorting=newest` is about PAGINATION, not about the order we hand back: the endpoint
+    # pages at 50, so asking for the oldest first would bury a live token's recent hits on a
+    # page this poll never fetches. The batch is then flipped to oldest-first, which is the
+    # order `Provider#poll` promises and the only one that reads right — three of these
+    # arriving between two polls used to land in the callbacks table upside down (and would
+    # keep that order after a reload, since the rows go into the DB in poll order).
+    #
+    # A non-200 RAISES rather than reading as an empty poll. webhook.site answers 404 for a
+    # token that expired (free tokens do, on a timer and on a request count) and 401 for a
+    # rotated api key — the two ways this listener quietly stops being a listener, and the
+    # operator has no other signal that the hits stopped because nobody is listening.
     def poll(http : Http, session : Session) : Array(Interaction)
       resp = http.request("GET",
         "#{base_url}/token/#{session.correlation_id}/requests?sorting=newest",
         api_key_headers)
-      return [] of Interaction unless resp.status == 200
-      data = parse_json(resp.body)["data"]?.try(&.as_a?) || [] of JSON::Any
-      data.compact_map { |it| to_interaction(it) }
+      unless resp.status == 200
+        raise Gori::Error.new("webhook.site poll: HTTP #{resp.status} #{snippet(resp.body)}")
+      end
+      array_field(parse_json(resp.body), "data").compact_map { |it| to_interaction(it) }.reverse
     end
 
     private def api_key_headers(json : Bool = false) : Hash(String, String)
