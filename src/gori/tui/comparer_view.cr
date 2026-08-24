@@ -179,15 +179,19 @@ module Gori::Tui
       end
     end
 
+    # `s.label` — what the SOURCE calls these bytes — and not a method+path rebuilt here. The
+    # two are the same string for a captured flow and a Repeater send, and only a source whose
+    # rows SHARE a target can tell them apart: every row of a fuzz run is "GET /api", and
+    # `#7 role=admin` is the only thing that names one. That label was being built and dropped.
     private def slot_short(s : ComparerSlot) : String
-      path = s.path
+      text = s.label
       # Truncate by DISPLAY WIDTH, not char count: a CJK/emoji path is up to 2 cols per
-      # char, so `path.size > 12` / `path[0, 11]` let it overflow the slot budget. Use the
+      # char, so `text.size > 12` / `text[0, 11]` let it overflow the slot budget. Use the
       # grapheme-aware width + column helpers (identical to the old behavior for ASCII).
-      if Screen.display_width(path) > 12
-        path = path[0, Screen.column_for(path, 11)] + "…"
+      if Screen.display_width(text) > 12
+        text = text[0, Screen.column_for(text, 11)] + "…"
       end
-      s.method.empty? ? path : "#{s.method} #{path}"
+      text
     end
 
     # --- slot management (controller + cross-tab handoff) -------------------
@@ -205,10 +209,21 @@ module Gori::Tui
 
     # Fill the next slot in the A → B → A ring; returns the slot that was set.
     def add_slot(s : ComparerSlot) : Symbol
-      slot = @fill_next
+      slot = next_fill
       set_slot(slot, s)
       @fill_next = slot == :a ? :b : :a
       slot
+    end
+
+    # The slot a "Send to Comparer" fills. An EMPTY column wins over the ring, because the
+    # ring only tracks the sends that came through IT: picking A by hand (`a`, the flow
+    # picker) leaves the ring pointing at A too, so the next send overwrote the pick and left
+    # B empty — a half-filled comparison built out of two flows. With both sides holding
+    # bytes there is no empty column and the ring decides, as it always did.
+    private def next_fill : Symbol
+      return :a if @slot_a.nil? && !@slot_b.nil?
+      return :b if @slot_b.nil? && !@slot_a.nil?
+      @fill_next
     end
 
     def add_flow(detail : Store::FlowDetail) : Symbol
@@ -234,6 +249,10 @@ module Gori::Tui
 
     def swap : Nil
       @slot_a, @slot_b = @slot_b, @slot_a
+      # The ring names the column the next send REPLACES — the one holding the older bytes.
+      # Swapping moves those to the other side, so a ring left where it was would refill the
+      # side that just became the newer one.
+      @fill_next = @fill_next == :a ? :b : :a
       invalidate
     end
 
@@ -251,17 +270,25 @@ module Gori::Tui
     # ON, not on its index: folding renumbers every row after the first collapsed run, so
     # keeping the index would silently move the cursor somewhere else in the message.
     def toggle_fold : Bool
+      sync_rowsel # so the row the cursor names is a row of the diff it is about to leave
       keep = display[@rowsel.cursor.cy]?.try(&.src)
       @fold = !@fold
       @display_cache = nil
       @styled_same = nil
       @word_cache.clear
       sync_rowsel
-      if keep
-        idx = display.index { |d| d.src >= keep } || 0
-        @rowsel.goto_line(idx)
-      end
+      @rowsel.goto_line(keep ? row_covering(keep) : 0)
       @fold
+    end
+
+    # The drawn row that STANDS FOR source row `src` — itself when it survived the fold, and
+    # otherwise the marker that collapsed it. `rindex`, because a fold marker is numbered by
+    # the FIRST row of its run: the last row at or before `src` is the one whose span covers
+    # it, while the first row at or after it is the next KEPT row — past the whole run, and
+    # `|| 0` (the top of the message) when the run is the trailing one. Reading 30 rows down a
+    # 60-line response and pressing `f` sent the cursor back to line 1.
+    private def row_covering(src : Int32) : Int32
+      display.rindex { |d| d.src <= src } || 0
     end
 
     # Move the row cursor to the next (`dir` 1) or previous (−1) CHANGED row, wrapping at

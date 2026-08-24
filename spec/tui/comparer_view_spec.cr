@@ -48,6 +48,73 @@ describe ComparerView do
     v.add_flow(flow("GET", "/next")).should eq(:a)
   end
 
+  # The ring names the column the next send REPLACES. `set_slot` (the `a`/`b` flow picker)
+  # does not advance it, so picking A by hand and then sending a flow in overwrote the pick
+  # and left B empty — a comparison of one flow against nothing, built out of two.
+  it "sends the next flow to the EMPTY side, whichever way the ring points" do
+    v = ComparerView.new
+    v.set_slot(:a, flow("GET", "/picked")) # picked by hand: the ring still points at A
+    v.add_flow(flow("GET", "/sent")).should eq(:b)
+    v.slot(:a).not_nil!.path.should eq("/picked")
+    v.slot(:b).not_nil!.path.should eq("/sent")
+  end
+
+  # Swapping moves the older bytes to the other column, so the ring has to follow them. It
+  # did not: with one slot filled, `s` then a send refilled the side that had JUST been
+  # filled and left the other one empty forever.
+  it "carries the next-slot ring across a swap" do
+    v = ComparerView.new
+    v.add_flow(flow("GET", "/one")) # → A, ring now at B
+    v.swap                          # …and /one is now B, so the ring belongs at A
+    v.add_flow(flow("GET", "/two")).should eq(:a)
+    v.both_set?.should be_true
+    v.slot(:a).not_nil!.path.should eq("/two")
+    v.slot(:b).not_nil!.path.should eq("/one")
+  end
+
+  # Every row of a fuzz run shares one target, so the derived "GET /path" name cannot tell
+  # two of them apart — the payload can, and the source hands it over as the slot label. That
+  # label was built and then dropped: both the chip and the A/B header rebuilt method + path.
+  it "carries a source-supplied slot name into the chip and the header" do
+    row = ->(i : Int32, payload : String) {
+      ComparerSlot.from_exchange("fuzz", "GET", "https://ex.test/api",
+        "GET /api HTTP/1.1\r\nHost: ex.test\r\n\r\n".to_slice, nil,
+        "HTTP/1.1 500 X\r\n\r\n".to_slice, "boom".to_slice,
+        status: 500, label: "##{i} #{payload}")
+    }
+    v = ComparerView.new
+    v.set_pair(row.call(3, "role=admin"), row.call(7, "role=guest"))
+    v.label(40).should eq("#3 role=adm… ⇄ #7 role=gue…")
+
+    b = MemoryBackend.new(140, 20)
+    v.render(Screen.new(b), Rect.new(0, 0, 140, 20), focused: true)
+    header = b.row(0)
+    header.should contain("#3 role=admin")
+    header.should contain("#7 role=guest")
+    header.should contain("ex.test") # …without losing the target the payload was sent to
+  end
+
+  # A captured request (head and body held apart) against the Repeater/fuzz re-send of it
+  # (one wire blob). Byte-identical requests reported two changed lines — both of them blank
+  # — which is the ONE pair this tab exists to make trustworthy. See MessageLines#head_lines.
+  it "diffs a captured request against a re-sent one as identical" do
+    row = Gori::Store::FlowRow.new(
+      1_i64, 1_i64, "https", "POST", "h.test", 443, "/a",
+      200, 100_i64, Gori::Store::FlowState::Complete, 50_i64, 1_i64, "text/plain")
+    wire = "POST /a HTTP/1.1\r\nHost: h.test\r\nContent-Length: 3\r\n\r\n"
+    captured = Gori::Store::FlowDetail.new(row, "HTTP/1.1", wire.to_slice, "x=1".to_slice,
+      "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice)
+    resent = ComparerSlot.from_exchange("repeater", "POST", "https://h.test/a",
+      "#{wire}x=1".to_slice, nil, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice, status: 200)
+
+    v = ComparerView.new
+    v.set_pair(ComparerSlot.from_flow(captured), resent)
+    v.toggle_pane # → the REQUEST half, which is where the two shapes met
+    v.render(Screen.new(MemoryBackend.new(100, 20)), Rect.new(0, 0, 100, 20), focused: true)
+    v.jump_change(1).should be_false # no changed row at all
+    v.copy_all.lines.each { |l| l.should start_with("  ") }
+  end
+
   it "truncates a slot label by display width, not char count" do
     v = ComparerView.new
     # 12 CJK chars ≈ 24 display cols; char-count truncation (path[0,11]) would keep ~22
@@ -412,6 +479,27 @@ describe "ComparerView change navigation and folding" do
     v.copy_text.should eq(before)
     v.toggle_fold
     v.copy_text.should eq(before)
+  end
+
+  # A fold marker is numbered by the FIRST row of the run it collapsed, so "the first drawn
+  # row at or after the cursor's row" walks PAST the whole run — and past the end of the diff
+  # entirely when the run is the trailing one, where the fallback sent the cursor to line 1.
+  # Reading 30 rows into a 60-line response and pressing `f` lost the place being read.
+  it "lands the cursor on the marker covering its row, not back at the top" do
+    v = ComparerView.new
+    body = ->(mid : String) { (1..60).map { |i| i == 3 ? mid : "line#{i}" }.join("\n") }
+    v.set_pair(flow("GET", "/a", body: body.call("BEFORE")),
+      flow("GET", "/a", body: body.call("AFTER")))
+    v.render(Screen.new(MemoryBackend.new(100, 20)), Rect.new(0, 0, 100, 20), true)
+    30.times { v.move_rows(1, false) } # deep inside the trailing unchanged run
+    at = v.copy_text
+    at.should match(/line\d+/)
+
+    v.toggle_fold
+    v.copy_text.should contain("unchanged lines") # the marker standing for that run…
+    v.toggle_fold
+    v.copy_text.should match(/line\d+/) # …and a line of the run it collapsed, not line 1
+    v.rowsel.cursor.cy.should be > 0
   end
 
   it "projects a fold marker into the copy text rather than dropping the rows silently" do

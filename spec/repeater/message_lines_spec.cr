@@ -10,6 +10,34 @@ describe Gori::Repeater::MessageLines do
       ["GET / HTTP/1.1", "Host: x", "", "hello", "world"])
   end
 
+  # A head captured off the wire ends WITH its blank line, and `split` leaves an empty
+  # trailing field for that final newline. Stating the separator once — instead of blank
+  # line + split artifact + an appended third — is what makes the two shapes of one message
+  # agree below.
+  it "states the head/body separator once for a head that carries its own terminator" do
+    head = "POST /a HTTP/1.1\r\nHost: x\r\n\r\n".to_slice
+    MessageLines.of(head, "x=1".to_slice, decode: false).should eq(
+      ["POST /a HTTP/1.1", "Host: x", "", "x=1"])
+    MessageLines.of(head, nil, decode: false).should eq(["POST /a HTTP/1.1", "Host: x", ""])
+  end
+
+  # The Comparer's headline pair: a CAPTURED request (head and body held apart) against the
+  # Repeater/fuzz re-send of it (one wire blob handed over as `head`, `body` nil). Byte-
+  # identical requests used to differ by two lines — both of them blank — purely because of
+  # which side of the split the bytes arrived on.
+  it "gives the same lines whether the message arrives split or as one blob" do
+    head = "POST /a HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n".to_slice
+    split = MessageLines.of(head, "x=1".to_slice, decode: false)
+    blob = MessageLines.of("POST /a HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nx=1".to_slice,
+      nil, decode: false)
+    split.should eq(blob)
+  end
+
+  it "still separates a head that does NOT carry its own blank line" do
+    MessageLines.of("GET / HTTP/1.1\r\nHost: x".to_slice, "hi".to_slice, decode: false).should eq(
+      ["GET / HTTP/1.1", "Host: x", "", "hi"])
+  end
+
   it "omits the separator + body when the body is empty or nil" do
     head = "GET / HTTP/1.1".to_slice
     MessageLines.of(head, nil, decode: false).should eq(["GET / HTTP/1.1"])

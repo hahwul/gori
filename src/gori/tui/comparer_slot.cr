@@ -18,7 +18,7 @@ module Gori::Tui
   # one constructor among several. The meta readout (status · size · time) rides here too:
   # it is per-side data, and every source that can name its bytes can name those as well.
   class ComparerSlot
-    getter label : String  # short chip text: "GET /path"
+    getter label : String  # short chip text: "GET /path", or what the source called these bytes
     getter method : String # sub-tab filter subject (`method:`)
     getter target : String # full URL when known — the sub-tab filter's `host:` subject
     getter host : String   # authority alone, for the header summary
@@ -30,9 +30,14 @@ module Gori::Tui
     # status · size · time — the shared value every surface states (see `Repeater::ExchangeMeta`).
     getter meta : Repeater::ExchangeMeta
     getter flow_id : Int64? # the capture this came from, when it came from one
+    # The SOURCE named these bytes itself, rather than `label` being the method + path
+    # rebuilt. It matters to `summary`: a source whose rows share one target — a fuzz run,
+    # where every row is "GET /api" — cannot be told apart by the derived name, so the name
+    # it DID supply has to ride the A/B header too and not just the sub-tab chip.
+    getter named : Bool
 
     def initialize(@label, @method, @target, @host, @path, @meta, *,
-                   @source = nil, @flow_id = nil,
+                   @source = nil, @flow_id = nil, @named = false,
                    @request_head : Bytes? = nil, @request_body : Bytes? = nil,
                    @response_head : Bytes? = nil, @response_body : Bytes? = nil,
                    @error : String? = nil, @text : Array(String)? = nil)
@@ -68,7 +73,7 @@ module Gori::Tui
       # and 0 B would be a claim about the origin that nothing observed.
       meta = Repeater::ExchangeMeta.of(status, size || response_body.try(&.size.to_i64), duration_us, error)
       new(label || "#{method} #{path}", method, url, host, path, meta,
-        source: source, flow_id: flow_id,
+        source: source, flow_id: flow_id, named: !label.nil?,
         request_head: request_head, request_body: request_body,
         response_head: response_head, response_body: response_body, error: error)
     end
@@ -104,9 +109,15 @@ module Gori::Tui
 
     # Header line, left of the meta readout. The source prefix only appears when the bytes
     # did NOT come from the capture history.
+    #
+    # A source-supplied name leads, because it is the half that TELLS THE TWO SIDES APART and
+    # the half a narrow column truncates away last: two rows of one fuzz run rendered as the
+    # same "[fuzz] GET api.test/search" on both sides of a diff whose whole point was which
+    # payload produced which response.
     def summary : String
       base = "#{@method} #{@host}#{@path}".strip
       base = @label if base.empty?
+      base = "#{@label} · #{base}" if @named && @label != base
       (s = @source) ? "[#{s}] #{base}" : base
     end
 

@@ -32,9 +32,15 @@ module Gori
       def of(head : Bytes?, body : Bytes?, *, decode : Bool, error : String? = nil) : Array(String)
         b = decode ? display_body(head, body) : body
         lines = error ? ["error: #{error}"] : [] of String
-        lines.concat(bytes_to_lines(head))
+        lines.concat(head_lines(head))
         if b && !b.empty?
-          lines << ""
+          # Only when the head did not already end in one — see `head_lines`. A source that
+          # hands the WHOLE message over as `head` (a Repeater send, a fuzz row: one wire blob,
+          # `body` nil) carries its own separator, and a source that splits the two does now
+          # as well, so both shapes of the SAME message produce the same lines. They did not:
+          # a captured request diffed against the Repeater re-send of it reported two changed
+          # lines — both of them blank — over byte-identical requests.
+          lines << "" unless lines.last?.try(&.empty?)
           if binary?(b)
             lines << "— binary body (#{b.size} bytes) — not shown as text —"
           else
@@ -42,6 +48,17 @@ module Gori
           end
         end
         lines
+      end
+
+      # The head's lines, WITHOUT the empty trailing field `split` leaves behind for its final
+      # newline. That field is an artifact of the split, not a line of the message; dropping it
+      # leaves the head's own terminating BLANK LINE as the last entry, which is exactly the
+      # head/body separator — so it is stated once instead of three times (blank line, split
+      # artifact, appended separator).
+      private def head_lines(head : Bytes?) : Array(String)
+        hl = bytes_to_lines(head)
+        hl.pop if head && !head.empty? && head[head.size - 1] == 0x0Au8 && !hl.empty?
+        hl
       end
 
       private def binary?(bytes : Bytes) : Bool
