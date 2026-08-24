@@ -181,6 +181,20 @@ private Y = -> { key(Termisu::Input::Key::LowerY, :none, 'y') }
 
 private TEXT = "alpha\nbravo\ncharlie"
 
+# One interaction as the poller would deliver it — enough lines in the raw request for the
+# detail pane to have a caret line that is not the whole pane.
+private def interaction : Gori::Oast::Interaction
+  Gori::Oast::Interaction.new(
+    unique_id: "uid-000001",
+    protocol: "dns",
+    method: nil,
+    source_ip: "203.0.113.7",
+    full_id: "000001.oast.test",
+    raw_request: ";; QUESTION SECTION:\n;000001.oast.test. IN A\n;; trailing",
+    raw_response: ";; ANSWER SECTION:\n000001.oast.test. 60 IN A 203.0.113.1",
+    at: Time.unix(1_700_000_000_i64))
+end
+
 describe "bare `y` in a raw-dispatched read pane" do
   describe "the Project description" do
     it "copies the WHOLE description when nothing is selected" do
@@ -247,6 +261,32 @@ describe "bare `y` in a raw-dispatched read pane" do
         ctl.handle_detail_key(Y.call).should be_true
         host.statuses.last.should start_with("copied 0b to clipboard")
       end
+    end
+  end
+end
+
+# Not a fallback bug like the two above but the same key in the same kind of pane: OAST's
+# callback detail swallowed EVERY key it did not itself handle, so the `y copy · x line` its
+# footer names were both dead — `y` reached no copy at all and `x` never got out to its chord.
+describe "bare `y` in the OAST callback detail" do
+  it "copies the callback, and leaves `x` to the keymap" do
+    with_session do |host, session|
+      store = session.store
+      sid = store.insert_oast_session(nil, "interactsh", "https://oast.test",
+        "c0rr3lat10n", "s3cret", nil, nil)
+      ctl = Gori::Tui::OastController.new(host)
+      ctl.callbacks_sub?.should be_true
+      ctl.@oast_events.send(Gori::Oast::CallbackEvent.new(sid, interaction))
+      ctl.drain_events.should be_true
+
+      ctl.handle_body_key(key(Termisu::Input::Key::Enter)).should be_true # ↵ opens the detail
+      ctl.oast_detail_readable?.should be_true
+
+      ctl.handle_body_key(Y.call).should be_true
+      host.statuses.last.should start_with("copied all (")
+
+      # `x` is oast.select-line, a plain chord: the pane must hand it back, not eat it.
+      ctl.handle_body_key(key(Termisu::Input::Key::LowerX, :none, 'x')).should be_false
     end
   end
 end
