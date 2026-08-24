@@ -1479,6 +1479,25 @@ module Gori::Tui
       @detail_read.selection_text(size, line_at) || @detail_read.current_line(size, line_at)
     end
 
+    # Every line of the pane, for the "copy the whole pane" fallback `y` takes with nothing
+    # selected (`HistoryController#detail_copy`) — the twin of `ReadPane#copy_all`, which every
+    # other read pane in the tree already offers. Materialises the text on purpose: it is going
+    # to the clipboard, which is one string either way, and the 64KB ceiling plus the
+    # "clipped from Nb" note live in `Clipboard`.
+    #
+    # Off the hot path by construction — one keypress, never a frame — so the lazy line source
+    # is walked once here rather than being kept lazy for a caller that needs all of it.
+    def detail_copy_all : String
+      size, line_at = detail_line_source
+      return "" if size <= 0
+      String.build do |io|
+        (0...size).each do |i|
+          io << '\n' if i > 0
+          io << line_at.call(i)
+        end
+      end
+    end
+
     # The "copy as X" menu for the open detail pane: {picker title, options}. REQUEST
     # offers url/headers/body/cookies/curl/raw (parsed from the captured bytes + the
     # flow's target URL); RESPONSE offers status+headers/body/raw. Decoded panes

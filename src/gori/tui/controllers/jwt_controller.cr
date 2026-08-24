@@ -780,7 +780,7 @@ module Gori::Tui
     def jwt_copy_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Read ? s.input_read.copy_text(s.input) : band_or_all(s.input)
+      when :input   then s.input_mode == InputMode::Read ? read_or_all(s.input_read, s.input) : band_or_all(s.input)
       when :header  then band_or_all(s.header)
       when :payload then band_or_all(s.payload)
       when :secret  then s.secret
@@ -791,6 +791,8 @@ module Gori::Tui
       end
     end
 
+    # `jwt_copy` already answers "selection, else the whole pane" for every pane, so the
+    # copy-all half of the unified Copy is the same call rather than a second decision.
     def jwt_copy_all : Nil
       jwt_copy
     end
@@ -800,6 +802,16 @@ module Gori::Tui
     # when there is no band, so this cannot silently copy an empty string over a full buffer.
     private def band_or_all(ed : TextArea) : String
       ed.selection_text || ed.text
+    end
+
+    # `band_or_all` for a pane in READ mode, where the band lives on the read cursor rather
+    # than on the editor. `TextReadState#copy_text` falls back to the caret's LINE, which is
+    # what INPUT-in-READ used to copy — the one pane of the four that did, and the one place
+    # the tab disagreed with the rest of the tree (`Runner#read_copy`: selection if active,
+    # else the whole pane). The selection test comes first because `copy_text`'s own fallback
+    # cannot be told apart from a one-line selection after the fact.
+    private def read_or_all(read : TextReadState, ed : TextArea) : String
+      read.selection? ? read.copy_text(ed) : read.copy_all(ed)
     end
 
     private def do_copy(text : String, label : String? = nil) : Nil

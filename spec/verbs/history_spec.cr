@@ -162,7 +162,7 @@ describe "Gori::Verbs.register_history" do
 
     it "keeps the in-place actions from closing the detail" do
       verb_intents(r, "detail.compare").should eq([:comparer_add_selected])
-      verb_intents(r, "detail.copy").should eq([:detail_copy_selection])
+      verb_intents(r, "detail.copy").should eq([:detail_copy])
       verb_intents(r, "detail.copy-flow").should eq([:copy_selection])
       verb_intents(r, "detail.copy-as").should eq([:copy_as_open])
       verb_intents(r, "detail.add-host").should eq([:scope_add_host])

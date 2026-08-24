@@ -35,8 +35,9 @@ abstract class Gori::Verb::ExecContext
 
   # detail view
   abstract def scroll_detail(delta : Int32) : Nil
-  # Copy the selection (or current line) from the navigable detail text pane.
-  abstract def detail_copy_selection : Nil
+  # Copy from the navigable detail text pane: the selection when one is held, else the
+  # whole pane — the same rule read_copy applies on every other tab.
+  abstract def detail_copy : Nil
   # (There is no horizontal companion to scroll_detail: the detail's req/res panes
   # soft-wrap, so a long line is already on the next row rather than off the edge.)
   abstract def toggle_detail_pane : Nil

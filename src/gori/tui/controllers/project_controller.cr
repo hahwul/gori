@@ -413,7 +413,7 @@ module Gori::Tui
       when key.right?                             then @project_view.desc_read_move(0, 1, selecting: selecting)
       when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
       when c == 'x'                               then @project_view.desc_select_line
-      when c == 'y'                               then project_copy
+      when c == 'y'                               then project_desc_copy
       end
     end
 
@@ -460,6 +460,15 @@ module Gori::Tui
       end
       written = Clipboard.copy(text)
       @host.status("copied description to clipboard (#{written}b)#{Clipboard.note(written, text)}")
+    end
+
+    # Bare `y` in the description: the selection when one is held, else the WHOLE description.
+    # `^Y` (project.copy -> Runner#read_copy) has always answered that way; `y` is raw-dispatched
+    # here (see verbs/core.cr for why it has no chord) and fell back to the caret's LINE, so one
+    # pane's two copy keys disagreed about what "copy with nothing selected" means. This routes
+    # both through the same choice — the rule stated once per pane, as every sibling tab does it.
+    def project_desc_copy : Nil
+      project_desc_selection_active? ? project_copy : project_copy_all
     end
 
     # --- SCOPE pane: browse the rule list; a/e open the Miner-style popup overlay ---

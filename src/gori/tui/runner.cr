@@ -4255,15 +4255,13 @@ module Gori::Tui
 
     # --- comparer (diff two arbitrary flows) ---
 
-    # The unified Copy verbs whose base title is now plain "Copy" (routed through
-    # read_copy — selection if active, else the whole focused pane; copy-all is
-    # gone). detail.copy is DELIBERATELY excluded: History detail has no whole-pane
-    # alternative (read_copy's :history branch always falls back to
-    # detail_copy_selection), so its title stays the static "Copy selection" —
-    # flipping it here would be a no-op at best and misleading at worst (no
-    # selection ⇒ it still only copies the current line, not "the whole pane").
+    # The unified Copy verbs whose base title is now plain "Copy" (selection if active,
+    # else the whole focused pane; copy-all is gone). detail.copy joins them: the History
+    # detail grew its whole-pane half (HistoryView#detail_copy_all), so "Copy" is now the
+    # honest base title there too — it used to be excluded because with no selection it
+    # only ever copied the caret's line.
     READ_COPY_VERBS = %w[
-      notes.copy repeater.copy decoder.copy issue.copy project.copy fuzzer.copy
+      notes.copy repeater.copy decoder.copy issue.copy project.copy fuzzer.copy detail.copy
     ]
 
     def space_menu_title(verb_id : String) : String?
@@ -4552,9 +4550,9 @@ module Gori::Tui
       when :sequencer then sequencer_controller.sequencer_copy
       when :miner     then miner_controller.miner_copy
       when :history
-        # No whole-rendered-pane delegator exists for the detail text pane — both
-        # branches fall back to the selection-or-current-line copy.
-        detail_copy_selection if @overlay.detail?
+        # One delegator, like the group above: HistoryController#detail_copy makes the
+        # selection-vs-whole-pane choice itself (it also words its own toast).
+        detail_copy if @overlay.detail?
       end
     end
 

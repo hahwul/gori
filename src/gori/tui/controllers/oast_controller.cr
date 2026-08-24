@@ -1130,9 +1130,17 @@ module Gori::Tui
             with_cb_pane { @cb_pane.move(-1, 0, selecting: ev.shift?) }
           end
         when key.down?, key.lower_j? then with_cb_pane { @cb_pane.move(1, 0, selecting: ev.shift?) }
+        when c == 'y'                then oast_detail_copy
         else
-          with_cb_pane { @cb_pane.motion_key(ev) } # Home / End / PgUp / PgDn, ⇧ extending
-          return true
+          # Home / End / PgUp / PgDn, ⇧ extending — and FALL THROUGH on anything else, which is
+          # what `x` (oast.select-line, a plain chord) needs to reach the keymap. The old
+          # unconditional `return true` swallowed every unhandled key, so the two this pane's
+          # footer names — `y copy · x line` — were both dead here: `y` had no chord to reach
+          # (it is raw-dispatched above, as it is in the callbacks LIST) and `x` never got out.
+          # Same fall-through the list below hands `g`/`r`/`a` to the keymap with.
+          handled = false
+          with_cb_pane { handled = @cb_pane.motion_key(ev) }
+          return handled
         end
         return true
       end

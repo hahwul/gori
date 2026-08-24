@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `y` with nothing selected copies the WHOLE pane, not the caret's own line: the History detail's Request/Response, the Project description, an Issue's notes and the JWT INPUT pane in READ all fell back to one line, so each disagreed with the `^Y` beside it and with every other read pane. In the OAST callback detail the same key was dead altogether, along with the `x` beside it in the footer — that pane swallowed every key it did not handle itself.
+
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.
 
 - The Fuzzer sweeps a WebSocket exchange: mark `§…§` positions in the outbound frames (and in the handshake) and each payload runs one full RFC 6455 session, with the inbound frames matched as the response body and the close code on every row. `gori run fuzz --repeater N` and MCP `fuzz_start` seed a WebSocket session's frames instead of refusing it, `--message` / `--message-frame` / `--idle-ms` / `--ws-keep-key` author them, and `--ws-http-only` sweeps the handshake as a plain request (#795).

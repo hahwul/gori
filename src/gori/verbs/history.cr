@@ -469,12 +469,14 @@ module Gori
         "detail.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
         Verb::Scope::HistoryDetail, mnemonic: 'B', group: :view) { |ctx| ctx.open_response_external; nil }
 
-      # Copy the selection (or current line) from the navigable detail text — flow copy
-      # lives in the space menu only (history.copy / detail.copy-flow).
+      # The single smart Copy over the navigable detail text: the selection when one is held,
+      # else the whole pane (the rule every other tab's Copy already follows — see
+      # repeater.copy above). Flow copy lives in the space menu only (history.copy /
+      # detail.copy-flow).
       r.register Verb::Definition.new(
-        "detail.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
+        "detail.copy", "Copy", "Copy the selected text, or the whole pane if nothing is selected, to the clipboard",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
-        mnemonic: 'y', group: :copy) { |ctx| ctx.detail_copy_selection; nil }
+        mnemonic: 'y', group: :copy) { |ctx| ctx.detail_copy; nil }
 
       # "Copy as X" for the drill-in: same focus-aware format picker as Repeater, over the
       # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y' (free in the

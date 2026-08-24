@@ -761,6 +761,36 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "copies the WHOLE detail pane when nothing is selected (not just the caret's line)" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/api", http_version: "HTTP/1.1",
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: "LINE1\nLINE2\nLINE3\nLINE4".to_slice, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      view.detail_selection?.should be_false
+      all = view.detail_copy_all
+      # Every body line, in order — the pane, not the row the caret happens to sit on.
+      %w[LINE1 LINE2 LINE3 LINE4].each { |l| all.should contain(l) }
+      all.should contain("200 OK")                                        # the head is part of the pane too
+      all.index("LINE1").not_nil!.should be < all.index("LINE4").not_nil! # document order
+
+      # With a selection held, `y` still means the selection.
+      view.detail_select_line
+      view.detail_selection?.should be_true
+      view.detail_copy_text.should_not eq(all)
+    end
+  end
+
   it "opens on the strip, flips to the body level, and resets to the strip on re-open" do
     tmp_store do |store|
       add_flow(store, "GET", "/api", 200)
