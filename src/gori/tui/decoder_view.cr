@@ -34,6 +34,9 @@ module Gori::Tui
     # the render hot path would stall the UI fiber. reset_output_scroll (called by the
     # controller on every recompute) + cycle_out_mode set the dirty flag.
     @out_lines : Array(String) = [] of String
+    # The same lines BEFORE `sanitize_display` — what a copy off this pane puts on the
+    # clipboard. Built in the same pass, and 1:1 with @out_lines (see `output_copy_text`).
+    @out_raw : Array(String) = [] of String
     @out_dirty : Bool = true
     # The OUTPUT pane's caret, selection, both scroll axes and its whole draw. Gutter on: these
     # rows ARE source lines of the decoded text, and ^G-style line references only mean
@@ -241,9 +244,22 @@ module Gori::Tui
       @out.motion_key(ev)
     end
 
+    # The selection (or, with none, the caret's line) — VERBATIM, not the '·'-substituted
+    # view the pane draws. A selection copied out of here is a payload on its way to another
+    # tool, and handing it a middle dot where a control byte was is a silent corruption;
+    # `output_copy` (copy-the-whole-pane) has always copied the raw text, so this is the
+    # selection half of the same answer rather than a new policy.
+    #
+    # Addressing the raw lines with the drawn pane's cursor is sound because
+    # `sanitize_display` maps one char to one char and leaves '\n' alone: same line count,
+    # same char offsets within each line.
     def output_copy_text(result : Decoder::ChainResult) : String
       output_lines(result)
-      @out.copy_text
+      raw = @out_raw
+      return "" if raw.empty?
+      at = ->(i : Int32) { raw[i]? || "" }
+      cur = @out.cursor
+      cur.selection_text(raw.size, at) || cur.current_line(raw.size, at)
     end
 
     def output_selection? : Bool
@@ -283,7 +299,9 @@ module Gori::Tui
     # change (so an idle frame never re-encodes + re-splits a large output).
     private def output_lines(result : Decoder::ChainResult) : Array(String)
       if @out_dirty
-        @out_lines = output_text(result).split('\n')
+        raw = output_raw_text(result)
+        @out_raw = raw.split('\n')
+        @out_lines = sanitize_display(raw).split('\n')
         @out_dirty = false
         @out.source(@out_lines) # the pane addresses exactly the text it is about to draw
       end
@@ -313,9 +331,14 @@ module Gori::Tui
 
     # Final output as display text (honoring the ^X mode), or the failure message.
     def output_text(result : Decoder::ChainResult) : String
+      sanitize_display(output_raw_text(result))
+    end
+
+    # The same text before the control-char substitution — the clipboard's copy, and the
+    # source `output_lines` sanitizes for the draw.
+    private def output_raw_text(result : Decoder::ChainResult) : String
       if bytes = result.output
-        text, _ = Decoder.display(bytes, @prefer)
-        sanitize_display(text)
+        Decoder.display(bytes, @prefer)[0]
       elsif fa = result.failed_at
         s = result.steps[fa]
         "✗ #{s.name}: #{s.error}"
@@ -332,15 +355,29 @@ module Gori::Tui
     # A single-line, control-char-sanitized preview of one step's bytes.
     private def preview(bytes : Bytes) : String
       s, _ = Decoder.display(bytes)
-      sanitize_display(s)
+      sanitize_row(s)
     end
 
     # Swap terminal-unsafe control chars for a visible placeholder. Without this,
     # a control byte (e.g. from a base64/hex decode of binary) reaches `screen.cell`,
     # which maps ASCII control bytes to a blank space — the byte is drawn but
     # invisible, reading as truncated even though it isn't.
+    #
+    # '\n' is EXEMPT here, and that is structural rather than cosmetic: `output_lines`
+    # splits this text on it to get the OUTPUT pane's lines. Folding it into '·' handed
+    # `ReadPane` ONE enormous line for every multi-line result — jwt-decode, msgpack/cbor
+    # → JSON, a `typo` variant list, an inflated HTML body — so the gutter only ever
+    # numbered line 1, ^G had nothing to reach, ^F could only ever match line 0, and the
+    # decode read as one run-on smear of middle dots.
     private def sanitize_display(text : String) : String
-      String.build { |io| text.each_char { |ch| io << (ch.control? ? '·' : ch) } }
+      String.build(text.bytesize) { |io| text.each_char { |ch| io << (ch.control? && ch != '\n' ? '·' : ch) } }
+    end
+
+    # The single-ROW form, for the PIPELINE preview: '\n' folds too, because that row is
+    # one screen line by construction — an unfolded newline would leave the tail of the
+    # step's output drawn nowhere.
+    private def sanitize_row(text : String) : String
+      String.build(text.bytesize) { |io| text.each_char { |ch| io << (ch.control? ? '·' : ch) } }
     end
 
     def cycle_out_mode : Nil

@@ -181,6 +181,21 @@ describe Gori::Decoder do
       end
     end
 
+    # A group is five base-85 digits packed into 32 bits, so 0xFFFFFFFF ("s8W-!") is the
+    # largest that exists. The old UInt32 wrap-around accumulate turned anything above it into
+    # four plausible-looking bytes — a decoder inventing data, which no other codec here does.
+    it "refuses an ascii85 group whose value overflows 32 bits" do
+      conv_bytes("ascii85-decode", "s8W-!".to_slice).should eq Bytes[0xff, 0xff, 0xff, 0xff] # the ceiling itself decodes
+      res = Gori::Decoder.run(REG, "uuuuu".to_slice, "ascii85-decode")
+      res.steps.first.state.failed?.should be_true
+      res.steps.first.error.to_s.should contain("overflows 32 bits")
+      # The 'u'-padded PARTIAL groups a real encode produces stay under the ceiling, so the
+      # check cannot reject valid data: every 1/2/3-byte tail still round-trips.
+      [Bytes[0xff], Bytes[0xff, 0xff], Bytes[0xff, 0xff, 0xff]].each do |tail|
+        conv_bytes("ascii85-decode", conv_bytes("ascii85-encode", tail).dup).should eq tail
+      end
+    end
+
     it "base58 round-trips (incl. leading-zero bytes)" do
       enc = conv("base58-encode", "hello world")
       conv("base58-decode", enc).should eq "hello world"
@@ -357,6 +372,18 @@ describe Gori::Decoder do
       String.new(conv_bytes("zstd", zs)).should eq "hello world"
     end
 
+    # The drain used to stop at `>= MAX_OUT`, which left the answer to chunk alignment: a last
+    # read landing exactly ON the ceiling passed `Chain.run`'s `size > max_out` gate, so the
+    # step reported Ok for output that had been silently cut, while one byte over it the same
+    # bomb failed. One answer now, and it is the failure.
+    it "fails a decompression that would exceed the 32 MiB ceiling instead of silently cutting it" do
+      bomb = conv_bytes("gzip-compress", Bytes.new(Gori::Decoder::MAX_OUT + 1024, 0_u8))
+      res = Gori::Decoder.run(REG, bomb, "gunzip")
+      res.ok?.should be_false
+      res.output.should be_nil
+      res.steps.first.error.to_s.should contain("exceeds")
+    end
+
     it "turns a buffer that was never one of these streams into a FAILED step, not a raise" do
       # Through the chain, which is what every surface runs: `DecoderError` is what `Chain.run`
       # converts into a Failed step, and anything else would unwind into a TUI draw.
@@ -478,6 +505,16 @@ describe Gori::Decoder do
       conv("json-escape", "a\nb").should eq "\"a\\nb\""
       conv("json-unescape", "\"a\\nb\"").should eq "a\nb"
       conv("json-unescape", "a\\tb").should eq "a\tb" # bare input tolerated
+    end
+
+    # `String.from_json` stops at the first complete value and ignores the rest, so this used
+    # to decode to "a" and drop everything after it without a word.
+    it "json-unescape refuses input that carries more than the one string literal" do
+      res = Gori::Decoder.run(REG, %("a" "b").to_slice, "json-unescape")
+      res.steps.first.state.failed?.should be_true
+      res.steps.first.error.to_s.should contain("invalid JSON string")
+      # Trailing whitespace is not "more input" — it strips, and the literal still decodes.
+      conv("json-unescape", %("a"  )).should eq "a"
     end
 
     it "unicode escape/unescape (incl. astral via surrogate pair)" do

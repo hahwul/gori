@@ -220,15 +220,22 @@ module Gori::Decoder
     end
 
     # A full group of 5 → 4 bytes; a partial group of m chars → m-1 bytes (padded
-    # with 'u'=84 for the value). Wrapping ops avoid an overflow raise on malformed
-    # (out-of-range) groups — garbage out, never a crash.
+    # with 'u'=84 for the value).
     private def flush_ascii85(sink : IO, group : Array(UInt8)) : Nil
       return if group.empty?
       # A 1-char trailing group is structurally impossible (a partial group is ≥2 chars → ≥1
       # byte); silently emitting 0 bytes would drop data — surface it like other malformed input.
       raise DecoderError.new("truncated ascii85 group (1 leftover char is not decodable)") if group.size == 1
-      v = 0_u32
-      5.times { |k| v = v &* 85_u32 &+ (k < group.size ? group[k] : 84_u8).to_u32 }
+      # Accumulate WIDE and range-check. A group is five base-85 digits packed into 32 bits, so
+      # 0xFFFFFFFF ("s8W-!") is the largest one that exists; the old `&*`/`&+` UInt32 accumulate
+      # wrapped an out-of-range group into four plausible-looking bytes instead ("uuuuu" decoded
+      # to 08 78 0e c4), which is a decoder inventing data — worse than the overflow raise the
+      # wrapping was there to avoid. No VALID group reaches here over the ceiling, the 'u'-padded
+      # partial groups included: the worst a real 1/2/3-byte tail pads to is 0xFFFFFF54, which
+      # is tight (171 to spare) but under it — so this rejects only input no encoder produced.
+      v = 0_u64
+      5.times { |k| v = v * 85_u64 + (k < group.size ? group[k] : 84_u8).to_u64 }
+      raise DecoderError.new("invalid ascii85 group (value overflows 32 bits)") if v > UInt32::MAX
       bytes = StaticArray(UInt8, 4).new(0_u8)
       bytes[0] = (v >> 24).to_u8!
       bytes[1] = (v >> 16).to_u8!
@@ -421,7 +428,12 @@ module Gori::Decoder
     def json_unescape(s : String) : String
       t = s.strip
       quoted = t.size >= 2 && t.starts_with?('"') && t.ends_with?('"')
-      String.from_json(quoted ? t : %("#{t}"))
+      # `JSON.parse`, not `String.from_json`: the latter stops at the first complete value and
+      # ignores whatever follows it, so `"a" "b"` decoded to `a` and the second half of the
+      # input vanished without a word. A decoder that silently drops what it was handed is
+      # worse than one that says the input is not a single JSON string.
+      JSON.parse(quoted ? t : %("#{t}")).as_s? ||
+        raise DecoderError.new("invalid JSON string: not a string literal")
     rescue ex : JSON::ParseException
       raise DecoderError.new("invalid JSON string: #{ex.message}")
     end
@@ -612,16 +624,27 @@ module Gori::Decoder
     end
 
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).
-    # Tolerant: a mid-stream error keeps whatever was decoded; an immediate failure
-    # (nothing decoded) raises a DecoderError. Mirrors content_decode.cr's read_all.
-    private def drain(reader : IO) : Bytes
+    # Tolerant of a CUT stream: a mid-stream error keeps whatever was decoded; an immediate
+    # failure (nothing decoded) raises a DecoderError. Mirrors content_decode.cr's read_all.
+    #
+    # The CAP is not tolerant, deliberately. Stopping at `>= MAX_OUT` handed the chain a slice
+    # whose size depended on where the reader's last 64 KiB chunk happened to land: landing
+    # exactly ON the ceiling passed `Chain.run`'s `size > max_out` gate, so the step reported
+    # Ok for output that had been silently cut, while one byte over it the same bomb failed
+    # with "output exceeds …". Same input, two answers, decided by chunk alignment. One byte
+    # PAST the ceiling is what proves the stream had more to give — a stream that decompresses
+    # to exactly MAX_OUT is not a bomb and still succeeds — so failing there gives every
+    # over-cap decompress the single answer the chain's own guard already gives.
+    private def drain(reader : IO, max_out : Int32 = Gori::Decoder::MAX_OUT) : Bytes
       sink = IO::Memory.new
       buf = Bytes.new(64 * 1024)
       begin
         while (n = reader.read(buf)) > 0
           sink.write(buf[0, n])
-          break if sink.bytesize >= Gori::Decoder::MAX_OUT
+          raise DecoderError.new("decompress output exceeds #{max_out} bytes (decompression bomb?)") if sink.bytesize > max_out
         end
+      rescue ex : DecoderError
+        raise ex # the cap, not a stream fault — never softened into a partial result
       rescue ex
         raise DecoderError.new("decompress failed: #{ex.message}") if sink.bytesize == 0
       end
