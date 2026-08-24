@@ -807,7 +807,11 @@ module Gori::Tui
       key = ev.key
       case
       when key.up?, key.lower_k?
-        @view.move_row(-1)
+        # ↑ on the first request — or on the empty placeholder, which has no cursor —
+        # pops focus back to the tab bar, the same exit esc takes. Clamping there instead
+        # left the one key an operator reaches for to walk out of the list looking dead
+        # (History/Issues/Intercept all pop from their top row).
+        @view.at_top? ? @host.request_focus(:menu) : @view.move_row(-1)
         true
       when key.down?, key.lower_j?
         @view.move_row(1)

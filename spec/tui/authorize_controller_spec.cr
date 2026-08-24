@@ -43,7 +43,10 @@ private class AuthorizeFakeHost
   def request_overlay(kind : Symbol) : Nil
   end
 
+  getter focus_requests = [] of Symbol
+
   def request_focus(pane : Symbol) : Nil
+    @focus_requests << pane
   end
 
   def focus_body : Nil
@@ -548,6 +551,35 @@ describe Gori::Tui::AuthorizeController do
         c.view.selected_trial.not_nil!.identity.should eq("as-captured")
         c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::BackTab)).should be_true
         c.view.selected_trial.not_nil!.identity.should eq("anonymous")
+      end
+    end
+  end
+
+  # esc was the ONLY way back to the tab bar: ↑ clamped at row 0 and did nothing at all on the
+  # empty placeholder, so the key an operator reaches for to walk out of a list read as dead.
+  describe "↑ at the top of the list" do
+    it "pops focus to the tab bar from the first request, after walking back to it" do
+      with_authorize_controller do |c, host, session|
+        first = seed_capture(session.store, "/orders", "session=A")
+        second = seed_capture(session.store, "/invoices", "session=A")
+        c.seed_flows([first, second])
+        c.view.move_row(1)
+
+        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up)).should be_true
+        host.focus_requests.should be_empty # still inside the list — the cursor moved
+        c.view.selected_entry.not_nil!.detail.row.id.should eq(first)
+
+        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up)).should be_true
+        host.focus_requests.should eq([:menu])
+        c.view.selected_entry.not_nil!.detail.row.id.should eq(first) # cursor stays put
+      end
+    end
+
+    it "pops focus to the tab bar from the empty placeholder" do
+      with_authorize_controller do |c, host, _|
+        c.view.any_requests?.should be_false
+        c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up)).should be_true
+        host.focus_requests.should eq([:menu])
       end
     end
   end
