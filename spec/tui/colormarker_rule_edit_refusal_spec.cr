@@ -296,6 +296,37 @@ describe "Gori::Tui::ColormarkerController#apply_color_rule" do
     end
   end
 
+  # A commit that also RE-HOMES the rule (the scope cycler was moved) is two writes, and the
+  # second one moves the row across the global/project boundary. The selection has to follow it,
+  # the way `colormarker_scope_toggle` already does — left where it was, the highlight (and
+  # every rule action behind it: x, d, ⇧J) names whichever rule slid into that index.
+  it "follows the rule into its new scope block after a re-home" do
+    with_globals do
+      with_colormarker_controller do |ctl, host, session|
+        with_own_settings do
+          session.store.insert_color_rule("host:a", "red", Gori::Store::MarkerStyle::Full, "a")
+          moved_id = session.store.insert_color_rule("host:b", "blue", Gori::Store::MarkerStyle::Full, "b")
+          ctl.on_enter
+          ctl.handle_wheel(1) # sit on the SECOND project rule — the one about to be promoted
+          ctl.selected_rule.try(&.match_filter).should eq("host:b")
+
+          ctl.apply_color_rule(ColormarkerRuleOverlay.new(name: "b", match_filter: "host:b",
+            color: "blue", style: "full", scope: "global",
+            edit_id: moved_id, edit_scope: Gori::Store::RuleScope::Project)).should be_true
+          # A promotion reaches every other project, so it is announced in the same words the
+          # `s` gesture uses rather than left to be inferred from a badge that changed.
+          host.statuses.last.should eq("colour rule is now GLOBAL — it applies in every project")
+
+          # Globals resolve first, so the promoted rule is now row 0 and the untouched project
+          # rule is row 1. The stale index would have selected the latter.
+          sel = ctl.selected_rule
+          sel.try(&.match_filter).should eq("host:b")
+          sel.try(&.global?).should be_true
+        end
+      end
+    end
+  end
+
   # The other half of the contract: false must mean "refused", not "any of the paths that
   # return", so a committed edit still closes the card.
   it "commits an edited global rule and closes the form" do

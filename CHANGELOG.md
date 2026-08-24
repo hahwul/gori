@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Colormarker: a custom colour whose write did not reach disk stayed live in memory anyway — offered in every project's picker, painting rows, blocking a retry as a duplicate and landing on disk at the next unrelated save, all under a message saying it was not written; a refused delete failed the same way in reverse. Promoting a rule from the EDIT card now moves the highlight with it and says so, and `gori run colormarker move --scope=global` distinguishes a refused write from a rule already at the top of its block.
+
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.
 
 - The Fuzzer sweeps a WebSocket exchange: mark `§…§` positions in the outbound frames (and in the handshake) and each payload runs one full RFC 6455 session, with the inbound frames matched as the response body and the close code on every row. `gori run fuzz --repeater N` and MCP `fuzz_start` seed a WebSocket session's frames instead of refusing it, `--message` / `--message-frame` / `--idle-ms` / `--ws-keep-key` author them, and `--ws-http-only` sweeps the handshake as a plain request (#795).

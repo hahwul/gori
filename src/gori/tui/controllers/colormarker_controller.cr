@@ -407,9 +407,26 @@ module Gori::Tui
         end
         if from != ov.scope
           moved = rule_list.find { |r| r.scope == from && r.id == id }
-          if moved && !engine.set_scope(moved, ov.scope)
-            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+          if moved.nil?
+            # The update reported a COMMIT, not a row — `Store#update_color_rule` answers through
+            # `exec_task_ok`, so an `UPDATE … WHERE id = ?` against an id a peer deleted while
+            # this card was open commits and matches nothing. Falling through here reported
+            # nothing and closed the form, so the operator watched a promotion they never got.
+            @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
+            return false
           end
+          unless engine.set_scope(moved, ov.scope)
+            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+            return true
+          end
+          # Follow the rule into its new block, exactly as `colormarker_scope_toggle` does.
+          # A re-home moves the row across the global/project boundary, so leaving `@sel` where
+          # it was left the highlight — and every rule action behind it — pointing at whichever
+          # unrelated rule slid into that index.
+          @sel = last_index_of_scope(ov.scope)
+          # And it says so, in the same words the `s` gesture uses: a promotion reaches every
+          # other project, which is not something to infer from a badge that changed.
+          @host.status(ov.scope.global? ? "colour rule is now GLOBAL — it applies in every project" : "colour rule is now project-scoped")
         end
       else
         unless engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
