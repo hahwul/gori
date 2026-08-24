@@ -44,6 +44,23 @@ module Gori
     # emitted — only the decimal spelling is dropped.
     MAX_BIGNUM_BYTES = 512
 
+    # Output ceiling for ONE document. The three above bound the INPUT walk, and none of them
+    # bounds the OUTPUT — which is not a function of the input's size here.
+    #
+    # A non-string map KEY is rendered as its own JSON text and that text becomes the member
+    # name (see `map_item`), so a map keyed on a MAP nests the inner rendering inside a JSON
+    # string once per level — and each level's escaping roughly doubles it. `a1 a1 a1 …`, one
+    # byte per level, therefore grows the output as 2^depth: 26 bytes produced 536 MB, and 28
+    # bytes reached the point where `String::Builder` refuses to grow and raised `IO::EOFError`
+    # straight out of `render` — the one thing this module promises never to do. `MAX_DEPTH`
+    # cannot fix it (the blow-up is well inside 32 levels) and a per-key length cap cannot
+    # either (`MAX_ITEMS` keys at any cap is still that cap × 100 000).
+    #
+    # Charged across the whole document, scratch key renders included, so it bounds the WORK
+    # and not merely what survives into the text. 8 MiB is `Pretty::MAX_OUT_PRETTY` — the cap
+    # the display path, which runs on every drawn flow, already discards above.
+    MAX_JSON_BYTES = 8 * 1024 * 1024
+
     # Render `data`, with everything a caller needs to decide whether the rendering is about
     # THIS body: see `BinaryDocument::Rendering`. `indent` pretty-prints; nil is compact.
     #
@@ -52,11 +69,16 @@ module Gori
     # body and often the point of it, and re-parsing would keep one and drop the other.
     def render(data : Bytes, *, max_depth : Int32 = MAX_DEPTH,
                indent : String? = nil) : BinaryDocument::Rendering
-      reader = Reader.new(data, max_depth)
-      text = JSON.build(indent) { |j| reader.item(j, 0) }
+      # An `IO::Memory` we own rather than `JSON.build`'s hidden `String::Builder`, so the
+      # reader can see how much it has produced and stop at `MAX_JSON_BYTES`. `JSON.build(io,
+      # indent)` is the same stdlib entry point the one-argument form wraps, so the text is
+      # byte-identical.
+      sink = IO::Memory.new
+      reader = Reader.new(data, max_depth, sink)
+      JSON.build(sink, indent) { |j| reader.item(j, 0) }
       reader.note_trailing
-      BinaryDocument::Rendering.new(text, reader.complete?, reader.pos, reader.stop)
-    rescue JSON::Error
+      BinaryDocument::Rendering.new(sink.to_s, reader.complete?, reader.pos, reader.stop)
+    rescue JSON::Error | IO::Error
       internal_rendering
     end
 
@@ -73,6 +95,11 @@ module Gori
       # number. The contract here ("never raises") is stronger than the belief
       # that the parser is right about all three, and the cost of being wrong is
       # an unhandled exception thrown while rendering someone's captured body.
+      #
+      # `IO::Error` is caught for that reason and not for a reachable case:
+      # `String::Builder` answers a document past 2 GiB with `IO::EOFError`, which
+      # is how the unbounded-output defect surfaced, and `MAX_JSON_BYTES` is what
+      # actually stops it. The belief that the ceiling holds is not the contract.
       BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal")
     end
 
@@ -87,10 +114,30 @@ module Gori
     private class Reader
       getter? complete : Bool = true
 
-      def initialize(@data : Bytes, @max_depth : Int32)
+      def initialize(@data : Bytes, @max_depth : Int32, @sink : IO::Memory)
         @pos = 0
         @items = 0
+        @spent = 0_i64
         @stop = nil.as(String?)
+      end
+
+      # Output bytes this document has cost so far: what is in the buffer being written now,
+      # plus every scratch key render that has already finished. The finished ones are counted
+      # even where their text was thrown away, because the ceiling bounds the WORK — a key
+      # rendered and discarded was still built. See `MAX_JSON_BYTES` and `key_name`.
+      #
+      # `Int64`, and not because a legal document reaches it: the sum this replaced was an
+      # `Int32` and the very shape the ceiling exists for overflowed it before the ceiling
+      # could be consulted, turning one unhandled exception into another.
+      private def produced : Int64
+        @spent + @sink.bytesize
+      end
+
+      # `partial`'s bookkeeping without the builder — for a stop discovered where there is no
+      # value position to write into (a key render that has already finished).
+      private def stop_at(reason : String) : Nil
+        @complete = false
+        @stop ||= reason
       end
 
       # One item's head: major type, additional info, and the argument the info
@@ -126,6 +173,9 @@ module Gori
         return partial(j, "max_depth") if depth > @max_depth
         @items += 1
         return partial(j, "max_items") if @items > MAX_ITEMS
+        # Entering: what has already been produced, including finished key renders. `key_name`
+        # tests again on the way OUT, and that one is the load-bearing half — see there.
+        return partial(j, "max_bytes") if produced >= MAX_JSON_BYTES
 
         head, why = read_head
         return partial(j, why) unless head
@@ -410,9 +460,28 @@ module Gori
         end
         @pos = save
         ok = true
-        # A separate builder, so a key that fails writes nothing into the map.
-        text = JSON.build { |kj| ok = item(kj, depth) }
-        {text, false, ok}
+        # A separate builder, so a key that fails writes nothing into the map. `@sink` follows
+        # it for the duration: this scratch render is where the output blow-up happens (a key
+        # that is itself a map renders a whole subtree, and the level above nests THAT inside a
+        # JSON string), so it has to be inside `MAX_JSON_BYTES` while it runs and not only
+        # after it returns. Whatever it produced is charged either way — a key rendered is a
+        # key built, kept or not.
+        scratch = IO::Memory.new
+        outer, @sink = @sink, scratch
+        JSON.build(scratch) { |kj| ok = item(kj, depth) }
+        @sink = outer
+        @spent += scratch.bytesize
+        # ON THE WAY OUT, and that is the whole guard. A map keyed on a map grows as the stack
+        # UNWINDS — every level nests the level below's finished text inside a JSON string —
+        # so the check `item` makes on the way IN sees an empty budget at every level and
+        # passes all of them. Testing here caps one level at roughly twice the one under it,
+        # so the first level to cross the ceiling is the last one built: a `false` `ok` stops
+        # `pair`, which stops `map_item`, and every level above it renders the marker instead.
+        if produced >= MAX_JSON_BYTES
+          stop_at("max_bytes")
+          return {"{\"$partial\":\"max_bytes\"}", false, false}
+        end
+        {scratch.to_s, false, ok}
       end
 
       # --- tags ---------------------------------------------------------------

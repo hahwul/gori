@@ -179,6 +179,41 @@ describe Gori::Msgpack do
       JSON.parse(json)
     end
 
+    # The depth and item ceilings bound the INPUT walk. Neither bounds the OUTPUT, and a map
+    # keyed on a MAP is where the two part company: `map` renders a non-string key as its own
+    # JSON text and uses that text as the member name, so every level nests the level below
+    # inside a JSON string and the escaping roughly doubles it. `81` is one byte per level.
+    it "bounds the OUTPUT of a map keyed on a map" do
+      # `81`*29, a nil key at the bottom, then a nil value per level — every map closed, so the
+      # parse has no other reason to stop. 59 bytes raised `IO::EOFError` out of
+      # `String::Builder` before the ceiling, from a body a target can put on the wire and an
+      # operator only has to LOOK at (`Pretty#try_binary_doc`, `gori run show --format json`).
+      io = IO::Memory.new
+      29.times { io.write_byte(0x81_u8) }
+      30.times { io.write_byte(0xc0_u8) }
+      json, ok = Gori::Msgpack.to_json(io.to_slice)
+      ok.should be_false
+      json.bytesize.should be < Gori::Msgpack::MAX_JSON_BYTES
+      json.should contain("$partial")
+      JSON.parse(json) # and it is still a document
+    end
+
+    it "leaves an ordinary document untouched" do
+      # The ceiling is a ceiling, not a rewrite: a body nowhere near it renders as it did.
+      json_of(mp(0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0x92, 0x02, 0x03)).should eq(%({"a":1,"b":[2,3]}))
+    end
+
+    it "names the stop when a map gives up on its KEY" do
+      # `81`*40 — the depth ceiling trips inside the key render, which writes into a scratch
+      # builder, so nothing had been written into the map itself and it closed as a bare `{}`:
+      # "an empty map", with `complete` false and no reason anywhere in the text. The CBOR
+      # sibling has always named it.
+      json, ok = Gori::Msgpack.to_json(Bytes.new(40) { 0x81_u8 })
+      ok.should be_false
+      json.should contain("$partial")
+      JSON.parse(json)
+    end
+
     it "does not allocate on a length no body could satisfy" do
       # bin32 claiming 4 GiB with four bytes behind it, and array32 / map32 claiming 4 G
       # elements. A count that cannot be an Int32 never reaches a loop or an allocation.

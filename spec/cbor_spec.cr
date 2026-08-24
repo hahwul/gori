@@ -491,4 +491,43 @@ describe Gori::Cbor do
       json.should contain("max_items")
     end
   end
+
+  # The depth and item ceilings bound the INPUT walk. Neither bounds the OUTPUT, and a map
+  # keyed on a MAP is where the two part company: `map_item` renders a non-string key as its
+  # own JSON text and uses that text as the member name, so every level nests the level below
+  # inside a JSON string and the escaping roughly doubles it. `a1` is one byte per level.
+  describe "the output bound" do
+    it "bounds a map keyed on a map" do
+      # 28 bytes. Before the ceiling this reached 2^32 and raised `IO::EOFError` out of
+      # `String::Builder`, ten seconds in — from a body a target can put on the wire and an
+      # operator only has to LOOK at (`Pretty#try_binary_doc`, `gori run show --format json`).
+      json, ok = CB.to_json(Bytes.new(28) { 0xa1_u8 })
+      ok.should be_false
+      json.bytesize.should be < Gori::Cbor::MAX_JSON_BYTES
+      json.should contain("max_bytes")
+    end
+
+    it "bounds one whose keys all terminate, not only a truncated one" do
+      # `a1`*22 then `f6`*23 — every map closed, nothing running out of input, so the parse
+      # has no other reason to stop. 45 bytes rendered 16.7 MB before the ceiling.
+      io = IO::Memory.new
+      22.times { io.write_byte(0xa1_u8) }
+      23.times { io.write_byte(0xf6_u8) }
+      json, ok = CB.to_json(io.to_slice)
+      ok.should be_false
+      json.bytesize.should be < Gori::Cbor::MAX_JSON_BYTES
+      json.should contain("max_bytes")
+    end
+
+    it "bounds it at the depth ceiling too, where the walk itself is legal" do
+      # Every level is inside MAX_DEPTH, so nothing about the INPUT is out of bounds.
+      json, _ = CB.to_json(Bytes.new(5_000) { 0xa1_u8 })
+      json.bytesize.should be < Gori::Cbor::MAX_JSON_BYTES
+    end
+
+    it "leaves an ordinary document untouched" do
+      # The ceiling is a ceiling, not a rewrite: a body nowhere near it renders as it did.
+      whole("a26161016162820203").should eq(%({"a":1,"b":[2,3]}))
+    end
+  end
 end
