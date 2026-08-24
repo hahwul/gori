@@ -322,7 +322,7 @@ module Gori::Tui
       when key.right?, key.lower_l?       then @history.detail_move(0, 1)
       when key.up?, key.lower_k?          then detail_body_up
       when key.down?, key.lower_j?        then @history.scroll_detail(1)
-      when ev.char == 'y' || key.lower_y? then detail_copy_selection
+      when ev.char == 'y' || key.lower_y? then detail_copy
         # Home/End are the LINE's edges here, like every other multi-line pane. The MODIFIED
         # form is deliberately not claimed: ⌃/⌥+Home/End falls through to the shell's
         # ±JUMP_ROWS and keeps the jump-to-top/bottom this pane has always had (and which
@@ -746,14 +746,22 @@ module Gori::Tui
       @history.detail_at_top?
     end
 
-    def detail_copy_selection : Nil
-      text = @history.detail_copy_text
+    # `y` in the detail: the selection when one is held, else the WHOLE pane. The fallback used
+    # to be the caret's own LINE, which on a request/response dump is the one thing nobody
+    # reaches for `y` to get — and it made this pane the last holdout against the rule every
+    # other read pane follows (`Runner#read_copy`: selection if active, else the whole pane).
+    # `detail_selection_text` keeps the line fallback: "Send selection to" is gated on a live
+    # selection, so its payload is never the fallback anyway.
+    def detail_copy : Nil
+      sel = @history.detail_selection?
+      text = sel ? @history.detail_copy_text : @history.detail_copy_all
       if text.empty?
         @host.status("nothing to copy")
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      note = Clipboard.note(written, text)
+      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
     end
 
     # The detail pane's selection (or current line) text without copying — "Send selection to".
