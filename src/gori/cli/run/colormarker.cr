@@ -514,9 +514,27 @@ module Gori
         abort "gori run colormarker move: pass --up or --down" if dir == 0
 
         if scope.global?
-          abort "gori run colormarker move: no global rule with id #{id}" unless Settings.colormarker_rules.any? { |r| r.id == id }
-          unless Settings.move_colormarker_rule(id, dir)
+          # The edge is established HERE, before the write, exactly as the project branch below
+          # does it and as MCP's `move_color_rule` does. `Settings.move_colormarker_rule` answers
+          # false for an edge AND for a refused save, so reporting one message for both told an
+          # operator whose settings.json was read-only that the rule was already at the top —
+          # and the same command would keep saying so however many times they retried.
+          #
+          # Against the list on DISK, because that is the list the mutator will act on: it opens
+          # with its own `reload_colormarker_from_disk` and re-derives the index there, so a
+          # check made against this process's start-up copy can pass while the write refuses for
+          # not-found or edge — handing back "settings not writable" for a rule that is simply
+          # at the top. That is the same wrong-message class this branch exists to remove.
+          Settings.reload_colormarker_from_disk
+          globals = Settings.colormarker_rules
+          i = globals.index { |r| r.id == id }
+          abort "gori run colormarker move: no global rule with id #{id}" unless i
+          j = i + dir
+          if j < 0 || j >= globals.size
             abort "gori run colormarker move: rule ##{id} is already at the #{dir < 0 ? "top" : "bottom"} of the global block"
+          end
+          unless Settings.move_colormarker_rule(id, dir)
+            abort "gori run colormarker move: settings not writable — the precedence order is unchanged"
           end
           puts "Global colour rule ##{id} moved #{dir < 0 ? "up" : "down"}."
           return

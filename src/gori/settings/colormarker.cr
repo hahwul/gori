@@ -313,8 +313,19 @@ module Gori::Settings
     return "a colour named “#{n}” already exists" if colormarker_colors.any? { |c| c.name == n }
     h = normalize_hex(hex)
     return "invalid hex — use #rrggbb" unless h
+    # Snapshot + restore, exactly as `add_colormarker_rule` does and for the same reason: this
+    # answer is a COMMIT answer, so memory has to agree with it. Left mutated, a refused save
+    # put the colour in the picker of every project, primed `Theme.set_custom_marks` with a hue
+    # nothing on disk defines, and let the next unrelated `save` write it out — while the
+    # operator had just been told it was not written. It also poisoned the RETRY: the failed
+    # save leaves the file's bytes unchanged, so `reload_colormarker_from_disk` short-circuits
+    # on its own cache (see `Settings.reload_section`) and the second attempt came back
+    # "a colour named “…” already exists" for a colour that had never been created.
+    prev = colormarker_colors
     self.colormarker_colors = colormarker_colors + [ColormarkerColor.new(n, h)]
-    save ? nil : "settings not writable"
+    return nil if save
+    self.colormarker_colors = prev
+    "settings not writable"
   end
 
   # Edit a custom colour in place, keyed by its OLD name (which may be unchanged). A rename to a
@@ -330,8 +341,13 @@ module Gori::Settings
     return "a colour named “#{n}” already exists" if n != old && colormarker_colors.any? { |c| c.name == n }
     h = normalize_hex(hex)
     return "invalid hex — use #rrggbb" unless h
+    # See `add_colormarker_color`. A refused save here repainted every rule naming the colour
+    # with a hue no file holds, until the next restart put the old one back.
+    prev = colormarker_colors
     self.colormarker_colors = colormarker_colors.map { |c| c.name == old ? ColormarkerColor.new(n, h) : c }
-    save ? nil : "settings not writable"
+    return nil if save
+    self.colormarker_colors = prev
+    "settings not writable"
   end
 
   # Delete a custom colour by name. Returns whether the write committed; a rule that still names
@@ -342,8 +358,15 @@ module Gori::Settings
     n = name.strip.downcase
     kept = colormarker_colors.reject { |c| c.name == n }
     return false if kept.size == colormarker_colors.size
+    # See `add_colormarker_color`; this one failed the OTHER way round. A dropped-then-unsaved
+    # colour is gone from the picker and from `Theme.set_custom_marks`, so every rule naming it
+    # falls back to a default hue — while the caller reports "NOT deleted, it is still there",
+    # and the next restart proves the caller right.
+    prev = colormarker_colors
     self.colormarker_colors = kept
-    save
+    return true if save
+    self.colormarker_colors = prev
+    false
   end
 
   # The name → hex map the render-side resolver consults (`Tui::Theme.set_custom_marks`). Built

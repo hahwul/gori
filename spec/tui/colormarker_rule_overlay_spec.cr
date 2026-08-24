@@ -128,6 +128,23 @@ describe ColormarkerRuleOverlay do
     cand.enabled?.should be_true # the preview asks "what WOULD this paint"
   end
 
+  # The preview looks the candidate up by `{id, scope}` to find which rules resolve AHEAD of it,
+  # and the two stores number independently — both count from 1 — so a project rule #1 whose
+  # scope cycler had been flipped to global was looked up as GLOBAL #1 and previewed against the
+  # wrong slice of the list. The rule is still where it was opened until the commit re-homes it.
+  it "keeps the OPENED scope as the candidate's identity when the cycler moves" do
+    ov = ColormarkerRuleOverlay.new(match_filter: "host:a.test", scope: "project",
+      edit_id: 1_i64, edit_scope: Gori::Store::RuleScope::Project)
+    ov.set_selected(ColormarkerRuleOverlay::ROW_SCOPE)
+    ov.adjust(1)
+    ov.scope.global?.should be_true                 # the cycler moved — that IS the re-home request
+    ov.candidate_rule.scope.global?.should be_false # …but the rule is still where it lives
+
+    # Adding has no opened scope, so the cycler's value is all there is.
+    add = ColormarkerRuleOverlay.new(match_filter: "host:a.test", scope: "global")
+    add.candidate_rule.scope.global?.should be_true
+  end
+
   it "asks for a preview only when a match-relevant field changes" do
     ov = ColormarkerRuleOverlay.new(match_filter: "host:a")
     asked = 0

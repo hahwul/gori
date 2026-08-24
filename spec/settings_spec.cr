@@ -40,6 +40,12 @@ private def with_refused_save(&)
   prev_rules = Gori::Settings.rewriter_rules
   prev_next = Gori::Settings.rewriter_next_rule_id
   prev_theme = Gori::Settings.theme
+  # Neither load below touches the `colormarker` section — the entry file is not an object, so
+  # `load` returns early, and the exit file has no `colormarker` key, which deliberately KEEPS
+  # the in-memory value (see `parse_colormarker_colors`). So the custom-colour registry survives
+  # this helper unless it is captured here, and the examples that mutate it would otherwise hand
+  # their leftovers to every later example in the run.
+  prev_colors = Gori::Settings.colormarker_colors
   begin
     ENV["GORI_HOME"] = dir
     Gori::Settings.warning_io = nil
@@ -55,6 +61,7 @@ private def with_refused_save(&)
     Gori::Settings.load
     Gori::Settings.rewriter_rules = prev_rules
     Gori::Settings.rewriter_next_rule_id = prev_next
+    Gori::Settings.colormarker_colors = prev_colors
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     FileUtils.rm_rf(dir)
     # That clearing load also reset every other section to a factory default; put back the
@@ -1321,6 +1328,53 @@ describe Gori::Settings do
 
         Gori::Settings.move_rewriter_rule(7_i64, 1).should be_false
         Gori::Settings.rewriter_rules.map(&.id).should eq([7_i64, 9_i64])
+      end
+    end
+  end
+
+  # The same negative twin, for the GLOBAL custom-colour palette. These three shared the
+  # rewriter defect above for longer, because they never got the snapshot: a refused save left
+  # `colormarker_colors` mutated, which puts the colour in every project's picker, primes
+  # `Theme.set_custom_marks` with a hue no file holds, and hands the next unrelated `save` a
+  # change the operator was told did not happen.
+  describe "custom colour CRUD on a refused save" do
+    it "does not leave the colour in the registry when add reports a refusal" do
+      with_refused_save do
+        Gori::Settings.colormarker_colors = [] of Gori::Settings::ColormarkerColor
+
+        Gori::Settings.add_colormarker_color("coral", "#ff6b6b").should eq("settings not writable")
+        Gori::Settings.colormarker_colors.should be_empty
+      end
+    end
+
+    # The retry is the observable half. A failed save leaves the file's BYTES unchanged, so
+    # `reload_colormarker_from_disk` short-circuits on its own cache and cannot sweep a phantom
+    # out of memory — the second attempt came back "already exists" for a colour that had never
+    # been created, and the operator had no way to get past it short of restarting.
+    it "lets the operator retry the same colour after a refused add" do
+      with_refused_save do
+        Gori::Settings.colormarker_colors = [] of Gori::Settings::ColormarkerColor
+
+        Gori::Settings.add_colormarker_color("coral", "#ff6b6b").should eq("settings not writable")
+        Gori::Settings.add_colormarker_color("coral", "#ff6b6b").should eq("settings not writable")
+      end
+    end
+
+    it "keeps the colour in the registry when delete reports false" do
+      with_refused_save do
+        Gori::Settings.colormarker_colors = [Gori::Settings::ColormarkerColor.new("coral", "#ff6b6b")]
+
+        Gori::Settings.delete_colormarker_color("coral").should be_false
+        Gori::Settings.colormarker_colors.map(&.name).should eq(["coral"])
+      end
+    end
+
+    it "keeps the old name and hex when update reports a refusal" do
+      with_refused_save do
+        Gori::Settings.colormarker_colors = [Gori::Settings::ColormarkerColor.new("coral", "#ff6b6b")]
+
+        Gori::Settings.update_colormarker_color("coral", "salmon", "#00ff00").should eq("settings not writable")
+        Gori::Settings.colormarker_color_map.should eq({"coral" => "#ff6b6b"})
       end
     end
   end

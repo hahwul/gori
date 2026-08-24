@@ -151,8 +151,17 @@ module Gori::Tui
 
     # A live rule for the preview scan. `enabled` is true regardless of anything: the question
     # the preview answers is "what WOULD this paint".
+    #
+    # The scope is the one the rule was OPENED at, not the cycler's current value, because the
+    # preview uses `{id, scope}` as an IDENTITY — it looks the rule up in the live list to find
+    # which rules resolve ahead of it. The rule is still where it was opened until the commit
+    # re-homes it, and the pair is load-bearing: the two stores number independently and both
+    # count from 1, so cycling scope on project rule #1 made the lookup find GLOBAL rule #1 and
+    # count the wrong rules as ahead of it. Adding a rule has no `edit_scope`, and there the
+    # cycler's value is all there is (nothing to find, so `ahead` is the whole list either way).
     def candidate_rule : Store::ColorRule
-      Store::ColorRule.new(@edit_id || 0_i64, true, condition, color, style, name, scope: scope)
+      Store::ColorRule.new(@edit_id || 0_i64, true, condition, color, style, name,
+        scope: @edit_scope || scope)
     end
 
     # No `skip_row?` — every row applies to every colour rule, so this is a plain clamp rather

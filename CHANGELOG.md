@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Colormarker: a custom colour whose write did not reach disk stayed live in memory anyway — offered in every project's picker, painting rows, blocking a retry as a duplicate and landing on disk at the next unrelated save, all under a message saying it was not written; a refused delete failed the same way in reverse. Promoting a rule from the EDIT card now moves the highlight with it and says so, and `gori run colormarker move --scope=global` distinguishes a refused write from a rule already at the top of its block (#802).
+
 - `y` with nothing selected copies the WHOLE pane, not the caret's own line: the History detail's Request/Response, the Project description, an Issue's notes and the JWT INPUT pane in READ all fell back to one line, so each disagreed with the `^Y` beside it and with every other read pane. In the OAST callback detail the same key was dead altogether, along with the `x` beside it in the footer — that pane swallowed every key it did not handle itself.
 
 - A `--wsdl` import source: a WSDL 1.1 service description becomes one SOAP request template per operation on every SOAP port it publishes, from the palette (`Import: WSDL`), `gori run import --wsdl PATH`, and the MCP `import_flows` tool. SOAP 1.1 and 1.2 bindings both, with bodies built from the XSD inline in the document; external schemas are never fetched and a `<!DOCTYPE>` is refused.

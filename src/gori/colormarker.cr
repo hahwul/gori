@@ -204,8 +204,14 @@ module Gori
     # `proto` is accepted so History can pass the `Proto.classify` it already computed for its
     # PROTO column. The no-argument form classifies for itself, for callers off the render path.
     def match(row : Store::FlowRow, proto : Proto::Kind) : Store::ColorRule?
-      compiled = @mutex.synchronize { @active ? @compiled : nil }
-      return nil unless compiled
+      # The revision comes out of the SAME critical section as the list it stamps. Read after
+      # it (which is what this did) a `refresh` landing in between hands back a revision that
+      # belongs to a list this call is not walking, and the "did a rule edit land while the
+      # query was in flight" guard in `store_tier_hit?` then passes for answers whose `i` names
+      # a different rule — filing them under the new list's indices. See `prefetch`.
+      snap = @mutex.synchronize { @active ? {@compiled, @revision} : nil }
+      return nil unless snap
+      compiled, rev = snap
       subject = InterceptFilter::Subject.new(
         method: row.method, host: row.host, target: row.target,
         scheme: row.scheme, status: row.status, proto: proto)
@@ -213,7 +219,7 @@ module Gori
         if f = c.filter
           return c.rule if f.matches?(subject)
         elsif sql = c.sql
-          return c.rule if store_tier_hit?(i, row.id, sql)
+          return c.rule if store_tier_hit?(i, row.id, sql, rev)
         end
       end
       nil
@@ -231,9 +237,11 @@ module Gori
     # A no-op, with no lock taken and no store touched, unless a store-tier rule exists.
     def prefetch(rows : Array(Store::FlowRow)) : Nil
       return if rows.empty? || !needs_store?
-      compiled = @mutex.synchronize { @active ? @compiled : nil }
-      return unless compiled
-      rev = @revision
+      # Both under one lock — see `match`: a `rev` read after the snapshot can already belong
+      # to the list that REPLACED it, which is exactly the case the check below exists to catch.
+      snap = @mutex.synchronize { @active ? {@compiled, @revision} : nil }
+      return unless snap
+      compiled, rev = snap
       compiled.each_with_index do |c, i|
         sql = c.sql
         next unless sql
@@ -273,12 +281,13 @@ module Gori
 
     # One store-tier rule's answer for one row, memoised. The fallback path for a row `prefetch`
     # did not cover; the cost is one indexed single-id query, paid once per {rule, row}.
-    private def store_tier_hit?(index : Int32, id : Int64, filter : QL::Filter) : Bool
+    # `rev` is the revision the CALLER's compiled list carries, taken in the same critical
+    # section as that list — never re-read here, where it could already name a newer one.
+    private def store_tier_hit?(index : Int32, id : Int64, filter : QL::Filter, rev : UInt64) : Bool
       # `unless .nil?`, not a truthiness test: a cached FALSE is a real answer, and `if cached`
       # would re-query for every row a rule does not paint — i.e. for almost every row.
       cached = @cache_mutex.synchronize { @sql_hits[id]?.try(&.[index]?) }
       return cached unless cached.nil?
-      rev = @revision
       hits = @store.ids_matching(filter, [id])
       return false unless hits # failed, not "no match" — do not cache it (see `Store#ids_matching`)
       hit = hits.includes?(id)
