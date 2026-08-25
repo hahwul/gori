@@ -616,6 +616,74 @@ describe "gori run show --format curl" do
       nil, nil, nil)
     Gori::CLI::Run.curl_command_for_spec(detail).not_nil!.should contain("curl 'http://acme.test:8080/a'")
   end
+
+  # A stored request body is WIRE bytes. `--format json` reports this flow's body as
+  # `{"text":"hello","note":"de-chunked"}` and the SARIF export as `"hello"`; the curl command
+  # used to hand over the chunk-framed bytes UNDER the capture's own `Transfer-Encoding: chunked`,
+  # which curl frames a second time — so the one artifact of the three that can be RUN was the one
+  # sending something else (14 bytes decoded at the origin, not 5). Fixed in the shared serializer,
+  # so the TUI's copy menu got it too.
+  it "hands over the de-chunked entity, not the chunk framing curl would re-apply" do
+    head = "POST /a HTTP/1.1\r\nHost: h.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+    row = Gori::Store::FlowRow.new(
+      id: 11_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "h.test",
+      port: 443, target: "/a", status: 200, size: 0_i64,
+      state: Gori::Store::FlowState::Complete)
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head.to_slice,
+      "5\r\nhello\r\n0\r\n\r\n".to_slice, nil, nil)
+    cmd = Gori::CLI::Run.curl_command_for_spec(detail).not_nil!
+    cmd.should contain("--data-raw 'hello'")
+    cmd.should_not contain("Transfer-Encoding")
+    cmd.should contain("# body de-chunked")
+  end
+
+  # `resolve_url` falls back to the flow's own target base, so a flow with NO captured head came
+  # out as `curl 'https://h.test'` — a request nobody made, handed over as if it were the capture.
+  # nil here is what makes `show_curl` say the head is empty instead.
+  it "has no command for a flow whose captured head is empty" do
+    row = Gori::Store::FlowRow.new(
+      id: 12_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h.test",
+      port: 443, target: "/a", status: nil, size: 0_i64,
+      state: Gori::Store::FlowState::Error)
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", Bytes.empty, nil, nil, nil)
+    Gori::CLI::Run.curl_command_for_spec(detail).should be_nil
+  end
+
+  # curl speaks the upgrade handshake and nothing after it, so for a socket the command is a
+  # faithful reproduction of a request that is not what the operator was looking at — the frames
+  # are the capture. `show_har` refuses a transcript-less socket BY NAME and the TUI's copy menu
+  # has a separate wscat row; this format printed the handshake with a silent STDERR.
+  describe "a WebSocket flow" do
+    ws_head = "GET /s HTTP/1.1\r\nHost: h.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    ws_row = Gori::Store::FlowRow.new(
+      id: 13_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h.test",
+      port: 443, target: "/s", status: 101, size: 0_i64,
+      state: Gori::Store::FlowState::Complete)
+    ws_detail = Gori::Store::FlowDetail.new(ws_row, "HTTP/1.1", ws_head.to_slice, nil,
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n".to_slice, nil)
+    msg = Gori::Store::WsMessage.new(1_i64, 13_i64, nil, 0_i64, "out", 1, "hi".to_slice)
+
+    it "names what the handshake command leaves out, and how many frames that is" do
+      note = Gori::CLI::Run.socket_curl_note(ws_detail, [msg]).not_nil!
+      note.should contain("#13 is a WebSocket flow")
+      note.should contain("UPGRADE HANDSHAKE only")
+      note.should contain("1 captured message is not in it")
+      note.should contain("wscat")
+    end
+
+    it "says so even with an empty transcript, and stays silent on a plain HTTP flow" do
+      Gori::CLI::Run.socket_curl_note(ws_detail, [] of Gori::Store::WsMessage)
+        .not_nil!.should contain("no messages were captured")
+      http = Gori::Store::FlowDetail.new(
+        Gori::Store::FlowRow.new(id: 14_i64, created_at: 0_i64, scheme: "https", method: "GET",
+          host: "h.test", port: 443, target: "/a", status: 200, size: 0_i64,
+          state: Gori::Store::FlowState::Complete),
+        "HTTP/1.1", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, nil,
+        "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil)
+      Gori::CLI::Run.socket_curl_note(http, [] of Gori::Store::WsMessage).should be_nil
+    end
+  end
 end
 
 describe "gori run history delete — the selector" do

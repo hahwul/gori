@@ -50,7 +50,16 @@ module Gori
     #
     # A no-op with no `$` in any value, with no binding table, and for a passthrough identity,
     # so the built-in as-captured/anonymous pair costs nothing.
+    # `report_unbound_overlay` runs FIRST, and it is the half this method was still missing.
+    # Resolving is only half of "the identity carries its own session": with nothing bound —
+    # which is EVERY headless run that has not replayed a login first, because a binding value
+    # is memory-only — the `$SESSION` goes out literal and the run reports `enforced` on a
+    # resource that is wide open. The failure this method's doc names is the one it could not
+    # SEE, so the report is where the resolution happens. Not a refusal: an Authorize run that
+    # dies on a half-configured identity is worse than one that says which identity went out
+    # unauthenticated (`Env.take_unbound_overlay` is what a run summary drains).
     def self.resolve(id : Identity) : Identity
+      Env.report_unbound_overlay(id)
       id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true) }
     end
 

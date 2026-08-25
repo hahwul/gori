@@ -964,6 +964,36 @@ module Gori
       line.empty? || line == "\r"
     end
 
+    # Whether a `head_lines` entry is an obs-fold CONTINUATION — a line whose first byte is SP
+    # or HTAB. RFC 9112 §5.2 makes it part of the PREVIOUS field's value, not a header of its
+    # own, and that is the SECOND line view one message carries: `head_lines` sees N lines where
+    # the field parser sees fewer fields. The two ops below used to read every line as a header,
+    # which broke both ways at once —
+    #
+    #   `HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self';\r\n script-src 'none'\r\n`
+    #     remove_header "Content-Security-Policy"  left ` script-src 'none'` behind as the FIRST
+    #     header line, i.e. gori manufactured a malformed head out of a well-formed one; the same
+    #     orphan under a `set_header Content-Length: 3` unfolds to `3 5` in a lenient recipient.
+    #
+    #   `HTTP/1.1 200 OK\r\nX-Note: hello\r\n X-Inner: folded\r\n`
+    #     set_header "X-Inner"  matched the CONTINUATION (`ln[0, ci].strip` erases the leading
+    #     SP), so `found` went true, the operator's header was never added to the wire at all,
+    #     and `X-Note`'s value was rewritten in its place. Silent on both counts.
+    #
+    # Reachable on the RESPONSE leg: the request leg raises on `Http1.obfuscated_header?` in
+    # `Codec::Body.request_framing` and re-pins CL/TE in `restore_framing_headers` afterwards,
+    # while `apply_response_rewrite` has no counterpart and `Http1.framing_ambiguous?` only ever
+    # compares the FRAMING headers. `Env.fold_or_blank?` refuses a folded Content-Length edit for
+    # exactly this reason; this is the same rule, kept by the ops rather than by a refusal.
+    #
+    # First BYTE, not `starts_with?(' ')`: a header line is captured bytes and can be invalid
+    # UTF-8 (obs-text in the value it continues), where char iteration answers about U+FFFD.
+    private def fold_line?(line : String) : Bool
+      return false if line.empty?
+      b = line.to_slice[0]
+      b == 0x20_u8 || b == 0x09_u8
+    end
+
     # Where the blank line that TERMINATES the head sits in `head_lines`, or nil when the head
     # carries none — the preview path splits the separator off (`split_message`) and a
     # hand-authored sample may simply not have one. Index 0 is the start line and the trailing
@@ -991,32 +1021,54 @@ module Gori
     # Replace the value of every header named `name` (case-insensitive, original casing and
     # the line's own terminator kept); if none exists, append it (upsert). The start line and
     # blank lines are left untouched.
+    #
+    # An obs-fold continuation of the field being set is part of the VALUE being replaced, so it
+    # goes with it (`fold_line?`). One of any other field is carried through untouched, and is
+    # never tested for the name.
     private def head_set_header(head : String, name : String, value : String) : String
       target = name.downcase
       found = false
-      out = head_lines(head).map_with_index do |ln, i|
-        next ln if i == 0 || blank_line?(ln)
-        if (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
+      in_target = false
+      out = [] of String
+      head_lines(head).each_with_index do |ln, i|
+        if i == 0 || blank_line?(ln)
+          in_target = false
+          out << ln
+        elsif fold_line?(ln)
+          # Part of the field ABOVE, whatever it is: dropped with a replaced value, kept with
+          # every other one. Never a name.
+          out << ln unless in_target
+        elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
           found = true
-          ln.ends_with?('\r') ? "#{ln[0, ci]}: #{value}\r" : "#{ln[0, ci]}: #{value}"
+          in_target = true
+          out << (ln.ends_with?('\r') ? "#{ln[0, ci]}: #{value}\r" : "#{ln[0, ci]}: #{value}")
         else
-          ln
+          in_target = false
+          out << ln
         end
       end
       found ? out.join('\n') : head_add_header(head, name, value)
     end
 
-    # Drop every header line named `name` (case-insensitive). The start line (index 0)
-    # and any blank lines are always kept, so the head stays well-formed.
+    # Drop every header line named `name` (case-insensitive), and with it every obs-fold
+    # continuation of that field — a continuation left behind becomes a header line of its own
+    # in the head gori writes back, which is a malformed head manufactured out of a valid one.
+    # The start line (index 0) and any blank lines are always kept, so the head stays
+    # well-formed.
     private def head_remove_header(head : String, name : String) : String
       target = name.downcase
       kept = [] of String
+      dropping = false
       head_lines(head).each_with_index do |ln, i|
         if i == 0 || blank_line?(ln)
+          dropping = false
           kept << ln
+        elsif fold_line?(ln)
+          kept << ln unless dropping # continues the field above, so it shares its fate
         elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
-          # drop this header
+          dropping = true # drop this header
         else
+          dropping = false
           kept << ln
         end
       end

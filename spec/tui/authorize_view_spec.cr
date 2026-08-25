@@ -574,3 +574,24 @@ describe AuthorizeView do
     end
   end
 end
+
+# A Target with NO non-baseline trial at all: every row IS the baseline, so nothing was
+# compared. Two identities both carrying `baseline:true` produced exactly this, and the three
+# surfaces gave it three different words — `gori run authorize` `[x] error`, the tab `review`,
+# MCP `enforced`. The split is exclusive (a request either compared something or it did not),
+# so it is decided by the SUM of the comparisons, and `review` — "there is something here to
+# judge" — is not the word for a row with nothing in it.
+describe AuthorizeView do
+  it "reports a request that compared nothing as error, not review" do
+    v = AuthorizeView.new
+    a = v.add(flow("GET", "/admin"))
+    only_baseline = Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/admin", [
+      trial("as-captured", true, 200, Gori::Authorize::Verdict::Baseline),
+    ])
+    only_baseline.uncompared?.should be_true
+    v.apply_result(a, only_baseline)
+    v.entry_by_id(a).not_nil!.verdict.should eq(:error)
+    v.bypass_total.should eq(0)
+    render(v)
+  end
+end

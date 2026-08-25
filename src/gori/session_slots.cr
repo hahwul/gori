@@ -97,6 +97,13 @@ module Gori
     def save(list : Array(SessionSlot)) : Bool
       blob = SessionSlot.serialize(list)
       return false unless @store.set_setting(KEY, blob)
+      install(list, blob)
+      true
+    end
+
+    # Publish a list this process has just committed. Split out of `save` so the
+    # TRANSACTIONAL edits below reach the same in-memory bookkeeping by the same door.
+    private def install(list : Array(SessionSlot), blob : String) : Nil
       @mutex.synchronize do
         @slots = list
         # This process's own write is not an external edit: remembering the bytes it committed
@@ -113,6 +120,36 @@ module Gori
       # every element, so a baseline move must prune nothing.
       @on_slots_changed.try &.call(list.map(&.name))
       Env.bump_highlight_rev
+    end
+
+    # Read-modify-write the persisted list with the READ taken INSIDE the store's write
+    # transaction (`Store#mutate_setting`).
+    #
+    # The list is ONE settings row holding the whole document, so `save` is an unconditional
+    # overwrite of everything. Every ONE-slot edit below used to build its new list from
+    # `slots` — this process's snapshot — and hand it to `save`, which meant `session add
+    # user` in one process DELETED the `admin` a peer had added since we last read the row,
+    # and reported success. Same shape, same measurement, and the same fix as the note set.
+    #
+    # `block` is handed the list as the transaction reads it and returns the list to persist,
+    # or nil to write nothing (a deterministic "no such slot"). It runs on the WRITER FIBER —
+    # so it must not take `@mutex`, which is why every caller below is a pure function of its
+    # argument and `install` runs only after the commit.
+    private def mutate(&block : Array(SessionSlot) -> Array(SessionSlot)?) : Bool
+      applied = nil.as(Array(SessionSlot)?)
+      blob = nil.as(String?)
+      committed = @store.mutate_setting(KEY) do |raw|
+        list = block.call(SessionSlot.parse_json(raw))
+        if list
+          applied = list
+          blob = SessionSlot.serialize(list)
+        end
+      end
+      return false unless committed
+      list = applied
+      written = blob
+      return false unless list && written
+      install(list, written)
       true
     end
 
@@ -178,39 +215,55 @@ module Gori
     # reason (a deterministic refusal reported as retryable makes an agent loop).
 
     # Append a slot. The caller has already established the name is free.
+    #
+    # IDEMPOTENT ON THE NAME, and that is the one thing the transaction added: the list the
+    # write amends is the persisted one, so a peer may have created a slot under this name
+    # between the caller's `find` and this write. Two rows with one name would break the key
+    # this whole class is built on (`find`, `activate`, and `Bindings`' per-slot tables are
+    # all keyed by NAME and nothing else), so the caller's definition REPLACES that row in
+    # place instead. Only the peer's same-named slot is lost — never the rest of their list,
+    # which is what an unconditional `save` of our snapshot used to erase.
     def add(slot : SessionSlot) : Bool
-      save(with_one_baseline(slots << slot, slot.baseline? ? slot.name : nil))
+      mutate do |list|
+        idx = list.index(&.name.==(slot.name))
+        idx ? (list[idx] = slot) : (list << slot)
+        with_one_baseline(list, slot.baseline? ? slot.name : nil)
+      end
     end
 
     # Replace the slot named `name`, IN PLACE — the list order is the order the Authorize tab
     # replays in, so an edit must not move a row. A rename is an ordinary update: `replacement`
     # carries the new name and the caller has checked it is free.
     def update(name : String, replacement : SessionSlot) : Bool
-      list = slots
-      idx = list.index(&.name.==(name))
-      return false unless idx
-      list[idx] = replacement
-      # An update that TOOK the baseline clears it everywhere else; one that dropped it leaves
-      # the list without an anchor, so the first row inherits it (the card's own delete rule).
-      save(with_one_baseline(list, replacement.baseline? ? replacement.name : nil))
+      mutate do |list|
+        idx = list.index(&.name.==(name))
+        if idx
+          list[idx] = replacement
+          # An update that TOOK the baseline clears it everywhere else; one that dropped it
+          # leaves the list without an anchor, so the first row inherits it (the card's own
+          # delete rule).
+          with_one_baseline(list, replacement.baseline? ? replacement.name : nil)
+        end
+      end
     end
 
     # Drop the slot named `name`. Unlike the TUI card this does NOT refuse the last one: an
     # Authorize run needs two, but a project with zero slots is exactly the pre-slot project
     # every playbook assumes, and a CLI that cannot undo its own `add` is worse.
     def remove(name : String) : Bool
-      list = slots
-      before = list.size
-      list.reject!(&.name.==(name))
-      return false if list.size == before
-      save(with_one_baseline(list, nil))
+      mutate do |list|
+        before = list.size
+        list.reject!(&.name.==(name))
+        with_one_baseline(list, nil) unless list.size == before
+      end
     end
 
     # Move the baseline — the flag every other slot is judged against. Separate from `update`
     # because it is the one edit that changes TWO rows.
     def set_baseline(name : String) : Bool
-      return false unless find(name)
-      save(with_one_baseline(slots, name))
+      mutate do |list|
+        with_one_baseline(list, name) if list.any?(&.name.==(name))
+      end
     end
 
     # Exactly one baseline, enforced by construction rather than by every caller remembering

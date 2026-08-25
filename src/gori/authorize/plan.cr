@@ -47,6 +47,15 @@ module Gori::Authorize
       # The TUI's identity form has always refused it; this is the same rule for a `--identities`
       # file, an MCP `identities` array, and a hand-edited settings row. `detail` = the name.
       DuplicateIdentity
+      # Two or more identities in the resolved set carry `baseline: true`. Refused rather than
+      # run, and refused rather than silently resolved: the baseline is the ONE response every
+      # other row is judged against, and a set with two of them does not say which. Running it
+      # anyway compared nothing — both rows came back `baseline`, no row was left to compare,
+      # and the surfaces disagreed about the word for that (MCP said `enforced`). The MCP
+      # schema has always promised "Exactly one may carry baseline:true"; this enforces it for
+      # `--identities`, an MCP `identities` array and a hand-edited settings blob alike.
+      # `detail` = the names, in order.
+      MultipleBaselines
       # Flows were selected, and every one of them was skipped — unsafe method, incomplete,
       # answered by gori, no identity changes it, out of scope, duplicate. `detail` = the
       # per-reason tally; `PlanError#skipped` carries the full per-flow list, because "a run
@@ -166,9 +175,26 @@ module Gori::Authorize
     # the surface, never swallowed: "gori sent nothing" and "there was nothing there" are
     # different answers and an operator has to be able to tell them apart (P4).
     getter skipped : Array(Skipped)
+    # How many rows the QUERY contributed, before any skip decision — the only number
+    # `--limit` governs, and the only one that can say whether it bit. A surface warns when
+    # this reaches the cap: matching flows past it were never looked at.
+    #
+    # Explicit ids are NOT in it. Counting the whole selection (targets + skipped) meant
+    # `gori run authorize 2 3 4 -q 'path:/soft' -n 4` warned that a query which matched one row
+    # had been capped at four — the operator raises `--limit` and nothing changes, because the
+    # cap never applied to the ids they typed.
+    getter query_rows : Int32
 
     def initialize(@engine : Engine, @identities : Array(Identity),
-                   @targets : Array(Store::FlowDetail), @skipped : Array(Skipped))
+                   @targets : Array(Store::FlowDetail), @skipped : Array(Skipped),
+                   @query_rows : Int32 = 0)
+    end
+
+    # Did `--limit` cut the query's contribution short? True only when a query ran and filled
+    # the cap exactly — there may or may not have been more, and "may have been" is the honest
+    # warning. Nil query, or fewer rows than the cap, is a selection the operator saw whole.
+    def query_capped?(limit : Int32) : Bool
+      limit > 0 && @query_rows >= limit
     end
 
     # How many requests this run will put on the wire if nothing stops it.
@@ -226,7 +252,7 @@ module Gori::Authorize
       # identities is a `NoTarget` ("name a flow id or --query"), and resolving identities
       # first answered it with `NoIdentities` — sending the operator off to configure a
       # tab when they had simply named nothing to replay.
-      details = resolve_flows(options)
+      details, query_rows = resolve_flows(options)
       identities = resolve_identities(options)
       targets, skipped = partition(details, identities, options, outbound)
       if targets.empty?
@@ -234,7 +260,7 @@ module Gori::Authorize
           "every selected flow was skipped", skip_tally(skipped), skipped)
       end
       new(engine: Engine.live(outbound, options.verify?, options.timeout),
-        identities: identities, targets: targets, skipped: skipped)
+        identities: identities, targets: targets, skipped: skipped, query_rows: query_rows)
     end
 
     # The identity set the run replays under: the explicit JSON when the surface has one,
@@ -255,6 +281,7 @@ module Gori::Authorize
       # the emptiness is what gets named, with `detail` saying which source produced it.
       list = Authorize.parse_json(raw)
       reject_duplicate_names(list)
+      reject_multiple_baselines(list)
       list = [Identity.as_captured(baseline_name(list))] + list unless list.any?(&.baseline?)
       if list.size < 2
         raise PlanError.new(PlanError::Reason::NoIdentities,
@@ -273,6 +300,24 @@ module Gori::Authorize
         raise PlanError.new(PlanError::Reason::DuplicateIdentity,
           "two identities are called #{id.name.inspect}", id.name)
       end
+    end
+
+    # Refuse a set with more than one baseline. Counted over the WHOLE list rather than
+    # stopping at the first flag, so the message can name both — the operator's next action is
+    # to clear one, and they need to know which two are competing.
+    #
+    # This is the same shape as `reject_duplicate_names` and for the same reason: the run below
+    # would not fail, it would succeed while comparing nothing. Every non-baseline trial is
+    # judged against the baseline, so a second baseline row removes itself from the comparison
+    # set; two identities both flagged left `Target#trials` with no comparison in it at all,
+    # and a headline built out of "no identity matched the baseline" reported that as
+    # `enforced`.
+    private def self.reject_multiple_baselines(list : Array(Identity)) : Nil
+      claimed = list.select(&.baseline?)
+      return if claimed.size < 2
+      names = claimed.map(&.name.inspect).join(", ")
+      raise PlanError.new(PlanError::Reason::MultipleBaselines,
+        "#{claimed.size} identities claim the baseline (#{names})", names)
     end
 
     # A name for the prepended baseline that the operator's own set has not already used.
@@ -294,7 +339,10 @@ module Gori::Authorize
     # Duplicates survive as rows here and are counted as `:duplicate` skips by `partition` —
     # dropping them silently would make `--flow 7 --flow 7` and `--flow 7` look identical
     # while one of them asked for something impossible.
-    private def self.resolve_flows(options : PlanOptions) : Array(Store::FlowDetail)
+    #
+    # Returns the flows AND how many rows the query contributed — the count `--limit` caps, and
+    # the only one a "capped" warning may be built from (see `Plan#query_capped?`).
+    private def self.resolve_flows(options : PlanOptions) : {Array(Store::FlowDetail), Int32}
       query = options.query.try(&.strip).presence
       if options.flow_ids.empty? && query.nil?
         raise PlanError.new(PlanError::Reason::NoTarget, "no flows selected")
@@ -304,11 +352,19 @@ module Gori::Authorize
       # was declined, it is a flow that no longer exists, and `NoFlows` below is what fires
       # when that leaves the selection empty.
       options.flow_ids.each { |id| options.store.get_flow(id).try { |d| details << d } }
-      query.try { |q| search(options, q).each { |row| options.store.get_flow(row.id).try { |d| details << d } } }
+      query_rows = 0
+      query.try do |q|
+        rows = search(options, q)
+        # The SEARCH's row count, not the flows it resolved to: `--limit` is applied by the
+        # search, so a row whose flow has since been pruned still used up one of the cap's
+        # slots and still means the query may have had more to give.
+        query_rows = rows.size
+        rows.each { |row| options.store.get_flow(row.id).try { |d| details << d } }
+      end
       if details.empty?
         raise PlanError.new(PlanError::Reason::NoFlows, "no captured flows matched the selection", query)
       end
-      details
+      {details, query_rows}
     end
 
     # The query's rows. Mirrors `gori run history`'s reading of a QL query exactly, because

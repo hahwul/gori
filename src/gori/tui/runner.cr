@@ -1792,7 +1792,7 @@ module Gori::Tui
     # Project desc / Repeater request must not be silently dropped), mirroring focus_tab.
     # Always true: the shell closes the editor on ↵ whether or not the disk write landed.
     private def save_tabs(ov : TabsOverlay) : Bool
-      Settings.tab_prefs = ov.to_prefs
+      Settings.tab_prefs = tab_prefs_of(ov)
       ok = Settings.save
       @resized = true
       settle_hidden_active_tab
@@ -1800,6 +1800,26 @@ module Gori::Tui
       # disk write can fail, so say so honestly rather than implying nothing happened.
       @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
       true
+    end
+
+    # What to persist for a tab-bar working copy — and the default arrangement is spelled as an
+    # ABSENT `tabs` key, never as a written-out copy of today's defaults.
+    #
+    # `TabsOverlay#to_prefs` maps EVERY row, hidden ones included, so the plain thing to save is
+    # a twenty-entry list. For an arrangement the operator actually made that is exactly right
+    # (a hidden tab's position has to survive for when it is re-shown). For one that is still
+    # the factory arrangement it is a trap: `Settings.tab_prefs = []` is the "never customized"
+    # state `Chrome.reconcile` reads as "catalog order, only DEFAULT_HIDDEN hidden", and it is
+    # what a factory reset writes — so the Preferences modal's `^R` on the Tabs row, which runs
+    # `reset_to_defaults` and saves, PINNED today's defaults into the file instead of clearing
+    # the key. A later release moving a tab in or out of `Chrome::DEFAULT_HIDDEN` would then be
+    # silently ignored for that operator, on the strength of a row they pressed "reset" on.
+    # Comparing against the reconciled default (rather than trusting the caller to say "this
+    # was a reset") also covers the operator who dragged the bar back to its default by hand.
+    private def tab_prefs_of(ov : TabsOverlay) : Array({String, Bool})
+      prefs = ov.to_prefs
+      defaults = Chrome.reconcile([] of {String, Bool}).map { |(sym, _, vis)| {sym.to_s, vis} }
+      prefs == defaults ? [] of {String, Bool} : prefs
     end
 
     # Snap off a now-hidden active tab, after anything that changed Settings.tab_prefs (the
@@ -4926,7 +4946,10 @@ module Gori::Tui
         # of a reset that did not happen) and must not report one either. That is the whole
         # reason `reset_to_factory` answers with three states rather than a Bool.
         case Settings.reset_to_factory
-        in .refused? then @toast = "settings not reset — #{Settings.path} could not be read in full"
+        # Covers both refusals now: a file only half read in, and one that could not be read at
+        # all (a root-owned settings.json, a `--config` naming a directory). Resetting from
+        # either would write factory defaults over a file this session never saw.
+        in .refused? then @toast = "settings not reset — #{Settings.path} could not be read"
         in .saved?   then @toast = apply_factory_reset("settings reset to defaults")
         in .applied? then @toast = apply_factory_reset("settings reset — could not save to #{Settings.path}")
         end
@@ -4939,6 +4962,15 @@ module Gori::Tui
     # mascot and the proxy bind can all have moved in the same write. Deliberately the union
     # of what `apply_settings_saved`'s per-section arms do, run unconditionally — a reset
     # that left the old theme on screen would read as "nothing happened".
+    #
+    # And the union of `apply_external_change`'s live re-reads too, which is the half this
+    # was missing. A reset DELETES the global Match&Replace and colour rules, and both of
+    # those are compiled SNAPSHOTS the proxy fibers hold: `Rules.merged` is on the hot path
+    # of every request and response that passes through. Nothing else refreshes them here —
+    # `data_version` only ticks when a capture commits, so with capture off it never ticks at
+    # all — so a rule the operator just deleted went on rewriting live traffic until they
+    # happened to walk into the Rewriter tab. Every ordinary rule edit calls `reload` on the
+    # spot; the reset was the one path that did not.
     private def apply_factory_reset(msg : String) : String
       Theme.apply(Settings.theme)
       @theme_restore = Settings.theme # nothing to revert on the next esc — this IS the theme now
@@ -4948,6 +4980,21 @@ module Gori::Tui
       @pretty = Settings.pretty_bodies_default
       @session.set_verify_upstream(Settings.verify_upstream?)
       @session.set_serve_landing(Settings.serve_landing?)
+      # The rewrite/colour snapshots, before anything renders against them. No settings re-read
+      # in front of either (unlike the tick's, which is chasing a PEER's write): the reset has
+      # already put this process's own sections at their defaults, and a `reload_*_from_disk`
+      # here would pull the peer's copy of the rules we just deleted straight back in.
+      @session.rules.reload
+      @session.colormarker.reload
+      Theme.set_custom_marks(Settings.colormarker_color_map)
+      @custom_marks_rev = @session.colormarker.revision
+      # The saved-view library is gone with them, so the active lens may name a view that no
+      # longer exists. `reload` alone would leave History filtering by it silently — every
+      # other path that loses a view says so, and this one has to as well. Re-resolved BEFORE
+      # the list reload so the reload runs against the lens that survived.
+      had_view = history_controller.view.active_view
+      history_controller.resolve_active_view
+      lost = had_view.try { |v| history_controller.view.active_view.nil? ? v.name : nil }
       history_controller.view.reload(@session.store)
       history_controller.refresh_preview
       sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
@@ -4955,6 +5002,9 @@ module Gori::Tui
       project_controller.refresh_network
       settle_hidden_active_tab # tab_prefs is empty now — the default hidden set applies again
       @resized = true          # theme + tab strip changed behind the modal
+      # Appended rather than `status`-ed: the caller assigns THIS return value to @toast, so a
+      # second toast written from in here would be overwritten before a frame drew it.
+      msg = "#{msg} — the #{lost} view is gone, showing All" if lost
       # Through apply_settings for the same reason a :network save is: the bind address moved
       # back to the default, and that has to reach the running accept socket (or say why it
       # did not) instead of only the file.

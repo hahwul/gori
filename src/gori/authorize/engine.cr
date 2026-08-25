@@ -4,11 +4,16 @@ require "../repeater/exchange_meta"
 require "../repeater/flow_request"
 require "../outbound"
 require "./identity"
+require "./passive"
 require "./verdict"
 
 module Gori
   module Authorize
     ACTIVE_TIMEOUT = 15.seconds
+
+    # Conditional-GET request headers, dropped from a SAFE request's replay (see
+    # `Engine#drop_cache_validators`).
+    CACHE_VALIDATORS = ["If-None-Match", "If-Modified-Since"]
 
     # One (request × identity) outcome: the metrics a row shows, the verdict against the
     # baseline, and the bytes that let the detail pane diff this response against the
@@ -51,8 +56,8 @@ module Gori
         @blocked > 0 && @trials.all?(&.meta.errored?)
       end
 
-      # NOT ONE non-baseline identity produced a comparison: every one of their sends failed,
-      # so this request is evidence of nothing.
+      # NOT ONE non-baseline identity produced a comparison: every one of their sends failed —
+      # or there was no non-baseline identity to send — so this request is evidence of nothing.
       #
       # This needs saying because the absence of a finding looks exactly like a clean one. A
       # request whose every trial errored has `same_count == 0` and no `review` verdict, so a
@@ -61,9 +66,19 @@ module Gori
       # all. It is the false negative `blocked` exists to keep out of the report, arriving
       # through the other door: "the server held" and "we could not reach the server" are
       # opposite findings and must never share a word.
+      #
+      # An EMPTY non-baseline set answers true, and the `!non.empty? &&` guard that used to
+      # stand here is why it did not. The split this predicate names is exclusive — a request
+      # either produced a comparison or it did not — so it has to be decided by the SUM of the
+      # comparisons, not by first counting the rows: with every trial flagged baseline (two
+      # identities both carrying `baseline:true`, which nothing refused) there were zero
+      # comparisons and zero rows to count, the guard returned false, and MCP's
+      # `authorize_verdict` fell past every arm to `enforced` — the strongest clean bill of
+      # health this tool can give, for a request that compared nothing at all. `Plan` now
+      # refuses that identity set outright (`MultipleBaselines`) and `order_baseline_first`
+      # cannot build one; this is the third layer, and the one that holds for any caller.
       def uncompared? : Bool
-        non = @trials.reject(&.baseline?)
-        !non.empty? && non.all?(&.verdict.error?)
+        @trials.reject(&.baseline?).all?(&.verdict.error?)
       end
 
       # `uncompared?` for the reason a NETWORK gives — the socket-level twin of
@@ -147,14 +162,15 @@ module Gori
         # a request nobody made. `FlowRequest.build` is the one home for that rewrite (plus the
         # truncated-body re-frame and the h2 pseudo-header refusal).
         built = Repeater::FlowRequest.build(detail)
-        base_bytes = built.bytes
+        base_bytes = drop_cache_validators(built.bytes, row.method)
+        head_request = row.method.upcase == "HEAD"
         backend = @backend_factory.call(origin, http2)
         baseline_trial = nil.as(Trial?)
         trials = [] of Trial
         begin
           ordered.each do |id|
             break if stop.try(&.call)
-            trial = send_one(base_bytes, id, backend, baseline_trial)
+            trial = send_one(base_bytes, id, backend, baseline_trial, head_request)
             baseline_trial ||= trial if id.baseline?
             trials << trial
           end
@@ -170,8 +186,34 @@ module Gori
       # sending the baseline itself (which gets `Verdict::Baseline`), set for the rest — its
       # summary anchors the verdict and its meta anchors the delta (both wire-size, so they
       # agree).
+      # The captured request minus its cache validators, for a SAFE method.
+      #
+      # A browser capture almost always carries `If-None-Match` / `If-Modified-Since`, and
+      # replaying them verbatim asks a question about a CACHE rather than about access control.
+      # The baseline revalidates and gets `304` with no body; another identity — whose ETag the
+      # capture never held, or for whom the resource renders differently — gets `200` and the
+      # whole entity. Same request, opposite answers, for a reason that has nothing to do with
+      # authorization: the status classes differ, the row read `Different`, and a run in which
+      # an anonymous client was handed the full response aggregated to `enforced` with exit 0.
+      #
+      # Stripped from the SHARED base, so every identity asks the identical unconditional
+      # question — the property under test is what the identity changes, and a header that
+      # makes one identity's answer a 304 is noise in the measurement. This is a replay, not a
+      # capture: the bytes actually sent are kept verbatim on each `Trial#request` (P7 is about
+      # what gori RECORDS, and the recording is untouched).
+      #
+      # SAFE methods only. On the rest, these are PRECONDITIONS and not cache hints —
+      # `If-None-Match: *` on a PUT means "create only if absent" and `If-Match` guards a
+      # lost update — so dropping one turns a refused write into a real one, once per identity.
+      # `--unsafe-methods` already replays side effects; it must not also disarm their guards.
+      private def drop_cache_validators(bytes : Bytes, method : String) : Bytes
+        return bytes unless Passive::SAFE_METHODS.includes?(method.upcase)
+        Authorize.overlay_wire(bytes, Identity.new("cache-validators", remove_headers: CACHE_VALIDATORS))
+      end
+
       private def send_one(base_bytes : Bytes, id : Identity,
-                           backend : Fuzz::Backend, baseline_trial : Trial?) : Trial
+                           backend : Fuzz::Backend, baseline_trial : Trial?,
+                           head_request : Bool) : Trial
         # RESOLVED first: a `$NAME` in this identity's own header value expands out of this
         # identity's binding table. Nothing downstream will do it — `all_verbatim` below stops
         # the message-level pass, and `Engine.live` turns the active-slot overlay off precisely
@@ -181,7 +223,7 @@ module Gori
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).
         result = backend.send(bytes, Fuzz::Backend.all_verbatim(bytes))
-        summary = ResponseSummary.of(result)
+        summary = ResponseSummary.of(result, head_request)
         status = result.response.try(&.status) || summary.status
         # Wire size for the readout (raw body), not the decoded size the verdict uses.
         meta = Repeater::ExchangeMeta.of(status, result.body.try(&.size.to_i64), result.duration_us, result.error)
@@ -202,12 +244,23 @@ module Gori
       end
 
       # Put the baseline first. Marks the first identity baseline when none is (a run always
-      # needs an anchor); keeps the rest in order.
+      # needs an anchor), DEMOTES any further one, and keeps the rest in order.
+      #
+      # Demotion, because "the baseline" is a singular the rest of this engine assumes: a
+      # second identity carrying the flag produces a second `Verdict::Baseline` row, which is
+      # a row compared against nothing. With two identities and both flagged that was the whole
+      # run — zero comparisons — and the surfaces then disagreed about what to call it (the CLI
+      # `[x] error`, the TUI `review`, MCP `enforced`). `Plan` refuses such a set up front, and
+      # the flag can only be moved one-at-a-time in the TUI list (`SessionSlot#with_baseline`);
+      # this keeps the property for any caller that reaches the engine directly. The FIRST flag
+      # wins, which is the same identity `Array#index` already chose as the anchor.
       private def order_baseline_first(identities : Array(Identity)) : Array(Identity)
         return [Identity.as_captured] if identities.empty?
         base_idx = identities.index(&.baseline?)
         if base_idx
-          [identities[base_idx]] + identities[...base_idx] + identities[(base_idx + 1)..]
+          rest = (identities[...base_idx] + identities[(base_idx + 1)..])
+            .map { |id| id.baseline? ? id.with_baseline(false) : id }
+          [identities[base_idx]] + rest
         else
           # `with_baseline`, not a re-`new` from three of the five fields: an identity IS a
           # `SessionSlot` and a hand-rolled copy silently drops whatever the constructor call

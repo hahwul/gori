@@ -286,12 +286,84 @@ module Gori
 
       def self.install_toml(config_path : String, exe_path : String, args : Array(String)) : Nil
         existing = File.file?(config_path) ? File.read(config_path) : ""
+
+        # Refuse a file gori cannot read, for the reason install_json and install_yaml refuse
+        # theirs: `~/.codex/config.toml` is Codex's whole configuration — model, provider,
+        # approval policy, every other MCP server — and a line splice into a file whose shape
+        # we did not understand is how adding one entry costs the rest. It cost exactly that:
+        # a `[mcp_servers.gori]` sitting inside a `"""…"""` example block used to match the
+        # header scan, and everything from there to the next real table was deleted.
+        doc = nil.as(TomlDoc?)
+        unless existing.strip.empty?
+          begin
+            doc = TomlDoc.parse(existing)
+          rescue ex : TomlError
+            raise "Refusing to overwrite #{config_path}: it exists but isn't valid TOML " \
+                  "(#{ex.message}). Fix or remove it, then re-run the installer."
+          end
+        end
+
         table = "mcp_servers.#{SERVER_NAME}"
         body = String.build do |io|
           io << "command = #{toml_string(exe_path)}\n"
           io << "args = #{toml_string_array(args)}\n"
         end
-        write_atomic(config_path, upsert_toml_table(existing, table, body))
+
+        # An INLINE entry (`gori = { command = … }` under `[mcp_servers]`, or a dotted
+        # `mcp_servers.gori.command = …`) is invisible to a header scan, and appending
+        # `[mcp_servers.gori]` beside one is not an upsert — it is
+        # `Cannot declare ('mcp_servers','gori') twice`, which Codex refuses to load, and which
+        # re-running does not repair (the second run replaces its own table and leaves the
+        # inline key exactly where it was). So drop that assignment's own lines first; the
+        # re-parse below is what checks the result.
+        source = doc ? drop_toml_inline_entry(existing, doc, ["mcp_servers", SERVER_NAME]) : existing
+
+        updated = upsert_toml_table(source, table, body)
+        # Read the splice back BEFORE it reaches disk — the same guard, for the same reason, as
+        # `verify_yaml_entry!` above. Line editing goes wrong in ways a value comparison catches
+        # and an eyeball does not, and the failure this installer is worst at is the quiet one:
+        # a real path, a real file, "installed" on STDOUT, and no gori server where the client
+        # looks for it.
+        verify_toml_entry!(config_path, updated, exe_path, args)
+        write_atomic(config_path, updated)
+      end
+
+      private def self.verify_toml_entry!(config_path : String, content : String,
+                                          exe_path : String, args : Array(String)) : Nil
+        doc =
+          begin
+            TomlDoc.parse(content)
+          rescue ex : TomlError
+            raise "Refusing to write #{config_path}: the updated file would not have been " \
+                  "valid TOML (#{ex.message}). Add the gori server to mcp_servers by hand."
+          end
+        entry = doc.dig("mcp_servers", SERVER_NAME)
+        command = entry.try(&.string?("command"))
+        written = entry.try(&.string_array?("args"))
+        return if command == exe_path && written == args
+        raise "Refusing to write #{config_path}: the gori entry did not read back as written. " \
+              "Add it to mcp_servers by hand instead."
+      end
+
+      # Delete the LINES of any `key = value` that assigns *path* (or something under it) from
+      # outside its own table — the inline spellings `upsert_toml_table`'s header scan cannot
+      # see. A `command = …` written under a real `[mcp_servers.gori]` header is NOT one of
+      # these: that table is the header scan's job, and it replaces the whole thing.
+      #
+      # Every other line keeps its own bytes, terminator included: splitting on '\n' and
+      # rejoining on '\n' is lossless for CRLF and for a file with no final newline alike.
+      private def self.drop_toml_inline_entry(content : String, doc : TomlDoc,
+                                              path : Array(String)) : String
+        drop = Set(Int32).new
+        doc.assignments.each do |a|
+          next unless a[:table].size < path.size # inside the table itself → header scan's job
+          full = a[:table] + a[:key]
+          next unless full.size >= path.size && full[0, path.size] == path
+          (a[:first]..a[:last]).each { |i| drop << i }
+        end
+        return content if drop.empty?
+        lines = content.split('\n')
+        lines.each_with_index.reject { |(_, i)| drop.includes?(i) }.map { |(l, _)| l }.join('\n')
       end
 
       # --- YAML clients (Hermes) ------------------------------------------------
@@ -644,18 +716,40 @@ module Gori
       # Replace or append a TOML table named *header* (without brackets), including any
       # dotted subtables (`[header.foo]`), even if they are non-contiguous. *body* is
       # the raw key=value lines (no header). Other content is preserved.
+      #
+      # A line that only LOOKS like a table header — one sitting inside a `"""…"""` or `'''…'''`
+      # block, which is where a config file keeps its own worked example — is not one, and is
+      # skipped by both scans below. Without that, the `[mcp_servers.gori]` inside
+      #
+      #     instructions = """
+      #     Example config:
+      #     [mcp_servers.gori]
+      #     command = "gori"
+      #     """
+      #
+      #     model = "gpt-5"
+      #
+      # matched, and everything from it to the next real `[` — the rest of the string, its
+      # closing delimiter, and `model` — was deleted, leaving a file whose next line is an
+      # unterminated string. Deliberately not parse-and-re-emit, for the reason
+      # `upsert_yaml_server` gives at length: this is a file the user reads and edits, and a
+      # canonical re-emit hands it back with every comment gone.
       def self.upsert_toml_table(content : String, header : String, body : String) : String
         chomped = content.empty? ? [] of String : content.chomp.split('\n')
+        in_string = toml_string_body_lines(chomped)
         keep = [] of String
         i = 0
         while i < chomped.size
           stripped = chomped[i].strip
-          if stripped == "[#{header}]" || stripped.starts_with?("[#{header}.")
+          if !in_string[i] && (stripped == "[#{header}]" || stripped.starts_with?("[#{header}."))
             # Drop this table header and its body (until the next unrelated table).
             i += 1
             while i < chomped.size
               s = chomped[i].strip
-              break if s.starts_with?('[') && !(s == "[#{header}]" || s.starts_with?("[#{header}."))
+              if !in_string[i] && s.starts_with?('[') &&
+                 !(s == "[#{header}]" || s.starts_with?("[#{header}."))
+                break
+              end
               i += 1
             end
             next
@@ -693,6 +787,585 @@ module Gori
 
       def self.toml_string_array(values : Array(String)) : String
         "[" + values.map { |v| toml_string(v) }.join(", ") + "]"
+      end
+
+      # Which lines are a CONTINUATION inside a multi-line string, i.e. lines whose first
+      # character is already inside a `"""` / `'''` block. Standalone from the reader below
+      # because `upsert_toml_table` is reachable on its own and has to be safe there too.
+      #
+      # Tracks only what decides that question: the two multi-line delimiters, the two
+      # single-line string forms (so a `"""` INSIDE `"a \" b"` is not an opener), backslash
+      # escapes in the basic forms, and `#` comments. Everything else is one character.
+      private def self.toml_string_body_lines(lines : Array(String)) : Array(Bool)
+        inside = Array(Bool).new(lines.size, false)
+        open = nil.as(String?)
+        lines.each_with_index do |line, idx|
+          inside[idx] = !open.nil?
+          i = 0
+          while i < line.size
+            if delim = open
+              if line[i, 3] == delim
+                open = nil
+                i += 3
+              elsif delim == "\"\"\"" && line[i] == '\\'
+                i += 2 # an escaped delimiter does not close the string
+              else
+                i += 1
+              end
+              next
+            end
+            case line[i]
+            when '#'
+              break # a comment runs to the end of the line
+            when '"'
+              if line[i, 3] == "\"\"\""
+                open = "\"\"\""
+                i += 3
+              else
+                i = toml_skip_quoted(line, i, escapes: true)
+              end
+            when '\''
+              if line[i, 3] == "'''"
+                open = "'''"
+                i += 3
+              else
+                i = toml_skip_quoted(line, i, escapes: false)
+              end
+            else
+              i += 1
+            end
+          end
+        end
+        inside
+      end
+
+      # Index just past the single-line string opening at *at*, or the end of the line when it
+      # is unterminated (which the reader below reports as the error it is).
+      private def self.toml_skip_quoted(line : String, at : Int32, escapes : Bool) : Int32
+        quote = line[at]
+        i = at + 1
+        while i < line.size
+          c = line[i]
+          return i + 1 if c == quote
+          i += (escapes && c == '\\' ? 2 : 1)
+        end
+        i
+      end
+
+      # --- a minimal TOML reader ------------------------------------------------------------
+      #
+      # Crystal ships no TOML parser and gori depends on none, which is why `install_toml` spent
+      # its life editing `~/.codex/config.toml` as plain lines with nothing checking the result —
+      # while its two siblings both refuse a file they cannot parse and `install_yaml` re-reads
+      # its own splice before writing. This is what lets the TOML path do the same.
+      #
+      # It reads the subset a config file is written in — tables, arrays of tables, dotted keys,
+      # all four string forms, arrays, inline tables — and keeps every other scalar (numbers,
+      # booleans, datetimes) as opaque text, because nothing here compares one. Anything it
+      # cannot account for RAISES. That direction is the whole point: a file it does not
+      # understand becomes a refusal, never a guess.
+      class TomlError < Exception
+      end
+
+      # One parsed value. `Other` covers every scalar the installer never inspects.
+      class TomlValue
+        enum Kind
+          Str
+          Arr
+          Table
+          Other
+        end
+
+        getter kind : Kind
+        getter str : String
+        getter arr : Array(TomlValue)
+        getter table : Hash(String, TomlValue)
+        # Written as an inline table (`{ … }`). TOML forbids reopening one with a `[header]`,
+        # which is exactly the collision `[mcp_servers]` + `gori = {…}` + an appended
+        # `[mcp_servers.gori]` walks into — and the collision Codex answers by refusing to
+        # load the file at all.
+        property? closed : Bool
+        # Brought into being by a dotted key (`a.b = 1`) rather than by a header of its own.
+        # Also not reopenable by `[a]`, and also not extendable by a later `a.c = 2` from a
+        # DIFFERENT table.
+        property? dotted : Bool
+        # Declared by its own `[header]` line, so a second one is a redefinition.
+        property? explicit : Bool
+        # An array of tables (`[[x]]`) rather than a value array.
+        property? array_table : Bool
+
+        def initialize(@kind : Kind, @str = "", @closed = false, @dotted = false,
+                       @explicit = false, @array_table = false)
+          @arr = [] of TomlValue
+          @table = Hash(String, TomlValue).new
+        end
+
+        def table? : Bool
+          @kind.table?
+        end
+
+        # The decoded string at *key*, or nil when the key is absent or holds anything else.
+        def string?(key : String) : String?
+          v = @table[key]?
+          v && v.kind.str? ? v.str : nil
+        end
+
+        # The array at *key* as strings, or nil unless EVERY element is one — a partial answer
+        # would let `["mcp", 3]` verify as `["mcp"]`.
+        def string_array?(key : String) : Array(String)?
+          v = @table[key]?
+          return nil unless v && v.kind.arr?
+          out = [] of String
+          v.arr.each do |e|
+            return nil unless e.kind.str?
+            out << e.str
+          end
+          out
+        end
+      end
+
+      # A parsed document: the root table, plus where each top-level assignment SAT, which is
+      # what lets `drop_toml_inline_entry` remove one by line without re-emitting the file.
+      class TomlDoc
+        alias Assignment = NamedTuple(table: Array(String), key: Array(String),
+          first: Int32, last: Int32)
+
+        getter root : TomlValue
+        getter assignments : Array(Assignment)
+
+        def initialize(@root : TomlValue, @assignments : Array(Assignment))
+        end
+
+        def self.parse(content : String) : TomlDoc
+          TomlReader.new(content).parse
+        end
+
+        # The table at *keys*, or nil when the path is absent or does not lead to one.
+        def dig(*keys : String) : TomlValue?
+          node = @root
+          keys.each do |k|
+            child = node.table[k]?
+            return nil unless child && child.table?
+            node = child
+          end
+          node
+        end
+      end
+
+      # :nodoc:
+      class TomlReader
+        def initialize(content : String)
+          @chars = content.chars
+          # A UTF-8 BOM is not a key, and a config file written by a Windows editor starts with
+          # one. Refusing over it would turn "your editor added three bytes" into "gori will not
+          # install", so it is skipped rather than reported. (`upsert_toml_table` never looks at
+          # the first character of the file, so only the reader needs this.)
+          @chars.shift if @chars.first? == '\uFEFF'
+          @pos = 0
+          @line = 0
+          @root = TomlValue.new(TomlValue::Kind::Table, explicit: true)
+          @current = @root
+          @current_path = [] of String
+          @assignments = [] of TomlDoc::Assignment
+        end
+
+        def parse : TomlDoc
+          loop do
+            skip_trivia
+            break if eof?
+            if peek == '['
+              read_header
+            else
+              read_assignment
+            end
+          end
+          TomlDoc.new(@root, @assignments)
+        end
+
+        # --- statements -------------------------------------------------------------------
+
+        private def read_header : Nil
+          take # '['
+          array_table = peek == '['
+          take if array_table
+          skip_blanks
+          path = read_key_path
+          skip_blanks
+          expect(']')
+          expect(']') if array_table
+          finish_line
+          raise_at "an empty table header" if path.empty?
+
+          node = descend(path[0...-1], header: true)
+          name = path[-1]
+          existing = node.table[name]?
+          if array_table
+            if existing.nil?
+              fresh = TomlValue.new(TomlValue::Kind::Arr, array_table: true)
+              node.table[name] = fresh
+              existing = fresh
+            elsif !(existing.kind.arr? && existing.array_table?)
+              raise_at "#{quoted(path)} is already defined and cannot be an array of tables"
+            end
+            element = TomlValue.new(TomlValue::Kind::Table, explicit: true)
+            existing.arr << element
+            @current = element
+          else
+            if existing.nil?
+              fresh = TomlValue.new(TomlValue::Kind::Table, explicit: true)
+              node.table[name] = fresh
+              @current = fresh
+            elsif existing.table? && !existing.explicit? && !existing.closed? && !existing.dotted?
+              existing.explicit = true
+              @current = existing
+            else
+              raise_at "cannot declare #{quoted(path)} twice"
+            end
+          end
+          @current_path = path
+        end
+
+        private def read_assignment : Nil
+          first = @line
+          key = read_key_path
+          skip_blanks
+          expect('=')
+          skip_blanks
+          value = read_value
+          last = @line
+          finish_line
+          raise_at "an empty key" if key.empty?
+
+          node = descend_into(@current, key[0...-1], dotted: true)
+          name = key[-1]
+          raise_at "cannot define #{quoted(@current_path + key)} twice" if node.table.has_key?(name)
+          node.table[name] = value
+          @assignments << {table: @current_path.dup, key: key, first: first, last: last}
+        end
+
+        # Walk (creating as needed) the intermediate tables of a header path. `dotted` marks
+        # tables a KEY brought into being, which neither a header nor another table's dotted
+        # key may reopen.
+        private def descend(path : Array(String), header : Bool) : TomlValue
+          descend_into(@root, path, dotted: !header)
+        end
+
+        private def descend_into(from : TomlValue, path : Array(String), dotted : Bool) : TomlValue
+          node = from
+          path.each do |k|
+            child = node.table[k]?
+            if child.nil?
+              child = TomlValue.new(TomlValue::Kind::Table, dotted: dotted)
+              node.table[k] = child
+            elsif child.kind.arr? && child.array_table?
+              last = child.arr.last?
+              raise_at "#{k} is an empty array of tables" unless last
+              child = last
+            elsif !child.table? || child.closed? || (dotted && child.explicit?) ||
+                  (!dotted && child.dotted?)
+              raise_at "cannot extend #{k}: it is already defined as something else"
+            end
+            node = child
+          end
+          node
+        end
+
+        # --- keys and values ---------------------------------------------------------------
+
+        private def read_key_path : Array(String)
+          parts = [read_key_part]
+          loop do
+            skip_blanks
+            break unless peek == '.'
+            take
+            skip_blanks
+            parts << read_key_part
+          end
+          parts
+        end
+
+        private def read_key_part : String
+          case peek
+          when '"'  then read_basic_string
+          when '\'' then read_literal_string
+          else
+            start = @pos
+            while (c = peek) && (c.ascii_alphanumeric? || c == '_' || c == '-')
+              take
+            end
+            raise_at "a key was expected" if @pos == start
+            @chars[start...@pos].join
+          end
+        end
+
+        private def read_value : TomlValue
+          case peek
+          when '"'
+            if lookahead(3) == "\"\"\""
+              TomlValue.new(TomlValue::Kind::Str, read_multiline_basic)
+            else
+              TomlValue.new(TomlValue::Kind::Str, read_basic_string)
+            end
+          when '\''
+            if lookahead(3) == "'''"
+              TomlValue.new(TomlValue::Kind::Str, read_multiline_literal)
+            else
+              TomlValue.new(TomlValue::Kind::Str, read_literal_string)
+            end
+          when '[' then read_array
+          when '{' then read_inline_table
+          else          read_bare_scalar
+          end
+        end
+
+        # Numbers, booleans, datetimes — kept as text. Nothing here compares one, and a reader
+        # that PARSED them would have to be right about TOML's whole numeric grammar to say
+        # "this file is fine", which is a much larger promise than the installer needs.
+        #
+        # It therefore runs to the delimiter rather than to whitespace, which makes it the one
+        # lenient corner: `x = 1 y = 2` reads as one scalar instead of the error it is. That is
+        # deliberate — a space-separated datetime (`1979-05-27 07:32:00`) is a legal scalar, and
+        # rejecting one would refuse a file Codex reads happily. Leniency here only costs a
+        # refusal gori did not have to make; every OTHER value form still ends at `finish_line`.
+        private def read_bare_scalar : TomlValue
+          start = @pos
+          while (c = peek) && c != ',' && c != ']' && c != '}' && c != '\n' && c != '#'
+            take
+          end
+          text = @chars[start...@pos].join.strip
+          raise_at "a value was expected" if text.empty?
+          TomlValue.new(TomlValue::Kind::Other, text)
+        end
+
+        private def read_array : TomlValue
+          take # '['
+          built = TomlValue.new(TomlValue::Kind::Arr)
+          loop do
+            skip_trivia
+            raise_at "an unterminated array" if eof?
+            if peek == ']'
+              take
+              return built
+            end
+            built.arr << read_value
+            skip_trivia
+            case peek
+            when ','
+              take
+            when ']'
+              take
+              return built
+            else
+              raise_at "a ',' or ']' was expected in an array"
+            end
+          end
+        end
+
+        private def read_inline_table : TomlValue
+          take # '{'
+          built = TomlValue.new(TomlValue::Kind::Table, closed: true)
+          skip_trivia
+          if peek == '}'
+            take
+            return built
+          end
+          loop do
+            skip_trivia
+            key = read_key_path
+            skip_blanks
+            expect('=')
+            skip_blanks
+            value = read_value
+            node = descend_into(built, key[0...-1], dotted: true)
+            raise_at "a duplicate key in an inline table" if node.table.has_key?(key[-1])
+            node.table[key[-1]] = value
+            skip_trivia
+            case peek
+            when ','
+              take
+            when '}'
+              take
+              return built
+            else
+              raise_at "a ',' or '}' was expected in an inline table"
+            end
+          end
+        end
+
+        # --- strings ------------------------------------------------------------------------
+
+        private def read_basic_string : String
+          take # '"'
+          String.build do |io|
+            loop do
+              c = peek
+              raise_at "an unterminated string" if c.nil? || c == '\n'
+              take
+              break if c == '"'
+              c == '\\' ? read_escape(io) : io << c
+            end
+          end
+        end
+
+        private def read_literal_string : String
+          take # '\''
+          String.build do |io|
+            loop do
+              c = peek
+              raise_at "an unterminated literal string" if c.nil? || c == '\n'
+              take
+              break if c == '\''
+              io << c
+            end
+          end
+        end
+
+        private def read_multiline_basic : String
+          3.times { take }
+          take if peek == '\n' # a newline right after the opener is not part of the value
+          String.build do |io|
+            loop do
+              raise_at "an unterminated multi-line string" if eof?
+              if lookahead(3) == "\"\"\""
+                3.times { take }
+                break
+              end
+              c = take
+              if c == '\\'
+                # A backslash at end-of-line swallows the newline and the whitespace after it.
+                if peek == '\n' || (peek == '\r' && lookahead(2) == "\r\n")
+                  while (n = peek) && (n == ' ' || n == '\t' || n == '\n' || n == '\r')
+                    take
+                  end
+                else
+                  read_escape(io)
+                end
+              else
+                io << c
+              end
+            end
+          end
+        end
+
+        private def read_multiline_literal : String
+          3.times { take }
+          take if peek == '\n'
+          String.build do |io|
+            loop do
+              raise_at "an unterminated multi-line literal string" if eof?
+              if lookahead(3) == "'''"
+                3.times { take }
+                break
+              end
+              io << take
+            end
+          end
+        end
+
+        private def read_escape(io : IO) : Nil
+          c = peek
+          raise_at "an unterminated escape" if c.nil?
+          take
+          case c
+          when 'b'  then io << '\b'
+          when 't'  then io << '\t'
+          when 'n'  then io << '\n'
+          when 'f'  then io << '\f'
+          when 'r'  then io << '\r'
+          when '"'  then io << '"'
+          when '\\' then io << '\\'
+          when 'u'  then io << read_code_point(4)
+          when 'U'  then io << read_code_point(8)
+          else           raise_at "an unknown escape \\#{c}"
+          end
+        end
+
+        private def read_code_point(width : Int32) : Char
+          digits = String.build do |io|
+            width.times do
+              c = peek
+              raise_at "a short \\u escape" if c.nil? || !c.ascii_number?(16)
+              io << take
+            end
+          end
+          value = digits.to_i?(16)
+          raise_at "an invalid \\u escape" unless value && value <= Char::MAX_CODEPOINT
+          value.chr
+        end
+
+        # --- lexing -------------------------------------------------------------------------
+
+        private def eof? : Bool
+          @pos >= @chars.size
+        end
+
+        private def peek : Char?
+          @pos < @chars.size ? @chars[@pos] : nil
+        end
+
+        private def lookahead(n : Int32) : String
+          @chars[@pos, n]?.try(&.join) || ""
+        end
+
+        private def take : Char
+          raise_at "the end of the file" if eof?
+          c = @chars[@pos]
+          @pos += 1
+          @line += 1 if c == '\n'
+          c
+        end
+
+        private def skip_blanks : Nil
+          while (c = peek) && (c == ' ' || c == '\t')
+            take
+          end
+        end
+
+        # Whitespace (newlines included), plus comments. Used between statements and inside
+        # arrays, both of which may span lines.
+        private def skip_trivia : Nil
+          loop do
+            case peek
+            when ' ', '\t', '\r', '\n'
+              take
+            when '#'
+              skip_comment
+            else
+              return
+            end
+          end
+        end
+
+        private def skip_comment : Nil
+          while (c = peek) && c != '\n'
+            take
+          end
+        end
+
+        # After a statement: trailing spaces and an optional comment, then the line has to end.
+        # Enforced rather than skipped, because `a = 1 b = 2` is the shape of a file that is
+        # not what the reader thinks it is.
+        private def finish_line : Nil
+          skip_blanks
+          skip_comment if peek == '#'
+          take if peek == '\r'
+          return if eof?
+          raise_at "a line break was expected" unless peek == '\n'
+          take
+        end
+
+        private def expect(char : Char) : Nil
+          raise_at "'#{char}' was expected" unless peek == char
+          take
+        end
+
+        private def quoted(path : Array(String)) : String
+          "(#{path.map { |p| "'#{p}'" }.join(", ")})"
+        end
+
+        private def raise_at(what : String) : NoReturn
+          raise TomlError.new("line #{@line + 1}: #{what}")
+        end
       end
     end
   end

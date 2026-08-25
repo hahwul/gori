@@ -49,7 +49,17 @@ module Gori::Proxy
     # which is the whole reason this listener is worth having: the destination arrives named,
     # so nothing downstream has to recover it from an SNI or a `Host` header the way the
     # transparent path does.
-    record Target, host : String, port : Int32
+    #
+    # `named` says WHICH of the three §4 address forms carried it — `ATYP_DOMAIN`, or one of the
+    # two IP literals. `host` alone cannot answer that (`read_address` renders a literal as text
+    # too), and the difference decides one thing downstream: whether this listener has a NAME to
+    # tell History, scope and the passthrough list, or only an address that a TLS ClientHello's
+    # SNI is the sole source for. See `Server#serve_socks5_target`.
+    record Target, host : String, port : Int32, named : Bool = false do
+      def named? : Bool
+        named
+      end
+    end
 
     # Read exactly `n` bytes, or nil on EOF/short read — every SOCKS field is fixed-length, so a
     # partial read is a protocol failure, not something to proceed past.
@@ -183,7 +193,7 @@ module Gori::Proxy
         return refused("the SOCKS5 request named a destination carrying a byte no host can " \
                        "hold (space, CR, LF, NUL or DEL): #{host.inspect}")
       end
-      Negotiation.new(Target.new(host, port), nil)
+      Negotiation.new(Target.new(host, port, named: head[3] == ATYP_DOMAIN), nil)
     end
 
     # The two things about a request gori settles before reading a byte more of it: whether it

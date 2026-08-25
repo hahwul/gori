@@ -454,6 +454,13 @@ module Gori
               "rename one of them. Compared case-insensitively: 'admin' and 'Admin' are one " \
               "identity here",
             "INVALID_ARGUMENT", field: "identities")
+        in Authorize::PlanError::Reason::MultipleBaselines
+          err("#{ex.detail} both claim \"baseline\":true — exactly one identity may, because the " \
+              "baseline is the single response every other identity is judged against. Clear the " \
+              "flag on all but one, or omit it everywhere to judge against the request AS " \
+              "CAPTURED. Run as passed, every result row would BE the baseline, nothing would be " \
+              "compared, and the headline would report on a comparison that never happened",
+            "INVALID_ARGUMENT", field: "identities")
         in Authorize::PlanError::Reason::NothingToSend
           authorize_nothing_to_send(ex, ob)
         end

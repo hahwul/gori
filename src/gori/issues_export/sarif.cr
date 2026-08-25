@@ -73,6 +73,11 @@ module Gori
           end
         end
 
+        # How many characters of the digest disambiguate a slug that had to be cut, and the
+        # separator in front of it. Same 8 hex characters the empty-slug fallback appends, and
+        # subtracted from `SLUG_CAP` rather than added to it so the cap stays the promise it says.
+        SLUG_DIGEST = 8
+
         # A stable rule id from the issue's free-text title, so a consumer groups repeats of
         # the same finding. Two near-identical titles ("XSS!" and "XSS?") can slug to one id;
         # that is benign — they share a rule, which is what grouping means — and the exact
@@ -92,8 +97,22 @@ module Gori
           # A title with no letters or digits AT ALL ("???", "———"). A shared bucket would
           # group findings that have nothing to do with each other, so key the fallback on the
           # title itself — distinct nonsense titles still get distinct rules.
-          slug = "#{FALLBACK_SLUG}-#{Digest::SHA256.hexdigest(normalized)[0, 8]}" if slug.empty?
-          slug = slug[0, SLUG_CAP].rstrip('-') if slug.size > SLUG_CAP
+          slug = "#{FALLBACK_SLUG}-#{Digest::SHA256.hexdigest(normalized)[0, SLUG_DIGEST]}" if slug.empty?
+          # A CUT slug carries the same digest the empty one does, and for the same reason. The
+          # note above assumed near-identical titles, but the cap merges any two titles that
+          # share a 60-character PREFIX — and what distinguishes two findings usually sits at the
+          # END of the sentence:
+          #
+          #   "SQL injection in the user profile update endpoint (parameter id)"    High
+          #   "SQL injection in the user profile update endpoint (parameter name)"  Critical
+          #
+          # …were one rule, so a dashboard grouped two distinct injection points under one badge.
+          # Grouping repeats of ONE title is the feature; grouping two titles because a length
+          # limit could not tell them apart is data loss, and the fallback path already knew it.
+          if slug.size > SLUG_CAP
+            keep = slug[0, SLUG_CAP - SLUG_DIGEST - 1].rstrip('-')
+            slug = "#{keep}-#{Digest::SHA256.hexdigest(normalized)[0, SLUG_DIGEST]}"
+          end
           "#{RULE_PREFIX}#{slug}"
         end
       end
@@ -106,6 +125,16 @@ module Gori
           title = one_line(f.title)
           rules[Sarif.rule_id(title)] ||= title
         end
+        # id => its position in the rules array, which is what `result.ruleIndex` means. Built
+        # here because this hash IS the rules array's order; `annotate_results` links each result
+        # with a lookup instead of `Sarif::Builder.find_rule_index`, whose `rules.index { … }` is
+        # a LINEAR SCAN per result — rules × results again, and distinct titles are what make
+        # distinct rules, so a list of distinct findings is the quadratic case rather than the
+        # corner. It is the other half of the same defect `worst_severities` fixes, one layer
+        # down; measured on 8000 distinct issues, --release: 299 ms → 133 ms with only the rules
+        # pass folded, → 64 ms with this one too.
+        rule_index = {} of String => Int32
+        rules.each_key { |id| rule_index[id] = rule_index.size }
 
         # ONE store read per issue for each of the two things every pass below wants. The flow
         # was previously fetched three times (location, markdown message, webRequest/Response)
@@ -128,7 +157,7 @@ module Gori
         run.results ||= [] of ::Sarif::Result
         # Results FIRST: a rule's `security-severity` is the worst severity among the results
         # that cite it, and it reads those off the property bags this pass writes.
-        annotate_results(run, issues, flows, links, project_name)
+        annotate_results(run, issues, flows, links, project_name, rule_index)
         annotate_rules(run)
         log.to_pretty_json
       end
@@ -141,11 +170,18 @@ module Gori
       private def self.annotate_results(run : ::Sarif::Run, issues : Array(Store::Issue),
                                         flows : Array(Store::FlowDetail?),
                                         links : Array(Array(Links::Resolved)),
-                                        project_name : String) : Nil
+                                        project_name : String,
+                                        rule_index : Hash(String, Int32)) : Nil
         results = run.results
         return unless results
         results.each_with_index do |res, i|
           f = issues[i]
+          # ruleId and ruleIndex, together and from the same map, so the pair a consumer
+          # cross-references cannot come apart. `ResultBuilder` would set both too, by scanning
+          # the whole rules array for every result — see `rule_index` in `sarif`.
+          id = Sarif.rule_id(one_line(f.title))
+          res.rule_id = id
+          res.rule_index = rule_index[id]?
           res.rank = Sarif.rank(f.severity)
           bag = ::Sarif::PropertyBag.new
           bag["gori/project"] = JSON::Any.new(one_line(project_name))
@@ -173,37 +209,58 @@ module Gori
       private def self.annotate_rules(run : ::Sarif::Run) : Nil
         descriptors = run.tool.driver.rules
         return unless descriptors
+        worst = worst_severities(run)
         # Keyed off each descriptor's own id rather than its position: the rules were
         # registered in insertion order, but a positional zip would silently mislabel every
         # severity if that ever stopped holding.
         descriptors.each do |d|
           bag = ::Sarif::PropertyBag.new(tags: ["security", "gori"])
-          bag["security-severity"] = JSON::Any.new(rule_security_severity(run, d.id))
+          live, any = worst[d.id]? || {nil, nil}
+          bag["security-severity"] =
+            JSON::Any.new(Sarif.security_severity(live || any || Store::Severity::Info))
           d.properties = bag
         end
       end
 
-      # The severity a rule's badge should show: the worst severity among the results that
-      # cite it AND are still live. A rule shared by a Critical and a Low is a Critical in a
+      # Per rule id, the severity its badge should show: {the worst among its LIVE results, the
+      # worst among all of them}. A rule shared by a Critical and a Low is a Critical in a
       # dashboard's list, which is the reading an operator triaging from that list needs.
       #
-      # SUPPRESSED results are excluded, because GitHub applies this badge PER ALERT, not just
-      # in the rules list: a Critical the operator triaged to false-positive was otherwise
-      # stamping 9.0 onto the one remaining open Info alert that happened to share its title.
-      # When every result for a rule is suppressed there is no live severity to show, so fall
-      # back to the worst of them rather than silently badging the rule Info.
-      private def self.rule_security_severity(run : ::Sarif::Run, rule_id : String) : String
-        live = nil.as(Store::Severity?)
-        any = nil.as(Store::Severity?)
+      # SUPPRESSED results are excluded from the live half, because GitHub applies this badge
+      # PER ALERT, not just in the rules list: a Critical the operator triaged to false-positive
+      # was otherwise stamping 9.0 onto the one remaining open Info alert that happened to share
+      # its title. When every result for a rule is suppressed there is no live severity to show,
+      # so the caller falls back to the worst of them rather than silently badging the rule Info.
+      #
+      # ONE pass, folding each result into its rule's entry. This used to be asked per DESCRIPTOR
+      # and rescanned every result to answer, i.e. rules × results — and since distinct titles are
+      # what make distinct rules, an issue list of distinct findings is the quadratic case, not
+      # the corner. Measured here, export of N issues with distinct titles, --release, with the
+      # `rule_index` map in `sarif` closing the second scan of the same shape:
+      #
+      #   issues   markdown   sarif before   sarif after
+      #     1000     1.6 ms        15.4 ms       10.6 ms
+      #     2000     3.3 ms        27.5 ms       15.7 ms
+      #     4000     6.2 ms        83.1 ms       31.6 ms
+      #     8000    13.6 ms       299.4 ms       64.4 ms    (doubling cost ~3.6x → ~2x)
+      #
+      # It runs SYNCHRONOUSLY on the TUI's UI fiber (`IssuesController`), which is the same fiber
+      # the `flows`/`links` pre-reads at the top of `sarif` were introduced to stop stalling.
+      private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Store::Severity?, Store::Severity?})
+        out = {} of String => {Store::Severity?, Store::Severity?}
         run.results.try &.each do |res|
-          next unless res.rule_id == rule_id
+          rule_id = res.rule_id
+          next unless rule_id
           sev = res.properties.try(&.get_string("gori/severity")).try { |l| Store::Severity.parse?(l) }
           next unless sev
+          live, any = out[rule_id]? || {nil.as(Store::Severity?), nil.as(Store::Severity?)}
           any = sev if any.nil? || sev.value > any.not_nil!.value
-          next if res.suppressions.try { |sup| !sup.empty? }
-          live = sev if live.nil? || sev.value > live.not_nil!.value
+          unless res.suppressions.try { |sup| !sup.empty? }
+            live = sev if live.nil? || sev.value > live.not_nil!.value
+          end
+          out[rule_id] = {live, any}
         end
-        Sarif.security_severity(live || any || Store::Severity::Info)
+        out
       end
 
       private def self.sarif_result(r : ::Sarif::RunBuilder, f : Store::Issue,
@@ -216,15 +273,23 @@ module Gori
           # the document for no reader's benefit.
           rb.message(sarif_message_text(f, title),
             markdown: String.build { |io| append_issue(io, f, flow, links, evidence: false) })
-          rb.rule_id(Sarif.rule_id(title))
+          # NOT `rb.rule_id` — that is what makes `ResultBuilder#build` scan the rules array for
+          # this result's index. `annotate_results` writes the id and the index together from the
+          # map that already knows both.
           rb.level(Sarif.level(f.severity))
           sarif_location(rb, f, flow)
           sarif_suppression(rb, f)
           # `gori/issueId` addresses THIS project DB; `gori/finding` survives a re-created one,
           # which is what lets a dashboard recognise the same finding across engagements.
+          #
+          # The LOCATION is part of what a finding IS. Without it, two separate IDORs on `/one`
+          # and `/two` — same title, same host, same severity, and the two rows a dashboard most
+          # needs to keep apart — hashed to one fingerprint, so a consumer deduplicating on the
+          # fingerprint (which is what a partialFingerprint is FOR) showed one of them. The
+          # material was already in hand: it is the same URI `sarif_location` writes.
           rb.partial_fingerprint("gori/issueId", f.id.to_s)
           rb.partial_fingerprint("gori/finding",
-            Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}"))
+            Digest::SHA256.hexdigest("#{title}\n#{f.host}\n#{f.severity.label}\n#{location_uri(f, flow)}"))
         end
       end
 
@@ -239,12 +304,16 @@ module Gori
       # than inventing one.
       private def self.sarif_location(rb : ::Sarif::ResultBuilder, f : Store::Issue,
                                       flow : Store::FlowDetail?) : Nil
-        if flow
-          rb.location(uri: one_line(flow.row.url))
-          return
-        end
+        uri = location_uri(f, flow)
+        rb.location(uri: uri) if uri
+      end
+
+      # That URI as a value, so the fingerprint above and the location here cannot disagree about
+      # WHERE a finding is — the fingerprint's whole job is to say which finding this is.
+      private def self.location_uri(f : Store::Issue, flow : Store::FlowDetail?) : String?
+        return one_line(flow.row.url) if flow
         host = f.host.try { |h| one_line(h) }
-        rb.location(uri: "https://#{host}/") if host && !host.empty?
+        host && !host.empty? ? "https://#{host}/" : nil
       end
 
       # A false-positive that arrives at a dashboard as an open finding is worse than not
@@ -315,10 +384,33 @@ module Gori
       # because header BYTES are attacker-controlled and can be invalid UTF-8 (an obs-text or
       # an h2 pseudo-header carrying a raw 0x80): unscrubbed, one of them makes the whole
       # document fail `valid_encoding?` and breaks it for a strict consumer.
+      #
+      # An obs-fold CONTINUATION (RFC 9112 §5.2 — a line whose first byte is SP/HTAB) is part of
+      # the value above it, and `one_line` strips exactly the whitespace that says so. A folded
+      #
+      #   X-Long: part1
+      #     X-Fake: part2
+      #
+      # therefore arrived here as two fields and left as two JSON members: a header the wire never
+      # carried, beside a truncated version of the one it did — while the curl export invented the
+      # same one and the JSON-Lines export (whose parser leaves the name alone) reported it as
+      # `"  X-Fake"`. Three surfaces, three header sets, one head. Folded into the previous value
+      # with a single SP, which is what a recipient that accepts obs-fold must do. (A continuation
+      # with no colon never reaches here at all: `Http1.parse_headers` drops a colon-less line.)
       private def self.sarif_headers(list : Proxy::Codec::HeaderList) : Hash(String, String)?
         out = {} of String => String
         seen = {} of String => String # downcased name => the casing first seen on the wire
+        last = nil.as(String?)        # the key an obs-fold continuation continues
         list.each do |h|
+          if fold_name?(h.name)
+            # Not a field. It continues the one above — or nothing, if it opened the block, in
+            # which case it belongs to no field and must not become one.
+            if key = last
+              cont = "#{one_line(h.name)}: #{one_line(h.value)}".strip
+              out[key] = out[key].empty? ? cont : "#{out[key]} #{cont}" unless cont.empty?
+            end
+            next
+          end
           name = one_line(h.name)
           next if name.empty?
           value = one_line(h.value)
@@ -332,8 +424,19 @@ module Gori
           else
             out[key] = value
           end
+          last = key
         end
         out.empty? ? nil : out
+      end
+
+      # Is this parsed field NAME really an obs-fold continuation — i.e. did its line start with
+      # SP or HTAB? `Http1.parse_headers` hands the name over UNSTRIPPED precisely so the caller
+      # can still tell; the byte is the only thing that distinguishes `  X-Fake: part2` (part of
+      # the value above) from `X-Fake: part2` (a field), and `one_line` erases it.
+      private def self.fold_name?(name : String) : Bool
+        return false if name.empty?
+        b = name.to_slice[0]
+        b == 0x20_u8 || b == 0x09_u8
       end
 
       # The body as `artifactContent.text`, through the SAME evidence rules the Markdown

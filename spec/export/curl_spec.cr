@@ -127,6 +127,138 @@ describe Gori::Export::Curl do
     end
   end
 
+  # The two arguments this file did NOT already refuse a NUL for. `shell_quote` says it in its
+  # own comment: every byte rides inside '…' except 0x00, and an argv is NUL-terminated. Measured
+  # with `curl` replaced by `/bin/echo` so execve's argv is visible: zsh (macOS's default shell)
+  # truncates SILENTLY at the NUL — `curl 'https://acme.test/pa<NUL>th'` requests `/pa` — and
+  # bash refuses the whole line. Neither says why, and a command that quietly requests a
+  # DIFFERENT path than the capture is the exact failure `nul_method_note` and `data_argument`
+  # already exist to prevent.
+  describe "a URL or header no shell argument can carry" do
+    it "refuses the whole command when the captured URL holds a NUL" do
+      cmd = curl_of("GET /pa\u0000th HTTP/1.1\r\nHost: acme.test\r\n\r\n", "https://acme.test")
+      # Not a curl line at all: there is no fallback for the one argument the command is FOR,
+      # so the paste must do nothing rather than fetch a different path.
+      cmd.lines.each { |l| l.lstrip.should start_with("#") }
+      cmd.should contain("# no command")
+      cmd.should contain("--format raw")
+      cmd.should_not contain("\u0000")
+    end
+
+    it "omits a NUL-bearing header and names it, instead of emitting one a shell truncates" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: acme.test\r\nX-Nul: be\u0000fore\r\nX-Ok: 1\r\n\r\n",
+        "https://acme.test")
+      cmd.should_not contain("-H 'X-Nul")
+      cmd.should contain("-H 'X-Ok: 1'")
+      cmd.should contain("# -H omitted")
+      cmd.should contain("X-Nul")
+      # The note is a comment on the operator's terminal; it must not carry the byte it is
+      # ABOUT (a raw NUL would truncate the note itself).
+      cmd.should_not contain("\u0000")
+      cmd.lines.last.should start_with("  # -H omitted")
+    end
+  end
+
+  # A stored request body is WIRE bytes, chunk framing and all. curl frames `--data-raw` itself,
+  # so handing it a chunked body under a `Transfer-Encoding: chunked` header made the origin
+  # decode 14 bytes where the capture sent 5 — the one runnable artifact of the three
+  # (`--format json` and SARIF both de-chunk) sending a different request than the capture.
+  describe "a chunked request body" do
+    it "de-chunks the body and drops the chunked coding curl re-applies itself" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n" \
+                    "5\r\nhello\r\n0\r\n\r\n", "https://h")
+      cmd.should contain("--data-raw 'hello'")
+      cmd.should_not contain("-H 'Transfer-Encoding: chunked'")
+      cmd.should contain("# body de-chunked")
+    end
+
+    # Only the FINAL `chunked` is framing. A compressing coding under it is content the origin
+    # still has to decode, so the layer stays on the command and the bytes stay compressed —
+    # de-chunking is not decompressing (`Content-Encoding` is untouched for the same reason).
+    it "peels only the final chunked coding, leaving a compressing one on the command" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip, chunked\r\n\r\n" \
+                    "4\r\nabcd\r\n0\r\n\r\n", "https://h")
+      cmd.should contain("-H 'Transfer-Encoding: gzip'")
+      cmd.should contain("--data-raw 'abcd'")
+    end
+
+    # A head that declares chunked over a body that is not chunk-framed — a hand-authored
+    # Repeater request, an import that stored the entity. `dechunk` is tolerant and recovers
+    # NOTHING from one, so peeling would have dropped the operator's body without a word.
+    it "hands over a body the head only CLAIMS is chunked, rather than dropping it" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nplain body",
+        "https://h")
+      cmd.should contain("--data-raw 'plain body'")
+      cmd.should contain("# body sent as captured")
+      cmd.should_not contain("de-chunked")
+    end
+
+    # A chunked stream cut at the capture cap still de-chunks to what it carried; the command
+    # says the capture itself is short rather than pretending the entity is whole.
+    it "names a chunked stream that never reached its 0-chunk" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel",
+        "https://h")
+      cmd.should contain("--data-raw 'hel'")
+      cmd.should contain("never reached its terminating 0-chunk")
+    end
+
+    it "leaves a body alone when nothing declares chunked framing" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\n5\r\nhello\r\n0\r\n\r\n", "https://h")
+      cmd.should contain("--data-raw '5")
+      cmd.should_not contain("de-chunked")
+    end
+  end
+
+  # RFC 9112 §5.2: a line starting with SP/HTAB continues the PREVIOUS field's value. `strip`ping
+  # the name made a continuation that happens to carry a colon indistinguishable from a header of
+  # its own, so the command SENT a header the wire never carried and truncated the value of the
+  # one it did — while `--format json` (whose parser does not strip the name) reported a third
+  # header set for the same head. A reproduction of a header-parsing difference must not have one
+  # of its own.
+  describe "an obs-fold continuation" do
+    it "folds the continuation into the field above it instead of inventing a header" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: h\r\nX-Long: part1\r\n  X-Fake: part2\r\nX-Last: z\r\n\r\n",
+        "https://h")
+      cmd.should contain("-H 'X-Long: part1 X-Fake: part2'")
+      cmd.should_not contain("-H 'X-Fake")
+      cmd.should contain("-H 'X-Last: z'")
+    end
+
+    it "folds a HTAB continuation, and a colon-less one, the same way" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: h\r\nX-Csp: default-src 'self';\r\n\tscript-src 'none'\r\n\r\n",
+        "https://h")
+      cmd.should contain(%q(-H 'X-Csp: default-src '\''self'\''; script-src '\''none'\'''))
+    end
+  end
+
+  # `Host` is dropped because curl derives it from the URL — which is only the same header when
+  # the capture's Host IS the URL's authority. A Host-header-injection capture is by definition
+  # the case where it is not, and that is a test this proxy exists to make possible.
+  describe "the Host header" do
+    it "keeps a Host that disagrees with the connection authority" do
+      cmd = curl_of("GET /x HTTP/1.1\r\nHost: evil.example\r\n\r\n", "https://acme.test")
+      cmd.should contain("curl 'https://acme.test/x'")
+      cmd.should contain("-H 'Host: evil.example'")
+    end
+
+    it "still drops the Host that only repeats the URL, default port spelled out or not" do
+      curl_of("GET /x HTTP/1.1\r\nHost: acme.test:443\r\n\r\n", "https://acme.test")
+        .should_not contain("-H 'Host:")
+      curl_of("GET /x HTTP/1.1\r\nHost: ACME.test\r\n\r\n", "https://acme.test")
+        .should_not contain("-H 'Host:")
+      curl_of("GET /x HTTP/1.1\r\nHost: acme.test:8080\r\n\r\n", "http://acme.test:8080")
+        .should_not contain("-H 'Host:")
+    end
+  end
+
+  # An empty head has no request line, so there is nothing to reproduce — but `resolve_url` falls
+  # back to the target base and the command came out `curl 'https://acme.test'`, a request the
+  # capture never made, offered as if it were the capture.
+  it "returns nil for a head with no request line rather than inventing GET /" do
+    Gori::Export::Curl.text("", "https://acme.test").should be_nil
+    Gori::Export::Curl.text("\r\n\r\n", "https://acme.test").should be_nil
+  end
+
   describe "a body no shell argument can carry" do
     it "refuses a NUL-bearing body in a comment rather than sending a SHORTER one" do
       cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\nab\u{0}cd", "http://h")

@@ -45,8 +45,25 @@ module Gori
       }
     end
 
+    # Deleting a provider must also cut the sessions that pointed at it loose, in the SAME
+    # batch. `oast_sessions.provider_id` carries no foreign key, and `oast_providers.id` is a
+    # plain `INTEGER PRIMARY KEY` — no AUTOINCREMENT — so SQLite reuses a deleted row's id for
+    # the next insert. A stale pointer then silently re-binds those sessions to whatever
+    # provider takes that id next: a different kind, a different endpoint, and a different
+    # TOKEN, which `Sessions#bind` would put in an `Authorization:` header aimed at the
+    # session's own host. NULLing it puts the rows on the kind+endpoint re-resolution path a
+    # global provider's sessions have always used (`Sessions#config_for`), which also means a
+    # provider deleted and re-added is found again instead of stranding its sessions.
+    #
+    # Both statements in one `exec_task_ok` closure so they share the write batch: a commit
+    # that dropped the provider but kept the pointers would recreate exactly the dangling row
+    # this prevents.
     def delete_oast_provider(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM oast_providers WHERE id = ?", id); nil }
+      exec_task_ok ->(c : DB::Connection) {
+        c.exec("UPDATE oast_sessions SET provider_id = NULL WHERE provider_id = ?", id)
+        c.exec("DELETE FROM oast_providers WHERE id = ?", id)
+        nil
+      }
     end
 
     def oast_sessions : Array(OastSessionRecord)

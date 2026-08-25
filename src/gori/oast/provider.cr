@@ -54,7 +54,37 @@ module Gori::Oast
 
     # Best-effort teardown. Default no-op; override where the server supports it. MUST NOT
     # raise (callers deregister during cleanup where an error is noise).
+    #
+    # A no-op here is not "the teardown succeeded" — it is "this build cannot tear this one
+    # down", and `deregisters?` below is what tells the two apart. `Sessions.release` used to
+    # read a silent return as success and answer `true`, so `gori run oast release` reported a
+    # teardown that never left the process for four of the five backends.
     def deregister(http : Http, session : Session) : Nil
+    end
+
+    # Can this provider TELL its server to forget a session? False by default, so a backend
+    # added without a teardown is honestly reported as one rather than inheriting a silent
+    # success. Overridden true by the three that have a real delete API: interactsh
+    # (`POST /deregister`), webhook.site (`DELETE /token/{uuid}`), postbin
+    # (`DELETE /api/bin/{binId}`).
+    #
+    # BOAST is the one backend that registers server-side state and offers NO way to release
+    # it: go-boast derives the id from the secret and keeps serving it. `release` says so
+    # instead of pretending, because the operator's next move — rotate the BOAST secret, or
+    # leave the engagement's listener collecting — depends entirely on knowing.
+    def deregisters? : Bool
+      false
+    end
+
+    # Did `register` create state on a THIRD-PARTY server at all? True for four of the five.
+    #
+    # CustomHttp is "bring your own OAST server": its register mints a local correlation id and
+    # never dials anything, so there is nothing on any server to release and a `release` that
+    # refused would be as wrong as one that claimed a teardown. It is the only member of the
+    # third state, and it exists so the two honest answers ("released" / "cannot be released")
+    # stay honest.
+    def server_state? : Bool
+      true
     end
 
     # The per-payload NONCE inside a payload this provider minted — the substring that comes

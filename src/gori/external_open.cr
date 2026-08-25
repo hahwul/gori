@@ -1,3 +1,4 @@
+require "file_utils"
 require "./media_type"
 require "./paths"
 require "./proxy/codec/content_decode"
@@ -57,9 +58,22 @@ module Gori
     # this bounds the WRITE, so a legitimately huge body cannot fill a home directory because
     # someone pressed a key. A truncated preview still renders — HTML and JSON both degrade
     # readably — and `Result#truncated` lets the caller say so.
+    #
+    # Equal to `ContentDecode::MAX_OUT` on purpose (this is the same ceiling seen from the
+    # other side), which used to make `truncated` unreachable for a compressed body: the
+    # inflate stopped AT the ceiling and `size > MAX_BYTES` was then false by one byte. The
+    # native decoders now stop one buffer PAST their cap (see `Brotli.decode_full`), so a body
+    # that really had more to give lands above this and is reported as cut.
     MAX_BYTES = 32 * 1024 * 1024
 
     # What the caller shows and what the Runner spawns against.
+    #
+    # `truncated` is "this file is NOT the whole document", from any of the three ways that
+    # happens: the capture cap cut the stored body before it reached us (`body_truncated`, the
+    # default 2 MiB `DEFAULT_CAPTURE_MAX_MIB` makes this the ordinary case, not an edge one),
+    # the decompressor never reached end-of-stream, or `MAX_BYTES` cut the write. All three
+    # produce a partial file that renders, so all three are one flag — the caller says
+    # "(truncated)" and the operator knows not to read the tail as the document's end.
     record Result, path : String, media : String?, bytes : Int32, truncated : Bool
 
     # Media type → suffix. An ALLOWLIST: a type absent here never picks its own extension.
@@ -125,15 +139,36 @@ module Gori
     # `stem` names the source — "flow-1234", "repeater-7" — and is the caller's to build from
     # ids, never from captured bytes.
     #
+    # `body_truncated` is the SOURCE's own verdict — `FlowDetail#response_body_truncated?` for
+    # a stored flow — and it is not an exotic case: with `DEFAULT_CAPTURE_MAX_MIB` at 2, every
+    # response over 2 MiB is stored cut. Every other surface reads that flag (`gori history`
+    # prints `[response body truncated]`, the MCP serializer and the HAR export both carry
+    # it); this one had no way to be told, so it wrote a partial document and said "opened".
+    #
     # Raises `Gori::Error` when there is nothing to show or the write fails; the caller turns
     # that into a status line. Never partially succeeds: the sweep runs after the write, so a
     # failed write cannot take older previews with it.
-    def self.write(stem : String, head : Bytes?, body : Bytes?) : Result
+    #
+    # Refuses rather than writing when a declared coding did not come off. `ContentDecode`
+    # returns the still-COMPRESSED entity in that case (that is its display contract — the
+    # note beside it says what happened), so the old `decoded || body` handed the deflate
+    # stream straight to `File.write`, named it `.html` from the response's `Content-Type`,
+    # and reported a successful open of a file no viewer can render. The note is the honest
+    # message and it is exactly what History renders one key away, so it IS the refusal.
+    def self.write(stem : String, head : Bytes?, body : Bytes?, body_truncated : Bool = false) : Result
       raise Gori::Error.new("no response body to open") if body.nil? || body.empty?
-      decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
+      decoded, note, complete = Proxy::Codec::ContentDecode.decode_full(head, body)
+      raise Gori::Error.new(note || "the response body could not be decoded") if Proxy::Codec::ContentDecode.decode_failed?(note)
       bytes = decoded || body
-      truncated = bytes.size > MAX_BYTES
-      bytes = bytes[0, MAX_BYTES] if truncated
+      # AFTER the decode, not only before it. The entry guard above tests the stored bytes;
+      # a body that decodes to nothing (a stream cut before its first output byte) still got
+      # past it, and a 0-byte file was written and announced as an open document.
+      raise Gori::Error.new("the response body decodes to nothing to show") if bytes.empty?
+      cut = bytes.size > MAX_BYTES
+      bytes = bytes[0, MAX_BYTES] if cut
+      # Three sources, one flag — see `Result`. `complete` is `decode_full`'s end-of-stream
+      # report, which the previous `decode` call discarded along with the note.
+      truncated = cut || !complete || body_truncated
       root = dir
       # `ensure_dir` inside the rescue as much as the write: it converts only the
       # occupied-path case to `Gori::Error` itself, so a read-only or full GORI_HOME raised
@@ -145,7 +180,12 @@ module Gori
         # `bytes`, not `body` — the decoded slice is what lands in the file, so it is what
         # the last-resort text/binary test has to read. See `suffix_for`.
         path = File.join(root, "#{sanitize_stem(stem)}-#{stamp}#{suffix_for(head, bytes)}")
-        File.write(path, bytes)
+        # 0600, like every other file gori writes that holds captured data (the store, the
+        # settings file, the project registry, the CA key). A preview holds a WHOLE response
+        # body — session tokens, PII, whatever the target returned — it lives under GORI_HOME
+        # rather than in a project directory, and deleting the project does not take it with
+        # it. The 0700 dir is not the whole guard: these outlive the session that made them.
+        File.write(path, bytes, perm: File::Permissions.new(0o600))
       rescue ex : Gori::Error
         raise ex # already phrased for an operator (the occupied-path case)
       rescue ex
@@ -186,21 +226,43 @@ module Gori
       {% end %}
     end
 
-    # Keep the newest `KEEP` files and delete the rest. Best-effort by design: a preview that
+    # Keep the newest `KEEP` entries and delete the rest. Best-effort by design: a preview that
     # will not delete (a viewer holding it open on a platform that locks) must not fail the
     # write that triggered the sweep — the operator asked to SEE something, not to tidy up.
+    #
+    # Every entry, not only the regular files. gori writes files, but the DESKTOP writes back:
+    # hand macOS a `.zip` preview and `open` passes it to Archive Utility, which unpacks the
+    # tree beside it, IN here. A `File.file?` filter dropped those directories out of the sweep
+    # entirely, so they were never counted against `keep` and never deleted — a dir per archive
+    # preview, accumulating under GORI_HOME forever, while the doc promises a bounded sweep.
     def self.prune(root : String, keep : Int32 = KEEP) : Nil
       entries = Dir.children(root).compact_map do |name|
         p = File.join(root, name)
-        File.file?(p) ? {p, File.info(p).modification_time} : nil
+        # `follow_symlinks: false`: a dangling link raises under a following stat and would
+        # drop out of the sweep the same way a directory did, permanently.
+        {p, File.info(p, follow_symlinks: false).modification_time}
       rescue
         nil
       end
       return if entries.size <= keep
       entries.sort_by! { |(_, mtime)| mtime }
-      entries[0, entries.size - keep].each { |(p, _)| File.delete(p) rescue nil }
+      entries[0, entries.size - keep].each { |(p, _)| delete_entry(p) }
     rescue
       # An unreadable preview dir is not a reason to lose the preview just written.
+    end
+
+    # Delete one swept entry, whatever it is. The directory case is a tree (an unpacked
+    # archive), so it needs `rm_rf` — decided on the LINK's own type, never a followed one, so
+    # a symlink that happens to point at a directory has the link removed rather than its
+    # target's contents.
+    private def self.delete_entry(path : String) : Nil
+      if File.info(path, follow_symlinks: false).directory?
+        FileUtils.rm_rf(path)
+      else
+        File.delete(path)
+      end
+    rescue
+      # Best-effort, as above.
     end
 
     # Does the body look like text a viewer should try to render? Deliberately crude and

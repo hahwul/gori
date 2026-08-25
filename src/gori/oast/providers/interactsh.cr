@@ -94,6 +94,10 @@ module Gori::Oast
       out
     end
 
+    def deregisters? : Bool
+      true
+    end
+
     def deregister(http : Http, session : Session) : Nil
       body = {"correlation-id" => session.correlation_id, "secret-key" => session.secret}.to_json
       resp = http.request("POST", "#{session.server_url}/deregister", json_headers, body)

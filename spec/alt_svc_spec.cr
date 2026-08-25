@@ -25,6 +25,26 @@ describe Gori::AltSvc do
       Gori::AltSvc.h3_evidence(%(h32=":443")).should be_nil
     end
 
+    it "does not read a list separator out of a comma inside a quoted-string" do
+      # RFC 9110 §5.6.4: `alt-authority` and a parameter value are quoted-strings, in which a
+      # comma is DATA. Splitting on every comma cut `p="a, h3=x"` in two and read `h3=x"` out of
+      # the second half — so gori removed a field advertising no HTTP/3 at all, while the flow
+      # advisory claimed it had removed an h3 advertisement.
+      Gori::AltSvc.h3_evidence(%(fake=":443"; p="a, h3=x")).should be_nil
+      Gori::AltSvc.advertises_h3?(%(fake=":443"; p="a, h3=x")).should be_false
+      # A backslash escapes the next octet inside the quotes, so the run does not end early.
+      Gori::AltSvc.h3_evidence(%(fake=":443"; p="a\\", h3=x")).should be_nil
+      # …and the separators that ARE separators still separate.
+      Gori::AltSvc.h3_evidence(%(fake="a, b", h3=":443")).should eq(%(h3=":443"))
+    end
+
+    it "strips nothing for a quoted comma reaching the whole way through the proxy seam" do
+      original = head("HTTP/1.1 200 OK", %(Alt-Svc: fake=":443"; p="a, h3=x"), "Content-Length: 3")
+      stripped, removed = Gori::AltSvc.strip_h3(original)
+      removed.should be_empty
+      stripped.to_unsafe.should eq(original.to_unsafe)
+    end
+
     it "survives a value that is not valid UTF-8" do
       Gori::AltSvc.h3_evidence(String.new(Bytes[0xff, 0xfe]) + %(, h3=":443")).should eq(%(h3=":443"))
     end

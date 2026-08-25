@@ -2296,12 +2296,12 @@ module Gori::Proxy
     end
 
     private def resolve_forward(req : Codec::RawRequest) : {String, Int32, String, Bytes}
-      # Post-CONNECT tunnel, or a reverse listener: all requests go to the pinned origin,
-      # byte-exact (they arrive origin-form over the decrypted channel / straight off the
-      # reverse socket). The declared Host rewrite is the one exception, and only when the
-      # operator asked for it.
+      # Post-CONNECT tunnel, a reverse listener, or a granted SOCKS5 CONNECT: all requests go
+      # to the pinned origin, byte-exact. The declared Host rewrite is one exception, and only
+      # when the operator asked for it; `pinned_origin_head` is the other.
       if fixed = @fixed_host
-        head = @rewrite_fixed_host ? rewrite_host_header(req, fixed, @fixed_port) : req.raw_head
+        head = pinned_origin_head(req)
+        head = rewrite_host_header(head, fixed, @fixed_port) if @rewrite_fixed_host
         return {fixed, @fixed_port, @scheme, head}
       end
 
@@ -2316,6 +2316,36 @@ module Gori::Proxy
         host, port = origin_form_destination(req)
         {host, port, @scheme, req.raw_head}
       end
+    end
+
+    # The head a PINNED connection puts on the wire: the client's own bytes, except that an
+    # absolute-form request-target is normalised to origin-form exactly as the forward-proxy
+    # branch below does it.
+    #
+    # This branch used to forward `req.raw_head` unconditionally, on a comment asserting that
+    # requests here "arrive origin-form". That was true of the two surfaces it was written for —
+    # a post-CONNECT tunnel and a reverse listener — and the SOCKS5 listener is the surface
+    # where it stopped being true: the client speaks ordinary HTTP/1.1 down a granted tunnel and
+    # nothing makes it use origin-form. Two things went wrong and neither needed the pin to
+    # fail (the dial stayed pinned throughout, which is the part that held):
+    #
+    #   * gori MANUFACTURED a proxy-only request line at an origin server. RFC 9112 §3.2.2 has
+    #     absolute-form for a request to a proxy; a lenient origin, CDN or gateway routes on the
+    #     absolute URI's authority instead, so gori's own forward chose a destination inside a
+    #     connection that was supposed to be pinned to one.
+    #   * `Url.request_url` prefers the absolute form, so the URL every SCOPE, Sandbox and
+    #     History lens read was a completely different authority from the one gori dialled —
+    #     `http://evil.example.com/` for a connection pinned to `127.0.0.1:19090`.
+    #
+    # `Url.absolute_form?` rather than the branch below's `starts_with?("http://")`: RFC 3986
+    # §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same instruction to
+    # a lenient recipient.
+    private def pinned_origin_head(req : Codec::RawRequest) : Bytes
+      return req.raw_head unless Gori::Url.absolute_form?(req.target)
+      # `URI::Error`/`OverflowError` here is the malformed-target case `handle_request` already
+      # rescues around this whole call — it records the attempt and answers 502 rather than
+      # letting it unwind.
+      rewrite_request_line(req, origin_form(URI.parse(req.target)))
     end
 
     # What an ORIGIN-FORM request is ADDRESSED to: the `Host` header, with the kernel's original
@@ -2344,12 +2374,14 @@ module Gori::Proxy
     # the request line, the header order, and any oddity in the client's spelling — this
     # rewrites ONE field, it does not normalise a head.
     #
+    # Takes the HEAD and not the projection, so it composes on top of `pinned_origin_head`'s
+    # request-line normalisation instead of reaching back to `req.raw_head` and undoing it.
+    #
     # Only the FIRST Host header is replaced and any later duplicate is dropped: a head with two
     # Host values is a request-smuggling shape, and leaving a second one behind after declaring
     # the origin would hand the origin the ambiguity we were asked to remove. A head with none
     # gains one immediately after the request line (where a client would have put it).
-    private def rewrite_host_header(req : Codec::RawRequest, host : String, port : Int32) : Bytes
-      raw = req.raw_head
+    private def rewrite_host_header(raw : Bytes, host : String, port : Int32) : Bytes
       nl = raw.index(0x0a_u8) || return raw # no LF at all? leave as-is
       default_port = @scheme == "https" ? 443 : 80
       authority = port == default_port ? bracketed(host) : "#{bracketed(host)}:#{port}"
@@ -2479,12 +2511,18 @@ module Gori::Proxy
     # protocol can arrive on at all — SMTP/IMAP cannot traverse a forward proxy without CONNECT — so leaving them out would have put the
     # fix everywhere except where it is needed (#729 says the transparent listener "matters more
     # here than anywhere else"). One method, so the sentence cannot fork.
+    # `opened` replaces the first clause for a caller whose client did NOT arrive in silence. The
+    # SOCKS5 listener is the one: its peer completed a whole handshake — version, method list, a
+    # CONNECT that gori gated and granted — before going quiet, so "opened this connection, sent
+    # zero bytes" described a client that never connected and sent the operator looking for one.
+    # The rest of the sentence is the same fact and stays one spelling.
     def self.record_silent_client(sink : FlowSink, scheme : String, host : String, port : Int32,
-                                  *, client_tls : Bool) : Nil
+                                  *, client_tls : Bool, opened : String? = nil) : Nil
       flow_id = sink.on_request(FlowMapper.request(Codec::Http1.parse_request_head(Bytes.new(0)),
         scheme: scheme, host: host, port: port, created_at: now_us, body: nil, source: FlowSource::Kind::Proxy))
       sink.on_response(FlowMapper.error_response(flow_id,
-        "no request: the client opened this connection, sent zero bytes, and was closed when the " \
+        "no request: the client #{opened || "opened this connection, sent zero bytes"}, and was " \
+        "closed when the " \
         "#{SocketTuning::CLIENT_IO_TIMEOUT.total_seconds.to_i} s client read timeout expired. A " \
         "SERVER-SPEAKS-FIRST protocol makes exactly this shape — SMTP, IMAP, POP3, MySQL and " \
         "friends have the SERVER greet first, so the client is waiting for a banner an HTTP proxy " \

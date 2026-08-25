@@ -225,12 +225,17 @@ module Gori::Proxy::Codec
       when "deflate"        then partial_note(inflate_deflate(data, max_out), "deflate")
       when "br"
         return {nil, "compressed: br — decoder not built in", true} unless Brotli::AVAILABLE
-        # The FFI decoders return bytes only; they carry no end-of-stream signal here, so
-        # they keep reporting a clean decode rather than guessing.
-        {Brotli.decode(data, max_out), "decoded: br", true}
+        # `decode_full`, never the one-value `decode`: both FFI decoders DO report their own
+        # end-of-stream (that is what the second element is), and calling the convenience
+        # wrapper threw the answer away and hard-coded `true` in its place. A brotli body cut
+        # anywhere — the ordinary shape of a capture-capped response — decoded to a prefix and
+        # was reported "decoded: br", the clean note, on every surface: the History note, the
+        # `decode_truncated` field in `--format json`, and Probe, for which an encoded body
+        # that never finished is the whole point of the scan.
+        partial_note(Brotli.decode_full(data, max_out), "br")
       when "zstd"
         return {nil, "compressed: zstd — decoder not built in", true} unless Zstd::AVAILABLE
-        {Zstd.decode(data, max_out), "decoded: zstd", true}
+        partial_note(Zstd.decode_full(data, max_out), "zstd")
       else
         {nil, "compressed: #{enc} — decode unsupported", true}
       end
@@ -241,9 +246,38 @@ module Gori::Proxy::Codec
     # Fold a {bytes, clean} pair into the note. A stream that stopped early is the FINDING
     # when the probe was a truncated or bomb-shaped encoded body, so it is named in the same
     # place a successful decode is named rather than in a field only JSON readers see.
+    #
+    # NOTHING decoded and no end-of-stream is not a partial result, it is a FAILED one: the
+    # buffer was never a stream of this coding (a forged or simply wrong `Content-Encoding`,
+    # or a body cut before the decoder produced its first byte). Reported as a failure —
+    # `nil` decoded, so `decode_full` hands back the captured entity instead — because the
+    # alternative is a non-nil EMPTY slice, and every display that prefers the decoded view
+    # over the raw one (`src = display || body`) then shows a blank pane under a note that
+    # says the decode succeeded, with the captured bytes reachable only through the hex view.
+    # Same rule as `Decoder::Codecs#native`: produced nothing AND did not end cleanly is the
+    # one shape neither a truncated body nor a legal empty payload can take.
     private def self.partial_note(result : {Bytes, Bool}, enc : String) : {Bytes?, String?, Bool}
       bytes, clean = result
+      return {nil, "decode error (#{enc}): no output — not a #{enc} stream, or cut before its first byte", false} if bytes.empty? && !clean
       {bytes, clean ? "decoded: #{enc}" : "decoded: #{enc} (stream truncated)", clean}
+    end
+
+    # Does a note from `decode`/`decode_full` report a coding that did NOT come off?
+    #
+    # The chain stops at the first layer it cannot undo and returns the bytes AS THEY STOOD —
+    # still compressed — so for an unsupported coding, a decoder that isn't built in, or a
+    # stream that was never this format, `decoded` is non-nil and the note is the only thing
+    # separating "here is the document" from "here are the wire bytes". A surface that
+    # DISPLAYS both and prints the note beside them can ignore this; one that writes the bytes
+    # to a file the desktop dispatches on cannot (`ExternalOpen` wrote a `Content-Encoding:
+    # compress` body out as `.html` and reported it opened).
+    #
+    # A note only ever grows by appending, and the chain stops at the first failure, so the
+    # verdict is the LAST segment — a successful `de-chunked` ahead of it must not mask it.
+    def self.decode_failed?(note : String?) : Bool
+      return false if note.nil?
+      last = note.split(" · ").last
+      last.starts_with?("compressed: ") || last.starts_with?("decode error")
     end
 
     private def self.gunzip(data : Bytes, max_out : Int32) : {Bytes, Bool}

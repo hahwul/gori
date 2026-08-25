@@ -1,5 +1,22 @@
 require "../spec_helper"
 
+# A throwaway `config.toml` (or the absence of one) for the `.install_toml` examples. They go
+# through the REAL entry point rather than the line splice, because the refusals and the
+# read-back guard live there.
+private def with_toml(existing : String?, &)
+  Dir.tempdir.try do |base|
+    dir = File.join(base, "codex-#{Random::Secure.hex(4)}")
+    Dir.mkdir_p(dir)
+    path = File.join(dir, "config.toml")
+    File.write(path, existing) if existing
+    begin
+      yield path
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+end
+
 describe Gori::MCP::Install do
   describe ".config_path" do
     it "maps codex to ~/.codex/config.toml (or CODEX_HOME)" do
@@ -423,6 +440,197 @@ describe Gori::MCP::Install do
       out.should_not contain("old")
       out.should_not contain("[mcp_servers.gori.env]")
       out.should_not contain("FOO")
+    end
+
+    # The header scan used to be a plain `strip.starts_with?("[mcp_servers.")` over every line,
+    # and a config file's own worked example is written in a `"""…"""` block. So this fixture's
+    # THIRD line matched, and everything from it to the next real `[` — the rest of the string,
+    # its closing delimiter, and `model` — was deleted, leaving the file unparseable and
+    # `model = "gpt-5"` gone. gori reported "Successfully installed".
+    it "does not read a table header out of a multi-line string" do
+      existing = <<-TOML
+      instructions = """
+      Example config:
+      [mcp_servers.gori]
+      command = "gori"
+      """
+
+      model = "gpt-5"
+      TOML
+      spliced = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori",
+        "command = \"/new\"\nargs = [\"mcp\"]\n")
+      spliced.should contain(%(model = "gpt-5"))
+      spliced.should contain("Example config:")
+      spliced.should contain(%(command = "gori"))          # the example inside the string, untouched
+      spliced.should contain(%(command = "/new"))          # …and the real entry, appended after it
+      spliced.scan("[mcp_servers.gori]").size.should eq(2) # the example's, and gori's own
+      # The whole point: what comes back still parses, with one gori server in it.
+      doc = Gori::MCP::Install::TomlDoc.parse(spliced)
+      doc.dig("mcp_servers", "gori").not_nil!.string?("command").should eq("/new")
+      doc.dig("mcp_servers", "gori").not_nil!.string_array?("args").should eq(["mcp"])
+    end
+
+    it "leaves a literal multi-line string's look-alike header alone too" do
+      existing = <<-TOML
+      note = '''
+      [mcp_servers.gori]
+      '''
+      model = "x"
+      TOML
+      spliced = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori", "command = \"/new\"\n")
+      spliced.should contain(%(model = "x"))
+      spliced.should contain("'''")
+    end
+  end
+
+  describe ".install_toml" do
+    it "refuses a file it cannot parse instead of splicing into it" do
+      with_toml("model = \"gpt-5\n[features]\nx = true\n") do |path|
+        before = File.read(path)
+        ex = expect_raises(Exception, /isn't valid TOML/) do
+          Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        end
+        ex.message.not_nil!.should contain(path)
+        File.read(path).should eq(before) # …and nothing was written
+      end
+    end
+
+    # `[mcp_servers]` with an INLINE `gori` entry is valid TOML that a header scan cannot see,
+    # so appending `[mcp_servers.gori]` beside it produced `Cannot declare ('mcp_servers',
+    # 'gori') twice` — a file Codex refuses to load, and one a re-run does not repair (the
+    # second run replaces its own table and leaves the inline key exactly where it was).
+    it "replaces an inline entry rather than declaring the table twice" do
+      with_toml(<<-TOML) do |path|
+        model = "gpt-5"
+
+        [mcp_servers]
+        other = { command = "/other", args = [] }
+        gori = { command = "/old/gori", args = ["mcp"] }
+        TOML
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp", "--read-only"])
+        text = File.read(path)
+        text.should_not contain("/old/gori")
+        text.should contain(%(other = { command = "/other", args = [] })) # the sibling stays
+        text.should contain(%(model = "gpt-5"))
+        doc = Gori::MCP::Install::TomlDoc.parse(text) # would RAISE on the duplicate declaration
+        doc.dig("mcp_servers", "gori").not_nil!.string?("command").should eq("/opt/gori")
+        doc.dig("mcp_servers", "other").not_nil!.string?("command").should eq("/other")
+      end
+    end
+
+    it "replaces a DOTTED inline entry too" do
+      with_toml(<<-TOML) do |path|
+        [mcp_servers]
+        gori.command = "/old/gori"
+        gori.args = ["mcp"]
+        keep = { command = "/keep" }
+        TOML
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        text = File.read(path)
+        text.should_not contain("/old/gori")
+        text.should contain("/keep")
+        Gori::MCP::Install::TomlDoc.parse(text)
+          .dig("mcp_servers", "gori").not_nil!.string?("command").should eq("/opt/gori")
+      end
+    end
+
+    it "installs into a file whose example block mentions the table, keeping the file valid" do
+      with_toml(<<-TOML) do |path|
+        instructions = """
+        Example config:
+        [mcp_servers.gori]
+        command = "gori"
+        """
+
+        model = "gpt-5"
+        TOML
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        text = File.read(path)
+        text.should contain(%(model = "gpt-5"))
+        doc = Gori::MCP::Install::TomlDoc.parse(text)
+        doc.dig("mcp_servers", "gori").not_nil!.string?("command").should eq("/opt/gori")
+        doc.root.string?("model").should eq("gpt-5")
+        doc.root.string?("instructions").not_nil!.should contain("[mcp_servers.gori]")
+      end
+    end
+
+    it "is idempotent, and keeps comments and unrelated tables" do
+      with_toml(<<-TOML) do |path|
+        model = "o3"
+        # keep me
+
+        [mcp_servers.other]
+        command = "other"
+
+        [features]
+        js_repl = false
+        TOML
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        first = File.read(path)
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        File.read(path).should eq(first)
+        first.should contain("# keep me")
+        first.should contain("[mcp_servers.other]")
+        first.should contain("js_repl = false")
+        first.scan("[mcp_servers.gori]").size.should eq(1)
+      end
+    end
+
+    it "writes a fresh file when there is none" do
+      with_toml(nil) do |path|
+        Gori::MCP::Install.install_toml(path, "/opt/gori", ["mcp"])
+        Gori::MCP::Install::TomlDoc.parse(File.read(path))
+          .dig("mcp_servers", "gori").not_nil!.string_array?("args").should eq(["mcp"])
+      end
+    end
+  end
+
+  describe "TomlDoc" do
+    it "rejects a table declared twice, an unterminated string and a stray line" do
+      expect_raises(Gori::MCP::Install::TomlError, /twice/) do
+        Gori::MCP::Install::TomlDoc.parse("[a]\nx = 1\n[a]\ny = 2\n")
+      end
+      expect_raises(Gori::MCP::Install::TomlError, /unterminated/) do
+        Gori::MCP::Install::TomlDoc.parse("x = \"open\n")
+      end
+      expect_raises(Gori::MCP::Install::TomlError, /line break/) do
+        Gori::MCP::Install::TomlDoc.parse(%(x = "s" y = 2\n))
+      end
+      expect_raises(Gori::MCP::Install::TomlError, /key was expected/) do
+        Gori::MCP::Install::TomlDoc.parse("x = 1\n]\n")
+      end
+      # An inline table is not reopenable — the shape `[mcp_servers]` + `gori = {…}` +
+      # `[mcp_servers.gori]` produces, and the reason install_toml clears the inline entry.
+      expect_raises(Gori::MCP::Install::TomlError, /twice/) do
+        Gori::MCP::Install::TomlDoc.parse("[t]\ng = { a = 1 }\n\n[t.g]\nb = 2\n")
+      end
+    end
+
+    it "reads the shapes a config file is written in" do
+      doc = Gori::MCP::Install::TomlDoc.parse(<<-TOML)
+        title = "gpt \\u0041\\n"     # escapes decode
+        raw = 'C:\\not\\an\\escape' # literal strings do not
+
+        [mcp_servers.gori]
+        command = "/opt/gori"
+        args = [
+          "mcp",     # comments and newlines inside an array
+          "--read-only",
+        ]
+
+        [[jobs]]
+        id = 1
+        TOML
+      doc.root.string?("title").should eq("gpt A\n")
+      doc.root.string?("raw").should eq("C:\\not\\an\\escape")
+      entry = doc.dig("mcp_servers", "gori").not_nil!
+      entry.string?("command").should eq("/opt/gori")
+      entry.string_array?("args").should eq(["mcp", "--read-only"])
+    end
+
+    it "answers nil rather than a partial array when an element is not a string" do
+      doc = Gori::MCP::Install::TomlDoc.parse("[t]\nargs = [\"mcp\", 3]\n")
+      doc.dig("t").not_nil!.string_array?("args").should be_nil
     end
   end
 

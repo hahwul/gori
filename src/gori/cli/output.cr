@@ -705,9 +705,16 @@ module Gori
           io << tr.verdict.label.ljust(10)
           io << tr.meta.status_text.ljust(5)
           io << (tr.meta.size.try { |s| human_size(s) } || "—").ljust(9)
-          # The baseline has nothing to be a delta FROM, and an errored send has no numbers to
-          # subtract — both print "—" rather than an invented zero.
-          io << (tr.delta || tr.summary.error.try { |e| term_safe(e) } || "—")
+          # The send FAILURE first, then the delta, then "—". Order matters and used to be the
+          # other way round: `ExchangeMeta.delta` builds its string out of whichever of the
+          # three facts both sides have, and two errored sends still have a duration each — so
+          # a trial that never reached the host printed `Δ time -1.0 ms` and swallowed the one
+          # thing worth reading, `connect failed: … host unreachable`. Reversed, an errored
+          # non-baseline row says WHY it errored (which can differ per identity — a proxy that
+          # rejects one token and times out on another), and the delta is left to the rows that
+          # have numbers to subtract. The baseline still has nothing to be a delta from, and a
+          # successful send has no error, so neither of those cases moved.
+          io << (tr.summary.error.try { |e| term_safe(e) } || tr.delta || "—")
         end
       end
 

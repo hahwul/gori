@@ -181,9 +181,14 @@ describe Gori::Authorize::Engine do
   # hand-rolled `Identity.new(name, set, remove, baseline: true)` drops in silence. The same
   # copy-by-hand bug hit the TUI form (`AuthorizeController#apply_identity`); the rule is that
   # the struct owns its copies, so a sixth field cannot be forgotten in either place.
+  #
+  # The rule is about COPYING an operator's identity, which is why the pattern is `Identity.new`
+  # carrying a `baseline:` — every hand-rolled copy in this engine is one that moves the flag.
+  # A literal overlay built from nothing (`drop_cache_validators`' header-strip slot) copies no
+  # operator field and cannot drop one; it is not what this guards against.
   it "copies a slot through with_baseline rather than rebuilding it field by field" do
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "authorize", "engine.cr"))
-    src.should_not match(/Identity\.new\(/)
+    src.should_not match(/Identity\.new\([^\n]*baseline:/)
     src.should contain("with_baseline(true)")
   end
 
@@ -221,5 +226,184 @@ describe Gori::Authorize::Engine do
       fake.sent.size.should eq(2)
       target.should_not be_nil # every identity ran, so the result stands
     end
+  end
+end
+
+# A captured flow with arbitrary head bytes — the conditional-GET headers a browser capture
+# almost always carries are the point of the block below.
+private def detail_with(method : String, extra : String) : Gori::Store::FlowDetail
+  row = Gori::Store::FlowRow.new(1_i64, 0_i64, "https", method, "api.example.com", 443,
+    "/report", 200, 100_i64, Gori::Store::FlowState::Complete)
+  head = "#{method} /report HTTP/1.1\r\nHost: api.example.com\r\nCookie: session=ADMIN\r\n#{extra}\r\n".to_slice
+  Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, nil, nil, nil)
+end
+
+private def head_resp(status : Int32, extra : String) : Gori::Repeater::Result
+  Gori::Repeater::Result.new("HTTP/1.1 #{status} X\r\n#{extra}\r\n".to_slice, nil, nil, 1_000_i64)
+end
+
+# ── conditional GET ─────────────────────────────────────────────────────────────────────
+#
+# Replaying `If-None-Match` verbatim asks a question about a CACHE, not about access control:
+# the baseline revalidates into a bodyless 304 while an identity whose ETag the capture never
+# held is handed the whole entity. Same request, opposite answers, for a reason that has
+# nothing to do with authorization — and the row read `Different`, so a run in which an
+# anonymous client walked off with the response aggregated to `enforced`.
+describe Gori::Authorize::Engine do
+  describe "cache validators" do
+    it "drops If-None-Match / If-Modified-Since from a safe request's replay" do
+      origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+      fake = FakeBackend.new({"*" => ok_resp(200, "page content here for both identities alike")}, origin)
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      seed = detail_with("GET", "If-None-Match: \"v1\"\r\nIf-Modified-Since: Mon, 01 Jan 2024 00:00:00 GMT\r\n")
+
+      eng.run(seed, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])])
+
+      fake.sent.size.should eq(2)
+      fake.sent.each do |bytes|
+        text = String.new(bytes)
+        text.downcase.should_not contain("if-none-match")
+        text.downcase.should_not contain("if-modified-since")
+        text.should contain("Host: api.example.com") # nothing else moved
+      end
+      # …and the drop is on the SHARED base, so the baseline asks the identical unconditional
+      # question rather than being the only row that revalidated.
+      String.new(fake.sent[0]).should contain("Cookie: session=ADMIN")
+    end
+
+    # On an unsafe method these are PRECONDITIONS, not cache hints: `If-None-Match: *` on a PUT
+    # means "create only if absent". Dropping one turns a refused write into a real one, once
+    # per identity. --unsafe-methods already replays side effects; it must not disarm them too.
+    it "keeps them on an unsafe method, where they guard the write" do
+      origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+      fake = FakeBackend.new({"*" => ok_resp(200, "written")}, origin)
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      seed = detail_with("PUT", "If-None-Match: *\r\n")
+
+      eng.run(seed, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])])
+
+      fake.sent.each { |bytes| String.new(bytes).should contain("If-None-Match: *") }
+    end
+
+    # END TO END for the false negative this fixes: with the validator gone, both identities
+    # get the same 200 page and the anonymous row is the BYPASS it always was. (With it in
+    # place the baseline came back 304 and the row read `different` → `enforced`.)
+    it "lets a real bypass through where the conditional GET hid it as enforced" do
+      page = "the full salary export for every employee rendered in this response body here"
+      responses = {
+        "*"          => ok_resp(200, page),
+        "X-Id: anon" => ok_resp(200, page),
+      }
+      origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+      fake = FakeBackend.new(responses, origin)
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      seed = detail_with("GET", "If-None-Match: \"v1\"\r\n")
+
+      target = eng.run(seed, [
+        Identity.new("as-captured", baseline: true),
+        Identity.new("anonymous", remove_headers: ["Cookie"], set_headers: [{"X-Id", "anon"}]),
+      ]).not_nil!
+
+      target.same_count.should eq(1)
+      Gori::CLI::Output.authorize_verdict(target).should eq(:bypass)
+    end
+  end
+
+  # ── HEAD ──────────────────────────────────────────────────────────────────────────────
+  #
+  # A HEAD reply never carries a body, so "both bodies were empty" is true of every pair of
+  # them. The engine has to say which method it replayed, or the judge cannot tell that
+  # emptiness apart from a genuine empty entity. HEAD is in `Passive::SAFE_METHODS`, so this
+  # is what passive replay does unattended.
+  describe "a HEAD replay" do
+    it "is not a bypass just because neither reply had a body" do
+      responses = {
+        "*"          => head_resp(200, "Content-Length: 4096\r\n"),
+        "X-Id: anon" => head_resp(200, "Content-Length: 12\r\n"), # a different resource
+      }
+      origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+      fake = FakeBackend.new(responses, origin)
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+
+      target = eng.run(detail_with("HEAD", ""), [
+        Identity.new("as-captured", baseline: true),
+        Identity.new("anonymous", remove_headers: ["Cookie"], set_headers: [{"X-Id", "anon"}]),
+      ]).not_nil!
+
+      target.same_count.should eq(0)
+      Gori::CLI::Output.authorize_verdict(target).should eq(:review)
+    end
+
+    it "is a bypass when both replies describe the SAME entity" do
+      responses = {
+        "*"          => head_resp(200, "Content-Length: 4096\r\n"),
+        "X-Id: anon" => head_resp(200, "Content-Length: 4096\r\n"),
+      }
+      origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+      fake = FakeBackend.new(responses, origin)
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+
+      target = eng.run(detail_with("HEAD", ""), [
+        Identity.new("as-captured", baseline: true),
+        Identity.new("anonymous", remove_headers: ["Cookie"], set_headers: [{"X-Id", "anon"}]),
+      ]).not_nil!
+
+      target.same_count.should eq(1)
+    end
+  end
+
+  # ── one baseline, always ──────────────────────────────────────────────────────────────
+  describe "a set where two identities claim the baseline" do
+    it "demotes the second, so the run still compares something" do
+      responses = {"*" => ok_resp(200, "the same page served to everyone who asks for it here")}
+      ids = [Identity.new("a", baseline: true),
+             Identity.new("b", baseline: true, remove_headers: ["Cookie"])]
+      target = engine(responses).run(detail, ids).not_nil!
+
+      target.trials.map(&.baseline?).should eq([true, false])
+      target.uncompared?.should be_false
+      ids[1].baseline?.should be_true # the caller's own list is untouched
+    end
+  end
+
+  # `uncompared?` is an exclusive split — a request either produced a comparison or it did not
+  # — so it is decided by the SUM of the comparisons and not by first counting rows. With NO
+  # non-baseline trial there are zero comparisons and zero rows, and the row count answered
+  # "false": MCP's headline then fell past every arm to `enforced`, the strongest clean bill of
+  # health this tool gives, for a request that compared nothing at all.
+  describe "Target#uncompared?" do
+    it "is true when there is no non-baseline trial at all" do
+      responses = {"*" => ok_resp(200, "a page")}
+      target = engine(responses).run(detail, [Identity.new("only", baseline: true)]).not_nil!
+      target.trials.size.should eq(1)
+      target.uncompared?.should be_true
+      target.unanswered?.should be_true
+      Gori::CLI::Output.authorize_verdict(target).should eq(:error)
+    end
+  end
+end
+
+# The strip runs on EVERY safe-method replay, so a request carrying no validator must come out
+# byte for byte the way it went in — mixed CRLF/LF framing and a body that is not valid UTF-8
+# included. The overlay path rebuilds the head from split lines, and "no such header" has to be
+# a true no-op or the tool would be reframing captures on its way to the wire.
+describe Gori::Authorize::Engine do
+  it "leaves a request with no cache validator untouched, byte for byte" do
+    io = IO::Memory.new
+    io << "GET /p HTTP/1.1\r\nHost: api.example.com\nX-Weird: \xff\xfe\r\nCookie: s=1\r\n\r\n"
+    io.write(Bytes[0xff, 0x00, 0xfe, 0x41])
+    wire = io.to_slice
+
+    row = Gori::Store::FlowRow.new(1_i64, 0_i64, "https", "GET", "api.example.com", 443,
+      "/p", 200, 100_i64, Gori::Store::FlowState::Complete)
+    seed = Gori::Store::FlowDetail.new(row, "HTTP/1.1", wire[0, wire.size - 4], wire[(wire.size - 4)..],
+      nil, nil)
+
+    origin = Gori::Fuzz::Origin.new("https", "api.example.com", 443)
+    fake = FakeBackend.new({"*" => ok_resp(200, "page")}, origin)
+    eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+    eng.run(seed, [Identity.as_captured])
+
+    fake.sent[0].should eq(wire)
   end
 end

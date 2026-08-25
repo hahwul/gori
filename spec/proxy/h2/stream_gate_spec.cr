@@ -624,6 +624,52 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # The CROSS of the two axes the specs above test separately: an unparseable edit (proved on a
+  # head-ONLY hold further up) arriving on a hold that covers head+BODY. The body was adopted
+  # before `encode_edited` had answered, so the refusal put the PEER's head — `content-length:
+  # 5` — over the OPERATOR's 17-byte entity, and gori itself manufactured the RFC 9113 §8.1.1
+  # malformed request that `h1_unfaithful_reason`/`edit_refusal` exist to keep off the wire.
+  it "refuses a head+body edit WHOLE when the head is no longer parseable" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.pending.first.head_only?.should be_false
+      # A non-empty field line with no colon — the same head `HeadCodec` genuinely cannot read
+      # that the head-only spec uses.
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost api.example.com\r\ncontent-length: 17\r\n\r\nPWNED-BODY-LONGER".to_slice)
+      settle
+
+      sent = rig.to_origin
+      head_of(sent, 1_u32).not_nil!.should eq(post_len("/up", 5))
+      # BOTH halves are the peer's, so the declared length still describes the DATA.
+      data_payloads(sent, 1_u32).should eq(["hello"])
+      sent.last.end_stream?.should be_true
+    end
+  end
+
+  it "refuses a head+body RESPONSE edit WHOLE too — the same seam, the other leg" do
+    with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/p")), Frame::END_HEADERS))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200") + [{"content-length", "5"}]),
+        Frame::END_HEADERS))
+      rig.s2c.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.pending.first.head_only?.should be_false
+      ic.forward(ic.pending.first.id,
+        "HTTP/2 200 OK\r\nContent-Type text/plain\r\ncontent-length: 17\r\n\r\nPWNED-BODY-LONGER".to_slice)
+      settle
+
+      sent = rig.to_client
+      head_of(sent, 1_u32).not_nil!.should eq(response("200") + [{"content-length", "5"}])
+      data_payloads(sent, 1_u32).should eq(["hello"])
+    end
+  end
+
   it "still half-closes the stream when an edit empties the body" do
     with_ic do |ic|
       rig = Rig.new(ic)

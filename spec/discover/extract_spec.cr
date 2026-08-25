@@ -346,4 +346,81 @@ describe Gori::Discover::Extract do
       E.from_text(%(fetch("/api/ping")).to_slice).should eq(["/api/ping"])
     end
   end
+
+  # `base_href` is not one candidate link among many: `Engine#expand_links` resolves EVERY
+  # relative href on the page against it, so a `<base>` read out of a comment or a script
+  # relocates the entire crawl. A commented-out `<base href="/old/">` left in a template made
+  # gori request `/old/`, `/old/page1` and `/old/?page=2` and never request the `/page1` that
+  # actually answers 200.
+  describe ".base_href" do
+    it "reads a real document base out of the head" do
+      E.base_href(%(<html><head><base href="/app/"></head><body><a href="x">x</a></body></html>).to_slice)
+        .should eq("/app/")
+      # Single quotes, bare values and a `<base target>` carrying no href all still work.
+      E.base_href(%(<base target="_blank"><base href='/q/'>).to_slice).should eq("/q/")
+      E.base_href(%(<base href=/bare/>).to_slice).should eq("/bare/")
+    end
+
+    it "ignores a <base> inside an HTML comment" do
+      body = %(<html><head>\n<!-- legacy: <base href="/old/"> -->\n</head>) +
+             %(<body><a href="page1">page1</a></body></html>)
+      E.base_href(body.to_slice).should be_nil
+    end
+
+    # The comment must not swallow the REAL base that follows it, either.
+    it "still finds the real base after a commented-out one" do
+      body = %(<head><!-- <base href="/old/"> --><base href="/new/"></head>)
+      E.base_href(body.to_slice).should eq("/new/")
+    end
+
+    it "ignores a <base> inside script / style / textarea / title text" do
+      E.base_href(%(<head><script>var t = '<base href="/js/">';</script></head>).to_slice).should be_nil
+      E.base_href(%(<head><style>/* <base href="/css/"> */</style></head>).to_slice).should be_nil
+      E.base_href(%(<head><title><base href="/t/"></title></head>).to_slice).should be_nil
+      E.base_href(%(<body><textarea><base href="/ta/"></textarea></body>).to_slice).should be_nil
+      # …and the element's own close must be the one that ends it.
+      E.base_href(%(<head><script>x = "</style>"; y = '<base href="/js/">';</script></head>).to_slice)
+        .should be_nil
+    end
+
+    it "does not read a <base> that comes after the head" do
+      E.base_href(%(<head></head><body><base href="/late/"></body>).to_slice).should be_nil
+      E.base_href(%(<html><body><base href="/late/">).to_slice).should be_nil
+    end
+
+    # A `</head>` or `<body` written inside a comment is not markup, so it cannot end the head
+    # early and hide the base that follows it.
+    it "does not let a commented-out </head> cut the head short" do
+      E.base_href(%(<head><!-- </head><body> --><base href="/real/"></head>).to_slice)
+        .should eq("/real/")
+    end
+
+    # An unterminated comment masks the rest of the document, exactly as a browser's parser
+    # does — the base inside it is never a base.
+    it "treats an unclosed comment as running to the end" do
+      E.base_href(%(<head><!-- oops <base href="/never/">).to_slice).should be_nil
+    end
+
+    # `<base href="">` is legal HTML meaning "the page URL", and it is still the FIRST base:
+    # HTML 4.2.3 ignores every one after it, so a later one must not be picked up instead.
+    it "keeps first-match-only semantics, empty value included" do
+      E.base_href(%(<head><base href=""><base href="/second/"></head>).to_slice).should be_nil
+      E.base_href(%(<head><base href="/first/"><base href="/second/"></head>).to_slice)
+        .should eq("/first/")
+    end
+
+    it "answers nil for a body with no base at all" do
+      E.base_href(%(<html><head><title>hi</title></head><body><a href="/a">a</a></body>).to_slice)
+        .should be_nil
+      E.base_href(Bytes.empty).should be_nil
+    end
+
+    # Same contract as every other extractor here: the scan runs over the scrubbed text.
+    it "reads a base out of a body that is not valid UTF-8" do
+      io = IO::Memory.new
+      io.write(Bytes[0xff, 0xfe, 0x80])
+      io << %(<head><base href="/ok/"></head>)
+      E.base_href(io.to_slice).should eq("/ok/")
+    end
+  end
 end

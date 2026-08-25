@@ -155,6 +155,28 @@ describe Gori::Issues::Export do
       end
     end
 
+    it "cross-references every result to the rule its ruleId names" do
+      # `sarif` links results to rules ITSELF now (`rule_index`), because the library's
+      # `find_rule_index` is a linear scan of the rules array per result — rules × results on the
+      # TUI's UI fiber. Taking the linking over means pinning the invariant it used to provide:
+      # `results[i].ruleIndex` must address the descriptor whose `id` is `results[i].ruleId`, for
+      # a whole document rather than for the one-rule case.
+      with_store do |store|
+        titles = ["Reflected XSS in ?q=", "IDOR on /orders", "Reflected XSS in ?q=", "취약점 발견"]
+        titles.each { |t| store.insert_issue(t, Gori::Store::Severity::High, "h.test", nil) }
+        json = export(store)
+        Sarif::Validator.new.validate(Sarif.parse!(json)).valid?.should be_true
+        doc = JSON.parse(json)
+        rules = doc["runs"][0]["tool"]["driver"]["rules"].as_a
+        rules.size.should eq(3) # the repeated title shares its rule
+        results = doc["runs"][0]["results"].as_a
+        results.size.should eq(4)
+        results.each do |res|
+          rules[res["ruleIndex"].as_i]["id"].as_s.should eq(res["ruleId"].as_s)
+        end
+      end
+    end
+
     it "slugs a non-Latin title instead of deleting it" do
       # An ASCII-only character class deleted a Korean/Japanese title outright, collapsing
       # EVERY finding in a non-Latin engagement into one meaningless `untitled` rule wearing
@@ -178,6 +200,41 @@ describe Gori::Issues::Export do
         ids.size.should eq(2)
         ids.each &.should match(%r{\Agori/issue/untitled-[0-9a-f]{8}\z})
         ids.uniq.size.should eq(2)
+      end
+    end
+
+    it "keeps two long titles apart when only their first 60 characters agree" do
+      # SLUG_CAP is a length limit, and the comment above `rule_id` called a collision "benign"
+      # on the strength of "XSS!" vs "XSS?". A PREFIX cap merges any two titles that agree for 60
+      # characters — and what tells two findings apart (the parameter, the endpoint) usually sits
+      # at the END of the sentence, so the merge lands on exactly the pairs a dashboard must keep
+      # apart. The empty-slug path already appends a digest for this reason; the cut path now does
+      # too, inside the cap rather than beyond it.
+      with_store do |store|
+        store.insert_issue("SQL injection in the user profile update endpoint (parameter id)",
+          Gori::Store::Severity::High, "h.test", nil)
+        store.insert_issue("SQL injection in the user profile update endpoint (parameter name)",
+          Gori::Store::Severity::Critical, "h.test", nil)
+        rules = JSON.parse(export(store))["runs"][0]["tool"]["driver"]["rules"].as_a
+        ids = rules.map(&.["id"].as_s)
+        ids.uniq.size.should eq(2)
+        ids.each &.should match(%r{\Agori/issue/sql-injection-.*-[0-9a-f]{8}\z})
+        # …still inside the cap the constant promises.
+        ids.each { |id| id.lchop("gori/issue/").size.should be <= 60 }
+        # The two severities land on their OWN rules rather than one badge for both.
+        rules.map(&.["properties"]["security-severity"].as_s).sort!.should eq(["7.0", "9.0"])
+      end
+    end
+
+    it "gives one title one rule however long it is" do
+      # The digest is of the WHOLE title, so grouping repeats of one finding — the feature the
+      # cap must not cost — still works past 60 characters.
+      with_store do |store|
+        long = "Server-side request forgery reachable from the avatar import endpoint parameter url"
+        2.times { store.insert_issue(long, Gori::Store::Severity::High, "h.test", nil) }
+        doc = JSON.parse(export(store))
+        doc["runs"][0]["tool"]["driver"]["rules"].as_a.size.should eq(1)
+        doc["runs"][0]["results"].as_a.map(&.["ruleIndex"].as_i).should eq([0, 0])
       end
     end
 
@@ -405,6 +462,51 @@ describe Gori::Issues::Export do
         end
       end
       digests[0].should eq(digests[1])
+    end
+
+    it "fingerprints two findings at DIFFERENT locations differently" do
+      # The other half of the property above, and the one the spec did not ask for: "same ⇒ same"
+      # is satisfied by a constant. `gori/finding` exists so a dashboard can recognise a finding
+      # across a re-created DB, which means DEDUPLICATING on it — and title+host+severity alone
+      # made two separate IDORs, on /one and /two, one fingerprint. The location was already in
+      # hand: `sarif_location` writes the same URI onto the result.
+      with_store do |store|
+        one = seed_flow(store, target: "/one")
+        two = seed_flow(store, target: "/two")
+        store.insert_issue("IDOR", Gori::Store::Severity::High, "h.test", one)
+        store.insert_issue("IDOR", Gori::Store::Severity::High, "h.test", two)
+        results = JSON.parse(export(store))["runs"][0]["results"].as_a
+        fps = results.map(&.["partialFingerprints"]["gori/finding"].as_s)
+        fps.uniq.size.should eq(2)
+        # …and the fingerprint still says WHICH location, matching the result's own.
+        results.map(&.["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].as_s)
+          .sort!.should eq(["https://h.test/one", "https://h.test/two"])
+      end
+    end
+
+    it "folds an obs-fold continuation into the header above it instead of inventing one" do
+      # RFC 9112 §5.2: a line starting with SP/HTAB continues the PREVIOUS field's value.
+      # `one_line(h.name)` strips the very byte that says so, so `  X-Fake: part2` arrived as a
+      # header of its own — a webRequest reporting a field the wire never carried, beside a
+      # truncated version of the one it did. The curl export invented the same header and the
+      # JSON-Lines export reported it as `"  X-Fake"`: three surfaces, three header sets, one
+      # head. A finding ABOUT a header-parsing difference must not be reported through one.
+      with_store do |store|
+        head = "GET /a HTTP/1.1\r\nHost: h.test\r\nX-Long: part1\r\n  X-Fake: part2\r\nX-Last: z\r\n\r\n"
+        fid = seed_flow(store, req_head: head,
+          resp_head: "HTTP/1.1 200 OK\r\nX-Csp: default-src 'self';\r\n\tscript-src 'none'\r\n\r\n")
+        store.insert_issue("t", Gori::Store::Severity::Low, "h.test", fid)
+        res = only_result(store)
+        headers = res["webRequest"]["headers"].as_h
+        headers.has_key?("X-Fake").should be_false
+        headers["X-Long"].as_s.should eq("part1 X-Fake: part2")
+        headers["X-Last"].as_s.should eq("z")
+        # A COLON-LESS continuation is a different (and smaller) loss: `Http1.parse_headers`
+        # drops any line without a colon, so it never reaches this writer at all and the value
+        # arrives short. Pinned as it is rather than wished away — the fold this file can see is
+        # the one that INVENTS a field, and that one is gone.
+        res["webResponse"]["headers"]["X-Csp"].as_s.should eq("default-src 'self';")
+      end
     end
 
     it "carries the project and the issue's timestamps as readable properties" do

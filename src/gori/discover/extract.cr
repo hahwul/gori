@@ -81,10 +81,91 @@ module Gori::Discover
     # `<base` in a body with no closing `>` backtracks across the whole 2 MiB of MAX_SCAN.
     BASE = /<base\b[^>]{0,256}[\s"']href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
 
-    # FIRST match only: HTML 4.2.3 ignores every `<base href>` after the first one.
+    # Cheap proof that BASE cannot match — a strict prefix of it, so a negative here is a
+    # negative there. Almost every body a crawl reads has no `<base` at all, and this is what
+    # keeps the region walk below off that path entirely.
+    BASE_OPEN = /<base/i
+
+    # The tokens the head walk cares about, in ONE pass: a comment open/close, a raw-text
+    # element's open/close (whose contents are character data, not markup), and the two places
+    # the head ends. Group 1 is a raw-text element's name on the open, group 2 on the close, so
+    # a `</script>` cannot close a `<title>`.
+    HEAD_TOKEN = /<!--|-->|<(script|style|textarea|title)\b|<\/(script|style|textarea|title)\s*>|<body\b|<\/head\b/i
+
+    # The document's own `<base href>`, or nil.
+    #
+    # FIRST match only: HTML 4.2.3 ignores every `<base href>` after the first one — including
+    # a first one with an empty value, which is why `presence`'s nil ends the search rather
+    # than continuing it.
+    #
+    # Scanned only where a `<base>` can actually BE: inside the head, and outside a comment or
+    # a raw-text element. `BASE` on the raw body knew none of that, and unlike the `ATTR` pass
+    # beside it a wrong answer here is not one junk candidate — `Engine#expand_links` uses this
+    # to resolve EVERY relative href on the page, so a commented-out `<base href="/old/">` left
+    # in a template (which is as common as templates are) sent the whole crawl one directory
+    # sideways: `/old/`, `/old/page1`, `/old/?page=2` requested, and the `/page1` that actually
+    # answers 200 never requested at all. The commit that added `<base>` support introduced
+    # exactly the false-negative class it was written to close.
     def self.base_href(body : Bytes) : String?
-      return nil unless m = BASE.match(scan_text(body))
-      (m[1]? || m[2]? || m[3]?).presence
+      base_href(scan_text(body))
+    end
+
+    # The String half, so a caller that already has the scanned text (and a spec) can skip
+    # rebuilding it.
+    def self.base_href(text : String) : String?
+      return nil unless text.matches?(BASE_OPEN)
+      cut, masked = head_bounds(text)
+      found = nil.as(String?)
+      text.scan(BASE) do |m|
+        at = m.begin(0)
+        break if at >= cut                                 # past </head> or into <body>
+        next if masked.any? { |(a, b)| at >= a && at < b } # inside a comment / <script> / <title>
+        found = (m[1]? || m[2]? || m[3]?).presence
+        break
+      end
+      found
+    end
+
+    # {where the head ends, the spans inside it that are not markup}.
+    #
+    # One `HEAD_TOKEN` pass with a two-state machine (in a comment / in a raw-text element), so
+    # the nesting rules that matter fall out rather than being restated: a `</head>` written
+    # inside a comment does not end the head, a `<script>` written inside a comment is not a
+    # script, and a `-->` inside a script is just text. An UNCLOSED comment or raw-text element
+    # masks everything to the end of what was scanned, which is what a browser does with it too.
+    private def self.head_bounds(text : String) : {Int32, Array({Int32, Int32})}
+      masked = [] of {Int32, Int32}
+      cut = text.size
+      open_at = nil.as(Int32?)  # where the current non-markup span started
+      raw_tag = nil.as(String?) # the raw-text element we are inside, if any
+      in_comment = false
+      text.scan(HEAD_TOKEN) do |m|
+        tok = m[0]
+        at = m.begin(0)
+        if in_comment
+          next unless tok == "-->"
+          in_comment = false
+          masked << {open_at || at, at + tok.size}
+          open_at = nil
+        elsif tag = raw_tag
+          close = m[2]?
+          next unless close && close.downcase == tag
+          raw_tag = nil
+          masked << {open_at || at, at + tok.size}
+          open_at = nil
+        elsif tok == "<!--"
+          in_comment = true
+          open_at = at
+        elsif opened = m[1]?
+          raw_tag = opened.downcase
+          open_at = at
+        else # <body / </head — real markup, so this is where the head ends
+          cut = at
+          break
+        end
+      end
+      masked << {open_at.not_nil!, text.size} if open_at
+      {cut, masked}
     end
 
     def self.from_html(body : Bytes) : Array(Found)

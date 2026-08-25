@@ -84,7 +84,11 @@ module Gori
         # (`outbound` keeps its OWN connection open on purpose: that is what lets a mid-run
         # scope/Sandbox change stop an in-flight sweep.)
         store.close
-        if query && (plan.targets.size + plan.skipped.size) >= limit
+        # The QUERY's own row count, not the size of the whole selection. `--limit` caps only
+        # what the query contributes, so counting the explicit ids alongside it warned about a
+        # cap that never applied: `gori run authorize 2 3 4 -q 'path:/soft' -n 4` announced that
+        # a one-row query had been truncated, and raising --limit changed nothing.
+        if plan.query_capped?(limit)
           STDERR.puts "gori run authorize: --query was capped at --limit #{limit} — " \
                       "matching flows past that were not replayed (raise --limit to include them)"
         end
@@ -310,6 +314,12 @@ module Gori
           "project's saved set when you passed none (`gori run session list`). The name is what " \
           "tells the rows of the results table apart, so give one of them a different one. Names " \
           "are compared case-insensitively (`admin` and `Admin` are one identity here)"
+        in Authorize::PlanError::Reason::MultipleBaselines
+          "more than one identity claims the baseline (#{ex.detail}) — exactly one may carry " \
+          "\"baseline\":true, because it is the single response every other identity is judged " \
+          "against. Clear the flag on all but one (omit it everywhere to make the request AS " \
+          "CAPTURED the baseline). Run as-is, every row would BE the baseline and nothing would " \
+          "be compared"
         in Authorize::PlanError::Reason::NothingToSend
           "every selected flow was skipped (#{ex.detail}), so nothing was sent — replay " \
           "POST/PUT/PATCH/DELETE with --unsafe-methods, reach a host outside the project scope " \

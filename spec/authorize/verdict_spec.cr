@@ -163,3 +163,114 @@ describe Gori::Authorize::ResponseSummary do
     s.simhash.should eq(0_u64)
   end
 end
+
+# ── the direction of a status-class change ──────────────────────────────────────────────
+#
+# A different status class was `Different` in BOTH directions, and `Different` is the verdict
+# that aggregates a request to `enforced`. That word claims the identity under test got LESS
+# than the baseline; when it got a 2xx and the baseline did not, the opposite happened.
+describe Gori::Authorize::Judge do
+  it "is Review, not Different, when the other identity was served a 2xx the baseline was denied" do
+    base = summary(403, "Forbidden")
+    other = summary(200, "the full salary export for every employee rendered in this response")
+    # `Different` here would aggregate to `enforced` — a green run for an identity that was
+    # handed a page the baseline could not see.
+    Judge.verdict(base, other).should eq(Verdict::Review)
+  end
+
+  it "is Review when the baseline revalidated (304) and the other identity got the entity (200)" do
+    base = Summary.new(304, 0_i64, 0_u64)
+    other = summary(200, "the full salary export for every employee rendered in this response")
+    Judge.verdict(base, other).should eq(Verdict::Review)
+  end
+
+  it "keeps a 2xx baseline turning into a denial as Different (enforcement, unchanged)" do
+    base = summary(200, "the full administrative control panel with billing and every user record")
+    Judge.verdict(base, summary(403, "Forbidden")).should eq(Verdict::Different)
+    Judge.verdict(base, summary(500, "Internal Server Error")).should eq(Verdict::Different)
+  end
+end
+
+# ── a body the protocol forbade is not a body that matched ──────────────────────────────
+#
+# HEAD and 304 describe an entity they deliberately do not send. "Both bodies were empty" is
+# true of every such pair, and reading it as a content match made `Same` — and so BYPASS —
+# the automatic answer for the whole family. HEAD is in `Passive::SAFE_METHODS`, so passive
+# replay painted ordinary endpoints red with nobody pressing a key.
+private def head_reply(status : Int32, length : Int64?, etag : String? = nil) : Summary
+  Summary.new(status, 0_i64, 0_u64, content_length: length, etag: etag, head_request: true)
+end
+
+describe Gori::Authorize::Judge do
+  it "does not call two bodyless HEAD replies Same on their status alone" do
+    # Same status, no body on either side, and the heads describe nothing else: there is no
+    # evidence here, and `Review` is the verdict whose meaning is "the operator judges".
+    Judge.verdict(head_reply(200, nil), head_reply(200, nil)).should eq(Verdict::Review)
+  end
+
+  it "is not Same when two HEAD replies declare different entity sizes" do
+    Judge.verdict(head_reply(200, 4096_i64), head_reply(200, 12_i64)).should eq(Verdict::Review)
+  end
+
+  it "is Same when two HEAD replies declare the same entity" do
+    Judge.verdict(head_reply(200, 4096_i64), head_reply(200, 4096_i64)).should eq(Verdict::Same)
+  end
+
+  it "reads the ETag ahead of the length — a different representation is not a match" do
+    a = head_reply(200, 4096_i64, etag: %("v1-admin"))
+    b = head_reply(200, 4096_i64, etag: %("v1-anon"))
+    Judge.verdict(a, b).should eq(Verdict::Review)
+    same = head_reply(200, 4096_i64, etag: %("v1-admin"))
+    Judge.verdict(a, same).should eq(Verdict::Same)
+  end
+
+  it "does not call two 304s Same for having no body" do
+    a = Summary.new(304, 0_i64, 0_u64, etag: %("admin-copy"))
+    b = Summary.new(304, 0_i64, 0_u64, etag: %("anon-copy"))
+    Judge.verdict(a, b).should eq(Verdict::Review)
+  end
+
+  # THE REGRESSION GUARD for this fix. A `204` and a `Content-Length: 0` 200 are not a
+  # suppressed entity — the emptiness IS the resource, and an identity served the same empty
+  # success is the same finding it always was. Turning those into `Review` would trade a
+  # systematic false positive for a missed bypass, which is the wrong direction.
+  it "still calls a genuine empty entity a match (204, and a Content-Length: 0 200)" do
+    Judge.verdict(Summary.new(204, 0_i64, 0_u64), Summary.new(204, 0_i64, 0_u64))
+      .should eq(Verdict::Same)
+    Judge.verdict(Summary.new(200, 0_i64, 0_u64, content_length: 0_i64),
+      Summary.new(200, 0_i64, 0_u64, content_length: 0_i64)).should eq(Verdict::Same)
+  end
+end
+
+describe Gori::Authorize::ResponseSummary do
+  it "carries what the head declares about an entity it did not send" do
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 4096\r\nETag: \"v1\"\r\n\r\n".to_slice
+    s = Summary.of(Gori::Repeater::Result.new(head, nil, nil, 0_i64), head_request: true)
+    s.content_length.should eq(4096_i64)
+    s.etag.should eq(%("v1"))
+    s.head_request?.should be_true
+    s.entity_suppressed?.should be_true
+  end
+
+  # Read off the RAW head, not only off a parsed `RawResponse`: a result built without a parse
+  # still has its bytes, and reading only the parsed half left every field above silently nil.
+  it "reads those headers off the raw head when nothing parsed it" do
+    head = "HTTP/1.1 302 Found\r\nLocation: /login\r\nContent-Length: 0\r\n\r\n".to_slice
+    s = Summary.of(Gori::Repeater::Result.new(head, nil, nil, 0_i64))
+    s.location.should eq("/login")
+    s.content_length.should eq(0_i64)
+  end
+
+  it "treats a 304 as an entity it did not send, whatever the request method was" do
+    head = "HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\n\r\n".to_slice
+    s = Summary.of(Gori::Repeater::Result.new(head, nil, nil, 0_i64))
+    s.entity_suppressed?.should be_true
+    s.head_request?.should be_false
+  end
+
+  it "does not treat an ordinary 200 body as suppressed" do
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
+    s = Summary.of(Gori::Repeater::Result.new(head, "ok".to_slice, nil, 0_i64))
+    s.entity_suppressed?.should be_false
+  end
+end

@@ -18,24 +18,84 @@ module Gori
       # its body is usually empty, so two 3xx replies compare as identical no matter where
       # they send the client. See `Judge.redirect_verdict`.
       getter location : String?
+      # What the HEAD says about an entity that was NOT transmitted. Read only when the body
+      # is absent by protocol (`entity_suppressed?`) — there the emptiness carries no
+      # information and these two are the only description of the resource on the wire.
+      getter content_length : Int64?
+      getter etag : String?
+      # The REQUEST was a HEAD. A property of the request, not the response, so it has to be
+      # carried in: a HEAD reply never has a body no matter what it is describing.
+      getter? head_request : Bool
 
       def initialize(@status : Int32?, @size : Int64?, @simhash : UInt64, @error : String? = nil,
-                     @location : String? = nil)
+                     @location : String? = nil, @content_length : Int64? = nil,
+                     @etag : String? = nil, @head_request : Bool = false)
+      end
+
+      # Could this response have carried a body at all? A HEAD reply and a `304 Not Modified`
+      # describe an entity they deliberately do NOT send, so "both bodies were empty" says
+      # nothing whatsoever about whether the two identities were served the same resource.
+      #
+      # A `204`/`205` is deliberately NOT here: there the emptiness IS the entity — the action
+      # succeeded and returned nothing — so two matching 204s remain the same evidence they
+      # always were (see `Judge.content_matches?`).
+      def entity_suppressed? : Bool
+        @head_request || @status == 304
       end
 
       # From a live send. Decodes the body for the fingerprint; `Repeater::Result` carries the
       # raw head/body and the send error.
-      def self.of(result : Repeater::Result) : ResponseSummary
+      def self.of(result : Repeater::Result, head_request : Bool = false) : ResponseSummary
         return new(nil, nil, 0_u64, error: result.error) unless result.ok?
         status = status_of(result.head)
-        location = result.response.try(&.headers.get?("location"))
+        location = header_of(result, "location")
+        length = header_of(result, "content-length").try(&.strip.to_i64?)
+        etag = header_of(result, "etag").try(&.strip.presence)
         decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body)
         body = decoded || result.body
-        if body && !body.empty?
-          new(status, body.size.to_i64, Discover::Fingerprint.simhash(body), location: location)
-        else
-          new(status, 0_i64, 0_u64, location: location)
+        size = body && !body.empty? ? body.size.to_i64 : 0_i64
+        hash = body && !body.empty? ? Discover::Fingerprint.simhash(body) : 0_u64
+        new(status, size, hash, location: location, content_length: length, etag: etag,
+          head_request: head_request)
+      end
+
+      # One header from a finished send. The parsed `RawResponse` when the sender produced one,
+      # else a scan of the raw head — a `Repeater::Result` built without a parse (an h2 bridge,
+      # a hand-built one in a spec) still has its bytes, and reading only the parsed half made
+      # every field below silently nil for it.
+      private def self.header_of(result : Repeater::Result, name : String) : String?
+        if resp = result.response
+          if v = resp.headers.get?(name)
+            return v
+          end
         end
+        head_header(result.head, name)
+      end
+
+      # First `name:` field value in a raw response head, case-insensitively. Byte-level and
+      # line-oriented for the same reason `ResponseSummary.status_of` is: a head off a socket
+      # need not be valid UTF-8.
+      private def self.head_header(head : Bytes, name : String) : String?
+        return nil if head.empty?
+        target = name.downcase
+        start = 0
+        first = true
+        i = 0
+        while i <= head.size
+          if i == head.size || head.unsafe_fetch(i) == 0x0a_u8
+            stop = i
+            stop -= 1 if stop > start && head.unsafe_fetch(stop - 1) == 0x0d_u8
+            line = String.new(head[start, stop - start])
+            return nil if !first && line.empty? # end of the head
+            if !first && (ci = line.index(':')) && line[0, ci].strip.downcase == target
+              return line[(ci + 1)..].strip
+            end
+            first = false
+            start = i + 1
+          end
+          i += 1
+        end
+        nil
       end
 
       # The numeric status from a response head, or nil when the head has no parseable status
@@ -106,7 +166,19 @@ module Gori
         os = status_class(other.status)
         # A different status CLASS (2xx vs 4xx vs 3xx …) is the clearest signal access control
         # engaged: a 200 baseline turning into a 401/403 for this identity is `Different`.
-        return Verdict::Different if bs != os
+        #
+        # But only in ONE DIRECTION, which the rule missed. `Different` aggregates the row to
+        # `enforced`, and that word is a claim about the identity under test getting LESS than
+        # the baseline. When it got a 2xx and the baseline did not, the opposite happened: a
+        # `403 → 200` (the baseline denied, this identity served) and a `304 → 200` (the
+        # baseline's conditional GET revalidated, this identity handed the whole entity) are
+        # both an identity receiving content the baseline never saw. Painting those green is
+        # the worst way this tool can fail, so a same-or-better outcome for the other side is
+        # `Review` — the verdict whose meaning is "the operator judges" — and never `Different`.
+        if bs != os
+          return Verdict::Review if os == 2 && bs != 2
+          return Verdict::Different
+        end
 
         # BOTH REDIRECTS: where they point is the answer, and it is the only part of a redirect
         # that carries one. The body is empty, so `content_matches?` matched every 3xx pair
@@ -165,6 +237,8 @@ module Gori
       # distance AND size band. Both guards matter: SimHash skips numeric/hex tokens, so two
       # differently-sized pages can hash close; the size band catches that.
       private def self.content_matches?(a : ResponseSummary, b : ResponseSummary) : Bool
+        # A body that could not be sent is not a body that matched. See `suppressed_matches?`.
+        return suppressed_matches?(a, b) if a.entity_suppressed? || b.entity_suppressed?
         sa, sb = a.size, b.size
         return true if (sa.nil? || sa == 0) && (sb.nil? || sb == 0)
         return false if sa.nil? || sb.nil? || sa == 0 || sb == 0
@@ -172,6 +246,29 @@ module Gori
         larger = {sa, sb}.max
         smaller = {sa, sb}.min
         (larger - smaller).to_f <= larger.to_f * SIZE_TOLERANCE
+      end
+
+      # Two responses whose body the PROTOCOL forbade — a HEAD request, a `304 Not Modified`
+      # (see `ResponseSummary#entity_suppressed?`). "Both bodies were empty" is true of every
+      # such pair and means nothing: the entity exists on both sides and neither was sent.
+      # Reading it as a content match made `Same` — and so `BYPASS` — the automatic answer for
+      # a whole response family, and HEAD is in `Passive::SAFE_METHODS`, so passive replay
+      # painted ordinary endpoints red without anyone pressing a key.
+      #
+      # What the two heads DECLARE about the entity is the evidence that is actually there. An
+      # `ETag` names the representation, so equal ETags are the same resource and different
+      # ETags are not; failing that, an equal `Content-Length` is the same claim about its
+      # size. When neither head describes the entity there is nothing to compare, and no match
+      # lands the row on `Review` — an operator's look — instead of a manufactured finding.
+      #
+      # A genuine empty ENTITY (a 204, a `Content-Length: 0` 200) never reaches here: there the
+      # emptiness is the resource, and matching emptiness stays the match it always was.
+      private def self.suppressed_matches?(a : ResponseSummary, b : ResponseSummary) : Bool
+        ea, eb = a.etag, b.etag
+        return ea == eb if ea && eb
+        ca, cb = a.content_length, b.content_length
+        return ca == cb if ca && cb
+        false
       end
 
       # The hundreds digit of a status (2 for 2xx, 4 for 4xx …), or 0 when there is none. The

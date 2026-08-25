@@ -3197,7 +3197,12 @@ module Gori::Tui
       if decode_note
         note = [] of Highlight::Line
         note << Highlight::Line.new
-        color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme.yellow : Theme.green
+        # Green is a CLEAN read of the whole body. A note that names a stream gori could not
+        # finish (`(stream truncated)`, `(partial — …)`) is not one: the pane is showing less
+        # than the wire carried, and green there reads as "this is the response".
+        incomplete = decode_note.includes?("unsupported") || decode_note.includes?("error") ||
+                     decode_note.includes?("truncated") || decode_note.includes?("partial")
+        color = incomplete ? Theme.yellow : Theme.green
         note << [Highlight::Span.new("— #{decode_note} —", color)]
         trailer = note + trailer # decode note before the truncation note
       end

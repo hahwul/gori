@@ -349,6 +349,7 @@ module Gori
             next unless detail
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
+            next unless passive_feed?(detail.row)
             # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
             # gap-free rescan_ws so a 101 flow evicted from @analyzed and re-scanned (or one with a
             # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
@@ -386,6 +387,12 @@ module Gori
           break if @stopped || !@mode.scanning?
           next if @analyzed.includes?(row.id)
           next unless row.state.complete?
+          # Same guard as the live feed, and it is not redundant: this sweep re-reads
+          # `recent_flows` with no source filter, so a gori-originated row the live path
+          # skipped (or dropped) would arrive here instead. Checked BEFORE `get_flow` — the
+          # row already carries the answer, and not marking it `@analyzed` costs one set
+          # lookup per sweep rather than a detail read.
+          next unless passive_feed?(row)
           detail = @store.get_flow(row.id)
           next unless detail && detail.response_head
           @analyzed << row.id
@@ -395,6 +402,42 @@ module Gori
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
+      end
+
+      # Does this flow belong on the PASSIVE feed — is it traffic gori observed, rather than
+      # traffic gori made?
+      #
+      # The History feed stopped being proxy-only when the Repeater began recording its sends
+      # by DEFAULT (`Settings.repeater_record_history?`). Every `^R` now writes a flow and
+      # publishes a `:updated` event, which gave the passive engine a SECOND, unguarded
+      # consumer of the same send:
+      #
+      #   A. RepeaterController#probe_scan_repeater → scan_detail(detail, repeater_id: id)
+      #   B. Repeater::HistoryRecord.record → insert_flow → publish → passive_loop → scan_detail
+      #
+      # Nothing dedups them — `@analyzed` holds FLOW ids and path A never touches it — and
+      # `Store#upsert_probe_issues` keys on `(code, host)` and does `hit_count = hit_count + 1`,
+      # so every passive finding on that host climbed by TWO per send and its
+      # `sample_flow_id`/`sample_repeater_id` provenance flipped to whichever path landed last.
+      # Path B also passes `enqueue_active: true`, so in Active/Aggressive a hand-driven `^R`
+      # started firing active probes the operator never asked for — the exact hazard
+      # `AuthorizeController` was given an explicit guard for (`proxy_origin?`, whose comment
+      # says "the Repeater now records its sends by default … on the same feed"). This is the
+      # counterpart `Probe::Analyzer` never got.
+      #
+      # Only the FEED is filtered. Path A still scans, `gori run probe`/MCP `probe_scan` still
+      # scan, and every gori surface that records history already runs its own explicit scan
+      # (Repeater, Fuzzer, MCP `send_request`) — so nothing loses coverage, it stops being
+      # counted twice.
+      #
+      # `sent_by_gori?` and not a repeater-only test, deliberately: a `--record-history` fuzz
+      # sweep has the identical shape, and `FlowSource::Kind#sent_by_gori?` is where that line
+      # is drawn once. An IMPORTED flow is NOT filtered (gori never sent it; it describes a real
+      # endpoint someone captured), and neither is a row whose provenance predates the column —
+      # nil answers false, so a project captured with an older gori keeps scanning exactly as
+      # before.
+      private def passive_feed?(row : Store::FlowRow) : Bool
+        !row.sent_by_gori?
       end
 
       # Scan the WS frames a 101 flow has accumulated since the last scan — each frame exactly

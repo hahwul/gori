@@ -70,6 +70,26 @@ module Gori::Oast
       out
     end
 
+    def deregisters? : Bool
+      true
+    end
+
+    # `DELETE /api/bin/{binId}` — the bin IS the listener, so deleting it is what makes the
+    # payloads minted from this session stop resolving. Bins expire on their own in ~30
+    # minutes, which is why the missing teardown was easy to miss and is still not a reason to
+    # skip it: `release` is what an operator runs when the engagement ends, and until the
+    # expiry the bin is a public URL collecting the target's traffic.
+    #
+    # `session.server_url` for the same reason `Interactsh#resume` uses it: the bin lives on the
+    # host that minted it. 404/410 are success (already gone); anything else raises so
+    # `Sessions.release` reports a failure rather than a teardown.
+    def deregister(http : Http, session : Session) : Nil
+      resp = http.request("DELETE", "#{session.server_url}/api/bin/#{session.correlation_id}",
+        json_headers)
+      return if {200, 201, 202, 204, 404, 410}.includes?(resp.status)
+      raise Gori::Error.new("postbin deregister failed: HTTP #{resp.status} #{snippet(resp.body)}")
+    end
+
     private def to_interaction(req : JSON::Any) : Interaction?
       return nil unless req.as_h?
       uid = field(req, "reqId", "id") || Crypto.random_id(16)

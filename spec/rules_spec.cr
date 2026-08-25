@@ -254,6 +254,64 @@ describe Gori::Rules do
       String.new(rules.rewrite_request(mixed, "")).should eq("GET / HTTP/1.1\r\nHost: z\nX-Keep: 1\r\n\r\n")
     end
   end
+  # An obs-fold continuation (RFC 9112 §5.2: a header line starting with SP/HTAB is part of the
+  # PREVIOUS field's value, never a header of its own) is the OTHER line view one message can
+  # carry, and the three header ops used to read it as an independent header line. The failures
+  # are silent and they land on the RESPONSE leg, which is where they are reachable: the request
+  # leg is guarded (`Codec::Body.request_framing` raises on `Http1.obfuscated_header?`, and
+  # `restore_framing_headers` re-pins CL/TE afterwards), the response leg has no counterpart, and
+  # `Http1.framing_ambiguous?` only ever looks at the FRAMING headers — so a folded
+  # Content-Security-Policy / Set-Cookie / X-Frame-Options rides straight through it.
+  # `Env.fold_or_blank?` writes the same rule down one file over, and for the same reason.
+  it "reads an obs-fold continuation as part of the field above it, in every header op" do
+    # (a) remove: the continuation goes with the field it continued. Left behind it becomes the
+    # FIRST header line of a head gori itself manufactured as malformed.
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+        "Content-Security-Policy", "", op: Gori::Store::RuleOp::RemoveHeader)
+      folded = ("HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self';\r\n" \
+                " script-src 'none'\r\nX-Other: 1\r\n\r\n").to_slice
+      String.new(rules.rewrite_response(folded, ""))
+        .should eq("HTTP/1.1 200 OK\r\nX-Other: 1\r\n\r\n")
+    end
+
+    # (b) set: the continuation is part of the value being replaced, so it goes with it. Kept,
+    # `Content-Length: 3` above a `\r\n 5\r\n` unfolds to `3 5` in a lenient recipient — gori
+    # manufacturing exactly the framing disagreement it exists to find.
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+        "Content-Length", "3", op: Gori::Store::RuleOp::SetHeader)
+      folded = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n 5\r\nX-Other: 1\r\n\r\n".to_slice
+      String.new(rules.rewrite_response(folded, ""))
+        .should eq("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nX-Other: 1\r\n\r\n")
+    end
+
+    # (c) the NAME test: `ln[0, ci].strip` matched a continuation that happens to carry a colon,
+    # so `found` went true on a line that is not a header — the operator's `X-Inner` control was
+    # never added to the wire at all, and `X-Note`'s value was silently rewritten in its place.
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+        "X-Inner", "pwn", op: Gori::Store::RuleOp::SetHeader)
+      folded = "HTTP/1.1 200 OK\r\nX-Note: hello\r\n X-Inner: folded\r\n\r\n".to_slice
+      String.new(rules.rewrite_response(folded, ""))
+        .should eq("HTTP/1.1 200 OK\r\nX-Note: hello\r\n X-Inner: folded\r\nX-Inner: pwn\r\n\r\n")
+    end
+
+    # A HTAB-led continuation is the same field-value continuation as an SP-led one, and a
+    # continuation directly under the START line belongs to no field at all — neither may be
+    # read as a header name.
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+        "X-Fold", "", op: Gori::Store::RuleOp::RemoveHeader)
+      folded = "HTTP/1.1 200 OK\r\n\tX-Fold: orphan\r\nX-Fold: real\r\n\tmore\r\nX-Other: 1\r\n\r\n".to_slice
+      String.new(rules.rewrite_response(folded, ""))
+        .should eq("HTTP/1.1 200 OK\r\n\tX-Fold: orphan\r\nX-Other: 1\r\n\r\n")
+    end
+  end
 
   # `add_header` located the blank line with `rindex(eol + eol)`, one spelling for the whole
   # head, so a head terminated `\n\n` with a CRLF anywhere above it had the new header appended

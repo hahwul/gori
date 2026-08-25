@@ -79,7 +79,7 @@ module Gori
       # (a body that ends and leaves a tail is usually not this document at all).
       trailing = p.ok? && p.pos < data.size
       BinaryDocument::Rendering.new(json, p.ok? && p.pos == data.size, p.pos,
-        trailing ? "trailing" : p.stop)
+        trailing ? "trailing" : p.stop, p.decoded?)
     rescue JSON::Error | IO::Error
       # `JSON.build` can only fail on a builder misuse, which would be a bug here rather than
       # bad input. Report it as an incomplete parse rather than unwinding into a TUI draw (P7).
@@ -87,7 +87,7 @@ module Gori
       # answers a document past 2 GiB with `IO::EOFError`, which is how the unbounded-output
       # defect surfaced, and `MAX_JSON_BYTES` is what actually stops it. The belief that the
       # ceiling holds is not the contract.
-      BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal")
+      BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal", false)
     end
 
     # :ditto: — the two-element form, for a caller that only wants the text and whether it is
@@ -106,8 +106,18 @@ module Gori
       # WHY the parse stopped, or nil when it did not. The FIRST reason wins: an inner value
       # running out of input is what happened, and every level above it only reports that.
       getter stop : String?
+      # Did the parse make ANYTHING of this body, or is the whole rendering one `$partial`
+      # marker? False only in the second case, which is where a lying length header lands —
+      # see `BinaryDocument::Rendering#describes?`, the third part of its test. `0xdb`, `0xc6`
+      # and `0xc9` all reach it: a str32/bin32/ext32 whose length nothing behind it can satisfy
+      # consumes every remaining byte and stops for want of input, exactly as a capture cap
+      # does, and answered `describes?` with a document that had decoded nothing.
+      getter? decoded : Bool = true
 
       def initialize(@data : Bytes, @max_depth : Int32, @sink : IO::Memory)
+        # The REAL output buffer, kept so `bail` can tell a marker written as the document's
+        # own value from one written into a scratch key render (`key_text` swaps `@sink`).
+        @root = @sink
         @items = 0
         @spent = 0_i64
         @stop = nil.as(String?)
@@ -219,9 +229,10 @@ module Gori
       # TRUNCATED document, and refusing it up front would render `null` for a body that is
       # mostly readable. The loop is bounded instead — the first element that runs out of input
       # bails, `break unless @ok` ends the loop there, and `MAX_ITEMS` bounds the aggregate.
-      # A count too wide to be an Int32 never gets here (`len` returns -1).
+      # A count too wide to be an Int32 never gets here (`len` returns `LEN_TOO_WIDE`), and a
+      # count whose own bytes ran out is told apart from it — see `len`.
       private def map(j : JSON::Builder, n : Int32, depth : Int32) : Nil
-        return bail(j, "malformed") if n < 0
+        return bail(j, len_stop(n)) if n < 0
         j.object do
           plain = true
           n.times do
@@ -240,7 +251,9 @@ module Gori
               # which says "an empty map" rather than "this stopped". `81 81 81 …` rendered
               # exactly that: `{}`, with `complete` false and no reason anywhere in the text,
               # and `Decoder::Codecs#document`'s `$partial` test then read it as a decode that
-              # worked. The CBOR sibling has always named it; this is the same sentence.
+              # worked. The CBOR sibling carries the same sentence in the same place — it did
+              # NOT when this was written, and its indefinite-length map closed `bf` as a bare
+              # `{}` for exactly this reason; the two were fixed together.
               j.field("$partial", @stop || "stopped")
               break
             end
@@ -257,7 +270,7 @@ module Gori
 
       # :ditto:
       private def array(j : JSON::Builder, n : Int32, depth : Int32) : Nil
-        return bail(j, "malformed") if n < 0
+        return bail(j, len_stop(n)) if n < 0
         j.array do
           n.times do
             break unless @ok
@@ -267,6 +280,7 @@ module Gori
       end
 
       private def str(j : JSON::Builder, n : Int32) : Nil
+        return bail(j, len_stop(n)) if n < 0
         raw = take(n) || return bail(j, "truncated")
         s = String.new(raw)
         # A `str` that is not valid UTF-8 is a fact about the body, not a rendering problem.
@@ -280,6 +294,7 @@ module Gori
       end
 
       private def bin(j : JSON::Builder, n : Int32) : Nil
+        return bail(j, len_stop(n)) if n < 0
         raw = take(n) || return bail(j, "truncated")
         j.object { j.field "$bin", Base64.strict_encode(raw) }
       end
@@ -289,13 +304,23 @@ module Gori
       # the one the spec itself defines (a timestamp), and it is decoded because a timestamp
       # rendered as base64 is a fact withheld.
       private def ext(j : JSON::Builder, n : Int32) : Nil
-        return bail(j, "malformed") if n < 0
+        return bail(j, len_stop(n)) if n < 0
         t = byte || return bail(j, "truncated")
         raw = take(n) || return bail(j, "truncated")
         type = t.to_i8!
         if type == -1
+          text, why = timestamp_text(raw)
           j.object do
-            j.field "$timestamp", timestamp_text(raw)
+            if text
+              j.field "$timestamp", text
+            else
+              # NAMED, not quietly filled with something else. `$timestamp` promises a time an
+              # operator can read, and putting base64 there when one could not be made handed
+              # the consumer a different type under the same field name — `c7 0c ff` with a
+              # seconds field of 2^63-1 rendered `{"$timestamp":"AAAAAH//////////"}`, which
+              # reads as a timestamp and is not one. The bytes are in `$ext` either way.
+              j.field "$timestamp_unrepresentable", why
+            end
             # The BYTES too, and that is the module's own "both readings" rule rather than
             # belt-and-braces: `$timestamp` is second-resolution, and the 8- and 12-byte forms
             # carry nanoseconds. Dropping them made the reading unreconstructible — a fact
@@ -311,23 +336,24 @@ module Gori
         end
       end
 
-      # The spec's three timestamp encodings (4, 8 and 12 bytes). An unrecognised width is
-      # reported as its bytes rather than as a wrong time.
-      private def timestamp_text(raw : Bytes) : String
+      # The spec's three timestamp encodings (4, 8 and 12 bytes) as RFC 3339 text — or nil and
+      # the reason there is none. The two reasons are a width the spec does not define and a
+      # seconds field outside `Time`'s own year 1..9999 range; both are corrupt input rather
+      # than an error to raise on, and neither is a time to print.
+      private def timestamp_text(raw : Bytes) : {String?, String}
         case raw.size
         when 4
-          Time.unix(be(raw, 0, 4).to_i64).to_rfc3339
+          {Time.unix(be(raw, 0, 4).to_i64).to_rfc3339, ""}
         when 8
           packed = be(raw, 0, 8)
-          Time.unix((packed & 0x3_ffff_ffff_u64).to_i64).to_rfc3339
+          {Time.unix((packed & 0x3_ffff_ffff_u64).to_i64).to_rfc3339, ""}
         when 12
-          Time.unix(be(raw, 4, 8).to_i64!).to_rfc3339
+          {Time.unix(be(raw, 4, 8).to_i64!).to_rfc3339, ""}
         else
-          Base64.strict_encode(raw)
+          {nil, "width"}
         end
       rescue ArgumentError | OverflowError
-        # A seconds field far outside `Time`'s range is corrupt input, not an error to raise on.
-        Base64.strict_encode(raw)
+        {nil, "out_of_range"}
       end
 
       private def uint(j : JSON::Builder, width : Int32) : Nil
@@ -378,13 +404,33 @@ module Gori
         b
       end
 
-      # A length field, read big-endian. Returns -1 when the input ran out or the value cannot
-      # be an Int32 — every caller treats a negative length as "stop", so an over-wide length
-      # never reaches an allocation.
+      # A length or count field, read big-endian. Every caller treats a negative return as
+      # "stop", so an over-wide length never reaches an allocation — but WHICH negative matters,
+      # because the two reasons are the two halves of `describes?` and they point opposite ways:
+      #
+      #   * `LEN_TRUNCATED` — the bytes ran out inside the field itself. That is a body cut
+      #     short, the same thing `take`'s short read reports, and the rendering is still about
+      #     this body.
+      #   * `LEN_TOO_WIDE` — a value no Int32 can hold, so no input this process can be handed
+      #     could ever satisfy it. That is a header claiming something impossible, which is what
+      #     a body of some other format looks like.
+      #
+      # One `-1` for both merged them: `dc 00` — an array16 with one of its two count bytes —
+      # was reported `malformed` and refused, while `d9 00`, the same cut one field over in the
+      # SAME reader, was reported `truncated` and shown. Two halves of one reader disagreeing
+      # about what a cut means.
+      LEN_TRUNCATED = -1
+      LEN_TOO_WIDE  = -2
+
       private def len(width : Int32) : Int32
-        raw = take(width) || return -1
+        raw = take(width) || return LEN_TRUNCATED
         v = be(raw, 0, width)
-        v > Int32::MAX.to_u64 ? -1 : v.to_i32
+        v > Int32::MAX.to_u64 ? LEN_TOO_WIDE : v.to_i32
+      end
+
+      # :ditto: — the stop reason a negative `len` stands for.
+      private def len_stop(n : Int32) : String
+        n == LEN_TRUNCATED ? "truncated" : "malformed"
       end
 
       private def take(n : Int32) : Bytes?
@@ -432,6 +478,11 @@ module Gori
       private def bail(j : JSON::Builder, reason : String) : Nil
         @ok = false
         @stop ||= reason
+        # Nothing has been written to the real output yet, so this marker IS the document: the
+        # parser was handed a body and made nothing of it. A container would have written its
+        # opening brace before reaching here, and a scalar its value. Tested against `@root`
+        # because `key_text` points `@sink` at a scratch buffer that legitimately starts empty.
+        @decoded = false if @sink.same?(@root) && @sink.bytesize == 0
         j.object { j.field "$partial", @stop }
       end
     end

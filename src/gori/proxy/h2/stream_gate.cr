@@ -266,6 +266,7 @@ module Gori::Proxy::H2
       @closed = false
       @warned_body = false
       @warned_length = false
+      @warned_refused = false
       @warned_scope = false
       @warned_overflow = false
       # Connection-level flow-control credit owed back to the SENDER for DATA this gate
@@ -831,12 +832,43 @@ module Gori::Proxy::H2
     # edit's body IS what gori sends, so a synced value is simply true and a mismatched one is
     # the RFC 9113 §8.1.1 probe the operator asked for. Both go out verbatim, which is exactly
     # what h1 does with the identical edit (P7).
+    #
+    # THE ENCODE IS ASKED FIRST, AND THE BODY IS ONLY ADOPTED IF IT SUCCEEDED. `encode_edited`
+    # answers nil for an edit gori will not apply — a head it cannot re-parse, or one whose
+    # peer block is not h1-faithful — and the caller's `|| block` then forwards the PEER's
+    # head. Adopting the body ahead of that answer made the two halves come from different
+    # authors: the peer's `content-length: 5` head went out over the operator's 17-byte entity,
+    # which is the RFC 9113 §8.1.1 malformed request `h1_unfaithful_reason`/`edit_refusal`
+    # exist to keep gori from MANUFACTURING — while the log said the original head was
+    # forwarded unchanged and `Interceptor#forward` told the TUI/CLI/MCP the edit had been
+    # applied. A refused edit is refused WHOLE: peer's head, peer's DATA.
     private def edited_with_body(slot : Slot, block : HeadRewrite::Block,
                                  head : Bytes, body : Bytes) : HeadRewrite::Block
+      encoded = @heads.encode_edited(block, head, false)
+      unless encoded
+        warn_edit_refused(block.stream_id, body.size)
+        return block
+      end
       # Only a CHANGED body is re-framed. An operator who edited the head alone keeps the
       # peer's own DATA frames byte-for-byte, boundaries included.
       slot.rebuilt = body unless body == body_of(slot)
-      @heads.encode_edited(block, head, false) || block
+      encoded
+    end
+
+    # The other half of a refused head+body edit: `encode_edited` has already written its own
+    # line about the HEAD it would not apply, and this says what that costs on a hold whose
+    # body the operator also wrote. Latched like `warned_body`/`warned_length` — one gate, one
+    # sentence, however many streams repeat it.
+    private def warn_edit_refused(stream_id : UInt32, body_size : Int32) : Nil
+      return if @warned_refused
+      @warned_refused = true
+      ::Log.warn do
+        "h2 #{@direction}: an intercept edit was refused (stream #{stream_id}), so the peer's " \
+        "own head AND its own DATA were forwarded — the edited #{body_size}-byte body was " \
+        "dropped with the head it belonged to. Sending one without the other would put the " \
+        "peer's declared length over the operator's entity, which is the malformed message " \
+        "(RFC 9113 §8.1.1) this gate exists to avoid manufacturing"
+      end
     end
 
     # The restore is a rewrite of the operator's own bytes, so it does not get to be silent —

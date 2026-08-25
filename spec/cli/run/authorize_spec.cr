@@ -217,6 +217,27 @@ describe "gori run authorize — output" do
     out.should contain("connect failed")
   end
 
+  # The last column used to be `delta || error`, on a comment claiming an errored send has no
+  # numbers to subtract. It has one: `ExchangeMeta.delta` builds its string out of whichever
+  # facts BOTH sides carry, and two failed sends still have a duration each — so a trial that
+  # never reached the host printed `Δ time -1.0 ms` and swallowed the only thing on the row
+  # worth reading. Which failure it was matters per identity: a proxy that rejects one token
+  # and times out on another is two different findings.
+  it "text: an errored trial prints WHY, not a duration delta against another failure" do
+    base = trial("as-captured", A::Verdict::Baseline, nil, nil, baseline: true,
+      error: "connect failed: acme.test unreachable")
+    other = Gori::Repeater::ExchangeMeta.of(nil, nil, 1_i64, "tls: handshake timeout")
+    delta = Gori::Repeater::ExchangeMeta.delta(base.meta, other)
+    delta.should_not be_nil # the trap itself: an errored PAIR is not delta-less
+    errored = A::Target.new(9_i64, "GET", "https://acme.test/me", [base,
+                                                                   trial("anonymous", A::Verdict::Error, nil, nil,
+                                                                     error: "tls: handshake timeout", delta: delta)])
+    out = Gori::CLI::Output.authorize_target_text(errored)
+    out.should contain("tls: handshake timeout")
+    out.should contain("connect failed: acme.test unreachable")
+    out.should_not contain("Δ time")
+  end
+
   it "text: names sends the scope gate refused before the socket" do
     blocked = A::Target.new(10_i64, "GET", "https://acme.test/admin",
       [trial("as-captured", A::Verdict::Baseline, nil, nil, baseline: true, error: "blocked"),
@@ -286,5 +307,44 @@ describe "gori run authorize — output" do
     ])
     Gori::CLI::Output.authorize_verdict(dead).should eq(:error)
     dead.unanswered?.should be_true
+  end
+end
+
+describe "gori run authorize — a set with two baselines" do
+  # Driven through a REAL `Plan.build`, like every other arm here: a sentence asserted against
+  # a hand-built error would keep passing after the builder stopped raising the reason.
+  it "MultipleBaselines: names both and says which flag to clear" do
+    with_store do |store|
+      id = capture_flow(store)
+      json = <<-JSON
+        [{"name": "admin", "baseline": true, "set": [{"name": "Cookie", "value": "a=1"}]},
+         {"name": "anonymous", "baseline": true, "set": [], "remove": ["Cookie"]}]
+        JSON
+      msg = refusal(store, flow_ids: [id], identities_json: json)
+      msg.should contain("more than one identity claims the baseline")
+      msg.should contain("admin")
+      msg.should contain("anonymous")
+      msg.should contain("baseline")
+      # …and it says what running it would have meant, which is the part that made this worth
+      # refusing rather than resolving: nothing would have been compared at all.
+      msg.should contain("nothing would")
+    end
+  end
+end
+
+# `--limit` caps the QUERY's rows and nothing else, so the "capped" warning has to be built
+# from that number. Counting the whole selection (`targets + skipped`) meant
+# `gori run authorize 2 3 4 -q 'path:/soft' -n 4` warned about a cap on a query that matched
+# one row — and raising --limit changed nothing, because the cap had never applied to the ids.
+#
+# A SOURCE guard, because the warning is printed straight to STDERR from `cmd_authorize`,
+# which opens a project and dials: the behaviour itself is pinned on the builder
+# (`spec/authorize/plan_spec.cr`, "#query_capped?"), and this is what keeps the surface
+# reading that number rather than re-deriving one of its own.
+describe "gori run authorize — the --limit warning" do
+  it "asks the plan whether the query was capped, instead of counting the selection" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "authorize.cr"))
+    src.should contain("plan.query_capped?(limit)")
+    src.should_not contain("plan.targets.size + plan.skipped.size")
   end
 end

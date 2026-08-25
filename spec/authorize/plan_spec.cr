@@ -688,3 +688,84 @@ describe "Gori::Authorize::Passive provenance" do
     end
   end
 end
+
+# ── exactly one baseline ────────────────────────────────────────────────────────────────
+#
+# The MCP schema has always promised "Exactly one may carry baseline:true" and nothing
+# enforced it. A set with two of them does not say which response the others are judged
+# against, and running it anyway compared NOTHING: both rows came back `baseline`, no row was
+# left to compare, and the three surfaces then gave the same Target three different words —
+# `gori run authorize` `[x] error`, the TUI `review`, MCP `enforced`.
+describe Gori::Authorize::Plan do
+  describe "MultipleBaselines" do
+    it "refuses a set where two identities claim the baseline" do
+      with_store do |store|
+        id = seed(store)
+        json = <<-JSON
+          [{"name": "admin", "baseline": true, "set": [{"name": "Cookie", "value": "a=1"}]},
+           {"name": "anonymous", "baseline": true, "set": [], "remove": ["Cookie"]}]
+          JSON
+        ex = expect_raises(PlanError) do
+          Plan.build(PlanOptions.new(store, flow_ids: [id], identities_json: json), ungated_outbound)
+        end
+        ex.reason.should eq(Reason::MultipleBaselines)
+        ex.detail.should eq(%("admin", "anonymous")) # BOTH named — one of them has to lose the flag
+      end
+    end
+
+    it "still takes the ordinary set with exactly one" do
+      with_store do |store|
+        id = seed(store)
+        plan = Plan.build(options(store, flow_ids: [id]), ungated_outbound)
+        plan.identities.count(&.baseline?).should eq(1)
+      end
+    end
+
+    # …and the baseline gori PREPENDS is not a second claim: a set with none gets exactly one.
+    it "prepends exactly one baseline to a set that claims none" do
+      with_store do |store|
+        id = seed(store)
+        plan = Plan.build(PlanOptions.new(store, flow_ids: [id], identities_json: ONE_IDENT_JSON),
+          ungated_outbound)
+        plan.identities.count(&.baseline?).should eq(1)
+      end
+    end
+  end
+
+  # ── what --limit actually caps ─────────────────────────────────────────────────────────
+  #
+  # `--limit` governs the QUERY's contribution and nothing else. The CLI warned off
+  # `targets + skipped >= limit`, which counts the explicit flow ids too — so
+  # `gori run authorize 2 3 4 -q 'path:/soft' -n 4` announced a cap on a query that matched one
+  # row, and raising --limit changed nothing because the cap had never applied.
+  describe "#query_capped?" do
+    it "counts the query's rows only, not the ids the operator named" do
+      with_store do |store|
+        ids = [seed(store, target: "/a"), seed(store, target: "/b"), seed(store, target: "/c")]
+        seed(store, target: "/soft")
+        plan = Plan.build(options(store, flow_ids: ids, query: "path:/soft", limit: 4), ungated_outbound)
+        plan.targets.size.should eq(4) # the three ids plus the query's one row
+        plan.query_rows.should eq(1)   # …of which the query contributed one
+        plan.query_capped?(4).should be_false
+      end
+    end
+
+    it "is true when the query filled the cap" do
+      with_store do |store|
+        3.times { |i| seed(store, target: "/p#{i}") }
+        plan = Plan.build(options(store, query: "host:acme.test", limit: 2), ungated_outbound)
+        plan.query_rows.should eq(2)
+        plan.query_capped?(2).should be_true
+      end
+    end
+
+    it "is false with no query at all" do
+      with_store do |store|
+        id = seed(store)
+        plan = Plan.build(options(store, flow_ids: [id], limit: 1), ungated_outbound)
+        plan.query_rows.should eq(0)
+        plan.query_capped?(1).should be_false
+      end
+    end
+  end
+end

@@ -49,6 +49,30 @@ module Gori::Oast
       array_field(parse_json(resp.body), "data").compact_map { |it| to_interaction(it) }.reverse
     end
 
+    def deregisters? : Bool
+      true
+    end
+
+    # `DELETE /token/{uuid}` — webhook.site's token IS the listener, so deleting it is what
+    # makes the payloads minted from this session stop resolving (they 404 from the next hit
+    # on). Without this the provider inherited `Provider#deregister`'s no-op and every surface
+    # reported a teardown that sent no packet: a free token left over from a finished
+    # engagement kept collecting the target's traffic on a public service, indefinitely.
+    #
+    # `session.server_url`, not `base_url`: the uuid only exists on the host that minted it, and
+    # a provider row whose host was edited since must not send this DELETE somewhere else (the
+    # same reasoning `Interactsh#resume` states).
+    #
+    # 404/410 count as success — the token is already gone, which is the state this asks for.
+    # Any other non-2xx RAISES so `Sessions.release` reports a failure rather than a teardown:
+    # a 401 from a rotated api key is exactly the case where the token is still live.
+    def deregister(http : Http, session : Session) : Nil
+      resp = http.request("DELETE", "#{session.server_url}/token/#{session.correlation_id}",
+        api_key_headers)
+      return if {200, 201, 202, 204, 404, 410}.includes?(resp.status)
+      raise Gori::Error.new("webhook.site deregister failed: HTTP #{resp.status} #{snippet(resp.body)}")
+    end
+
     private def api_key_headers(json : Bool = false) : Hash(String, String)
       h = {} of String => String
       h["Content-Type"] = "application/json" if json

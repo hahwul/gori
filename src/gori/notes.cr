@@ -64,6 +64,120 @@ module Gori
       Doc.new(0, [] of NoteEntry, 1_i64)
     end
 
+    # A document build from the two raw rows `load` reads, with the same legacy fallback.
+    # Split out of `load` so the TRANSACTIONAL mutators below can rebuild the doc from the
+    # blob the store handed them inside the write transaction (see `Store#mutate_setting`)
+    # rather than from a second, racy read.
+    def self.doc_from(raw : String?, legacy : String?) : Doc
+      if raw && (doc = parse(raw))
+        return doc
+      end
+      if legacy && !legacy.empty?
+        return Doc.new(0, [NoteEntry.new(1_i64, legacy)], 2_i64)
+      end
+      Doc.new(0, [] of NoteEntry, 1_i64)
+    end
+
+    # What a transactional mutation did. Three outcomes, and the middle one is why this is
+    # not a Bool: "no note with that id" is a DETERMINISTIC refusal the caller must report as
+    # such, while `Busy` is transient and retryable (an agent that retries the first loops
+    # forever, the split `SessionSlots` documents for the same reason).
+    enum Write
+      Committed
+      Missing
+      Busy
+    end
+
+    # ── transactional mutators ────────────────────────────────────────────────
+    #
+    # The note set is ONE settings row holding the whole document, so every edit is a
+    # read-modify-write. Done as two statements it loses a peer's notes: both processes read
+    # the same set, both append one note, both commit — and the second commit's document
+    # never contained the first's row. MEASURED at 103 of 200 surviving across two `gori mcp`
+    # processes, every call reporting success. `Store#mutate_setting` puts the read and the
+    # write inside one `BEGIN IMMEDIATE`, which is the whole fix; these four wrappers are what
+    # make the surfaces use it.
+    #
+    # The blocks below run on the writer fiber and touch nothing but their arguments — see
+    # `Store#mutate_setting` for that contract. `legacy` is read BEFORE the transaction on
+    # purpose: gori never WRITES the legacy key, so its value cannot move under us, and
+    # reading it from inside the block would need a second statement on the writer's
+    # connection for a row that is absent in every project written this decade.
+
+    # Append one note and return its id, or nil when the store did not commit. The id is
+    # minted from the set as it exists INSIDE the transaction, so two processes appending at
+    # once get two different ids and both notes survive.
+    def self.create(store : Store, text : String) : Int64?
+      legacy = store.setting(LEGACY_KEY)
+      created = nil.as(Int64?)
+      committed = store.mutate_setting(DOCS_KEY) do |raw|
+        doc = doc_from(raw, legacy)
+        id = doc.next_id
+        notes = doc.notes + [NoteEntry.new(id, text)]
+        created = id
+        serialize(notes.size - 1, notes, id + 1)
+      end
+      committed ? created : nil
+    end
+
+    # Replace one note's text. `Missing` when the id is not in the set the transaction read —
+    # which is the authoritative one, so a note a peer deleted a moment ago reports Missing
+    # rather than being silently resurrected by our stale copy.
+    def self.update(store : Store, id : Int64, text : String) : Write
+      legacy = store.setting(LEGACY_KEY)
+      found = false
+      committed = store.mutate_setting(DOCS_KEY) do |raw|
+        doc = doc_from(raw, legacy)
+        idx = doc.notes.index { |n| n.id == id }
+        if idx
+          found = true
+          notes = doc.notes.dup
+          notes[idx] = NoteEntry.new(id, text)
+          serialize(doc.cur, notes, doc.next_id)
+        end
+      end
+      return Write::Busy unless committed
+      found ? Write::Committed : Write::Missing
+    end
+
+    # Drop one note. `cur` is re-clamped against the set the transaction read, not ours.
+    def self.delete(store : Store, id : Int64) : Write
+      legacy = store.setting(LEGACY_KEY)
+      found = false
+      committed = store.mutate_setting(DOCS_KEY) do |raw|
+        doc = doc_from(raw, legacy)
+        idx = doc.notes.index { |n| n.id == id }
+        if idx
+          found = true
+          notes = doc.notes.dup
+          notes.delete_at(idx)
+          serialize(doc.cur.clamp(0, {notes.size - 1, 0}.max), notes, doc.next_id)
+        end
+      end
+      return Write::Busy unless committed
+      found ? Write::Committed : Write::Missing
+    end
+
+    # `merge` applied to the persisted set INSIDE the write transaction, for the two surfaces
+    # that hold a whole session's worth of notes (the TUI's Notes tab, `gori run notes`).
+    # Returns the merged document as committed, or nil when the store did not commit.
+    #
+    # This is the same reconciliation those surfaces already do; what changes is WHERE the
+    # `persisted` argument comes from. Re-reading it just before `set_setting` — which is
+    # what they do today — still merges against a set a peer can replace between the read and
+    # the write, and the merge's whole promise is that a peer's note is kept.
+    def self.save(store : Store, mine : Array(NoteEntry), deleted : Set(Int64),
+                  cur_id : Int64?, next_id : Int64) : Doc?
+      legacy = store.setting(LEGACY_KEY)
+      merged = nil.as(Doc?)
+      committed = store.mutate_setting(DOCS_KEY) do |raw|
+        doc = merge(doc_from(raw, legacy), mine, deleted, cur_id, next_id)
+        merged = doc
+        serialize(doc.cur, doc.notes, doc.next_id)
+      end
+      committed ? merged : nil
+    end
+
     # Parse the JSON document set; nil on malformed data so callers can fall back.
     def self.parse(raw : String) : Doc?
       # Read the root through `as_h?` rather than indexing the JSON::Any directly:

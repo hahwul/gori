@@ -519,6 +519,12 @@ module Gori
           if format == :har
             emit_har(store, rows, query, view_label, limit)
           elsif format == :json
+            # The same sentence the text and HAR branches print, on the same channel. JSON-Lines
+            # answered an empty listing with ZERO bytes and a silent STDERR — so "I saw no
+            # traffic" and "a standing --view/--in-scope lens excluded all of it" read identically
+            # to the one consumer that cannot see the flags it was invoked with. STDOUT stays a
+            # pure stream either way (this is STDERR), so a pipe is unaffected.
+            STDERR.puts empty_listing_note(query, view_label, in_scope) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
@@ -650,7 +656,7 @@ module Gori
         case format
         when :raw  then show_raw(detail, show_request, show_response)
         when :har  then show_har(detail, ws_msgs)
-        when :curl then show_curl(detail)
+        when :curl then show_curl(detail, ws_msgs)
         when :json then puts show_json(detail, show_request, show_response, ws_msgs)
         else            show_text(detail, show_request, show_response, ws_msgs)
         end
@@ -664,13 +670,15 @@ module Gori
       # body is arbitrary bytes, and every naive quoting of those is wrong in a way that
       # only shows up on the operator's terminal).
       #
-      # Body included, exactly as captured, so the command reproduces the request rather
-      # than a GET-shaped sketch of it — with the two caveats the bytes themselves impose
-      # reported on STDERR, never mixed into the command on STDOUT: a body cut at the
-      # capture cap would be re-sent SHORT, and a body holding a NUL cannot be a shell
-      # argument at all (`Export::Curl.data_argument` writes that refusal into the command
-      # as a `#` comment, so a paste still runs).
-      private def self.show_curl(detail : Store::FlowDetail, io : IO = STDOUT) : Nil
+      # Body included, so the command reproduces the request rather than a GET-shaped sketch of
+      # it — with every caveat reported on STDERR, never mixed into the command on STDOUT: a body
+      # cut at the capture cap would be re-sent SHORT, and a SOCKET flow's command is the upgrade
+      # handshake and none of the frames (`socket_curl_note`). The caveats the BYTES impose are
+      # the serializer's and travel inside the command as `#` comments, so a paste still runs: a
+      # NUL no shell argument can carry (`Export::Curl.data_argument` / `nul_header_note`), and
+      # the chunk framing curl would otherwise apply a second time.
+      private def self.show_curl(detail : Store::FlowDetail, ws_msgs : Array(Store::WsMessage),
+                                 io : IO = STDOUT) : Nil
         row = detail.row
         command = curl_command_for(detail)
         unless command
@@ -678,13 +686,41 @@ module Gori
                 "its captured head is empty (use --format raw to see the bytes)"
         end
         io.puts command
+        if note = socket_curl_note(detail, ws_msgs)
+          STDERR.puts "gori run show: #{note}"
+        end
         if detail.request_body_truncated?
           STDERR.puts "gori run show: flow ##{row.id}'s request body was truncated at the capture cap — " \
                       "this command sends the SHORT body"
         end
       end
 
-      # The curl command for a stored flow, or nil when its head carries no resolvable URL.
+      # What a curl command for a SOCKET flow leaves out, or nil when the flow is plain HTTP.
+      #
+      # curl speaks the upgrade handshake and nothing after it, so for a 101 the command on STDOUT
+      # is a true reproduction of a request that is not what the operator was looking at: the
+      # frames are the capture. Every sibling here says so — `show_har` refuses a transcript-less
+      # socket by name, the TUI's copy menu offers a separate `wscat` row — while this format
+      # printed the handshake with an empty STDERR, which reads as "this is the flow".
+      #
+      # Judged on the TRANSCRIPT first and the handshake shape second, the way `Har.skip_reason`
+      # is: a flow with captured messages is a socket whatever its status line says (#742's
+      # WebSocket-over-h2), and `FlowDetail#websocket?` answers for the one that has none.
+      #
+      # Public for the reason `empty_listing_note` is: the command ends in output, so the sentence
+      # is the only part of it a spec can pin.
+      def self.socket_curl_note(detail : Store::FlowDetail, ws_msgs : Array(Store::WsMessage)) : String?
+        return nil unless ws_msgs.size > 0 || detail.websocket?
+        carried = ws_msgs.empty? ? "no messages were captured for it" \
+                                    : "the #{ws_msgs.size} captured message#{ws_msgs.size == 1 ? "" : "s"} #{ws_msgs.size == 1 ? "is" : "are"} not in it"
+        "flow ##{detail.row.id} is a WebSocket flow — this command reproduces the UPGRADE " \
+        "HANDSHAKE only, and #{carried}. Replaying the socket needs a WebSocket client " \
+        "(the TUI's copy menu has a wscat row); --format json or raw carries the transcript"
+      end
+
+      # The curl command for a stored flow, or nil when its head carries no request line to
+      # resolve a URL from — an EMPTY captured head included, which used to resolve to the flow's
+      # own target base and hand back `curl 'https://h.test'`, a request nobody made.
       # Split from `show_curl` so the serialization is reachable without the abort/IO around it.
       private def self.curl_command_for(detail : Store::FlowDetail) : String?
         row = detail.row

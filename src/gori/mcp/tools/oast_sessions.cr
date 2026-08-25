@@ -99,14 +99,18 @@ module Gori
         return row if row.is_a?(Result)
         bound = Oast::Sessions.bind(store, row)
         return oast_session_problem(bound, row) if bound.is_a?(Oast::Sessions::Problem)
-        # `release` returns false when the deregister raised (the server is down, or answered
-        # a status outside interactsh's accepted set): the correlation id is still registered
-        # and its payloads still resolve, so an agent must not be told the teardown happened.
-        # Same refusal `gori run oast release` makes (cli/run/oast.cr).
-        unless Oast::Sessions.release(bound, Oast::HttpClient.new(@verify_upstream))
-          return Result.new("could not deregister OAST session ##{row} (provider error) — " \
-                            "payloads minted from it may still resolve; its " \
-                            "#{store.oast_callback_count(row)} callback(s) stay", is_error: true)
+        # A teardown has four outcomes, not two, and an agent has to be able to tell them
+        # apart: the id is dead (`Released`), there was never a third-party registration
+        # (`NoServerState`), the backend keeps one and offers no way to drop it
+        # (`Unsupported` — BOAST), or the delete errored (`Failed`). The last two leave the
+        # correlation id live and its payloads resolving, so they are refusals; they carry the
+        # SAME sentence `gori run oast release` prints, because "BOAST cannot be released" is
+        # actionable where a bare "provider error" reads as a transient network fault.
+        outcome = Oast::Sessions.release_outcome(bound, Oast::HttpClient.new(@verify_upstream))
+        callbacks = store.oast_callback_count(row)
+        unless outcome.torn_down?
+          return Result.new(Oast::Sessions.release_message(outcome, bound, row, callbacks),
+            is_error: true)
         end
         # Only NOW drop a live handle on it: after the deregister its correlation id is dead, so
         # leaving one pollable would answer an agent with an endless empty poll. Before it, the
@@ -116,7 +120,13 @@ module Gori
         if live = @oast_mcp.find { |_, s| s.store_session_id == row }
           @oast_mcp.delete(live[0])
         end
-        Result.new({released: row, callbacks_kept: store.oast_callback_count(row)}.to_json)
+        # `deregistered` separates the two success states: false here means custom-http, where
+        # nothing was ever registered on anyone's server — an agent that reads only `released`
+        # would otherwise record a teardown for a backend that never had one.
+        Result.new({released:       row,
+                    callbacks_kept: callbacks,
+                    deregistered:   outcome.released?,
+                    note:           Oast::Sessions.release_message(outcome, bound, row, callbacks)}.to_json)
       end
 
       # The `oast_sessions` row id an argument names: `7`, or the `#7` the TUI and

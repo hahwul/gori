@@ -169,7 +169,7 @@ private def socks5_connect(port : Int32, host : String, dst_port : Int32,
   {sock, head}
 end
 
-private def trusting_client(raw : TCPSocket, ca_dir : String, sni : String) : OpenSSL::SSL::Socket::Client
+private def trusting_client(raw : IO, ca_dir : String, sni : String) : OpenSSL::SSL::Socket::Client
   ctx = OpenSSL::SSL::Context::Client.new
   ca_cert = Cert.read_pem(File.join(ca_dir, "root.crt.pem"))
   store = LibSSL.ssl_ctx_get_cert_store(ctx.to_unsafe)
@@ -177,19 +177,68 @@ private def trusting_client(raw : TCPSocket, ca_dir : String, sni : String) : Op
   OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: sni)
 end
 
+# A client that sends `sni` and then accepts whatever leaf comes back. The one spec that needs
+# it is the one where the SNI is the LIE under test: gori is expected to mint for the name the
+# handshake DECLARED instead, so a verifying client would fail on the very outcome being
+# asserted — and fail identically whichever name it got.
+private def unverified_client(raw : IO, sni : String) : OpenSSL::SSL::Socket::Client
+  ctx = OpenSSL::SSL::Context::Client.new
+  ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
+  OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: sni)
+end
+
+# Splits the FIRST write into its first octet and the rest, with a scheduler yield between —
+# which is what puts exactly ONE byte in gori's socket buffer when its `peek` runs. Nothing
+# exotic produces this on a real network either: a `TCP_NODELAY` client, a PMTU boundary, or an
+# SSL layer that writes its record header separately.
+private class SplitFirstWriteIO < IO
+  def initialize(@inner : IO)
+    @split = true
+  end
+
+  def read(slice : Bytes) : Int32
+    @inner.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    if @split && slice.size > 1
+      @split = false
+      @inner.write(slice[0, 1])
+      @inner.flush
+      sleep 50.milliseconds # let the listener's fiber run and peek the single octet
+      @inner.write(slice[1..])
+      return
+    end
+    @inner.write(slice)
+  end
+
+  def flush
+    @inner.flush
+  end
+
+  def close
+    @inner.close
+  end
+end
+
 describe Gori::Proxy::Socks5 do
   it "reads a DOMAIN request and does NOT answer it — the caller decides" do
     # `negotiate` stops short of `succeeded` on purpose: the listener still has a self-loop and
     # a Sandbox question to ask, and a reply once sent cannot be retracted.
     result, written = negotiate(GREETING + Bytes[5, 1, 0, 3, 9] + "acme.test".to_slice + Bytes[1, 187])
-    result.target.should eq(Socks5::Target.new("acme.test", 443))
+    # `named:` — the ATYP this destination arrived under. It is what lets the listener know it
+    # has a NAME to tell History, scope and the passthrough list, rather than an address whose
+    # only name would be whatever SNI the client puts in its ClientHello.
+    result.target.should eq(Socks5::Target.new("acme.test", 443, named: true))
     result.refusal.should be_nil
     written.should eq(Bytes[5, 0]) # the method selection, and nothing else
   end
 
   it "reads an IPv4 and an IPv6 literal as an address a URL authority can carry" do
     v4, _ = negotiate(GREETING + Bytes[5, 1, 0, 1, 127, 0, 0, 1, 0x1f, 0x90])
-    v4.target.should eq(Socks5::Target.new("127.0.0.1", 8080))
+    # `named: false` — a literal names no host, so the SNI is still the only name on the wire.
+    v4.target.should eq(Socks5::Target.new("127.0.0.1", 8080, named: false))
+    v4.target.not_nil!.named?.should be_false
     v6, _ = negotiate(GREETING + Bytes[5, 1, 0, 4] + Bytes.new(15) { |i| i == 14 ? 0_u8 : 0_u8 } + Bytes[1_u8] + Bytes[0, 80])
     # `::1`, the spelling the rest of gori compares against — not the hand-expanded
     # `0:0:0:0:0:0:0:1`, which the Sandbox, `tls_passthrough?` and a `host:` filter would all
@@ -320,6 +369,61 @@ describe "socks5 listener" do
       body.should contain("secret")
       seen.receive.should eq("GET /s HTTP/1.1")
       sink.requests.first.scheme.should eq("https")
+    end
+  end
+
+  it "MITMs a ClientHello SPLIT ACROSS TWO WRITES, which `peek` alone cannot answer for" do
+    # `IO::Buffered#peek` is one `read(2)`'s worth and refills only when the buffer is EMPTY, so
+    # it can hand back a single octet — and the listeners fed that straight into
+    # `record_start?`, a TWO-byte test. A ClientHello split `[0:1] / [1:]` therefore answered
+    # "not TLS", fell down the HTTP/1.1 path, and produced a flow whose method was `"\x16"`:
+    # no MITM, no capture, and the origin never dialled. A `TCP_NODELAY` client, a PMTU
+    # boundary or an SSL layer that writes its record header separately is enough to cause it.
+    seen = Channel(String).new(1)
+    origin = start_tls_origin("split-secret", seen)
+    with_socks5_listener do |proxy, sink, done, dir|
+      raw, reply = socks5_connect(proxy.port, "127.0.0.1", origin)
+      reply[1].should eq(Socks5::REP_SUCCEEDED)
+      # The split, forced under the ClientHello: the first record octet on its own, and only
+      # then the rest. `SplitFirstWriteIO` says how.
+      ssl = trusting_client(SplitFirstWriteIO.new(raw), dir, "127.0.0.1")
+      ssl << "GET /split HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+      ssl.flush
+      body = ssl.gets_to_end
+      ssl.close
+      done.receive
+
+      body.should contain("split-secret")
+      seen.receive.should eq("GET /split HTTP/1.1")
+      # The proof it took the TLS branch rather than the h1 one: a captured https flow, not a
+      # `"\x16"` "not an HTTP request" row.
+      sink.requests.first.scheme.should eq("https")
+      sink.requests.first.target.should eq("/split")
+    end
+  end
+
+  it "does not let a client-chosen SNI relabel a destination the handshake DECLARED" do
+    # The SNI wins over a TRANSPARENT listener's `{host, port}` because that pair is an ADDRESS
+    # the kernel reported and the SNI is a NAME. A SOCKS5 client sent its destination AS a name,
+    # through a handshake gori already gated and granted — so preferring the ClientHello let it
+    # relabel a connection it had already declared, and History, the scope lens and
+    # `tls_passthrough` all matched a name the client invented while the dial stayed pinned.
+    seen = Channel(String).new(1)
+    origin = start_tls_origin("labelled", seen)
+    with_socks5_listener do |proxy, sink, _done, _|
+      # An ATYP_DOMAIN destination (what `socks5_connect` sends), so the client NAMED it — and
+      # a name that happens to be reachable, so the exchange completes rather than dying in DNS.
+      raw, reply = socks5_connect(proxy.port, "127.0.0.1", origin)
+      reply[1].should eq(Socks5::REP_SUCCEEDED)
+      ssl = unverified_client(raw, "evil-sni.example")
+      ssl << "GET /x HTTP/1.1\r\nHost: evil-sni.example\r\nConnection: close\r\n\r\n"
+      ssl.flush
+      ssl.gets_to_end
+      ssl.close
+      seen.receive
+
+      # The DECLARED destination, not the name the ClientHello made up.
+      sink.requests.first.host.should eq("127.0.0.1")
     end
   end
 

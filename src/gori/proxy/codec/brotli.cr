@@ -20,6 +20,17 @@ module Gori::Proxy::Codec
     # "produced nothing" is the only other signal, and it means "this was never brotli" and
     # "this is a valid stream of an empty payload" equally. The workbench has to tell those
     # apart; the display path does not care and takes whatever decoded.
+    #
+    # ## The cap stops one buffer PAST `max_out`, deliberately
+    #
+    # Stopping at `>= max_out` returned a slice whose size depended on where the decoder's
+    # last 64 KiB buffer happened to land, and 32 MiB divides by 64 KiB exactly — so a bomb
+    # landed on precisely `max_out` and cleared every consumer's `size > max_out` guard
+    # (`Chain.run`'s, `ExternalOpen`'s), which reported Ok for output that had been silently
+    # cut. One byte PAST the ceiling is what proves the stream had more to give: a body that
+    # decompresses to exactly `max_out` is not a bomb and still reports a clean, complete
+    # decode, while a bomb now overshoots by at most one buffer and every over-cap consumer
+    # sees it. Same rule, same reason, as `Decoder::Codecs#drain` and `ContentDecode#read_all`.
     def self.decode_full(input : Bytes, max_out : Int32) : {Bytes, Bool}
       {% if flag?(:without_native_codecs) %}
         raise Gori::Error.new("brotli decoder not built in")
@@ -51,8 +62,8 @@ module Gori::Proxy::Codec
             # actually kept. `has_more_output` is the decoder's own answer to "is there more in
             # you", and draining on it recovers the rest.
             break unless result == 3 || (result == 2 && LibBrotliDec.has_more_output(state) != 0)
-            break if produced == 0           # no progress → bail (defensive)
-            break if out.bytesize >= max_out # bomb guard
+            break if produced == 0          # no progress → bail (defensive)
+            break if out.bytesize > max_out # bomb guard — see below
           end
           {out.to_slice, clean}
         ensure

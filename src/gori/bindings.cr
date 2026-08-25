@@ -280,12 +280,40 @@ module Gori
     # must not lose the token. `rows` and `bound?` read that table directly, which is what
     # keeps the Bindings pane showing a disabled rule's value while nothing resolves it.
     #
-    # SLOT-AWARE, and this is the read half of "the active slot is the send context": the
-    # global table first, then the ACTIVE slot's table written over it. A slot therefore
-    # SHADOWS a global name rather than being a separate namespace an operator has to spell —
-    # `$SESSION` means one thing in a request and the active slot decides which session that
+    # SLOT-AWARE, and this is the read half of "the active slot is the send context":
+    # `$SESSION` means one thing in a request and the send context decides which session that
     # is. With no slot active (the default, and `as-captured`) this is the global table alone,
     # byte for byte the answer this method gave before slots existed.
+    #
+    # OWNERSHIP, not shadowing — this is what it used to get wrong, and `rows` had it right
+    # all along. A name belongs to exactly one table per context, chosen by who CLAIMS it:
+    #
+    #   * claimed by the context slot  → that slot's table, and nothing else
+    #   * claimed by some OTHER slot   → nothing; the value is another identity's
+    #   * claimed by nobody            → the global table
+    #
+    # Writing the slot table OVER the global one instead broke the feature in both directions,
+    # measured:
+    #
+    #   * an operator who bound `$SESSION` globally BEFORE creating the slots that claim it
+    #     left a value in `@values` that no later write can replace (`bind` sends a claimed
+    #     name to its slot's table, `candidates` never runs a claimed rule unclaimed). Both
+    #     `admin` and `user` then resolved that one retired token — one credential wearing
+    #     several names, which is the exact failure `Env.expand_bindings_as` names as the
+    #     reason this feature exists, and which the Bindings pane contradicted by painting
+    #     both rows UNBOUND.
+    #   * an operator who takes a name BACK — edits the slot down to a pure header overlay —
+    #     left the slot's retired value shadowing the global table forever. A fresh global
+    #     rebind could never be seen while that slot was the context, so the wire kept
+    #     carrying the identity the operator had just dissolved.
+    #
+    # Both are the same missing question, asked once here for the read half exactly as
+    # `candidates` and `bind` ask it for the write half.
+    #
+    # Nothing is DELETED to make this true. A retired value stays in memory — `held_values`
+    # still masks it (it is still a secret that was on the wire), and a name handed back to
+    # the same slot resolves again without a round trip, which is the property `refresh`
+    # already protects for a merely-disabled rule.
     def values : Hash(String, String)
       # OUTSIDE `@mutex`: `SessionSlots` has its own, and the two must never nest — see
       # `candidates`. Nothing here needs the two snapshots to be atomic with each other; a
@@ -296,21 +324,41 @@ module Gori
     # `Env::Layer#slot_values` — the same read, answered for a NAMED slot instead of the active
     # one. For the caller that carries several identities through one run and cannot activate
     # each in turn (`Authorize`, whose whole measurement is that two identities resolve to two
-    # different sessions); see `Env.expand_bindings_as`. An unknown name degrades to the global
-    # table, which is what a slot holding no table of its own resolves to anyway.
+    # different sessions); see `Env.expand_bindings_as`. An unknown name degrades to the
+    # UNCLAIMED half of the global table — an identity with no slot has no private table, and
+    # it has no business resolving a name that belongs to a slot it is not.
     def slot_values(slot : String) : Hash(String, String)
       values_in(@slots.try(&.find(slot)))
     end
 
-    # Same lock discipline as `values`: `slot` is resolved by the caller, outside `@mutex`.
+    # Same lock discipline as `values`: `slot` and the claim set are resolved by the caller,
+    # OUTSIDE `@mutex` — `SessionSlots` has a mutex of its own and the two must never nest
+    # (see `candidates`, which takes the same two snapshots for the write half).
     private def values_in(slot : SessionSlot?) : Hash(String, String)
+      slots = @slots
+      # nil = no slot claims anything, so ownership cannot differ from the pre-slot answer and
+      # the common project never allocates the set. Same `scoped?` fast path as `candidates`.
+      claimed = (slots && slots.scoped?) ? slots.claimed_names : nil
       @mutex.synchronize do
         live = Set(String).new
         @rules.each { |r| live << r.name if r.enabled? }
         h = {} of String => String
-        @values.each { |(k, b)| h[k] = b.value if live.includes?(k) }
+        @values.each do |(k, b)|
+          next unless live.includes?(k)
+          # A claimed name's global entry is RETIRED, whichever slot claims it: it can only be
+          # a value bound before the claim existed, and it belongs to no identity now.
+          next if claimed && claimed.includes?(k)
+          h[k] = b.value
+        end
         if slot && (table = @slot_values[slot.name]?)
-          table.each { |(k, b)| h[k] = b.value if live.includes?(k) }
+          table.each do |(k, b)|
+            next unless live.includes?(k)
+            # …and symmetrically, a value in this slot's table for a name the slot no longer
+            # claims is retired too. Keyed on the SLOT's own list rather than on `claimed`, so
+            # a name that moved to a DIFFERENT slot stops resolving here as well.
+            next unless slot.claims?(k)
+            h[k] = b.value
+          end
         end
         h
       end
@@ -358,9 +406,15 @@ module Gori
     # exact case `boundary_forging?` above documents. The operator's own literal header value
     # is NOT guarded — `SessionSlot.overlay_head` copies it verbatim, the same provenance
     # split every other seam in this codebase draws.
+    #
+    # `report_unbound_overlay` FIRST, and it is not a gate: with nothing bound, `$SESSION` in
+    # a slot header goes out as five literal bytes and the origin answers 401 — which the
+    # operator reads as the session having been sent and rejected. See `Env.unbound_in_slot`
+    # for why this seam can say so when a request BODY's `$id` cannot.
     def overlay(wire : Bytes) : Bytes
       slots = @slots
       return wire unless slots
+      Env.report_unbound_overlay(slots.active)
       slots.overlay(wire) { |value| Env.expand_bindings(value, guard_boundary: true) }
     end
 
@@ -554,12 +608,18 @@ module Gori
       end
     end
 
-    # In the CURRENT send context: the active slot's table, else the global one. The same
-    # question `values` answers, asked about one name.
+    # In the CURRENT send context: whichever table OWNS this name. The same question `values`
+    # answers, asked about one name — and it has to be answered the same way, or the readout
+    # and the wire disagree about whether the next send carries a credential.
     def bound?(name : String) : Bool
-      slot = @slots.try(&.active)
+      slots = @slots
+      slot = slots.try(&.active)
+      claimed = (slots && slots.scoped?) ? slots.claimed_names : nil
       @mutex.synchronize do
-        next true if slot && @slot_values[slot.name]?.try(&.has_key?(name))
+        # The context slot claims it: its table is the only one that can answer.
+        next !!@slot_values[slot.name]?.try(&.has_key?(name)) if slot && slot.claims?(name)
+        # Some OTHER slot claims it: it is not this context's to have. (See `values_in`.)
+        next false if claimed && claimed.includes?(name)
         @values.has_key?(name)
       end
     end
@@ -577,6 +637,27 @@ module Gori
       @mutex.synchronize do
         @values.delete(name)
         slot.try { |sl| @slot_values[sl.name]?.try(&.delete(name)) }
+        @rev &+= 1
+      end
+      Env.bump_highlight_rev
+    end
+
+    # Forget ONE ROW of `rows` — the table named by `slot`, and no other. The `bindings`
+    # sub-tab's clear action asks for this and not for the context-scoped `clear` above: the
+    # pane lists one row per (rule, table it writes), so an operator pressing clear on the
+    # `user` row while `admin` is active means the `user` row. Clearing the send context
+    # instead wiped a value they were looking at a different line from, and left the row they
+    # aimed at uncleanable for as long as its slot was not the active one.
+    #
+    # `nil` is the GLOBAL table — the row `rows` emits for an unclaimed rule — and not "the
+    # active slot", which is the whole difference from `clear`.
+    def clear_row(name : String, slot : String?) : Nil
+      @mutex.synchronize do
+        if slot
+          @slot_values[slot]?.try(&.delete(name))
+        else
+          @values.delete(name)
+        end
         @rev &+= 1
       end
       Env.bump_highlight_rev
@@ -734,13 +815,86 @@ module Gori
         claimed = slots.claimed_names
         active = slots.active
       end
+      matched(subject).select do |c|
+        next true unless claimed && claimed.includes?(c.rule.name)
+        !!active.try(&.claims?(c.rule.name))
+      end
+    end
+
+    # The HOST-and-CONDITION half of `candidates`, without the slot test. Its own method so
+    # `unasked` below asks the same question `candidates` does rather than a second copy of
+    # it that can drift — the difference between the two answers IS the diagnostic.
+    private def matched(subject : InterceptFilter::Subject) : Array(Compiled)
       @mutex.synchronize do
         @compiled.select do |c|
-          next false unless c.rule.enabled? && Rules.host_matches?(c.rule.host, subject.host) && c.filter.matches?(subject)
-          next true unless claimed && claimed.includes?(c.rule.name)
-          !!active.try(&.claims?(c.rule.name))
+          c.rule.enabled? && Rules.host_matches?(c.rule.host, subject.host) && c.filter.matches?(subject)
         end
       end
+    end
+
+    # Which slots claim `name`, in list order. Empty when no slot does — which is also the
+    # answer for a project with no slots at all.
+    def claiming_slots(name : String) : Array(String)
+      slots = @slots
+      return [] of String unless slots && slots.scoped?
+      slots.slots.select(&.claims?(name)).map(&.name)
+    end
+
+    # Rules this message MATCHED — host glob and condition both — that `candidates` did NOT
+    # ask, because a slot claims them and that slot is not the send context. One entry per
+    # rule: `{binding name, the slots claiming it}`.
+    #
+    # This is the information a caller needs to tell "the rule found nothing" apart from "the
+    # rule was not asked", and until it existed nobody could. `--bind-from` replays a flow,
+    # gets no bound name back and reports "no extract rule matched its response … check the
+    # rule's host glob, condition and selector" — three innocent things, when the actual cause
+    # is that one slot claims the rule and no slot is active. The rule matched; the selection
+    # skipped it. Measured: `session edit idA --rule SESSION` silently broke every existing
+    # `--bind-from` playbook, and `--clear-rules` silently fixed it again.
+    #
+    # A SELECTION and not a miss, so it is deliberately not written to the `events` feed (see
+    # `candidates`): that would be one row per response for every identity the operator is not
+    # currently using. It is answered on demand, to the surface that has something to say.
+    def unasked(subject : InterceptFilter::Subject) : Array({String, Array(String)})
+      skipped = [] of {String, Array(String)}
+      slots = @slots
+      return skipped unless slots && slots.scoped?
+      claimed = slots.claimed_names
+      active = slots.active
+      list = slots.slots
+      matched(subject).each do |c|
+        name = c.rule.name
+        next unless claimed.includes?(name)
+        next if active.try(&.claims?(name))
+        next if skipped.any? { |(n, _)| n == name }
+        skipped << {name, list.select(&.claims?(name)).map(&.name)}
+      end
+      skipped
+    end
+
+    # `unasked` with no message in hand: every ENABLED rule that cannot be asked in the
+    # current send context whatever the response says, because a slot claims it and that slot
+    # is not active.
+    #
+    # The subject-free half, because the caller that most needs this has no `Subject` to give.
+    # `gori run … --bind-from` replays a flow through `Repeater::Sender`, which runs the
+    # extraction ITSELF; the CLI only ever sees "nothing bound" and has nothing left to build
+    # a subject from. `Rules#report_refused`'s shape — a query a surface asks when it is about
+    # to say something wrong — and the same reason it is a query and not an event row.
+    def scoped_out : Array({String, Array(String)})
+      skipped = [] of {String, Array(String)}
+      slots = @slots
+      return skipped unless slots && slots.scoped?
+      claimed = slots.claimed_names
+      active = slots.active
+      list = slots.slots
+      @mutex.synchronize { @rules.select(&.enabled?).map(&.name) }.each do |name|
+        next unless claimed.includes?(name)
+        next if active.try(&.claims?(name))
+        next if skipped.any? { |(n, _)| n == name }
+        skipped << {name, list.select(&.claims?(name)).map(&.name)}
+      end
+      skipped
     end
 
     private def run(picked : Array(Compiled), raw : Repeater::Result, flow_id : Int64?,
