@@ -96,24 +96,31 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          # Merge the append into the freshly-read doc instead of a blind load→overwrite,
-          # so a concurrent writer's notes (a TUI editing the same project) aren't reverted.
-          # Same reconcile the TUI save path uses (Notes.merge): `mine` is only the new note,
-          # so every persisted note is kept and just the delta is added.
-          persisted = Notes.load(store)
-          new_id = persisted.next_id
-          # `cur` = the note just created, named by its id: `gori run notes create` is the
-          # operator saying "this is what I am working on now", the same thing `^N` means in
-          # the TUI, and an index would have to guess where the merge appended it.
-          merged = Notes.merge(persisted, [Notes::NoteEntry.new(new_id, body)], Set(Int64).new,
-            new_id, persisted.next_id + 1)
-          # set_setting returns false when the write didn't commit (store busy/locked):
-          # don't claim success then — same guard as issues/rewriter/project mutations.
-          unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
+          # `Notes.create` — the READ, the merge and the write in one transaction. Reading the
+          # set here and writing it back was two statements, and a peer (a TUI on the same
+          # project, a `gori mcp`, a second shell) that appended between them had its note
+          # erased by our commit while both calls printed success. Minting the id inside the
+          # transaction matters just as much: `next_id` read out here is the SAME number the
+          # peer read, so two concurrent creates claimed one id and the merge treated the
+          # second as an EDIT of the first.
+          #
+          # `cur` is left on the note just created — `gori run notes create` is the operator
+          # saying "this is what I am working on now", the same thing `^N` means in the TUI
+          # — which is what `Notes.create` persists.
+          new_id = Notes.create(store, body)
+          unless new_id
             store.close
             abort "gori run notes create: project is busy (write did not commit) — try again"
           end
-          puts "Note ##{merged.size} created."
+          # The position is a DISPLAY figure read back after the commit, so it names the note
+          # where it actually landed among a peer's; a peer that deletes it in that instant
+          # leaves nothing to number, and the id is then the only honest thing to print.
+          doc = Notes.load(store)
+          if idx = doc.notes.index { |n| n.id == new_id }
+            puts "Note ##{idx + 1} created."
+          else
+            puts "Note created (id #{new_id})."
+          end
         ensure
           store.close
         end
@@ -157,9 +164,13 @@ module Gori
           # else previous), which is what closing a sub-tab does in the TUI.
           keep_id = persisted.note_id(persisted.cur)
           keep_id = persisted.note_id(persisted.cur + 1) || persisted.note_id(persisted.cur - 1) if keep_id == target_id
-          merged = Notes.merge(persisted, [] of Notes::NoteEntry, Set{target_id},
-            keep_id, persisted.next_id)
-          unless store.set_setting(Notes::DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
+          # `Notes.save` re-runs that merge against the set the WRITE TRANSACTION reads, so a
+          # note a peer added between the load above and this line survives the delete. The
+          # two-statement version committed a document built before the peer's row landed and
+          # reported success. (`Notes.delete` would be the smaller call but it re-clamps `cur`
+          # by POSITION, which is exactly the drift `keep_id` above exists to avoid.)
+          merged = Notes.save(store, [] of Notes::NoteEntry, Set{target_id}, keep_id, persisted.next_id)
+          unless merged
             store.close
             abort "gori run notes delete: project is busy (write did not commit) — try again"
           end

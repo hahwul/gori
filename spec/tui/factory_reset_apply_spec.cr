@@ -35,6 +35,66 @@ describe "Runner#apply_factory_reset" do
     body.should contain("Theme.set_custom_marks")
   end
 
+  # The THIRD snapshot of exactly this class, and the one the fix above walked past.
+  # `reset_to_factory` runs `reset_scan_rules`, emptying the GLOBAL custom probe-rule library —
+  # but `Probe::Analyzer#@custom` is filled once by `load_custom` in the constructor and re-read
+  # from a single place, `ProbeController#reload_rules` (the Rules sub-tab editor). So after a
+  # reset the passive engine kept matching rules the operator had just deleted, minting fresh
+  # `probe_issues` rows and climbing `hit_count` on the ones already there. Same class as the
+  # Rewriter/Colormarker holes, one snapshot further along.
+  it "reloads the Probe analyzer's custom-rule snapshot" do
+    body = runner_body("private def apply_factory_reset(msg : String) : String")
+    body.should contain("probe.reload_rule_config")
+  end
+
+  # Behavioural half: `reload_rule_config` is only worth calling if it actually re-reads the
+  # library, so the deletion→stale→reload sequence is run for real. `delete_scan_rule` stands in
+  # for `reset_scan_rules` (private, and a real `reset_to_factory` would wipe the process-wide
+  # singleton other examples share) — it leaves `Settings.scan_rules` in the same state the
+  # reset does, which is all the analyzer's snapshot can see.
+  it "picks up a deleted global custom rule only after the reload" do
+    path = File.tempname("gori-reset-probe", ".db")
+    store = Gori::Store.open(path)
+    begin
+      id = Gori::Settings.add_scan_rule("spec canary", "", "response", "header",
+        "string", "X-Spec-Canary", "info")
+      id.should_not eq("")
+      analyzer = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
+
+      head = "GET / HTTP/1.1\r\nHost: reset.test\r\n\r\n"
+      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "reset.test", port: 80,
+        method: "GET", target: "/", http_version: "HTTP/1.1", head: head.to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: fid, status: 200, reason: "OK", duration_us: 1_i64,
+        head: "HTTP/1.1 200 OK\r\nX-Spec-Canary: 1\r\n\r\n".to_slice,
+        body: "hi".to_slice, content_type: "text/plain"))
+      store.flush
+      detail = store.get_flow(fid).not_nil!
+
+      code = "custom_g_#{id}"
+      analyzer.scan_detail(detail)
+      store.flush
+      store.probe_issues(host: "reset.test").map(&.code).should contain(code)
+
+      # The reset's half: the library is empty, the analyzer's snapshot is not.
+      Gori::Settings.delete_scan_rule(id).should be_true
+      analyzer.reload_rule_config
+      store.clear_probe_issues
+      store.flush
+      analyzer.scan_detail(detail)
+      store.flush
+      store.probe_issues(host: "reset.test").map(&.code).should_not contain(code)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   # `reset_saved_views` empties `Settings.saved_views`, so the lens History is filtering by
   # can be a view that no longer exists. `view.reload` alone repopulates the list THROUGH
   # that dead lens and says nothing; every other path that loses a view (a peer's

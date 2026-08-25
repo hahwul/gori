@@ -4988,6 +4988,16 @@ module Gori::Tui
       @session.colormarker.reload
       Theme.set_custom_marks(Settings.colormarker_color_map)
       @custom_marks_rev = @session.colormarker.revision
+      # The THIRD snapshot taken at construction and refreshed only on an explicit edit, and it
+      # was the one this reset walked past. `reset_to_factory` runs `reset_scan_rules`, which
+      # empties the GLOBAL custom probe-rule library — but `Probe::Analyzer#@custom` is filled
+      # once by `load_custom` in the constructor and re-read from exactly one place
+      # (`ProbeController#reload_rules`, the Rules sub-tab's editor). So the passive engine kept
+      # matching rules the operator had just deleted, minting fresh `probe_issues` rows and
+      # climbing `hit_count` on existing ones. Same reload the editor calls, so the disabled-set
+      # and OAST minter come back to their defaults with it, and its `@analyzed.clear` re-arms
+      # built-ins the reset just re-enabled over traffic already on screen.
+      @session.probe.reload_rule_config
       # The saved-view library is gone with them, so the active lens may name a view that no
       # longer exists. `reload` alone would leave History filtering by it silently — every
       # other path that loses a view says so, and this one has to as well. Re-resolved BEFORE

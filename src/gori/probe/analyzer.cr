@@ -347,9 +347,17 @@ module Gori
             end
             detail = @store.get_flow(ev.id)
             next unless detail
+            # BEFORE the `@analyzed` insert, exactly as in `catch_up` — the order is load-bearing,
+            # not style. `@analyzed` is capped at ANALYZED_CAP and `trim` drops the OLDEST ids, so
+            # marking a flow this feed does not scan spends a slot on it and evicts a real proxy
+            # flow's id instead. That evicted id is then absent when `catch_up` re-reads
+            # `recent_flows`, the sweep scans it a SECOND time, and `upsert_probe_issues`
+            # (`(code, host)` → `hit_count = hit_count + 1`) walks the count up and flips
+            # `sample_flow_id` — the very double-count this guard was added to stop, arriving
+            # through the other door.
+            next unless passive_feed?(detail.row)
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
-            next unless passive_feed?(detail.row)
             # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
             # gap-free rescan_ws so a 101 flow evicted from @analyzed and re-scanned (or one with a
             # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
@@ -425,19 +433,25 @@ module Gori
       # says "the Repeater now records its sends by default … on the same feed"). This is the
       # counterpart `Probe::Analyzer` never got.
       #
-      # Only the FEED is filtered. Path A still scans, `gori run probe`/MCP `probe_scan` still
-      # scan, and every gori surface that records history already runs its own explicit scan
-      # (Repeater, Fuzzer, MCP `send_request`) — so nothing loses coverage, it stops being
-      # counted twice.
+      # Only the FEED is filtered. Path A still scans, and `gori run probe`/MCP `probe_scan`
+      # still scan — so nothing loses coverage, it stops being counted twice.
       #
-      # `sent_by_gori?` and not a repeater-only test, deliberately: a `--record-history` fuzz
-      # sweep has the identical shape, and `FlowSource::Kind#sent_by_gori?` is where that line
-      # is drawn once. An IMPORTED flow is NOT filtered (gori never sent it; it describes a real
-      # endpoint someone captured), and neither is a row whose provenance predates the column —
-      # nil answers false, so a project captured with an older gori keeps scanning exactly as
-      # before.
+      # The axis is `FlowSource::Kind#self_scanned?` — "does the surface that made this flow
+      # ALREADY hand the same response to `scan_detail`?" — and emphatically NOT `sent_by_gori?`,
+      # which is what this guard first shipped with. `sent_by_gori?` is true for SEVEN kinds
+      # while only two have such a call, so it switched the passive engine off for Discover,
+      # Miner, Sequencer, Authorize and Probe: a crawl that walks a whole site produced zero
+      # passive findings, and the comment justifying it ("every gori surface that records
+      # history already runs its own explicit scan") was true of the two surfaces it named and
+      # of no others. Skipping is only ever safe when something else is scanning; see
+      # `self_scanned?` for the call site behind each `true`.
+      #
+      # An IMPORTED flow is NOT filtered (gori never sent it; it describes a real endpoint
+      # someone captured), and neither is a row whose provenance predates the V17 columns —
+      # a nil `source` answers "not self-scanned", so a project captured with an older gori
+      # keeps scanning exactly as before.
       private def passive_feed?(row : Store::FlowRow) : Bool
-        !row.sent_by_gori?
+        !row.source.try(&.self_scanned?)
       end
 
       # Scan the WS frames a 101 flow has accumulated since the last scan — each frame exactly

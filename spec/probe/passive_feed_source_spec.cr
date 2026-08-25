@@ -15,6 +15,15 @@ require "../spec_helper"
 #
 # `catch_up` is exercised beside the live loop deliberately: it re-reads `recent_flows` with no
 # source filter, so it reaches a flow the lossy live feed dropped and would re-open the hole.
+#
+# The guard's AXIS is what these specs mostly pin, because the first cut got it wrong in a way a
+# green suite could not see: it filtered on `FlowSource::Kind#sent_by_gori?`, true for SEVEN
+# kinds, when only TWO of them hand the same response to `scan_detail` by hand. That turned the
+# passive engine off for Discover, Miner, Sequencer, Authorize and Probe — a crawl of a whole
+# site reported zero leaked secrets, zero missing security headers, zero cookie-flag findings —
+# and the suite stayed green because every assertion was written against the same wrong axis.
+# So the table below is spelled out kind by kind WITH the call site (or its absence) that puts
+# each on its side; a kind may only move to the skipped column when a real explicit scan lands.
 module Gori::Probe
   class Analyzer
     def spec_catch_up : Nil
@@ -23,6 +32,11 @@ module Gori::Probe
 
     def spec_passive_feed?(row : Gori::Store::FlowRow) : Bool
       passive_feed?(row)
+    end
+
+    # `@analyzed` is the capped dedup set the eviction hazard below is about.
+    def spec_analyzed : Set(Int64)
+      @analyzed
     end
   end
 end
@@ -133,13 +147,92 @@ describe "Probe::Analyzer passive feed provenance" do
       analyzer.spec_catch_up
       store.flush
 
+      # Skipped: FuzzerController#probe_scan_fuzz_result already scans this exact result.
       hits_for(store, "fuzz.test").should eq(0)
-      hits_for(store, "crawl.test").should eq(0)
+      # NOT skipped, and this is the regression the whole file exists to hold down. Nothing
+      # anywhere calls scan_detail on a crawl's flows — the feed is Discover's ONLY passive
+      # coverage, so filtering it out made `gori run discover` a scan that finds nothing.
+      hits_for(store, "crawl.test").should be > 0
       # An IMPORTED flow is someone else's capture of a real endpoint — gori never sent it, so
       # it is evidence about the target and stays on the feed.
       hits_for(store, "import.test").should be > 0
       hits_for(store, "proxy.test").should be > 0
     end
+  end
+
+  # The axis, kind by kind, against the SEEDED store rather than the predicate alone: this is
+  # the table the first cut got wrong, and reading it off real findings is what makes "Discover
+  # scans nothing" visible instead of arithmetic on a boolean.
+  it "scans every kind no surface scans by hand, and only skips the two that do" do
+    with_store do |store|
+      Gori::FlowSource::Kind.values.each { |k| seed_flow(store, "#{k.token}.test", k) }
+      analyzer_for(store, Channel(Gori::Store::FlowEvent).new(1)).spec_catch_up
+      store.flush
+
+      scanned = Gori::FlowSource::Kind.values.select { |k| hits_for(store, "#{k.token}.test") > 0 }
+      # Named as an exclusive split and asserted as a SUM, not a count: "no findings" and "never
+      # looked" are the same number, so both halves are listed and both are checked.
+      self_scanned = [Gori::FlowSource::Kind::Repeater, Gori::FlowSource::Kind::Fuzzer]
+      on_feed = Gori::FlowSource::Kind.values - self_scanned
+      scanned.sort_by(&.to_s).should eq(on_feed.sort_by(&.to_s))
+      self_scanned.each { |k| hits_for(store, "#{k.token}.test").should eq(0) }
+    end
+  end
+
+  # The live loop checked the guard AFTER `@analyzed << ev.id`, where `catch_up` checks it
+  # before. `@analyzed` is capped (ANALYZED_CAP) and `trim` evicts the OLDEST ids, so every
+  # skipped flow that got marked spent a slot and pushed a REAL proxy flow's id out. Once
+  # evicted, `catch_up`'s `recent_flows` re-read no longer recognises that proxy flow and scans
+  # it again — `upsert_probe_issues` bumps `hit_count` and flips `sample_flow_id`, which is the
+  # same double-count arriving through the other door. Marking it is also what let a skipped
+  # 101 flow reach `rescan_ws` on its NEXT `:updated` (the `@analyzed.includes?` fast path),
+  # passively re-scanning frames `probe_scan_ws_repeater` had already counted.
+  it "never marks a skipped flow as analyzed" do
+    with_store do |store|
+      input = Channel(Gori::Store::FlowEvent).new(8)
+      analyzer = analyzer_for(store, input)
+      rptr = seed_flow(store, "rptr.test", Gori::FlowSource::Kind::Repeater)
+      fuzz = seed_flow(store, "fuzz.test", Gori::FlowSource::Kind::Fuzzer)
+      proxied = seed_flow(store, "proxy.test", Gori::FlowSource::Kind::Proxy)
+      analyzer.start
+      input.send(Gori::Store::FlowEvent.new(rptr, :updated))
+      input.send(Gori::Store::FlowEvent.new(fuzz, :updated))
+      # In order, so findings for the LAST event prove the first two were already drained.
+      input.send(Gori::Store::FlowEvent.new(proxied, :updated))
+      deadline = Time.instant + 10.seconds
+      until hits_for(store, "proxy.test") > 0 || Time.instant > deadline
+        Fiber.yield
+        store.flush
+      end
+      analyzer.stop
+
+      analyzed = analyzer.spec_analyzed
+      analyzed.should contain(proxied) # the flow it DID scan is deduped, as before
+      # The two it skipped hold no slot, so the cap belongs entirely to scanned flows.
+      analyzed.should_not contain(rptr)
+      analyzed.should_not contain(fuzz)
+      analyzed.size.should eq(1)
+    end
+  end
+
+  # `self_scanned?` claims a call site for each `true`. A source-grep is the only thing that can
+  # tell a real claim from a stale one, and a stale one is silent: the kind simply stops being
+  # scanned. Comments are stripped so a call named only in prose cannot vouch for itself.
+  it "backs every self_scanned? kind with a real scan_detail call site" do
+    root = File.expand_path(File.join(__DIR__, "..", ".."))
+    src = Dir.glob(File.join(root, "src", "**", "*.cr")).sort
+      .reject(&.ends_with?(File.join("probe", "analyzer.cr")))
+      .join('\n') do |f|
+        File.read_lines(f).reject { |l| l.lstrip.starts_with?('#') }.join('\n')
+      end
+    # Repeater: RepeaterController (HTTP + WS) and MCP send_request's saved-repeater scan.
+    src.should contain("probe.scan_detail(detail, repeater_id: repeater_id)")
+    src.should contain("probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)")
+    src.should contain("Probe::Passive.analyze(detail).map")
+    # Fuzzer: FuzzerController#probe_scan_fuzz_result.
+    src.should contain("probe.scan_detail(detail)")
+    Gori::FlowSource::Kind.values.select(&.self_scanned?).map(&.to_s).sort!
+      .should eq(["Fuzzer", "Repeater"])
   end
 
   # A row written before the V17 provenance columns has `source` NULL. Treating "not recorded"
@@ -157,13 +250,27 @@ describe "Probe::Analyzer passive feed provenance" do
           200, 0_i64, Gori::Store::FlowState::Complete, source: k)
         {k, analyzer.spec_passive_feed?(row)}
       end.to_h
-      # The line is `FlowSource::Kind#sent_by_gori?`, drawn once — a workbench that learns to
-      # record joins this guard by existing, not by remembering to edit it here.
-      each_source[Gori::FlowSource::Kind::Proxy].should be_true
-      each_source[Gori::FlowSource::Kind::Import].should be_true
-      Gori::FlowSource::Kind.values.each do |k|
-        each_source[k].should eq(!k.sent_by_gori?)
+      # The line is `FlowSource::Kind#self_scanned?` — "is someone else already scanning this
+      # exact response?" — so a workbench that learns to RECORD joins the feed by existing, and
+      # leaves it only by also gaining an explicit scan. Spelled out per kind with the reason,
+      # because the failure mode of the alternative (`sent_by_gori?`) was silent.
+      {
+        # No explicit scan anywhere — the feed is the only passive coverage these have.
+        Gori::FlowSource::Kind::Proxy     => true, # the client's own traffic; the feed's reason to exist
+        Gori::FlowSource::Kind::Discover  => true, # a crawl: nothing calls scan_detail on its flows
+        Gori::FlowSource::Kind::Miner     => true, # ditto
+        Gori::FlowSource::Kind::Sequencer => true, # ditto
+        Gori::FlowSource::Kind::Authorize => true, # ditto
+        Gori::FlowSource::Kind::Probe     => true, # ditto
+        Gori::FlowSource::Kind::Import    => true, # gori never sent it; someone's capture of a real endpoint
+        # Scanned by hand at a call site named in `self_scanned?` — on the feed too, they double-count.
+        Gori::FlowSource::Kind::Repeater => false, # RepeaterController + MCP send_request
+        Gori::FlowSource::Kind::Fuzzer   => false, # FuzzerController#probe_scan_fuzz_result
+      }.each do |kind, on_feed|
+        each_source[kind].should eq(on_feed)
       end
+      # And the table is exhaustive — a new member must be placed deliberately, not defaulted.
+      each_source.size.should eq(Gori::FlowSource::Kind.values.size)
     end
   end
 end

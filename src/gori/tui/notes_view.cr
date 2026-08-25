@@ -424,21 +424,31 @@ module Gori::Tui
     # against the currently-persisted set first, so a second TUI session on the same
     # project doesn't clobber this session's notes (and vice-versa): peer notes are
     # kept, this session's edits win per-note, and this session's closes are honoured.
-    def save(store : Store) : Nil
-      return unless @dirty
+    #
+    # Returns whether the notes are persisted — TRUE for the clean no-op, false ONLY when a
+    # write was attempted and rolled back. `NotesController#save_notes` says so on the status
+    # line; the buffers and `@dirty` are left exactly as they were, so the text is still on
+    # screen and the next save path (esc, a sub-tab switch, quit) is a real retry.
+    def save(store : Store) : Bool
+      return true unless @dirty
       mine = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
-      # The active note by stable ID — `@current` is an index into THIS session's list, and
-      # the merged order is the persisted one plus our appends. See Notes.merge.
-      merged = Notes.merge(Notes.load(store), mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
-      wrote = store.set_setting(DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
-      # `next_id` advances either way: it only has to stay monotonic, and holding it back would
-      # let a retry reuse an id the merge already handed out.
+      # `Notes.save` runs that merge INSIDE the write transaction. Merging against a set read
+      # by a separate statement kept the promise only until a peer wrote between the two: the
+      # document we then committed was built before their row landed, so their note was gone
+      # and this session was told it had saved. The active note goes by stable ID — `@current`
+      # is an index into THIS session's list, and the merged order is the persisted one plus
+      # our appends. See Notes.merge.
+      merged = Notes.save(store, mine, @deleted_ids, @notes[@current]?.try(&.id), @next_id)
+      return false unless merged
+      # `next_id` advances on a COMMIT only: the ids the merge handed out are the ones now on
+      # disk, and a rolled-back transaction handed out none.
       @next_id = merged.next_id
-      # …but `@dirty` only comes down on a write that COMMITTED. `set_setting` is `exec_task_ok`,
-      # so it says which happened. Clearing it regardless meant a rolled-back write (project
-      # busy) silently dropped the operator's notes: the flag was the only thing that would have
-      # made a later exit path try again. Same correction as `ProjectView#save`.
-      @dirty = false if wrote
+      # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant
+      # a rolled-back write (project busy) silently dropped the operator's notes: the flag was
+      # the only thing that would have made a later exit path try again. Same correction as
+      # `ProjectView#save`.
+      @dirty = false
+      true
     end
 
     # `focused` = the editor has focus (cursor + bright). The sub-tab strip is now

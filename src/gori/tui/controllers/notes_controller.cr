@@ -323,8 +323,24 @@ module Gori::Tui
       @notes.reload(@host.session.store)
     end
 
-    def save_notes : Nil
-      @notes.save(@host.session.store)
+    # Persist the buffer (a no-op when clean) and SAY SO when the write was rolled back.
+    # `NotesView#save` leaves the notes dirty and the TextAreas untouched on that path, so the
+    # text is still on screen and the next save — esc, a sub-tab switch, leaving the tab —
+    # retries for real. Reporting nothing is what made a busy project look like it had saved;
+    # the operator would have learned otherwise by finding the note gone. Same shape as
+    # `IssuesController#save_notes_or_report`.
+    #
+    # Returns whether the notes are persisted, so a caller that posts its own status right
+    # after does not paint over the refusal.
+    #
+    # NOT reported anywhere else: `Runner#commit_pending_edits` runs this from the QUIT
+    # teardown, where a status line is never rendered (`IssuesController` says the same of its
+    # own quit path, and puts that conflict in the leave modal instead). Escalating there
+    # needs the quit confirm, which lives in `runner.cr`.
+    def save_notes : Bool
+      return true if @notes.save(@host.session.store)
+      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+      false
     end
 
     # Open a fresh note and drop into it (^N from the tab bar / strip / editor).
@@ -348,11 +364,14 @@ module Gori::Tui
 
     # Content-only clone of the active note (new id; entity_links not copied).
     def notes_duplicate : Nil
-      save_notes
+      # The clone happens either way — it is in-memory, and the source note keeps its text and
+      # its dirty flag — but a "duplicated note" line would paint over the refusal `save_notes`
+      # just posted, which is the one thing the operator needs to see.
+      saved = save_notes
       @notes.duplicate_current
       refresh_link_preview
       @host.focus_body
-      @host.status("duplicated note (#{@notes.count} open)")
+      @host.status("duplicated note (#{@notes.count} open)") if saved
     end
 
     # Close the current note (^W) — after a confirm, since the text is discarded. A
