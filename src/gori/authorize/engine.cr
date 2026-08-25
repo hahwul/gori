@@ -11,9 +11,25 @@ module Gori
   module Authorize
     ACTIVE_TIMEOUT = 15.seconds
 
-    # Conditional-GET request headers, dropped from a SAFE request's replay (see
-    # `Engine#drop_cache_validators`).
-    CACHE_VALIDATORS = ["If-None-Match", "If-Modified-Since"]
+    # The conditional request header fields (RFC 9110 §13), dropped from a SAFE request's
+    # replay (see `Engine#drop_conditional_headers`).
+    #
+    # ALL FIVE, not just the two cache validators a browser sends on a revalidation. Every one
+    # of them hands the SERVER a precondition to evaluate, and the answer to that precondition
+    # depends on state THE CAPTURE happened to hold — never on who is asking. That is the same
+    # split the two-header version was written to remove, arriving through the other three:
+    #
+    #   * `If-Range` on a resumed download replays as `206 Partial Content` for whoever still
+    #     matches the recorded validator and `200` + the whole entity for whoever does not.
+    #     Two status classes, wildly different sizes, and the row reads `Review`.
+    #   * `If-Match` / `If-Unmodified-Since` answer `412 Precondition Failed` once the
+    #     validator has moved on — a `4xx` against the baseline's `2xx`, which is the exact
+    #     shape a real enforcement looks like.
+    #
+    # Either way the run's verdict is decided by a PRECONDITION rather than by access control,
+    # which is precisely what `drop_conditional_headers` says it exists to prevent.
+    CONDITIONAL_HEADERS = ["If-None-Match", "If-Modified-Since", "If-Match",
+                           "If-Unmodified-Since", "If-Range"]
 
     # One (request × identity) outcome: the metrics a row shows, the verdict against the
     # baseline, and the bytes that let the detail pane diff this response against the
@@ -162,7 +178,7 @@ module Gori
         # a request nobody made. `FlowRequest.build` is the one home for that rewrite (plus the
         # truncated-body re-frame and the h2 pseudo-header refusal).
         built = Repeater::FlowRequest.build(detail)
-        base_bytes = drop_cache_validators(built.bytes, row.method)
+        base_bytes = drop_conditional_headers(built.bytes, row.method)
         head_request = row.method.upcase == "HEAD"
         backend = @backend_factory.call(origin, http2)
         baseline_trial = nil.as(Trial?)
@@ -186,7 +202,7 @@ module Gori
       # sending the baseline itself (which gets `Verdict::Baseline`), set for the rest — its
       # summary anchors the verdict and its meta anchors the delta (both wire-size, so they
       # agree).
-      # The captured request minus its cache validators, for a SAFE method.
+      # The captured request minus its conditional headers, for a SAFE method.
       #
       # A browser capture almost always carries `If-None-Match` / `If-Modified-Since`, and
       # replaying them verbatim asks a question about a CACHE rather than about access control.
@@ -202,13 +218,25 @@ module Gori
       # capture: the bytes actually sent are kept verbatim on each `Trial#request` (P7 is about
       # what gori RECORDS, and the recording is untouched).
       #
+      # `Range` is NOT dropped with them, and the difference is what the whole strip is for.
+      # A conditional header's answer turns on state the capture held; a `Range` is evaluated
+      # the same way for every caller, so the identical one rides the shared base into every
+      # identity's send and cannot by itself make two identities disagree for a
+      # non-authorization reason. Where it does make them disagree — `206` for one and `416
+      # Range Not Satisfiable` for another — the two representations really are different
+      # lengths, which is the signal this run is looking for and not noise over it. Dropping it
+      # would also pull the FULL entity once per identity on exactly the captures that carry
+      # one (resumed downloads of large files), which buys no measurement.
+      #
       # SAFE methods only. On the rest, these are PRECONDITIONS and not cache hints —
       # `If-None-Match: *` on a PUT means "create only if absent" and `If-Match` guards a
       # lost update — so dropping one turns a refused write into a real one, once per identity.
       # `--unsafe-methods` already replays side effects; it must not also disarm their guards.
-      private def drop_cache_validators(bytes : Bytes, method : String) : Bytes
+      # Widening the list to all five conditional headers widens that hazard in step, which is
+      # why the safe-method gate stays the FIRST thing this method does.
+      private def drop_conditional_headers(bytes : Bytes, method : String) : Bytes
         return bytes unless Passive::SAFE_METHODS.includes?(method.upcase)
-        Authorize.overlay_wire(bytes, Identity.new("cache-validators", remove_headers: CACHE_VALIDATORS))
+        Authorize.overlay_wire(bytes, Identity.new("conditional-headers", remove_headers: CONDITIONAL_HEADERS))
       end
 
       private def send_one(base_bytes : Bytes, id : Identity,

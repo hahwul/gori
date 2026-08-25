@@ -624,33 +624,22 @@ module Gori
       end
     end
 
-    # Forget one name (the `bindings` sub-tab's clear action). The RULE is untouched — a
-    # cleared name is declared-but-unbound, so the next send naming it refuses rather than
-    # going out with a stale value.
+    # Forget ONE ROW of `rows` — the table named by `slot`, and no other. The RULE is
+    # untouched: a cleared name is declared-but-unbound, so the next send naming it refuses
+    # rather than going out with a stale value.
     #
-    # Clears the name in the CURRENT send context — the active slot's table AND the global
-    # one — because both are resolvable through `values` and forgetting only the shadowing
-    # half would leave the next send going out with the value underneath it. Other slots'
-    # tables are untouched: they are other identities, and the operator asked about this one.
-    def clear(name : String) : Nil
-      slot = @slots.try(&.active)
-      @mutex.synchronize do
-        @values.delete(name)
-        slot.try { |sl| @slot_values[sl.name]?.try(&.delete(name)) }
-        @rev &+= 1
-      end
-      Env.bump_highlight_rev
-    end
-
-    # Forget ONE ROW of `rows` — the table named by `slot`, and no other. The `bindings`
-    # sub-tab's clear action asks for this and not for the context-scoped `clear` above: the
-    # pane lists one row per (rule, table it writes), so an operator pressing clear on the
-    # `user` row while `admin` is active means the `user` row. Clearing the send context
-    # instead wiped a value they were looking at a different line from, and left the row they
-    # aimed at uncleanable for as long as its slot was not the active one.
+    # The `bindings` sub-tab's clear action asks for THIS and not for a context-scoped clear,
+    # which is what stood beside it until every caller had moved: the pane lists one row per
+    # (rule, table it writes), so an operator pressing clear on the `user` row while `admin`
+    # is active means the `user` row. Clearing the send context instead wiped a value they
+    # were looking at a different line from, and left the row they aimed at uncleanable for as
+    # long as its slot was not the active one.
     #
     # `nil` is the GLOBAL table — the row `rows` emits for an unclaimed rule — and not "the
-    # active slot", which is the whole difference from `clear`.
+    # active slot", which was the whole difference from the deleted `clear`. That one erased
+    # the active slot's table AND the global one in a single call, so a caller reaching for
+    # the nearer-sounding name got a second deletion it never asked for; two explicit
+    # `clear_row` calls say it where it is actually wanted.
     def clear_row(name : String, slot : String?) : Nil
       @mutex.synchronize do
         if slot

@@ -707,6 +707,14 @@ module Gori
           note += " — capped at #{Fuzz::HistoryRecord::MAX}, later sends not recorded" if record_truncated
           STDERR.puts note
         end
+        # LAST, after every count the summary prints: `--slot NAME` whose overlay resolved to
+        # nothing means every request in the sweep carried `$SESSION` itself instead of a
+        # session, so the whole run tested the endpoint UNAUTHENTICATED while announcing
+        # "slot: sending as NAME". A 401 wall then reads as a guarded endpoint and a 200 wall
+        # as a bypass; neither is what the run measured. Silent when the slot resolved —
+        # `seed_bindings` drops the seed replay's own pre-bind record. See
+        # `Run.unbound_overlay_note`.
+        report_unbound_slot_overlay("gori run fuzz")
         # Before the exit rules below, which would otherwise report a cut-short run as a plain
         # "no matches". See `Run.report_interrupted`.
         Run.report_interrupted(shown, "row", "emitted") if interrupted.call

@@ -199,7 +199,7 @@ describe "Bindings × session slots" do
   end
 
   describe "clearing" do
-    it "clears the active slot's value and the global one, and leaves other slots alone" do
+    it "clears one slot's value and leaves the other's, then clear_all takes both" do
       with_store do |store|
         slots = Gori::SessionSlots.load(store)
         slots.save([Slot.new("admin", rules: ["SESSION"]), Slot.new("user", rules: ["SESSION"])])
@@ -210,7 +210,9 @@ describe "Bindings × session slots" do
         slots.activate("user")
         b.observe(login("USERTOKEN"), subject)
 
-        b.clear("SESSION")
+        # Names the table, rather than meaning "whichever one is active" — the difference the
+        # deleted `clear` blurred. Its global half is `clear_row(name, nil)`, covered below.
+        b.clear_row("SESSION", "user")
         b.values.should be_empty
         slots.activate("admin")
         b.values["SESSION"].should eq("ADMINTOKEN")

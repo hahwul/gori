@@ -159,6 +159,23 @@ module Gori::Discover
         elsif opened = m[1]?
           raw_tag = opened.downcase
           open_at = at
+        elsif m[2]? || tok == "-->"
+          # An ORPHAN closer: `</script>` with no `<script>` still open, or a stray `-->` with
+          # no comment open. A browser drops these on the floor, and so must this walk — the
+          # `else` below is for `<body` / `</head` ONLY.
+          #
+          # Falling through to it instead ended the head at the orphan, which is a real page
+          # shape and not a hypothetical one: a template engine emitting a closing tag whose
+          # opener sat in a conditional branch that did not render, a head partial included on
+          # its own so its `</title>` arrives before anything opened one, a CMS field pasted
+          # into the head with a closer left in it. Every one of those cut the head short at
+          # the orphan, and a `<base href>` written after the cut is then refused by
+          # `base_href`'s `break if at >= cut` — so `Engine#expand_links` resolves the whole
+          # page against the wrong base and the crawl walks off into a directory that answers
+          # nothing. That is the same false-negative class the region walk was added to close,
+          # reappearing from the other side: the comment-aware version stopped believing a
+          # `<base>` that was not really there, and this stopped believing one that was.
+          next
         else # <body / </head — real markup, so this is where the head ends
           cut = at
           break

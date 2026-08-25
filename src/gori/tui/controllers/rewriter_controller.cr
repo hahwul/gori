@@ -887,11 +887,12 @@ module Gori::Tui
     def binding_clear : Nil
       row = binding_rows[@sub_sel]? || return @host.status("no binding selected")
       return @host.status("$#{row.name} is not bound") unless row.bound?
-      # `clear_row`, not `clear`: the pane lists one row per (rule, table), and the operator
-      # is pointing at ONE of them. `clear` forgets the CURRENT SEND CONTEXT instead — the
-      # active slot plus the global table — so pressing it on the `user` row while `admin`
-      # was active wiped admin's token and left the row under the cursor still bound, with no
-      # way to ever clear it while that slot was not the active one.
+      # `clear_row` takes the row's OWN table, because the pane lists one row per (rule,
+      # table) and the operator is pointing at ONE of them. The predecessor this replaced
+      # forgot the current send context instead — the active slot plus the global table — so
+      # pressing it on the `user` row while `admin` was active wiped admin's token and left
+      # the row under the cursor still bound, with no way to clear it while that slot was not
+      # the active one. It is deleted; `clear_row(name, nil)` is how the global table is cleared.
       bindings.clear_row(row.name, row.slot)
       @host.status(row.slot ? "$#{row.name} cleared for #{row.slot}" : "$#{row.name} cleared")
     end

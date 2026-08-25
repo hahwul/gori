@@ -401,6 +401,52 @@ describe Gori::Discover::Extract do
       E.base_href(%(<head><!-- oops <base href="/never/">).to_slice).should be_nil
     end
 
+    # An ORPHAN closing tag is not the end of the head. `HEAD_TOKEN` matches `</script>`,
+    # `</style>`, `</textarea>` and `</title>` whether or not the matching opener was ever
+    # seen, and with no raw-text element open the walk had nothing left to do with one but
+    # fall through to the `<body` / `</head` arm and cut the head there. Everything after the
+    # orphan — the `<base href>` included — was then past `cut` and refused, so
+    # `Engine#expand_links` resolved the whole page against the wrong base and the crawl
+    # walked into a directory that answers nothing. That is the same whole-page false negative
+    # the region walk was added to close, arriving from the opposite side.
+    #
+    # All four, separately, because each is a page shape that really occurs: a template engine
+    # emitting a closing tag whose opener sat in a conditional branch that did not render, a
+    # head partial included on its own so its `</title>` arrives before anything opened one,
+    # a CMS field pasted into the head with a closer left in it.
+    it "does not let an unpaired closing raw-text tag cut the head short" do
+      E.base_href(%(<head></script><base href="/app/"></head>).to_slice).should eq("/app/")
+      E.base_href(%(<head></style><base href="/app/"></head>).to_slice).should eq("/app/")
+      E.base_href(%(<head></textarea><base href="/app/"></head>).to_slice).should eq("/app/")
+      E.base_href(%(<head></title><base href="/app/"></head>).to_slice).should eq("/app/")
+    end
+
+    # The template-conditional shape as it actually ships, with real markup around it rather
+    # than the orphan on its own: `{% if debug %}<script>…{% endif %}</script>` renders the
+    # closer and not the opener, and everything downstream of it used to become unreachable.
+    it "finds the base and the links after a template leaves a closer unpaired" do
+      body = %(<html><head><meta charset="utf-8"></script>) +
+             %(<base href="/app/"><script src="/real.js"></script></head>) +
+             %(<body><a href="page1">p</a></body></html>)
+      E.base_href(body.to_slice).should eq("/app/")
+    end
+
+    # A stray `-->` with no comment open is the same defect wearing the other token: HTML
+    # treats it as text, and the walk treated it as the end of the head.
+    it "does not let a stray comment close cut the head short" do
+      E.base_href(%(<head>--><base href="/app/"></head>).to_slice).should eq("/app/")
+    end
+
+    # …and the fix must not have bought that by making orphans invisible to the state machine.
+    # A PAIRED raw-text element still masks its contents, `<body` / `</head` still end the
+    # head, and an unclosed one still runs to the end.
+    it "still ignores a base inside a properly paired element after an orphan close" do
+      E.base_href(%(<head></script><script><base href="/js/"></script></head>).to_slice).should be_nil
+      E.base_href(%(<head></title><!-- <base href="/old/"> --></head>).to_slice).should be_nil
+      E.base_href(%(<head></script></head><body><base href="/late/"></body>).to_slice).should be_nil
+      E.base_href(%(<head></style><title><base href="/t/">).to_slice).should be_nil
+    end
+
     # `<base href="">` is legal HTML meaning "the page URL", and it is still the FIRST base:
     # HTML 4.2.3 ignores every one after it, so a later one must not be picked up instead.
     it "keeps first-match-only semantics, empty value included" do

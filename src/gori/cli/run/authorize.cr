@@ -152,6 +152,13 @@ module Gori
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
         authorize_done(sent, total, ids, bypasses, failed, unanswered)
+        # …and, on the same summary, any identity whose `$NAME` went out LITERALLY. This is the
+        # surface the drain exists for: a slot overlay that resolved to nothing sends the
+        # identity UNAUTHENTICATED, the resource answers 401 exactly as it does for anonymous,
+        # and the row aggregates to `enforced` — the one direction `Authorize::Identity`'s doc
+        # says this tool must not fail in, reported as a clean result. Ahead of the exits below
+        # so an all-refused or interrupted run says it too. See `Run.unbound_overlay_note`.
+        report_unbound_slot_overlay("authorize")
         # Before the all-refused check below — see `Run.report_interrupted` for why the order
         # matters: a run stopped early has not demonstrated that every send was refused.
         Run.report_interrupted(sent, "request", "replayed") if interrupted.call

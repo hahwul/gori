@@ -140,18 +140,24 @@ module Gori::Oast
     # Release the server-side registration. The local row and every callback it collected
     # stay — this releases the LISTENER, not the evidence.
     def release_outcome(bound : Bound, http : Http) : Release
-      return Release::NoServerState unless bound.provider.server_state?
-      return Release::Unsupported unless bound.provider.deregisters?
-      bound.provider.deregister(http, bound.session)
-      Release::Released
-    rescue
-      Release::Failed
+      release_detail(bound.provider, bound.session, http)[0]
     end
 
-    # The yes/no form, for a surface that only refuses or proceeds. Deliberately answers false
-    # for `Unsupported` too: a release that could not be performed is not one that was.
-    def release(bound : Bound, http : Http) : Bool
-      release_outcome(bound, http).torn_down?
+    # The outcome PLUS the failing teardown's own text, for a caller that has the pieces but
+    # not a `Bound` — the TUI performs its release on a detached fiber and reports it from a
+    # later drain. It takes the pair rather than re-deciding, because deciding it a second
+    # time is precisely how the tab came to print "released" for a backend that has no
+    # teardown: four branches hand-rolled beside the three lines that already own them.
+    #
+    # The text is the one thing `release_message` cannot know — `Failed` reads "(provider
+    # error)" on its own, which is indistinguishable between a 503 and a DNS failure.
+    def release_detail(provider : Provider, session : Session, http : Http) : {Release, String?}
+      return {Release::NoServerState, nil} unless provider.server_state?
+      return {Release::Unsupported, nil} unless provider.deregisters?
+      provider.deregister(http, session)
+      {Release::Released, nil}
+    rescue ex
+      {Release::Failed, ex.message}
     end
 
     # The sentence a surface prints for a release outcome. One phrasing, three surfaces — the

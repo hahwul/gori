@@ -263,10 +263,11 @@ describe Gori::Oast::Sessions do
           "q".to_slice, nil, Time.utc.to_unix_ms * 1000)
         store.flush
         bound = O::Sessions.bind(store, id, [] of O::ProviderConfig).as(O::Sessions::Bound)
-        # Returns false rather than raising: a release can run during teardown, where an
-        # exception is noise, but the CLI still needs to know it failed.
-        O::Sessions.release(bound, ExplodingHttp.new).should be_false
-        O::Sessions.release_outcome(bound, ExplodingHttp.new).should eq(O::Sessions::Release::Failed)
+        # Answers rather than raising: a release can run during teardown, where an exception
+        # is noise, but the CLI still needs to know it failed.
+        outcome = O::Sessions.release_outcome(bound, ExplodingHttp.new)
+        outcome.should eq(O::Sessions::Release::Failed)
+        outcome.torn_down?.should be_false
         # This releases the LISTENER, not the evidence.
         store.oast_sessions.map(&.id).should contain(id)
         store.oast_callback_count(id).should eq(1)
@@ -332,7 +333,6 @@ describe Gori::Oast::Sessions do
         outcome = O::Sessions.release_outcome(bound, http)
         outcome.should eq(O::Sessions::Release::Unsupported)
         outcome.torn_down?.should be_false
-        O::Sessions.release(bound, http).should be_false
         http.calls.should be_empty # not a failed request — no request at all
         msg = O::Sessions.release_message(outcome, bound, id, 1)
         msg.should contain("was NOT released")
@@ -355,7 +355,6 @@ describe Gori::Oast::Sessions do
         outcome = O::Sessions.release_outcome(bound, http)
         outcome.should eq(O::Sessions::Release::NoServerState)
         outcome.torn_down?.should be_true
-        O::Sessions.release(bound, http).should be_true
         http.calls.should be_empty
         O::Sessions.release_message(outcome, bound, id, 0).should contain("needed no release")
       end

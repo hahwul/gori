@@ -41,6 +41,9 @@ module Gori
           plan.total_sends.to_i64, Time.utc.to_unix_ms)
         ajob = AuthorizeJob.new(id, plan, audit, @db_path)
         evict_finished_jobs(@authorize_jobs)
+        # Follow the registry the eviction just trimmed — a note for a job nobody can look up
+        # any more is a leak, and this map has no size bound of its own.
+        @authorize_unbound.select! { |jid, _| @authorize_jobs.has_key?(jid) }
         @authorize_jobs[id] = ajob
         Log.info { "authorize_start #{id} flows=#{plan.targets.size} identities=#{plan.identities.size} sends=#{plan.total_sends} skipped=#{plan.skipped.size}" }
         spawn(name: "mcp-authorize-#{id}") { run_authorize_job(ajob) }
@@ -63,6 +66,19 @@ module Gori
 
       # The whole run on one fiber. `Plan#run` owns the loop (stop polled between requests AND
       # handed to the engine so it is polled between identities); this only accumulates.
+      # Identities whose `$NAME` went out LITERALLY, by job id — the drain of
+      # `Env.take_unbound_overlay`, held until `authorize_status` / `authorize_results` renders
+      # it. It cannot live on `AuthorizeJob` and be read where the CLI reads it (the CLI's run
+      # IS its summary; here the summary is a later tool call), and it must not be re-derived at
+      # read time: the record is drained once, by the surface that ends the run.
+      #
+      # Keyed rather than a single field because two jobs can be in flight. The drain itself is
+      # process-global, so a concurrent `send_request` under a slot could have its names land on
+      # this job's summary instead — the pair carries the SLOT NAME, so the sentence still names
+      # the identity to fix, and reporting it on the wrong summary is strictly better than the
+      # nothing this said before.
+      @authorize_unbound = {} of String => String
+
       private def run_authorize_job(ajob : AuthorizeJob) : Nil
         ajob.plan.run(-> { ajob.stop_requested? }, ->(detail : Store::FlowDetail, ex : Exception) {
           record_authorize_failure(ajob, detail, ex)
@@ -80,6 +96,12 @@ module Gori
         ajob.status = :error
         ajob.error_msg ||= ex.message || "internal authorize job error"
       ensure
+        # In the `ensure`, so a crashed or stopped run reports it too: a job that died halfway
+        # still sent the identities it sent, and "the overlay resolved to nothing" is the fact
+        # that decides whether the rows it did produce mean anything.
+        if note = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
+          @authorize_unbound[ajob.id] = note
+        end
         finalize_job(ajob)
       end
 
@@ -240,6 +262,13 @@ module Gori
         # them, so a caller that read `authorize_results` alone had no field at all saying
         # part of its selection produced nothing.
         j.field "unanswered_count", ajob.unanswered
+        # In the HEADLINE for the same reason `unanswered_count` is, and it is the stronger
+        # claim of the two: an identity whose `$SESSION` never resolved was sent
+        # UNAUTHENTICATED, so a `verdict` of `enforced` over it is a statement about anonymous
+        # traffic. Absent when every reference resolved — a bound run reads exactly as before.
+        if note = @authorize_unbound[ajob.id]?
+          j.field "unbound_overlay_warning", note
+        end
         j.field "summary", authorize_summary(ajob, verdict)
       end
 

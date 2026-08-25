@@ -679,28 +679,13 @@ module Gori::Tui
       ch = @release_events
       sid = session.id
       label = session.kind.label
-      # Ask what this backend can actually DO before dialling. `Provider#deregister`'s default
-      # is a no-op, so calling it unconditionally is what let the tab report a teardown for
-      # BOAST (registers server state, offers no delete) and for custom-http (registers nothing
-      # anywhere). Both answers still go through the channel — the operator pressed `x` and is
-      # owed the outcome — but they are sent from a fiber so this caller never parks on a full
-      # channel, the same reason the network path is spawned.
-      unless provider.server_state?
-        spawn { ch.send(ReleaseResult.new(sid, Oast::Sessions::Release::NoServerState, label, nil)) } if report
-        return
-      end
-      unless provider.deregisters?
-        spawn { ch.send(ReleaseResult.new(sid, Oast::Sessions::Release::Unsupported, label, nil)) } if report
-        return
-      end
+      # `release_detail` owns the four-way answer — including "this backend has no teardown",
+      # which is what the tab used to print as "released". Calling it rather than re-deciding
+      # keeps the three surfaces on one verdict; it is the same reason the drain builds its
+      # sentence with `release_message`. It never raises, so the fiber cannot die silently.
       spawn(name: "gori-oast-deregister") do
-        begin
-          provider.deregister(http, session)
-          ch.send(ReleaseResult.new(sid, Oast::Sessions::Release::Released, label, nil)) if report
-        rescue ex
-          ch.send(ReleaseResult.new(sid, Oast::Sessions::Release::Failed, label,
-            ex.message || "provider error")) if report
-        end
+        outcome, err = Oast::Sessions.release_detail(provider, session, http)
+        ch.send(ReleaseResult.new(sid, outcome, label, err)) if report
       end
     end
 
