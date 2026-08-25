@@ -199,7 +199,7 @@ describe "Bindings × session slots" do
   end
 
   describe "clearing" do
-    it "clears the active slot's value and the global one, and leaves other slots alone" do
+    it "clears one slot's value and leaves the other's, then clear_all takes both" do
       with_store do |store|
         slots = Gori::SessionSlots.load(store)
         slots.save([Slot.new("admin", rules: ["SESSION"]), Slot.new("user", rules: ["SESSION"])])
@@ -210,7 +210,9 @@ describe "Bindings × session slots" do
         slots.activate("user")
         b.observe(login("USERTOKEN"), subject)
 
-        b.clear("SESSION")
+        # Names the table, rather than meaning "whichever one is active" — the difference the
+        # deleted `clear` blurred. Its global half is `clear_row(name, nil)`, covered below.
+        b.clear_row("SESSION", "user")
         b.values.should be_empty
         slots.activate("admin")
         b.values["SESSION"].should eq("ADMINTOKEN")
@@ -400,6 +402,327 @@ describe "Bindings × session slots" do
         before = b.rev
         slots.activate("a")
         b.rev.should be > before
+      end
+    end
+  end
+
+  # A name's OWNERSHIP is not fixed at the moment a rule is written: an operator binds first
+  # and creates slots afterwards, or edits a slot back down to a pure header overlay. Both
+  # transitions used to be invisible to the READ half — `candidates` and `bind` gate the WRITE
+  # half on `slots.scoped?` AND `active.claims?`, and `values_in` had neither — so the pane
+  # (`rows`, which asks the question) and the wire (`values`, which did not) disagreed.
+  describe "a name whose ownership MOVES" do
+    it "retires a global value the moment a slot claims the name" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+
+        # Bound globally FIRST — the rule is unclaimed, so this is the ordinary pre-slot path.
+        b.observe(login("VICTIM-TOKEN"), subject).should eq(["SESSION"])
+        b.values["SESSION"].should eq("VICTIM-TOKEN")
+
+        # …and only now does the operator split the name across two identities.
+        slots.save([
+          Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+          Slot.new("user", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+        ])
+
+        # The pane always said UNBOUND for both rows; the resolution now agrees. Handing both
+        # identities that one retired token is "one credential wearing several names" —
+        # `Env.expand_bindings_as` names it as the failure this feature exists to prevent.
+        b.rows.map { |r| {r.slot, r.value} }.should eq([{"admin", nil}, {"user", nil}])
+        b.slot_values("admin").should be_empty
+        b.slot_values("user").should be_empty
+        slots.activate("admin")
+        b.values.should be_empty
+        b.bound?("SESSION").should be_false
+        slots.activate("user")
+        b.values.should be_empty
+        b.bound?("SESSION").should be_false
+
+        # It is RETIRED, not destroyed: it was on the wire, so masking must still redact it.
+        with_layer(b) { Gori::Env.masking_vars.values.includes?("VICTIM-TOKEN").should be_true }
+      end
+    end
+
+    it "retires a slot's value the moment the operator hands the name back" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        slots.activate("admin")
+        b.observe(login("ADMIN-TOKEN"), subject).should eq(["SESSION"])
+        b.values["SESSION"].should eq("ADMIN-TOKEN")
+
+        # The operator edits `admin` down to a pure header overlay: `SESSION` is unclaimed
+        # again, so it binds globally again.
+        slots.activate(nil)
+        slots.update("admin", Slot.new("admin", set_headers: [{"X-Who", "admin"}])).should be_true
+        b.observe(login("GLOBAL-TOKEN"), subject).should eq(["SESSION"])
+        b.rows.map { |r| {r.slot, r.value} }.should eq([{nil, "GLOBAL-TOKEN"}])
+
+        # Under `admin` the retired table must not shadow the global one — it used to, and
+        # permanently: no later global rebind could ever be seen while that slot was active.
+        slots.activate("admin")
+        b.values["SESSION"].should eq("GLOBAL-TOKEN")
+        b.bound?("SESSION").should be_true
+        b.observe(login("GLOBAL-TOKEN-2"), subject).should eq(["SESSION"])
+        b.values["SESSION"].should eq("GLOBAL-TOKEN-2")
+      end
+    end
+
+    it "still gives each identity its OWN token when the claim is in place" do
+      # The regression guard on both fixes above: the normal case must be untouched.
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([
+          Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+          Slot.new("user", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+        ])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        slots.activate("user")
+        b.observe(login("USERTOKEN"), subject)
+
+        wire = "GET /me HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+        with_layer(b) do
+          slots.activate("admin")
+          String.new(Gori::Env.overlay_slot(wire)).should contain("Cookie: sid=ADMINTOKEN")
+          slots.activate("user")
+          String.new(Gori::Env.overlay_slot(wire)).should contain("Cookie: sid=USERTOKEN")
+          # …and the same, for the caller that cannot activate each in turn.
+          Gori::Env.expand_bindings_as("sid=$SESSION", "admin").should eq("sid=ADMINTOKEN")
+          Gori::Env.expand_bindings_as("sid=$SESSION", "user").should eq("sid=USERTOKEN")
+        end
+      end
+    end
+
+    it "does not resolve another slot's name for an identity that is not a slot" do
+      # `Authorize` prepends a baseline and can be handed identities from a file — names the
+      # slot list has never heard of. Degrading to the global table is right; degrading to a
+      # CLAIMED name's retired global value is the same "one credential, several names".
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        b.add("CSRF", "", Gori::ExtractKind::Header, "x-csrf")
+        b.observe(response_result(
+          "HTTP/1.1 200 OK\r\nSet-Cookie: sid=GLOBAL; Path=/\r\nX-CSRF: C1\r\nContent-Length: 0\r\n\r\n"),
+          subject)
+        slots.save([Slot.new("admin", rules: ["SESSION"])])
+
+        b.slot_values("not-a-slot").should eq({"CSRF" => "C1"})
+      end
+    end
+  end
+
+  # `candidates` runs a CLAIMED rule only while the slot claiming it is active. That is the
+  # namespacing decision and it stands — but until `unasked` existed, nothing could say so, so
+  # `--bind-from` reported "no extract rule matched its response … check the rule's host glob,
+  # condition and selector" about a rule that matched all three and was simply not asked.
+  describe "rules a slot has scoped OUT of this send context" do
+    it "names the rule and the slots claiming it" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("idA", rules: ["SESSION"]), Slot.new("idB", rules: ["SESSION"]),
+                    Slot.new("anon", remove_headers: ["Cookie"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+
+        # No slot active — the pre-slot playbook's send context, and the `--bind-from` one.
+        b.observe(login("TOK"), subject).should be_empty
+        b.unasked(subject).should eq([{"SESSION", ["idA", "idB"]}])
+        b.claiming_slots("SESSION").should eq(["idA", "idB"])
+
+        # A slot that does not claim it is active: same story.
+        slots.activate("anon")
+        b.unasked(subject).should eq([{"SESSION", ["idA", "idB"]}])
+
+        # …and the subject-free half, for the caller with no message in hand (`--bind-from`).
+        slots.activate(nil)
+        b.scoped_out.should eq([{"SESSION", ["idA", "idB"]}])
+        slots.activate("anon")
+        b.scoped_out.should eq([{"SESSION", ["idA", "idB"]}])
+
+        # Either claiming slot: the rule IS asked, so there is nothing to explain.
+        slots.activate("idB")
+        b.unasked(subject).should be_empty
+        b.scoped_out.should be_empty
+
+        # The right one, and there is nothing left to explain.
+        slots.activate("idA")
+        b.unasked(subject).should be_empty
+        b.observe(login("TOK"), subject).should eq(["SESSION"])
+      end
+    end
+
+    it "stays silent about a rule that genuinely did not match" do
+      # The distinction is the whole point: `unasked` must not blame the slots for a host glob
+      # that missed, or the diagnostic swaps one wrong answer for another.
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("idA", rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid", host: "other.test")
+        b.unasked(subject).should be_empty
+        b.claiming_slots("SESSION").should eq(["idA"])
+        # `scoped_out` does NOT know about the host glob and must not pretend to: it answers
+        # "this rule cannot be asked here at all", which stays true on any message.
+        b.scoped_out.should eq([{"SESSION", ["idA"]}])
+        # …and an unclaimed rule is never scoped out, whatever is active.
+        b.add("CSRF", "", Gori::ExtractKind::Header, "x-csrf")
+        b.unasked(subject).should be_empty
+      end
+    end
+
+    it "answers empty for a project with no slots at all" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        b.unasked(subject).should be_empty
+        b.scoped_out.should be_empty
+        b.claiming_slots("SESSION").should be_empty
+      end
+    end
+  end
+
+  # A binding value is memory-only, so EVERY `gori run … --slot` process starts with an empty
+  # table: without `--bind-from`, a slot header saying `Bearer $SESSION` ships those eight
+  # bytes and the run exits 0 with no warning. In Authorize that is a MISSED bypass — the
+  # identity goes out unauthenticated, draws the same 401 as anonymous, and the row reads
+  # `enforced`.
+  describe "a slot overlay that resolves to nothing" do
+    it "reports the literal it is about to send, and keeps sending it" do
+      with_store do |store|
+        Gori::Env.take_unbound_overlay # drain whatever an earlier example left
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("idA", set_headers: [{"Authorization", "Bearer $SESSION"}],
+          rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        slots.activate("idA")
+
+        with_layer(b) do
+          Gori::Env.unbound_in_slot(slots.find("idA").not_nil!).should eq(["SESSION"])
+          sent = String.new(Gori::Env.overlay_slot("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+          # A REPORT, not a refusal: the bytes still go, so a half-configured slot cannot kill
+          # a run (the #525 shape — a guard with no exit costs more than the loss it prevents).
+          sent.should contain("Authorization: Bearer $SESSION")
+        end
+
+        drained = Gori::Env.take_unbound_overlay
+        drained.should eq([{"idA", "SESSION"}])
+        # Drained once: a summary prints it, it does not accumulate per send.
+        Gori::Env.take_unbound_overlay.should be_empty
+      end
+    end
+
+    it "says nothing once the name is bound" do
+      with_store do |store|
+        Gori::Env.take_unbound_overlay
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("idA", set_headers: [{"Authorization", "Bearer $SESSION"}],
+          rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("idA")
+        b.observe(login("REALTOKEN"), subject)
+
+        with_layer(b) do
+          sent = String.new(Gori::Env.overlay_slot("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+          sent.should contain("Authorization: Bearer REALTOKEN")
+        end
+        Gori::Env.take_unbound_overlay.should be_empty
+      end
+    end
+
+    it "leaves an operator's own `$$` escape and an unknown name alone" do
+      # `$$NAME` is the one escape this module defines and the exit an operator has when the
+      # literal IS what they meant. An unknown `$FOO` is plan-build's business (#525) — two
+      # answers for one syntax is exactly what that shape rules out.
+      with_store do |store|
+        Gori::Env.take_unbound_overlay
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("idA", set_headers: [{"X-A", "$$SESSION"}, {"X-B", "$NOSUCH"}])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("idA")
+        with_layer(b) do
+          Gori::Env.unbound_in_slot(slots.find("idA").not_nil!).should be_empty
+          sent = String.new(Gori::Env.overlay_slot("GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+          sent.should contain("X-A: $SESSION")
+          sent.should contain("X-B: $NOSUCH")
+        end
+        Gori::Env.take_unbound_overlay.should be_empty
+      end
+    end
+
+    it "reports per IDENTITY on the Authorize path, where each resolves its own table" do
+      with_store do |store|
+        Gori::Env.take_unbound_overlay
+        slots = Gori::SessionSlots.load(store)
+        slots.save([
+          Slot.new("admin", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+          Slot.new("user", set_headers: [{"Cookie", "sid=$SESSION"}], rules: ["SESSION"]),
+        ])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        slots.activate(nil)
+
+        with_layer(b) do
+          admin = Gori::Authorize.resolve(slots.find("admin").not_nil!)
+          admin.set_headers.should eq([{"Cookie", "sid=ADMINTOKEN"}])
+          user = Gori::Authorize.resolve(slots.find("user").not_nil!)
+          # Nothing bound for `user`: the literal goes out and THAT is what must be said, or
+          # the 401 it draws reads as access control working.
+          user.set_headers.should eq([{"Cookie", "sid=$SESSION"}])
+        end
+        Gori::Env.take_unbound_overlay.should eq([{"user", "SESSION"}])
+      end
+    end
+  end
+
+  # `rows` emits one row per (rule, table it writes), so the pane can show two rows with one
+  # `rule_id`. The clear action has to name the ROW.
+  describe "clearing one row" do
+    it "forgets exactly the table the row names" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin", rules: ["SESSION"]), Slot.new("user", rules: ["SESSION"])])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        slots.activate("admin")
+        b.observe(login("ADMINTOKEN"), subject)
+        slots.activate("user")
+        b.observe(login("USERTOKEN"), subject)
+
+        # `admin` is not the send context, so the context-scoped `clear` could never reach it.
+        b.clear_row("SESSION", "admin")
+        b.rows.map { |r| {r.slot, r.value} }.should eq([{"admin", nil}, {"user", "USERTOKEN"}])
+        slots.activate("admin")
+        b.values.should be_empty
+        slots.activate("user")
+        b.values["SESSION"].should eq("USERTOKEN")
+      end
+    end
+
+    it "forgets the GLOBAL table when the row names no slot" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin")])
+        b = Gori::Bindings.load(store, slots)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
+        b.observe(login("GLOBALTOKEN"), subject)
+        slots.activate("admin")
+        b.clear_row("SESSION", nil)
+        b.rows.map(&.value).should eq([nil])
+        b.values.should be_empty
       end
     end
   end

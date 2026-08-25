@@ -715,6 +715,73 @@ module Gori
       }
     end
 
+    # Read-modify-write ONE `settings` row with the READ taken INSIDE the writer's own
+    # `BEGIN IMMEDIATE` transaction, so a second gori process cannot land a write between
+    # the two halves.
+    #
+    # ## Why this exists
+    #
+    # Several of gori's documents are persisted as a whole JSON blob in one settings row —
+    # the note set, the session-slot list, the project env vars. Every mutator of those used
+    # to be `load` → edit → `set_setting`, and `set_setting` is an unconditional overwrite:
+    # the loser of a race commits a document it built from a snapshot taken BEFORE the
+    # winner's row landed, so the winner's rows are erased. Both callers see `true` — the
+    # write really did commit; what it committed was the peer's work, deleted. MEASURED at
+    # 103 surviving notes out of 200 `create_note` calls across two `gori mcp` processes,
+    # every one of them reported as `isError:false`.
+    #
+    # Re-reading immediately before the write (which `create_note` did) narrows the window;
+    # it does not close it, because the window is between the two STATEMENTS and not between
+    # two calls. Only a transaction that spans both closes it.
+    #
+    # `saved_views` (schema V18) is the shape that was already immune: a real table, one row
+    # per view, `INSERT OR IGNORE` + `changes()`. That is the better long-term answer for
+    # these documents too, and it is a schema migration — deliberately NOT done here. The
+    # transaction boundary alone takes the loss to zero on the existing rows.
+    #
+    # ## The contract on the block
+    #
+    # `block` is handed the row's CURRENT value (nil when the row does not exist) and returns
+    # the blob to store, or `nil` to leave the row exactly as it is (the transaction still
+    # commits — that is how "no such note id" is expressed without a rollback).
+    #
+    # It runs on the WRITER FIBER, inside a transaction that may be shared with a burst of
+    # capture writes, so it must be pure and fast: no store calls (its own connection is the
+    # one held open here), no locks the caller already holds (the caller is parked on the
+    # reply channel, so a mutex it holds can never be released from inside), no blocking I/O.
+    # A raise would roll back the WHOLE batch, taking unrelated captured flows with it — so
+    # one is caught here, logged, and turned into "no write", which the `false` return
+    # reports to the caller as a failed mutation.
+    #
+    # Returns whether the batch COMMITTED. A caller that also needs to know whether its own
+    # edit applied (an id it minted, a "not found") captures that in a local from inside the
+    # block and reads it after this returns — the reply is only sent after COMMIT.
+    def mutate_setting(key : String, &block : String? -> String?) : Bool
+      failure = nil.as(Exception?)
+      committed = exec_task_ok ->(c : DB::Connection) {
+        current = c.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
+        fresh =
+          begin
+            block.call(current)
+          rescue ex
+            failure = ex
+            nil
+          end
+        if v = fresh
+          c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+            key, v, v)
+        end
+        nil
+      }
+      if ex = failure
+        # gori.log, not STDERR (#411). The batch itself committed (nothing was written for
+        # this key), so the honest answer to the caller is "your mutation did not happen".
+        ::Log.error { "settings mutation for #{key} raised and was skipped: #{ex.message}" }
+        return false
+      end
+      committed
+    end
+
     # Blocks until every write enqueued before this call has committed AND the search index
     # has caught up with them. The single writer drains its channel FIFO, so a synchronous
     # round-trip also flushes the fire-and-forget h2-frame writes that precede it (a clean

@@ -498,14 +498,23 @@ module Gori
           rescue ex
             err.puts "poll error: #{ex.message}"
             once_failed = true
-            [] of Oast::Interaction
+            nil
           end
-          store.touch_oast_session(id)
-          interactions.each do |i|
-            next if seen.includes?(i.unique_id)
-            seen << i.unique_id
-            Oast::Sessions.record_callback(store, id, i)
-            oast_emit_callback(io, i, label, json)
+          # Stamp last_poll_at ONLY for a poll that answered. It is a LIVENESS signal, not a
+          # "we tried" counter: `OutOfBand::StoreMinter.pick_session` mints every blind/OOB
+          # probe payload against the most-recently-polled session, so a listener whose
+          # endpoint 500s on every tick used to keep winning that pick — and win it harder the
+          # longer it stayed broken. The callbacks then arrive nowhere, `OutOfBand.sweep`
+          # promotes nothing, and the scan reads clean. A failing poll must leave the row
+          # looking exactly as stale as the listener behind it is.
+          if interactions
+            store.touch_oast_session(id)
+            interactions.each do |i|
+              next if seen.includes?(i.unique_id)
+              seen << i.unique_id
+              Oast::Sessions.record_callback(store, id, i)
+              oast_emit_callback(io, i, label, json)
+            end
           end
           break if once
           break if oast_wait_or_stop(stop, interval.seconds)
@@ -550,8 +559,15 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           bound = oast_bind_session(store, id, "release")
-          abort "gori run oast release: could not deregister session ##{id} (provider error) — payloads minted from it may still resolve" unless Oast::Sessions.release(bound, Oast::HttpClient.new)
-          puts "released OAST session ##{id} — its #{store.oast_callback_count(id)} callback(s) stay."
+          # Four outcomes, not two. A provider with NO deregistration API (BOAST) and one whose
+          # deregister raised are both "still listening", and neither may print "released" —
+          # the help above promises "payloads minted from it stop resolving", and an operator
+          # who reads that line believes a third-party listener is dead. `release_message` is
+          # the one phrasing; `torn_down?` is the one question.
+          outcome = Oast::Sessions.release_outcome(bound, Oast::HttpClient.new)
+          message = Oast::Sessions.release_message(outcome, bound, id, store.oast_callback_count(id))
+          abort "gori run oast release: #{message}" unless outcome.torn_down?
+          puts message
         ensure
           store.close
         end
@@ -666,10 +682,21 @@ module Gori
           # Help says listen's registration ends with the process. `--once` used to be
           # the only path that deregistered; Ctrl-C left a live interactsh/BOAST
           # registration whose payload still resolved with nobody watching.
-          begin
-            prov.deregister(http, session)
-          rescue ex
-            STDERR.puts "gori run oast: deregister failed: #{ex.message}"
+          #
+          # And say so when it does NOT: a backend with no deregistration API (BOAST) leaves a
+          # live registration behind, and the silent no-op it used to inherit made that read
+          # exactly like a clean teardown. custom-http registered nothing, so it says nothing.
+          if !prov.server_state?
+            # nothing was ever registered on anyone else's server
+          elsif !prov.deregisters?
+            STDERR.puts "gori run oast: #{kind.label} has no deregistration API — " \
+                        "this registration stays live and its payloads keep resolving"
+          else
+            begin
+              prov.deregister(http, session)
+            rescue ex
+              STDERR.puts "gori run oast: deregister failed: #{ex.message}"
+            end
           end
         end
         # A --once run whose single poll FAILED must not exit 0 — a scripted caller can't

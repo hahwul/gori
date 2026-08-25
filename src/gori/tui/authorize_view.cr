@@ -77,7 +77,11 @@ module Gori::Tui
         t = @target
         return :error unless t
         non = t.trials.reject(&.baseline?)
-        return :review if non.empty?
+        # `uncompared?` covers the empty set too — a `return :review if non.empty?` used to
+        # stand in front of it, and it was the tab's half of the three-way disagreement that
+        # two baselines produced (CLI `[x] error`, here `review`, MCP `enforced`). `review`
+        # means "there is something here to judge"; a run that compared nothing is `error` on
+        # every surface. See `Authorize::Target#uncompared?`.
         return :error if t.uncompared?
         return :bypass if non.any?(&.verdict.same?)
         return :enforced if non.all?(&.verdict.different?)

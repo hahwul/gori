@@ -248,6 +248,39 @@ describe Gori::Cbor do
       json = JSON.parse(text)
       json["$bignum"]?.should be_nil
       json["value"]["$bin"].as_s.size.should be > 0
+      # …and SAYS it dropped it. Silence made a bignum whose decimal was declined identical to
+      # a tag 2 the reader had never looked at, which is the one distinction this module exists
+      # to keep (the msgpack sibling states the same rule over its `$ext` bytes).
+      json["$bignum_omitted"].as_s.should eq("max_bignum_bytes")
+    end
+
+    it "bounds the total bignum work in one document, not only one bignum" do
+      # `MAX_BIGNUM_BYTES` bounds ONE bignum and nothing bounded how many there were. Base-256
+      # to base-10 is quadratic, so a 1 MiB body — a size `Pretty::MAX_PRETTY` hands straight to
+      # this reader — packed with maximum-size bignums cost 770 ms of straight-line CPU against
+      # 2.2 ms for the same body of plain byte strings. `build_detail_view` caches per selection,
+      # so that is a blocking freeze every time the operator lands on the flow, and again on
+      # every theme or `p` toggle.
+      body = IO::Memory.new
+      body.write_byte(0x9f_u8) # one indefinite array, so the whole body is ONE document
+      while body.bytesize < 1_000_000
+        body.write_byte(0xc2_u8)
+        body.write_byte(0x59_u8)
+        body.write_bytes(Gori::Cbor::MAX_BIGNUM_BYTES.to_u16, IO::ByteFormat::BigEndian)
+        Gori::Cbor::MAX_BIGNUM_BYTES.times { body.write_byte(0xff_u8) }
+      end
+      body.write_byte(0xff_u8)
+
+      t = Time.instant
+      text, complete = CB.to_json(body.to_slice)
+      ms = (Time.instant - t).total_milliseconds
+      complete.should be_true
+      # Loose on purpose — this guards against the unbounded path reopening, not a slow machine.
+      ms.should be < 150.0
+      # The budget is spent on the FIRST bignums and named on the rest; the bytes never go.
+      text.should contain(%("$bignum":))
+      text.should contain(%("$bignum_omitted":"max_bignum_work"))
+      text.should_not contain("$partial")
     end
 
     it "falls back to the generic envelope for a mislabelled bignum" do
@@ -299,9 +332,46 @@ describe Gori::Cbor do
     end
 
     it "is partial, and still valid JSON, when a map key is missing" do
+      # The map NAMES why it stopped rather than inventing a member out of the failed key's own
+      # marker text. That text is a whole rendering, and using it as a member name is what made
+      # a chain of maps-as-keys cost 2^depth to build (see "the output bound" below) — and it
+      # also flagged `$non_string_keys` on a map where no key had been read at all.
       text, complete = render("a1")
       complete.should be_false
-      JSON.parse(text).as_h.has_key?("$non_string_keys").should be_true
+      text.should eq(%({"$partial":"truncated"}))
+      JSON.parse(text).as_h.has_key?("$non_string_keys").should be_false
+    end
+
+    it "names the stop inside an indefinite-length map, like every other container" do
+      # `bf` opens a map that ends at a `break`. The branch that runs out of input first set the
+      # flags and wrote NOTHING, so the map closed as a bare `{}` — "an empty map", not "this
+      # stopped" — with `complete` false and `$partial` nowhere in the text. Every consumer that
+      # tests the TEXT (`Decoder::Codecs#document`) read that as a decode that worked, and
+      # `bf 61 61 01` was worse: `{"a":1}`, a document that looks whole and is not.
+      text, complete = render("bf")
+      complete.should be_false
+      text.should eq(%({"$partial":"truncated"}))
+
+      text, complete = render("bf616101")
+      complete.should be_false
+      text.should eq(%({"a":1,"$partial":"truncated"}))
+
+      # The sibling branches, which always did name it — this is the parity that had drifted.
+      render("9f")[0].should eq(%([{"$partial":"truncated"}]))
+      render("a2616101")[0].should eq(%({"a":1,"$partial":"truncated"}))
+    end
+
+    it "consumes what it looked at when a cut lands inside an item's ARGUMENT" do
+      # A head's argument bytes are read by `read_arg`, which used to leave the cursor on the
+      # INITIAL byte on a short read while `take` — the same situation one field over — moved it
+      # to the end. `describes?` reads that gap as a header that lied, so every prefix of a real
+      # document whose cut landed inside a length field got the binary placeholder instead of
+      # the kilobytes that had already decoded.
+      {"1b0000", "1900", "5a0001", "1a00"}.each do |hex|
+        r = CB.render(hex.hexbytes)
+        r.stop.should eq("truncated")
+        r.consumed.should eq(hex.hexbytes.size)
+      end
     end
 
     it "is partial when an indefinite container never breaks" do
@@ -497,14 +567,29 @@ describe Gori::Cbor do
   # own JSON text and uses that text as the member name, so every level nests the level below
   # inside a JSON string and the escaping roughly doubles it. `a1` is one byte per level.
   describe "the output bound" do
-    it "bounds a map keyed on a map" do
+    it "does not BUILD a chain of maps-as-keys that runs out of input" do
       # 28 bytes. Before the ceiling this reached 2^32 and raised `IO::EOFError` out of
       # `String::Builder`, ten seconds in — from a body a target can put on the wire and an
       # operator only has to LOOK at (`Pretty#try_binary_doc`, `gori run show --format json`).
+      # The ceiling stopped the crash and still paid the 2^depth to reach it: `a1` × 24 spent
+      # 46 ms walking to 8 MiB, ~1 000× the msgpack sibling on `81` × 24. `pair` no longer uses
+      # a FAILED key's marker text as the member name, so there is nothing left to re-escape
+      # and the work is linear in the depth. Measured next to the sibling, both under a
+      # millisecond.
       json, ok = CB.to_json(Bytes.new(28) { 0xa1_u8 })
       ok.should be_false
-      json.bytesize.should be < Gori::Cbor::MAX_JSON_BYTES
-      json.should contain("max_bytes")
+      json.should eq(%({"$partial":"truncated"}))
+
+      t = Time.instant
+      50.times { CB.to_json(Bytes.new(24) { 0xa1_u8 }) }
+      cbor_ms = (Time.instant - t).total_milliseconds
+      t = Time.instant
+      50.times { Gori::Msgpack.to_json(Bytes.new(24) { 0x81_u8 }) }
+      msgpack_ms = (Time.instant - t).total_milliseconds
+      # Loose on purpose: this guards against the 2^depth path reopening, not against a slow
+      # machine. 50 rounds took ~2 300 ms before and under 1 ms after.
+      cbor_ms.should be < 200.0
+      cbor_ms.should be < msgpack_ms + 200.0
     end
 
     it "bounds one whose keys all terminate, not only a truncated one" do

@@ -15,9 +15,12 @@ module Gori
   # JSON shape — is the failure class this reader is written to avoid. Every such
   # item gets an explicit `$`-prefixed envelope instead, so a reader can always
   # tell "the body said this" from "JSON could not say that". The envelopes are
-  # `$bin`, `$str_invalid_utf8`, `$tag`, `$bignum`, `$time`, `$undefined`,
-  # `$simple`, `$float`, `$non_string_keys` and `$partial`. A CBOR text key
-  # spelled the same way is indistinguishable from a marker in the output; that
+  # `$bin`, `$str_invalid_utf8`, `$tag`, `$bignum`, `$bignum_omitted`, `$time`,
+  # `$undefined`, `$simple`, `$float`, `$non_string_keys` and `$partial`. The
+  # same rule covers a reading this reader DECLINED to make: `$bignum_omitted`
+  # names it rather than leaving a bignum indistinguishable from a tag nobody
+  # looked at. A CBOR text key spelled the same way as one of these envelopes is
+  # indistinguishable from a marker in the output; that
   # collision is accepted, because the alternative (escaping every key) makes the
   # common body unreadable to buy safety in a body nobody sends.
   #
@@ -41,18 +44,35 @@ module Gori
     # base-10 is quadratic in the digit count, so an unbounded bignum is a CPU
     # bomb with a 9-byte header. 512 bytes covers an RSA-4096 modulus, which is
     # the realistic reason a security tool cares. Past it the raw bytes are still
-    # emitted — only the decimal spelling is dropped.
+    # emitted — only the decimal spelling is dropped, and `$bignum_omitted` says so.
     MAX_BIGNUM_BYTES = 512
 
-    # Output ceiling for ONE document. The three above bound the INPUT walk, and none of them
-    # bounds the OUTPUT — which is not a function of the input's size here.
+    # Total bignum-decimal WORK for ONE document. The cap above bounds one bignum and nothing
+    # bounds how many there are, which is the whole gap: the same 1 MiB body — the size
+    # `Pretty::MAX_PRETTY` already hands to this reader — costs 2.2 ms as plain byte strings
+    # and 770 ms as ~2 000 maximum-size bignums, 350× more, because the conversion is quadratic
+    # per bignum and linear in their number. That is a blocking freeze on the TUI detail path,
+    # which rebuilds on every selection of that flow and on every theme or `p` toggle, and the
+    # ceiling on the same shape at `MAX_JSON_BYTES` was ~1.65 s.
+    #
+    # Charged as n², which is what the conversion actually costs, so the handful of small
+    # bignums a real document carries are free and only the bomb pays: the budget is sixteen
+    # maximum-size bignums, or any number of small ones summing to the same work.
+    MAX_BIGNUM_WORK = 16_i64 * MAX_BIGNUM_BYTES * MAX_BIGNUM_BYTES
+
+    # Output ceiling for ONE document. The four above bound the INPUT walk and the work it
+    # costs, and none of them bounds the OUTPUT — which is not a function of the input's size
+    # here.
     #
     # A non-string map KEY is rendered as its own JSON text and that text becomes the member
     # name (see `map_item`), so a map keyed on a MAP nests the inner rendering inside a JSON
     # string once per level — and each level's escaping roughly doubles it. `a1 a1 a1 …`, one
     # byte per level, therefore grows the output as 2^depth: 26 bytes produced 536 MB, and 28
     # bytes reached the point where `String::Builder` refuses to grow and raised `IO::EOFError`
-    # straight out of `render` — the one thing this module promises never to do. `MAX_DEPTH`
+    # straight out of `render` — the one thing this module promises never to do. (Those two
+    # spellings ran OUT of input; `pair` no longer nests a key that failed, so the shape that
+    # still reaches here is one whose keys all terminate — `a1` × 22 then `f6` × 23, 45 bytes,
+    # which rendered 16.7 MB. The ceiling is the same and so is the reason.) `MAX_DEPTH`
     # cannot fix it (the blow-up is well inside 32 levels) and a per-key length cap cannot
     # either (`MAX_ITEMS` keys at any cap is still that cap × 100 000).
     #
@@ -77,7 +97,8 @@ module Gori
       reader = Reader.new(data, max_depth, sink)
       JSON.build(sink, indent) { |j| reader.item(j, 0) }
       reader.note_trailing
-      BinaryDocument::Rendering.new(sink.to_s, reader.complete?, reader.pos, reader.stop)
+      BinaryDocument::Rendering.new(sink.to_s, reader.complete?, reader.pos, reader.stop,
+        reader.decoded?)
     rescue JSON::Error | IO::Error
       internal_rendering
     end
@@ -100,7 +121,7 @@ module Gori
       # `String::Builder` answers a document past 2 GiB with `IO::EOFError`, which
       # is how the unbounded-output defect surfaced, and `MAX_JSON_BYTES` is what
       # actually stops it. The belief that the ceiling holds is not the contract.
-      BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal")
+      BinaryDocument::Rendering.new("{\"$partial\":\"internal\"}", false, 0, "internal", false)
     end
 
     # --- parser ---------------------------------------------------------------
@@ -114,10 +135,20 @@ module Gori
     private class Reader
       getter? complete : Bool = true
 
+      # Did the walk make ANYTHING of this body, or is the whole rendering one `$partial`
+      # marker? False only in the second case, which is the one a lying length header lands in
+      # — see `BinaryDocument::Rendering#describes?`, where it is the third part of the test.
+      getter? decoded : Bool = true
+
       def initialize(@data : Bytes, @max_depth : Int32, @sink : IO::Memory)
+        # The REAL output buffer, kept so `partial` can tell a marker written as the document's
+        # own value from one written into a scratch key render (`key_name` swaps `@sink`).
+        @root = @sink
         @pos = 0
         @items = 0
         @spent = 0_i64
+        # Bignum-decimal work charged so far, in n² units. See `MAX_BIGNUM_WORK`.
+        @bignum_work = 0_i64
         @stop = nil.as(String?)
       end
 
@@ -398,9 +429,17 @@ module Gori
             loop do
               break if take_break?
               unless @pos < @data.size
+                # An indefinite map with no `break` and no bytes left. NAMED, in the member
+                # position — `partial` writes a VALUE and there is no member name to hang one
+                # under, which is why this branch is spelled out by hand and is exactly why it
+                # drifted: it set the flags and wrote nothing, so `bf` closed as a bare `{}`
+                # with `complete` false and `$partial` nowhere in the text, and `bf 61 61 01`
+                # rendered `{"a":1}` as if the document had ended there. Every other branch
+                # (definite map, both array forms) names it, and `Decoder::Codecs#document`
+                # tests the TEXT for `$partial`, so a silent stop reads as a decode that worked.
                 ok = false
-                @complete = false
-                @stop ||= "truncated" # an indefinite map with no `break` and no bytes left
+                stop_at("truncated")
+                j.field "$partial", "truncated"
                 break
               end
               ok, tagged = pair(j, depth, tagged)
@@ -422,14 +461,22 @@ module Gori
       # One key/value pair. Returns {ok, whether a non-string key has been seen}.
       private def pair(j : JSON::Builder, depth : Int32, tagged : Bool) : {Bool, Bool}
         name, plain, kok = key_name(depth + 1)
-        tagged ||= !plain
         unless kok
-          # The key itself ran out. Its marker text is the member name, so the
-          # reason is already in the document; the value slot has to hold
-          # something and there is nothing behind it.
-          j.field(name) { j.null }
+          # The key itself ran out, or hit a ceiling. The reason goes in — but NOT the key's
+          # own marker TEXT as the member name, which is what this used to do. That text is a
+          # whole rendering, and using it as a name makes the level above nest it inside a JSON
+          # string and escape it again, so a chain of maps-as-keys costs 2^depth to BUILD even
+          # though nothing survives: `a1` × 24, a twenty-five byte body, spent 46 ms walking up
+          # to the 8 MiB output ceiling, ~1 000× the msgpack sibling's `81` × 24, which drops
+          # the failed key's text and writes a constant exactly as this now does. The reason is
+          # a constant either way, so nothing legible is lost.
+          #
+          # Nor is `tagged` set from a key that never read: no key means no non-string key, and
+          # flagging `$non_string_keys` on a map that merely stopped says something untrue.
+          j.field("$partial", @stop || "stopped")
           return {false, tagged}
         end
+        tagged ||= !plain
         vok = true
         # `depth + 1`, the same as the key and the same as an array's elements. At `depth` a
         # chain of maps-as-values did not count as nesting at all, so `{"a": {"a": …}}` recursed
@@ -530,7 +577,10 @@ module Gori
             if payload
               j.object do
                 j.field("$tag") { write_uint(j, tag) }
-                if payload.size <= MAX_BIGNUM_BYTES
+                if why = bignum_omitted(payload.size)
+                  j.field "$bignum_omitted", why
+                else
+                  @bignum_work += payload.size.to_i64 * payload.size
                   j.field "$bignum", bignum_decimal(payload, tag == 3_u64)
                 end
                 j.field("value") { j.object { j.field "$bin", Base64.strict_encode(payload) } }
@@ -543,6 +593,19 @@ module Gori
         # let the generic envelope show whatever is actually there.
         @pos = save
         generic_tag(j, tag, depth)
+      end
+
+      # Why this bignum's decimal is being withheld, or nil to spell it out.
+      #
+      # NAMED, never silent. A tag 2 whose decimal was declined used to render exactly like a
+      # tag 2 the reader had never looked at, so the operator could not tell "too big to spell"
+      # from "not a bignum at all" — and this module's own rule, the one the msgpack sibling
+      # states over its `$ext` bytes, is that a reading held back has to be named. The bytes
+      # are in `value` either way, so nothing is lost but the spelling.
+      private def bignum_omitted(size : Int32) : String?
+        return "max_bignum_bytes" if size > MAX_BIGNUM_BYTES
+        return "max_bignum_work" if @bignum_work + size.to_i64 * size > MAX_BIGNUM_WORK
+        nil
       end
 
       # Big-endian base-256 magnitude to decimal, schoolbook, one byte at a time
@@ -663,7 +726,16 @@ module Gori
       end
 
       private def read_arg(major : UInt8, ai : UInt8, count : Int32) : {Head?, String}
-        return {nil, "truncated"} if remaining < count
+        if remaining < count
+          # The same short-read bookkeeping `take` does, and for the same reason: the reader
+          # looked at every byte it had left and found them insufficient, so the cursor belongs
+          # at the end. Leaving it on the initial byte reported a 2 KB body as two bytes
+          # consumed, which `describes?` reads as a header that lied — and a cut landing inside
+          # an ARGUMENT is where one prefix in thirteen of a realistic document lands, every one
+          # of them answered with the binary placeholder instead of the 2 KB that had decoded.
+          @pos = @data.size
+          return {nil, "truncated"}
+        end
         arg = 0_u64
         count.times do
           arg = (arg << 8) | @data[@pos].to_u64
@@ -711,6 +783,11 @@ module Gori
       private def partial(j : JSON::Builder, reason : String) : Bool
         @complete = false
         @stop ||= reason # the FIRST reason: later levels only report that this one stopped
+        # Nothing has been written to the real output yet, so this marker IS the document: the
+        # reader was handed a body and made nothing of it. A container would have written its
+        # opening brace before reaching here, and a scalar its value. Tested against `@root`
+        # because `key_name` points `@sink` at a scratch buffer that legitimately starts empty.
+        @decoded = false if @sink.same?(@root) && @sink.bytesize == 0
         j.object { j.field "$partial", reason }
         false
       end

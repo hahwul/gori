@@ -628,6 +628,12 @@ module Gori
         # send_request, which records the attempt).
         recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project_name, db_path) : nil
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id)
+        # The session slot's `$NAME` that went out LITERALLY, after the response and before the
+        # exit code. A Repeater send under a slot is how an operator MINTS a binding, so this is
+        # also the surface that has to say when the mint never happened: the origin answers 401
+        # to a header carrying the reference itself, and that reads as a session that was sent
+        # and rejected. See `Run.unbound_overlay_note`.
+        report_unbound_slot_overlay("gori run repeater send")
         persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project_name, db_path) if result.ok?
         exit 1 unless result.ok?
       end
@@ -690,6 +696,9 @@ module Gori
         end
 
         emit_ws_result(id, result, format)
+        # `--slot NAME` on the handshake head, resolved to nothing — same reason as the HTTP
+        # path below. Before the exit so a failed exchange says it too.
+        report_unbound_slot_overlay("gori run repeater send")
         exit 1 unless result.ok?
       end
 
@@ -1438,6 +1447,9 @@ module Gori
         end
 
         emit_repeater_result(result, new_body, diff, format, diff_capped)
+        # `--slot NAME` on a single-flow replay: the same drain the session-send path takes,
+        # because it is the same overlay seam and a notice fixed on one of the two would drift.
+        report_unbound_slot_overlay("gori run repeater")
         exit 1 unless result.ok?
       end
 

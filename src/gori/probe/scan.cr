@@ -2,6 +2,7 @@ require "../store"
 require "../ql"
 require "../outbound"
 require "../scope"
+require "../host_overrides"
 require "./issue"
 require "./passive"
 require "./active"
@@ -144,10 +145,14 @@ module Gori
                    rules : RuleConfig? = nil,
                    progress : Proc(Int32, Int32, Nil)? = nil,
                    active_budget : Budget? = nil,
+                   overrides : Gori::HostOverrides? = nil,
                    on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         # Read the Rules config ONCE per scan (not per flow) — same as the Analyzer, which
         # loads it at construction and only re-reads on an explicit rules reload.
         cfg = rules || RuleConfig.load(store)
+        # …and the host overrides once too, here rather than in each half, so the two cannot
+        # answer "where does this host live" differently within one scan.
+        ov = overrides_for(store, active, overrides)
         # ONE budget across both halves — see `Budget`. Built here rather than passed down as a
         # number so the repeater half cannot spend the flow half's allowance again.
         budget = active_budget || Budget.new(active_limit)
@@ -159,10 +164,10 @@ module Gori
         end
         detections = scan_flows(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts,
-          rules: cfg, progress: progress, active_budget: budget, on_error: on_error)
+          rules: cfg, progress: progress, active_budget: budget, overrides: ov, on_error: on_error)
         repeater_dets, repeater_n = scan_repeaters(store, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg,
-          active_budget: budget, on_error: on_error)
+          active_budget: budget, overrides: ov, on_error: on_error)
         detections.concat(repeater_dets)
         # Promote any OUT-OF-BAND probe whose callback has landed since it was planted. This is
         # a headless surface, so it cannot wait for one: the probes this run plants are picked
@@ -186,6 +191,35 @@ module Gori
         dets
       rescue DB::Error | SQLite3::Exception
         [] of Detection
+      end
+
+      # The project's HOST OVERRIDES table for this scan's active probes — the operator's
+      # /etc/hosts-style routing, which every active probe has to dial through or it is
+      # measuring a host the operator did not point gori at.
+      #
+      # A per-call SNAPSHOT, and that is the right object here rather than a live one: both
+      # callers of this module (`gori run probe`, the MCP `probe_scan` tool) are one-shot
+      # headless runs, so there is no window in which the table could be edited under them —
+      # exactly the split `HostOverrides`' constructor documents, and the same shape
+      # `mcp/tools/minimize.cr` and `cli/run/repeater_minimize.cr` already use. The TUI's
+      # long-lived `Probe::Analyzer` is the case that needs the live instance, and it gets one
+      # from the session instead of coming through here.
+      #
+      # Resolved ONCE per scan (the twin of `with_oob` right below, for the same reason: it is
+      # a store read, and nothing a probe would want to follow can change mid-scan), skipped
+      # entirely on a passive-only run because nothing there opens a socket, and honoured when
+      # the caller supplies its own (a spec).
+      #
+      # A failed read degrades to nil rather than aborting, matching `CLI::Run
+      # .cli_host_overrides`. Overrides may fail OPEN — the worst case is the pre-existing
+      # behaviour, a probe sent to the name as resolved — where a failed SCOPE read must fail
+      # CLOSED, because that one decides whether to send at all.
+      private def overrides_for(store : Store, active : Bool,
+                                given : Gori::HostOverrides?) : Gori::HostOverrides?
+        return given if given || !active
+        HostOverrides.load(store)
+      rescue DB::Error | SQLite3::Exception
+        nil
       end
 
       # Give a scan its OAST minter, unless this is a passive-only run (never reaches
@@ -213,9 +247,11 @@ module Gori
                      rules : RuleConfig? = nil,
                      progress : Proc(Int32, Int32, Nil)? = nil,
                      active_budget : Budget? = nil,
+                     overrides : Gori::HostOverrides? = nil,
                      on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
+        ov = overrides_for(store, active, overrides)
         detections = [] of Detection
         budget = active_budget || Budget.new(active_limit)
         opts = with_oob(store, opts, active)
@@ -235,7 +271,8 @@ module Gori
               # `https://acme.test/` would miss `https://acme.test:8443/…` and silently
               # skip every active probe on that origin while the lens still shows it in-scope.
               if active && !cfg.degraded && allows_row?(outbound, detail.row) && budget.take?
-                detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
+                detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound,
+                  overrides: ov, opts: opts,
                   disabled: cfg.disabled, on_error: on_error,
                   on_oob: oob_sink(store, detail.row, id)))
               end
@@ -286,9 +323,11 @@ module Gori
                          scope : Scope? = nil, allow_unscoped : Bool = false,
                          opts : Active::Options = Active::Options::DEFAULT,
                          rules : RuleConfig? = nil, active_budget : Budget? = nil,
+                         overrides : Gori::HostOverrides? = nil,
                          on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
+        ov = overrides_for(store, active, overrides)
         detections = [] of Detection
         budget = active_budget || Budget.new(nil)
         opts = with_oob(store, opts, active)
@@ -303,7 +342,7 @@ module Gori
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
             if active && !cfg.degraded && allows_row?(outbound, detail.row) && budget.take?
-              Active.analyze(detail, verify_upstream, outbound: outbound, opts: opts,
+              Active.analyze(detail, verify_upstream, outbound: outbound, overrides: ov, opts: opts,
                 disabled: cfg.disabled, on_error: on_error,
                 on_oob: oob_sink(store, detail.row, rec.flow_id)).each do |d|
                 detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)

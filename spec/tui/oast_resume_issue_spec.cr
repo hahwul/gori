@@ -171,6 +171,24 @@ private class SilentProvider < Gori::Oast::Provider
   def poll(http : Gori::Oast::Http, session : Gori::Oast::Session) : Array(Gori::Oast::Interaction)
     [] of Gori::Oast::Interaction
   end
+
+  # It stands in for interactsh, which has a real `POST /deregister` — so it must SAY so.
+  # `Provider#deregisters?` defaults to false precisely so a backend without a teardown is
+  # reported as one, and a double that inherits the default is modelling BOAST, not the
+  # flagship. `NoDeregisterProvider` below is the double for that case.
+  def deregisters? : Bool
+    true
+  end
+end
+
+# The backend that registers server-side state and offers NO way to release it: BOAST derives
+# the id from the secret and keeps serving it. This is `Provider`'s default, and it is why the
+# default is false — for four of the five backends `release` used to return true without a
+# packet leaving the process, while the docs promised the payloads stopped resolving.
+private class NoDeregisterProvider < SilentProvider
+  def deregisters? : Bool
+    false
+  end
 end
 
 # A provider whose deregister RAISES — which interactsh's really does, for any status outside
@@ -565,7 +583,7 @@ describe "Gori::Tui::OastController — releasing a session" do
       # Not "released" yet — nothing has answered.
       host.statuses.last.should contain("releasing session ##{sid}")
       settle_release(controller)
-      host.statuses.last.should contain("released session ##{sid}")
+      host.statuses.last.should contain("released OAST session ##{sid}")
       host.statuses.last.should contain("callbacks stay")
       # The listener is gone either way; the row and its callbacks are not.
       controller.@listeners.should be_empty
@@ -583,16 +601,45 @@ describe "Gori::Tui::OastController — releasing a session" do
       controller.release_session(sid)
       settle_release(controller)
 
-      host.statuses.last.should contain("could not release session ##{sid}")
+      host.statuses.last.should contain("could not deregister OAST session ##{sid}")
       host.statuses.last.should contain("HTTP 503")
       host.statuses.last.should contain("may still resolve")
       # A status line scrolls past; a correlation id the operator believes is gone but is not
       # has to survive them looking away.
       note = host.notifications.latest
       note.should_not be_nil
-      note.not_nil!.message.should contain("could not release session ##{sid}")
+      note.not_nil!.message.should contain("could not deregister OAST session ##{sid}")
       note.not_nil!.level.should eq(:warn)
       # Still no local loss: releasing drops the LISTENER, never the evidence.
+      session.store.oast_sessions.map(&.id).should contain(sid)
+    end
+  end
+
+  # The defect this whole path was carrying: `Provider#deregister`'s default is a NO-OP, so a
+  # backend with no teardown API answered the tab in microseconds without a packet leaving the
+  # process, and the tab printed "released". The operator stops watching a listener that is
+  # still collecting on a third-party server — the one thing a release is supposed to settle.
+  # This must read the same on all three surfaces, so it asserts the shared sentence that
+  # `gori run oast release` and MCP `oast_release` print.
+  it "will not claim a release from a backend that has no way to perform one" do
+    with_oast_controller do |controller, host, session, sid, pid|
+      engine = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+      controller.@reg_events.send(resumed_reg_with(NoDeregisterProvider.new, engine, "p_#{pid}"))
+      controller.drain_events
+
+      controller.release_session(sid)
+      settle_release(controller)
+
+      host.statuses.last.should contain("was NOT released")
+      host.statuses.last.should contain("no deregistration API")
+      host.statuses.last.should contain("keep resolving")
+      # It is not an error — nothing failed — but the listener is still live, which is the half
+      # a status line must not be the only record of.
+      note = host.notifications.latest
+      note.should_not be_nil
+      note.not_nil!.message.should contain("was NOT released")
+      note.not_nil!.level.should eq(:warn)
       session.store.oast_sessions.map(&.id).should contain(sid)
     end
   end

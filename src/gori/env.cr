@@ -1,5 +1,6 @@
 require "json"
 require "./settings"
+require "./session_slot"
 require "./store"
 
 module Gori
@@ -196,6 +197,106 @@ module Gori
     # author — a captured replay, a fuzz template with its payload already spliced.
     def self.overlay_slot(wire : Bytes) : Bytes
       (l = @@layer) ? l.overlay(wire) : wire
+    end
+
+    # ── a slot overlay's own unresolved references ────────────────────────────
+    #
+    # A SLOT header value is the one place `$NAME` is guaranteed to be a reference and never
+    # a payload. An operator writes `Authorization: Bearer $SESSION` on a slot in order to
+    # send that slot's token; there is no GraphQL `$id`, no Mongo `$ne`, no JSON Schema
+    # `$ref` in a header value an operator typed for that purpose. That is what makes this
+    # answerable at all, and it is why the send seams' "leave an unknown token literal"
+    # rule (#525, `unbound`'s doc above) is not weakened by saying something HERE.
+    #
+    # Because with an empty binding table `expand_bindings` passes `$SESSION` through as five
+    # literal bytes, and the binding table is memory-only: EVERY `gori run … --slot` process
+    # starts with an empty one, so every such run without `--bind-from` sends the literal.
+    # Exit 0, no warning, HTTP 200 from the origin, and the operator reads it as a session
+    # that worked. In Authorize it is worse than useless: the identity goes out
+    # unauthenticated, draws the same 401 as anonymous, and the row aggregates to `enforced` —
+    # a MISSED bypass, the one direction `Authorize::Identity`'s doc says this tool must not
+    # fail in.
+    #
+    # A REPORT and not a refusal, deliberately. A guard with no exit costs more than the loss
+    # it prevents (the #525 measurement: a probe scan losing 7 of 9 active checks on a flow,
+    # reported as scanned), and an operator who genuinely wants the four bytes `$SES…` on the
+    # wire already has the escape: `$$SESSION`, the one escape this module defines, which
+    # `expand` consumes and this scan honours for the same reason.
+
+    # Every `$NAME` in `slot`'s own header VALUES that will land on the wire LITERALLY when
+    # this slot is the send context, in first-appearance order.
+    #
+    # Only names the BINDING half owns are reported — a name some enabled extract rule
+    # declares, or one this slot claims (a slot naming a rule that does not exist yet is the
+    # same operator mistake, one step earlier). An unknown `$FOO` is plan-build's business,
+    # exactly as `unbound` above states; two answers to one syntax is what #525 rules out.
+    def self.unbound_in_slot(slot : SessionSlot) : Array(String)
+      literal = [] of String
+      return literal if slot.set_headers.empty?
+      prefix = Settings.env_prefix
+      return literal if prefix.empty?
+      # Nothing to scan and nothing to allocate for the overwhelmingly common slot: header
+      # values an operator typed with no reference in them. This runs per SEND.
+      return literal unless slot.set_headers.any? { |(_, v)| v.byte_index(prefix) }
+      vals = binding_values_as(slot.name)
+      declared = declared_bindings
+      slot.set_headers.each do |(_, value)|
+        token_names(value, prefix).each do |name|
+          next if vals.has_key?(name)
+          next unless declared.includes?(name) || slot.claims?(name)
+          literal << name unless literal.includes?(name)
+        end
+      end
+      literal
+    end
+
+    # Names an overlay shipped literally, since the last `take_unbound_overlay`. A surface
+    # that prints a run summary drains this and says so; the log line below is for the ones
+    # that do not (the live proxy path, a TUI send).
+    @@unbound_overlay = [] of {String, String}
+    @@unbound_overlay_seen = Set(String).new
+    @@unbound_overlay_lock = Mutex.new
+
+    # Called by every seam that applies a slot overlay, BEFORE it applies it. Returns the
+    # names so a caller with a better place to put them can use them directly; records them
+    # for `take_unbound_overlay` and logs each (slot, name) pair once.
+    def self.report_unbound_overlay(slot : SessionSlot?) : Array(String)
+      return [] of String unless slot
+      names = unbound_in_slot(slot)
+      return names if names.empty?
+      fresh = [] of String
+      @@unbound_overlay_lock.synchronize do
+        names.each do |name|
+          next unless @@unbound_overlay_seen.add?("#{slot.name} #{name}")
+          @@unbound_overlay << {slot.name, name}
+          fresh << name
+        end
+      end
+      unless fresh.empty?
+        # gori.log (#411). Once per (slot, name) until a surface drains the list: this runs
+        # per SEND, and a Fuzzer sweep under a slot would otherwise write one line per request.
+        ::Log.warn do
+          "session slot #{slot.name.inspect} sends #{token_list(fresh)} LITERALLY — nothing " \
+          "has bound #{fresh.size == 1 ? "it" : "them"} in this process (a binding value is " \
+          "memory-only and every run starts with an empty table). Bind first (`--bind-from`, " \
+          "a Repeater send under this slot), or write `$$#{fresh[0]}` if the literal is what " \
+          "you meant"
+        end
+      end
+      names
+    end
+
+    # Drain the record — `{slot name, binding name}` pairs, in the order they were first seen.
+    # For a surface that ends a run with a summary: unresolved references are the one thing an
+    # exit-0 run must not stay quiet about, and a log line the operator is not tailing is not
+    # a report. Draining resets the log throttle too, so a second run says it again.
+    def self.take_unbound_overlay : Array({String, String})
+      @@unbound_overlay_lock.synchronize do
+        out = @@unbound_overlay.dup
+        @@unbound_overlay.clear
+        @@unbound_overlay_seen.clear
+        out
+      end
     end
 
     # The active session slot's NAME, or nil for as-captured (the default). What a surface
@@ -1145,6 +1246,65 @@ module Gori
       Settings.project_env_vars = vars.dup
       bump_highlight_rev
       committed
+    end
+
+    # Read-modify-write the project env table with the READ taken INSIDE the store's write
+    # transaction (`Store#mutate_setting`).
+    #
+    # `save_project` above persists the WHOLE array, which is right for the surface that owns
+    # the whole array (the TUI's env pane edits it in place) and wrong for every per-KEY
+    # mutator: those load the array, change one entry and save it back, so the loser of a
+    # race commits an array built before the winner's row landed and silently DELETES every
+    # var the peer added. MCP's own `ENV_REFRESH_TOOLS` comment already names that hazard and
+    # treats a pre-read as the mitigation; measured on the note set (the same shape) the
+    # pre-read narrows the window to a few hundred microseconds and loses half the writes
+    # anyway. One transaction closes it.
+    #
+    # `block` is handed the table as the transaction reads it and returns the table to
+    # persist, or nil to write nothing. It runs on the WRITER FIBER — see
+    # `Store#mutate_setting` for what that forbids.
+    #
+    # Unlike `save_project` an empty table is WRITTEN (as `[]`) rather than deleting the row:
+    # a delete and an insert are two different statements and this is one. `parse_vars_json`
+    # reads `[]` and a missing row identically, so nothing downstream can tell them apart.
+    def self.mutate_project(store : Store,
+                            &block : Array({String, String}) -> Array({String, String})?) : Bool
+      applied = nil.as(Array({String, String})?)
+      committed = store.mutate_setting(PROJECT_VARS_KEY) do |raw|
+        vars = block.call(parse_vars_json(raw))
+        if vars
+          applied = vars
+          serialize_vars(vars)
+        end
+      end
+      return false unless committed
+      if vars = applied
+        Settings.project_env_vars = vars.dup
+        bump_highlight_rev
+      end
+      true
+    end
+
+    # Set one `$KEY`, keeping its position when it is already there (the pane renders the
+    # table in stored order, so an edit must not move a row). False = nothing was persisted.
+    def self.set_project_var(store : Store, key : String, value : String) : Bool
+      mutate_project(store) do |vars|
+        idx = vars.index { |(k, _)| k == key }
+        idx ? (vars[idx] = {key, value}) : (vars << {key, value})
+        vars
+      end
+    end
+
+    # Drop one `$KEY`. False when the store did not commit. Deliberately NOT answering "there
+    # was no such key": that is a deterministic refusal, the caller already holds the table to
+    # make it from (it reloads before every env tool), and folding it into the same `false` a
+    # busy store returns is what makes an agent retry a refusal forever — the split
+    # `SessionSlots`' list edits document.
+    def self.delete_project_var(store : Store, key : String) : Bool
+      mutate_project(store) do |vars|
+        vars.reject! { |(k, _)| k == key }
+        vars
+      end
     end
 
     def self.valid_key?(key : String) : Bool

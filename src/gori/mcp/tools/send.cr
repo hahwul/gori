@@ -87,6 +87,13 @@ module Gori
           recorded_flow_id = id
         end
         result = plan.send_wire(h1_wire)
+        # The active session slot's `$NAME` that `plan.wire_bytes` shipped LITERALLY, drained
+        # here because this tool IS the run summary for a synchronous send. Without it the only
+        # trace was a `Log.warn` line on the server's STDERR, which no agent reads — so a call
+        # under `set_active_session_slot` whose binding was never minted came back as an
+        # ordinary 401/200 with nothing saying the session was absent from the bytes. One
+        # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
+        unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -97,7 +104,7 @@ module Gori
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules, plan.h2_fields,
-          request_line_rewritten, plan.websocket?),
+          request_line_rewritten, plan.websocket?, unbound_overlay),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -667,7 +674,8 @@ module Gori
                                    applied_rules : Bool = false,
                                    h2_fields : Array({String, String})? = nil,
                                    request_line_rewritten : Bool = false,
-                                   websocket_handshake : Bool = false) : String
+                                   websocket_handshake : Bool = false,
+                                   unbound_overlay : String? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -678,6 +686,10 @@ module Gori
             # origin-form line that actually went out). Absent means nothing was rewritten.
             j.field "request_line_rewritten", true if request_line_rewritten
             j.field "match_replace_applied", true if applied_rules
+            # Beside `effective_request`, which is where the literal `$NAME` is visible in the
+            # bytes — an agent that reads the response alone cannot tell this send from one
+            # that carried the session. Absent when every reference resolved.
+            j.field "unbound_overlay_warning", unbound_overlay if unbound_overlay
             # `send_request` has always sent an RFC 6455 upgrade as an ordinary HTTP request —
             # it dials `Engine`/`H2Engine` and reads the 101 as a response, where the TUI and
             # `gori run repeater send` would perform the framed exchange. That is a useful

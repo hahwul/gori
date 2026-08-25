@@ -53,7 +53,14 @@ module Gori::Proxy::Codec
             # all. Measured on 20_000 copies of one 25-byte frame (25 KB of input, a legal
             # `Content-Encoding: zstd` body): 131 MB produced against a 32 MiB cap, scaling
             # linearly with input, on the path an operator reaches by opening the flow.
-            break if out.bytesize >= max_out
+            #
+            # PAST the ceiling, not AT it: 32 MiB divides by this 128 KiB buffer exactly, so a
+            # `>=` stop landed a bomb on precisely `max_out` and cleared every consumer's
+            # `size > max_out` guard (`Chain.run`'s, `ExternalOpen`'s) — the cut output was
+            # reported as a finished decode. One byte over is what proves the stream had more
+            # to give; a stream that decodes to exactly `max_out` still ends cleanly below.
+            # Same rule as `Decoder::Codecs#drain` and `Brotli.decode_full`.
+            break if out.bytesize > max_out
             if ret == 0
               # A frame ended — but a zstd STREAM may be several frames back to back, and a
               # `Content-Encoding: zstd` body legitimately is one. Stopping at the first

@@ -316,7 +316,24 @@ module Gori::Proxy::H2
         emit_response(stream)
         # The exchange is complete; a stream id is never reused on a connection
         # (RFC 7540 §5.1.1), so drop its buffers to bound per-connection memory.
-        @streams.delete(stream_id)
+        #
+        # NOT while the request half is still open, and that is the OTHER half of the same
+        # broken invariant. The guard above asks `ws` — the live codec — which is the right
+        # question for "is there still a socket to read"; it is the wrong one for "may this
+        # stream be forgotten". `answer_ws_capture` takes the codec back off (`close_ws`) on
+        # every NON-2xx answer, which is how a WAF, a gateway, or an origin with no RFC 8441
+        # support turns a WebSocket down (426/400/403) — so `ws` was nil here while `flow_id`
+        # still came from the request HEAD and the client's half was still open. The stream was
+        # deleted, the client's next frame on that id allocated a fresh `Stream`, and History
+        # gained one invented `GET /` row per refused upgrade against the real target host.
+        #
+        # `ws_armed` is the durable spelling of "this `flow_id` does not mean the request half
+        # closed": it is set exactly where `emit_request` is called early, and `close_ws` does
+        # not clear it. The response row is still written above — a refused upgrade's error body
+        # is an ordinary response and must not wait for a half-close that may never come — only
+        # the FORGETTING waits. Whatever arrives next settles it, and `finalize_all` flushes at
+        # connection close as it always has.
+        @streams.delete(stream_id) if stream.req.ended || !stream.ws_armed
       end
     end
 

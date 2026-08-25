@@ -22,7 +22,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return status("open in browser: flow ##{id} is no longer in History") unless detail
     # The head goes in as well as the body: it carries the `Content-Type` the suffix comes
     # from AND the `Content-Encoding` the body has to be inflated against.
-    preview("flow-#{id}", detail.response_head, detail.response_body)
+    #
+    # `response_body_truncated?` goes in too. The capture cap defaults to 2 MiB, so a stored
+    # body over that size is a PREFIX, and every other surface says so (`gori history` prints
+    # `[response body truncated]`, the MCP serializer and the HAR export both carry the flag).
+    # Without it this verb opened the prefix and reported it as the document.
+    preview("flow-#{id}", detail.response_head, detail.response_body, detail.response_body_truncated?)
   end
 
   def repeater_open_response_external : Nil
@@ -38,9 +43,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Write the preview and hand it to the desktop. Every refusal is a status line, never a
   # raise: this is a convenience verb and a missing `xdg-open` must not end the session.
-  private def preview(stem : String, head : Bytes?, body : Bytes?) : Nil
+  private def preview(stem : String, head : Bytes?, body : Bytes?, body_truncated : Bool = false) : Nil
     result = begin
-      ExternalOpen.write(stem, head, body)
+      ExternalOpen.write(stem, head, body, body_truncated)
     rescue ex : Gori::Error
       return status("open in browser: #{ex.message}")
     end

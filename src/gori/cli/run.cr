@@ -552,6 +552,64 @@ module Gori
         Env.layer.as?(Gori::Bindings).try(&.slots).try(&.activate(name))
       end
 
+      # ── an overlay that shipped `$NAME` literally, said OUT LOUD ─────────────────────
+      #
+      # `Env.report_unbound_overlay` records every `$NAME` a slot header sent literally and
+      # writes one `Log.warn`; `Env.take_unbound_overlay` is the drain its own doc reserves
+      # for "a surface that prints a run summary", because a log line the operator is not
+      # tailing is not a report. Nothing drained it, so the failure the mechanism was built
+      # to name stayed exactly as silent as before it existed: an Authorize identity written
+      # `Authorization: Bearer $SESSION` with nothing bound goes out unauthenticated, draws
+      # the same 401 as anonymous, aggregates to `enforced`, and exits 0.
+      #
+      # ONE sentence, built here, said by every surface that ends in a summary — `gori run
+      # authorize`, `gori run repeater send`, `gori run fuzz`, and MCP's `send_request` /
+      # `authorize_*` through this same method. The repeated failure shape in this repo is a
+      # notice fixed on one surface and left to drift on the other two.
+      #
+      # An INTERRUPTION and not a refusal, matching the seam it reports (`Env.unbound_in_slot`):
+      # the bytes already went out, `$$NAME` is the escape for an operator who meant the
+      # literal, and a guard with no exit costs more than the loss it prevents. What this owes
+      # the operator is that the result is not read as evidence about an identity that was
+      # never sent.
+      #
+      # `pairs` is `Env.take_unbound_overlay`'s output — {slot name, binding name}, in
+      # first-seen order. nil when there is nothing to say, so a bound run stays silent.
+      def self.unbound_overlay_note(pairs : Array({String, String})) : String?
+        return nil if pairs.empty?
+        # Grouped by SLOT, because the slot is the thing the operator fixes: two identities
+        # each missing `$SESSION` are two configurations, not one.
+        order = [] of String
+        by_slot = Hash(String, Array(String)).new
+        pairs.each do |(slot, name)|
+          unless by_slot.has_key?(slot)
+            order << slot
+            by_slot[slot] = [] of String
+          end
+          by_slot[slot] << name unless by_slot[slot].includes?(name)
+        end
+        one = pairs.size == 1 && order.size == 1
+        first = pairs.first[1]
+        String.build do |io|
+          io << "session #{one ? "value" : "values"} went out LITERALLY — "
+          io << order.join("; ") { |s| "#{s} sent #{Env.token_list(by_slot[s])}" }
+          io << ". Nothing bound #{one ? "it" : "them"} in this process (a binding value is "
+          io << "memory-only, so every run starts with an empty table), so #{one ? "that" : "those"} "
+          io << "request#{one ? "" : "s"} carried the reference itself where the session belongs "
+          io << "— #{one ? "its" : "their"} response#{one ? " is" : "s are"} NOT evidence about "
+          io << "the identity #{one ? "it names" : "they name"}. Bind first — replay a login under "
+          io << "the slot (`--bind-from FLOW-ID` on a `gori run` sweep, a Repeater send, "
+          io << "`send_request` over MCP) — or write `$$#{first}` if the literal is what you meant"
+        end
+      end
+
+      # Drain and SAY it, for a `gori run` surface that has just printed its summary. Silent
+      # when nothing was recorded — a run whose slot resolved is a run with no new line.
+      private def self.report_unbound_slot_overlay(cmd : String) : Nil
+        note = unbound_overlay_note(Env.take_unbound_overlay)
+        STDERR.puts "#{cmd}: #{note}" if note
+      end
+
       # ── session bindings, headless ───────────────────────────────────────────────────
       #
       # A session binding lives in the MEMORY of the gori that observed it and is never
@@ -638,11 +696,54 @@ module Gori
         end
         bound = bindings.values.keys
         if bound.empty?
-          abort "#{cmd}: --bind-from: flow ##{flow_id} replayed (HTTP #{result.response.try(&.status) || "?"}) " \
-                "but no extract rule matched its response, so nothing was bound — check the rule's " \
-                "host glob, condition and selector with `gori run rewriter extract`"
+          abort "#{cmd}: --bind-from: " \
+                "#{bind_from_nothing_bound(bindings, flow_id, result.response.try(&.status))}"
         end
         STDERR.puts "bind-from: flow ##{flow_id} replayed → bound #{Env.token_list(bound)}"
+        # The seed replay ran with the table still EMPTY — that is what it is for — so the
+        # active slot's own `$NAME` went out literally on this one request and
+        # `Env.report_unbound_overlay` recorded it. Drained and DROPPED here: the sweep that
+        # follows resolves those names, and letting the record survive would put
+        # `unbound_overlay_note` on the summary of a run whose bindings are fine. Measured:
+        # `--slot idA --bind-from 1` warned about the very `$SESSION` the same line above
+        # reports as bound. Anything STILL unbound is re-recorded by the sweep's own sends
+        # (`take_unbound_overlay` clears the log throttle with it), so nothing is swallowed.
+        Env.take_unbound_overlay
+      end
+
+      # WHY a `--bind-from` replay came back with nothing bound — the sentence that decides
+      # what the operator does next, and the one place it was measurably wrong.
+      #
+      # The default arm blames three innocent things (host glob, condition, selector) and is
+      # right only when the rule was ASKED and missed. `Bindings#scoped_out` names the other
+      # case: an enabled rule that MATCHED but was never asked, because a session slot claims
+      # it and no slot is the send context. `gori run session edit idA --rule SESSION` silently
+      # broke every existing `--bind-from` playbook that way, and `--clear-rules` silently
+      # fixed it — with this sentence sending the operator to re-check a rule that was never
+      # the problem, three times over.
+      #
+      # Both halves can be true at once (one rule scoped out, another asked and missed), so the
+      # scoped-out arm names its rules and slots and leaves the generic advice attached.
+      # `status` and not the whole `Repeater::Result`, so the sentence has exactly the two
+      # inputs it reads and a spec can hold both.
+      private def self.bind_from_nothing_bound(bindings : Gori::Bindings, flow_id : Int64,
+                                               status : Int32?) : String
+        replayed = "flow ##{flow_id} replayed (HTTP #{status || "?"}) but nothing was bound"
+        skipped = bindings.scoped_out
+        if skipped.empty?
+          return "#{replayed} — no extract rule matched its response, so check the rule's " \
+                 "host glob, condition and selector with `gori run rewriter extract`"
+        end
+        # `{rule name, the slots claiming it}` → "$SESSION (claimed by idA)".
+        detail = skipped.join(", ") do |(name, slots)|
+          "#{Env.token_list([name])} (claimed by #{slots.join(", ")})"
+        end
+        pick = skipped.first[1].first
+        "#{replayed}, and #{skipped.size == 1 ? "the rule that would have bound is" : "the rules that would have bound are"} " \
+        "not being asked: #{detail}. A claimed rule is only read when its slot is the send " \
+        "context, and this run has no slot active — so the rule was skipped, not missed. Send " \
+        "as that identity (`--slot #{pick}`), or give the rule back to the global table " \
+        "(`gori run session edit #{pick} --clear-rules`)"
       end
 
       # Why `--bind-from` cannot bind anything in this project, or nil to go ahead. Shared by

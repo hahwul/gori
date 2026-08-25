@@ -25,6 +25,14 @@ private def gzipped(text : String) : Bytes
   io.to_slice
 end
 
+# ~172 KB of seeded word soup: a truncated gzip prefix of a SMALL body decodes to nothing,
+# which is a decode failure rather than the partial result the truncation examples pin.
+private def soup : String
+  words = %w[alpha beta gamma delta]
+  rng = Random.new(5)
+  String.build { |io| 30_000.times { io << words[rng.rand(4)] << ' ' } }
+end
+
 # Every write goes to `Paths.home_dir/preview`, so the examples run under a GORI_HOME of
 # their own and put the real one back.
 private def with_preview_home(&)
@@ -159,6 +167,68 @@ describe Gori::ExternalOpen do
       end
     end
 
+    # `ContentDecode` hands back the still-COMPRESSED entity for a coding it cannot undo (its
+    # display contract: the note beside the bytes says what happened), so `decoded || body`
+    # wrote the wire bytes out, named them from the response's own `Content-Type`, and reported
+    # a successful open. The operator got a `.html` file byte-identical to the compressed
+    # stream — while the History detail pane one key away rendered the reason in yellow.
+    it "refuses an encoding it cannot undo instead of writing the compressed wire bytes" do
+      with_preview_home do |root|
+        wire = "\x00\x01compressed wire bytes that are not a document".to_slice
+        expect_raises(Gori::Error, /unsupported/) do
+          Gori::ExternalOpen.write("flow-11", resp("text/html", "compress"), wire)
+        end
+        dir = File.join(root, "preview")
+        (Dir.exists?(dir) ? Dir.children(dir) : [] of String).should be_empty
+      end
+    end
+
+    # The entry guard tests the STORED bytes; a body that decodes to nothing got past it and a
+    # 0-byte file was written and announced as an open document.
+    it "refuses a body that decodes to nothing rather than opening an empty file" do
+      with_preview_home do
+        expect_raises(Gori::Error, /decode|nothing/) do
+          Gori::ExternalOpen.write("flow-12", resp("text/html", "gzip"), "not gzip at all".to_slice)
+        end
+      end
+    end
+
+    # `decode` discarded both the note and `decode_full`'s end-of-stream flag, so a stream cut
+    # mid-way was written as a partial document and the status line said "opened … 48.7KB"
+    # with no "(truncated)" — the operator reads the tail as the document's end.
+    it "marks a preview truncated when the stream never reached end-of-stream" do
+      with_preview_home do
+        full = gzipped(soup)
+        r = Gori::ExternalOpen.write("flow-13", resp("text/html", "gzip"), full[0, full.size // 2])
+        r.bytes.should be > 0
+        r.bytes.should be < soup.bytesize
+        r.truncated.should be_true
+      end
+    end
+
+    # The capture cap defaults to 2 MiB (`DEFAULT_CAPTURE_MAX_MIB`), so a stored body over that
+    # size IS a prefix — not an edge case. Every other surface reads the flag (`gori history`
+    # prints `[response body truncated]`, MCP and the HAR export carry it); this path had no
+    # way to be told, so it opened the prefix and called it the document.
+    it "carries the source's own truncation verdict into the result" do
+      with_preview_home do
+        r = Gori::ExternalOpen.write("flow-14", resp("text/html"), "<h1>cut</h1>".to_slice, true)
+        r.truncated.should be_true
+        File.read(r.path).should eq("<h1>cut</h1>") # still written — a prefix renders
+      end
+    end
+
+    # A preview holds a WHOLE response body — session tokens, PII — under GORI_HOME rather than
+    # a project directory, and it outlives the project. Every other gori file that holds
+    # captured data is 0600 (store, settings, project registry, CA key); a bare `File.write`
+    # made these 0644, readable by every account on the box.
+    it "writes the preview 0600, like every other file that holds captured data" do
+      with_preview_home do
+        r = Gori::ExternalOpen.write("flow-15", resp("text/html"), "<h1>secret</h1>".to_slice)
+        (File.info(r.path).permissions.value & 0o777).should eq(0o600)
+      end
+    end
+
     it "gives two writes of the same stem two files, so a re-send is never a stale render" do
       with_preview_home do
         a = Gori::ExternalOpen.write("repeater-1", resp("text/html"), "<p>first</p>".to_slice)
@@ -199,6 +269,29 @@ describe Gori::ExternalOpen do
 
     it "swallows a missing directory rather than failing the write that called it" do
       Gori::ExternalOpen.prune(File.join(File.tempname("gori-no-such"), "preview"))
+    end
+
+    # gori writes files; the DESKTOP writes back. Hand macOS a `.zip` preview and `open` passes
+    # it to Archive Utility, which unpacks the tree IN here. A `File.file?` filter dropped those
+    # directories out of the sweep entirely — never counted against `keep`, never deleted, one
+    # per archive preview, accumulating under GORI_HOME forever.
+    it "sweeps directories a desktop opener unpacked here, not only the files it wrote" do
+      with_preview_home do |root|
+        dir = File.join(root, "preview")
+        Dir.mkdir_p(dir)
+        unpacked = File.join(dir, "flow-1-unpacked")
+        Dir.mkdir_p(File.join(unpacked, "nested"))
+        File.write(File.join(unpacked, "nested", "index.html"), "<p>x</p>")
+        File.touch(unpacked, Time.utc)
+        3.times do |i|
+          p = File.join(dir, "newer#{i}.txt")
+          File.write(p, "x")
+          File.touch(p, Time.utc + (i + 1).seconds)
+        end
+        Gori::ExternalOpen.prune(dir, keep: 3)
+        Dir.children(dir).sort.should eq(["newer0.txt", "newer1.txt", "newer2.txt"])
+        Dir.exists?(unpacked).should be_false # the whole tree, not just its top entry
+      end
     end
   end
 

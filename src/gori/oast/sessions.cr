@@ -115,14 +115,78 @@ module Gori::Oast
       bound.provider.resume(http, bound.session)
     end
 
+    # What a release actually DID. Four states because "released" and "not released" were
+    # never the only two, and collapsing them is how three surfaces came to report a teardown
+    # that had not happened: `Provider#deregister`'s default is a no-op, so for webhook.site,
+    # postbin, BOAST and custom-http `release` returned true without a packet leaving the
+    # process while the docs promised "payloads minted from it stop resolving".
+    enum Release
+      Released      # the server was told, and acknowledged
+      NoServerState # there was never a third-party registration to release (custom-http)
+      Unsupported   # this backend registered state and offers no way to release it (BOAST)
+      Failed        # a teardown exists and it errored — the registration is still live
+
+      # Is the listener actually gone? The one question a surface asks before printing
+      # "released" or refusing to. `NoServerState` counts: nothing was ever registered, so
+      # nothing is still listening on anyone else's server.
+      def torn_down? : Bool
+        case self
+        in Released, NoServerState then true
+        in Unsupported, Failed     then false
+        end
+      end
+    end
+
     # Release the server-side registration. The local row and every callback it collected
-    # stay — this releases the LISTENER, not the evidence. Returns false when deregister
-    # raised (network / provider error) so a surface can refuse to print "released".
-    def release(bound : Bound, http : Http) : Bool
-      bound.provider.deregister(http, bound.session)
-      true
-    rescue
-      false
+    # stay — this releases the LISTENER, not the evidence.
+    def release_outcome(bound : Bound, http : Http) : Release
+      release_detail(bound.provider, bound.session, http)[0]
+    end
+
+    # The outcome PLUS the failing teardown's own text, for a caller that has the pieces but
+    # not a `Bound` — the TUI performs its release on a detached fiber and reports it from a
+    # later drain. It takes the pair rather than re-deciding, because deciding it a second
+    # time is precisely how the tab came to print "released" for a backend that has no
+    # teardown: four branches hand-rolled beside the three lines that already own them.
+    #
+    # The text is the one thing `release_message` cannot know — `Failed` reads "(provider
+    # error)" on its own, which is indistinguishable between a 503 and a DNS failure.
+    def release_detail(provider : Provider, session : Session, http : Http) : {Release, String?}
+      return {Release::NoServerState, nil} unless provider.server_state?
+      return {Release::Unsupported, nil} unless provider.deregisters?
+      provider.deregister(http, session)
+      {Release::Released, nil}
+    rescue ex
+      {Release::Failed, ex.message}
+    end
+
+    # The sentence a surface prints for a release outcome. One phrasing, three surfaces — the
+    # same contract `message_for` keeps for `Problem`, and the reason it names the provider:
+    # "BOAST cannot be released" is actionable (rotate the secret, or accept a live listener)
+    # where a bare "could not deregister" reads as a transient network fault.
+    def release_message(outcome : Release, bound : Bound, id : Int64, callbacks : Int32) : String
+      release_message(outcome, bound.session.kind.label, id, callbacks)
+    end
+
+    # The same sentence for a caller that no longer holds the `Bound` — the TUI reports a
+    # release from a drain loop, after the fiber that performed it is gone. The label is the
+    # only thing the phrasing takes from the binding, so passing it keeps the three surfaces
+    # on one wording instead of growing a fourth.
+    def release_message(outcome : Release, kind_label : String, id : Int64, callbacks : Int32) : String
+      kept = callbacks == 1 ? "its 1 callback stays" : "its #{callbacks} callbacks stay"
+      case outcome
+      in Release::Released
+        "released OAST session ##{id} — #{kept}."
+      in Release::NoServerState
+        "OAST session ##{id} needed no release — #{kind_label} keeps no " \
+        "server-side registration (it polls an endpoint you run); #{kept}."
+      in Release::Unsupported
+        "OAST session ##{id} was NOT released — #{kind_label} has no " \
+        "deregistration API, so payloads minted from it keep resolving; #{kept}."
+      in Release::Failed
+        "could not deregister OAST session ##{id} (provider error) — payloads minted from it " \
+        "may still resolve; #{kept}."
+      end
     end
 
     # Persist one polled interaction against its session, with the interaction's OWN time
@@ -157,12 +221,39 @@ module Gori::Oast
     # global provider is the ordinary case for anyone who configured interactsh once and
     # reuses it across projects. Re-resolve those by the only identity the row still carries,
     # the kind and the server it registered against.
+    #
+    # The row id alone is NOT an identity. `oast_providers.id` is a plain `INTEGER PRIMARY KEY`
+    # with no AUTOINCREMENT, so SQLite hands a deleted row's id to the next insert — delete the
+    # second interactsh provider and add a webhook.site one, and the sessions that pointed at
+    # the first now resolve to the second. `bind` takes the HOST from the session and the TOKEN
+    # from the config, so that mismatch does not merely mislabel a row: it puts a webhook.site
+    # api key in an `Authorization:` header aimed at an interactsh host the operator never
+    # meant to hand it to. Accept the id ONLY when the kind agrees, and fall through to the
+    # kind+endpoint re-resolution below when it does not.
+    #
+    # Falling through when the id is simply GONE matters for its own reason: deleting a provider
+    # and re-adding the same one used to strand every session it minted with a provider_key of
+    # nil, which the TUI reads as "not resumable" forever. `Store#delete_oast_provider` now
+    # NULLs the column, and this is the path those rows land on.
     def config_for(rec : Store::OastSessionRecord,
                    configs : Array(ProviderConfig)) : ProviderConfig?
       if pid = rec.provider_id
-        return configs.find { |p| p.project_id == pid }
+        hit = configs.find { |p| p.project_id == pid }
+        return hit if hit && same_kind?(hit.kind, rec.kind)
       end
-      configs.find { |p| p.kind == rec.kind && same_endpoint?(p.host, rec.server_url) }
+      configs.find { |p| same_kind?(p.kind, rec.kind) && same_endpoint?(p.host, rec.server_url) }
+    end
+
+    # Do a provider row and a session row name the same backend? Through `ProviderKind.parse?`
+    # rather than by string ==, because the two columns are written by different producers:
+    # a config's `kind` is the LABEL ("webhook.site", "custom-http") while a session's is
+    # whatever the register persisted, and `parse?` already accepts both spellings. A kind
+    # neither side can parse falls back to the literal compare so an unknown backend still
+    # matches itself.
+    def same_kind?(config_kind : String, session_kind : String) : Bool
+      a = ProviderKind.parse?(config_kind)
+      b = ProviderKind.parse?(session_kind)
+      a && b ? a == b : config_kind == session_kind
     end
 
     # Compare a configured host against a session's server_url the way `Provider#base_url`

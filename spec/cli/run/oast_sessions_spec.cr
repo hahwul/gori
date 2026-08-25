@@ -123,6 +123,33 @@ describe "gori run oast — persisted sessions" do
       end
     end
 
+    # last_poll_at is a LIVENESS signal, not a "we tried" counter: `OutOfBand::StoreMinter`
+    # picks the most-recently-polled session to mint every blind/OOB probe payload against.
+    # Stamping it after a FAILED poll made a listener whose endpoint 500s on every tick beat
+    # every healthy one — payloads planted against a session nobody can read, callbacks that
+    # never reach `oast_callbacks`, and a scan that comes back clean.
+    it "does NOT stamp last_poll_at for a poll that errored" do
+      with_store do |store|
+        id = store.insert_oast_session(nil, "custom-http", "https://oob.example/hits",
+          "corr", "", nil, nil)
+        store.flush
+        bound = Gori::Oast::Sessions.bind(store, id, [] of Gori::Oast::ProviderConfig)
+          .as(Gori::Oast::Sessions::Bound)
+        err = IO::Memory.new
+        Gori::CLI::Run.spec_oast_stream_session(store, bound,
+          FakePollHttp.new("boom!", 500), id, IO::Memory.new, err).should be_true
+        store.flush
+        err.to_s.should contain("poll error")
+        store.get_oast_session(id).not_nil!.last_poll_at.should be_nil
+
+        # …and a later poll that ANSWERS still stamps it, so the signal is not merely disabled.
+        Gori::CLI::Run.spec_oast_stream_session(store, bound, FakePollHttp.new("[]"), id,
+          IO::Memory.new, IO::Memory.new).should be_false
+        store.flush
+        store.get_oast_session(id).not_nil!.last_poll_at.should_not be_nil
+      end
+    end
+
     it "emits the payload and each callback as JSON lines under --json" do
       with_store do |store|
         id = store.insert_oast_session(nil, "custom-http", "https://oob.example/hits",

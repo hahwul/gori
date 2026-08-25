@@ -51,17 +51,17 @@ module Gori
         end)
       end
 
+      # `Notes.create`, not load → serialize → `set_setting`: the note set is ONE settings row
+      # holding the whole document, so an append done as two statements commits a document
+      # built before a peer's row landed and DELETES it. Two `gori mcp` processes against one
+      # project kept 103 of 200 notes that way, every call answering `isError:false`.
+      # `Notes.create` runs the read and the write inside one `BEGIN IMMEDIATE` (see
+      # `Store#mutate_setting`), and mints the id from the set the transaction read — so two
+      # concurrent creates get two ids and both notes survive.
       private def create_note(h) : Result
         text = str(h, "text") || ""
-        doc = Notes.load(store)
-        new_id = doc.next_id
-        new_entry = Notes::NoteEntry.new(new_id, text)
-        new_notes = doc.notes + [new_entry]
-        new_cur = new_notes.size - 1
-        new_next_id = new_id + 1
-
-        serialized = Notes.serialize(new_cur, new_notes, new_next_id)
-        return busy("note NOT saved (store busy or unwritable); nothing was persisted") unless store.set_setting(Notes::DOCS_KEY, serialized)
+        new_id = Notes.create(store, text)
+        return busy("note NOT saved (store busy or unwritable); nothing was persisted") unless new_id
 
         Result.new(JSON.build do |j|
           j.object do
@@ -77,16 +77,15 @@ module Gori
         text = str(h, "text")
         return Result.new("missing 'text' parameter", is_error: true) unless text
 
-        doc = Notes.load(store)
-        entry_idx = doc.notes.index { |n| n.id == id }
-        return not_found("no note with id #{id}") unless entry_idx
-
-        updated_entry = Notes::NoteEntry.new(id, text)
-        new_notes = doc.notes.dup
-        new_notes[entry_idx] = updated_entry
-
-        serialized = Notes.serialize(doc.cur, new_notes, doc.next_id)
-        return busy("note NOT updated (store busy or unwritable); it is unchanged") unless store.set_setting(Notes::DOCS_KEY, serialized)
+        # The id is looked up INSIDE the write transaction — see `create_note`. That is also
+        # what makes `Missing` trustworthy: it is "not in the set this write is amending",
+        # not "not in a copy we read some milliseconds ago".
+        case Notes.update(store, id, text)
+        when .missing?
+          return not_found("no note with id #{id}")
+        when .busy?
+          return busy("note NOT updated (store busy or unwritable); it is unchanged")
+        end
 
         Result.new(JSON.build do |j|
           j.object do
@@ -100,16 +99,12 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
 
-        doc = Notes.load(store)
-        entry_idx = doc.notes.index { |n| n.id == id }
-        return not_found("no note with id #{id}") unless entry_idx
-
-        new_notes = doc.notes.dup
-        new_notes.delete_at(entry_idx)
-        new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
-
-        serialized = Notes.serialize(new_cur, new_notes, doc.next_id)
-        return busy("note NOT deleted (store busy or unwritable); it is unchanged") unless store.set_setting(Notes::DOCS_KEY, serialized)
+        case Notes.delete(store, id)
+        when .missing?
+          return not_found("no note with id #{id}")
+        when .busy?
+          return busy("note NOT deleted (store busy or unwritable); it is unchanged")
+        end
 
         Result.new(JSON.build do |j|
           j.object do

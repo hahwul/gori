@@ -121,14 +121,27 @@ module Gori::Tui
     end
 
     # The identity of whatever `@sub_sel` currently points at, or nil when it points at nothing.
-    # An extract rule is its row id; a binding row is its `rule_id` (the extract rule it resolves
-    # for), which is what makes a row that rule's row across a reload.
-    private def sub_selection_key : Int64?
-      @sub == :extract ? extract_list[@sub_sel]?.try(&.id) : binding_rows[@sub_sel]?.try(&.rule_id)
+    # An extract rule is its row id; a binding row is its `rule_id` PLUS the table it names.
+    #
+    # The rule id alone stopped identifying a row the moment `Bindings#rows` grew a per-slot
+    # dimension: a rule two session slots claim yields two rows with the SAME `rule_id`, so
+    # `index { … }` always answered the FIRST of them and the cursor jumped off the second one
+    # on every reload tick — which is every external change, i.e. constantly on a live proxy.
+    # A String key because the pair is what is unique; both halves come out of the same `Row`.
+    private def sub_selection_key : String?
+      if @sub == :extract
+        extract_list[@sub_sel]?.try { |r| "extract:#{r.id}" }
+      else
+        binding_rows[@sub_sel]?.try { |r| "binding:#{r.rule_id}@#{r.slot}" }
+      end
     end
 
-    private def sub_index_of(key : Int64) : Int32?
-      @sub == :extract ? extract_list.index { |r| r.id == key } : binding_rows.index { |r| r.rule_id == key }
+    private def sub_index_of(key : String) : Int32?
+      if @sub == :extract
+        extract_list.index { |r| "extract:#{r.id}" == key }
+      else
+        binding_rows.index { |r| "binding:#{r.rule_id}@#{r.slot}" == key }
+      end
     end
 
     # Flush an edited preview sample to the project store on leave/quit. Compared against the
@@ -874,8 +887,14 @@ module Gori::Tui
     def binding_clear : Nil
       row = binding_rows[@sub_sel]? || return @host.status("no binding selected")
       return @host.status("$#{row.name} is not bound") unless row.bound?
-      bindings.clear(row.name)
-      @host.status("$#{row.name} cleared")
+      # `clear_row` takes the row's OWN table, because the pane lists one row per (rule,
+      # table) and the operator is pointing at ONE of them. The predecessor this replaced
+      # forgot the current send context instead — the active slot plus the global table — so
+      # pressing it on the `user` row while `admin` was active wiped admin's token and left
+      # the row under the cursor still bound, with no way to clear it while that slot was not
+      # the active one. It is deleted; `clear_row(name, nil)` is how the global table is cleared.
+      bindings.clear_row(row.name, row.slot)
+      @host.status(row.slot ? "$#{row.name} cleared for #{row.slot}" : "$#{row.name} cleared")
     end
 
     # Commit the extract-rule editor overlay. Returns false — and says why — when the table

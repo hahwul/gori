@@ -191,6 +191,15 @@ module Gori::Tui
       nm = "$#{row.name}"
       x = screen.text(x, py, nm, row.bound? ? Theme.env_known : Theme.env_unknown, bg,
         row.bound? ? Attribute::None : Attribute::Italic, width: {rect.right - x, 0}.max) + 1
+      # WHICH TABLE this row is. `rows` emits one row per (rule, table it writes), so a rule
+      # two session slots claim is two rows here — and with the slot undrawn they were
+      # character-for-character identical apart from a masked preview, which is exactly the
+      # pair an operator most needs to tell apart. `as NAME` is the spelling the Repeater's
+      # send-context readout already uses; an unclaimed rule has one row and no tag.
+      if slot = row.slot
+        x = screen.text(x, py, "as #{slot}", Theme.accent, bg,
+          width: {rect.right - x, 0}.max) + 1
+      end
       # `preview`, never the value: this row is the ONE place the operator sees a binding at
       # all, and it is still masked. The full value exists only in the captured traffic it
       # came from, where P7 says it must stay readable.

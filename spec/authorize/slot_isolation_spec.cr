@@ -77,7 +77,7 @@ describe "Authorize vs the active session slot" do
       ]
       origin.serve(2)
       target = Gori::Authorize::Engine
-        .live(Gori::Outbound.cli(nil, false), false, 5.seconds)
+        .live(Gori::Outbound.cli(nil, false), false, 5.seconds, overrides: nil)
         .run(detail, identities)
       target.should_not be_nil
 
@@ -156,7 +156,7 @@ describe "Authorize and per-identity bindings" do
 
       origin.serve(2)
       Gori::Authorize::Engine
-        .live(Gori::Outbound.cli(nil, false), false, 5.seconds)
+        .live(Gori::Outbound.cli(nil, false), false, 5.seconds, overrides: nil)
         .run(detail, slots.slots).should_not be_nil
 
       origin.requests.size.should eq(2)

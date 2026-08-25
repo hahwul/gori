@@ -1,5 +1,6 @@
 require "../url"
 require "../proxy/h2/head_codec"
+require "../proxy/codec/content_decode"
 
 module Gori
   module Export
@@ -35,8 +36,15 @@ module Gori
       def self.text(wire : String, target : String) : String?
         head, body = split_message(wire)
         lines = split_lines(head)
+        request_line = lines.first? || ""
+        # No request line, no request. An EMPTY head used to reach `resolve_url`, whose
+        # target-base fallback answers `https://acme.test` for an empty request-target — so a
+        # flow whose capture holds no head at all was handed back as `curl 'https://acme.test'`,
+        # a request nobody ever made, offered as if it were the capture. The one case with
+        # nothing runnable to hand over now includes the case with nothing captured.
+        return nil if request_line.strip.empty?
         header_lines = lines.size > 1 ? lines[1..] : [] of String
-        method, req_target, version = parse_request_line(lines.first? || "")
+        method, req_target, version = parse_request_line(request_line)
         url = resolve_url(req_target, target, header_lines)
         return nil if url.empty?
         command(method, url, header_lines, body, version)
@@ -61,32 +69,199 @@ module Gori
       # is the one place a hostile capture could aim this command. Quoted like the rest now.
       def self.command(method : String, url : String, header_lines : Array(String),
                        body : String, version : String = "") : String
+        # FIRST, and a refusal rather than a note: the URL is the one argument the command IS.
+        # There is no curl line without it and no `-X`-style fallback to fall back to, so a NUL
+        # in it means there is nothing runnable to hand over — see `nul_url_note`.
+        if note = nul_url_note(url)
+          return note
+        end
+        # Every caveat the bytes impose, appended as `#` comments after the last argument. A
+        # comment swallows the ` \` that continues its line, so the first of them ends the
+        # command — which is why they all sit at the end, and why a second one is still safe
+        # (the line it lands on is a comment too).
+        notes = [] of String
+        # The stored body is WIRE bytes. curl frames `--data-raw` itself, so the chunk framing
+        # has to come off with the coding that declared it.
+        entity, transfer_encoding = unchunk(header_lines, body, notes)
         parts = ["curl #{shell_quote(url)}"]
         if flag = version_flag(version, url)
           parts << flag
         end
         # Emit -X unless it's a plain bodyless GET (curl's default). A GET *with* a body
         # still needs -X GET, else curl silently promotes the request to POST.
-        method_note = nil
-        unless method.empty? || (method == "GET" && body.empty?)
-          if note = nul_method_note(method, body)
-            method_note = note
+        unless method.empty? || (method == "GET" && entity.empty?)
+          if note = nul_method_note(method, entity)
+            notes << note
           else
             parts << "-X #{shell_quote(method)}"
           end
         end
+        te_written = false
         each_header(header_lines) do |name, value|
           down = name.downcase
-          next if down == "host" || down == "content-length"
+          next if down == "content-length"
           next if MARKER_HEADERS.includes?(down)
+          # curl derives Host FROM THE URL — which is the captured header only when the capture's
+          # Host IS the URL's authority. When it is not, that disagreement is the request (a Host
+          # header injection test is nothing else), so it has to ride on the command.
+          next if down == "host" && host_is_url_authority?(value, url)
+          if down == "transfer-encoding" && (te = transfer_encoding)
+            next if te_written # the peeled list is emitted once, at the first TE line
+            te_written = true
+            next if te.empty?
+            parts << "-H #{shell_quote("#{name}: #{te}")}"
+            next
+          end
+          if note = nul_header_note(name, value)
+            notes << note
+            next
+          end
           parts << "-H #{shell_quote("#{name}: #{value}")}"
         end
-        parts << data_argument(body) unless body.empty?
+        parts << data_argument(entity) unless entity.empty?
         # LAST, like `data_argument`'s refusal and for the same reason: a `#` comment swallows
         # the ` \` that continues the line, so a note anywhere earlier would truncate the
         # command it is annotating.
-        parts << method_note if method_note
+        parts.concat(notes)
         parts.join(" \\\n  ")
+      end
+
+      # The refusal for a URL holding a NUL. The other end of the hole `nul_method_note` and
+      # `data_argument` already name, on the one argument that has no fallback: `shell_quote`
+      # carries every byte inside '…' except 0x00, and an argv is NUL-terminated. Measured with
+      # `curl` replaced by `/bin/echo` so execve's argv is visible, on a stored
+      # `GET /pa<NUL>th HTTP/1.1`:
+      #
+      #   zsh (macOS's default)   ARG https://acme.test/pa    — truncated, SILENTLY
+      #   bash                    "cannot execute binary file" / a syntax error on paste
+      #
+      # So the command would fetch a DIFFERENT resource than the capture, which is the single
+      # thing this serializer must never do. Emitting the whole thing as a comment is the only
+      # honest shape: a paste does nothing instead of doing the wrong thing.
+      private def self.nul_url_note(url : String) : String?
+        return nil unless url.to_slice.includes?(0_u8)
+        "# no command: the captured URL holds a NUL, which no shell argument can carry — a " \
+        "shell truncates the argument there (zsh silently, bash by refusing the line), so curl " \
+        "would request a different resource than the capture did. Read the request line with " \
+        "--format raw"
+      end
+
+      # The refusal for a header whose name or value holds a NUL, or nil when it does not. Same
+      # byte, same truncation, one argument over: `-H 'X-Nul: be<NUL>fore'` reaches curl as
+      # `X-Nul: be`, so the reproduction sends a header the capture did not. Dropped and named,
+      # the way `nul_method_note` drops `-X`.
+      #
+      # The note itself is written with the NUL ESCAPED — a raw one would truncate the comment
+      # that is about it.
+      private def self.nul_header_note(name : String, value : String) : String?
+        return nil unless name.to_slice.includes?(0_u8) || value.to_slice.includes?(0_u8)
+        "# -H omitted for #{nul_escaped(name)}: the captured header holds a NUL, which no shell " \
+        "argument can carry — a shell truncates it there and curl would send a header the " \
+        "capture did not. Read the head with --format raw"
+      end
+
+      # `s` with every NUL byte written as the text `\\0`, for a note ABOUT a NUL. Byte-wise, so
+      # a header name that is not valid UTF-8 is not rewritten into U+FFFD on its way into a
+      # sentence naming it.
+      private def self.nul_escaped(s : String) : String
+        bytes = s.to_slice
+        io = IO::Memory.new(bytes.size)
+        bytes.each do |b|
+          b == 0_u8 ? io << "\\0" : io.write_byte(b)
+        end
+        String.new(io.to_slice)
+      end
+
+      # The FINAL `chunked` transfer coding peeled off the body, as {the entity, the
+      # Transfer-Encoding value the command should carry instead} — the second nil when nothing
+      # declared chunked framing and the TE lines should be emitted as captured, and "" when
+      # `chunked` was the only coding and the header goes away entirely.
+      #
+      # A stored request body is the bytes off the WIRE, chunk framing included, and curl frames
+      # `--data-raw` ITSELF. Handed the wire bytes under the capture's own
+      # `Transfer-Encoding: chunked`, curl chunked them a second time: the origin decoded 14
+      # bytes where the capture sent 5. `--format json` (`note: "de-chunked"`) and the SARIF
+      # export both already report the entity, so the one artifact of the three that can actually
+      # be RUN was the one lying about what it sends.
+      #
+      # Only the final `chunked` comes off, and no compression does. A `Transfer-Encoding` of
+      # `gzip, chunked` is framing over CONTENT the origin still has to inflate, so the gzip
+      # layer stays on the command and on the bytes — the same split `ContentDecode` draws
+      # between framing and compression, and the same reason `Content-Encoding` is untouched.
+      private def self.unchunk(header_lines : Array(String), body : String,
+                               notes : Array(String)) : {String, String?}
+        return {body, nil} if body.empty?
+        codings = transfer_codings(header_lines)
+        return {body, nil} unless codings.last? == "chunked"
+        wire = body.to_slice
+        entity = String.new(Proxy::Codec::ContentDecode.dechunk(wire))
+        complete = Proxy::Codec::ContentDecode.chunked_complete?(wire)
+        # A head declaring `chunked` over a body that is NOT chunk-framed — a hand-authored
+        # request in the Repeater, an import that stored the entity. `dechunk` is tolerant and
+        # recovers NOTHING from one, so peeling would drop the operator's body silently, which is
+        # the failure this whole peel exists to avoid. Hand the bytes over as captured and say
+        # which of the two the head disagrees with.
+        if !complete && entity.empty?
+          notes << "# body sent as captured: the head declares Transfer-Encoding: chunked but " \
+                   "the stored #{wire.size} bytes are not chunk-framed, so there is no framing " \
+                   "to take off — curl will frame them itself"
+          return {body, nil}
+        end
+        cut = complete ? "" : " That stream never reached its terminating 0-chunk, so the " \
+                              "capture itself is cut."
+        notes << "# body de-chunked: --data-raw carries the #{entity.bytesize}-byte entity, not " \
+                 "the #{wire.size} chunk-framed bytes of the capture — curl frames --data-raw " \
+                 "itself, and sending the wire bytes under a chunked coding frames them twice." \
+                 "#{cut} --format raw has the wire bytes"
+        {entity, codings[0, codings.size - 1].join(", ")}
+      end
+
+      # Every Transfer-Encoding coding on the request, in wire order, lowercased. Across ALL
+      # TE lines: a repeated field is one comma-separated list (RFC 9110 §5.3), so the final
+      # coding is the last token of the last line, not of whichever line was looked at.
+      private def self.transfer_codings(header_lines : Array(String)) : Array(String)
+        out = [] of String
+        each_header(header_lines) do |name, value|
+          next unless name.downcase == "transfer-encoding"
+          value.split(',').each do |tok|
+            t = tok.strip.downcase
+            out << t unless t.empty?
+          end
+        end
+        out
+      end
+
+      # Is the captured `Host` the very authority the URL already carries? Only then is dropping
+      # it (for curl to derive from the URL) a reproduction rather than a rewrite. Compared with
+      # the scheme's DEFAULT PORT normalised away on both sides and case-insensitively, because
+      # `acme.test`, `ACME.test` and `acme.test:443` on an https URL are one authority.
+      private def self.host_is_url_authority?(host_value : String, url : String) : Bool
+        sep = url.index("://")
+        return false unless sep
+        scheme = url[0, sep].downcase
+        rest = url[(sep + 3)..]
+        slash = rest.index('/')
+        authority = slash ? rest[0, slash] : rest
+        # userinfo is curl's to send; it is never part of a Host header (RFC 9110 §7.2).
+        if at = authority.rindex('@')
+          authority = authority[(at + 1)..]
+        end
+        normalize_authority(authority, scheme) == normalize_authority(host_value.strip, scheme)
+      end
+
+      # An authority lowercased with the scheme's default port removed. An IPv6 literal keeps its
+      # brackets: the trailing `:port` is only a port when no `]` follows the last colon.
+      private def self.normalize_authority(authority : String, scheme : String) : String
+        a = authority.downcase
+        default = case scheme
+                  when "https", "wss" then "443"
+                  when "http", "ws"   then "80"
+                  else                     ""
+                  end
+        return a if default.empty?
+        colon = a.rindex(':')
+        return a unless colon && a.index(']', colon).nil?
+        a[(colon + 1)..] == default ? a[0, colon] : a
       end
 
       # The refusal for a method holding a NUL, or nil when there is none. Same hole
@@ -206,17 +381,60 @@ module Gori
         nil
       end
 
-      # Yield each well-formed header line as {stripped name, stripped value}; lines
-      # without a colon (blank/continuation) are skipped. ONE parse convention shared by
-      # `command`, the copy menu's Cookie row and the wscat builder, so they can't drift.
+      # Yield each header FIELD as {stripped name, stripped value}, obs-fold continuations folded
+      # into the field they continue. Lines with no colon that are not continuations (a blank
+      # line, a partial paste) are skipped. ONE parse convention shared by `command`, the copy
+      # menu's Cookie row and the wscat builder, so they can't drift.
+      #
+      # The fold is the whole point. RFC 9112 §5.2 makes a line whose first byte is SP or HTAB
+      # part of the PREVIOUS field's value, and this used to `strip` the name — which made a
+      # continuation that happens to carry a colon indistinguishable from a header of its own:
+      #
+      #   X-Long: part1        ->  -H 'X-Long: part1'    the real value, TRUNCATED
+      #     X-Fake: part2      ->  -H 'X-Fake: part2'    a header the wire never carried
+      #
+      # …while `--format json`, whose parser does NOT strip the name, reported the same head as
+      # `X-Long` plus `"  X-Fake"`. Three surfaces, three header sets, for one message. gori is
+      # the tool an operator points at header-parsing differences; the command it hands them must
+      # not have one of its own. Folded here into `part1 part2` — obs-fold replaced by one SP,
+      # which is what a recipient that accepts one is required to do.
       def self.each_header(header_lines : Array(String), & : String, String ->) : Nil
+        name = nil.as(String?)
+        value = ""
         header_lines.each do |line|
-          name, sep, value = line.partition(":")
+          if fold_line?(line)
+            # An ORPHAN fold — a continuation with no field above it (a head that starts with
+            # one) — continues nothing and is not a field either, so it is dropped rather than
+            # promoted to a header.
+            if name
+              cont = line.strip
+              value = value.empty? ? cont : "#{value} #{cont}" unless cont.empty?
+            end
+            next
+          end
+          if n = name
+            yield n, value
+            name = nil
+          end
+          fname, sep, fvalue = line.partition(":")
           next if sep.empty?
-          n = name.strip
-          next if n.empty?
-          yield n, value.strip
+          fname = fname.strip
+          next if fname.empty?
+          name = fname
+          value = fvalue.strip
         end
+        if n = name
+          yield n, value
+        end
+      end
+
+      # An obs-fold continuation line: its first BYTE is SP or HTAB. Byte-wise rather than
+      # `starts_with?(' ')` for the reason `split_lines` is byte-wise — a captured header line
+      # need not be valid UTF-8, and char iteration answers about U+FFFD instead of the byte.
+      private def self.fold_line?(line : String) : Bool
+        return false if line.empty?
+        b = line.to_slice[0]
+        b == 0x20_u8 || b == 0x09_u8
       end
 
       # POSIX single-quote: wrap in '…' and rewrite each embedded ' as '\'' so the

@@ -74,6 +74,20 @@ describe Gori::Msgpack do
       json_of(mp(0xd6, 0xff, 0, 0, 0, 0))
         .should eq(%({"$timestamp":"1970-01-01T00:00:00Z","$ext":"AAAAAA==","$ext_type":-1}))
     end
+
+    it "does not put base64 where it promised a time" do
+      # A seconds field outside `Time`'s own year 1..9999 range cannot be spelled as RFC 3339,
+      # and the fallback put the raw bytes under `$timestamp` — the field name still promising
+      # a readable time, the consumer handed base64 under it, and no way to tell that from a
+      # timestamp that simply looks like that. It is a WITHHELD reading, and this module's rule
+      # (stated two fields over, above `$ext`) is that those are named.
+      json_of("c70cff000000007fffffffffffffff".hexbytes)
+        .should eq(%({"$timestamp_unrepresentable":"out_of_range",) +
+                   %("$ext":"AAAAAH//////////","$ext_type":-1}))
+      # A width the spec does not define is the other reason, named apart from the first.
+      json_of(mp(0xd4, 0xff, 0x01))
+        .should eq(%({"$timestamp_unrepresentable":"width","$ext":"AQ==","$ext_type":-1}))
+    end
   end
 
   # Vectors produced by an INDEPENDENT implementation (python-msgpack 1.2.1, `use_bin_type`),
@@ -240,6 +254,24 @@ describe Gori::Msgpack do
       end
     end
 
+    it "calls a cut COUNT field truncated, the same as a cut length field" do
+      # `len` returned one `-1` for two different things — the bytes ran out, and the value is
+      # too wide for an Int32 — and every count caller read that as `malformed`. So `dc 00`, an
+      # array16 with one of its two count bytes, was "this is not MessagePack" while `d9 00`,
+      # the same cut one field over, was "this body was cut short": two halves of ONE reader
+      # disagreeing about what a cut means, and the count half refused a body the length half
+      # would have shown.
+      {"dc00", "de00", "dd000000", "df000000", "c700"}.each do |hex|
+        r = Gori::Msgpack.render(hex.hexbytes)
+        r.stop.should eq("truncated")
+        r.consumed.should eq(hex.hexbytes.size)
+      end
+      # A count no Int32 can hold is the OTHER reason, and it keeps the other answer: no input
+      # this process can be handed could satisfy it, which is a header claiming the impossible.
+      Gori::Msgpack.render(mp(0xdd, 0xff, 0xff, 0xff, 0xff)).stop.should eq("malformed")
+      Gori::Msgpack.render(mp(0xdb, 0xff, 0xff, 0xff, 0xff)).stop.should eq("malformed")
+    end
+
     it "names an empty body rather than rendering a bare null" do
       json, ok = Gori::Msgpack.to_json(Bytes.empty)
       json.should eq(%({"$partial":"truncated"}))
@@ -271,6 +303,18 @@ describe Gori::Msgpack do
       bad = Gori::Msgpack.render(mp(0x92, 0xc1, 0x01))
       bad.stop.should eq("malformed")
       bad.describes?(3).should be_false
+
+      # A header that LIES about a length wears the first case's clothes: a short read consumes
+      # every byte it was given — deliberately, so a cut landing inside a value still counts —
+      # so `stop` is `truncated` and `consumed == size`, exactly like a capture cap. What tells
+      # them apart is that this one decoded NOTHING: the whole rendering is the marker.
+      lie = Gori::Msgpack.render(mp(0xdb, 0x00, 0x10, 0x00, 0x00, 0x41, 0x41, 0x41))
+      lie.stop.should eq("truncated")
+      lie.consumed.should eq(8)
+      lie.decoded.should be_false
+      lie.describes?(8).should be_false
+      # …while the cut-short body above did decode something, which is the whole difference.
+      cut.decoded.should be_true
     end
 
     it "renders with an indent when asked, without a re-parse" do

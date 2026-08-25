@@ -610,6 +610,49 @@ describe Gori::Proxy::H2::Assembler do
     resp.advisory.not_nil!.should contain("RFC 8441 extended CONNECT")
   end
 
+  # A REFUSED extended CONNECT, which is the common answer: a WAF, a gateway or an origin with
+  # no RFC 8441 support turns the upgrade down with 426/400/403. `answer_ws_capture` takes the
+  # WebSocket codec back off the stream for that (`close_ws`), and the guard in `emit_ready`
+  # used to read `stream.ws` — nil by then — so the stream was DELETED with the client's
+  # request half still open. The client's next frame on that id allocated a fresh `Stream` and
+  # produced a second, invented `GET /` row against the target host.
+  it "does not invent a second flow when the origin refuses an extended CONNECT" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, connect_block))
+    refusal = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "400"}])
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, refusal))
+    # The client has not half-closed yet — it sends one more block on the same stream, exactly
+    # as it may (RFC 9113 §5.1: the request half is open until END_STREAM).
+    late = Gori::Proxy::H2::HPACK::Encoder.new.encode([{"x-late", "1"}])
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, late))
+
+    sink.requests.size.should eq(1)
+    sink.requests.first.method.should eq("CONNECT")
+    sink.requests.first.target.should eq("/chat")
+    # The refusal is answered where it arrives — a refused upgrade's error body is an ordinary
+    # response and does not wait for a half-close that may never come. The client's own
+    # half-close then rewrites the SAME row (`update_response` is last-write-wins), which is the
+    # shape the accepted-socket spec above already documents.
+    sink.responses.map(&.status).uniq.should eq([400])
+    sink.responses.map(&.flow_id).uniq.size.should eq(1)
+  end
+
+  # The 2xx control for the spec above: an ACCEPTED extended CONNECT was always one flow, and
+  # must stay one. A count-only assertion cannot tell "the refusal path is fixed" from "the
+  # projection stopped happening", so both dispositions are pinned side by side.
+  it "still projects exactly one flow when the origin ACCEPTS the extended CONNECT" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, connect_block))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+    assembler.feed("in", data_frame(1_u32, Frame::END_STREAM, "\x81\x03one"))
+    assembler.feed("out", data_frame(1_u32, Frame::END_STREAM, "\x88\x02\x03\xe8"))
+
+    sink.requests.size.should eq(1)
+    sink.requests.first.method.should eq("CONNECT")
+  end
+
   # The complement that decides whether either of the above means anything: an ordinary
   # CONNECT tunnel — no `:protocol` pseudo — must get NO advisory and NO head marker, or the
   # signal is on every CONNECT and says nothing.

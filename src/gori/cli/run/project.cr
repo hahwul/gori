@@ -894,13 +894,12 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          vars = Settings.project_env_vars.dup
-          if idx = vars.index { |(k, _)| k == key }
-            vars[idx] = {key, val}
-          else
-            vars << {key, val}
-          end
-          unless Env.save_project(store, vars)
+          # `Env.set_project_var`, not a load-edit-`save_project`: this command owns ONE key,
+          # and persisting the whole array from a copy read beforehand deletes every var a
+          # concurrent writer (a running `gori mcp`, the TUI's ENV pane, a second shell) added
+          # in between — while still printing "set". The read happens inside the write
+          # transaction, so only this key changes.
+          unless Env.set_project_var(store, key, val)
             store.close
             abort "gori run project env set: project is busy (write did not commit) — try again"
           end
@@ -934,14 +933,15 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          vars = Settings.project_env_vars.dup
-          before = vars.size
-          vars.reject! { |(k, _)| k == key }
-          if vars.size == before
+          # "no such key" is decided against the table this process just loaded (open_store
+          # hydrates it), because `Env.delete_project_var` folds that case into the same
+          # `false` a busy store returns and the two need different exit messages. The write
+          # is transactional, so removing this key cannot drop a peer's.
+          if Settings.project_env_vars.none? { |(k, _)| k == key }
             store.close
             abort "gori run project env delete: no env var named '#{key}'"
           end
-          unless Env.save_project(store, vars)
+          unless Env.delete_project_var(store, key)
             store.close
             abort "gori run project env delete: project is busy (write did not commit) — try again"
           end

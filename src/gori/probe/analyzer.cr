@@ -6,6 +6,7 @@ require "./event"
 require "../store"
 require "../scope"
 require "../fuzz/engine"
+require "../host_overrides"
 
 module Gori
   module Probe
@@ -52,8 +53,25 @@ module Gori
 
       private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 
+      # The project's HOST OVERRIDES table, dialed through by every active probe this analyzer
+      # sends (`execute_active`). Held as the SESSION'S LIVE INSTANCE — the same mutex-guarded
+      # object the Project tab's HOST OVERRIDES pane edits and the proxy reads — never a
+      # snapshot of our own. An analyzer outlives every edit made to that table: it is built
+      # once when the project opens and runs until it closes, so a private
+      # `HostOverrides.load(store)` would freeze at project-open and quietly send every
+      # subsequent probe to the address the operator has since corrected. `HostOverrides`
+      # exists in that shape for exactly this (see its constructor's note on the read path);
+      # the headless `Probe::Scan` is the one-shot case and takes a snapshot instead.
+      #
+      # Nilable with a nil default because `Session` is the sole production caller and the
+      # spec suite builds analyzers that never open a socket. What keeps a REAL caller from
+      # forgetting it is the required keyword on `Active.analyze` plus the source-grep guard
+      # in `spec/probe/host_overrides_wiring_spec.cr`, which covers this constructor too.
+      @overrides : Gori::HostOverrides?
+
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
-                     @mode : Mode, @verify_upstream : Bool)
+                     @mode : Mode, @verify_upstream : Bool,
+                     *, @overrides : Gori::HostOverrides? = nil)
         # The one scope decision this analyzer's active probes dial through. Layer 1 is the
         # strict ALLOWLIST (maybe_enqueue_active), and — new with the Outbound seam — its
         # sender now applies Layer 2 too, so Sandbox mode and explicit EXCLUDE rules stop a
@@ -347,6 +365,15 @@ module Gori
             end
             detail = @store.get_flow(ev.id)
             next unless detail
+            # BEFORE the `@analyzed` insert, exactly as in `catch_up` — the order is load-bearing,
+            # not style. `@analyzed` is capped at ANALYZED_CAP and `trim` drops the OLDEST ids, so
+            # marking a flow this feed does not scan spends a slot on it and evicts a real proxy
+            # flow's id instead. That evicted id is then absent when `catch_up` re-reads
+            # `recent_flows`, the sweep scans it a SECOND time, and `upsert_probe_issues`
+            # (`(code, host)` → `hit_count = hit_count + 1`) walks the count up and flips
+            # `sample_flow_id` — the very double-count this guard was added to stop, arriving
+            # through the other door.
+            next unless passive_feed?(detail.row)
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
             # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
@@ -386,6 +413,12 @@ module Gori
           break if @stopped || !@mode.scanning?
           next if @analyzed.includes?(row.id)
           next unless row.state.complete?
+          # Same guard as the live feed, and it is not redundant: this sweep re-reads
+          # `recent_flows` with no source filter, so a gori-originated row the live path
+          # skipped (or dropped) would arrive here instead. Checked BEFORE `get_flow` — the
+          # row already carries the answer, and not marking it `@analyzed` costs one set
+          # lookup per sweep rather than a detail read.
+          next unless passive_feed?(row)
           detail = @store.get_flow(row.id)
           next unless detail && detail.response_head
           @analyzed << row.id
@@ -395,6 +428,48 @@ module Gori
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
+      end
+
+      # Does this flow belong on the PASSIVE feed — is it traffic gori observed, rather than
+      # traffic gori made?
+      #
+      # The History feed stopped being proxy-only when the Repeater began recording its sends
+      # by DEFAULT (`Settings.repeater_record_history?`). Every `^R` now writes a flow and
+      # publishes a `:updated` event, which gave the passive engine a SECOND, unguarded
+      # consumer of the same send:
+      #
+      #   A. RepeaterController#probe_scan_repeater → scan_detail(detail, repeater_id: id)
+      #   B. Repeater::HistoryRecord.record → insert_flow → publish → passive_loop → scan_detail
+      #
+      # Nothing dedups them — `@analyzed` holds FLOW ids and path A never touches it — and
+      # `Store#upsert_probe_issues` keys on `(code, host)` and does `hit_count = hit_count + 1`,
+      # so every passive finding on that host climbed by TWO per send and its
+      # `sample_flow_id`/`sample_repeater_id` provenance flipped to whichever path landed last.
+      # Path B also passes `enqueue_active: true`, so in Active/Aggressive a hand-driven `^R`
+      # started firing active probes the operator never asked for — the exact hazard
+      # `AuthorizeController` was given an explicit guard for (`proxy_origin?`, whose comment
+      # says "the Repeater now records its sends by default … on the same feed"). This is the
+      # counterpart `Probe::Analyzer` never got.
+      #
+      # Only the FEED is filtered. Path A still scans, and `gori run probe`/MCP `probe_scan`
+      # still scan — so nothing loses coverage, it stops being counted twice.
+      #
+      # The axis is `FlowSource::Kind#self_scanned?` — "does the surface that made this flow
+      # ALREADY hand the same response to `scan_detail`?" — and emphatically NOT `sent_by_gori?`,
+      # which is what this guard first shipped with. `sent_by_gori?` is true for SEVEN kinds
+      # while only two have such a call, so it switched the passive engine off for Discover,
+      # Miner, Sequencer, Authorize and Probe: a crawl that walks a whole site produced zero
+      # passive findings, and the comment justifying it ("every gori surface that records
+      # history already runs its own explicit scan") was true of the two surfaces it named and
+      # of no others. Skipping is only ever safe when something else is scanning; see
+      # `self_scanned?` for the call site behind each `true`.
+      #
+      # An IMPORTED flow is NOT filtered (gori never sent it; it describes a real endpoint
+      # someone captured), and neither is a row whose provenance predates the V17 columns —
+      # a nil `source` answers "not self-scanned", so a project captured with an older gori
+      # keeps scanning exactly as before.
+      private def passive_feed?(row : Store::FlowRow) : Bool
+        !row.source.try(&.self_scanned?)
       end
 
       # Scan the WS frames a 101 flow has accumulated since the last scan — each frame exactly
@@ -592,7 +667,7 @@ module Gori
         # vs `\\`), then its pipeline group — several requests to one origin, sequentially, so
         # `idle_conns: 1` is the whole need. Closed in the ensure below.
         sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT,
-          keep_alive: true, idle_conns: 1)
+          keep_alive: true, idle_conns: 1, overrides: @overrides)
         # The WHOLE probe is captured evidence plus this rule's own canary — see
         # `Fuzz::Backend.all_verbatim` for why nothing in it is eligible for session-binding
         # expansion. This loop is the TWIN of the one in `Active.analyze`: same plans, same

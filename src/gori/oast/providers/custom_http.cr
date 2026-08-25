@@ -18,6 +18,17 @@ module Gori::Oast
         token: @token, registered: true)
     end
 
+    # There is no third-party registration behind a custom-http session — `register` above mints
+    # a correlation id locally and dials nothing — so "release the server-side state" has no
+    # subject here. Saying so is not the same as the silent no-op every other provider used to
+    # inherit: `Sessions.release` reads this as "nothing to release" and reports a clean
+    # teardown, where a provider that DID register and cannot tear down (BOAST) is reported as
+    # not released. The operator's own endpoint keeps logging either way, which is theirs to
+    # stop.
+    def server_state? : Bool
+      false
+    end
+
     def generate_payload(session : Session) : String
       sep = session.server_url.includes?('?') ? '&' : '?'
       "#{session.server_url}#{sep}oid=#{Crypto.random_id(10)}"

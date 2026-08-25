@@ -75,12 +75,42 @@ module Gori::Proxy
       # Refusal sentences this listener has already written to `gori.log`. The FLOW is the record
       # an operator reads; this bounds the log against a client that reconnects forever.
       @socks5_logged = Set(String).new
+      # Destinations this listener has already told the operator it is relaying blind because
+      # `network.tls_passthrough` lists them (see `note_passthrough_blackout`). Per LISTENER and
+      # not per connection — `Proxy::Server` serves every connection this listener accepts, each
+      # in its own fiber, so anything that is a fact about ONE connection may not live here.
+      # This is a fact about the CONFIGURATION, which is why it may.
+      @passthrough_noted = Set(String).new
     end
 
     # How many distinct SOCKS5 refusal sentences one listener writes to `gori.log`. Same shape
     # and the same reason as `ClientConn::COMPRESSED_SKIP_LOG_CAP`: the vocabulary is small and
     # bounded, and a client cycling through it must not grow the set for the process's life.
     SOCKS5_LOG_CAP = 8
+
+    # How many distinct destinations one listener will announce as a passthrough blackout, in
+    # `gori.log` and as a flow. Same shape and the same reason as `SOCKS5_LOG_CAP` above: the
+    # list is the operator's and is small, and a client cycling through ports must not grow the
+    # set for the process's life.
+    PASSTHROUGH_NOTE_CAP = 16
+
+    # How long a SOCKS5 connection to a `network.tls_passthrough` host may stay SILENT before
+    # the listener stops waiting for a first byte to route on and relays it byte-exact.
+    #
+    # The number buys back the capture the setting's name promises it would not cost. Matching
+    # the list before any peek made `tls_passthrough` a whole-protocol blackout — plaintext
+    # `http://` to a listed host was relayed with no flow and no advisory — and never looking at
+    # the clock made a server-speaks-first peer (SMTP/IMAP/POP3/MySQL, and `ssh -D`, which is
+    # what most people point at this listener) wait out the 30 s client read timeout with the
+    # origin never dialled. A deadline answers both: bytes inside it route exactly as they
+    # always did, and silence past it is the one shape that cannot be routed on at all.
+    #
+    # A SECOND is far past what the client-speaks-first side needs and far short of what the
+    # other side was paying. A client that has a request in hand writes it the instant the grant
+    # lands — it opened the tunnel BECAUSE it had one — so the wait it has to beat is its own
+    # scheduling plus one RTT, not a think time. And the cost is paid only by a connection to a
+    # host the operator has already asked gori not to look inside.
+    PASSTHROUGH_PEEK_WAIT = 1.second
 
     # How many ports past the requested one to probe before giving up to ephemeral.
     FALLBACK_TRIES = 16
@@ -250,9 +280,9 @@ module Gori::Proxy
     # it arrived through.
     private def serve_reverse(client : TCPSocket, origin : {String, String, Int32}) : Nil
       scheme, host, port = origin
-      first = peek_first(client, scheme, host, port)
+      first, stream = route_prefix(client, peek_first(client, scheme, host, port))
       if first && !first.empty? && first[0] == Tls::ClientHello::RECORD_HANDSHAKE
-        return serve_reverse_tls(client, origin)
+        return serve_reverse_tls(client, stream, origin)
       end
       # h2c prior knowledge (#737). A reverse listener IS the origin — the authority is
       # declared, not derived — so RFC 9113 §3.4 is as well defined here as it is for gori's own
@@ -269,13 +299,13 @@ module Gori::Proxy
           end
           return close_client(client)
         end
-        return serve_h2c(client, host, port, origin_dst: nil)
+        return serve_h2c(client, stream, host, port, origin_dst: nil)
       end
       # `Cleartext` describes the CLIENT leg, which is this listener's own socket and carried no
       # TLS handshake. `scheme` here is the declared ORIGIN's, and an https origin does not give
       # this client an ALPN offer it never received — the TLS-terminating half of the same
       # listener is `serve_reverse_tls`, and it stamps what its handshake actually observed.
-      ClientConn.new(client, scheme, @sink,
+      ClientConn.new(stream, scheme, @sink,
         fixed_host: host, fixed_port: port, listener_pinned: true, tls_upstream: scheme == "https",
         rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
         self_addr: {@host, @port}, rewrite_fixed_host: @rewrite_host, extractor: @extractor,
@@ -292,7 +322,8 @@ module Gori::Proxy
     # From `intercept` onward this is byte-for-byte the CONNECT path, so ALPN reflection and
     # capture behave identically. Every DROP path closes the client socket explicitly, for the
     # reason spelled out on `serve_pinned_tls`.
-    private def serve_reverse_tls(client : TCPSocket, origin : {String, String, Int32}) : Nil
+    private def serve_reverse_tls(client : TCPSocket, stream : IO,
+                                  origin : {String, String, Int32}) : Nil
       scheme, host, port = origin
       tls = @tls
       return close_client(client) unless tls
@@ -301,10 +332,12 @@ module Gori::Proxy
       # pointed at a host their own sandbox excludes — but Layer 2 is the layer that must be
       # identical on every surface, so it is applied here exactly as everywhere else.
       return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
-      # No PrefixIO: `peek` above did not consume, so the ClientHello is still in the socket's
-      # buffer for OpenSSL to read. (The transparent path needs one only because peek_sni does
-      # consume what it parses.)
-      tls.intercept(host, port, client, @sink, tls_upstream: scheme == "https",
+      # `stream` and not `client`: on the common path `peek` consumed nothing and the two ARE
+      # the same socket, with the ClientHello still in its buffer for OpenSSL to read. They
+      # differ only when `route_prefix` had to READ the second record byte to answer
+      # `record_start?` — then `stream` is the `PrefixIO` replaying it, and handing the bare
+      # socket on here would hand OpenSSL a ClientHello with its first bytes missing.
+      tls.intercept(host, port, stream, @sink, tls_upstream: scheme == "https",
         rewrite_host: @rewrite_host)
     end
 
@@ -347,7 +380,7 @@ module Gori::Proxy
     # Every refusal CLOSES the socket. Nothing else will: ownership never passes to a
     # `ClientConn#run` on this path, and the accept fiber's rescue only covers pre-run setup —
     # the same reasoning `serve_pinned_tls` spells out.
-    private def serve_h2c(client : TCPSocket, host : String, port : Int32,
+    private def serve_h2c(client : TCPSocket, stream : IO, host : String, port : Int32,
                           origin_dst : {String, Int32}?) : Nil
       if Settings.http2_disabled?
         ::Log.warn do
@@ -365,11 +398,14 @@ module Gori::Proxy
       # `Cleartext` for the same reason as the branches above — and the h1 preface refusal that
       # reads it is unreachable from here anyway (this ClientConn serves h2c prior knowledge and
       # never enters the HTTP/1.1 loop), so it is the honest observation, not a placeholder.
-      conn = ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
+      conn = ClientConn.new(stream, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
         host_overrides: @host_overrides, origin_dst: origin_dst, extractor: @extractor,
         h2_offer: H2Offer::Cleartext, client_tls: false)
       begin
-        conn.serve_h2c_prior_knowledge(host, port, client)
+        # `stream` carries the preface — all 24 octets of it, whether they were still in the
+        # socket's own buffer or `route_prefix` had to read the first four to tell `"PRI "` from
+        # `POST`. `close_client` still closes the SOCKET, which is what owns the fd.
+        conn.serve_h2c_prior_knowledge(host, port, stream)
       ensure
         close_client(client)
       end
@@ -478,25 +514,85 @@ module Gori::Proxy
     # Route the granted connection on its first byte, exactly as the transparent listener does.
     private def serve_socks5_target(client : TCPSocket, target : Socks5::Target,
                                     local_host : String?) : Nil
+      # `network.tls_passthrough` decides HOW LONG this listener waits for the client's first
+      # byte. It does NOT decide whether to look at one, and the difference is the whole of this
+      # branch.
+      #
+      # Matching the list ahead of the peek and relaying on the match fixed a real hang and
+      # opened a silent hole. The hang: the peek waits for the CLIENT, and SMTP, IMAP, POP3,
+      # MySQL and SSH are SERVER-speaks-first, so the client sits waiting for a banner while
+      # both peers burn the 30 s client read timeout with the origin never dialled at all —
+      # `socks5.cr` says in its own comments that `ssh -D` is what most people point at this
+      # listener. The hole: a relay decided before any client byte cannot tell a ClientHello
+      # from `GET / HTTP/1.1`, so plaintext `http://` to a listed host was piped through
+      # byte-for-byte with no flow, no advisory and nothing in History to say a request had
+      # happened. The setting is called `tls_passthrough`, the UI and the help describe TLS
+      # hosts, and an operator who listed `internal.corp` to dodge a pinned app lost every
+      # cleartext capture for it — "nothing came" and "nobody looked" reading the same (P4).
+      #
+      # A DEADLINE separates the two. Bytes inside it route exactly as they did before the list
+      # was ever consulted: cleartext goes to `ClientConn` and is captured, and a ClientHello
+      # reaches `serve_pinned_tls`, which asks the list for itself and relays there — the one
+      # place it was ever asked and the one place a `tls_passthrough` decision can be made about
+      # actual TLS. Silence past it is the only shape that cannot be routed on at all, so that
+      # is the one the list gets to answer.
+      #
+      # HOSTS NOT ON THE LIST ARE UNTOUCHED — same peek, same 30 s, same `record_silent_client`
+      # flow. The capture bargain there ("a client that says nothing is still worth a row") is
+      # not this defect's to renegotiate.
+      passthrough = Settings.tls_passthrough?(target.host)
       # `peek_first`, the REVERSE listener's peek, and not `peek_transparent_first`: both record
       # the #755 silent-client flow, but the transparent one RECOVERS the destination it files
       # under (`OrigDst` answers nil here, so it would invent `""`:80) while this one is handed
       # the destination that was declared — which on this listener is the client's own CONNECT.
       # It re-raises after recording, so the timeout still ends the connection.
-      first = peek_first(client, "http", target.host, target.port)
+      silent = "completed a SOCKS5 handshake for " \
+               "#{BindAddress.authority(target.host, target.port)} and then sent zero bytes"
+      peeked =
+        if passthrough
+          peek_passthrough_first(client)
+        else
+          peek_first(client, "http", target.host, target.port, opened: silent)
+        end
+      if passthrough && peeked.nil?
+        # Nothing arrived inside the deadline, so there is no byte to route on and the listed
+        # host gets the answer the list is for. `peek` consumed nothing, so the relay starts at
+        # the same offset a MITM would have.
+        #
+        # No `pin:`, unlike the transparent listener's call: there the passthrough LIST is
+        # matched on the SNI name while the DIAL goes to the address the kernel named (#529).
+        # Here the client named the destination itself, so the name matched and the name dialled
+        # are the same thing and a pin would be a second copy of it.
+        note_passthrough_blackout(target)
+        return if relay_passthrough(target.host, target.port, client, client)
+        # The origin was unreachable, so nothing was relayed and nothing was consumed. Fall back
+        # to the ordinary wait rather than dropping — `serve_pinned_tls`'s reasoning, one branch
+        # over: the operator asked not to decode this host, not to lose the connection, and a
+        # client that turns out to have been merely slow is still captured.
+        peeked = peek_first(client, "http", target.host, target.port, opened: silent)
+      end
+      first, stream = route_prefix(client, peeked)
       # The TWO-byte ClientHello test (#755), not the one-byte one the other two listeners use:
       # a SOCKS5 listener is where a non-HTTP protocol is most likely to arrive — `ssh -D` is
       # what most people point at one — and feeding an SSH banner into an OpenSSL server
       # handshake because its first octet happened to be 0x16 helps nobody.
       dst = {target.host, target.port}
       if first && Tls::ClientHello.record_start?(first)
-        serve_pinned_tls(client, dst)
+        # `declared_name` — the half of #529 this listener answers differently from the
+        # transparent one. There the `{host, port}` comes from the KERNEL and is an address, so
+        # the SNI is the only NAME on the wire and has to win. Here the client NAMED its
+        # destination in a handshake gori already gated on (`socks5_allowed?`), so letting a
+        # ClientHello relabel it hands History, the scope lens and the passthrough list a name
+        # the client invented while gori dials somewhere else — the exact derivation this
+        # listener exists to make unnecessary. A client that declared an IP LITERAL has named
+        # nothing, so the SNI still answers there.
+        serve_pinned_tls(client, stream, dst, declared_name: target.named? ? target.host : nil)
       elsif h2c_preface?(first)
         # `origin_dst: nil` — the reverse listener's answer, not the transparent one's. That
         # argument exists to PIN a dial to an address the kernel named when the request's own
         # name might be something else; here the name IS the request, so a pin would only be a
         # second copy of it wearing a label ("the kernel said so") that is not true.
-        serve_h2c(client, target.host, target.port, origin_dst: nil)
+        serve_h2c(client, stream, target.host, target.port, origin_dst: nil)
       else
         # `fixed_host`/`fixed_port`, the REVERSE listener's shape rather than the transparent
         # one's `origin_dst`. The client DECLARED this authority, so it is what History, scope
@@ -507,12 +603,14 @@ module Gori::Proxy
         #
         # `self_addr` + `local_host` arm `loops_to_self?` inside `ClientConn` too. Not because a
         # later request can name a different host — with `fixed_host` set, `resolve_forward`
-        # holds every ordinary request to the declared destination, absolute-form included, and
-        # the one shape that skipped it (`CONNECT`) is now refused outright on a pinned
-        # connection. They are passed because that pair is what a pinned `ClientConn` is given
-        # everywhere (the reverse listener does the same), and a guard that is armed for a case
-        # that cannot arise costs nothing and survives the day the pin changes.
-        ClientConn.new(client, "http", @sink, fixed_host: target.host, fixed_port: target.port,
+        # holds every ordinary request to the declared destination, absolute-form INCLUDED —
+        # and `resolve_forward` now normalises that form to origin-form rather than putting a
+        # proxy-only request line on an origin's wire — and the one shape that skipped it
+        # (`CONNECT`) is refused outright on a pinned connection. They are passed because that
+        # pair is what a pinned `ClientConn` is given everywhere (the reverse listener does the
+        # same), and a guard that is armed for a case that cannot arise costs nothing and
+        # survives the day the pin changes.
+        ClientConn.new(stream, "http", @sink, fixed_host: target.host, fixed_port: target.port,
           listener_pinned: true,
           rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides,
           self_addr: {@host, @port}, local_host: local_host, extractor: @extractor,
@@ -538,7 +636,7 @@ module Gori::Proxy
     end
 
     private def serve_transparent(client : TCPSocket) : Nil
-      first = peek_transparent_first(client)
+      first, stream = route_prefix(client, peek_transparent_first(client))
       tls = !!(first && !first.empty? && first[0] == Tls::ClientHello::RECORD_HANDSHAKE)
       # Read the original destination ONCE, before the branch, and hand the same answer to both
       # halves. That is the property `Settings::Listener#effective_target_port(tls)` existed to
@@ -546,17 +644,73 @@ module Gori::Proxy
       # covering the address as well as the port.
       dst = transparent_dst(client, tls)
       if tls
-        serve_pinned_tls(client, dst)
+        serve_pinned_tls(client, stream, dst)
       elsif h2c_preface?(first)
-        serve_transparent_h2c(client, dst)
+        serve_transparent_h2c(client, stream, dst)
       else
         # `Cleartext`: the first byte was not a ClientHello, so this transparent connection
         # arrived with no TLS handshake and therefore no ALPN offer.
-        ClientConn.new(client, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
+        ClientConn.new(stream, "http", @sink, rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides,
           default_port: Settings.listener_target_port(@target_port, tls: false),
           origin_dst: dst, extractor: @extractor, h2_offer: H2Offer::Cleartext, client_tls: false).run
       end
+    end
+
+    # How many leading bytes the discriminator needs before it may COMMIT this connection to a
+    # protocol. `Tls::ClientHello.record_start?` states its own half of the contract — "fewer
+    # than two bytes is not a yes; the caller must read the second before it can route on it" —
+    # and `H2::Frame::PREFACE_FLOOR` states the other. Every other opening byte decides on one
+    # octet and has nothing extra to wait for, which is the CONNECT path's rule too.
+    private def route_want(first : UInt8) : Int32
+      return 2 if first == Tls::ClientHello::RECORD_HANDSHAKE
+      return H2::Frame::PREFACE_FLOOR if first == 0x50_u8 # 'P': "PRI ", but also POST/PUT/PATCH
+      1
+    end
+
+    # The routing discriminator, and the stream every downstream handler must be given.
+    #
+    # `IO::Buffered#peek` is ONE `read(2)`'s worth of bytes — it refills only when the buffer is
+    # empty — so it can legitimately hand back a single octet, and the listeners fed that answer
+    # straight into two-byte and four-byte tests. A ClientHello split `[0:1] / [1:]` across two
+    # writes therefore failed `record_start?` and fell down the HTTP/1.1 path (no MITM, no
+    # capture, a flow whose method is `"\x16"`), and a preface split after `"P"` was refused as
+    # "an h2/gRPC client preface on the HTTP/1.1 path". Nothing exotic produces the split: a
+    # `TCP_NODELAY` client, a PMTU boundary, or an SSL layer that writes its record header
+    # separately is enough. The CONNECT path never had this — it fills with `read_peek(first, N)`.
+    #
+    # Filling means CONSUMING, so the bytes are handed back through a `PrefixIO` and the caller
+    # passes THAT on (P7: the chosen handler still sees the complete stream). The common path
+    # never gets there: `peek` already answered with enough, and the socket itself is returned,
+    # so nothing is consumed and nothing is allocated — which is what keeps `peek_sni` and
+    # `Frame.read_preface` reading their own bytes off the socket exactly as before.
+    #
+    # A read that FAILS or times out mid-fill returns the short prefix rather than raising. Both
+    # tests then answer false and the connection goes down the h1 path, where `ClientConn`
+    # records what it finds — the same disposition it would have had before, never a dropped
+    # connection over a byte that never came.
+    private def route_prefix(client : TCPSocket, peeked : Bytes?) : {Bytes?, IO}
+      return {peeked, client} if peeked.nil? || peeked.empty?
+      want = route_want(peeked[0])
+      return {peeked, client} if peeked.size >= want
+      buf = Bytes.new(want)
+      # COPY before consuming: `peek` returns a view into the socket's own buffer, which the
+      # reads below overwrite.
+      peeked.copy_to(buf[0, peeked.size])
+      got = peeked.size
+      client.skip(got)
+      begin
+        while got < want
+          byte = client.read_byte
+          break unless byte
+          buf[got] = byte
+          got += 1
+        end
+      rescue IO::Error
+        # A short prefix is an answer; see above. (`IO::TimeoutError` is an `IO::Error`.)
+      end
+      prefix = buf[0, got]
+      {prefix, PrefixIO.new(prefix, client)}
     end
 
     # `client.peek` — the first-byte discriminator the reverse and transparent listeners route
@@ -567,15 +721,82 @@ module Gori::Proxy
     # by `serve_connection`'s rescue and the fd closed with nothing recorded anywhere, so the fix
     # in `ClientConn#read_client_head` was unreachable on the paths that need it most.
     #
+    # `opened` is the clause the flow's sentence opens with, for the one caller whose client did
+    # NOT arrive in silence: a SOCKS5 peer completed a whole handshake — version, method list,
+    # a CONNECT that gori gated and granted — before going quiet, and telling the operator it
+    # "sent zero bytes" sent them looking for a client that never connected.
+    #
     # RE-RAISES after recording, deliberately: every existing control path is unchanged — the
     # accept-path rescue still closes the fd and the `ensure` still frees the slot. Only the
     # silence is gone. A drip-feed that stalls mid-head is NOT this: it never reaches here,
     # because `peek` returns as soon as one byte lands.
-    private def peek_first(client : TCPSocket, scheme : String, host : String, port : Int32) : Bytes?
+    private def peek_first(client : TCPSocket, scheme : String, host : String, port : Int32,
+                           opened : String? = nil) : Bytes?
       client.peek
     rescue ex : IO::TimeoutError
-      ClientConn.record_silent_client(@sink, scheme, host, port, client_tls: false)
+      ClientConn.record_silent_client(@sink, scheme, host, port, client_tls: false, opened: opened)
       raise ex
+    end
+
+    # `peek_first` for a SOCKS5 destination `network.tls_passthrough` lists: the same peek under
+    # `PASSTHROUGH_PEEK_WAIT` instead of the 30 s baseline, answering nil when the deadline
+    # expires with the client still silent.
+    #
+    # nil means EXACTLY that. `IO::Buffered#peek` returns an EMPTY slice at EOF and raises
+    # `IO::TimeoutError` on the deadline, so the two ways a connection can produce no bytes stay
+    # apart: a client that hung up is `Bytes.empty` and falls through to `route_prefix`, which
+    # hands it to `ClientConn` to dispose of exactly as it always has. Only a peer still holding
+    # the socket open reaches the relay.
+    #
+    # Does NOT record `record_silent_client`, and that is the point of having a second spelling.
+    # That flow says "gori waited 30 s and gave up"; here gori waited a second and then did
+    # something — `note_passthrough_blackout` is the sentence for what it did.
+    #
+    # The baseline is restored on every exit. Leaving a one-second read timeout on a socket that
+    # goes on to become a captured HTTP connection would turn every think-time pause on it into
+    # a dead peer.
+    private def peek_passthrough_first(client : TCPSocket) : Bytes?
+      SocketTuning.arm(client, PASSTHROUGH_PEEK_WAIT)
+      begin
+        client.peek
+      rescue IO::TimeoutError
+        nil
+      ensure
+        SocketTuning.arm(client, SocketTuning::CLIENT_IO_TIMEOUT)
+      end
+    end
+
+    # What `network.tls_passthrough` cost this destination, told to the operator where they will
+    # see it. A blind relay produces no flow by construction, so without this the History for a
+    # listed host is empty whether the client sent nothing, sent everything, or never connected
+    # — the "nothing came vs nobody looked" failure (P4) that the whole of R1 is about.
+    #
+    # ONCE per destination per listener, because the sentence is about the SETTING and not about
+    # this connection: `ssh -D` opens a connection per session and a row apiece would drown the
+    # History this tool exists to produce, the same measurement that took the connect-and-close
+    # row out of `serve_socks5`. The message says so in as many words, so a reader does not take
+    # the single row for a single connection.
+    #
+    # Written BEFORE the dial, which is why it describes the POLICY rather than an outcome:
+    # `relay_passthrough` does not return until the tunnel is over, and an advisory an operator
+    # reads after the session has ended is one they cannot act on. A dial that then fails falls
+    # back to the ordinary wait and records its own flow, so nothing here has to promise what
+    # this particular connection did.
+    private def note_passthrough_blackout(target : Socks5::Target) : Nil
+      where = BindAddress.authority(target.host, target.port)
+      return unless @passthrough_noted.size < PASSTHROUGH_NOTE_CAP && @passthrough_noted.add?(where)
+      message = "no capture: #{target.host} is listed in `network.tls_passthrough`, and a client " \
+                "completed a SOCKS5 handshake for #{where} without sending a byte for " \
+                "#{PASSTHROUGH_PEEK_WAIT.total_seconds.to_i} s — a SERVER-SPEAKS-FIRST protocol " \
+                "(SMTP, IMAP, POP3, MySQL, SSH) makes exactly that shape. gori relays those " \
+                "connections to the origin byte-exact and records nothing on them, so this row " \
+                "is the only trace they leave. It is written ONCE for #{where}; every later " \
+                "connection to it is relayed the same way and is equally absent from History. " \
+                "Remove the host from `network.tls_passthrough` to capture it instead — a " \
+                "client that DOES speak first is unaffected either way: cleartext HTTP to this " \
+                "host is still captured and TLS to it is still passed through"
+      ::Log.info { "socks5 #{BindAddress.authority(@host, @port)}: #{message}" }
+      ClientConn.record_listener_refusal(@sink, target.host, target.port, message)
     end
 
     # `peek_first` for the transparent listener, which learns its target from the KERNEL rather
@@ -622,12 +843,12 @@ module Gori::Proxy
     # rather than dialled somewhere invented — with a line, because a client that mysteriously
     # fails otherwise leaves no trace anywhere. `log_missing_sni`'s reasoning, applied to the
     # branch that has one fewer fallback than the branch that comment was written for.
-    private def serve_transparent_h2c(client : TCPSocket, dst : {String, Int32}?) : Nil
+    private def serve_transparent_h2c(client : TCPSocket, stream : IO, dst : {String, Int32}?) : Nil
       unless dst
         log_missing_h2c_dst
         return close_client(client)
       end
-      serve_h2c(client, dst[0], dst[1], origin_dst: dst)
+      serve_h2c(client, stream, dst[0], dst[1], origin_dst: dst)
     end
 
     # #493's discipline, applied to the destination: an operator looking at a flow that went
@@ -667,11 +888,15 @@ module Gori::Proxy
     # same way: bytes that open with a ClientHello and a `{host, port}` from outside the stream.
     # (It was `serve_transparent_tls` until the SOCKS5 listener became its second caller; the
     # body never was transparent-specific.)
-    private def serve_pinned_tls(client : TCPSocket, dst : {String, Int32}?) : Nil
+    #
+    # `declared_name` is the destination the CLIENT NAMED out of band, and only the SOCKS5
+    # listener has one — see below for why it outranks the SNI where it exists.
+    private def serve_pinned_tls(client : TCPSocket, transport : IO, dst : {String, Int32}?,
+                                 declared_name : String? = nil) : Nil
       tls = @tls
       return close_client(client) unless tls
-      sni, consumed = Tls::ClientHello.peek_sni(client)
-      stream = PrefixIO.new(consumed, client)
+      sni, consumed = Tls::ClientHello.peek_sni(transport)
+      stream = PrefixIO.new(consumed, transport)
       # The SNI is the NAME the client asked for, so it stays the destination whenever it is
       # there: it is what the leaf has to be minted for, what the sandbox and the passthrough
       # list are written against, and what History shows. The kernel's address answers the case
@@ -683,7 +908,21 @@ module Gori::Proxy
       # connection went to another reaches the host it went to. When the SNI IS absent both
       # values are the kernel's address and the pin is a no-op, which is why #528's no-name
       # behaviour is untouched.
-      host = sni || dst.try(&.[0])
+      #
+      # A DECLARED NAME outranks both, and only the SOCKS5 listener passes one. The reasoning is
+      # this method's own, read the other way round: the SNI wins over `dst` because `dst` is an
+      # ADDRESS the kernel reported and the SNI is a NAME — but a SOCKS5 client sent its
+      # destination as a name, in a handshake gori has already gated (`socks5_allowed?`) and
+      # granted. Preferring the ClientHello there let the client relabel a connection it had
+      # already declared: `CONNECT 127.0.0.1:19091` with `SNI: evil-sni.example` produced a flow,
+      # a scope lens and a `tls_passthrough` match against a name the client invented, while the
+      # dial stayed pinned to the declared one. Containment held; the LABEL did not, and this
+      # listener exists precisely so no downstream has to recover a name from an SNI.
+      #
+      # An IP-LITERAL declaration passes `nil` and changes nothing: it names no host, so the SNI
+      # is still the only name on the wire — which is what `curl --socks5` (as against
+      # `--socks5-hostname`) sends, and what a leaf still has to be minted for.
+      host = declared_name || sni || dst.try(&.[0])
       unless host
         # No name and no kernel answer: nothing to mint a certificate for and nothing to gate on.
         # Relaying blind would send an unidentified connection to an unknown origin, so drop it —
@@ -698,7 +937,7 @@ module Gori::Proxy
       # with a 403 here — the client expects TLS, not HTTP — so the connection is dropped.
       return close_client(client) if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
       if Settings.tls_passthrough?(host)
-        return if relay_transparent_passthrough(host, port, stream, client, dst.try(&.[0]))
+        return if relay_passthrough(host, port, stream, client, dst.try(&.[0]))
         # The origin was unreachable, so nothing was relayed. Fall through and MITM instead of
         # dropping: the operator asked not to decrypt this host, not to lose the connection, and
         # the handshake failure they then see names the real problem.
@@ -706,17 +945,23 @@ module Gori::Proxy
       tls.intercept(host, port, stream, @sink, dial_addr: dst.try(&.[0]))
     end
 
-    # A passthrough host reached through a transparent listener: dial the origin and pipe bytes,
-    # never minting a leaf. False when the origin could not be reached AND nothing was consumed,
-    # so the caller can still fall through.
+    # A passthrough host on a listener that derives or is handed its destination: dial the origin
+    # and pipe bytes, never minting a leaf. False when the origin could not be reached AND
+    # nothing was consumed, so the caller can still fall through.
+    #
+    # TWO callers, and the second is what dropped `transparent` from the name. `serve_pinned_tls`
+    # reaches it after a ClientHello, which is what "passthrough" reads as. `serve_socks5_target`
+    # reaches it BEFORE any client byte at all: the destination arrived in the handshake, so the
+    # list can be matched without waiting for the client to speak — which for SMTP/IMAP/SSH is a
+    # wait that never ends. Same relay, same "capture nothing" bargain, one home.
     #
     # `pin` applies here for the same reason it applies to the MITM branch, and matters MORE:
     # this connection is relayed undecrypted, so the address gori dials is the only thing that
     # decides where the client's session actually terminates. The passthrough LIST is still
-    # matched on the name (`Settings.tls_passthrough?` above) — the operator wrote it against
-    # names — which is exactly the split #529 is.
-    private def relay_transparent_passthrough(host : String, port : Int32, stream : IO,
-                                              client : TCPSocket, pin : String? = nil) : Bool
+    # matched on the name (`Settings.tls_passthrough?` at each caller) — the operator wrote it
+    # against names — which is exactly the split #529 is.
+    private def relay_passthrough(host : String, port : Int32, stream : IO,
+                                  client : TCPSocket, pin : String? = nil) : Bool
       upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: pin)
       return false unless upstream
       begin

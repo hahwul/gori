@@ -117,7 +117,12 @@ module Gori::Tui
     # still live and its planted payloads still resolve), and the tab was the one surface
     # saying it unconditionally — it fired the request off a fiber and announced success on the
     # next line, before anything had answered.
-    record ReleaseResult, session_id : Int64, error : String?
+    # `outcome` rides along because the tab reports a release from `drain_releases`, long after
+    # the fiber that performed it is gone — and "released" was never the only success, nor
+    # "errored" the only failure. `kind_label` travels with it so the drain can build the one
+    # shared sentence (`Oast::Sessions.release_message`) without re-reading the row.
+    record ReleaseResult, session_id : Int64, outcome : Oast::Sessions::Release,
+      kind_label : String, error : String?
 
     def initialize(host : Host)
       super(host)
@@ -673,13 +678,14 @@ module Gori::Tui
       http = poll_http
       ch = @release_events
       sid = session.id
+      label = session.kind.label
+      # `release_detail` owns the four-way answer — including "this backend has no teardown",
+      # which is what the tab used to print as "released". Calling it rather than re-deciding
+      # keeps the three surfaces on one verdict; it is the same reason the drain builds its
+      # sentence with `release_message`. It never raises, so the fiber cannot die silently.
       spawn(name: "gori-oast-deregister") do
-        begin
-          provider.deregister(http, session)
-          ch.send(ReleaseResult.new(sid, nil)) if report
-        rescue ex
-          ch.send(ReleaseResult.new(sid, ex.message || "provider error")) if report
-        end
+        outcome, err = Oast::Sessions.release_detail(provider, session, http)
+        ch.send(ReleaseResult.new(sid, outcome, label, err)) if report
       end
     end
 
@@ -1419,12 +1425,16 @@ module Gori::Tui
     private def drain_releases : Bool
       applied = false
       while res = nonblocking_release
-        if err = res.error
-          msg = "could not release session ##{res.session_id} (#{err}) — payloads minted from it may still resolve"
-          @host.status(msg)
+        callbacks = @host.session.store.oast_callback_count(res.session_id)
+        msg = Oast::Sessions.release_message(res.outcome, res.kind_label, res.session_id, callbacks)
+        # The shared sentence names the provider and the consequence; the exception text is the
+        # one thing it cannot know, so a Failed outcome carries it too.
+        msg = "#{msg} (#{res.error})" if res.error
+        @host.status(msg)
+        # A listener that is still live is the notification-worthy half — `Released` and
+        # `NoServerState` both mean nothing of the operator's is still collecting.
+        unless res.outcome.torn_down?
           @host.notifications.push(:warn, msg, Jobs::Goto.new(:oast), source: "oast")
-        else
-          @host.status("released session ##{res.session_id} — its callbacks stay")
         end
         applied = true
       end

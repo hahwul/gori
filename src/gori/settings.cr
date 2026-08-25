@@ -72,6 +72,15 @@ module Gori
     # all and the next save is a deliberate clean write.
     @@load_partial = false
 
+    # A settings file is THERE and `load_raw` could not read a byte of it — EACCES on a file a
+    # `sudo gori` left root-owned, a `--config` naming a directory, a transient I/O error. The
+    # separate flag exists because that rescue is silent: it sets no `load_warning` (nothing was
+    # parsed, so nothing complained) and leaves no `.corrupt` copy (`load_root` writes one where
+    # a PARSE fails, and this never got that far), so the only record that the operator's file
+    # was never seen is this bool. `load_degraded?` folds it in with two other cases; the one
+    # caller that has to tell them apart is `reset_to_factory`.
+    @@load_unreadable = false
+
     # An explicit settings file for THIS process (`gori --config PATH`), overriding both
     # $GORI_CONFIG and the default under GORI_HOME. Set once from CLI.run before any
     # subcommand dispatch, so every surface — TUI, `gori run`, `gori mcp` — reads the same
@@ -101,6 +110,7 @@ module Gori
     def self.load : Nil
       @@loaded_raw = nil
       @@load_partial = false
+      @@load_unreadable = false
       # A full load rewrites every section's class properties, including the two
       # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
       # these bytes" from outliving the memory it was an assertion about — a load that ends in
@@ -109,7 +119,13 @@ module Gori
       forget_reloaded_sections
       @@load_warning = nil # cleared here, not in load_root, so a file that is fixed OR removed drops it
       raw = load_raw
-      return unless raw # no file yet / unreadable — first run, keep defaults
+      unless raw
+        # No file yet (first run — keep defaults, nothing to protect) or one that is there and
+        # could not be READ (`@@load_unreadable`: everything below is at a factory default over
+        # a file whose contents nobody has seen).
+        @@load_unreadable = File.exists?(path)
+        return
+      end
       root = load_root(raw)
       return unless root # present but unparseable — kept a .corrupt copy, keep defaults
       begin
@@ -501,7 +517,10 @@ module Gori
 
     # Persist the current values. Never raises into the caller (a failed write must
     # not crash the TUI); returns whether it succeeded.
-    def self.save : Bool
+    #
+    # `factory_reset` is passed by `reset_to_factory` alone and only changes how the 3-way
+    # merge treats a section this process did not have to touch — see `merge_with_disk`.
+    def self.save(factory_reset : Bool = false) : Bool
       # The last load only got HALF this file in, so what is in memory is the operator's
       # sections down to the raise and factory defaults after it. Writing that back is the
       # #594 loss with a different door: the merge cannot recover a section it never read
@@ -532,7 +551,7 @@ module Gori
       # Basing on `mine` keeps "did I change this section?" honest, so an unchanged section
       # always yields to disk on every subsequent save.
       mine = serialize
-      write_private(path, merge_with_disk(mine))
+      write_private(path, merge_with_disk(mine, factory_reset))
       @@loaded_raw = mine
       true
     rescue
@@ -562,7 +581,22 @@ module Gori
     # left unchanged (mine == base) yields to disk; a section it changed wins.
     #
     # A few sections are merged one level DEEPER than that — see RULE_SECTION_LISTS.
-    private def self.merge_with_disk(current : String) : String
+    #
+    # `factory_reset` turns the section-level rule off, and only a reset may pass it. The rule
+    # asks "did I change this section?", and a factory reset is the one write for which that
+    # question has no useful answer: it SPEAKS for every section, including the ones it had
+    # nothing to change because they were already at their defaults. Left on, a section sitting
+    # on disk in a spelling that parses to the factory default is absent from BOTH `mine` and
+    # `base` (`serialize` omits a defaulted section), reads as "unchanged", and disk's block is
+    # copied straight through the reset — which is how a `decoder.sessions` block full of
+    # pasted tokens (a legacy key `serialize` never writes back) survived a reset that had just
+    # told the operator it dropped their saved decoder chains. Same for any key gori does not
+    # know: a fresh install has none, so a factory reset must not leave one behind.
+    #
+    # The rule LISTS keep their entry-by-entry merge either way — a reset racing a peer's
+    # `create_rule` must still delete the rules it knew about without deleting the one it never
+    # saw (see RULE_SECTION_LISTS).
+    private def self.merge_with_disk(current : String, factory_reset : Bool = false) : String
       base = @@loaded_raw
       return current unless base && File.exists?(path)
       disk = File.read(path)
@@ -583,6 +617,8 @@ module Gori
             chosen = if lists = RULE_SECTION_LISTS[k]?
                        merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists,
                          RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
+                     elsif factory_reset
+                       cur_v # what a fresh install would hold — nil drops the key entirely
                      else
                        pick_changed(cur_v, base_h[k]?, disk_h[k]?)
                      end
@@ -1008,9 +1044,22 @@ module Gori
       # refused would leave the session running on defaults while the file still holds
       # everything — i.e. a "factory reset" that undoes itself at the next start. Ask before
       # the side effect, not after it.
-      return ResetResult::Refused if @@load_partial
+      #
+      # …and the same ask covers the OTHER way this session can be sitting on defaults over a
+      # file that still holds everything: `load_raw`'s blanket rescue swallows every READ
+      # failure — EACCES on a settings.json a `sudo gori` left root-owned, a `--config`
+      # pointing at a directory, a transient I/O error — and leaves no trace at all. A reset
+      # from there is not a reset: nothing of the operator's file was ever read, so `serialize`
+      # writes the same factory document with or without them, and the merge has no base to
+      # protect them with. If the DIRECTORY is writable (the root-owned-file case exactly),
+      # `DurableFile`'s rename lands on top of a file gori never opened — and unlike the
+      # unparseable path there is no `.corrupt` copy, because that one is written where a parse
+      # fails, not where a read does. Deliberately NOT `load_degraded?`, whose third case (a
+      # `serialize` that raised AFTER every section applied) leaves memory whole and a reset
+      # perfectly safe.
+      return ResetResult::Refused if @@load_partial || @@load_unreadable
       reset_sections
-      save ? ResetResult::Saved : ResetResult::Applied
+      save(factory_reset: true) ? ResetResult::Saved : ResetResult::Applied
     end
 
     # Restore the in-memory state, section by section. Mirrors `serialize` below — same

@@ -84,6 +84,57 @@ private def start_plain_origin(seen : Channel(String)) : Int32
   port
 end
 
+# A SERVER-SPEAKS-FIRST origin: it greets the instant a peer connects and never waits for the
+# client to say anything. SMTP, IMAP, POP3, MySQL and SSH all have this shape, and `ssh -D` is
+# what most people point a SOCKS5 listener at. `dialled` counts CONNECTIONS, so an example can
+# assert that gori reached the origin at all — the half a passing banner alone cannot separate
+# from a client talking to something else.
+private def start_banner_origin(dialled : Channel(Nil)) : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  spawn do
+    while conn = server.accept?
+      spawn do
+        begin
+          dialled.send(nil)
+          conn << "220 banner.origin ESMTP ready\r\n"
+          conn.flush
+          conn.gets_to_end # hold the relay open until the client hangs up
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    end
+  end
+  port
+end
+
+# A BOUNDED wait on the sink, for the examples whose failure mode IS silence. `done.receive` is
+# this file's usual shape and is right wherever a response is guaranteed — but the defect these
+# examples are about is a connection that produces no flow at all, and waiting on the channel
+# for it wedges the suite instead of failing it (a CI run that hangs reports nothing, which is
+# the same "nothing came vs nobody looked" confusion one layer up).
+private def await_flows(sink : RecordingSink, n : Int32 = 1) : Nil
+  250.times do
+    break if sink.requests.size >= n
+    sleep 0.02.seconds
+  end
+end
+
+# `network.tls_passthrough` set for the duration of one example and put back afterwards — it is
+# process-global settings state, and a leak makes the NEXT example's origin unreachable in a way
+# that reads as a proxy bug.
+private def with_passthrough(hosts : Array(String), &)
+  prev = Gori::Settings.tls_passthrough
+  begin
+    Gori::Settings.tls_passthrough = hosts
+    yield
+  ensure
+    Gori::Settings.tls_passthrough = prev
+  end
+end
+
 private def start_tls_origin(body : String, seen : Channel(String)) : Int32
   cert, key = CertBuilder.build_root("origin.test")
   ctx = ContextFactory.server_context(cert, key, advertise_h2: false)
@@ -169,7 +220,7 @@ private def socks5_connect(port : Int32, host : String, dst_port : Int32,
   {sock, head}
 end
 
-private def trusting_client(raw : TCPSocket, ca_dir : String, sni : String) : OpenSSL::SSL::Socket::Client
+private def trusting_client(raw : IO, ca_dir : String, sni : String) : OpenSSL::SSL::Socket::Client
   ctx = OpenSSL::SSL::Context::Client.new
   ca_cert = Cert.read_pem(File.join(ca_dir, "root.crt.pem"))
   store = LibSSL.ssl_ctx_get_cert_store(ctx.to_unsafe)
@@ -177,19 +228,68 @@ private def trusting_client(raw : TCPSocket, ca_dir : String, sni : String) : Op
   OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: sni)
 end
 
+# A client that sends `sni` and then accepts whatever leaf comes back. The one spec that needs
+# it is the one where the SNI is the LIE under test: gori is expected to mint for the name the
+# handshake DECLARED instead, so a verifying client would fail on the very outcome being
+# asserted — and fail identically whichever name it got.
+private def unverified_client(raw : IO, sni : String) : OpenSSL::SSL::Socket::Client
+  ctx = OpenSSL::SSL::Context::Client.new
+  ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
+  OpenSSL::SSL::Socket::Client.new(raw, context: ctx, sync_close: true, hostname: sni)
+end
+
+# Splits the FIRST write into its first octet and the rest, with a scheduler yield between —
+# which is what puts exactly ONE byte in gori's socket buffer when its `peek` runs. Nothing
+# exotic produces this on a real network either: a `TCP_NODELAY` client, a PMTU boundary, or an
+# SSL layer that writes its record header separately.
+private class SplitFirstWriteIO < IO
+  def initialize(@inner : IO)
+    @split = true
+  end
+
+  def read(slice : Bytes) : Int32
+    @inner.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    if @split && slice.size > 1
+      @split = false
+      @inner.write(slice[0, 1])
+      @inner.flush
+      sleep 50.milliseconds # let the listener's fiber run and peek the single octet
+      @inner.write(slice[1..])
+      return
+    end
+    @inner.write(slice)
+  end
+
+  def flush
+    @inner.flush
+  end
+
+  def close
+    @inner.close
+  end
+end
+
 describe Gori::Proxy::Socks5 do
   it "reads a DOMAIN request and does NOT answer it — the caller decides" do
     # `negotiate` stops short of `succeeded` on purpose: the listener still has a self-loop and
     # a Sandbox question to ask, and a reply once sent cannot be retracted.
     result, written = negotiate(GREETING + Bytes[5, 1, 0, 3, 9] + "acme.test".to_slice + Bytes[1, 187])
-    result.target.should eq(Socks5::Target.new("acme.test", 443))
+    # `named:` — the ATYP this destination arrived under. It is what lets the listener know it
+    # has a NAME to tell History, scope and the passthrough list, rather than an address whose
+    # only name would be whatever SNI the client puts in its ClientHello.
+    result.target.should eq(Socks5::Target.new("acme.test", 443, named: true))
     result.refusal.should be_nil
     written.should eq(Bytes[5, 0]) # the method selection, and nothing else
   end
 
   it "reads an IPv4 and an IPv6 literal as an address a URL authority can carry" do
     v4, _ = negotiate(GREETING + Bytes[5, 1, 0, 1, 127, 0, 0, 1, 0x1f, 0x90])
-    v4.target.should eq(Socks5::Target.new("127.0.0.1", 8080))
+    # `named: false` — a literal names no host, so the SNI is still the only name on the wire.
+    v4.target.should eq(Socks5::Target.new("127.0.0.1", 8080, named: false))
+    v4.target.not_nil!.named?.should be_false
     v6, _ = negotiate(GREETING + Bytes[5, 1, 0, 4] + Bytes.new(15) { |i| i == 14 ? 0_u8 : 0_u8 } + Bytes[1_u8] + Bytes[0, 80])
     # `::1`, the spelling the rest of gori compares against — not the hand-expanded
     # `0:0:0:0:0:0:0:1`, which the Sandbox, `tls_passthrough?` and a `host:` filter would all
@@ -320,6 +420,61 @@ describe "socks5 listener" do
       body.should contain("secret")
       seen.receive.should eq("GET /s HTTP/1.1")
       sink.requests.first.scheme.should eq("https")
+    end
+  end
+
+  it "MITMs a ClientHello SPLIT ACROSS TWO WRITES, which `peek` alone cannot answer for" do
+    # `IO::Buffered#peek` is one `read(2)`'s worth and refills only when the buffer is EMPTY, so
+    # it can hand back a single octet — and the listeners fed that straight into
+    # `record_start?`, a TWO-byte test. A ClientHello split `[0:1] / [1:]` therefore answered
+    # "not TLS", fell down the HTTP/1.1 path, and produced a flow whose method was `"\x16"`:
+    # no MITM, no capture, and the origin never dialled. A `TCP_NODELAY` client, a PMTU
+    # boundary or an SSL layer that writes its record header separately is enough to cause it.
+    seen = Channel(String).new(1)
+    origin = start_tls_origin("split-secret", seen)
+    with_socks5_listener do |proxy, sink, done, dir|
+      raw, reply = socks5_connect(proxy.port, "127.0.0.1", origin)
+      reply[1].should eq(Socks5::REP_SUCCEEDED)
+      # The split, forced under the ClientHello: the first record octet on its own, and only
+      # then the rest. `SplitFirstWriteIO` says how.
+      ssl = trusting_client(SplitFirstWriteIO.new(raw), dir, "127.0.0.1")
+      ssl << "GET /split HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+      ssl.flush
+      body = ssl.gets_to_end
+      ssl.close
+      done.receive
+
+      body.should contain("split-secret")
+      seen.receive.should eq("GET /split HTTP/1.1")
+      # The proof it took the TLS branch rather than the h1 one: a captured https flow, not a
+      # `"\x16"` "not an HTTP request" row.
+      sink.requests.first.scheme.should eq("https")
+      sink.requests.first.target.should eq("/split")
+    end
+  end
+
+  it "does not let a client-chosen SNI relabel a destination the handshake DECLARED" do
+    # The SNI wins over a TRANSPARENT listener's `{host, port}` because that pair is an ADDRESS
+    # the kernel reported and the SNI is a NAME. A SOCKS5 client sent its destination AS a name,
+    # through a handshake gori already gated and granted — so preferring the ClientHello let it
+    # relabel a connection it had already declared, and History, the scope lens and
+    # `tls_passthrough` all matched a name the client invented while the dial stayed pinned.
+    seen = Channel(String).new(1)
+    origin = start_tls_origin("labelled", seen)
+    with_socks5_listener do |proxy, sink, _done, _|
+      # An ATYP_DOMAIN destination (what `socks5_connect` sends), so the client NAMED it — and
+      # a name that happens to be reachable, so the exchange completes rather than dying in DNS.
+      raw, reply = socks5_connect(proxy.port, "127.0.0.1", origin)
+      reply[1].should eq(Socks5::REP_SUCCEEDED)
+      ssl = unverified_client(raw, "evil-sni.example")
+      ssl << "GET /x HTTP/1.1\r\nHost: evil-sni.example\r\nConnection: close\r\n\r\n"
+      ssl.flush
+      ssl.gets_to_end
+      ssl.close
+      seen.receive
+
+      # The DECLARED destination, not the name the ClientHello made up.
+      sink.requests.first.host.should eq("127.0.0.1")
     end
   end
 
@@ -468,6 +623,163 @@ describe "socks5 listener" do
       done.receive
 
       sink.responses.first.error.to_s.should contain("SOCKS5")
+    end
+  end
+
+  # `network.tls_passthrough` on this listener. The setting names TLS, the UI and the help
+  # describe TLS hosts, and the whole of it is which connections it may silence.
+  #
+  # Matching the list AHEAD of the peek fixed a real hang — a server-speaks-first peer sat out
+  # the 30 s client read timeout with the origin never dialled — and opened a silent hole: a
+  # relay chosen before any client byte cannot tell a ClientHello from `GET / HTTP/1.1`, so
+  # plaintext `http://` to a listed host was piped through with no flow and no advisory. An
+  # operator who listed `internal.corp` to dodge a pinned app lost every cleartext capture for
+  # it, with nothing anywhere to say so — "nothing came" and "nobody looked" reading the same.
+  #
+  # These five hold the three properties together. Dropping any one of them re-opens one of the
+  # two defects, and no two of them can be satisfied by the same shortcut — capture the
+  # cleartext, pass the TLS, do not wait, say what was lost, and leave every other host alone.
+  describe "network.tls_passthrough" do
+    it "STILL CAPTURES plaintext HTTP to a listed host" do
+      # The blackout, stated as the thing that must not happen again. The client speaks first,
+      # so there is a byte to route on, and a byte that is not a ClientHello has nothing to do
+      # with a setting called `tls_passthrough`.
+      seen = Channel(String).new(1)
+      origin = start_plain_origin(seen)
+      with_passthrough(["localhost"]) do
+        with_socks5_listener do |proxy, sink, _done, _|
+          sock, reply = socks5_connect(proxy.port, "localhost", origin)
+          reply[1].should eq(Socks5::REP_SUCCEEDED)
+          sock << "GET /listed HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+          sock.flush
+          response = sock.gets_to_end
+          sock.close
+          await_flows(sink)
+
+          # The RESPONSE still arrives either way — the blackout relayed the bytes faithfully,
+          # which is exactly why it was invisible. Only the row tells the two apart.
+          response.should contain("200 OK")
+          seen.receive.should contain("GET /listed HTTP/1.1")
+          # THE ASSERTION THE DEFECT FAILED: a row, for a request that happened.
+          sink.requests.size.should eq(1)
+          sink.requests.first.host.should eq("localhost")
+          sink.requests.first.target.should eq("/listed")
+          sink.requests.first.scheme.should eq("http")
+        end
+      end
+    end
+
+    it "STILL PASSES TLS to a listed host through, leaving the origin's own certificate" do
+      # The half the setting is named for, unchanged: the ClientHello reaches
+      # `serve_pinned_tls`, which asks the list for itself — the one place a `tls_passthrough`
+      # decision can be made about actual TLS — and relays without minting a leaf.
+      seen = Channel(String).new(1)
+      origin = start_tls_origin("passthrough-secret", seen)
+      with_passthrough(["localhost"]) do
+        with_socks5_listener do |proxy, sink, _done, _|
+          raw, reply = socks5_connect(proxy.port, "localhost", origin)
+          reply[1].should eq(Socks5::REP_SUCCEEDED)
+          ssl = unverified_client(raw, "localhost")
+          subject = ssl.peer_certificate.not_nil!.subject.to_a.map { |e| "#{e[0]}=#{e[1]}" }.join(",")
+          ssl << "GET /tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+          ssl.flush
+          body = ssl.gets_to_end
+          ssl.close
+          seen.receive
+
+          subject.should contain("origin.test") # relayed opaquely — no leaf was minted
+          body.should contain("passthrough-secret")
+          sink.requests.should be_empty # nothing decrypted means nothing recorded
+        end
+      end
+    end
+
+    it "relays a SERVER-SPEAKS-FIRST peer on a listed host without waiting out the read timeout" do
+      # The hang the ordering was introduced to fix, and it must stay fixed: the client is
+      # waiting for a banner, so it sends nothing, and a peek with no deadline means both peers
+      # wait 30 s with the origin never dialled. The deadline is `PASSTHROUGH_PEEK_WAIT`, so
+      # this completes in about a second — the assertion is bounded well below the 30 s that
+      # would mean the wait came back.
+      dialled = Channel(Nil).new(2)
+      origin = start_banner_origin(dialled)
+      with_passthrough(["localhost"]) do
+        with_socks5_listener do |proxy, sink, _done, _|
+          started = Time.instant
+          sock, reply = socks5_connect(proxy.port, "localhost", origin)
+          reply[1].should eq(Socks5::REP_SUCCEEDED)
+          sock.read_timeout = 20.seconds
+          sock.gets.should eq("220 banner.origin ESMTP ready")
+          elapsed = Time.instant - started
+          sock.close
+          dialled.receive # gori really reached the origin
+
+          elapsed.should be < 15.seconds
+
+          # AND THE OPERATOR IS TOLD. A blind relay produces no flow by construction, so
+          # without this the History for a listed host is empty whether the client sent
+          # nothing, sent everything, or never connected — the failure the whole change is
+          # about. The row names the setting, the destination, and that it stands for every
+          # later connection too.
+          await_flows(sink)
+          sink.requests.size.should eq(1)
+          sink.requests.first.host.should eq("localhost")
+          msg = sink.responses.first.error.to_s
+          msg.should contain("no capture")
+          msg.should contain("network.tls_passthrough")
+          msg.should contain("SERVER-SPEAKS-FIRST")
+          msg.should contain("byte-exact")
+        end
+      end
+    end
+
+    it "writes the blackout advisory ONCE per destination while relaying every connection" do
+      # `ssh -D` opens a connection per session. A row apiece would drown the History this tool
+      # exists to produce — the same measurement that took the connect-and-close row out of
+      # this listener — so the sentence is about the SETTING and is written once, and says so
+      # in as many words. What must NOT be bounded is the RELAY: every later connection is
+      # still carried.
+      dialled = Channel(Nil).new(4)
+      origin = start_banner_origin(dialled)
+      with_passthrough(["localhost"]) do
+        with_socks5_listener do |proxy, sink, _done, _|
+          3.times do
+            sock, reply = socks5_connect(proxy.port, "localhost", origin)
+            reply[1].should eq(Socks5::REP_SUCCEEDED)
+            sock.read_timeout = 20.seconds
+            sock.gets.should eq("220 banner.origin ESMTP ready") # relayed, every time
+            sock.close
+            dialled.receive
+          end
+          sleep 0.2.seconds
+          sink.requests.size.should eq(1) # advised once
+        end
+      end
+    end
+
+    it "leaves a host NOT on the list alone — a silent client is still not relayed" do
+      # The capture bargain on every other destination is not this change's to renegotiate. An
+      # unlisted host keeps the 30 s wait and the `record_silent_client` flow, so the origin is
+      # NOT dialled while the client stays quiet — which is what `dialled` being empty after
+      # several times the passthrough deadline proves.
+      dialled = Channel(Nil).new(2)
+      origin = start_banner_origin(dialled)
+      with_passthrough(["not-this-host.test"]) do
+        with_socks5_listener do |proxy, _sink, _done, _|
+          sock, reply = socks5_connect(proxy.port, "localhost", origin)
+          reply[1].should eq(Socks5::REP_SUCCEEDED)
+          sleep 3.seconds # three times PASSTHROUGH_PEEK_WAIT, and nothing may happen
+          # A NON-BLOCKING look at the channel: `receive` would wait out the listener's own 30 s
+          # and turn a failure into a hang, and the question here is only whether anything has
+          # been queued by now.
+          select
+          when dialled.receive
+            fail "an unlisted host was relayed before the client said anything"
+          else
+            # Nothing dialled, which is the whole assertion.
+          end
+          sock.close
+        end
+      end
     end
   end
 end

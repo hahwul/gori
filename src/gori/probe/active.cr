@@ -20,6 +20,7 @@ require "./active/ssrf_oast"
 require "../outbound"
 require "../scope"
 require "../fuzz/engine"
+require "../host_overrides"
 
 module Gori
   module Probe
@@ -121,6 +122,19 @@ module Gori
       # explicit exclude rule HARD-blocks the probe at the socket seam even when the caller
       # bypassed its own include gate (--allow-unscoped). Required rather than optional
       # precisely so a new caller cannot forget it.
+      # `overrides` is the project's HOST OVERRIDES table, and it is REQUIRED for exactly the
+      # same reason — retroactively. It was `Fuzz::Sender`'s optional trailing argument, this
+      # method never named it at all, and so every probe gori has ever sent from a headless
+      # scan dialed whatever DNS resolved while the operator's routing table sat there being
+      # ignored. Nothing failed and nothing was logged: the probes went out, the findings were
+      # real findings about the WRONG host. Optionality is what made that possible, so it is
+      # gone. Nil is still a legitimate value (a spec with an injected backend has no project),
+      # but it is now a value someone chose.
+      #
+      # It cannot widen containment. The override moves only the TCP connect target;
+      # `Fuzz::Origin`'s host is what `outbound` judged and what SNI, the certificate check and
+      # the `Host` header keep carrying, so the scope verdict above is computed on the name the
+      # operator scoped, never on the address gori ends up dialing.
       # `backend` overrides the default Fuzz::Sender so specs can drive the rules without a
       # socket; it is wrapped in Fuzz::GatedBackend so an injected backend is gated too.
       # `opts` widens the method gate / raises caps (manual unsafe opt-in, AGGRESSIVE mode).
@@ -136,6 +150,7 @@ module Gori
       # A caller that passes nothing simply does not participate in out-of-band checks.
       def self.analyze(detail : Store::FlowDetail, verify_upstream : Bool = true,
                        timeout : Time::Span = 10.seconds, *, outbound : Outbound,
+                       overrides : Gori::HostOverrides?,
                        backend : Fuzz::Backend? = nil, opts : Options = Options::DEFAULT,
                        disabled : Set(String) = NO_DISABLED,
                        on_error : Proc(String, Exception, Nil)? = nil,
@@ -163,7 +178,7 @@ module Gori
                    Fuzz::GatedBackend.new(base, outbound).as(Fuzz::Backend)
                  else
                    Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
-                     keep_alive: true, idle_conns: 1)
+                     keep_alive: true, idle_conns: 1, overrides: overrides)
                  end
 
         # Send-refusal reasons already reported for THIS flow (see the `result.ok?` branch).

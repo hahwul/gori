@@ -28,6 +28,19 @@ private def decode(head : Bytes, body : Bytes)
   Gori::Proxy::Codec::ContentDecode.decode(head, body)
 end
 
+private def decode_full(head : Bytes, body : Bytes)
+  Gori::Proxy::Codec::ContentDecode.decode_full(head, body)
+end
+
+# ~172 KB of RANDOM word soup, seeded for determinism. A regular pattern compresses to a few
+# hundred bytes and half of a few hundred bytes decodes to nothing, so the truncation examples
+# need a payload whose truncated PREFIX still carries more than one output buffer.
+private def word_soup(n = 30_000, seed = 11) : String
+  words = %w[alpha beta gamma delta]
+  rng = Random.new(seed)
+  String.build { |io| n.times { io << words[rng.rand(4)] << ' ' } }
+end
+
 private def encoded?(head : Bytes)
   Gori::Proxy::Codec::ContentDecode.content_encoded?(head)
 end
@@ -147,18 +160,99 @@ describe Gori::Proxy::Codec::ContentDecode do
     next unless Gori::Proxy::Codec::Brotli::AVAILABLE
     br = br_compress("brotli round trip works")
     next if br.nil? # `brotli` CLI not installed — skip rather than fail
-    decoded, note = decode(head("HTTP/1.1 200 OK", "Content-Encoding: br"), br)
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: br"), br)
     String.new(decoded.not_nil!).should eq("brotli round trip works")
     note.should eq("decoded: br")
+    clean.should be_true # an INTACT stream must never pick up a truncation warning
   end
 
   it "decodes a zstd body when the decoder is built in" do
     next unless Gori::Proxy::Codec::Zstd::AVAILABLE
     z = zstd_compress("zstd round trip works")
     next if z.nil?
-    decoded, note = decode(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), z)
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), z)
     String.new(decoded.not_nil!).should eq("zstd round trip works")
     note.should eq("decoded: zstd")
+    clean.should be_true
+  end
+
+  # `Brotli`/`Zstd.decode_full` report their own end-of-stream and `inflate` threw that answer
+  # away, calling the one-value `decode` and hard-coding `true` beside it. So a br or zstd body
+  # cut mid-stream — the ordinary shape of a capture-capped response — decoded to a PREFIX and
+  # was reported "decoded: br", the clean note, on every surface that reads one: the History
+  # detail note, `--format json`'s `decode_truncated`, and Probe, for which an encoded body
+  # that never finished is the point of the scan. Its gzip sibling had said "(stream
+  # truncated)" the whole time, which is what made the silence hard to see.
+  it "reports a truncated brotli body as truncated, exactly as gzip does" do
+    next unless Gori::Proxy::Codec::Brotli::AVAILABLE
+    full = br_compress(word_soup)
+    next if full.nil?
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: br"), full[0, full.size // 2])
+    decoded.not_nil!.size.should be > 0
+    decoded.not_nil!.size.should be < word_soup.bytesize # a PREFIX, not the document
+    note.should eq("decoded: br (stream truncated)")
+    clean.should be_false
+  end
+
+  it "reports a truncated zstd body as truncated, exactly as gzip does" do
+    next unless Gori::Proxy::Codec::Zstd::AVAILABLE
+    # Bigger than the brotli example's payload on purpose: libzstd emits nothing until it has a
+    # whole block, so half of a 170 KB body decodes to zero bytes — which is a decode FAILURE
+    # (below), not a partial one. This pins the partial case, so the body has to be large
+    # enough that the surviving prefix carries real output.
+    body = word_soup(200_000)
+    full = zstd_compress(body)
+    next if full.nil?
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), full[0, full.size // 2])
+    decoded.not_nil!.size.should be > 0
+    decoded.not_nil!.size.should be < body.bytesize
+    note.should eq("decoded: zstd (stream truncated)")
+    clean.should be_false
+  end
+
+  # A `Content-Encoding` that does not describe the bytes at all — a forged header, or a body
+  # cut before the decoder's first output byte. Neither library raises on it: they hand back
+  # nothing. Reported as a FAILURE (nil decoded ⇒ `decode_full` returns the captured entity)
+  # rather than a non-nil EMPTY slice, because every display prefers the decoded view over the
+  # raw one (`src = display || body`) and an empty one wins that test — the operator got a
+  # blank pane under a green "decoded: br" and could only reach the bytes through the hex view.
+  it "refuses a br/zstd label over bytes that were never that stream, keeping the raw body" do
+    raw = "this is plain text, not a compressed stream at all".to_slice
+    if Gori::Proxy::Codec::Brotli::AVAILABLE
+      decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: br"), raw)
+      decoded.should eq(raw) # the CAPTURED bytes, so the pane has something to show
+      note.not_nil!.should start_with("decode error (br)")
+      clean.should be_false
+      Gori::Proxy::Codec::ContentDecode.decode_failed?(note).should be_true
+    end
+    if Gori::Proxy::Codec::Zstd::AVAILABLE
+      decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), raw)
+      decoded.should eq(raw)
+      note.not_nil!.should start_with("decode error (zstd)")
+      clean.should be_false
+    end
+    # Same verdict for a REAL stream cut before its first output byte: libzstd emits nothing
+    # until it has a whole block, so half of a 170 KB body is indistinguishable from garbage
+    # here — and either way the honest answer is the captured bytes, not an empty pane.
+    if Gori::Proxy::Codec::Zstd::AVAILABLE && (z = zstd_compress(word_soup))
+      cut = z[0, z.size // 2]
+      decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), cut)
+      decoded.should eq(cut)
+      note.not_nil!.should start_with("decode error (zstd)")
+      clean.should be_false
+    end
+  end
+
+  # `decode_failed?` is the predicate a caller that WRITES the bytes needs, and it reads the
+  # LAST note segment: the chain stops at the first layer it cannot undo, so a successful
+  # `de-chunked` ahead of the failure must not mask it.
+  it "names a failed decode apart from a successful or merely truncated one" do
+    failed = Gori::Proxy::Codec::ContentDecode.decode_failed?("de-chunked · compressed: compress — decode unsupported")
+    failed.should be_true
+    Gori::Proxy::Codec::ContentDecode.decode_failed?("decode error (gzip): Invalid gzip header").should be_true
+    Gori::Proxy::Codec::ContentDecode.decode_failed?("de-chunked · decoded: gzip").should be_false
+    Gori::Proxy::Codec::ContentDecode.decode_failed?("decoded: br (stream truncated)").should be_false
+    Gori::Proxy::Codec::ContentDecode.decode_failed?(nil).should be_false
   end
 
   # The truncated-body case is the one a capture cap produces every day, and it was silently
@@ -169,17 +263,16 @@ describe Gori::Proxy::Codec::ContentDecode do
   # Measured on this payload: 65,536 before, 171,915 after.
   it "keeps draining a truncated brotli body past the first output buffer" do
     next unless Gori::Proxy::Codec::Brotli::AVAILABLE
-    # RANDOM word soup, seeded for determinism. A regular pattern compresses to a few hundred
-    # bytes, and half of a few hundred bytes decodes to nothing — the ceiling this pins is only
-    # reachable when the truncated PREFIX itself carries more than 64 KiB of output.
-    words = %w[alpha beta gamma delta]
-    rng = Random.new(11)
-    body = String.build { |io| 60_000.times { io << words[rng.rand(4)] << ' ' } }
-    full = br_compress(body)
+    full = br_compress(word_soup(60_000))
     next if full.nil?
     truncated = full[0, full.size // 2]
-    decoded, _ = decode(head("HTTP/1.1 200 OK", "Content-Encoding: br"), truncated)
+    # The NOTE as well as the bytes. This example used to destructure `decoded, _` and drop it,
+    # which is why it could pin the drain fix and still pass while the truncation went
+    # unreported: the pair is one answer, and reading half of it is how the silence survived.
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: br"), truncated)
     decoded.not_nil!.size.should be > 65_536
+    note.should eq("decoded: br (stream truncated)")
+    clean.should be_false
   end
 
   # A zstd STREAM is one or more frames back to back, and a `Content-Encoding: zstd` body
@@ -190,8 +283,12 @@ describe Gori::Proxy::Codec::ContentDecode do
     next if one.nil?
     two = zstd_compress("second frame.")
     next if two.nil?
-    decoded, _ = decode(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), one + two)
+    decoded, note, clean = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: zstd"), one + two)
     String.new(decoded.not_nil!).should eq("first frame. second frame.")
+    # And no false alarm: every frame ended and every input byte was consumed, so a multi-frame
+    # body is a COMPLETE decode. Adding a truncation signal must not invent one here.
+    note.should eq("decoded: zstd")
+    clean.should be_true
   end
 
   # A zstd stream is many frames, and `ZSTD_decompressStream` returns 0 at the END OF EVERY ONE
@@ -207,6 +304,47 @@ describe Gori::Proxy::Codec::ContentDecode do
     cap = 64 * 1024
     bytes, _ = Gori::Proxy::Codec::Zstd.decode_full(bomb.to_slice, cap)
     bytes.size.should be < cap * 4 # the cap binds; one output buffer of slack
+  end
+
+  # The cap has to stop one buffer PAST the ceiling, not on it. Both decoders drain into a
+  # power-of-two buffer (64 KiB brotli, 128 KiB zstd) and the real cap is 32 MiB, which both
+  # divide exactly — so a `>= max_out` stop landed a bomb on PRECISELY the ceiling, and every
+  # consumer's guard is `size > max_out` (`Chain.run`'s, `ExternalOpen`'s). Measured before the
+  # fix: a brotli and a zstd bomb both produced 33,554,432 bytes and both reported `Ok`, while
+  # the gzip sibling — whose stdlib drain already used `>` — failed with "output exceeds …".
+  # Same input, two answers, decided by buffer alignment. The caps here are chosen to divide
+  # exactly, which is the shape that hid it.
+  it "stops a br/zstd bomb PAST the cap, so an over-cap consumer guard can see it" do
+    if Gori::Proxy::Codec::Brotli::AVAILABLE && (bomb = br_compress("a" * 4_000_000))
+      cap = 4 * 64 * 1024 # an exact multiple of the brotli drain buffer
+      bytes, clean = Gori::Proxy::Codec::Brotli.decode_full(bomb, cap)
+      bytes.size.should be > cap
+      bytes.size.should be <= cap + 64 * 1024 # …by at most one buffer
+      clean.should be_false
+    end
+    if Gori::Proxy::Codec::Zstd::AVAILABLE && (bomb = zstd_compress("a" * 4_000_000))
+      cap = 4 * 128 * 1024 # an exact multiple of the zstd drain buffer
+      bytes, clean = Gori::Proxy::Codec::Zstd.decode_full(bomb, cap)
+      bytes.size.should be > cap
+      bytes.size.should be <= cap + 128 * 1024
+      clean.should be_false
+    end
+  end
+
+  # The other half of the same rule: a body that decompresses to EXACTLY the cap is not a bomb.
+  # Moving the guard past the ceiling must not start reporting those as cut.
+  it "reports a stream that decodes to exactly the cap as complete" do
+    payload = "a" * (64 * 1024)
+    if Gori::Proxy::Codec::Brotli::AVAILABLE && (b = br_compress(payload))
+      bytes, clean = Gori::Proxy::Codec::Brotli.decode_full(b, payload.bytesize)
+      bytes.size.should eq(payload.bytesize)
+      clean.should be_true
+    end
+    if Gori::Proxy::Codec::Zstd::AVAILABLE && (z = zstd_compress(payload))
+      bytes, clean = Gori::Proxy::Codec::Zstd.decode_full(z, payload.bytesize)
+      bytes.size.should eq(payload.bytesize)
+      clean.should be_true
+    end
   end
 
   # `decode_full`'s second element is the only honest failure signal either library has: both

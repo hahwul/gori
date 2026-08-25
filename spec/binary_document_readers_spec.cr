@@ -119,4 +119,63 @@ describe "the binary document readers" do
     rc.stop.should eq("truncated")
     rc.describes?(ccut.size).should be_true
   end
+
+  # The pair `describes?` has to separate, and they pull opposite ways: the FIRST header of a
+  # mislabelled body lies about a length and the short read then consumes every byte, landing on
+  # the same `{truncated, consumed == size}` a capture cap lands on. `{` is CBOR major 3 /
+  # additional info 27, so an ordinary JSON body under an `application/cbor` label reads as a
+  # text string of 2.4 × 10^18 bytes — and a 20 KB response was replaced in the detail panel by
+  # `{"$partial": "truncated"}`, with the binary placeholder suppressed because a document had
+  # "decoded". What separates them is whether the reader made ANYTHING of the body.
+  it "refuses a body whose first header lied, and shows one the capture cap cut" do
+    rng = Random.new(5)
+    tail = Bytes.new(20_000) { rng.rand(256).to_u8 }
+    mislabelled = {
+      {"json", (%({"key":") + "A" * 20_000 + %("})).to_slice},
+      {"small json", %({"a":1,"b":"hi"}).to_slice},
+      {"html", "<html><body>x</body></html>".to_slice},
+      {"png", Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] + tail},
+      {"gzip", Bytes[0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03] + tail},
+      {"zlib", Bytes[0x78, 0x9c] + tail},
+    }
+    shown = [] of String
+    mislabelled.each do |(label, body)|
+      shown << "cbor #{label}" if Gori::Cbor.render(body).describes?(body.size)
+      shown << "msgpack #{label}" if Gori::Msgpack.render(body).describes?(body.size)
+    end
+    shown.should eq([] of String)
+  end
+
+  it "shows EVERY prefix of a real document, which is what a capture cap produces" do
+    # The other half of the pair, and the one a fix for the first half breaks. Cutting a real
+    # document at every offset is exactly what a body cap does, and each cut has to stay
+    # readable — `read_arg`'s short read used to leave the cursor on the head's initial byte,
+    # so a cut landing inside a LENGTH field reported two bytes consumed out of two thousand
+    # and `describes?` called a 2 KB rendering a lie. Sweeping the prefixes is the only way
+    # this is visible: 172 of 2 247 CBOR prefixes were refused, and the count is 0.
+    # Both written by an INDEPENDENT encoder (see "against a reference encoder" in each
+    # reader's spec) from one value: nested maps, arrays, a float, a byte string, a wide
+    # integer — so the cut lands inside a head, an argument, a count and a payload in turn.
+    docs = {
+      {"cbor", ("a66269647175726e3a757569643a39633866316434306274731a68aa6eff647573657" \
+                "2a2646e616d656668616877756c65726f6c6573826561646d696e6761756469746f72" \
+                "656974656d7381a463736b7568534b552d303030316371747903657072696365fb3ff8" \
+                "00000000000064626c6f62480001020304050607626f6bf5646e6f7465f6")
+                  .hexbytes},
+      {"msgpack", ("86a26964b175726e3a757569643a3963386631643430a27473ce68aa6effa4757365" \
+                   "7282a46e616d65a668616877756ca5726f6c657392a561646d696ea761756469746f" \
+                   "72a56974656d739184a3736b75a8534b552d30303031a371747903a57072696365cb" \
+                   "3ff8000000000000a4626c6f62c4080001020304050607a26f6bc3a46e6f7465c0")
+                     .hexbytes},
+    }
+    docs.each do |(fmt, doc)|
+      refused = [] of String
+      (1..doc.size).each do |n|
+        cut = doc[0, n]
+        r = fmt == "cbor" ? Gori::Cbor.render(cut) : Gori::Msgpack.render(cut)
+        refused << "#{fmt} #{n}: #{r.stop} #{r.json[0, 40]}" unless r.describes?(n)
+      end
+      refused.should eq([] of String)
+    end
+  end
 end

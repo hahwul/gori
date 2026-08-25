@@ -36,19 +36,58 @@ module Gori
     #   * `h2=…` — an alternative reached over TCP, so still a CONNECT through gori.
     #   * `fooh3=…` / `h32=…` — the protocol-id is the WHOLE token before `=`, never a
     #     substring, or a strip would eat a field it does not understand.
+    #   * a comma INSIDE a quoted-string — see `each_alternative`. `alt-authority` is a
+    #     quoted-string by grammar (§3) and a parameter's value may be one too, so an
+    #     origin writing `fake=":443"; p="a, h3=x"` advertises no HTTP/3 whatever: a plain
+    #     `split(',')` cut that field in two and read `h3=x"` out of the second half, which
+    #     removed a header gori does not understand while claiming it had removed an h3
+    #     advertisement (P7 — the strip must eat only fields it can name).
     def self.h3_evidence(value : String) : String?
       val = value.scrub
-      val.split(',').each do |entry|
-        trimmed = entry.strip
-        next if trimmed.empty?
-        parts = trimmed.split('=', 2)
-        next if parts.size < 2
-        proto = parts[0].strip.downcase
+      each_alternative(val) do |trimmed|
+        eq = trimmed.index('=')
+        next unless eq
+        proto = trimmed[0, eq].strip.downcase
         if proto == "h3" || proto.starts_with?("h3-")
           return trimmed[0, {trimmed.size, EVIDENCE_MAX}.min]
         end
       end
       nil
+    end
+
+    # Each non-empty `alt-value` of an `Alt-Svc` field, OWS-trimmed, splitting on the commas
+    # that are actually list separators.
+    #
+    # RFC 9110 §5.6.4 (quoted-string): a `"` opens a run in which `,` is DATA and `\` escapes
+    # the next octet. Both the `alt-authority` and a parameter value can be one, so a comma
+    # inside quotes belongs to the entry, not between two of them.
+    #
+    # An UNBALANCED quote runs to the end of the value and yields one entry. That errs towards
+    # not stripping — the direction P7 asks for here, and the same answer `clear` and `h2=`
+    # already get: a field gori cannot parse is a field it does not remove.
+    private def self.each_alternative(val : String, &) : Nil
+      bytes = val.to_slice
+      start = 0
+      in_quotes = false
+      escaped = false
+      i = 0
+      while i < bytes.size
+        b = bytes.unsafe_fetch(i)
+        if escaped
+          escaped = false
+        elsif in_quotes && b == 0x5c_u8 # '\' — quoted-pair, only inside a quoted-string
+          escaped = true
+        elsif b == 0x22_u8 # '"'
+          in_quotes = !in_quotes
+        elsif b == 0x2c_u8 && !in_quotes # ',' — a list separator, at last
+          entry = val.byte_slice(start, i - start).strip
+          yield entry unless entry.empty?
+          start = i + 1
+        end
+        i += 1
+      end
+      last = val.byte_slice(start, bytes.size - start).strip
+      yield last unless last.empty?
     end
 
     # :ditto: as a predicate, for a caller that only has to decide.

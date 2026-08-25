@@ -71,9 +71,17 @@ module Gori
         # short-circuiting on "no --project given" would drop Sandbox containment.
         outbound = project_outbound(project_name, db_path, allow_unscoped)
         plan = begin
+          # `overrides` is a SNAPSHOT off the read connection already open here, not a second
+          # `open_store` the way `cli_host_overrides` does it for fuzz/mine/sequence: those
+          # commands can run project-less (`--request`/stdin) and so have to decide whether a
+          # project is in play at all, while authorize always has one (the flows AND the
+          # identities both come out of it). Taken before `store.close` below, and it holds
+          # its rows in memory, so the run keeps dialing the operator's table after the read
+          # connection is gone.
           Authorize::Plan.build(Authorize::PlanOptions.new(store,
             flow_ids: flow_ids, query: query, limit: limit, identities_json: identities_json,
-            unsafe_methods: unsafe_methods, verify: !insecure, timeout: timeout), outbound)
+            unsafe_methods: unsafe_methods, verify: !insecure, timeout: timeout,
+            overrides: Gori::HostOverrides.load(store)), outbound)
         rescue ex : Authorize::PlanError
           store.close
           outbound.close
@@ -84,7 +92,11 @@ module Gori
         # (`outbound` keeps its OWN connection open on purpose: that is what lets a mid-run
         # scope/Sandbox change stop an in-flight sweep.)
         store.close
-        if query && (plan.targets.size + plan.skipped.size) >= limit
+        # The QUERY's own row count, not the size of the whole selection. `--limit` caps only
+        # what the query contributes, so counting the explicit ids alongside it warned about a
+        # cap that never applied: `gori run authorize 2 3 4 -q 'path:/soft' -n 4` announced that
+        # a one-row query had been truncated, and raising --limit changed nothing.
+        if plan.query_capped?(limit)
           STDERR.puts "gori run authorize: --query was capped at --limit #{limit} — " \
                       "matching flows past that were not replayed (raise --limit to include them)"
         end
@@ -148,6 +160,13 @@ module Gori
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
         authorize_done(sent, total, ids, bypasses, failed, unanswered)
+        # …and, on the same summary, any identity whose `$NAME` went out LITERALLY. This is the
+        # surface the drain exists for: a slot overlay that resolved to nothing sends the
+        # identity UNAUTHENTICATED, the resource answers 401 exactly as it does for anonymous,
+        # and the row aggregates to `enforced` — the one direction `Authorize::Identity`'s doc
+        # says this tool must not fail in, reported as a clean result. Ahead of the exits below
+        # so an all-refused or interrupted run says it too. See `Run.unbound_overlay_note`.
+        report_unbound_slot_overlay("authorize")
         # Before the all-refused check below — see `Run.report_interrupted` for why the order
         # matters: a run stopped early has not demonstrated that every send was refused.
         Run.report_interrupted(sent, "request", "replayed") if interrupted.call
@@ -310,6 +329,12 @@ module Gori
           "project's saved set when you passed none (`gori run session list`). The name is what " \
           "tells the rows of the results table apart, so give one of them a different one. Names " \
           "are compared case-insensitively (`admin` and `Admin` are one identity here)"
+        in Authorize::PlanError::Reason::MultipleBaselines
+          "more than one identity claims the baseline (#{ex.detail}) — exactly one may carry " \
+          "\"baseline\":true, because it is the single response every other identity is judged " \
+          "against. Clear the flag on all but one (omit it everywhere to make the request AS " \
+          "CAPTURED the baseline). Run as-is, every row would BE the baseline and nothing would " \
+          "be compared"
         in Authorize::PlanError::Reason::NothingToSend
           "every selected flow was skipped (#{ex.detail}), so nothing was sent — replay " \
           "POST/PUT/PATCH/DELETE with --unsafe-methods, reach a host outside the project scope " \

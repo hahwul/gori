@@ -2233,7 +2233,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
       scope = Gori::Scope.load(store)
       scope.add("exclude", "host", "acme.test")
       fake = CountingBackend.new(Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port))
-      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), backend: fake)
+      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), overrides: nil, backend: fake)
       fake.sent.should eq(0) # blocked before the socket — proves scope, not a send failure
       dets.should be_empty
     end
@@ -2302,7 +2302,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
       scope = Gori::Scope.load(store)
       scope.add("include", "host", "acme.test")
       fake = CountingBackend.new(Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port))
-      Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), backend: fake)
+      Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), overrides: nil, backend: fake)
       fake.sent.should be > 0 # an include rule (no exclude, sandbox off) lets the probe through
     end
   end
@@ -2321,7 +2321,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
       origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
       backend = RaisingBackend.new(origin)
       failed = [] of String
-      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope),
+      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), overrides: nil,
         backend: backend, on_error: ->(where : String, _ex : Exception) { failed << where; nil })
       dets.should be_empty # nothing could be detected — every send blew up
       # ...but the loop did not abort on the first raise: more than one rule got to run and
@@ -2342,7 +2342,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
       scope.add("include", "host", "acme.test")
       origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
       failed = [] of String
-      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope),
+      dets = Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.interactive(scope), overrides: nil,
         backend: FlakyCorsBackend.new(origin),
         on_error: ->(where : String, _ex : Exception) { failed << where; nil })
       # on_error carries the RULE id; the Detection carries its own finding CODE.
@@ -2468,7 +2468,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "skips active analysis safely when active probe target connection fails or yields no plan" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/no-params", content_type: nil)
-      dets = Gori::Probe::Active.analyze(detail, outbound: ungated_outbound)
+      dets = Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil)
       dets.should be_empty
     end
   end
@@ -3773,7 +3773,7 @@ describe "Gori::Probe::Active::OpenRedirect" do
         target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)
       backend = FixedBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443),
         "HTTP/1.1 302 Found\r\nLocation: https://gori-redir-probe.example/cb\r\n\r\n")
-      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, backend: backend).map(&.code).should contain("open_redirect")
+      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil, backend: backend).map(&.code).should contain("open_redirect")
     end
   end
 end
@@ -4241,13 +4241,13 @@ describe "Gori::Probe::Scan rules config parity" do
       origin = Gori::Fuzz::Origin.new(detail.row.scheme, detail.row.host, detail.row.port)
 
       baseline = CountingBackend.new(origin)
-      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, backend: baseline)
+      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil, backend: baseline)
       baseline.sent.should be > 0
 
       # Disabling every active rule must stop the sends at the source, not just drop findings.
       all_ids = Gori::Probe::Active::RULES.map(&.info.id).to_set
       muted = CountingBackend.new(origin)
-      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, backend: muted, disabled: all_ids)
+      Gori::Probe::Active.analyze(detail, outbound: ungated_outbound, overrides: nil, backend: muted, disabled: all_ids)
       muted.sent.should eq(0)
     end
   end

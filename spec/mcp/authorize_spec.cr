@@ -607,3 +607,101 @@ describe "MCP authorize tools" do
     end
   end
 end
+
+# An origin with a PER-SESSION cached copy: a request that carries both the session cookie and
+# the validator it was issued has nothing new to say, so it revalidates into a bodyless 304.
+# Every other request — an anonymous one, whose ETag this origin never issued — is handed the
+# whole entity. This is what a browser capture replays into: `If-None-Match` rides along on
+# almost every captured GET.
+private def start_conditional_origin : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  spawn do
+    while conn = server.accept?
+      begin
+        head = Gori::Proxy::Codec::Http1.read_head(conn)
+        text = head ? String.new(head).downcase : ""
+        if text.includes?("if-none-match") && text.includes?("cookie:")
+          conn << "HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n"
+        else
+          body = "top secret admin dashboard: employee list, payroll totals, and pending invoices"
+          conn << "HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: #{body.bytesize}\r\n" \
+                  "Connection: close\r\n\r\n" << body
+        end
+        conn.flush
+        conn.close
+      rescue
+        conn.close rescue nil
+      end
+    end
+  end
+  port
+end
+
+private def seed_conditional_flow(store, port) : Int64
+  head = "GET /payroll HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nCookie: session=abc123\r\n" \
+         "If-None-Match: \"v1\"\r\n\r\n"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+    method: "GET", target: "/payroll", http_version: "HTTP/1.1",
+    head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 304, head: "HTTP/1.1 304 Not Modified\r\n\r\n".to_slice, body: nil,
+    content_type: nil))
+  id
+end
+
+describe "MCP authorize tools" do
+  # THE false negative, end to end and on a socket. Replayed verbatim, only the BASELINE
+  # revalidates (it is the one carrying the session the copy belongs to): it gets a bodyless
+  # 304 while the anonymous client is handed the whole payroll page. Different status classes,
+  # so the row read `different`, the job reported `enforced` with 0 bypasses, and an anonymous
+  # client walking off with a salary export came back green.
+  it "finds the bypass on a capture that carried a conditional GET" do
+    port = start_conditional_origin
+    with_store do |store|
+      flow = seed_conditional_flow(store, port)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "authorize_start", {
+        "flow_ids"       => [flow],
+        "identities"     => anon,
+        "allow_unscoped" => true,
+      }.to_json)
+      status = drain_job(tools, start["job_id"].as_s)
+      status["access_control"].as_s.should eq("BYPASS")
+      status["bypass_count"].as_i.should eq(1)
+
+      results = call_json(tools, "authorize_results", %({"job_id":#{start["job_id"].as_s.to_json}}))
+      trials = results["results"][0]["trials"].as_a
+      # Both identities asked the same unconditional question, so both were served the page.
+      trials[0]["status"].as_i.should eq(200)
+      trials[1]["status"].as_i.should eq(200)
+      trials[1]["verdict"].as_s.should eq("same")
+    end
+  end
+
+  # The schema has always said "Exactly one may carry baseline:true". Nothing enforced it, and
+  # a set with two compared NOTHING — every trial came back `baseline`, no row was left to
+  # compare, and the headline fell past every arm to `enforced`: the strongest clean bill of
+  # health this tool can give, for a run that measured nothing at all.
+  it "refuses an identity set where two claim the baseline" do
+    port = start_authz_origin(enforce: false)
+    with_store do |store|
+      flow = seed_authz_flow(store, port)
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      r = call_result(tools, "authorize_start", {
+        "flow_ids"   => [flow],
+        "identities" => [
+          {"name" => "admin", "baseline" => true},
+          {"name" => "anonymous", "baseline" => true, "remove" => ["Cookie"]},
+        ],
+        "allow_unscoped" => true,
+      }.to_json)
+      r.is_error.should be_true
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.text.should contain("baseline")
+      r.text.should contain("admin")
+      r.text.should contain("anonymous")
+    end
+  end
+end
