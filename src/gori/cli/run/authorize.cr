@@ -71,9 +71,17 @@ module Gori
         # short-circuiting on "no --project given" would drop Sandbox containment.
         outbound = project_outbound(project_name, db_path, allow_unscoped)
         plan = begin
+          # `overrides` is a SNAPSHOT off the read connection already open here, not a second
+          # `open_store` the way `cli_host_overrides` does it for fuzz/mine/sequence: those
+          # commands can run project-less (`--request`/stdin) and so have to decide whether a
+          # project is in play at all, while authorize always has one (the flows AND the
+          # identities both come out of it). Taken before `store.close` below, and it holds
+          # its rows in memory, so the run keeps dialing the operator's table after the read
+          # connection is gone.
           Authorize::Plan.build(Authorize::PlanOptions.new(store,
             flow_ids: flow_ids, query: query, limit: limit, identities_json: identities_json,
-            unsafe_methods: unsafe_methods, verify: !insecure, timeout: timeout), outbound)
+            unsafe_methods: unsafe_methods, verify: !insecure, timeout: timeout,
+            overrides: Gori::HostOverrides.load(store)), outbound)
         rescue ex : Authorize::PlanError
           store.close
           outbound.close

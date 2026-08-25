@@ -435,7 +435,12 @@ module Gori
           # Same rule as the sibling sweeps: the tool argument can only make verification
           # STRICTER, never lift a `gori mcp --insecure` the operator set for the process.
           verify: bool_arg(h, "verify", true) && @verify_upstream,
-          timeout: fuzz_timeout(h) || Authorize::ACTIVE_TIMEOUT)
+          timeout: fuzz_timeout(h) || Authorize::ACTIVE_TIMEOUT,
+          # Per-CALL snapshot of the project's host overrides — the same shape `minimize`,
+          # `fuzz`, `mine`, `sequence` and `discover` already use on this surface. An MCP tool
+          # call is a one-shot: there is no instance living long enough for the live-object
+          # distinction the TUI needs, and a snapshot cannot go stale within one call.
+          overrides: HostOverrides.load(store))
         Authorize::Plan.build(options, ob)
       rescue ex : Authorize::PlanError
         authorize_plan_error(ex, ob)

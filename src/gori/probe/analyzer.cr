@@ -6,6 +6,7 @@ require "./event"
 require "../store"
 require "../scope"
 require "../fuzz/engine"
+require "../host_overrides"
 
 module Gori
   module Probe
@@ -52,8 +53,25 @@ module Gori
 
       private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 
+      # The project's HOST OVERRIDES table, dialed through by every active probe this analyzer
+      # sends (`execute_active`). Held as the SESSION'S LIVE INSTANCE — the same mutex-guarded
+      # object the Project tab's HOST OVERRIDES pane edits and the proxy reads — never a
+      # snapshot of our own. An analyzer outlives every edit made to that table: it is built
+      # once when the project opens and runs until it closes, so a private
+      # `HostOverrides.load(store)` would freeze at project-open and quietly send every
+      # subsequent probe to the address the operator has since corrected. `HostOverrides`
+      # exists in that shape for exactly this (see its constructor's note on the read path);
+      # the headless `Probe::Scan` is the one-shot case and takes a snapshot instead.
+      #
+      # Nilable with a nil default because `Session` is the sole production caller and the
+      # spec suite builds analyzers that never open a socket. What keeps a REAL caller from
+      # forgetting it is the required keyword on `Active.analyze` plus the source-grep guard
+      # in `spec/probe/host_overrides_wiring_spec.cr`, which covers this constructor too.
+      @overrides : Gori::HostOverrides?
+
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
-                     @mode : Mode, @verify_upstream : Bool)
+                     @mode : Mode, @verify_upstream : Bool,
+                     *, @overrides : Gori::HostOverrides? = nil)
         # The one scope decision this analyzer's active probes dial through. Layer 1 is the
         # strict ALLOWLIST (maybe_enqueue_active), and — new with the Outbound seam — its
         # sender now applies Layer 2 too, so Sandbox mode and explicit EXCLUDE rules stop a
@@ -649,7 +667,7 @@ module Gori
         # vs `\\`), then its pipeline group — several requests to one origin, sequentially, so
         # `idle_conns: 1` is the whole need. Closed in the ensure below.
         sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT,
-          keep_alive: true, idle_conns: 1)
+          keep_alive: true, idle_conns: 1, overrides: @overrides)
         # The WHOLE probe is captured evidence plus this rule's own canary — see
         # `Fuzz::Backend.all_verbatim` for why nothing in it is eligible for session-binding
         # expansion. This loop is the TWIN of the one in `Active.analyze`: same plans, same

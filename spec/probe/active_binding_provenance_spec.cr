@@ -136,7 +136,7 @@ describe "Gori::Probe::Active session-binding provenance" do
   it "does NOT expand a `$NAME` that arrived from the wire in a CAPTURED body" do
     with_binding("id", "ORIGINSID1234567890") do
       backend = ExpandingBackend.new(F::Origin.new("https", "acme.test", 443))
-      P::Active.analyze(captured(GQL_BODY), outbound: ungated_outbound, backend: backend,
+      P::Active.analyze(captured(GQL_BODY), outbound: ungated_outbound, overrides: nil, backend: backend,
         opts: P::Active::Options.new(allow_unsafe: true))
 
       backend.wire.should_not be_empty
@@ -152,7 +152,7 @@ describe "Gori::Probe::Active session-binding provenance" do
   it "marks the WHOLE probe request verbatim at every send, primary and followup" do
     with_binding("id", "ORIGINSID1234567890") do
       backend = ExpandingBackend.new(F::Origin.new("https", "acme.test", 443))
-      P::Active.analyze(captured(GQL_BODY), outbound: ungated_outbound, backend: backend,
+      P::Active.analyze(captured(GQL_BODY), outbound: ungated_outbound, overrides: nil, backend: backend,
         opts: P::Active::Options.new(allow_unsafe: true))
 
       # Not "some spans reached the seam" — EVERY send, including the differential rules'
@@ -171,7 +171,7 @@ describe "Gori::Probe::Active session-binding provenance" do
     plain = %({"query":"query GetUser","variables":{"id":"42"}})
     with_binding("id", "ORIGINSID1234567890") do
       fixed = ExpandingBackend.new(F::Origin.new("https", "acme.test", 443))
-      P::Active.analyze(captured(plain), outbound: ungated_outbound, backend: fixed,
+      P::Active.analyze(captured(plain), outbound: ungated_outbound, overrides: nil, backend: fixed,
         opts: P::Active::Options.new(allow_unsafe: true))
       # With no `$` in the buffer, expansion was already a no-op: `verbatim` changes nothing
       # about which probes are built or what they carry.
@@ -244,7 +244,7 @@ describe "Gori::Probe::Active session-binding provenance" do
         inner = ExpandingBackend.new(F::Origin.new("https", "acme.test", 443))
         errs = [] of String
         dets = P::Active.analyze(captured(GQL_BODY),
-          outbound: Gori::Outbound.interactive(scope), backend: inner,
+          outbound: Gori::Outbound.interactive(scope), overrides: nil, backend: inner,
           opts: P::Active::Options.new(allow_unsafe: true),
           on_error: ->(_id : String, ex : Exception) { errs << ex.message.to_s; nil })
 

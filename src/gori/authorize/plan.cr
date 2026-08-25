@@ -1,3 +1,4 @@
+require "../host_overrides"
 require "../outbound"
 require "../ql"
 require "../scope"
@@ -130,6 +131,17 @@ module Gori::Authorize
     property? verify : Bool
     # Per-send connect/read/write timeout.
     property timeout : Time::Span
+    # The project's HOST OVERRIDES table (/etc/hosts-style: dial THIS address for that
+    # hostname), threaded to `Engine.live` and from there to the dialer. Nil is a real answer
+    # — a spec that never opens a socket has no table to give — but a surface that sends must
+    # supply one, or the operator's routing table is silently ignored and every identity is
+    # replayed against whatever DNS resolves, which is the defect this argument exists for.
+    #
+    # A SNAPSHOT here rather than a live object, because both callers of this seam are
+    # headless one-shot runs (`gori run authorize`, the MCP `authorize_*` tools) and neither
+    # outlives the edit it would need to observe. The TUI does not build a PlanOptions; it
+    # calls `Engine.live` directly with the session's live instance.
+    property overrides : Gori::HostOverrides?
 
     def initialize(@store : Store,
                    *,
@@ -139,7 +151,8 @@ module Gori::Authorize
                    @identities_json : String? = nil,
                    @unsafe_methods : Bool = false,
                    @verify : Bool = true,
-                   @timeout : Time::Span = ACTIVE_TIMEOUT)
+                   @timeout : Time::Span = ACTIVE_TIMEOUT,
+                   @overrides : Gori::HostOverrides? = nil)
     end
   end
 
@@ -259,7 +272,7 @@ module Gori::Authorize
         raise PlanError.new(PlanError::Reason::NothingToSend,
           "every selected flow was skipped", skip_tally(skipped), skipped)
       end
-      new(engine: Engine.live(outbound, options.verify?, options.timeout),
+      new(engine: Engine.live(outbound, options.verify?, options.timeout, overrides: options.overrides),
         identities: identities, targets: targets, skipped: skipped, query_rows: query_rows)
     end
 

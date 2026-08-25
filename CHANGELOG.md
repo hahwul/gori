@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A per-project host override now reaches the Authorize tab and the active Probe rules, on all three surfaces: both dialled the name in the capture, so an operator pointing a host at a staging IP was testing the wrong origin and nothing said so. The global `settings.json` overrides always applied; it was the project table that was lost (#807).
+
 - `Space` `⇧B` on a History flow, its detail or a Repeater tab writes the DECODED response body under `~/.gori/preview` and hands it to the desktop opener, and `^G`/`^F` reach the Decoder's INPUT/OUTPUT and the Fuzzer's template and result detail. The suffix comes from a fixed allowlist keyed on the media type, the file is written `0600`, a body whose coding did not come off is refused by name rather than opened as an empty or still-compressed file, and the sweep that bounds the preview directory takes the trees a desktop opener unpacks there with it (#796).
 
 - A factory reset clears what is on DISK, not just what this session parsed: a section that reads as the default — pasted Decoder values, a key gori no longer writes — goes with the rest, the live Match & Replace and colour-rule snapshots are rebuilt so a deleted rule stops rewriting traffic, a deleted saved view stops being History's active lens, and a settings.json gori could not read at all is refused rather than overwritten. The Tabs row's `^R` clears the key instead of pinning today's default arrangement into the file.

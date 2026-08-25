@@ -1,5 +1,6 @@
 require "../store/models"
 require "../fuzz/engine"
+require "../host_overrides"
 require "../repeater/exchange_meta"
 require "../repeater/flow_request"
 require "../outbound"
@@ -127,8 +128,24 @@ module Gori
       end
 
       # The live engine: sends through `Fuzz::Sender`, scope-gated by `outbound`.
+      #
+      # `overrides` is the project's HOST OVERRIDES table, and it is a REQUIRED keyword for
+      # the same reason `Probe::Active.analyze`'s `outbound` is: it was optional, every one of
+      # this seam's callers forgot it, and the result was silent. A nil here is a legitimate
+      # answer (no project in play, a spec that never dials) but it has to be an answer someone
+      # gave. It only moves the TCP connect target — SNI, the certificate hostname, the Host
+      # header and the scope verdict all keep the ORIGIN's own host — so it can neither widen
+      # the scope decision `outbound` already made nor disguise where a send went.
+      #
+      # Which OBJECT to pass differs by surface, and the difference is load-bearing (see
+      # `HostOverrides`' constructor): a live TUI passes `session.host_overrides`, the ONE
+      # mutex-guarded instance the Project tab edits in place, so an override the operator
+      # fixed a moment ago is honoured by the next replay. A headless CLI/MCP call passes its
+      # own `HostOverrides.load(store)` snapshot, which is all a one-shot run can observe
+      # anyway and is what every sibling headless sender already does.
       def self.live(outbound : Gori::Outbound, verify_upstream : Bool,
-                    timeout : Time::Span = ACTIVE_TIMEOUT) : Engine
+                    timeout : Time::Span = ACTIVE_TIMEOUT,
+                    *, overrides : Gori::HostOverrides?) : Engine
         # keep_alive: FALSE, unlike every other sweep in gori. The whole point of the second
         # request is that it carries different credentials, and connection-oriented auth
         # (NTLM, Negotiate — ordinary on internal engagements) authenticates the CONNECTION,
@@ -146,7 +163,7 @@ module Gori
         # from SUBSTITUTION, and the overlay writes whole header lines.
         new(->(origin : Fuzz::Origin, http2 : Bool) {
           Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
-            slot_overlay: false).as(Fuzz::Backend)
+            slot_overlay: false, overrides: overrides).as(Fuzz::Backend)
         })
       end
 

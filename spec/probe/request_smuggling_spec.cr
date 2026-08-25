@@ -377,7 +377,7 @@ describe Gori::Probe::Active::RequestSmuggling do
     it "Active.analyze routes the pipeline to the wire when the rule is ENABLED (default-off flip)" do
       backend = RecordingBackend.new(F::Origin.new("https", "acme.test", 443))
       # request_smuggling is default-OFF, so its id PRESENT in the disabled set means ENABLED.
-      P::Active.analyze(frontended_detail, outbound: ungated_outbound, backend: backend,
+      P::Active.analyze(frontended_detail, outbound: ungated_outbound, overrides: nil, backend: backend,
         opts: AGGRESSIVE, disabled: Set{"request_smuggling"})
       # The differential smuggle (canary) and a CL.TE timing probe both reached the wire.
       backend.wire.any?(&.includes?("gori-smuggle-")).should be_true
@@ -386,7 +386,7 @@ describe Gori::Probe::Active::RequestSmuggling do
 
     it "Active.analyze sends NO smuggling probe when the rule is default-off (empty disabled set)" do
       backend = RecordingBackend.new(F::Origin.new("https", "acme.test", 443))
-      P::Active.analyze(frontended_detail, outbound: ungated_outbound, backend: backend,
+      P::Active.analyze(frontended_detail, outbound: ungated_outbound, overrides: nil, backend: backend,
         opts: AGGRESSIVE) # disabled defaults to empty ⇒ default-off rule stays off
       backend.wire.none?(&.includes?("gori-smuggle-")).should be_true
     end

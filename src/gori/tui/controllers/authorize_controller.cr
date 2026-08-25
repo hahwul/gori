@@ -482,6 +482,15 @@ module Gori::Tui
       return if batch.nil? # comparable_batch already said why
       outbound = Outbound.allowlist(@host.session.scope)
       verify = Settings.verify_upstream?
+      # The session's LIVE HostOverrides — the one mutex-guarded instance the Project tab's
+      # HOST OVERRIDES pane edits in place and the proxy dials from — not a
+      # `HostOverrides.load(store)` of our own. The distinction is the whole reason this is
+      # read here: a snapshot taken when the tab was built would be frozen at project open,
+      # so an operator who notices a bad route, fixes it in the Project tab and presses run
+      # again would keep getting the old address with nothing on screen to say why. Read on
+      # the MAIN fiber and handed to the spawned fiber below, like `outbound` above; the
+      # object itself is safe to share (that is what its mutex is for).
+      overrides = @host.session.host_overrides
       # Arm the batch on the MAIN fiber, before anything is spawned: the stop flag has to be
       # cleared here, not in the fiber's teardown, or a stop raised while the previous run was
       # winding down would be swallowed and this run would inherit it.
@@ -498,7 +507,7 @@ module Gori::Tui
       jobs = batch.map { |e| {e.id, e.detail} }
       stop = -> { @view.stop_requested? }
       spawn(name: "authorize-run") do
-        engine = Authorize::Engine.live(outbound, verify)
+        engine = Authorize::Engine.live(outbound, verify, overrides: overrides)
         jobs.each do |(eid, detail)|
           break if @view.stop_requested?
           begin

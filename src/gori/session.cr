@@ -112,7 +112,7 @@ module Gori
         # the shared Scope. Runs headless too — but ONLY on the capture-lock holder (started
         # below), never on a view-only 2nd instance (which would send duplicate active probes to
         # targets and race issue-writes on the shared DB against the real capturer).
-        probe = Probe::Analyzer.new(store, scope, probe_events, store.probe_mode, !config.insecure_upstream?)
+        probe = Probe::Analyzer.new(store, scope, probe_events, store.probe_mode, !config.insecure_upstream?, overrides: host_overrides)
         # `extractor: bindings` is the SECOND wiring of the same object and the one slice 2 is
         # about: `Env.layer` above makes `$SESSION` resolvable at send time, this makes proxy
         # traffic able to BIND it. Threaded explicitly rather than read off the `Env` global,

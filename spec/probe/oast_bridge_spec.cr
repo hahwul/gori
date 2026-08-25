@@ -135,7 +135,7 @@ describe Gori::Probe::Active::SsrfOast do
       detail = ssrf_flow(store, "/fetch?url=https://good.example/x")
       backend = OkBackend.new(Gori::Fuzz::Origin.new("https", "acme.test", 443))
       collector = OobCollector.new
-      Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.waived(nil, Gori::Outbound::Reason::Operator),
+      Gori::Probe::Active.analyze(detail, outbound: Gori::Outbound.waived(nil, Gori::Outbound::Reason::Operator), overrides: nil,
         backend: backend, opts: Gori::Probe::Active::Options.new(oob: FakeMinter.new),
         on_oob: ->(rid : String, c : Gori::Probe::OutOfBand::Candidate) { collector.call(rid, c); nil })
       collector.seen.size.should eq(1)
