@@ -75,12 +75,42 @@ module Gori::Proxy
       # Refusal sentences this listener has already written to `gori.log`. The FLOW is the record
       # an operator reads; this bounds the log against a client that reconnects forever.
       @socks5_logged = Set(String).new
+      # Destinations this listener has already told the operator it is relaying blind because
+      # `network.tls_passthrough` lists them (see `note_passthrough_blackout`). Per LISTENER and
+      # not per connection — `Proxy::Server` serves every connection this listener accepts, each
+      # in its own fiber, so anything that is a fact about ONE connection may not live here.
+      # This is a fact about the CONFIGURATION, which is why it may.
+      @passthrough_noted = Set(String).new
     end
 
     # How many distinct SOCKS5 refusal sentences one listener writes to `gori.log`. Same shape
     # and the same reason as `ClientConn::COMPRESSED_SKIP_LOG_CAP`: the vocabulary is small and
     # bounded, and a client cycling through it must not grow the set for the process's life.
     SOCKS5_LOG_CAP = 8
+
+    # How many distinct destinations one listener will announce as a passthrough blackout, in
+    # `gori.log` and as a flow. Same shape and the same reason as `SOCKS5_LOG_CAP` above: the
+    # list is the operator's and is small, and a client cycling through ports must not grow the
+    # set for the process's life.
+    PASSTHROUGH_NOTE_CAP = 16
+
+    # How long a SOCKS5 connection to a `network.tls_passthrough` host may stay SILENT before
+    # the listener stops waiting for a first byte to route on and relays it byte-exact.
+    #
+    # The number buys back the capture the setting's name promises it would not cost. Matching
+    # the list before any peek made `tls_passthrough` a whole-protocol blackout — plaintext
+    # `http://` to a listed host was relayed with no flow and no advisory — and never looking at
+    # the clock made a server-speaks-first peer (SMTP/IMAP/POP3/MySQL, and `ssh -D`, which is
+    # what most people point at this listener) wait out the 30 s client read timeout with the
+    # origin never dialled. A deadline answers both: bytes inside it route exactly as they
+    # always did, and silence past it is the one shape that cannot be routed on at all.
+    #
+    # A SECOND is far past what the client-speaks-first side needs and far short of what the
+    # other side was paying. A client that has a request in hand writes it the instant the grant
+    # lands — it opened the tunnel BECAUSE it had one — so the wait it has to beat is its own
+    # scheduling plus one RTT, not a think time. And the cost is paid only by a connection to a
+    # host the operator has already asked gori not to look inside.
+    PASSTHROUGH_PEEK_WAIT = 1.second
 
     # How many ports past the requested one to probe before giving up to ephemeral.
     FALLBACK_TRIES = 16
@@ -484,34 +514,64 @@ module Gori::Proxy
     # Route the granted connection on its first byte, exactly as the transparent listener does.
     private def serve_socks5_target(client : TCPSocket, target : Socks5::Target,
                                     local_host : String?) : Nil
-      # `network.tls_passthrough` FIRST, ahead of the peek, which is the CONNECT path's own
-      # order ("the byte peek below never happens for a passthrough host" — `handle_connect`).
-      # It has to be, and this listener is where it matters most.
+      # `network.tls_passthrough` decides HOW LONG this listener waits for the client's first
+      # byte. It does NOT decide whether to look at one, and the difference is the whole of this
+      # branch.
       #
-      # The peek below waits for the CLIENT's first byte. SMTP, IMAP, POP3, MySQL and SSH are
-      # SERVER-speaks-first: the client is waiting for a banner, so it sends nothing, and both
-      # peers wait until gori's 30 s read timeout closes the connection with the origin never
-      # dialled at all. `socks5.cr` says in its own comments that `ssh -D` is what most people
-      # point at this listener. gori HAS an explicit per-host spelling of "relay this one
-      # byte-exact and capture nothing" — and asking for it after the peek meant the one escape
-      # hatch could never be reached by the one shape that needs it.
+      # Matching the list ahead of the peek and relaying on the match fixed a real hang and
+      # opened a silent hole. The hang: the peek waits for the CLIENT, and SMTP, IMAP, POP3,
+      # MySQL and SSH are SERVER-speaks-first, so the client sits waiting for a banner while
+      # both peers burn the 30 s client read timeout with the origin never dialled at all —
+      # `socks5.cr` says in its own comments that `ssh -D` is what most people point at this
+      # listener. The hole: a relay decided before any client byte cannot tell a ClientHello
+      # from `GET / HTTP/1.1`, so plaintext `http://` to a listed host was piped through
+      # byte-for-byte with no flow, no advisory and nothing in History to say a request had
+      # happened. The setting is called `tls_passthrough`, the UI and the help describe TLS
+      # hosts, and an operator who listed `internal.corp` to dodge a pinned app lost every
+      # cleartext capture for it — "nothing came" and "nobody looked" reading the same (P4).
       #
-      # No `pin:`, unlike the transparent listener's call: there the passthrough LIST is matched
-      # on the SNI name while the DIAL goes to the address the kernel named (#529). Here the
-      # client named the destination itself, so the name matched and the name dialled are the
-      # same thing and a pin would be a second copy of it.
-      if Settings.tls_passthrough?(target.host) &&
-         relay_passthrough(target.host, target.port, client, client)
-        return
-      end
+      # A DEADLINE separates the two. Bytes inside it route exactly as they did before the list
+      # was ever consulted: cleartext goes to `ClientConn` and is captured, and a ClientHello
+      # reaches `serve_pinned_tls`, which asks the list for itself and relays there — the one
+      # place it was ever asked and the one place a `tls_passthrough` decision can be made about
+      # actual TLS. Silence past it is the only shape that cannot be routed on at all, so that
+      # is the one the list gets to answer.
+      #
+      # HOSTS NOT ON THE LIST ARE UNTOUCHED — same peek, same 30 s, same `record_silent_client`
+      # flow. The capture bargain there ("a client that says nothing is still worth a row") is
+      # not this defect's to renegotiate.
+      passthrough = Settings.tls_passthrough?(target.host)
       # `peek_first`, the REVERSE listener's peek, and not `peek_transparent_first`: both record
       # the #755 silent-client flow, but the transparent one RECOVERS the destination it files
       # under (`OrigDst` answers nil here, so it would invent `""`:80) while this one is handed
       # the destination that was declared — which on this listener is the client's own CONNECT.
       # It re-raises after recording, so the timeout still ends the connection.
-      first, stream = route_prefix(client, peek_first(client, "http", target.host, target.port,
-        opened: "completed a SOCKS5 handshake for " \
-                "#{BindAddress.authority(target.host, target.port)} and then sent zero bytes"))
+      silent = "completed a SOCKS5 handshake for " \
+               "#{BindAddress.authority(target.host, target.port)} and then sent zero bytes"
+      peeked =
+        if passthrough
+          peek_passthrough_first(client)
+        else
+          peek_first(client, "http", target.host, target.port, opened: silent)
+        end
+      if passthrough && peeked.nil?
+        # Nothing arrived inside the deadline, so there is no byte to route on and the listed
+        # host gets the answer the list is for. `peek` consumed nothing, so the relay starts at
+        # the same offset a MITM would have.
+        #
+        # No `pin:`, unlike the transparent listener's call: there the passthrough LIST is
+        # matched on the SNI name while the DIAL goes to the address the kernel named (#529).
+        # Here the client named the destination itself, so the name matched and the name dialled
+        # are the same thing and a pin would be a second copy of it.
+        note_passthrough_blackout(target)
+        return if relay_passthrough(target.host, target.port, client, client)
+        # The origin was unreachable, so nothing was relayed and nothing was consumed. Fall back
+        # to the ordinary wait rather than dropping — `serve_pinned_tls`'s reasoning, one branch
+        # over: the operator asked not to decode this host, not to lose the connection, and a
+        # client that turns out to have been merely slow is still captured.
+        peeked = peek_first(client, "http", target.host, target.port, opened: silent)
+      end
+      first, stream = route_prefix(client, peeked)
       # The TWO-byte ClientHello test (#755), not the one-byte one the other two listeners use:
       # a SOCKS5 listener is where a non-HTTP protocol is most likely to arrive — `ssh -D` is
       # what most people point at one — and feeding an SSH banner into an OpenSSL server
@@ -676,6 +736,67 @@ module Gori::Proxy
     rescue ex : IO::TimeoutError
       ClientConn.record_silent_client(@sink, scheme, host, port, client_tls: false, opened: opened)
       raise ex
+    end
+
+    # `peek_first` for a SOCKS5 destination `network.tls_passthrough` lists: the same peek under
+    # `PASSTHROUGH_PEEK_WAIT` instead of the 30 s baseline, answering nil when the deadline
+    # expires with the client still silent.
+    #
+    # nil means EXACTLY that. `IO::Buffered#peek` returns an EMPTY slice at EOF and raises
+    # `IO::TimeoutError` on the deadline, so the two ways a connection can produce no bytes stay
+    # apart: a client that hung up is `Bytes.empty` and falls through to `route_prefix`, which
+    # hands it to `ClientConn` to dispose of exactly as it always has. Only a peer still holding
+    # the socket open reaches the relay.
+    #
+    # Does NOT record `record_silent_client`, and that is the point of having a second spelling.
+    # That flow says "gori waited 30 s and gave up"; here gori waited a second and then did
+    # something — `note_passthrough_blackout` is the sentence for what it did.
+    #
+    # The baseline is restored on every exit. Leaving a one-second read timeout on a socket that
+    # goes on to become a captured HTTP connection would turn every think-time pause on it into
+    # a dead peer.
+    private def peek_passthrough_first(client : TCPSocket) : Bytes?
+      SocketTuning.arm(client, PASSTHROUGH_PEEK_WAIT)
+      begin
+        client.peek
+      rescue IO::TimeoutError
+        nil
+      ensure
+        SocketTuning.arm(client, SocketTuning::CLIENT_IO_TIMEOUT)
+      end
+    end
+
+    # What `network.tls_passthrough` cost this destination, told to the operator where they will
+    # see it. A blind relay produces no flow by construction, so without this the History for a
+    # listed host is empty whether the client sent nothing, sent everything, or never connected
+    # — the "nothing came vs nobody looked" failure (P4) that the whole of R1 is about.
+    #
+    # ONCE per destination per listener, because the sentence is about the SETTING and not about
+    # this connection: `ssh -D` opens a connection per session and a row apiece would drown the
+    # History this tool exists to produce, the same measurement that took the connect-and-close
+    # row out of `serve_socks5`. The message says so in as many words, so a reader does not take
+    # the single row for a single connection.
+    #
+    # Written BEFORE the dial, which is why it describes the POLICY rather than an outcome:
+    # `relay_passthrough` does not return until the tunnel is over, and an advisory an operator
+    # reads after the session has ended is one they cannot act on. A dial that then fails falls
+    # back to the ordinary wait and records its own flow, so nothing here has to promise what
+    # this particular connection did.
+    private def note_passthrough_blackout(target : Socks5::Target) : Nil
+      where = BindAddress.authority(target.host, target.port)
+      return unless @passthrough_noted.size < PASSTHROUGH_NOTE_CAP && @passthrough_noted.add?(where)
+      message = "no capture: #{target.host} is listed in `network.tls_passthrough`, and a client " \
+                "completed a SOCKS5 handshake for #{where} without sending a byte for " \
+                "#{PASSTHROUGH_PEEK_WAIT.total_seconds.to_i} s — a SERVER-SPEAKS-FIRST protocol " \
+                "(SMTP, IMAP, POP3, MySQL, SSH) makes exactly that shape. gori relays those " \
+                "connections to the origin byte-exact and records nothing on them, so this row " \
+                "is the only trace they leave. It is written ONCE for #{where}; every later " \
+                "connection to it is relayed the same way and is equally absent from History. " \
+                "Remove the host from `network.tls_passthrough` to capture it instead — a " \
+                "client that DOES speak first is unaffected either way: cleartext HTTP to this " \
+                "host is still captured and TLS to it is still passed through"
+      ::Log.info { "socks5 #{BindAddress.authority(@host, @port)}: #{message}" }
+      ClientConn.record_listener_refusal(@sink, target.host, target.port, message)
     end
 
     # `peek_first` for the transparent listener, which learns its target from the KERNEL rather
