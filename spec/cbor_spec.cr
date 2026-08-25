@@ -257,26 +257,48 @@ describe Gori::Cbor do
     it "bounds the total bignum work in one document, not only one bignum" do
       # `MAX_BIGNUM_BYTES` bounds ONE bignum and nothing bounded how many there were. Base-256
       # to base-10 is quadratic, so a 1 MiB body — a size `Pretty::MAX_PRETTY` hands straight to
-      # this reader — packed with maximum-size bignums cost 770 ms of straight-line CPU against
-      # 2.2 ms for the same body of plain byte strings. `build_detail_view` caches per selection,
+      # this reader — packed with maximum-size bignums cost 9.1 s of straight-line CPU against
+      # 21 ms for the same body of plain byte strings. `build_detail_view` caches per selection,
       # so that is a blocking freeze every time the operator lands on the flow, and again on
       # every theme or `p` toggle.
-      body = IO::Memory.new
-      body.write_byte(0x9f_u8) # one indefinite array, so the whole body is ONE document
-      while body.bytesize < 1_000_000
-        body.write_byte(0xc2_u8)
-        body.write_byte(0x59_u8)
-        body.write_bytes(Gori::Cbor::MAX_BIGNUM_BYTES.to_u16, IO::ByteFormat::BigEndian)
-        Gori::Cbor::MAX_BIGNUM_BYTES.times { body.write_byte(0xff_u8) }
+      #
+      # Measured as a RATIO against that plain-byte-string body, not as a wall-clock ceiling.
+      # An absolute bound prices in the machine: the budget this guards — `MAX_BIGNUM_WORK`,
+      # sixteen maximum-size decimals — is itself ~75 ms of the ~98 ms a passing run takes here,
+      # so a ceiling loose enough for a slow CI runner is no longer near the thing it guards.
+      # The ratio is ~5x with the budget in place and ~430x without it, and it moves with the
+      # machine on both sides.
+      one_mib = ->(tagged : Bool) do
+        body = IO::Memory.new
+        body.write_byte(0x9f_u8) # one indefinite array, so the whole body is ONE document
+        while body.bytesize < 1_000_000
+          body.write_byte(0xc2_u8) if tagged
+          body.write_byte(0x59_u8)
+          body.write_bytes(Gori::Cbor::MAX_BIGNUM_BYTES.to_u16, IO::ByteFormat::BigEndian)
+          Gori::Cbor::MAX_BIGNUM_BYTES.times { body.write_byte(0xff_u8) }
+        end
+        body.write_byte(0xff_u8)
+        body.to_slice
       end
-      body.write_byte(0xff_u8)
+      plain, bignums = one_mib.call(false), one_mib.call(true)
+
+      # Both bodies run once before either is timed: the first `to_json` of the pair pays for a
+      # cold heap, and charging that to whichever body went first is the same machine noise the
+      # ratio exists to divide out.
+      CB.to_json(plain)
+      CB.to_json(bignums)
 
       t = Time.instant
-      text, complete = CB.to_json(body.to_slice)
+      CB.to_json(plain)
+      floor = (Time.instant - t).total_milliseconds
+
+      t = Time.instant
+      text, complete = CB.to_json(bignums)
       ms = (Time.instant - t).total_milliseconds
+
       complete.should be_true
       # Loose on purpose — this guards against the unbounded path reopening, not a slow machine.
-      ms.should be < 150.0
+      ms.should be < floor * 20
       # The budget is spent on the FIRST bignums and named on the rest; the bytes never go.
       text.should contain(%("$bignum":))
       text.should contain(%("$bignum_omitted":"max_bignum_work"))
