@@ -110,7 +110,10 @@ module Gori
     end
 
     private def claim_i(seg : String, key : String) : Int64?
-      JSON.parse(String.new(Base64.decode(seg)))[key]?.try(&.as_i64?)
+      # RFC 7519 NumericDate permits a non-integer value (sub-second precision), so `exp`
+      # can arrive as a JSON float — take its integer part rather than dropping the claim.
+      v = JSON.parse(String.new(Base64.decode(seg)))[key]?
+      v.try(&.as_i64?) || v.try(&.as_f?).try(&.to_i64)
     rescue
       nil
     end

@@ -174,6 +174,15 @@ describe Gori::Jwt do
       found.size.should eq(1)
       found[0].brief.not_nil!.should contain("99999999999999") # raw fallback, not a raise
     end
+
+    it "renders a float exp (RFC 7519 sub-second NumericDate) as a date, not a dropped claim" do
+      # `exp` is a NumericDate, which RFC 7519 permits to be non-integer; a JSON float used to
+      # fail `as_i64?` and vanish from the brief. 1735689600.5 → 2025-01-01 00:00:00Z.
+      floaty = jwt(%({"alg":"HS256"}), %({"exp":1735689600.5}))
+      found = Gori::Jwt.from_flow("/", head("GET / HTTP/1.1", "Authorization: Bearer #{floaty}"), nil, nil, nil)
+      found.size.should eq(1)
+      found[0].brief.not_nil!.should contain("exp 2025-01-01")
+    end
   end
 end
 

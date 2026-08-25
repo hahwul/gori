@@ -154,6 +154,34 @@ describe Gori::Jwt do
       Gori::Jwt.sign("#{header}.#{payload}", "HS256", "secret").should eq(sig)
     end
 
+    it "re-signs the weak-secret family under the token's own HS alg (HS384/HS512)" do
+      # An HS512 token whose weak key is 'secret' is only caught if the re-sign is HS512 —
+      # a server that pins HS512 rejects an HS256 signature regardless of the key, so the old
+      # hardcoded HS256 made every HS384/HS512 weak-secret payload a non-starter.
+      {"HS384", "HS512"}.each do |alg|
+        header_seg = b64(%({"alg":"#{alg}","typ":"JWT"}))
+        payload_seg = b64(%({"sub":"1"}))
+        token = "#{header_seg}.#{payload_seg}.orig-sig"
+        entry = Gori::Jwt.attacks(token)
+          .select(&.category.== "weak-secret")
+          .find { |a| a.name == "#{alg} secret=secret" }.not_nil!
+        h, p, sig = entry.token.split('.')
+        # The forged header carries the token's own alg…
+        JSON.parse(String.new(Base64.decode(h)))["alg"].should eq(alg)
+        # …and the signature verifies under that alg with the weak key.
+        Gori::Jwt.sign("#{h}.#{p}", alg, "secret").should eq(sig)
+      end
+    end
+
+    it "falls the weak-secret family back to HS256 for a non-HMAC token (downgrade probe)" do
+      # A none/RS/ES/PS token isn't HMAC, so there is no 'own' HS alg — HS256 is the classic
+      # downgrade-to-HMAC-with-a-weak-key attempt.
+      none_token = "#{b64(%({"alg":"none"}))}.#{b64(%({"sub":"1"}))}."
+      names = Gori::Jwt.attacks(none_token).select(&.category.== "weak-secret").map(&.name)
+      names.should contain("HS256 secret=secret")
+      names.none?(&.starts_with?("HS384")).should be_true
+    end
+
     it "generates header-injection tokens (kid/jku/x5u/jwk)" do
       names = Gori::Jwt.attacks(hs256_token("k")).select(&.category.== "header-inject").map(&.name)
       names.any?(&.starts_with?("kid")).should be_true
