@@ -8,6 +8,11 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
+      # Two shell scripts the jobs below actually execute, neither of which matches
+      # `**/*.cr`: without these lines a change to the spec partition or to the bench
+      # type-check would merge without the job that runs it ever waking up.
+      - scripts/spec_shard.sh
+      - scripts/bench_check.sh
       # `docker/Dockerfile` is deliberately absent: nothing in this workflow
       # builds the image any more (see the note under `tests`), so listing it
       # would only wake the Crystal build and the spec matrix to test nothing
@@ -26,6 +31,15 @@ on:
         description: manual run
         required: false
         default: ""
+# Superseded PR runs are cancelled. Pushing a fixup thirty seconds after the first push
+# used to leave the first workflow running to completion — eight jobs' worth of runners
+# producing a verdict on a tree nobody will merge. Only `pull_request` runs collapse:
+# the group for everything else is the run id, which is unique, so a push to `main` and
+# a merge_group run each sit alone in their own group and never cancel or queue behind
+# anything. (`cancel-in-progress: true` is harmless in a group of one.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 jobs:
   build-crystal:
     runs-on: ubuntu-latest
@@ -43,14 +57,28 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
       - name: Install dependencies
-        run: shards install
+        # `--production` (= `--frozen --without-development`) rather than a bare
+        # install. Two reasons, one of each kind:
+        #
+        # LIGHTER: the only development dependency is ameba, whose postinstall
+        # COMPILES the ameba binary — and no job here runs ameba (see the note above
+        # `tests`). That build was the bulk of this step's half-minute, paid once per
+        # job, for a tool nothing in CI invokes. `--frozen` costs nothing on top and
+        # leaves shard.lock untouched, so this stays a read of the tree, not an edit.
+        #
+        # STRICTER: `--frozen` fails when shard.lock does not satisfy shard.yml, which
+        # is the one dependency mistake a green build would otherwise hide — a shard
+        # added or bumped in shard.yml with the lock left behind resolves fine here and
+        # then installs something else on the next machine.
+        run: shards install --production
       - name: Build
         # Deliberately NO `-Dpreview_mt`. Store, Fuzz::Engine, Miner::Engine and
         # Store::SafeRegexp each document that their plain ivars and unguarded
         # counters are safe *because* gori runs on the single-threaded fiber
         # scheduler. Enabling MT here would build a binary those files do not
-        # describe.
-        run: shards build
+        # describe. `--production` for the same reason as the step above — without it
+        # `shards build` runs its own install first and puts ameba straight back.
+        run: shards build --production
   format:
     runs-on: ubuntu-latest
     steps:
@@ -96,7 +124,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
       - name: Install dependencies
-        run: shards install
+        # `--production`: see the note on the same step in `build-crystal`.
+        run: shards install --production
       - name: Type-check bench harnesses
         # The same script `just benchmark-check` runs, so local and CI cannot drift apart
         # (and this job needs no `just` on the runner).
@@ -104,10 +133,40 @@ jobs:
   # Still no ameba job. The backlog is down from 965 findings to 641, but 248 of the
   # remainder are Metrics/CyclomaticComplexity in the TUI — splitting those methods is a
   # real refactor, not lint cleanup, and `.ameba.yml` already records the decision to
-  # raise the bar to 12 rather than carve them up. `just check` still runs it locally.
+  # raise the bar to 12 rather than carve them up. `just check` still runs it locally —
+  # which is now the ONLY place it runs at all: the install steps pass `--production`, so
+  # no runner clones or compiles ameba any more. Whichever job gains the gate has to drop
+  # that flag for itself.
   # Add the gate when that category is dealt with, not by excluding it — a check that is
   # always red is a check nobody reads, but one that is green by exclusion is worse.
   tests:
+    # Sharded, because `crystal spec` compiles the whole suite into ONE binary and runs
+    # its ~10,900 examples in ONE single-threaded fiber scheduler — so this job was the
+    # only thing anybody waited for: 8.5 of the workflow's 8.5 minutes, while `format`
+    # finished in 18 seconds and the other two in under three minutes.
+    #
+    # Measured on this tree, the run splits roughly 1:5 between compiling (~35 s) and
+    # executing (~370 s), and the executing half is barely CPU-bound at all — the suite
+    # spends most of it parked on real sockets and deliberate sleeps that hold a
+    # connection open so a stall stays distinguishable from a hangup. That is time four
+    # runners can wait through at once, and the four-way split takes the job to well
+    # under four minutes. It is NOT free: each shard pays the compile again, so the
+    # workflow burns more runner-minutes than it did. Four is where that trade stops
+    # paying — at six the compile plus job setup is already most of a shard's wall
+    # clock, and the longest shard barely moves (43 s of examples against 49 s at four)
+    # because the heaviest spec FILE cannot be split any finer than itself.
+    #
+    # Sharding by PROCESS rather than by threads inside one is deliberate: several
+    # specs bind a fixed loopback port, and two of them in one process — or two
+    # processes on one runner — would collide. One shard per runner keeps them apart.
+    strategy:
+      # A failing shard must not cancel the other three. The whole point of the split is
+      # that one run tells you everything that is broken; fail-fast would turn it back
+      # into "fix one, push, wait, find the next".
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    name: tests (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -120,7 +179,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
       - name: Install dependencies
-        run: shards install
+        # `--production`: see the note on the same step in `build-crystal`.
+        run: shards install --production
       - name: Run tests
         # `-Wl,--no-export-dynamic` is a WORKAROUND for a linker bug, not a preference.
         #
@@ -150,7 +210,13 @@ jobs:
         # symbol by name, so there is no consumer of the export either.
         #
         # DELETE THIS once the toolchain stops mis-emitting the table.
-        run: crystal spec --link-flags "-Wl,--no-export-dynamic"
+        #
+        # `scripts/spec_shard.sh` decides WHICH files this runner compiles — the same
+        # script `just test-shard` runs, so a shard that fails here can be reproduced
+        # locally with one command. It partitions by walking the tree, never by a list
+        # checked in here: a hardcoded split stops covering whatever spec file is added
+        # next and nothing goes red to say so.
+        run: crystal spec --link-flags "-Wl,--no-export-dynamic" $(scripts/spec_shard.sh ${{ matrix.shard }} 4)
 # No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
 # arm64 on every PR, and those two builds — each compiling a static Crystal
 # binary from source, the arm64 one on a native runner because QEMU is far too
