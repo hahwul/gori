@@ -62,6 +62,15 @@ docker-run tag="gori:dev" *args:
 test:
     crystal spec
 
+# Run the spec files CI's matrix gives one runner, e.g. `just test-shard 2` for the
+# third of four. The partition is a function of the tree (scripts/spec_shard.sh), so
+# this reproduces exactly what a red shard in Actions ran — CI calls the same script.
+
+# Run one CI spec shard locally (INDEX is 0-based).
+[group('development')]
+test-shard index total="4":
+    crystal spec $(scripts/spec_shard.sh {{index}} {{total}})
+
 # Run one spec file (or dir), e.g. `just test-file spec/store_spec.cr`.
 [group('development')]
 test-file path:
