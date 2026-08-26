@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: the Comparer flow picker follows the active project Scope lens; turning the lens off still exposes every captured flow
+
 ## v0.4.0
 
 ### New features

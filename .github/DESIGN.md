@@ -226,8 +226,9 @@ case-insensitive), `string` (case-insensitive substring), or `regex` (case-sensi
 
 It has three distinct jobs, and conflating them is the usual source of bugs:
 
-1. **Display lens.** Everything is captured regardless. When scope is enabled, History and
-   Sitemap show only in-scope flows, and mark in-scope versus out-of-scope inline.
+1. **Display lens.** Everything is captured regardless. When scope is enabled, History,
+   Sitemap, and the Comparer flow picker show only in-scope flows; History and Sitemap retain
+   their inline scope markers.
 2. **Intercept gate.** Out-of-scope flows are not held for a decision.
 3. **Sandbox: a hard containment gate.** When on, a request to a host that is not allowlisted
    is blocked outright and still recorded, so the operator sees the blocked attempt (P4/P7).
@@ -1792,3 +1793,17 @@ version (the handshake as a flow PLUS the transcript through `insert_ws_messages
 `Fuzz::Result` to retain the transcript under `keep_bodies`, which is a retention-budget change
 of its own. The TUI Fuzzer tab stays HTTP-only for now, which is the one place this round leaves
 the three surfaces short of parity.
+
+### 2026-08-26: the active Scope lens follows flow selection into Comparer
+
+Refines: [P8](#p8). PR: pending.
+
+Scope is a display lens rather than a capture boundary: out-of-scope flows remain canonical
+project data, but a list used to select a flow should not immediately reveal rows the active lens
+just hid in History and Sitemap. The Comparer picker therefore applies `Scope#filter` at its Store
+query, before the 2,000-row limit. With the lens off, the filter is `QL::EMPTY` and the picker keeps
+showing every captured flow.
+
+The shared `FlowPicker` stays a presentation object over rows supplied by its caller. Applying the
+lens at the Comparer open-site changes only that workflow; the entity-link picker keeps its own
+unscoped row policy.
