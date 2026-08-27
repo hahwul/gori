@@ -141,6 +141,10 @@ module Gori
         # The start-up bind failure is history now — a later NO_PROJECT (after a switch to
         # another broken project, say) must not still blame the db we just moved off.
         @bind_error = nil
+        # Move the agent-presence marker to the new project (#815): close the old one, lay a
+        # new one beside `@db_path` we just set. On the `Store.open` failure above we early
+        # return before here, so the marker stays put on the project we never left.
+        announce_presence
         # Same REPLACEMENT discipline as the binding layer below: the loader assigns every
         # network property including nil, so a project with no pinned upstream does not
         # inherit the previous project's jump host (#538).

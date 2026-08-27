@@ -7,6 +7,7 @@ require "../scope"
 require "../paths"
 require "../project_registry"
 require "../capture_lock"
+require "../agent_presence"
 require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../repeater/flow_request"
@@ -266,11 +267,18 @@ module Gori
         # bound on the next tool call. Rebuilding it per call would silently make every
         # binding write-only.
         @bindings = nil.as(Gori::Bindings?)
+        # The peer's clientInfo, delivered by the initialize handshake — which can arrive
+        # before OR after a project is bound, so both `client_seen` and `announce_presence`
+        # know how to fill the other's gap.
+        @client_name = nil.as(String?)
+        @client_version = nil.as(String?)
+        @presence = nil.as(AgentPresence?)
         if s = @store
           bind_project_network(s)
           Env.load_project(s)
           bind_binding_layer(s)
         end
+        announce_presence
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @sequence_jobs = {} of String => SequenceJob
@@ -335,6 +343,35 @@ module Gori
         b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
+      end
+
+      # Drop any previous project's marker and lay one down beside the CURRENTLY bound
+      # database (#815) — so the marker follows the store across `switch_project`/`create_project`,
+      # and an unbound server (no `@db_path`) lays none. `announce` is best effort and never
+      # raises, so this is safe to call from the constructor and from any bind path.
+      private def announce_presence : Nil
+        @presence.try(&.close)
+        @presence = nil
+        return unless p = @db_path
+        @presence = AgentPresence.announce(p, client: @client_name,
+          client_version: @client_version, read_only: !@allow_actions,
+          selection_source: @selection_source)
+      end
+
+      # The `initialize` handshake carries the peer's name; the server hands it here (it may
+      # arrive before or after a bind). Store it for the next announce and, if a marker already
+      # exists, fill its name in place.
+      def client_seen(name : String?, version : String?) : Nil
+        @client_name = name
+        @client_version = version
+        @presence.try(&.update(name, version))
+      end
+
+      # Called from `Server#run`'s ensure, after the worker has drained — so no in-flight
+      # `switch_project` can re-announce behind our back. Idempotent.
+      def release_presence : Nil
+        @presence.try(&.close)
+        @presence = nil
       end
 
       # Tools that work with no project store open.

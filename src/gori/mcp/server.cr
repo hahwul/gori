@@ -103,6 +103,9 @@ module Gori
         ensure
           work.close
           drained.receive
+          # After the worker has drained, so a still-running switch_project cannot re-announce
+          # behind us. The store is closed by the caller (cli/mcp.cr); the marker is ours (#815).
+          @tools.release_presence
         end
       end
 
@@ -313,6 +316,12 @@ module Gori
       private def handle_initialize(id : JSON::Any, params : JSON::Any?) : Nil
         client_ver = obj_field(params, "protocolVersion").try(&.as_s?)
         version = client_ver && SUPPORTED_VERSIONS.includes?(client_ver) ? client_ver : PROTOCOL_VERSION
+        # The client's self-description feeds the agent-presence marker's name (#815). Same
+        # arg-reader stance as everywhere else on this surface: a non-string slot is ABSENT,
+        # never coerced — `as_s?` returns nil for a number/object/null, so a hostile
+        # `clientInfo.name` cannot smuggle a container in.
+        info = obj_field(params, "clientInfo")
+        @tools.client_seen(obj_field(info, "name").try(&.as_s?), obj_field(info, "version").try(&.as_s?))
         write_result(id) do |j|
           j.object do
             j.field "protocolVersion", version
