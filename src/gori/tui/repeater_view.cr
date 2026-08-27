@@ -213,6 +213,10 @@ module Gori::Tui
       @ws_result = nil.as(Repeater::WsEngine::Result?)
       @ws_lines_cache = nil.as(Array({String, Color})?)
       @transcript_rev = Theme.revision # theme the colour-baked transcript cache was built under
+      # …and the `.proto` schema revision the gRPC transcript was drawn through (#823).
+      @transcript_schema_rev = Gori::Protobuf::Schemas.revision
+      # The rpc path the CURRENT result was sent to — the gRPC transcript's `.proto` binding.
+      @grpc_sent_target = ""
       # gRPC repeater mode (an application/grpc h2 flow): the editor holds the editable
       # request HEAD (metadata headers) and the framed message body is sent byte-exact
       # from @grpc_body; the response pane shows a deframed gRPC transcript + status.

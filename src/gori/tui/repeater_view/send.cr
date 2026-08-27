@@ -345,7 +345,10 @@ class Gori::Tui::RepeaterView
     @prev_result = @result
     @result = result
     @group_results = nil # a single ^R send takes the pane back from a group transcript
-    reset_result_caches  # new response → drop the styled/lines/diff caches
+    # The rpc path this result belongs to, frozen at send time so the gRPC transcript's `.proto`
+    # lens describes the response it is drawing rather than whatever the editor says later (#823).
+    @grpc_sent_target = grpc_method_target
+    reset_result_caches # new response → drop the styled/lines/diff caches
     # Stay on whichever response tab the user last had open — a send no longer
     # force-jumps to the diff. Fall back to :response only when a diff can't be
     # shown: an errored send (its error lives in the response view) or no

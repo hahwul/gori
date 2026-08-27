@@ -904,7 +904,7 @@ gori run project scope disable
 
 #### project sandbox {#run-project-sandbox}
 
-**하드 컨테인먼트** 샌드박스 게이트를 조회하거나 설정합니다. TUI Project NETWORK 토글의 헤드리스 등가물입니다. 켜면 캡처 프록시가 스코프가 허용하는 요청만 전달하고 나머지는 모두 차단합니다. 표시 렌즈일 뿐인 `project scope enable`과는 다릅니다.
+**하드 컨테인먼트** 샌드박스 게이트를 조회하거나 설정합니다. TUI Project settings 토글의 헤드리스 등가물입니다. 켜면 캡처 프록시가 스코프가 허용하는 요청만 전달하고 나머지는 모두 차단합니다. 표시 렌즈일 뿐인 `project scope enable`과는 다릅니다.
 
 ```bash
 gori run project sandbox                 # show the current state (status is the default)

@@ -937,7 +937,7 @@ gori run project scope disable
 
 #### project sandbox
 
-Get or set the **hard-containment** sandbox gate, the headless equivalent of the TUI Project NETWORK toggle. When on, the capture proxy forwards only requests the scope allows and blocks everything else. This is distinct from `project scope enable`, which is only the display lens.
+Get or set the **hard-containment** sandbox gate, the headless equivalent of the TUI Project settings toggle. When on, the capture proxy forwards only requests the scope allows and blocks everything else. This is distinct from `project scope enable`, which is only the display lens.
 
 ```bash
 gori run project sandbox                 # show the current state (status is the default)

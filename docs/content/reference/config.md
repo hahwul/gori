@@ -18,6 +18,7 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `ca/` | Root CA: `root.crt.pem` and `root.key.pem` |
 | `themes/` | User themes |
 | `wordlists/` | Fuzzer / miner wordlists |
+| `protos/` | gRPC descriptor sets (`protoc --descriptor_set_out`), loaded by any project with no path of its own |
 | `active_project` | Marker for the most-recently-used project |
 
 ## settings.json

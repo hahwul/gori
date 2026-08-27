@@ -145,6 +145,10 @@ private class RewriterAnchorHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 private REWRITER_ANCHOR_CA = File.tempname("gori-rewriter-anchor-ca")

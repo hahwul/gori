@@ -46,7 +46,7 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 ## 4. 샌드박스로 테스트 가두기 {#4-contain-the-test-with-the-sandbox}
 
-스코프 렌즈는 트래픽을 숨기고, **샌드박스**는 트래픽을 멈춥니다. **Project → NETWORK** 패널에서 켜거나, 어디서든 `Ctrl-P` → **Toggle sandbox**로 켭니다:
+스코프 렌즈는 트래픽을 숨기고, **샌드박스**는 트래픽을 멈춥니다. **Project → Project settings** 패널에서 켜거나, 어디서든 `Ctrl-P` → **Toggle sandbox**로 켭니다:
 
 ```bash
 gori run project sandbox on

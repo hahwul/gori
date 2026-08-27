@@ -109,7 +109,8 @@ module Gori::Tui
       @set_sel = 0
       @set_values = ["", "", ""]
       @set_overridden = [false, false, false]
-      @set_baseline = {"", "", "", "", "", ""} # the six fields as last loaded; drives settings_dirty?
+      @set_baseline = {"", "", "", "", "", ""} # the six NETWORK fields as last loaded; drives settings_dirty?
+      @protos_baseline = ""                    # …and the proto-schema field's own, per its own commit
       @set_cursor = 0
       @set_preedit = ""
       load_settings_values
@@ -201,14 +202,17 @@ module Gori::Tui
     # would be shown here under a "· global" marker that misnames it, and would become an
     # inherit-baseline that makes the running port unpinnable. See Settings.configured_bind_host.
     private def load_settings_values : Nil
-      @set_values = [
-        Settings.configured_bind_host,
-        Settings.configured_bind_port.to_s,
-        Settings.effective_upstream_proxy,
-        Settings.effective_connect_timeout_secs.to_s,
-        Settings.effective_io_timeout_secs.to_s,
-        Settings.effective_capture_max_mib.to_s,
-      ]
+      # The proto-schema slot has to exist before `load_network_values` writes in place.
+      @set_values = network_values + [Protobuf::Schemas.spec]
+      load_network_values
+      load_protos_value
+    end
+
+    # The six NETWORK fields only, written in place so the proto-schema slot beside them
+    # survives. Partial ON PURPOSE: the two halves commit separately, so each half's refresh
+    # must leave the other's pending edit alone — see `refresh_settings` / `refresh_protos`.
+    private def load_network_values : Nil
+      network_values.each_with_index { |v, i| @set_values[i] = v }
       @set_overridden = [
         !Settings.project_bind_host.nil?,
         !Settings.project_bind_port.nil?,
@@ -219,6 +223,25 @@ module Gori::Tui
       ]
       @set_cursor = current_set_value.size
       @set_baseline = settings_values # capture the load state so "dirty" means the USER edited a field
+    end
+
+    # The project's descriptor-set path as the loader currently holds it. Blank means the
+    # convention directory (`~/.gori/protos`), which is what an unconfigured project uses.
+    private def load_protos_value : Nil
+      @set_values[SETTINGS_PROTOS_FIELD] = Protobuf::Schemas.spec
+      @set_cursor = current_set_value.size
+      @protos_baseline = protos_value
+    end
+
+    private def network_values : Array(String)
+      [
+        Settings.configured_bind_host,
+        Settings.configured_bind_port.to_s,
+        Settings.effective_upstream_proxy,
+        Settings.effective_connect_timeout_secs.to_s,
+        Settings.effective_io_timeout_secs.to_s,
+        Settings.effective_capture_max_mib.to_s,
+      ]
     end
 
     private def current_set_value : String
@@ -359,18 +382,26 @@ module Gori::Tui
     # One row for the sub-tab chips.
     STRIP_H = 1
 
-    # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
+    # PROJECT SETTINGS pane rows: two toggles (scope-lens, sandbox) over the inline text
     # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
-    # it (the fields still live in the 3-slot @set_values, indexed @set_sel - FIELD_BASE).
+    # it (the fields live in @set_values, indexed @set_sel - FIELD_BASE).
     # Row order is the tuple order everywhere (settings_values, @set_overridden, the controller's
     # commit). The three timeout/capture fields were global-only until #440; they are ENGAGEMENT
     # properties, so a slow appliance or a fat-response target no longer taxes every project.
+    #
+    # "Proto schema" (#823) sits LAST and is deliberately not part of the network tuple: it is
+    # committed on its own baseline, so editing it never re-applies (and re-BINDS) six network
+    # values that did not change. It is an engagement property for the same reason the timeouts
+    # are — a `.proto` describes THIS target's API and must not follow the operator to the next.
     SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy",
-                       "Connect timeout", "Idle timeout", "Capture limit"]
+                       "Connect timeout", "Idle timeout", "Capture limit", "Proto schema"]
     SETTINGS_SCOPE_ROW   =  0
     SETTINGS_SANDBOX_ROW =  1
-    SETTINGS_FIELD_BASE  =  2 # first inline-editable network-field row
+    SETTINGS_FIELD_BASE  =  2 # first inline-editable text-field row
     SETTINGS_LABEL_W     = 16 # value column starts past the widest label ("Connect timeout")
+    # Index into @set_values / @set_overridden of the "Proto schema" field (its row is
+    # SETTINGS_FIELD_BASE + this). Named because three places have to agree on it.
+    SETTINGS_PROTOS_FIELD = 6
 
     # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
     # either list).
@@ -621,10 +652,25 @@ module Gori::Tui
       @set_sel <= 0
     end
 
-    # The three network fields, trimmed, for commit: {bind IP, bind port, upstream proxy}.
+    # The six NETWORK fields, trimmed, for commit: {bind IP, bind port, upstream proxy,
+    # connect timeout, idle timeout, capture limit}. Deliberately NOT including the proto
+    # schema path — see SETTINGS_PROTOS_FIELD.
     def settings_values : {String, String, String, String, String, String}
       {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip,
        @set_values[3].strip, @set_values[4].strip, @set_values[5].strip}
+    end
+
+    # The "Proto schema" field, trimmed: a `.desc` file, a directory of them, or blank for
+    # the convention directory.
+    def protos_value : String
+      @set_values[SETTINGS_PROTOS_FIELD]?.try(&.strip) || ""
+    end
+
+    # True when the user edited the proto-schema path since it was last loaded. Its OWN
+    # baseline, so a network edit does not reload descriptor sets and a path edit does not
+    # rebind the proxy.
+    def protos_dirty? : Bool
+      protos_value != @protos_baseline
     end
 
     # True when the user edited a network field since it was last loaded. Diffs against the
@@ -676,9 +722,22 @@ module Gori::Tui
       @set_cursor = (@set_cursor + delta).clamp(0, @set_values[@set_sel - SETTINGS_FIELD_BASE].size)
     end
 
-    # Re-read the network fields after an apply (Settings.project_* / effective values changed).
+    # Re-read the NETWORK fields after an apply (Settings.project_* / effective values changed).
+    #
+    # Network only. Both halves of this pane commit from one entry point, network first, and
+    # a full reload here silently discarded a proto-schema path the operator had typed in the
+    # same visit — it rebuilt slot 6 from the OLD `Schemas.spec` and reset `@protos_baseline`
+    # to match, so `protos_dirty?` read false by the time its own commit looked.
     def refresh_settings : Nil
-      load_settings_values
+      load_network_values
+    end
+
+    # …and the mirror image, after a proto-schema apply. A network field may be holding a
+    # half-typed value that `settings_invalid(on_leave: false)` deliberately LEFT on screen for
+    # the operator to correct; resetting the six here would erase it mid-correction, under a
+    # toast still naming it.
+    def refresh_protos : Nil
+      load_protos_value
     end
 
     # Mouse hit-test: the settings row index under (mx,my), or nil outside the pane's rows.
@@ -686,7 +745,7 @@ module Gori::Tui
       return nil unless card = card_rect(rect, :settings)
       inner = card.inset(1, 1)
       return nil if inner.h <= 0 || !inner.contains?(mx, my)
-      row = my - inner.y
+      row = my - inner.y + settings_scroll(inner.h)
       (0 <= row < SETTINGS_LABELS.size) ? row : nil
     end
 
@@ -1861,18 +1920,30 @@ module Gori::Tui
       @desc_read.paint_chrome(screen, rect, @desc_area, active)
     end
 
-    # NETWORK card: the scope-lens + sandbox toggles over the three inline-editable network
-    # fields (bind IP / bind port / upstream proxy). Each network row carries a "· project" /
-    # "· global" marker so a pinned override reads distinct from an inherited global value.
+    # PROJECT SETTINGS card: the scope-lens + sandbox toggles over the inline-editable text
+    # fields. Each network row carries a "· project" / "· global" marker so a pinned override
+    # reads distinct from an inherited global value; the proto-schema row shows what actually
+    # LOADED instead, because a path with nothing behind it is the failure that matters there.
     private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "NETWORK", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, "PROJECT SETTINGS", bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
       return if inner.h <= 0 || inner.w <= 0
+      # Scrolled, not clipped. The card takes whatever height is left under the OVERVIEW band,
+      # so on a short terminal the LAST rows fall off — and `set_select` clamps to the full
+      # label count regardless, which let the selection (and typing, and a commit that toasts)
+      # land on a row nothing had drawn.
+      off = settings_scroll(inner.h)
       SETTINGS_LABELS.each_with_index do |label, i|
-        break if i >= inner.h
-        render_settings_row(screen, inner, inner.y + i, i, label, focused && @set_sel == i)
+        next if i < off
+        break if i - off >= inner.h
+        render_settings_row(screen, inner, inner.y + (i - off), i, label, focused && @set_sel == i)
       end
+    end
+
+    # Rows scrolled off the TOP of the settings card, so render and hit-test agree.
+    private def settings_scroll(h : Int32) : Int32
+      scroll_for(@set_sel, SETTINGS_LABELS.size, h)
     end
 
     private def render_settings_row(screen : Screen, inner : Rect, y : Int32, i : Int32,
@@ -1921,6 +1992,7 @@ module Gori::Tui
     # right-aligned "· project" / "· global" override marker.
     private def render_settings_field(screen : Screen, inner : Rect, y : Int32, vx : Int32,
                                       fi : Int32, selected : Bool, bg : Color) : Nil
+      return render_protos_field(screen, inner, y, vx, selected, bg) if fi == SETTINGS_PROTOS_FIELD
       overridden = @set_overridden[fi]
       marker = overridden ? "· project" : "· global"
       mx = inner.right - marker.size
@@ -1931,6 +2003,37 @@ module Gori::Tui
         screen.text(vx, y, @set_values[fi], Theme.text, bg, width: fw)
       end
       screen.text(mx, y, marker, overridden ? Theme.accent : Theme.muted, bg) if mx > vx + 3
+    end
+
+    # The proto-schema row. Its marker is not "project / global" — there is no global to
+    # inherit — but WHAT LOADED: "3 files · 41 messages · 12 rpcs", or the reason nothing did.
+    # A path that silently resolves to nothing is the whole failure mode of this field, and it
+    # is the one thing a "· project" marker would happily lie about.
+    private def render_protos_field(screen : Screen, inner : Rect, y : Int32, vx : Int32,
+                                    selected : Bool, bg : Color) : Nil
+      failed = Protobuf::Schemas.errors?
+      marker = "· #{Protobuf::Schemas.status}"
+      # Derived, not a constant 38: the status is where a partial load says so ("2 failed",
+      # "136 over the 64-file limit"), and a fixed cap put exactly that half off the end on a
+      # wide terminal while still crowding a narrow one.
+      cap = {inner.w // 2, 24}.max
+      marker = "#{marker[0, cap - 1]}…" if marker.size > cap
+      mx = inner.right - marker.size
+      fw = {mx - vx - 1, 3}.max
+      value = @set_values[SETTINGS_PROTOS_FIELD]? || ""
+      if selected
+        screen.input_line(vx, y, value, @set_cursor, @set_preedit, Theme.text_bright, bg, width: fw)
+      else
+        # Blank field → say what blank MEANS, rather than leaving an empty cell the operator
+        # has to guess at.
+        if value.empty?
+          screen.text(vx, y, "(#{Paths.protos_dir})", Theme.muted, bg, width: fw)
+        else
+          screen.text(vx, y, value, Theme.text, bg, width: fw)
+        end
+      end
+      colour = failed ? Theme.yellow : (Protobuf::Schemas.schema ? Theme.accent : Theme.muted)
+      screen.text(mx, y, marker, colour, bg) if mx > vx + 3
     end
 
     # Scroll offset that keeps `sel` visible in a window of `h` rows over `total`.

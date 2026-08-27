@@ -205,6 +205,9 @@ module Gori::Tui
       # live-capture drains, cursor moves. Dropped in lockstep with @detail_cache (drop_detail_cache).
       @detail_styled_cache = {} of Int32 => Highlight::Line
       @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
+      # …and the `.proto` schema the cached gRPC tree was drawn through (#823). Loading a
+      # descriptor set from the Project pane must re-render the flow already on screen.
+      @detail_schema_rev = Protobuf::Schemas.revision
       @detail_read = ReadCursor.new
       # The geometry the last text render actually drew with. Hit-testing reads these back
       # rather than re-deriving them: `detail_gutter_w` is fed a different total by each
@@ -3027,8 +3030,12 @@ module Gori::Tui
     # opaque gRPC hex — are bounded, so they go in `head` (eager, wrapped plain);
     # only a plain request/response body is windowed (styled per visible line).
     private def detail_view : DetailView
-      drop_detail_cache if @detail_cache_rev != Theme.revision # theme switched → rebuild with new colours
+      # theme switched → rebuild with new colours; schema loaded/cleared → rebuild the tree
+      if @detail_cache_rev != Theme.revision || @detail_schema_rev != Protobuf::Schemas.revision
+        drop_detail_cache
+      end
       @detail_cache_rev = Theme.revision
+      @detail_schema_rev = Protobuf::Schemas.revision
       @detail_cache ||= build_detail_view
     end
 
@@ -3154,7 +3161,12 @@ module Gori::Tui
       if (body && !body.empty?) && grpc_body?(head)
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
-        ls.concat(wrap(grpc_lines(MediaType.of(head), body, @pretty)))
+        # The `.proto` lens, when the project has one: the flow's own path IS the binding
+        # (`/package.Service/Method` names the input and output message), and REQUEST vs
+        # RESPONSE picks which end of the rpc this pane is showing. nil — no descriptor set
+        # loaded, a non-gRPC path, an rpc the set does not declare — renders as it always did.
+        binding = Protobuf::Schemas.resolve(detail.row.target, request: request)
+        ls.concat(wrap(grpc_lines(MediaType.of(head), body, @pretty, binding)))
         return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true)
       end
 
@@ -3286,7 +3298,8 @@ module Gori::Tui
     # than arrived rendered here as "(no complete gRPC messages)" with no byte count —
     # indistinguishable from a body that simply is not gRPC, while `gori run show
     # --format json` reported it in full.
-    private def grpc_lines(content_type : String?, body : Bytes, tree : Bool) : Array(String)
+    private def grpc_lines(content_type : String?, body : Bytes, tree : Bool,
+                           binding : Protobuf::Schemas::Binding? = nil) : Array(String)
       # `scan_body`: a grpc-web-text body carries its frames base64-encoded, so scanning the
       # raw bytes finds a length prefix made of base64 characters and reports nothing.
       msgs, residual = Proxy::H2::Grpc.scan_body(content_type, body)
@@ -3294,14 +3307,19 @@ module Gori::Tui
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       lines = [] of String
       # The legend belongs above the messages and exactly once — see ProtobufTree::NOTE.
-      lines << ProtobufTree::NOTE if ProtobufTree.legend?(msgs, tree)
+      if ProtobufTree.legend?(msgs, tree)
+        # With a schema resolved the `|` legend is no longer true of what is drawn, so the
+        # line that explains the tree is swapped for the one that names the schema — same
+        # slot, same "exactly once" rule.
+        lines << (binding ? ProtobufTree.schema_note(binding) : ProtobufTree::NOTE)
+      end
       msgs.each_with_index do |m, i|
         if m.trailer
           lines << "▸ trailer  #{m.data.size}b"
           Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| lines << "  #{k}: #{v}" }
         else
           lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
-          lines.concat(grpc_payload_lines(m, tree))
+          lines.concat(grpc_payload_lines(m, tree, binding))
         end
       end
       lines << "⚠ #{note}" if note
@@ -3311,9 +3329,11 @@ module Gori::Tui
     # One gRPC message's payload, under its header line. `ProtobufTree.decode?` owns the
     # carve-outs (compressed / trailer), shared with the Repeater transcript so the two panes
     # cannot disagree about which payloads are protobuf.
-    private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, tree : Bool) : Array(String)
+    private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, tree : Bool,
+                                   binding : Protobuf::Schemas::Binding? = nil) : Array(String)
       return hex_preview(m.data) unless ProtobufTree.decode?(m, tree)
-      ProtobufTree.lines(Protobuf.decode(m.data), indent: "  ")
+      ProtobufTree.lines(Protobuf.decode(m.data), indent: "  ",
+        schema: binding.try(&.schema), type: binding.try(&.type))
     end
 
     private def hex_preview(data : Bytes, max : Int32 = 64) : Array(String)

@@ -85,6 +85,12 @@ module Gori
         # safe — App re-seeds it from the global Settings on every project open. Inside the begin
         # so a failing settings read is torn down below rather than leaking store+channels.
         Settings.load_project_network(store, bind: true)
+        # The project's gRPC `.proto` schema (#823) — a per-project global for the same
+        # reason `Env` is one: the four surfaces that render a protobuf payload reach it
+        # through static serializers with no store in hand. Loading a local descriptor set
+        # is not an outbound act, so it needs no gate; server reflection, when it lands,
+        # will be a separate operator-initiated path.
+        Protobuf::Schemas.load_project(store)
         Env.load_project(store)
         config.listen = Settings.effective_bind_host
         config.port = Settings.effective_bind_port

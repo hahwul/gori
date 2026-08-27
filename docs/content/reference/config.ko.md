@@ -18,6 +18,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `ca/` | 루트 CA: `root.crt.pem`과 `root.key.pem` |
 | `themes/` | 사용자 테마 |
 | `wordlists/` | Fuzzer / miner 워드리스트 |
+| `protos/` | gRPC 디스크립터 셋(`protoc --descriptor_set_out`). 자체 경로를 지정하지 않은 프로젝트가 여기서 읽습니다 |
 | `active_project` | 가장 최근에 사용한 프로젝트 마커 |
 
 ## settings.json {#settingsjson}

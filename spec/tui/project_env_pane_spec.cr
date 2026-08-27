@@ -368,6 +368,10 @@ private class FakeHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 private ENV_PANE_CA_ROOT = File.tempname("gori-env-pane-ca")

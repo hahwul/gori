@@ -4717,6 +4717,25 @@ module Gori::Tui
       "#{applied} — but NOT saved (project busy); it reverts when you reopen this project"
     end
 
+    # Persist + load this project's gRPC `.proto` schema path (#823) and report what came of
+    # it. Blank clears the row, which puts the project back on the convention directory
+    # (`~/.gori/protos`) — the state it starts in.
+    #
+    # The schema is loaded EVEN WHEN the store write did not land, on the same trade
+    # `apply_project_network` states: the operator asked to look through this `.proto`, and
+    # refusing to show it because another instance holds the writer would be the worse half.
+    # What must not happen is calling it saved.
+    def apply_project_protos(spec : String) : String
+      key = Gori::Protobuf::Schemas::SETTING_KEY
+      store = @session.store
+      persisted = spec.empty? ? store.delete_setting(key) : store.set_setting(key, spec)
+      Gori::Protobuf::Schemas.apply(spec)
+      # `status` is the whole answer: how many files/messages/rpcs loaded, or the reason none
+      # did (a missing path, or the `.proto` SOURCE file mistaken for a descriptor set).
+      line = "proto schema: #{Gori::Protobuf::Schemas.status}"
+      persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project"
+    end
+
     # Store the per-project value, or drop the key so the project inherits the global.
     # Returns whether that write COMMITTED (both store calls are `exec_task_ok`).
     private def set_or_clear(key : String, value : String, global : String) : Bool
