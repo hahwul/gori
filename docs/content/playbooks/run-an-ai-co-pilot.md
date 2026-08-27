@@ -50,7 +50,7 @@ Tools run one at a time, in the order they arrive, so a slow `send_request` neve
 
 ## 3. Watch what it does
 
-You don't have to trust an agent blindly, because none of its actions are silent. Every one lands in gori's **notification center** tagged as coming from an agent and rendered differently from your own, so you can glance over and see what a co-pilot changed — a request it sent, an issue it filed, a rule it wrote — while you were reading another tab.
+You can see the co-pilot before it does anything: the moment it connects, an `mcp:claude-code` chip appears on the top bar, and clicking it lists every agent attached to the project. From there you don't have to trust it blindly. Its consequential actions surface in gori's **notification center** tagged as coming from an agent and rendered differently from your own, so you can glance over and see what a co-pilot changed — a request it sent, an issue it filed, a rule it wrote — while you were reading another tab.
 
 The same holds inside the intercept loop: an agent can sit in the queue next to you, and each `intercept_forward_edit` it makes is marked as its own. One safety note for a live handoff — once an agent attaches to the intercept queue, gori arms a 30-second auto-forward for held items nobody is watching, so a client that dies mid-hold can't wedge the connection indefinitely.
 
