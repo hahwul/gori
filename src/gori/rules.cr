@@ -1,4 +1,5 @@
 require "./env"
+require "./rule_set_change"
 require "./proxy/head_rewriter"
 require "./rules/stub"
 require "./store"
@@ -84,6 +85,10 @@ module Gori
       # rule's — and the operator would be told about one of two rules that stopped applying.
       @unbound_reported = Set({Store::RuleScope, Int64}).new
       @unbound_reported_rev = 0_u64
+      # A PEER's change to this snapshot, waiting to be announced (#772). Written only by
+      # `reload` — never by the private `refresh` the local editing methods call — which is what
+      # makes the operator's own edits silent without a flag threaded through all seven of them.
+      @pending_peer_change = nil.as(RuleSetChange?)
     end
 
     # Whether this rule is a live REWRITE rule for {target, part} — the ONE shape test the
@@ -368,8 +373,42 @@ module Gori
     # another gori PROCESS wrote is not picked up: that would mean re-reading settings.json,
     # and `Settings.load` replaces every section from disk — including ones this process has
     # changed but not saved yet. Same reach the Decoder's chain library has always had.
-    def reload : Nil
+    # A peer's edit is also RECORDED here for the operator (#772). The split that makes this
+    # correct is the one that already existed: every local edit in this process goes through the
+    # private `refresh` (`add`, `update`, `set_scope`, `remove`, `toggle`, `toggle_default`,
+    # `move` all call it after their own write), and only a peer adoption or a re-read reaches
+    # this method. So "was it mine?" is answered by WHICH METHOD RAN, not by a flag a future
+    # mutator could forget to pass.
+    #
+    # Recorded rather than returned because the re-readers must not be able to eat it: the
+    # Rewriter tab's `on_enter` and its `r` key both land here, and a peer's change adopted by one
+    # of those is still owed an announcement. The drain takes it whenever it next runs.
+    #
+    # The comparison is over the MERGED array, which is what makes a peer's `toggle_default` on a
+    # global rule THIS project overrides correctly silent — the effective `enabled?` this session
+    # rewrites with never moved, so nothing on its wire did either.
+    #
+    # `announce: false` is for a LOCAL change that has to come in through the front door anyway —
+    # the factory reset, which wipes the global library out from under the snapshot.
+    def reload(announce : Bool = true) : Nil
+      before = @mutex.synchronize { @rules }
       refresh
+      return unless announce
+      after = @mutex.synchronize { @rules }
+      return unless change = RuleSetChange.between(before, after, ->(r : Store::MatchRule) { {r.scope, r.id} })
+      @mutex.synchronize do
+        @pending_peer_change = (held = @pending_peer_change) ? held.merge(change) : change
+      end
+    end
+
+    # Take the peer change owed to the operator, if any, and forget it. Drained by the surfaces
+    # that can speak — the TUI's notification ring, the headless capture's log.
+    def take_peer_change : RuleSetChange?
+      @mutex.synchronize do
+        held = @pending_peer_change
+        @pending_peer_change = nil
+        held
+      end
     end
 
     # --- one-line rule formatting (shared) -----------------------------------

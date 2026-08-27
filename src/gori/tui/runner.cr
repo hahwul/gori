@@ -3,6 +3,7 @@ require "../bind_address"
 require "../verb"
 require "../store"
 require "../session"
+require "../peer_notices"
 require "./screen"
 require "./theme"
 require "./layout"
@@ -568,6 +569,12 @@ module Gori::Tui
               # chip too. Reports dirty only when the rendered chip string actually changed, so an
               # idle project with a steady agent list does not repaint on the timer.
               dirty = true if refresh_agent_presence
+              # Peer-change announcements (#772). OUTSIDE the data_version branch for the same
+              # class of reason as agent presence, but the opposite way round: the CHANGE is
+              # spotted inside the branch (only a commit can move a peer's rules or probe mode),
+              # while the EMIT has to keep running after the commits stop, or a line held back by
+              # the coalescing window would wait for traffic that may never come.
+              dirty = true if drain_peer_notices
               # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
               # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
               # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
@@ -1017,7 +1024,16 @@ module Gori::Tui
       # it opened with; a peer switching the project to `off`/`passive` to stop active probing
       # left this session firing. `apply_stored_mode` adopts the persisted value WITHOUT writing
       # it back — a tick that persisted would race the peer's write and put the old mode back.
-      @session.probe.apply_stored_mode
+      #
+      # The adoption is also ANNOUNCED (#772). Until now the only signal was the top-bar
+      # `probe:active` chip changing under the operator, which is not a signal at all for the one
+      # peer change that authorizes this session to fire attack payloads. `apply_stored_mode`
+      # returns the direction it moved; the line itself is queued here and emitted by
+      # `drain_peer_notices` below, OUTSIDE this gate — see the reasoning there.
+      if moved = @session.probe.apply_stored_mode
+        @peer_notices_pending << @peer_notices.probe_mode(moved[0], moved[1],
+          Gori::PeerNotices.agent_wrote?(@session.store, Gori::PeerNotices::PROBE_TOOLS))
+      end
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
@@ -3023,6 +3039,48 @@ module Gori::Tui
       @session.listener_rows.size
     end
 
+    # Peer-change announcements (#772). The policy — which peer change is worth a line, at what
+    # level, and in what words — lives in `Gori::PeerNotices` so the headless capture loop can say
+    # the same thing; this end only queues and emits.
+    #
+    # Declared here rather than in the initializer, the way the agent-presence snapshot is: these
+    # two are the whole state.
+    @peer_notices = Gori::PeerNotices.new
+    @peer_notices_pending = [] of Gori::PeerNotices::Notice
+
+    # Emit whatever `apply_external_change` queued. Same three-surface shape the background-result
+    # sites use (probe_controller.cr): the ring always, the bottom-bar toast only when the operator
+    # left it on. No `insert_event` — the AI feed ALREADY holds the agent_action row for the write
+    # this line is about (mcp/tools.cr), and mirroring it back would record the same fact twice.
+    #
+    # `:info` notes take neither the toast nor the bell (Notifications#push rings only above
+    # `:info`): a peer STOPPING active probing is worth a line in the centre and nothing louder.
+    private def drain_peer_notices : Bool
+      now = Time.instant
+      # The rule sets hold their own peer delta rather than returning it, so a re-read cannot eat
+      # it — the Rewriter tab's `on_enter` and its `r` key both reload, and a peer's change picked
+      # up by one of those is still owed a line. Taking here, on the bare cadence, is what makes
+      # every path converge whether or not the tick that noticed ran. `absorb` also asks the feed
+      # who wrote them, once for the pair and only when something actually moved.
+      @peer_notices.absorb(@session.rules.take_peer_change, @session.bindings.take_peer_change,
+        now, @session.store)
+      # In FRONT of anything already queued (in practice a probe-mode line from this same pass):
+      # the Companion speaks the newest note and only that one, so the last thing pushed is the
+      # thing she says — and between "a peer changed the rules" and "a peer authorized attack
+      # payloads from here", the mode is the one that must survive.
+      if note = @peer_notices.flush(now)
+        @peer_notices_pending.unshift(note)
+      end
+      return false if @peer_notices_pending.empty?
+      @peer_notices_pending.each do |note|
+        goto = note.tab.try { |tab| Jobs::Goto.new(tab) }
+        @notifications.push(note.level, note.message, goto: goto, source: note.source)
+        status(note.message) if Settings.notify_toast? && note.level != :info
+      end
+      @peer_notices_pending.clear
+      true
+    end
+
     # Announce hosts newly added to the session-global passthrough inventory
     # (Settings.passthrough_hosts) as notifications. The inventory is written by PROXY fibers
     # and Notifications#push is main-fiber-only by contract, so this is a per-tick diff of a
@@ -4993,7 +5051,11 @@ module Gori::Tui
       # in front of either (unlike the tick's, which is chasing a PEER's write): the reset has
       # already put this process's own sections at their defaults, and a `reload_*_from_disk`
       # here would pull the peer's copy of the rules we just deleted straight back in.
-      @session.rules.reload
+      #
+      # `announce: false` for the same reason — this is the ONE local edit that reaches `reload`
+      # instead of the private refresh the rule editors use, and left to speak it would tell the
+      # operator a peer had just deleted every global rule they themselves had reset (#772).
+      @session.rules.reload(announce: false)
       @session.colormarker.reload
       Theme.set_custom_marks(Settings.colormarker_color_map)
       @custom_marks_rev = @session.colormarker.revision

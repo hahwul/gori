@@ -102,6 +102,9 @@ module Gori
         # planted in an earlier run and answered while gori was closed is matched on open.
         @oob = load_oob
         @oob_watermark = 0_i64
+        # The mode the ROW still holds after an operator edit this process could not persist —
+        # see the write path below. nil whenever memory and disk agree.
+        @uncommitted_from = nil.as(Mode?)
       end
 
       # Re-read the Rules sub-tab config (disabled built-ins + custom rules) and force a re-scan of
@@ -180,6 +183,16 @@ module Gori
         prev = @mode
         @mode = m
         committed = @store.set_probe_mode(m)
+        # A refused write leaves memory ahead of disk on purpose (the surface says so: "another
+        # instance keeps the old mode"). Remember what disk still holds, because the very next
+        # poll will read it back and revert — and without this that revert is indistinguishable
+        # from a peer's edit, so the operator would be told a peer changed the mode 750ms after
+        # being told their own change did not save (#772).
+        #
+        # `prev` only equals disk for the FIRST refusal. A second refused edit before the next poll
+        # has `prev` holding the first refusal's value, which was never persisted either — so the
+        # oldest outstanding value is the one disk still has, and it is the one to keep.
+        @uncommitted_from = committed ? nil : (@uncommitted_from || prev)
         # Re-arm when entering an actively-probing mode from one that wasn't (OFF/PASSIVE), OR when
         # switching between ACTIVE and AGGRESSIVE — the wider AGGRESSIVE opts (unsafe methods,
         # raised caps) produce new dedup keys, so recent in-scope traffic should be re-swept.
@@ -202,15 +215,36 @@ module Gori
       #
       # Otherwise identical to `set_mode` minus the store write: the arming rule collapses to a
       # bare `probes_actively?` because the early return has already established the mode moved.
-      def apply_stored_mode : Nil
+      #
+      # Returns the {previous, adopted} pair when the mode actually MOVED, nil on the no-op tick
+      # that is the common case. Both callers announce the change to the operator (#772), and
+      # neither can reconstruct the direction afterwards — `@mode` already holds the new value by
+      # then, and the direction is the whole policy: an upgrade into an actively-probing mode is
+      # this session being authorized to fire attack payloads, a downgrade is safe.
+      def apply_stored_mode : {Mode, Mode}?
         m = @store.probe_mode
-        return if m == @mode
+        if m == @mode
+          # Memory and disk agree, so nothing is outstanding — including a refusal whose value a
+          # peer has since made true anyway. Left armed here it would match a LATER genuine peer
+          # change that happens to land on the same mode and swallow that announcement, which for
+          # an upgrade into aggressive is the exact silence this whole feature exists to end.
+          @uncommitted_from = nil
+          return nil
+        end
+        prev = @mode
         @mode = m
         arm_active_backfill if m.probes_actively?
+        # The revert of this session's OWN refused write is adopted like any other value, but it
+        # is not news — the operator was already told the write did not save.
+        reverting = m == @uncommitted_from
+        @uncommitted_from = nil
+        return nil if reverting
+        {prev, m}
       rescue DB::Error | SQLite3::Exception
         # Same tolerance as `load_custom`: an unreadable settings row leaves the live mode
         # alone and the next tick tries again. Both callers poll on the UI / capture fiber
         # with no per-call rescue of their own.
+        nil
       end
 
       def start : Nil
