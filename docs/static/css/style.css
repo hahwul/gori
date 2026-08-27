@@ -658,8 +658,16 @@ kbd {
    same frame (scrims included, so the layers cancel exactly) revealed through
    a narrow travelling band. Brightness is multiplicative, so the gold rings —
    the brightest pixels in the frame — catch nearly all of the light while the
-   marble stays night. Both keyframe ends park the band off-frame, so the
-   reduced-motion freeze (and the rest between sweeps) shows nothing. */
+   marble stays night. The band lives on a 300%-wide window whose diagonal
+   mask never moves: the window slides left while the frame inside it
+   counter-slides right, so the photograph holds still and only the light
+   travels. Everything animated is a transform — a mask-position animation
+   repaints this filtered, viewport-sized layer on the main thread every
+   frame, which stuttered in Safari; transforms stay on the compositor. The
+   whole travelling layer lives inside this @media(no-preference) block, so
+   under reduced motion neither the window nor the frame is emitted and there
+   is nothing to show; parking the band off-frame at both keyframe ends only
+   buys the quiet rest between sweeps. */
 .hero-glint {
   position: absolute;
   top: 0;
@@ -672,43 +680,69 @@ kbd {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .hero-glint::before {
+  .hero-glint > span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    /* 300% wide and translated past the edges: only .home-main's
+       overflow:hidden keeps this off the page's horizontal scroll. */
+    width: 300%;
+    -webkit-mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%);
+    mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%);
+    will-change: transform;
+    animation: glint-window 11s linear infinite;
+  }
+
+  .hero-glint > span::before {
     content: "";
     position: absolute;
-    inset: 0;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: calc(100% / 3);
     background:
       linear-gradient(96deg, rgb(6 8 14 / 0.78) 0%, rgb(6 8 14 / 0.42) 34%, rgb(6 8 14 / 0) 58%),
       linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
       url("../images/hero-orbits.webp") 66% 24% / cover no-repeat;
     filter: brightness(1.5) saturate(1.15);
     opacity: 0.55;
-    -webkit-mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
-    mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%) 0 0 / 300% 100% no-repeat;
-    animation: hero-glint 11s linear infinite;
+    will-change: transform;
+    animation: glint-frame 11s linear infinite;
   }
 
   /* Match the inverted base frame, then lift the result toward paper so the
      sweep reads as sheen on the bronze rather than a shadow. */
-  :root[data-theme="light"] .hero-glint::before {
+  :root[data-theme="light"] .hero-glint > span::before {
     filter: invert(1) hue-rotate(180deg) saturate(0.82) brightness(1.22);
     opacity: 0.5;
   }
 }
 
-/* mask-size is 300% wide, so position 0%→100% carries the band from past the
-   right edge to past the left one; the tail of the cycle is a quiet rest. */
-@keyframes hero-glint {
+/* The window is 300% of the hero wide, so sliding it two thirds of its own
+   width carries the band from past the right edge to past the left one; the
+   frame inside (one third of the window, i.e. hero-sized) counter-slides the
+   same distance — 200% of itself — so the photograph never appears to move.
+   -200%/3 of the window equals exactly 200% of the hero-sized frame, so the
+   two cancel with no sub-pixel drift (a rounded -66.6667% would not). The
+   tail of the cycle is a quiet rest. */
+@keyframes glint-window {
   0% {
-    -webkit-mask-position: 0% 0;
-    mask-position: 0% 0;
+    transform: translateX(0);
   }
-  55% {
-    -webkit-mask-position: 100% 0;
-    mask-position: 100% 0;
-  }
+  55%,
   100% {
-    -webkit-mask-position: 100% 0;
-    mask-position: 100% 0;
+    transform: translateX(calc(-200% / 3));
+  }
+}
+
+@keyframes glint-frame {
+  0% {
+    transform: translateX(0);
+  }
+  55%,
+  100% {
+    transform: translateX(200%);
   }
 }
 
@@ -3283,7 +3317,7 @@ html.search-lock body {
     height: min(90vh, 46rem);
   }
 
-  .hero-glint::before {
+  .hero-glint > span::before {
     background:
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
       linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
