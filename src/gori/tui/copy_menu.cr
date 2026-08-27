@@ -1,4 +1,9 @@
 require "../export/curl"
+require "../export/python_requests"
+require "../export/js_fetch"
+require "../export/go_http"
+require "../export/httpie"
+require "../export/csrf_poc"
 
 module Gori::Tui
   # Pure helpers that turn an HTTP message into the "copy as X" option set the
@@ -43,6 +48,19 @@ module Gori::Tui
       end
       unless url.empty?
         opts << Option.new("cURL", 'l', Export::Curl.command(method, url, header_lines, body, version))
+        # "Copy as <language>" — the same request, serialized for the four common HTTP clients,
+        # each a surface-neutral `Export::*` module (`gori run show --format python|fetch|go|httpie`
+        # emits byte-identical text). Keys avoid 'p'/'s': the detail and single-flow list menus
+        # append a "Req + Res pair" ('p') and a "Raw response" ('s') AFTER this list, and the
+        # CopyPicker dispatches on the FIRST row whose key matches. `parts` re-parses `wire` the
+        # one way the serializers do, so the menu cannot disagree with the CLI about the bytes.
+        if parts = Export::RequestParts.from_wire(wire, target)
+          opts << Option.new("Python", 'y', Export::PythonRequests.script(parts))
+          opts << Option.new("fetch", 'f', Export::JsFetch.code(parts))
+          opts << Option.new("Go", 'g', Export::GoHttp.program(parts))
+          opts << Option.new("httpie", 'i', Export::Httpie.command(parts))
+          opts << Option.new("CSRF PoC", 'x', Export::CsrfPoc.document(parts))
+        end
       end
       if messages = websocket_messages
         ws_url = websocket_url(url)

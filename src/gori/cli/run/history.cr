@@ -625,7 +625,7 @@ module Gori
           p.banner = "Usage: gori run show <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl (a runnable curl command for the request)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl]) }
+          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf]) }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -654,11 +654,16 @@ module Gori
         show_request = !resp_only
         show_response = !req_only
         case format
-        when :raw  then show_raw(detail, show_request, show_response)
-        when :har  then show_har(detail, ws_msgs)
-        when :curl then show_curl(detail, ws_msgs)
-        when :json then puts show_json(detail, show_request, show_response, ws_msgs)
-        else            show_text(detail, show_request, show_response, ws_msgs)
+        when :raw    then show_raw(detail, show_request, show_response)
+        when :har    then show_har(detail, ws_msgs)
+        when :curl   then show_curl(detail, ws_msgs)
+        when :python then show_code(detail, ws_msgs, :python)
+        when :fetch  then show_code(detail, ws_msgs, :fetch)
+        when :go     then show_code(detail, ws_msgs, :go)
+        when :httpie then show_code(detail, ws_msgs, :httpie)
+        when :csrf   then show_code(detail, ws_msgs, :csrf)
+        when :json   then puts show_json(detail, show_request, show_response, ws_msgs)
+        else              show_text(detail, show_request, show_response, ws_msgs)
         end
       end
 
@@ -692,6 +697,38 @@ module Gori
         if detail.request_body_truncated?
           STDERR.puts "gori run show: flow ##{row.id}'s request body was truncated at the capture cap — " \
                       "this command sends the SHORT body"
+        end
+      end
+
+      # The flow's REQUEST serialized as client code — the headless twin of the TUI's
+      # "Copy as → Python / fetch / Go / httpie / CSRF PoC" rows, and the same surface-neutral
+      # `Export::*` serializers those rows call (so the CLI output is byte-identical to the
+      # clipboard). Same shape as `show_curl`: the caveats travel on STDERR, never mixed into the
+      # code on STDOUT. A socket flow's snippet is the upgrade handshake and none of the frames
+      # (`socket_curl_note`, phrased once for every request-code format).
+      private def self.show_code(detail : Store::FlowDetail, ws_msgs : Array(Store::WsMessage),
+                                 format : Symbol, io : IO = STDOUT) : Nil
+        row = detail.row
+        wire = String.new(request_wire_bytes(detail))
+        target = Repeater::FlowRequest.build_target(row.scheme, row.host, row.port)
+        code = case format
+               when :python then Export::PythonRequests.text(wire, target)
+               when :fetch  then Export::JsFetch.text(wire, target)
+               when :go     then Export::GoHttp.text(wire, target)
+               when :httpie then Export::Httpie.text(wire, target)
+               when :csrf   then Export::CsrfPoc.text(wire, target)
+               end
+        unless code
+          abort "gori run show: flow ##{row.id} has no request line to build a URL from — " \
+                "its captured head is empty (use --format raw to see the bytes)"
+        end
+        io.puts code
+        if note = socket_curl_note(detail, ws_msgs)
+          STDERR.puts "gori run show: #{note}"
+        end
+        if detail.request_body_truncated?
+          STDERR.puts "gori run show: flow ##{row.id}'s request body was truncated at the capture cap — " \
+                      "this #{format} snippet carries the SHORT body"
         end
       end
 
@@ -751,15 +788,21 @@ module Gori
         if format == :har && (req_only || resp_only)
           return "--format har writes a whole entry — --request-only/--response-only don't apply"
         end
-        # `--format curl` is the REQUEST, always: there is no curl command for a response.
+        # `--format curl` (and the code/PoC serializers) are the REQUEST, always: there is no
+        # curl command — nor Python/fetch/Go/httpie snippet, nor CSRF PoC — for a response.
         # `--request-only` is therefore redundant-but-honest and allowed; `--response-only`
         # asks for something that does not exist, so say so rather than print the request the
         # operator explicitly excluded.
-        if format == :curl && resp_only
-          return "--format curl writes the REQUEST as a command — --response-only has nothing to emit"
+        if REQUEST_CODE_FORMATS.includes?(format) && resp_only
+          return "--format #{format} writes the REQUEST as code — --response-only has nothing to emit"
         end
         nil
       end
+
+      # The `--format` values that serialize the REQUEST into another tool's shape — curl, the
+      # four client-code snippets, and the CSRF PoC. All are request-only (see `show_side_error`)
+      # and all share the socket caveat (see `show_code`).
+      REQUEST_CODE_FORMATS = [:curl, :python, :fetch, :go, :httpie, :csrf]
 
       # The captured WebSocket transcript `show` renders (text, `--format json` and the HAR
       # entry's `_webSocketMessages` all read it), fetched while the store is still open.

@@ -59,6 +59,37 @@ describe Gori::Tui::CopyMenu do
       opt(CopyMenu.request_options(wire, target), 'r').not_nil!.text.should eq(wire)
     end
 
+    it "offers the code serializer rows (Python/fetch/Go/httpie/CSRF) beside cURL" do
+      opts = CopyMenu.request_options(wire, target)
+      opt(opts, 'y').not_nil!.label.should eq("Python")
+      opt(opts, 'f').not_nil!.label.should eq("fetch")
+      opt(opts, 'g').not_nil!.label.should eq("Go")
+      opt(opts, 'i').not_nil!.label.should eq("httpie")
+      opt(opts, 'x').not_nil!.label.should eq("CSRF PoC")
+      # The mnemonics are unique within the list — the CopyPicker dispatches on the first match,
+      # so a collision would silently shadow a row. (In particular none reuse 'p'/'s', which the
+      # detail and single-flow list menus append for the Req+Res pair and Raw response.)
+      keys = opts.map(&.key)
+      keys.uniq.size.should eq(keys.size)
+    end
+
+    it "makes each code row byte-identical to its surface-neutral serializer (so the CLI matches)" do
+      opts = CopyMenu.request_options(wire, target)
+      opt(opts, 'y').not_nil!.text.should eq(Gori::Export::PythonRequests.text(wire, target))
+      opt(opts, 'f').not_nil!.text.should eq(Gori::Export::JsFetch.text(wire, target))
+      opt(opts, 'g').not_nil!.text.should eq(Gori::Export::GoHttp.text(wire, target))
+      opt(opts, 'i').not_nil!.text.should eq(Gori::Export::Httpie.text(wire, target))
+      opt(opts, 'x').not_nil!.text.should eq(Gori::Export::CsrfPoc.text(wire, target))
+    end
+
+    it "omits the code rows when there is no resolvable URL" do
+      # A hand-typed partial with no request target and no Host resolves to no URL — the whole
+      # url/curl/code block drops, matching the cURL row's own gate.
+      opts = CopyMenu.request_options("GET  HTTP/1.1\r\n\r\n", "")
+      opt(opts, 'y').should be_nil
+      opt(opts, 'x').should be_nil
+    end
+
     it "omits body/cookie rows when the request has neither (GET, no cookie)" do
       get = "GET /health HTTP/1.1\r\nHost: h\r\n\r\n"
       opts = CopyMenu.request_options(get, "http://h")
