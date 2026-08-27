@@ -360,7 +360,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       unread: @notifications.unread, capturing: @session.capturing?,
       write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
       listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-      authorize: authorize_chip_label, session: session_slot_chip)
+      authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
     return false unless tag
 
     case tag
@@ -370,6 +370,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :bypass    then open_passthrough
     when :listeners then open_listeners
     when :session   then open_session_slots
+    when :agents    then open_agents
     when :listen    then toggle_capture
     when :palette   then open_palette
     when :settings  then open_preferences

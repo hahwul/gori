@@ -1814,3 +1814,17 @@ lensed and an all-hidden list reads `no flows in scope` (plus `⇧S toggles the 
 `no flows captured yet` — the Sitemap's split, on a card that previously had no way to be wrong.
 For the same reason the open-site passes `raise_on_error: true`: `Store#search` otherwise degrades
 a SQLite failure to an empty result, which on this card is indistinguishable from an empty scope.
+
+### 2026-08-27: agent presence is a flock+sidecar marker, not a DB row
+
+Refines: [P1](#p1), [P6](#p6). #815.
+
+That a `gori mcp` server is attached to a project was recorded nowhere on disk. Three constraints
+ruled out a DB heartbeat row: the project picker never opens project databases (it stats files),
+a `--read-only` server cannot write one, and a periodic write moves `data_version` and makes every
+watching TUI reload rules/scope/bindings on each beat. So presence is a per-process marker under
+`<canonical db_path>.agents/`, held for the session with an exclusive flock — the same split as
+`CaptureLock` + `CaptureStatus`: the flock is the truth about liveness (the kernel frees it on
+SIGKILL, where no `ensure` runs) and the JSON body is decoration. Readers sweep any marker whose
+lock they can take. The TUI polls the directory on the DV tick OUTSIDE `apply_external_change`,
+because a marker moves no `data_version`.

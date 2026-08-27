@@ -44,6 +44,10 @@ module Gori::Tui
     Notifications
     Passthrough
     Listeners
+    # The MCP clients bound to this project (#815), opened from the `mcp:` top-bar chip or the
+    # app.agents palette entry. Read-only, like Listeners — the rows are gori mcp processes,
+    # not anything the TUI edits.
+    Agents
     ProbeActive
     DiscoverConfig
     DiscoverHeaders

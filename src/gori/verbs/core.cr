@@ -57,6 +57,13 @@ module Gori
         "app.listeners", "Listeners", "List the additional sockets this session serves (the primary bind is on the listen chip)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_listeners; nil }
 
+      # The attached-agent list (#815). Palette + the `mcp:<client>` top-bar chip, no chord —
+      # like app.listeners, the chip is how you find out an agent is attached, and this entry
+      # makes the card keyboard-reachable rather than mouse-only.
+      r.register Verb::Definition.new(
+        "app.agents", "Attached agents", "List the MCP clients bound to this project (the mcp: chip)",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_agents; nil }
+
       # The ACTIVE session slot — which identity the next Repeater/Fuzzer/intercept-forward
       # send goes out as. Global and palette-only, with the `session:NAME` chip as the other
       # way in: it is a session-wide send context, not a tab's action, and it is deliberately

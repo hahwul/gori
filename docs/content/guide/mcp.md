@@ -63,6 +63,10 @@ A default (actions-on) server still has a writer — `send_request` and `create_
 
 One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index — open the project in gori, or drop `--read-only`, to drain it.
 
+## Seeing an Agent From the TUI
+
+While an MCP server is bound to a project, gori shows it. In the project picker the project's row carries an `mcp` mark (`mcp×2` for more than one), and once the project is open a clickable `mcp:<client>` chip appears on the top bar. Click it — or run `app.agents` from the command palette — to open a card listing every attached agent: its name, version, pid, when it connected, and whether it is read-only. The name comes from the client's own `clientInfo` handshake; a server started with `--read-only` shows as read-only there. A row disappears on its own the moment its process exits, so the chip and card always reflect what is attached right now.
+
 ## Installing Into an Agent
 
 gori can write the MCP configuration for common clients for you:

@@ -48,6 +48,10 @@ private class FakeContext < ExecContext
     @calls << :open_listeners
   end
 
+  def open_agents : Nil
+    @calls << :open_agents
+  end
+
   def open_session_slots : Nil
     @calls << :open_session_slots
   end

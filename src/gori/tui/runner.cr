@@ -74,6 +74,7 @@ require "./companion"
 require "./notifications_overlay"
 require "./passthrough_overlay"
 require "./listeners_overlay"
+require "./agents_overlay"
 require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
@@ -98,6 +99,7 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+require "./runner/agent_presence"
 require "./runner/authorize"
 require "./runner/colormarker"
 require "./runner/comparer"
@@ -559,6 +561,13 @@ module Gori::Tui
                 apply_external_change
                 dirty = true
               end
+              # Attached-agent presence (#815): re-scan the `.agents` marker directory. OUTSIDE
+              # the data_version branch on purpose — a marker appears/vanishes on the filesystem
+              # and never moves data_version, so gating it on the DB would miss every change. And
+              # outside `capturing_lock_held?` below — a view-only second window should show the
+              # chip too. Reports dirty only when the rendered chip string actually changed, so an
+              # idle project with a steady agent list does not repaint on the timer.
+              dirty = true if refresh_agent_presence
               # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
               # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
               # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
@@ -2149,7 +2158,7 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label, session: session_slot_chip)
+        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
       # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
