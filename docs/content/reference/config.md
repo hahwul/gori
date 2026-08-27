@@ -271,7 +271,7 @@ A rule is matched against the **original** hostname, before any [host override](
 
 ### outbound_tls
 
-Per-destination TLS policy for the connections gori **makes**: a client certificate to present, and the protocol range / cipher list to negotiate with. Ordered, first match wins, same host-pattern dialect. Edit with `gori settings --edit`.
+Per-destination TLS policy for the connections gori **makes**: a client certificate to present, the protocol range / cipher list to negotiate with, and the shape of the ClientHello gori sends (its [TLS fingerprint](#tls-fingerprint)). Ordered, first match wins, same host-pattern dialect. Edit with `gori settings --edit`.
 
 This is a separate table from [`upstream_rules`](#upstream_rules) on purpose. Both are keyed by destination host, but they answer different questions, and folding them together would make the common shape inexpressible — "everything through the corporate proxy, plus a client certificate for one host" would need the proxy address duplicated onto that host's row, because one first-match table can only apply a single row per host.
 
@@ -302,6 +302,13 @@ This is a separate table from [`upstream_rules`](#upstream_rules) on purpose. Bo
 | `max_version` | string | Highest protocol to negotiate, same values. Empty leaves the default |
 | `ciphers` | string | OpenSSL cipher list for TLS 1.2 and below. Empty leaves the default |
 | `permissive` | bool | Talk to broken/legacy servers: drops the OpenSSL security level to 0 and allows renegotiation |
+| `preset` | string | A named browser approximation: `chrome`, `firefox`, `safari`, `curl`. See [TLS fingerprint](#tls-fingerprint) |
+| `groups` | string | Named groups / curves and their order, e.g. `X25519:P-256:P-384`. Empty leaves the default |
+| `sigalgs` | string | Signature algorithms and their order, e.g. `ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256` |
+| `ciphersuites` | string | The **TLS 1.3** suites, which `ciphers` cannot reach |
+| `alpn` | array | Ordered ALPN list, e.g. `["h2", "http/1.1"]`. Only `h2` and `http/1.1` are allowed — gori has to be able to speak whatever the origin selects |
+| `session_tickets` | bool | `false` drops the `session_ticket` extension from the hello. Omitted = OpenSSL's default (on) |
+| `ocsp_stapling` | bool | `true` adds the `status_request` extension, which browsers send and stock OpenSSL does not. Omitted = off |
 
 **Why `min_version` exists.** gori cannot reach a TLS 1.0/1.1-only appliance out of the box, and `verify_upstream: false` does not help — that turns off certificate *verification*, not protocol negotiation. Crystal's TLS client context disables TLS 1.0 and 1.1 in its constructor, so lowering the floor here is the only way. A legacy appliance usually needs `permissive: true` as well, because distributions build OpenSSL at a security level that rejects the old cipher suites outright.
 
@@ -316,6 +323,55 @@ Pinning both to the same value offers exactly that one version, so a handshake f
 **Certificates are file paths, not inline material.** A private key does not belong in `settings.json`, which is shareable and exportable ([#439](https://github.com/hahwul/gori/issues/439)). A passphrase-protected key is rejected at save time: OpenSSL would prompt for the passphrase on the terminal the TUI owns, so gori would simply appear to hang. Decrypt it first with `openssl pkey -in key.pem -out plain.pem`.
 
 The policy is looked up on the **dialled** host, not on an SNI override — a certificate and a protocol floor belong to the machine actually being talked to, whereas the Repeater's SNI field deliberately lies about the name for domain-fronting and vhost tests.
+
+#### TLS fingerprint {#tls-fingerprint}
+
+With gori in the loop, the ClientHello an origin sees is **gori's OpenSSL handshake, not the browser's**. Anti-bot stacks fingerprint that handshake as a JA3 or JA4 and start serving challenges or `403`s to traffic that was fine a minute ago — the everyday *"it works in the browser, it breaks through the proxy"*. The fields above are the knobs for it, and
+
+```bash
+gori settings tls-fingerprint
+```
+
+is how you check them: it prints the JA3/JA4 of the ClientHello gori really sends to each destination, built from the same TLS context a dial builds. OpenSSL only ever reports what got *negotiated*, so without that command none of these settings can be verified.
+
+```json
+{
+  "outbound_tls": [
+    { "host": "shop.example.com", "preset": "chrome" },
+    {
+      "host": "api.internal",
+      "groups": "X25519:P-256",
+      "sigalgs": "ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256",
+      "ciphersuites": "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384",
+      "alpn": ["h2", "http/1.1"],
+      "ocsp_stapling": true
+    }
+  ]
+}
+```
+
+**Presets are approximations, and gori will not claim otherwise.** A preset fills in every *value-level* field a classifier reads — cipher list and order, TLS 1.3 suites, named groups, signature algorithms, the ALPN pair, and whether `session_ticket` / `status_request` appear at all. It does **not** reproduce a browser's JA3 byte for byte, and cannot:
+
+- **Extension order** is OpenSSL's, and OpenSSL emits its own fixed order. JA3 hashes that order.
+- **GREASE** ([RFC 8701](https://datatracker.ietf.org/doc/html/rfc8701)) placement is OpenSSL's. Both fingerprints strip GREASE values, but the positions a browser reserves for them are not the ones OpenSSL picks.
+- **Post-quantum key shares** (`X25519MLKEM768`), which current Chrome and Firefox offer first, are deliberately left out of the presets: they exist only on OpenSSL 3.5+, and a preset that fails to apply on an older build is worse than one that is honestly incomplete. Add it to a rule's own `groups` where your build has it.
+- **SHA-1 signature algorithms**, which Firefox and Safari still list last as legacy fallbacks, are left out for the same reason: Debian and Ubuntu ship OpenSSL with SHA-1 signatures disabled, and listing them would make the preset refuse to apply at all there. No modern origin selects one.
+
+Compare the `JA4_r` lists the report prints, not the digests — that is where you see which field is still wrong. A byte-exact match needs a TLS stack with control over extension order and GREASE (BoringSSL, rustls, uTLS); that is [#822 phase 3](https://github.com/hahwul/gori/issues/822) and is not what these fields do.
+
+A rule's own fields **override** the preset it names, so `{"preset": "chrome", "groups": "P-521"}` is Chrome's everything with your group list.
+
+**ALPN and the two legs.** gori dials with different ALPN offers depending on what it is going to speak on that socket: `h2` on a decrypted tunnel, nothing at all on a leg it will speak HTTP/1.1 on (the plain forward-proxy dial, the Repeater, WebSocket). A configured `alpn` list is used as written on the first, and has `h2` **removed** on the second — an origin that selected `h2` there would leave gori writing HTTP/1.1 into an HTTP/2 connection. `gori settings tls-fingerprint` reports both legs for exactly this reason.
+
+An invalid `groups`, `sigalgs`, `ciphersuites` or `alpn` value is checked by handing the string to the same OpenSSL that would consume it. This table has no in-app editor — you edit the JSON — so the check runs at **startup** and names the rule, the setting and the consequence, rather than leaving you with a handshake failure that reads like the origin's fault:
+
+```
+⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 — the rule for api.internal; TLS dials to that destination will fail
+```
+
+The same line appears as a notification in the TUI. A bad rule affects only its own destination; every other rule, and the rest of gori, still work.
+
+Inbound fingerprint *spoofing* (making the client's own handshake look like something else) is not in scope here; this section only shapes the connections gori makes.
 
 ### layout
 

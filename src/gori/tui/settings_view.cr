@@ -44,7 +44,7 @@ module Gori::Tui
         "per-host routing / SOCKS5 / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
         readonly: true),
       Field.new("Outbound TLS",
-        "per-host client certificates + protocol range — edit with `gori settings --edit` (outbound_tls)",
+        "per-host client certificates, protocol range and TLS fingerprint (groups/sigalgs/ALPN, or a chrome/firefox/safari/curl preset) — edit with `gori settings --edit` (outbound_tls); check what actually goes on the wire with `gori settings tls-fingerprint`",
         readonly: true),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
@@ -298,7 +298,7 @@ module Gori::Tui
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
                   Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off", passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), rule_count_label(Settings.outbound_tls.size, "entry", "entries"), hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off", passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), outbound_tls_summary, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -324,7 +324,7 @@ module Gori::Tui
         Settings.strip_alt_svc? ? "on" : "off",
         passthrough_label(Settings.tls_passthrough),
         rule_count_label(Settings.upstream_rules.size, "rule"),
-        rule_count_label(Settings.outbound_tls.size, "entry", "entries"),
+        outbound_tls_summary,
         hostnames_summary,
       ]
     end
@@ -377,6 +377,15 @@ module Gori::Tui
     private def rule_count_label(n : Int32, one : String, many : String = "") : String
       return "none — configured in settings.json" if n == 0
       "#{n} #{n == 1 ? one : (many.presence || "#{one}s")}"
+    end
+
+    # The outbound-TLS row's value. A bare count hides the one fact an operator most wants back
+    # from this row: whether any destination is being dialed with a BROWSER FINGERPRINT rather
+    # than gori's own (#822). Names the presets in play, deduped and in table order.
+    private def outbound_tls_summary : String
+      base = rule_count_label(Settings.outbound_tls.size, "entry", "entries")
+      presets = Settings.outbound_tls.map(&.preset).reject(&.empty?).uniq!
+      presets.empty? ? base : "#{base} · #{presets.join(", ")}"
     end
 
     private def passthrough_label(patterns : Array(String)) : String

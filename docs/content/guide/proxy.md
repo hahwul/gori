@@ -618,6 +618,34 @@ Scope will not do this for you. Scope decides what is recorded and acted on; an 
 
 A bypassed host leaves no flow anywhere, so the top bar grows a yellow `bypass:N` chip the first time one is relayed. Click it (or run **TLS passthrough hosts** from the command palette) for the list: each host with the rule that matched, when it was first seen, and how many connections it covered. The list is session-wide, not per project, because the setting is global.
 
+## When the Origin Blocks the Proxy {#tls-fingerprint}
+
+A different failure from a pinned client, and it looks nothing like one: the request goes through, and the origin answers with a challenge page or a `403` it never sent before gori was in the loop. Nothing on the HTTP side explains it — the headers are the browser's, the cookies are the browser's.
+
+The give-away is a layer below. The ClientHello an origin sees is **gori's OpenSSL handshake, not the browser's**, and anti-bot stacks (Cloudflare, Akamai, DataDome, PerimeterX) fingerprint it as a JA3 or JA4. A bare OpenSSL hello does not look like Chrome, so the traffic is judged before a single header is read.
+
+`outbound_tls` can reshape that handshake per destination. The quickest form is a preset:
+
+```json
+{
+  "outbound_tls": [
+    { "host": "shop.example.com", "preset": "chrome" }
+  ]
+}
+```
+
+`chrome`, `firefox`, `safari` and `curl` are the names. Each fills in the cipher list and its order, the TLS 1.3 suites, the named groups, the signature algorithms, the `h2, http/1.1` ALPN pair a browser offers (gori's own default offers one protocol, which is already a tell), and whether the `session_ticket` and `status_request` extensions appear at all. Anything you set on the rule itself wins over the preset, and each field is also usable on its own — see [`outbound_tls`](/reference/config/#outbound_tls).
+
+Then check it, because a knob that never reached the wire looks exactly like one that did:
+
+```bash
+gori settings tls-fingerprint shop.example.com
+```
+
+That prints the JA3 and JA4 of the hello gori really sends there, built from the same TLS context the dial builds, along with the raw lists behind each digest.
+
+**Read the presets as approximations.** They match every value-level field a classifier reads, and they will not reproduce a browser's JA3 byte for byte: extension order and GREASE placement come from OpenSSL and are not settable from it. That is usually enough to stop looking like a bare OpenSSL client, which is the thing being detected — but compare the `JA4_r` lists rather than the digests, and expect the digests to differ.
+
 ## Project Tab
 
 The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.

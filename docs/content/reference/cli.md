@@ -1132,6 +1132,7 @@ gori settings --edit               # open it in $EDITOR
 gori settings sections             # list the top-level sections
 gori settings export [-o FILE]     # write a shareable profile (stdout by default)
 gori settings import FILE          # apply a profile's sections
+gori settings tls-fingerprint      # the JA3/JA4 gori sends to each destination
 ```
 
 ### Profiles
@@ -1159,6 +1160,7 @@ A section marked *not set* is still a valid name for `--sections`: exporting it 
 | `--sections a,b` | both | Comma-separated section names; at least one. Export defaults to everything except secret-bearing sections; import defaults to every section in the file |
 | `-o`, `--out FILE` | export | Write to a file instead of stdout |
 | `--dry-run` | import | Print which sections would be applied, then exit without writing |
+| `--json` | tls-fingerprint | Emit the report as JSON, always including the decomposed JA3 string and `ja4_r` |
 
 A section you do not select — or that the profile does not carry — is left **exactly as it was**. That is the guarantee `--sections` is choosing between. Within a section the profile *does* carry:
 
@@ -1176,6 +1178,32 @@ If gori cannot load your `settings.json` — unparseable, unreadable, or a `--co
 `-o` pointing at your live `settings.json` is refused. An export is not a snapshot — it omits every section at its factory default, and omits `env` and `decoder` unless you name them — so writing one back over the real file would delete those sections rather than update it.
 
 When an export **does** carry one of those sections, `-o FILE` is created `0600` and gori says so, naming what is in the file. Consenting to export a credential is not consenting to leave it world-readable. An ordinary export stays `0644`, and an export that names `env` on an install with no env vars is an ordinary export — the mode follows what the document actually contains, not what you typed.
+
+### `gori settings tls-fingerprint`
+
+Prints the **JA3 and JA4 fingerprint of the ClientHello gori actually sends**, per destination — the offer an anti-bot stack (Cloudflare, Akamai, DataDome, PerimeterX) reads before it decides whether to challenge you. It is the check for the [`outbound_tls`](/reference/config/#outbound_tls) fingerprint fields: OpenSSL will only ever tell you what got *negotiated*, never what was offered, so without this the settings are unverifiable.
+
+```bash
+gori settings tls-fingerprint                    # every rule, plus the no-rule default
+gori settings tls-fingerprint shop.example.com   # the one policy that host would get
+gori settings tls-fingerprint --json             # machine-readable, with the raw lists
+```
+
+```
+shop.example.com  (matched rule "shop.example.com")
+  preset          chrome
+  groups          X25519:P-256:P-384
+  …
+  tunnelled (gori offers h2) — ALPN h2, http/1.1
+    JA3  c99e92e692ba483e2602b38b3c0a5645
+         771,4865-4866-…,65281-0-11-10-35-5-16-22-13-43-45-51-21,29-23-24,0
+    JA4  t13d1513h2_8daaf6152771_afafd945c4ab
+         t13d1513h2_002f,0035,…_0005,000a,…_0403,0804,…
+```
+
+Each policy is reported for **two legs**, and the difference between them is real. gori offers `h2` on a decrypted MITM connection; on a leg it is going to speak HTTP/1.1 on (the forward-proxy dial, the Repeater, WebSocket) it drops `h2` from the offer, and with no `alpn` configured it sends no ALPN extension at all — so those legs carry different ClientHellos. The second line under each digest is the list it hashes: that is where you see *which* field a setting moved, and it is the half worth comparing against a browser.
+
+The context the report reads is the same one a dial builds, so it cannot describe a handshake gori does not make. A `groups` or `sigalgs` string this OpenSSL rejects is reported on stderr for that rule and the rest still print.
 
 ### `--config PATH`
 
