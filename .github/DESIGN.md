@@ -1796,7 +1796,7 @@ the three surfaces short of parity.
 
 ### 2026-08-26: the active Scope lens follows flow selection into Comparer
 
-Refines: [P8](#p8). PR: pending.
+Refines: [P4](#p4). PR #809.
 
 Scope is a display lens rather than a capture boundary: out-of-scope flows remain canonical
 project data, but a list used to select a flow should not immediately reveal rows the active lens
@@ -1807,3 +1807,10 @@ showing every captured flow.
 The shared `FlowPicker` stays a presentation object over rows supplied by its caller. Applying the
 lens at the Comparer open-site changes only that workflow; the entity-link picker keeps its own
 unscoped row policy.
+
+P4 is the reason the lens cannot be silent about it. A modal narrowed by a mode the modal never
+mentions is a decision applied behind the operator's back, so the picker is TOLD its rows were
+lensed and an all-hidden list reads `no flows in scope` (plus `⇧S toggles the lens`) rather than
+`no flows captured yet` — the Sitemap's split, on a card that previously had no way to be wrong.
+For the same reason the open-site passes `raise_on_error: true`: `Store#search` otherwise degrades
+a SQLite failure to an empty result, which on this card is indistinguishable from an empty scope.

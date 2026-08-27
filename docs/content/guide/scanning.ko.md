@@ -134,7 +134,7 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 - **Notes**: 자유 형식의 프로젝트별 마크다운 문서(프로젝트당 여러 노트). Notes 탭에서 노트를 생성, 편집, 닫을 수 있고, `gori run notes` / `gori run notes --all`로 헤드리스에서 목록을 보거나 덤프할 수 있습니다. 에이전트는 MCP(`list_notes`, `get_note`, `create_note`, …)로 노트를 관리할 수 있습니다.
 - **Comparer**: 두 메시지를 슬롯 A와 B에 불러와 나란히 diff합니다. 요청 간 응답이 어떻게 바뀌었는지 파악하는 데 유용합니다.
 
-  슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` → **Send to Comparer**, 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.
+  슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` → **Send to Comparer**, 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. 이 피커는 History·Sitemap과 마찬가지로 활성 Scope 렌즈를 따르므로, 스코프 밖 플로우를 고르려면 렌즈를 꺼야 합니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.
 
   각 열 헤더에 그쪽의 `status · size · time`이 붙고, 가운데 구분선에 A→B 델타가 표시됩니다. `403 → 200` 하나가 본문을 읽기 전에 답인 경우가 대부분입니다.
 

@@ -134,7 +134,7 @@ Two more tools round out analysis:
 - **Notes**: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; list or dump them headless with `gori run notes` / `gori run notes --all`. Agents can manage notes over MCP (`list_notes`, `get_note`, `create_note`, …).
 - **Comparer**: load two messages into slots A and B for a side-by-side diff, useful for spotting how a response changed between requests.
 
-  A slot is filled from anywhere that holds a request and a response: `Space` → **Send to Comparer** from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or `a` / `b` on the Comparer tab itself to pick a captured flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.
+  A slot is filled from anywhere that holds a request and a response: `Space` → **Send to Comparer** from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or `a` / `b` on the Comparer tab itself to pick a captured flow — that picker follows the active Scope lens, like History and the Sitemap, so turn the lens off to reach an out-of-scope flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.
 
   Each column header carries that side's `status · size · time`, and the divider between them states the A→B delta — a `403 → 200` is usually the whole answer, before a body line is read.
 
