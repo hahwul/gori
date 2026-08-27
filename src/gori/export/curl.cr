@@ -235,7 +235,11 @@ module Gori
       # it (for curl to derive from the URL) a reproduction rather than a rewrite. Compared with
       # the scheme's DEFAULT PORT normalised away on both sides and case-insensitively, because
       # `acme.test`, `ACME.test` and `acme.test:443` on an https URL are one authority.
-      private def self.host_is_url_authority?(host_value : String, url : String) : Bool
+      #
+      # Public because the code serializers (`Export::PythonRequests` &c., via
+      # `Export::RequestParts`) draw the same Host/URL line curl does — a Host that matches the
+      # URL's authority is redundant, a Host that does NOT is the request.
+      def self.host_is_url_authority?(host_value : String, url : String) : Bool
         sep = url.index("://")
         return false unless sep
         scheme = url[0, sep].downcase

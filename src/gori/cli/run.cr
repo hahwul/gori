@@ -38,6 +38,11 @@ require "../links"
 require "../import"
 require "../session_from_flow"
 require "../export/curl"
+require "../export/python_requests"
+require "../export/js_fetch"
+require "../export/go_http"
+require "../export/httpie"
+require "../export/csrf_poc"
 require "./output"
 require "./run/interrupt"
 require "./run/capture"
@@ -175,7 +180,7 @@ module Gori
         {"history (ls)", "List / QL-query captured flows"},
         {"history delete", "Hard-delete one captured flow by id, or every match of -q QL (needs --yes)"},
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
-        {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, or a curl command)"},
+        {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, curl/python/fetch/go/httpie, or a CSRF PoC)"},
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
@@ -1179,6 +1184,11 @@ module Gori
               when "raw"            then :raw
               when "har"            then :har
               when "curl"           then :curl
+              when "python"         then :python
+              when "fetch"          then :fetch
+              when "go"             then :go
+              when "httpie"         then :httpie
+              when "csrf"           then :csrf
               when "paths"          then :paths
               when "markdown", "md" then :markdown
               when "sarif"          then :sarif
