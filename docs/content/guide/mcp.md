@@ -117,6 +117,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_scope` | Current scope include/exclude rules |
 | `list_links` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `compare_flows` | Line diff of two flows' request or response — with each side's status/size/time and the A→B delta; `context:N` folds the unchanged runs into `{kind:fold,hidden}` markers |
+| `diff_projects` | Retest diff: two PROJECTS at endpoint scale — what is new, gone, or answering differently since the last engagement. Endpoints are keyed by the Sitemap's folded template, and `removed` (never requested in the newer capture) is a separate verdict from `gone` (asked, got 404/410) |
 | `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
 | `list_projects` | Every gori project on this host |
 | `list_notes` / `get_note` | Read project notes |

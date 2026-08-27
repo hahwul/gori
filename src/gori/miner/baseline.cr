@@ -1,3 +1,4 @@
+require "../tolerance"
 require "./types"
 require "./inject"
 require "./fingerprint"
@@ -101,9 +102,9 @@ module Gori::Miner
       # metrics (not just length): a 50 KB / 8k-word page has word/line jitter that a fixed
       # floor of 3/2 is far too tight for, so an ad slot or a "results: N" counter tripped a
       # false Words/Lines finding while the proportional length band absorbed the same change.
-      length_tol = {(lengths.max - lengths.min) * 2, {8_i64, base.metrics.length // 100}.max}.max
-      words_tol = {(words.max - words.min) * 2, {3, base.metrics.words // 100}.max}.max
-      lines_tol = {(lines.max - lines.min) * 2, {2, base.metrics.lines // 100}.max}.max
+      length_tol = Tolerance.band(lengths.min, lengths.max, base.metrics.length, Tolerance::LENGTH_FLOOR)
+      words_tol = Tolerance.band(words.min, words.max, base.metrics.words, Tolerance::WORDS_FLOOR)
+      lines_tol = Tolerance.band(lines.min, lines.max, base.metrics.lines, Tolerance::LINES_FLOOR)
 
       statuses = probes.compact_map(&.metrics.status).uniq!
       stable = statuses.size <= 1

@@ -636,6 +636,67 @@ module Gori
       [] of {String, String, String}
     end
 
+    # One (endpoint, status, content-type) group — the unit the retest diff
+    # (`Gori::Diff`) aggregates a snapshot from.
+    #
+    # Grouped in SQL rather than GROUP_CONCAT'd into one row per endpoint: a
+    # `Content-Type` value may legitimately contain the comma GROUP_CONCAT joins on, so
+    # a concatenated set could not be split back apart — and the diff has to be able to
+    # say WHICH content types an endpoint answered with. One extra row per distinct
+    # (status, content-type) pair is cheap; a real endpoint has one or two.
+    #
+    # `min_size`/`max_size` are the RESPONSE bytes and are NULL for a group whose flows
+    # never got a response (SQLite's MIN/MAX skip NULLs, so a group that mixes pending
+    # and complete flows still reports the sizes it does have). `flow_id` is the newest
+    # flow in the group — the concrete capture a surface drills into.
+    record EndpointObservation,
+      host : String, method : String, target : String,
+      status : Int32?, content_type : String?,
+      count : Int64, min_size : Int64?, max_size : Int64?,
+      first_seen : Int64, last_seen : Int64, flow_id : Int64
+
+    # Bound on the grouped rows above. Deliberately larger than SITEMAP_MAX: this query
+    # groups by (status, content-type) on top of the endpoint, so the same history yields
+    # more rows here than the sitemap does — and a diff that silently dropped a host would
+    # report its endpoints as "not seen on this side", which is the one lie this feature
+    # exists to avoid. A caller that hits the cap is told (see `Diff::Snapshot#truncated?`).
+    ENDPOINT_OBSERVATION_MAX = 40_000
+
+    # Distinct (host, method, target, status, content-type) groups for the retest diff,
+    # honouring an optional filter (the Scope lens / a QL narrowing).
+    #
+    # ORDER BY names every GROUP BY column, so the ordering is TOTAL and the `LIMIT` cut is
+    # deterministic — same reason as `sitemap_entries_detailed`, and the same consequence
+    # if it were not: with no cursor on this read, a group that loses an arbitrary tiebreak
+    # is not on a later page, it is unreachable.
+    def endpoint_observations(filter : QL::Filter = QL::EMPTY, limit : Int32 = ENDPOINT_OBSERVATION_MAX, *,
+                              raise_on_error : Bool = false) : Array(EndpointObservation)
+      rows = [] of EndpointObservation
+      args = filter.args.dup
+      args << limit
+      sql = "SELECT host, method, target, status, content_type, COUNT(*), " \
+            "MIN(response_size), MAX(response_size), MIN(created_at), MAX(created_at), MAX(id) " \
+            "FROM flows WHERE #{filter.sql} " \
+            "GROUP BY host, method, target, status, content_type " \
+            "ORDER BY host, target, method, status, content_type LIMIT ?"
+      @db.query(sql, args: args) do |rs|
+        rs.each do
+          rows << EndpointObservation.new(
+            rs.read(String), rs.read(String), rs.read(String),
+            rs.read(Int32?), rs.read(String?), rs.read(Int64),
+            rs.read(Int64?), rs.read(Int64?), rs.read(Int64), rs.read(Int64), rs.read(Int64))
+        end
+      end
+      rows
+    rescue ex
+      # Same stance as #sitemap_entries: a live surface degrades to no matches rather than
+      # tearing down, and the one-shot CLI passes raise_on_error so a failed query reads
+      # distinctly from a genuinely empty project.
+      raise ex if raise_on_error
+      ::Log.warn { "endpoint observation query failed: #{ex.message}" }
+      [] of EndpointObservation
+    end
+
     # Passive-signal tags for a flow, fetched lazily per on-screen row (P8 pull,
     # not push). No tag producer exists this milestone, so this is always empty;
     # the call site is the seam.

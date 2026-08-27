@@ -152,6 +152,30 @@ Two more tools round out analysis:
 
   On a changed row only the parts that actually differ are lit red/green; what both sides share is dimmed, so a re-signed token or one flipped JSON value is visible without reading the line.
 
+## Diff: what changed since last time
+
+The Comparer diffs two **messages**. Retesting asks the same question one level up — *what changed since the last engagement?* — and that is the **Diff** sub-tab under **Target**, next to the Sitemap whose folding it keys on.
+
+Slots hold **projects**, not flows: `a` picks the baseline (the earlier engagement), `b` defaults to the project you have open, `s` swaps them, and `r` re-runs the read. Nothing is sent — both sides are captured traffic. Rows are endpoints, and `↵` (or `o`) hands the selected endpoint's capture from *each* side to the Comparer for the byte-level answer.
+
+**Endpoint identity is the whole game.** Two engagements never capture the same identifiers, so a diff keyed on literal paths reports every row twice — once removed, once added — and tells you nothing. Endpoints are therefore keyed by the same folded template the Sitemap draws: `/users/{uuid}`, `/items/{n}`, `/search` with its query variants folded on. The fold runs over the union of both sides, so a route that met the fold threshold on only one side still matches itself on the other.
+
+Five verdicts, and the split between the last two is the point:
+
+| Verdict | Meaning |
+|---------|---------|
+| `added` | Captured in B, never captured in A |
+| `gone` | Captured in both — and every answer B got was `404`/`410` where A was reachable |
+| `changed` | Captured in both; status class, auth, content type, or size moved beyond tolerance |
+| `same` | Captured in both, equivalent |
+| `not seen` | In A, and B captured **no request to it at all** — a coverage gap, not evidence of removal |
+
+A thinner retest visits fewer endpoints. Collapsing "we did not go there" into "it is gone" would report a short afternoon as a wave of fixes, so the two are different verdicts and the caveat sits on the header where it cannot scroll away. Both sides' flow, endpoint and host counts print beside the numbers for the same reason.
+
+`changed` is judged by a tolerance band — the same calibration the Repeater's minimizer and the Miner use — not byte equality, so a page whose length wanders between captures reads as unchanged. Status is compared by **class**, so a `200` that became a `201` is not a finding while a `200` that became a `403` is (reported on its own `auth` axis).
+
+`v` cycles the verdict lens; the counts always cover all five whatever the lens shows. Headless, it is [`gori run diff`](/reference/cli/#run-diff) — with `--format md` the report is a section you paste into the deliverable — and over MCP it is `diff_projects`.
+
 Issues, notes, repeaters, and fuzz/miner sessions can be linked so you jump from an issue straight back to the evidence flow or the session that produced it. `Space` → **Link…** from History, the Repeater, the Fuzzer, or the Miner opens one card holding every issue *and* every note, with `+ New issue…` / `+ New note…` pinned above them — so filing a brand-new issue for what you are looking at, already linked, is the same keystroke as attaching it to an existing one. Type to filter by title, host, status, or the words `issue` / `note`; whatever you typed becomes the new issue's title if you land on the create row.
 
 ## Next Steps

@@ -176,21 +176,11 @@ module Gori
             node
           end
         end
-      # Segment the PATH only: an unencoded '/' in a query VALUE (e.g. ?redirect=/a/b)
-      # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
-      # /x?a=2 stay distinct endpoints without corrupting the tree.
-      qidx = path.index('?')
-      path_only = qidx ? path[0...qidx] : path # local, not the `path_part` helper below
-      suffix = qidx ? path[qidx..] : ""
-      segments = path_only.split('/')
-      segments.shift if segments.first? == "" # the mandatory leading-slash empty
-      segments.pop if segments.last? == ""    # a trailing slash → same endpoint (normalized)
-      # An INTERIOR empty (a literal "//") is kept, so //dup/a stays distinct from /dup/a.
-      segments[-1] = "#{segments[-1]}#{suffix}" unless segments.empty? || suffix.empty?
+      segments, truncated = segments_of(path)
       if segments.empty?
-        leaf = suffix.empty? ? "/" : suffix
+        leaf = root_leaf(path)
         node = host_node.child(leaf)
-        node.path = suffix.empty? ? "/" : "/#{suffix}"
+        node.path = root_path(path)
       else
         # MEASURED, and the reason MAX_DEPTH exists: every node stores its FULL path from
         # the root (`Node#path`, the durable tag key), so both this loop's `acc` and the
@@ -198,11 +188,6 @@ module Gori
         # 109 MB at 5k segments, 404 MB at 10k, 1.6 GB at 20k, 6.6 GB at 40k, 28 GB at 80k,
         # OOM-killed at 160k — reachable from ONE captured or imported request, and long
         # before any traversal runs out of stack.
-        # The query rode onto the LAST segment above, so a cut target drops its query with
-        # the tail it belonged to. That is the same loss as the rest of the tail, and the
-        # `truncated` flag is what tells the operator the path is a prefix.
-        truncated = segments.size > MAX_DEPTH
-        segments = segments[0, MAX_DEPTH] if truncated
         acc = ""
         node = host_node
         segments.each do |seg|
@@ -215,6 +200,57 @@ module Gori
         node.truncated = true if truncated
       end
       node.methods << method unless node.methods.includes?(method)
+    end
+
+    # The path segments one already-normalized path contributes to the tree — the query
+    # string already ridden onto the LAST segment, the target cut at MAX_DEPTH — plus
+    # whether that cut happened.
+    #
+    # Extracted from `add` because `node_path` has to answer with the SAME segments `add`
+    # inserts along: the retest diff (`Gori::Diff`) keys its endpoints on `Node#path` and
+    # re-derives it per captured target rather than carrying the whole tree, and a second
+    # copy of this reduction is exactly how a diff key would stop naming the row the
+    # Sitemap tab draws (a trailing slash alone is enough — see the `pop` below).
+    private def self.segments_of(path : String) : {Array(String), Bool}
+      # Segment the PATH only: an unencoded '/' in a query VALUE (e.g. ?redirect=/a/b)
+      # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
+      # /x?a=2 stay distinct endpoints without corrupting the tree.
+      qidx = path.index('?')
+      path_only = qidx ? path[0...qidx] : path # local, not the `path_part` helper below
+      suffix = qidx ? path[qidx..] : ""
+      segments = path_only.split('/')
+      segments.shift if segments.first? == "" # the mandatory leading-slash empty
+      segments.pop if segments.last? == ""    # a trailing slash → same endpoint (normalized)
+      # An INTERIOR empty (a literal "//") is kept, so //dup/a stays distinct from /dup/a.
+      segments[-1] = "#{segments[-1]}#{suffix}" unless segments.empty? || suffix.empty?
+      # The query rode onto the LAST segment above, so a cut target drops its query with
+      # the tail it belonged to. That is the same loss as the rest of the tail, and the
+      # `truncated` flag is what tells the operator the path is a prefix.
+      truncated = segments.size > MAX_DEPTH
+      segments = segments[0, MAX_DEPTH] if truncated
+      {segments, truncated}
+    end
+
+    # The `label` / `path` a path with NO segments lands on: the host's bare root, or the
+    # query alone when the request carried one ("/?a=1" arrives here as the label "?a=1").
+    private def self.root_leaf(path : String) : String
+      (qidx = path.index('?')) ? path[qidx..] : "/"
+    end
+
+    private def self.root_path(path : String) : String
+      (qidx = path.index('?')) ? "/#{path[qidx..]}" : "/"
+    end
+
+    # The `Node#path` a captured target lands on, WITHOUT building a tree — the durable
+    # per-endpoint key (`add` stamps exactly this string). Absolute-form targets are
+    # reduced first, a trailing slash is dropped, and a target deeper than MAX_DEPTH is
+    # cut at the same node `add` would flag `truncated`, so several deep targets can share
+    # one answer here exactly as they share one node there.
+    def self.node_path(target : String) : String
+      path = normalize_path(target)
+      segments, _ = segments_of(path)
+      return root_path(path) if segments.empty?
+      String.build { |io| segments.each { |seg| io << '/' << seg } }
     end
 
     # An absolute-form target ("https://host/p?q") → its path+query; an origin-form
