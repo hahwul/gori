@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: the Comparer flow picker follows the active project Scope lens, and says `no flows in scope` rather than `no flows captured yet` when the lens hides everything; turning the lens off still exposes every captured flow (#809)
+
 ## v0.4.0
 
 ### New features

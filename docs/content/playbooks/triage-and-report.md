@@ -50,7 +50,7 @@ gori run probe promote 12            # confirm a Probe finding into Issues
 
 A finding lands harder with the before and after side by side — the unauthenticated `403` next to the authenticated `200`, or the patched response next to the vulnerable one. The **Comparer** holds two messages, A and B, and diffs them.
 
-Fill the slots from wherever a request and its response live. Select the first flow in **History** and press `Space` → **Send to Comparer**; it lands in slot A. Send the second the same way to fill slot B. A Repeater send or a Fuzzer result row goes in the same way — and since neither leaves a captured flow behind, this is their only route into a diff. On the Comparer tab itself, `a` / `b` pick a captured flow straight into either slot.
+Fill the slots from wherever a request and its response live. Select the first flow in **History** and press `Space` → **Send to Comparer**; it lands in slot A. Send the second the same way to fill slot B. A Repeater send or a Fuzzer result row goes in the same way — and since neither leaves a captured flow behind, this is their only route into a diff. On the Comparer tab itself, `a` / `b` pick a captured flow straight into either slot — through the active Scope lens, so an out-of-scope control needs the lens off.
 
 The divider between the columns states the A→B delta before you read a line: a `403 → 200` is usually the whole answer. `←`/`→` switches between diffing the requests and the responses, and on a changed row only the bytes that actually differ are lit red and green, so one flipped value stands out without reading the line.
 

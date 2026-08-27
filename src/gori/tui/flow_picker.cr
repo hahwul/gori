@@ -22,7 +22,11 @@ module Gori::Tui
     getter target : Symbol
     @indexed : Array({Store::FlowRow, String}) # each row paired with its precomputed filter haystack
 
-    def initialize(@rows : Array(Store::FlowRow), @target : Symbol)
+    # `scoped` — the caller drew these rows THROUGH the active Scope lens, so an empty list
+    # means "nothing in scope", not "nothing captured". The picker holds rows and cannot ask
+    # the Scope itself, and the two readings send the operator opposite ways: one hunts for
+    # traffic gori supposedly lost, the other presses ⇧S.
+    def initialize(@rows : Array(Store::FlowRow), @target : Symbol, @scoped : Bool = false)
       # Precompute each row's filter haystack ONCE (not per keystroke) so typing into
       # a 2000-row snapshot doesn't rebuild 2000 strings on every character.
       @indexed = @rows.map { |row| {row, haystack(row)} }
@@ -97,8 +101,18 @@ module Gori::Tui
       ensure_visible(list_h)
 
       if @filtered.empty?
-        msg = @rows.empty? ? "no flows captured yet" : "no flows match"
+        # Same three-way split the Sitemap draws (sitemap_view.cr): a live filter, the lens,
+        # or a genuinely empty project — never one sentence covering two of them.
+        msg, hint =
+          if !@rows.empty?
+            {"no flows match", nil}
+          elsif @scoped
+            {"no flows in scope", "⇧S toggles the lens"}
+          else
+            {"no flows captured yet", nil}
+          end
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
+        screen.text(box.x + 3, list_top + 2, hint, Theme.muted, Theme.panel) if hint && list_h > 2
         return
       end
 

@@ -1,12 +1,23 @@
 # Comparer (diff two flows) — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent
-  # flows; the picker filters them in memory. Loading the pick into the slot is the
-  # injected commit, so the same picker also serves the entity-link flow (see
-  # Runner#build_link_add_picker) with no mode flag in the picker itself.
+  # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent flows
+  # through the active Scope lens; the picker filters them in memory. Loading the pick
+  # into the slot is the injected commit, so the same picker also serves the entity-link
+  # flow (see Runner#build_link_add_picker) with no mode flag in the picker itself.
   def comparer_pick(slot : Symbol) : Nil
-    fp = FlowPicker.new(@session.store.recent_flows(2000), slot)
+    # `raise_on_error: true`, not the TUI default: the lens is an OR chain of per-rule
+    # `gori_ci_contains` / REGEXP callbacks, so this query CAN fail where `recent_flows`
+    # could not — and the default degrade-to-`[]` would open a card claiming the project
+    # holds nothing. Say what happened instead (history_view.cr takes the same exit).
+    rows =
+      begin
+        @session.store.search(@scope.filter, 2000, raise_on_error: true)
+      rescue ex
+        @toast = "could not list flows: #{ex.message}"
+        return
+      end
+    fp = FlowPicker.new(rows, slot, scoped: @scope.active?)
     fp.on_commit = -> { comparer_load_slot(fp, slot) }
     open_overlay(fp)
   end
