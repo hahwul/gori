@@ -301,6 +301,38 @@ One caveat worth knowing before the list looks broken: a flow captured **before 
 
 A view's query is checked when you save it, not when it runs. One whose every term would be dropped is refused outright, because it would narrow *nothing* while the `v:` chip claimed otherwise.
 
+## Columns (`Space` `C`) {#columns}
+
+A query answers *which flows match*. A **column** answers the other half: *what is the value of X in each row*. Press `Space` then `C` and you can add one — an `X-Request-Id`, a JWT `sub`, a rate-limit header, a field out of a JSON body — and it is drawn beside every flow in the list.
+
+A column is an **extract descriptor**, the same five ways of finding a value in a message that [session bindings](/guide/proxy/#session-bindings) already use, so there is nothing new to learn:
+
+| Kind | Reads |
+|------|-------|
+| `header` | a named header |
+| `cookie` | a cookie by name — `Set-Cookie` on a response, the `Cookie` jar on a request |
+| `jsonpath` | a leaf of a JSON body (`data.id`, `$.items[0].name`) |
+| `regex` | capture group 1, else the whole match, over the decoded body |
+| `position` | a fixed byte range of the decoded body |
+
+Each column also names a **side**: the response (the default) or the **request**. That matters more than it sounds — the id you want in the list is as often the one your client sent as the one the origin echoed back, and a column of each, side by side, is how you see a proxy rewriting it.
+
+The editor is a list card: `a` adds, `e` edits, `d` deletes, and `Shift-←` / `Shift-→` move a column left or right. Order is the whole point of the card, so it is what the arrows do. Everything is saved to the project the moment you press it, and the list behind the card redraws immediately — while you are typing a descriptor, the form's bottom band shows what it pulls out of the flow under the cursor, so you judge it against a real message rather than from memory.
+
+Columns take their cells from the right-hand cluster and **outrank** `TYPE` / `SIZE` / `DUR`: a narrow terminal drops those first, because they are the cells you did not ask for. A descriptor that matches nothing draws a **blank** cell — never the selector, and never the `—` that `SRC` uses for "gori does not know". Values are extracted only for the rows actually on screen, and remembered per flow, so scrolling a 5,000-row window costs what its visible dozen costs.
+
+The set is a project object, and the headless surfaces read the same values:
+
+```bash
+gori run ls                                     # draws this project's columns
+gori run ls --no-columns                        # the plain listing
+gori run ls --column header:x-request-id        # ad-hoc, replacing the project's set
+gori run ls --column 'RID=req:header:x-request-id' --column jsonpath:data.id
+gori run ls --format json --column 'T=regex:tok=(\w+)'
+```
+
+A `--column` spec is `[LABEL=][req|res:]kind:selector`. The label defaults to the selector, and the side to the response. A `=` only separates the label when it comes *before* the first `:`, so `regex:token=(\w+)` is the pattern you wrote and not a column called `regex:token`. MCP's `list_history` takes the same specs under a `columns` argument and carries the values back on each row — opt-in there, since a per-row block an agent did not ask for is paid for on every row of the page.
+
 ## Marking flows (multi-select)
 
 Press `t` to **mark** the flow under the cursor and step to the next older one, so a run of `t` marks consecutive rows (in either list order). `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.

@@ -104,7 +104,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다 — 클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` … — 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다 |
+| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다 — 클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` … — 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다 — QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views) — `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다** — 그쪽은 넘긴 `view`로만 거릅니다 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답 |

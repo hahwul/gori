@@ -156,6 +156,10 @@ private class FakeContext < ExecContext
     @calls << :history_view_pick
   end
 
+  def history_columns_edit : Nil
+    @calls << :history_columns_edit
+  end
+
   def history_delete : Nil
     @calls << :history_delete
   end

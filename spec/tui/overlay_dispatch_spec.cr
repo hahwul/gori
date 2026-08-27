@@ -33,7 +33,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
-  :mine_config, :name_prompt, :library_pick, :copy_as, :send_to,
+  :mine_config, :name_prompt, :columns, :column, :library_pick, :copy_as, :send_to,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -113,6 +113,10 @@ private MIGRATED_KINDS = [
   # help.query palette entries, plus `?` on an empty filter bar), so likewise never in
   # MODAL_OVERLAYS.
   OverlayKind::Help,
+  # The History column pair (#819) — the list card and the per-column form it hands off to,
+  # born on the seam, so likewise never in MODAL_OVERLAYS.
+  OverlayKind::Columns,
+  OverlayKind::Column,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

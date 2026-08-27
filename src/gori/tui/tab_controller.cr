@@ -48,6 +48,11 @@ module Gori::Tui
     def open_history_view_picker : Nil
     end
 
+    # The History column editor (#819). Same seam, and same reason, as the view picker above:
+    # the Runner's own `open_history_columns` (runner/columns.cr) overrides it.
+    def open_history_columns : Nil
+    end
+
     # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
     abstract def reconfigure_sequence : Nil
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).

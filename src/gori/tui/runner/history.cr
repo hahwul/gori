@@ -77,6 +77,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_history_view_picker
   end
 
+  # See runner/columns.cr for the list card, the per-column form and the store writes.
+  def history_columns_edit : Nil
+    open_history_columns
+  end
+
   def history_delete : Nil
     history_controller.history_delete
   end

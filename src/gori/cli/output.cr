@@ -1,5 +1,6 @@
 require "json"
 require "../store"
+require "../display_columns"
 require "../proxy/codec/http1"
 require "../url"
 require "../fuzz"
@@ -20,8 +21,9 @@ module Gori
     # colour. The JSON shape here is the stable, documented contract for scripts.
     module Output
       # One JSON object (one line, for JSON-Lines streams) describing a flow row.
-      def self.flow_row_json(row : Store::FlowRow, request_head : Bytes? = nil) : String
-        JSON.build { |j| flow_row_fields(j, row, request_head) }
+      def self.flow_row_json(row : Store::FlowRow, request_head : Bytes? = nil,
+                             columns : Array({String, String})? = nil) : String
+        JSON.build { |j| flow_row_fields(j, row, request_head, columns) }
       end
 
       # Emits the flow-row fields into an open builder (reused by `show`, which
@@ -37,7 +39,8 @@ module Gori
       # that `gori run capture`'s live stream and MCP's serializer mirror is byte-identical
       # to what it always was. See spec/cli/run/history_spec.cr, which pins that key set.
       def self.flow_row_fields(j : JSON::Builder, row : Store::FlowRow,
-                               request_head : Bytes? = nil) : Nil
+                               request_head : Bytes? = nil,
+                               columns : Array({String, String})? = nil) : Nil
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
@@ -93,6 +96,33 @@ module Gori
             # wrong, which is why the field exists at all.
             json_captured(j, "url", row.url)
             j.field("headers") { request_headers_json(j, head) }
+          end
+          # User-defined History columns (#819), when the caller asked for any. Emitted only
+          # then, so a script keying off field presence is not broken by a field it never asked
+          # for — the same discipline `advisory` and `headers` keep here.
+          j.field("columns") { columns_json(j, columns) } if columns && !columns.empty?
+        end
+      end
+
+      # `label → value`, and label → ARRAY of values where two columns share a label. Two
+      # columns MAY legitimately share one (the same header off the request and off the
+      # response is a comparison, not a mistake), and a plain last-wins object would drop the
+      # half the operator defined first. Same fold, and the same reasoning, as
+      # `request_headers_json` below — the label is matched exactly, not case-insensitively,
+      # because unlike a header name it is operator text with no RFC folding it.
+      private def self.columns_json(j : JSON::Builder, columns : Array({String, String})) : Nil
+        j.object do
+          DisplayColumns.fold_by_label(columns).each do |(label, values)|
+            # `term_safe` on the KEY as well as the value. `DisplayColumns.parse_spec` already
+            # scrubs a label off ARGV, and a stored label comes from a TextField — this is the
+            # backstop that makes the emitter safe on its own, since a raw key that is not valid
+            # UTF-8 poisons the whole document rather than its own row.
+            key = term_safe(label)
+            if values.size == 1
+              j.field key, term_safe(values.first)
+            else
+              j.field(key) { j.array { values.each { |v| j.string(term_safe(v)) } } }
+            end
           end
         end
       end
@@ -196,7 +226,7 @@ module Gori
 
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
-      def self.flow_row_text(row : Store::FlowRow) : String
+      def self.flow_row_text(row : Store::FlowRow, columns : Array({String, String})? = nil) : String
         status = row.status.try(&.to_s) || "—"
         # HTTP proxied requests store an absolute-form target ("http://host/path") that
         # already carries the host; only origin-form targets need the host prefixed.
@@ -226,6 +256,12 @@ module Gori
           # `gori run show <id>` prints the sentences.
           io << "  [!]" unless row.advisories.empty?
           io << "  [" << row.state << ']' unless row.state.complete?
+          # User-defined columns (#819) last, after everything the row already said about
+          # itself. `label=value` and not a padded cell: this listing has no header row, so a
+          # bare column of values would be unreadable — and EVERY column is printed, empty ones
+          # included, because "the descriptor found nothing here" is an answer a reader
+          # comparing rows needs to see rather than infer from a missing field.
+          columns.try &.each { |(label, value)| io << "  " << term_safe(label) << '=' << term_safe(value) }
         end
       end
 

@@ -144,9 +144,13 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--view=NAME` | 저장된 [뷰](#run-views)를 적용합니다 — 그 쿼리는 `-q`를 **대체하지 않고 AND로** 얹힙니다. TUI의 `v` 피커가 필터 바 위에 얹히는 것과 같습니다. 명시할 때만 적용됩니다 — TUI가 보고 있는 뷰가 여기 자동으로 걸리는 일은 없으며, `--in-scope`가 저장된 ⇧S 렌즈에 대해 긋는 선과 같습니다. 없는 이름은 무시하지 않고 거절하며(있는 이름들을 알려 줍니다), 목록에서만 씁니다 |
 | `--in-scope` | 프로젝트에 설정된 스코프 안의 플로우만 — TUI의 ⇧S 렌즈로, 옵트인이며 그 렌즈의 활성화 여부와 무관합니다. 캡처는 여전히 전부 기록하며, 스코프 규칙이 없으면 빈 결과 |
 | `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
+| `--column=SPEC` | 행마다 추출한 값을 함께 출력합니다 (반복 가능). `[LABEL=][req\|res:]kind:selector` — 예: `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. `--column`을 하나라도 주면 이 프로젝트에 설정된 [History 컬럼](/ko/guide/proxy/#columns)을 **대체**합니다 |
+| `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
 | `--format=FMT` | `text`, `json` / `jsonl` (둘 다 JSON-Lines), 또는 `har` |
 
 서브커맨드: `history show <id>` (`run show`와 동일), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
+
+이 프로젝트의 [History 컬럼](/ko/guide/proxy/#columns)은 기본으로 함께 그려지므로, 헤드리스 목록도 TUI의 History 탭과 같은 값을 보여 줍니다. 컬럼 없는 기본 목록으로 돌아가려면 `--no-columns`를 쓰세요. `text`에서는 행 끝에 `label=value`로 붙고(빈 값도 포함해서 전부 — "이 디스크립터는 여기서 아무것도 못 찾았다"도 봐야 할 답입니다), `json`에서는 `columns` 객체로 실립니다(컬럼이 없으면 키 자체가 없습니다). `=`는 첫 `:`보다 **앞에** 올 때만 라벨 구분자이므로 `regex:token=(\w+)`는 `regex:token`이라는 컬럼이 아니라 패턴 그대로입니다. 컬럼 하나당 출력되는 행마다 읽기 한 번이 추가되고, 본문을 읽는 세 종류는 본문을 최대 512 KiB까지 읽습니다.
 
 `json`/`jsonl`의 각 행은 플로우의 절대 `url`과 요청 헤더를 담은 `headers` 객체를 함께 싣습니다 (같은 이름이 반복되면 배열이 됩니다). 본문은 넣지 않습니다 — 그건 `run show`의 몫입니다.
 

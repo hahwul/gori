@@ -1085,8 +1085,45 @@ module Gori
         "CREATE UNIQUE INDEX idx_saved_views_name ON saved_views (name COLLATE NOCASE)",
       ]
 
+      # User-defined History columns (#819). A column is an extract descriptor the LIST draws:
+      # `header:x-request-id`, `jsonpath:data.id`, a regex capture — the values QL can already
+      # filter on but never show.
+      #
+      # A separate table rather than a `display` flag on `extract_rules`, and the difference is
+      # the `position` column right there: an extract rule produces no bytes and cannot compose,
+      # so V6 deliberately gave it no order — while columns are read LEFT TO RIGHT and that
+      # order is the whole of what the operator arranges. Same split, and the same reasoning,
+      # `match_rules` and `extract_rules` already carry between them.
+      #
+      # `side` is the axis extraction never needed until now: the Sequencer and session bindings
+      # both observe RESPONSES, so "the response" was implied by the descriptor. An operator
+      # wants an `X-Request-Id` column as often for the request their client SENT. Defaults to
+      # `response`, which is what every descriptor written before this migration meant.
+      #
+      # `width` is 0 for "auto" — the renderer's default cell — rather than NULL, so the column
+      # is NOT NULL like every other one here and no reader has to spell the fallback twice.
+      #
+      # No UNIQUE on `label`: two columns may legitimately share a header (`ID` off the request
+      # and `ID` off the response is a comparison, not a mistake), and nothing keys a column by
+      # name — the id does.
+      V19 = [
+        <<-SQL,
+          CREATE TABLE display_columns (
+            id        INTEGER PRIMARY KEY,
+            position  INTEGER NOT NULL DEFAULT 0,
+            label     TEXT    NOT NULL,
+            side      TEXT    NOT NULL DEFAULT 'response',
+            kind      TEXT    NOT NULL,
+            selector  TEXT    NOT NULL DEFAULT '',
+            pos_start INTEGER NOT NULL DEFAULT 0,
+            pos_end   INTEGER NOT NULL DEFAULT 0,
+            width     INTEGER NOT NULL DEFAULT 0
+          )
+          SQL
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18]
+                    V18, V19]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

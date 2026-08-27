@@ -2,6 +2,7 @@ require "json"
 require "base64"
 require "../env"
 require "../store"
+require "../display_columns"
 require "../issues_export"
 require "../repeater/engine"
 require "../fuzz"
@@ -76,7 +77,8 @@ module Gori
       end
 
       # --- list projection (History) ------------------------------------------
-      def self.flow_row(j : JSON::Builder, row : Store::FlowRow) : Nil
+      def self.flow_row(j : JSON::Builder, row : Store::FlowRow,
+                        columns : Array({String, String})? = nil) : Nil
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
@@ -113,6 +115,26 @@ module Gori
           advisories = row.advisories
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |a| j.string text(a) } } }
+          end
+          # The user-defined columns this call asked for (#819) — `label → value`, and label →
+          # ARRAY where two specs share a label (two specs MAY: the same header off the request
+          # and off the response is a comparison, not a mistake). Only when asked for, so an
+          # ordinary page is byte-identical to what it always was.
+          j.field("columns") { columns_object(j, columns) } if columns && !columns.empty?
+        end
+      end
+
+      private def self.columns_object(j : JSON::Builder, columns : Array({String, String})) : Nil
+        j.object do
+          Gori::DisplayColumns.fold_by_label(columns).each do |(label, values)|
+            # `text` on the KEY as well as the value — see `CLI::Output.columns_json` for why the
+            # emitter carries the backstop even though the label is scrubbed at its own seam.
+            key = text(label)
+            if values.size == 1
+              j.field key, text(values.first)
+            else
+              j.field(key) { j.array { values.each { |v| j.string(text(v)) } } }
+            end
           end
         end
       end

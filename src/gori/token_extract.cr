@@ -49,6 +49,91 @@ module Gori
     end
   end
 
+  # Which half of an exchange a descriptor reads.
+  #
+  # `ExtractKind` says WHERE in a message the value lives; this says WHICH message. The two
+  # were one axis for as long as extraction had a single consumer — the Sequencer and session
+  # bindings both observe RESPONSES, so "the response" was implied by the descriptor and never
+  # written down. History display columns (#819) are the first consumer that reads the other
+  # half: an `X-Request-Id` an operator wants in the list is as often the one their client SENT
+  # as the one the origin echoed back.
+  #
+  # Response stays the FIRST member so a descriptor that never names a side keeps meaning what
+  # every stored `extract_rules` row already means.
+  enum MessageSide
+    Response
+    Request
+
+    def label : String
+      response? ? "response" : "request"
+    end
+
+    def self.parse?(token : String) : MessageSide?
+      case token.downcase.strip
+      when "response", "resp", "res" then Response
+      when "request", "req"          then Request
+      end
+    end
+  end
+
+  # ONE message — head bytes, captured body, and which half of the exchange it is — as the five
+  # descriptors read it. The unit `TokenExtract` actually works over; `Repeater::Result` is one
+  # way to obtain it and a stored `FlowDetail` is the other (`Gori::DisplayColumns`).
+  #
+  # A CLASS and not a record: `headers` is parsed lazily and memoised, and the three body-scoped
+  # kinds never ask for it at all. A struct would re-parse on every copy, which on the History
+  # row loop is once per visible row per frame.
+  #
+  # `headers` may also be SUPPLIED — the repeater/h2 engines hand over a response object they
+  # already parsed (an h2 head is synthesized from HPACK, so the parsed object is the truth and
+  # a re-parse of the synthetic bytes is at best redundant).
+  class ExtractSubject
+    getter head : Bytes
+    getter body : Bytes?
+    getter side : MessageSide
+    # Ceiling on the DECODED entity, for the three body-scoped kinds.
+    #
+    # Capping the bytes read out of SQLite caps nothing on a compressed body: `Content-Encoding:
+    # gzip` over a 512 KiB stored prefix inflates to whatever the ratio gives, and the default is
+    # `ContentDecode::MAX_OUT` — 32 MiB, the decompression-bomb ceiling, not a working budget.
+    # A caller that only scans a prefix passes its own (Probe passes 64 KiB, History display
+    # columns pass theirs), so a large compressed body stops inflating early instead of expanding
+    # megabytes only to be truncated. Left at the bomb ceiling for the binding/sequencer path,
+    # which reads one response at a time rather than one per visible row.
+    getter decode_max : Int32
+
+    def initialize(@head : Bytes, @body : Bytes?, @side : MessageSide,
+                   @headers : Proxy::Codec::HeaderList? = nil,
+                   @decode_max : Int32 = Proxy::Codec::ContentDecode::MAX_OUT)
+    end
+
+    def self.response(head : Bytes?, body : Bytes?,
+                      decode_max : Int32 = Proxy::Codec::ContentDecode::MAX_OUT) : ExtractSubject
+      new(head || Bytes.empty, body, MessageSide::Response, decode_max: decode_max)
+    end
+
+    def self.request(head : Bytes?, body : Bytes?,
+                     decode_max : Int32 = Proxy::Codec::ContentDecode::MAX_OUT) : ExtractSubject
+      new(head || Bytes.empty, body, MessageSide::Request, decode_max: decode_max)
+    end
+
+    # The header block, parsed once. An empty head answers an empty list rather than raising:
+    # a Pending flow has no response bytes at all, and "no value" is this module's answer to
+    # every miss.
+    def headers : Proxy::Codec::HeaderList
+      @headers ||= parse_headers
+    end
+
+    private def parse_headers : Proxy::Codec::HeaderList
+      return Proxy::Codec::HeaderList.new if @head.empty?
+      if @side.request?
+        Proxy::Codec::Http1.parse_request_head(@head).headers
+      else
+        Proxy::Codec::Http1.parse_response_head(@head).headers
+      end
+    end
+  end
+
   # Where the token lives in a response. One `selector` string is reused per kind
   # (cookie name | header name | regex source | jsonpath expr); Position uses the
   # ints (a half-open byte range over the DECODED body).
@@ -86,22 +171,53 @@ module Gori
     # it is reused per response instead of recompiling the pattern every sample.
     def self.extract(raw : Repeater::Result, loc : TokenLoc, re : Regex? = nil) : String?
       return nil unless raw.error.nil?
+      resp = raw.response
+      # A head-based kind reads the response object the ENGINE parsed rather than a re-parse of
+      # `raw.head` — an h2 head is synthesized from HPACK, so the parsed object is the truth —
+      # and a nil one means there is no response to read a header off at all.
+      return nil if resp.nil? && (loc.kind.cookie? || loc.kind.header?)
+      extract(ExtractSubject.new(raw.head, raw.body, MessageSide::Response, resp.try(&.headers)),
+        loc, re)
+    end
+
+    # The same five descriptors over ONE message, whichever half of the exchange it is. Every
+    # `Repeater::Result` reading above funnels through here, so a display column (#819) and a
+    # session binding cannot disagree about what `header:x-request-id` means.
+    def self.extract(subject : ExtractSubject, loc : TokenLoc, re : Regex? = nil) : String?
       case loc.kind
-      in ExtractKind::Cookie   then cookie(raw, loc.selector)
-      in ExtractKind::Header   then header(raw, loc.selector)
-      in ExtractKind::Regex    then regex(raw, loc.selector, re)
-      in ExtractKind::Position then position(raw, loc.pos_start, loc.pos_end)
-      in ExtractKind::JsonPath then json_path(raw, loc.selector)
+      in ExtractKind::Cookie   then cookie(subject, loc.selector)
+      in ExtractKind::Header   then header(subject, loc.selector)
+      in ExtractKind::Regex    then regex(subject, loc.selector, re)
+      in ExtractKind::Position then position(subject, loc.pos_start, loc.pos_end)
+      in ExtractKind::JsonPath then json_path(subject, loc.selector)
       end
     end
 
     # First `name=value` across all Set-Cookie headers (there are usually several).
     # Case-sensitive cookie name per RFC 6265; strips at the first attribute `;`.
     def self.cookie(raw : Repeater::Result, name : String) : String?
-      return nil if name.empty?
       resp = raw.response
       return nil unless resp
-      resp.headers.get_all("set-cookie").each do |sc|
+      cookie(ExtractSubject.new(raw.head, raw.body, MessageSide::Response, resp.headers), name)
+    end
+
+    # The same, over either half. On a REQUEST the cookie jar is the `Cookie` header's
+    # `; `-separated pairs (RFC 6265 §5.4), not `Set-Cookie` — the two spellings are the same
+    # question asked of the two directions, and reading a request for `Set-Cookie` would answer
+    # nil for every flow a browser ever sent.
+    def self.cookie(subject : ExtractSubject, name : String) : String?
+      return nil if name.empty?
+      if subject.side.request?
+        subject.headers.get_all("cookie").each do |jar|
+          jar.split(';').each do |pair|
+            eq = pair.index('=')
+            next unless eq
+            return pair[(eq + 1)..].strip if pair[0...eq].strip == name
+          end
+        end
+        return nil
+      end
+      subject.headers.get_all("set-cookie").each do |sc|
         pair = sc.split(';', 2).first
         eq = pair.index('=')
         next unless eq
@@ -117,6 +233,11 @@ module Gori
       raw.response.try(&.headers.get?(name))
     end
 
+    def self.header(subject : ExtractSubject, name : String) : String?
+      return nil if name.empty?
+      subject.headers.get?(name)
+    end
+
     # Capture group 1 (else the whole match) of `pattern` over the decoded body —
     # same semantics as Fuzz::Matcher#extract_value. `re`, when passed, is the pattern
     # precompiled once by the engine; otherwise it is compiled here (fallback path for
@@ -124,9 +245,13 @@ module Gori
     # on Crystal — catch both so one bad descriptor yields empty samples, never a crash,
     # honouring this module's "returns nil on a miss rather than raising" contract.
     def self.regex(raw : Repeater::Result, pattern : String, re : Regex? = nil) : String?
+      regex(ExtractSubject.response(raw.head, raw.body), pattern, re)
+    end
+
+    def self.regex(subject : ExtractSubject, pattern : String, re : Regex? = nil) : String?
       return nil if pattern.empty?
       re ||= Regex.new(pattern)
-      text = decoded_text(raw)
+      text = decoded_text(subject)
       return nil if text.empty?
       md = re.match(text)
       return nil unless md
@@ -151,7 +276,11 @@ module Gori
     # `Env.mask_secrets`, `Rules#substitute` and `Bindings.boundary_forging?` are all
     # byte-level, and the store never sees a value at all.
     def self.position(raw : Repeater::Result, a : Int32, b : Int32) : String?
-      body = decoded_bytes(raw)
+      position(ExtractSubject.response(raw.head, raw.body), a, b)
+    end
+
+    def self.position(subject : ExtractSubject, a : Int32, b : Int32) : String?
+      body = decoded_bytes(subject)
       lo = a.clamp(0, body.size)
       hi = b.clamp(0, body.size)
       return nil if hi <= lo
@@ -162,8 +291,12 @@ module Gori
     # `["key"]`, `['key']`, and `[index]`; no filters or wildcards (v1). Non-JSON or a
     # missing path yields nil; a leaf is stringified (raw string, else its JSON form).
     def self.json_path(raw : Repeater::Result, path : String) : String?
+      json_path(ExtractSubject.response(raw.head, raw.body), path)
+    end
+
+    def self.json_path(subject : ExtractSubject, path : String) : String?
       return nil if path.empty?
-      root = JSON.parse(decoded_text(raw))
+      root = JSON.parse(decoded_text(subject))
       node = walk(root, path)
       return nil unless node
       node.as_s? || (node.raw.nil? ? nil : node.to_json)
@@ -266,16 +399,16 @@ module Gori
 
     # The decoded entity, byte-exact (gzip/br/zstd handled through the same seam
     # `Fuzz::Matcher` uses, so the two cannot disagree). What every BYTE-scoped reading gets.
-    private def self.decoded_bytes(raw : Repeater::Result) : Bytes
-      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
-      decoded || raw.body || Bytes.empty
+    private def self.decoded_bytes(subject : ExtractSubject) : Bytes
+      decoded, _ = Proxy::Codec::ContentDecode.decode(subject.head, subject.body, subject.decode_max)
+      decoded || subject.body || Bytes.empty
     end
 
     # The decoded entity read as TEXT, repaired so `Regex` and `JSON.parse` can run over it.
     # Only `text_only?` kinds come through here; `text_lossy?` is how a caller learns that the
     # repair happened and that the value it just got is not the origin's bytes.
-    private def self.decoded_text(raw : Repeater::Result) : String
-      String.new(decoded_bytes(raw)).scrub
+    private def self.decoded_text(subject : ExtractSubject) : String
+      String.new(decoded_bytes(subject)).scrub
     end
 
     # Whether reading this response's body as TEXT changes its bytes — i.e. the decoded entity
@@ -287,7 +420,11 @@ module Gori
     # `valid_encoding?` and not a scrub-and-compare: 9 µs against 130 µs on a valid 40 KB body,
     # and this is asked once per response a rule has already claimed.
     def self.text_lossy?(raw : Repeater::Result) : Bool
-      !String.new(decoded_bytes(raw)).valid_encoding?
+      text_lossy?(ExtractSubject.response(raw.head, raw.body))
+    end
+
+    def self.text_lossy?(subject : ExtractSubject) : Bool
+      !String.new(decoded_bytes(subject)).valid_encoding?
     end
   end
 end

@@ -947,6 +947,60 @@ module Gori
       end
     end
 
+    # --- user-defined History column (#819) ------------------------------------------------
+    #
+    # An extract descriptor the LIST draws. Shaped like `ExtractRule` above and reading through
+    # the same `Gori::TokenExtract` engine (P1/P3 — there is no second value-extraction
+    # grammar), with the two axes a displayed value needs and a bound one does not: `position`,
+    # because columns are read left to right, and `side`, because the value an operator wants in
+    # the list is as often on the request as on the response.
+    #
+    # No `enabled` flag: a column the operator does not want takes cells from HOST and PATH, so
+    # the honest off switch is deleting it — and unlike a colour rule there is no state (a
+    # matched filter, a bound name) that a disabled row would preserve.
+    struct DisplayColumn
+      getter id : Int64
+      # 0-based order, left to right. Ties broken by id so the order is total.
+      getter position : Int32
+      # What the column head says. Drawn UPPERCASED and truncated to the cell.
+      getter label : String
+      getter side : Gori::MessageSide
+      getter kind : Gori::ExtractKind
+      getter selector : String
+      getter pos_start : Int32
+      getter pos_end : Int32
+      # Cell width in terminal cells; 0 means "auto" — `DisplayColumns::DEFAULT_WIDTH`.
+      getter width : Int32
+
+      def initialize(@id, @position, @label, @side, @kind,
+                     @selector = "", @pos_start = 0, @pos_end = 0, @width = 0)
+      end
+
+      def token_loc : Gori::TokenLoc
+        Gori::TokenLoc.new(@kind, @selector, @pos_start, @pos_end)
+      end
+
+      # Head-scoped kinds read the parsed header block alone; the other three need the decoded
+      # entity, which is what makes a column expensive enough to want the body read capped.
+      def body_scoped? : Bool
+        !(@kind.cookie? || @kind.header?)
+      end
+
+      # The descriptor as `gori run ls --column` spells it, and as the editor's detail line reads
+      # it back: `[LABEL=]side:kind:selector`.
+      #
+      # The `LABEL=` prefix is emitted only when the label is not the one the grammar would have
+      # derived anyway — and emitting it at all is the point: the editor card renders this line
+      # under a comment promising it is typeable into the CLI, and without the prefix a column
+      # the operator named `RID` came back as one named `x-request-id`.
+      def spec : String
+        tail = @kind.position? ? "#{@pos_start}:#{@pos_end}" : @selector
+        body = "#{@side.label}:#{@kind.label}:#{tail}"
+        derived = Gori::DisplayColumns.default_label(@kind, @selector, @pos_start, @pos_end)
+        @label == derived ? body : "#{@label}=#{body}"
+      end
+    end
+
     # The six BUILT-IN colours a Colormarker rule can name — a VOCABULARY, and nothing else.
     #
     # It is not the type of `ColorRule#color` (that is a plain label string, so a user-defined
