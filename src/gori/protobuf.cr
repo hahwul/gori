@@ -101,7 +101,10 @@ module Gori
         end
       end
 
-      private def wire_name : String
+      # PUBLIC because the schema lens emits it too (`Protobuf::Lens.emit_json`): a field the
+      # `.proto` does not declare, or one whose declaration the wire contradicts, is reported
+      # by its WIRE type there — the one fact that is never in doubt.
+      def wire_name : String
         case wire
         in .varint?           then "varint"
         in .fixed64?          then "fixed64"

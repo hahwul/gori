@@ -354,8 +354,8 @@ describe "ProjectView#pane_at" do
   end
 end
 
-describe "ProjectView NETWORK pane" do
-  it "renders the scope-lens + sandbox toggles + the three network fields with an inherit marker" do
+describe "ProjectView PROJECT SETTINGS pane" do
+  it "renders the scope-lens + sandbox toggles + the network fields with an inherit marker" do
     tmp_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -363,7 +363,10 @@ describe "ProjectView NETWORK pane" do
       view.focus_pane(:settings) # the body shows one card at a time now
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
-      b.contains?("NETWORK").should be_true
+      # The card title follows the chip, not the first thing that was ever put in the card:
+      # it holds the scope lens, the sandbox, the network fields and (#823) the project's
+      # `.proto` schema path.
+      b.contains?("PROJECT SETTINGS").should be_true
       # The chip strip still names every sub-tab. Title Case since the strips were unified:
       # four of the six in gori already read `Findings`/`Callbacks`/`Sitemap`, and this one
       # shouted while the Rewriter's whispered — the renderer draws labels verbatim.
@@ -373,6 +376,7 @@ describe "ProjectView NETWORK pane" do
       b.contains?("Bind IP").should be_true
       b.contains?("Bind Port").should be_true
       b.contains?("Upstream proxy").should be_true
+      b.contains?("Proto schema").should be_true
       b.contains?("127.0.0.1").should be_true # inherited global bind host
       b.contains?("· global").should be_true  # no override yet → inheriting
     ensure
@@ -420,6 +424,64 @@ describe "ProjectView NETWORK pane" do
 
       view.set_backspace
       view.settings_values[1].should eq("80709")
+    ensure
+      reset_projnet
+    end
+  end
+
+  # #823: the proto-schema path is its OWN field with its OWN baseline, so editing it neither
+  # marks the network half dirty (which would re-apply and re-BIND six unchanged values on the
+  # next tab-leave) nor is marked dirty by a network edit.
+  it "keeps the proto-schema field on a baseline of its own" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.protos_value.should eq("")
+      view.protos_dirty?.should be_false
+
+      view.select_setting(2 + Gori::Tui::ProjectView::SETTINGS_PROTOS_FIELD) # the "Proto schema" row
+      view.settings_text_row?.should be_true
+      "api.desc".each_char { |c| view.set_input(c) }
+      view.protos_value.should eq("api.desc")
+      view.protos_dirty?.should be_true
+      view.settings_dirty?.should be_false # the network half is untouched
+
+      view.select_setting(3) # Bind Port
+      view.set_input('9')
+      view.settings_dirty?.should be_true
+      view.protos_dirty?.should be_true # …and the proto edit is still pending, not swallowed
+    ensure
+      reset_projnet
+    end
+  end
+
+  # Regression: the two halves of this pane commit from ONE entry point, network first, so
+  # each half's post-apply refresh must leave the other's pending edit alone. A full reload in
+  # either one silently discarded the edit the other commit had not looked at yet — and, in the
+  # network direction, cleared `protos_dirty?` so the proto commit then returned early.
+  it "refreshes each half of the settings pane without clobbering the other's pending edit" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+
+      view.select_setting(2 + Gori::Tui::ProjectView::SETTINGS_PROTOS_FIELD)
+      "api.desc".each_char { |c| view.set_input(c) }
+      view.select_setting(3) # Bind Port
+      view.set_input('9')
+
+      view.refresh_settings # what a network commit calls
+      view.protos_value.should eq("api.desc")
+      view.protos_dirty?.should be_true
+      view.settings_dirty?.should be_false # the network half WAS re-read, as its commit intends
+
+      view.select_setting(3)
+      view.set_input('9')
+      view.refresh_protos                          # what the proto commit calls
+      view.settings_values[1].should end_with("9") # the half-typed port survives
+      view.settings_dirty?.should be_true
+      view.protos_dirty?.should be_false
     ensure
       reset_projnet
     end

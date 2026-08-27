@@ -151,6 +151,10 @@ private class FakeHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 # A Provider that never touches a socket. `poll` returns nothing, so the Poller the resume

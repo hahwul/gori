@@ -152,6 +152,10 @@ private class FilterBarFakeHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 # Each column of the bar row, mapped to the chip the hit-test claims it for. Compared against the

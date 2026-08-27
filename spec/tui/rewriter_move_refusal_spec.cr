@@ -146,6 +146,10 @@ private class FakeHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 # The CA is the one slow part of standing a Session up (a root keypair) and no example asserts

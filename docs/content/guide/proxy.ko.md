@@ -84,9 +84,9 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
 
 ### 샌드박스 {#sandbox}
 
-**샌드박스**는 테스트를 허용된 범위 안으로만 강하게 가두는 차단 게이트입니다. **Project** 탭의 **NETWORK** 패널에서 토글하거나, 어느 탭에서든 커맨드 팔레트(`Ctrl-P` → **Toggle sandbox**)로 토글합니다(기본값: off). on인 동안 캡처 프록시는 스코프가 *허용*하는 요청만 전달하고, 나머지는 오리진에 닿기 전에 차단합니다. 차단된 시도도 aborted 플로우로 기록되어 History에서 확인할 수 있습니다. HTTP/1.1에서는 클라이언트가 `X-Gori-Sandbox: blocked` 헤더가 붙은 `403`을 받고, HTTP/2에서는 차단된 스트림만 취소되며(`RST_STREAM`, `CANCEL`) 같은 연결의 나머지 스트림은 그대로 동작합니다. 여기서 "허용"이란 스코프를 허용 목록(allowlist)으로 평가한 것으로, include 규칙이 하나 이상 매칭되고 exclude 규칙에는 매칭되지 않아야 합니다.
+**샌드박스**는 테스트를 허용된 범위 안으로만 강하게 가두는 차단 게이트입니다. **Project** 탭의 **Project settings** 패널에서 토글하거나, 어느 탭에서든 커맨드 팔레트(`Ctrl-P` → **Toggle sandbox**)로 토글합니다(기본값: off). on인 동안 캡처 프록시는 스코프가 *허용*하는 요청만 전달하고, 나머지는 오리진에 닿기 전에 차단합니다. 차단된 시도도 aborted 플로우로 기록되어 History에서 확인할 수 있습니다. HTTP/1.1에서는 클라이언트가 `X-Gori-Sandbox: blocked` 헤더가 붙은 `403`을 받고, HTTP/2에서는 차단된 스트림만 취소되며(`RST_STREAM`, `CANCEL`) 같은 연결의 나머지 스트림은 그대로 동작합니다. 여기서 "허용"이란 스코프를 허용 목록(allowlist)으로 평가한 것으로, include 규칙이 하나 이상 매칭되고 exclude 규칙에는 매칭되지 않아야 합니다.
 
-허용 목록이므로 include 규칙이 하나도 없으면 모든 트래픽이 차단됩니다. 먼저 대상에 대한 include를 추가하세요(스코프가 빈 상태에서 샌드박스를 켜면 바로 이 점을 확인하도록 물어봅니다). 켜져 있는 동안에는 상단 바에 빨간 `sandbox` 칩이 계속 표시되고, NETWORK 행의 토글 옆에 현재 효과가 안내됩니다.
+허용 목록이므로 include 규칙이 하나도 없으면 모든 트래픽이 차단됩니다. 먼저 대상에 대한 include를 추가하세요(스코프가 빈 상태에서 샌드박스를 켜면 바로 이 점을 확인하도록 물어봅니다). 켜져 있는 동안에는 상단 바에 빨간 `sandbox` 칩이 계속 표시되고, Project settings 행의 토글 옆에 현재 효과가 안내됩니다.
 
 샌드박스는 프록시로 캡처되는 트래픽에만 적용됩니다. Repeater, Fuzzer, Miner, MCP `send_request` 도구는 각자 스코프를 강제합니다(범위를 벗어난 대상은 `SCOPE_BLOCKED`로 거부). HTTPS는 요청 URL을 확인하기 위해 TLS 인터셉트에 의존합니다. 스코프에 들 수 없는 호스트는 `CONNECT` 단계에서 거부되고, 통과한 호스트의 요청은 하나씩 개별 검사합니다. 이 검사는 HTTP/2에서도 스트림 단위로 동작하므로, 샌드박스 때문에 연결이 HTTP/1.1로 내려가지 않고 gRPC 클라이언트도 계속 동작합니다. `CONNECT` 안에 들어오는 평문 HTTP/2(h2c, 드묾)도 다른 HTTP/2 연결과 똑같이 스트림 단위로 검사합니다. 터널은 열리고, 그 위에서 스코프를 벗어난 스트림만 개별적으로 취소됩니다.
 
@@ -125,7 +125,7 @@ gori는 지나가는 프로토콜을 인식합니다.
 | **HTTP/3** | 직접 가로채지 않음; 클라이언트가 우회할 수 있음을 알 수 있도록 `Alt-Svc` `h3`를 표시하고, `network.strip_alt_svc`로 제거해 우회 자체를 막을 수 있음 |
 | **WebSocket** over HTTP/1.1 (`Upgrade`) | 실시간 메시지 캡처, 리피터, 메시지 단위 인터셉트(`proto:ws`로 옵트인), 메시지 Match & Replace. 핸드셰이크에서 압축이 제거됩니다(아래 참고) |
 | **WebSocket** over HTTP/2 (RFC 8441) | 메시지 캡처. HTTP/1.1 쪽과 똑같이 표시되고 export됩니다. 메시지 단위 인터셉트, 메시지 Match & Replace, Repeater 재전송은 불가(아래 참고) |
-| **gRPC** | HTTP/2 위에 프레이밍되고 status 트레일러 포함; `.proto` 없이 와이어 포맷에서 protobuf 디코드(아래 참고) |
+| **gRPC** | HTTP/2 위에 프레이밍되고 status 트레일러 포함; `.proto` 유무와 무관하게 와이어 포맷에서 protobuf 디코드(아래 참고) |
 | **Server-Sent Events** | 표시 시점에 개별 이벤트로 파싱 |
 
 **gori는 HTTP/3을 직접 가로채지 않습니다.** QUIC은 UDP이고 gori의 리스너는 전부 TCP 소켓이므로, `Alt-Svc: h3=":443"`으로 응답하는 원 서버는 클라이언트에게 프록시 밖으로 나가는 길을 제안하는 셈입니다. 기본값에서 gori는 그 제안을 그대로 둔 채 표시만 하므로, 언제 그런 일이 벌어지는지 눈으로 보고 판단할 수 있습니다. [`network.strip_alt_svc`](/ko/reference/config/#strip-alt-svc)를 켜면 `h3`를 광고하는 `Alt-Svc` 필드를 클라이언트가 받는 응답에서 제거하므로(HTTP/1.1과 HTTP/2 모두), 클라이언트가 읽는 응답에는 옮겨 갈 곳이 남지 않습니다. (`Alt-Svc` 말고 다른 경로로 h3를 알아내는 클라이언트 — 예를 들어 DNS `HTTPS` 레코드 — 는 응답 쪽 제거가 닿는 범위 밖입니다.) 제거 대상은 딱 그 필드들뿐입니다. `Alt-Svc: clear`는 그대로 둡니다 — 이미 캐시한 대체 경로를 잊으라는 지시이기 때문입니다. `h2=":8443"` 같은 h3가 아닌 대체 경로도 그대로 둡니다 — 그것도 TCP 포트이고 여전히 gori를 지나가기 때문입니다.
@@ -156,6 +156,30 @@ gori는 gRPC 페이로드를 protobuf 와이어 포맷 자체에서 디코드합
 - **grpc-web 트레일러 프레임.** 이 페이로드는 protobuf가 아니라 ASCII 헤더 줄입니다.
 
 트리는 모든 표면에서 제공됩니다. TUI의 History와 Repeater 패널(`p`로 트리와 바이트 미리보기를 전환하며, `^X`는 여전히 바이트 그대로의 덤프를 보여 줍니다), `gori run history show --format json`, 그리고 MCP `get_flow` 도구(뒤 둘은 `grpc_messages[].protobuf` 필드)입니다. 잘렸거나 악의적인 메시지는 파싱되는 데까지 디코드된 뒤 거부되는 대신 `complete: false`로 표시됩니다. 어느 쪽이든 원본 옥텟에는 계속 접근할 수 있습니다.
+
+### `.proto`가 있을 때 {#proto-schema}
+
+스키마를 **가지고 있다면** gori는 그것을 씁니다. 프로젝트에 **디스크립터 셋**(`protoc`이 내보내는 바이너리 산출물)을 지정하면, 같은 패널이 번호 대신 이름과 타입이 붙은 필드를 그립니다.
+
+```
+protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
+```
+
+경로는 **Project → Project settings → Proto schema**에서 지정합니다. `.desc` 파일 하나여도 되고, 그런 파일들이 든 디렉터리(`.desc`, `.pb`, `.protoset`, `.fds`, `.bin`)여도 됩니다. 비워 두면 `~/.gori/protos/`에 있는 디스크립터 셋을 전부 읽으므로, 파일 하나를 거기 두는 것만으로 경로를 따로 지정하지 않은 모든 프로젝트에 적용됩니다. 그 행은 실제로 **무엇이 로드됐는지**(`2 files · 41 messages · 12 rpcs`)를, 아무것도 로드되지 않았다면 그 이유를 보여 줍니다 — 조용히 아무것도 안 가리키는 경로야말로 이름을 붙여 줘야 할 실패이기 때문입니다. **프로젝트** 설정인 이유는 `.proto`가 한 대상의 API를 서술하는 것이고 다음 engagement까지 따라가서는 안 되기 때문입니다.
+
+디스크립터 셋 자체가 protobuf라서 gori는 자기 디코더로 파싱하며, 런타임에 `protoc`이 필요 없습니다. `.proto` **소스 파일**은 읽지 않습니다 — 소스를 가리키면 위 명령과 함께 그렇게 말해 줍니다.
+
+**경로가 곧 바인딩입니다.** gRPC 요청은 `/package.Service/Method`로 가고, 디스크립터 셋은 그 경로를 rpc의 입력·출력 메시지 타입으로 바로 매핑합니다. 그래서 요청 패널은 입력 메시지로, 응답 패널은 출력 메시지로 읽히며, 추측도 없고 flow마다 설정할 것도 없습니다. 트리 위 한 줄 안내가 어떤 rpc와 어떤 메시지로 해석됐는지 이름을 밝히므로, gori가 고른 바인딩을 직접 확인할 수 있습니다.
+
+**스키마는 바이트 위의 렌즈일 뿐, 바이트를 대체하지 않습니다**(P7). 여기서 세 가지가 따라오고, 셋 다 화면에 드러납니다.
+
+- **스키마에 없는 필드 번호도 그대로 보여 줍니다.** 스키마가 없을 때와 똑같이 — 맞는 해석을 전부, `(undeclared)` 아래에 — 그립니다. 문서에 없는 필드야말로 와이어를 들여다보는 이유인 경우가 많습니다.
+- **선언과 어긋나는 와이어 타입은 불일치로 보고합니다.** 조용히 다시 읽지 않습니다. 행에 스키마가 선언한 것과 실제로 도착한 것이 함께 적히고, 그 아래에 원본 해석이 그려집니다. 어느 쪽이든 발견이 될 수 있습니다 — 번호를 바꾸지 않고 필드 타입을 바꾼 서버일 수도, 오래된 `.desc`일 수도 있습니다.
+- **원본 트리는 사라지지 않습니다.** `gori run history show --format json`과 MCP `get_flow`는 `grpc_messages[].protobuf`를 그대로 내보내고 그 옆에 `schema`를 더합니다. `^X`는 여전히 바이트 그대로의 덤프를 줍니다.
+
+스키마의 **공백**과 스키마와의 **충돌**은 구분됩니다. 이름이 없는 enum 값이나 셋에 없는 메시지 타입은 "스키마가 부족하다"는 안내이지, 바이트가 틀렸다는 주장이 아닙니다. 디스크립터 셋을 로드하지 않았다면 모든 표면은 이전과 완전히 동일하게 렌더됩니다.
+
+gRPC **서버 리플렉션**(파일 대신 대상에서 디스크립터를 받아오는 것)은 아직 구현되지 않았습니다. 아웃바운드 요청이므로, 들어올 때는 operator가 명시적으로 실행하고 다른 모든 능동 전송과 같이 프로젝트 scope의 통제를 받습니다.
 
 ### MessagePack과 CBOR {#binary-documents}
 
@@ -580,7 +604,7 @@ gori는 모든 HTTPS 연결을 가로채므로, 인증서를 피닝하는 클라
 | **SCOPE** | include/exclude 규칙 (호스트, 문자열, 정규식) |
 | **HOST OVERRIDES** | 프로젝트별 접속 맵 |
 | **ENV** | 아웃바운드 요청을 위한 프로젝트별 `$KEY` 변수. [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/#environment-variables) 참고 |
-| **NETWORK** | scope 렌즈 + **샌드박스** 토글, 그리고 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream) |
+| **PROJECT SETTINGS** | scope 렌즈 + **샌드박스** 토글, 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream), 그리고 gRPC [`.proto` 스키마](#proto-schema) 경로 |
 
 스코프 규칙과 호스트 오버라이드는 스크립트로도 다룰 수 있습니다: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-project)에 있습니다.
 

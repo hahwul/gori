@@ -62,11 +62,16 @@ class Gori::Tui::RepeaterView
   # The transcript caches bake Theme colours into each row, so a runtime palette
   # switch (Theme.revision bump) must drop them — mirrors resp_view's guard — else
   # the transcript keeps the old theme's colours until the next send.
+  # …and on a `.proto` schema being loaded or cleared (#823): the gRPC transcript bakes its
+  # rows through whatever lens was in effect, so a descriptor set loaded from the Project pane
+  # has to reach the tab already on screen. Same trap, same answer as the theme revision.
   private def drop_transcript_cache_on_theme_change : Nil
-    return if @transcript_rev == Theme.revision
+    schema_rev = Gori::Protobuf::Schemas.revision
+    return if @transcript_rev == Theme.revision && @transcript_schema_rev == schema_rev
     @ws_lines_cache = nil
     @grpc_lines_cache = nil
     @transcript_rev = Theme.revision
+    @transcript_schema_rev = schema_rev
   end
 
   # Drop the styled response view AND the per-line styled-body memo together — the memo

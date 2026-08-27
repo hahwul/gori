@@ -46,7 +46,7 @@ Press `s` anywhere to toggle the **scope lens**. It filters History, the Sitemap
 
 ## 4. Contain the test with the sandbox
 
-The scope lens hides traffic; the **sandbox** stops it. Turn it on from the **Project → NETWORK** pane, or from anywhere with `Ctrl-P` → **Toggle sandbox**:
+The scope lens hides traffic; the **sandbox** stops it. Turn it on from the **Project → Project settings** pane, or from anywhere with `Ctrl-P` → **Toggle sandbox**:
 
 ```bash
 gori run project sandbox on

@@ -87,9 +87,9 @@ Scope keeps a large session focused on your target. In the **Project** tab you d
 
 ### Sandbox
 
-The **Sandbox** is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the **Project** tab's **NETWORK** pane, or from anywhere via the command palette (`Ctrl-P` → **Toggle sandbox**) — default: off. While it's on, the capture proxy forwards only the requests your scope *allows*. Everything else is blocked before it reaches the origin and recorded as an aborted flow so the attempt stays visible. On HTTP/1.1 the client gets a `403` with an `X-Gori-Sandbox: blocked` header; on HTTP/2 the blocked stream is cancelled (`RST_STREAM` with `CANCEL`) and the rest of the connection keeps working. "Allowed" means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.
+The **Sandbox** is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the **Project** tab's **Project settings** pane, or from anywhere via the command palette (`Ctrl-P` → **Toggle sandbox**) — default: off. While it's on, the capture proxy forwards only the requests your scope *allows*. Everything else is blocked before it reaches the origin and recorded as an aborted flow so the attempt stays visible. On HTTP/1.1 the client gets a `403` with an `X-Gori-Sandbox: blocked` header; on HTTP/2 the blocked stream is cancelled (`RST_STREAM` with `CANCEL`) and the rest of the connection keeps working. "Allowed" means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.
 
-Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.
+Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the Project settings row spells out the current effect right next to the toggle.
 
 The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP `send_request` tool enforce scope on their own (they refuse an out-of-scope target with `SCOPE_BLOCKED`). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and every request on a host that gets through is checked individually. That per-request check runs on HTTP/2 as well, per stream, so the sandbox no longer costs a host its protocol and gRPC clients keep working while it's on. Cleartext HTTP/2 tunnelled inside `CONNECT` (h2c, rare) gets the same per-stream check as any other HTTP/2 connection: the tunnel opens, and each out-of-scope stream on it is cancelled individually.
 
@@ -128,7 +128,7 @@ gori understands the protocols it carries:
 | **HTTP/3** | Not intercepted; `Alt-Svc` `h3` is surfaced so you know the client may bypass, and `network.strip_alt_svc` removes it so the client cannot |
 | **WebSocket** over HTTP/1.1 (`Upgrade`) | Live message capture, repeater, per-message intercept (opt in with `proto:ws`), and Match & Replace on messages. Compression is removed from the handshake (see below) |
 | **WebSocket** over HTTP/2 (RFC 8441) | Message capture, shown and exported everywhere the HTTP/1.1 kind is. No per-message intercept, no Match & Replace on messages, no Repeater replay (see below) |
-| **gRPC** | Framed over HTTP/2 with status trailers; protobuf decoded from the wire format without a `.proto` (see below) |
+| **gRPC** | Framed over HTTP/2 with status trailers; protobuf decoded from the wire format, with or without a `.proto` (see below) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
 **gori does not intercept HTTP/3.** QUIC is UDP and every gori listener is a TCP socket, so an origin answering `Alt-Svc: h3=":443"` is offering the client a way out of the proxy. By default gori surfaces that offer and leaves it in place, so you can see it happen and decide. Turning on [`network.strip_alt_svc`](/reference/config/#strip-alt-svc) removes the `Alt-Svc` fields advertising `h3` from the response the client receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go. (A client that learns an h3 route some other way — a DNS `HTTPS` record — is beyond what any response-side strip can reach.) It removes those fields and nothing else: `Alt-Svc: clear` stays, because it tells the client to forget alternatives it has already cached, and a non-h3 alternative like `h2=":8443"` stays too, because that is another TCP port and still comes through gori.
@@ -159,6 +159,30 @@ Two payloads deliberately stay hex, on every surface:
 - **A grpc-web trailer frame.** Its payload is ASCII header lines, not protobuf.
 
 The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` and the MCP `get_flow` tool (both as `grpc_messages[].protobuf`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected — the octets stay reachable either way.
+
+### …and with one {#proto-schema}
+
+When you *have* the schema, gori will use it. Point a project at a **descriptor set** — the binary artifact `protoc` writes — and the same panes render named, typed fields instead of numbered ones:
+
+```
+protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
+```
+
+Set the path in **Project → Project settings → Proto schema**: a `.desc` file, or a directory of them (`.desc`, `.pb`, `.protoset`, `.fds`, `.bin`). Leave it blank and gori loads every descriptor set in `~/.gori/protos/`, so dropping a file there is enough for every project that has no path of its own. The row shows what actually loaded — `2 files · 41 messages · 12 rpcs` — or why nothing did, because a path that quietly resolves to nothing is the failure mode worth naming. It is a **project** setting: a `.proto` describes one target's API and should not follow you to the next engagement.
+
+A descriptor set is itself protobuf, so gori parses one with its own decoder and needs no `protoc` at runtime. gori does **not** read `.proto` source files — point it at one and it says so, with the command above.
+
+**The path is the binding.** A gRPC request goes to `/package.Service/Method`, which the descriptor set maps straight to the rpc's input and output message types. So the request pane is read through the input message, the response pane through the output message, with no guessing and nothing to configure per flow. The one-line note above the tree names the rpc and the message it resolved to, so you can see which binding gori picked.
+
+**The schema is a lens over the bytes, never a replacement for them** (P7). Three things follow, and all three are visible:
+
+- **A field number the schema does not declare is still shown**, drawn exactly as it is with no schema at all — every reading that fits, under `(undeclared)`. An undocumented field is often why you are reading the wire in the first place.
+- **A wire type the declaration contradicts is reported as a disagreement**, not quietly re-read: the row says what the schema declared and what actually arrived, and the raw reading is drawn underneath it. Either side can be the finding — a server that changed a field's type without a new number, or a stale `.desc`.
+- **The raw tree never goes away.** `gori run history show --format json` and MCP `get_flow` keep emitting `grpc_messages[].protobuf` unchanged and add `schema` beside it; `^X` still gives the byte-exact dump.
+
+A gap in the schema is distinguished from a conflict with it: an enum value with no name, or a message type the set does not carry, is a note saying the schema is short — not a claim that the bytes are wrong. With no descriptor set loaded, every surface renders exactly what it did before.
+
+gRPC **server reflection** — fetching the descriptors from the target instead of a file — is not implemented yet. It is an outbound request, so when it lands it will be operator-initiated and gated by project scope like every other active send.
 
 ### MessagePack and CBOR {#binary-documents}
 
@@ -585,7 +609,7 @@ detail rather than whole facts.
 | **SCOPE** | Include/exclude rules (host, string, or regex) |
 | **HOST OVERRIDES** | Per-project dial map |
 | **ENV** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
-| **NETWORK** | Scope-lens + **sandbox** toggles, plus per-project network pins (bind / upstream) that override the global Settings default |
+| **PROJECT SETTINGS** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 

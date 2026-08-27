@@ -1,6 +1,8 @@
 require "../spec_helper"
+require "../support/demo_descriptor"
 require "socket"
 require "base64"
+require "file_utils"
 require "digest/sha1"
 
 # The MCP surface read as an AGENT-DRIVEN security-testing API: every case here is one where
@@ -800,6 +802,47 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     g.as_h.has_key?("framing_error").should be_false
     g["messages"][1]["trailer"].as_bool.should be_true
     g["messages"][1]["headers"]["grpc-status"].as_s.should eq("3")
+  end
+
+  # #823: the `.proto` lens rides ALONGSIDE the raw tree, so an agent gets `role = ROLE_ADMIN`
+  # and the octets that back it in one object — and gets exactly what it got before when the
+  # project has no descriptor set loaded.
+  it "adds a schema object beside the raw protobuf tree when a descriptor set resolves" do
+    dir = File.tempname("gori-protos-mcp")
+    Dir.mkdir_p(dir)
+    File.write(File.join(dir, "demo.desc"), Base64.decode(DEMO_DESC_B64))
+    Gori::Protobuf::Schemas.apply(dir)
+    payload = Base64.decode(DEMO_USER_B64)
+    head = "HTTP/2 200\r\ncontent-type: application/grpc\r\n\r\n".to_slice
+    body = Bytes[0x00, 0, 0, 0, payload.size.to_u8] + payload
+    g = JSON.parse(JSON.build { |j|
+      j.object {
+        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body,
+          "/demo.Users/GetUser", request: false)
+      }
+    })["response_grpc_messages"]
+    g["schema_message"].should eq("demo.User")
+    m0 = g["messages"][0]
+    m0["protobuf"]["fields"][1]["string"].should eq("hahwul") # raw tree untouched
+    m0["schema"]["fields"][2]["enum"].should eq("ROLE_ADMIN")
+  ensure
+    Gori::Protobuf::Schemas.clear
+    FileUtils.rm_rf(dir) if dir
+  end
+
+  it "omits the schema object entirely when nothing is loaded" do
+    Gori::Protobuf::Schemas.clear
+    payload = Base64.decode(DEMO_USER_B64)
+    head = "HTTP/2 200\r\ncontent-type: application/grpc\r\n\r\n".to_slice
+    body = Bytes[0x00, 0, 0, 0, payload.size.to_u8] + payload
+    g = JSON.parse(JSON.build { |j|
+      j.object {
+        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body,
+          "/demo.Users/GetUser", request: false)
+      }
+    })["response_grpc_messages"]
+    g.as_h.has_key?("schema_message").should be_false
+    g["messages"][0].as_h.has_key?("schema").should be_false
   end
 
   it "emits nothing for a body that is not gRPC" do

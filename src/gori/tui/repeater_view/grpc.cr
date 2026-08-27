@@ -78,6 +78,7 @@ class Gori::Tui::RepeaterView
       @grpc_payload = Bytes.empty
     end
     @grpc_lines_cache = nil
+    @grpc_sent_target = "" # no send yet on this tab; the transcript has nothing to describe
     @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
     @tcx = @target.size
     @sni = ""
@@ -217,12 +218,22 @@ class Gori::Tui::RepeaterView
     # below the bytes.
     msgs, residual = Proxy::H2::Grpc.scan_body(Gori::MediaType.of(result.head),
       result.body || Bytes.empty)
+    # The `.proto` lens for the RESPONSE half of this rpc (#823), keyed on the path that was
+    # SENT — not the captured flow's (the editor is where an operator retargets a call) and not
+    # the one currently typed. These rows describe a PAST response, and the transcript cache
+    # outlives an editor keystroke: retarget the request line without sending, then let the
+    # cache drop for any other reason (a theme switch, a schema load) and the old response
+    # would be redrawn under the OTHER rpc's field names. nil (no descriptor set, an undeclared
+    # rpc) leaves the transcript exactly as it was.
+    binding = Protobuf::Schemas.resolve(@grpc_sent_target, request: false)
     if msgs.empty? && residual == 0
       rows << {"← (no complete gRPC messages)", Theme.muted}
     else
       # One legend above the messages, and only when a tree will actually be drawn — see
       # ProtobufTree::NOTE. Same rule as the History framing pane, from the same predicate.
-      rows << {ProtobufTree::NOTE, Theme.muted} if ProtobufTree.legend?(msgs, @pretty)
+      if ProtobufTree.legend?(msgs, @pretty)
+        rows << {binding ? ProtobufTree.schema_note(binding) : ProtobufTree::NOTE, Theme.muted}
+      end
       msgs.each_with_index do |m, i|
         if m.trailer
           rows << {"← trailer  #{m.data.size}b", Theme.green}
@@ -238,7 +249,7 @@ class Gori::Tui::RepeaterView
           end
         else
           rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
-          grpc_payload_rows(m).each { |r| rows << r }
+          grpc_payload_rows(m, binding).each { |r| rows << r }
         end
       end
     end
@@ -267,11 +278,21 @@ class Gori::Tui::RepeaterView
   #
   # `ProtobufTree.decode?` owns the compressed/trailer carve-outs the CLI and MCP make, so
   # this pane and the History framing pane cannot disagree about which payloads are protobuf.
-  private def grpc_payload_rows(m : Proxy::H2::Grpc::Message) : Array({String, Color})
+  private def grpc_payload_rows(m : Proxy::H2::Grpc::Message,
+                                binding : Protobuf::Schemas::Binding? = nil) : Array({String, Color})
     unless ProtobufTree.decode?(m, @pretty)
       return grpc_hex_preview(m.data).map { |h| {h, Theme.muted} }
     end
-    ProtobufTree.lines(Protobuf.decode(m.data), indent: "    ").map { |l| {l, Theme.text} }
+    ProtobufTree.lines(Protobuf.decode(m.data), indent: "    ",
+      schema: binding.try(&.schema), type: binding.try(&.type)).map { |l| {l, Theme.text} }
+  end
+
+  # The rpc a send is aimed at, taken from the request line as it stands at SEND time.
+  # `RepeaterView#apply` records the result of calling this into `@grpc_sent_target`, which is
+  # what the transcript then reads — see `grpc_response_rows`. `summary` and `request_method`
+  # read the same line live, because those describe the tab rather than a past send.
+  def grpc_method_target : String
+    (@editor.first_nonblank_line || "").strip.split(' ')[1]? || ""
   end
 
   private def grpc_hex_preview(data : Bytes, max : Int32 = 32) : Array(String)

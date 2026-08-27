@@ -146,6 +146,10 @@ private class FakeHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 # Counts the full-table reloads the drain triggers. Crystal has no `override`, so this

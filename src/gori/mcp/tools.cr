@@ -334,6 +334,10 @@ module Gori
       # after the server bound — one `switch_project` away from being picked up.
       private def bind_project_network(s : Store) : Nil
         Settings.load_project_network(s, bind: false)
+        # The project's gRPC `.proto` schema rides the same bind-time hook (#823): nothing
+        # on this surface WRITES the descriptor path, so like the network overrides its only
+        # staleness window is a TUI edit made after the server bound.
+        Gori::Protobuf::Schemas.load_project(s)
       end
 
       # Publish this project's extract rules as `Env`'s send-time layer. Same per-project

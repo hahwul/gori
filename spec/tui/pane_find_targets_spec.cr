@@ -142,6 +142,10 @@ private class PaneFindHost
                             connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
     ""
   end
+
+  def apply_project_protos(spec : String) : String
+    ""
+  end
 end
 
 private PANE_FIND_CA = File.tempname("gori-pane-find-ca")

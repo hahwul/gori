@@ -998,16 +998,27 @@ module Gori
       # identically to "this flow is not gRPC". A trailing partial frame went the same way,
       # with no count of what was left over. The raw body was stored correctly either way
       # (P7) — this was only the report the operator reads.
-      private def self.emit_grpc_messages_json(j : JSON::Builder, head : Bytes?, body : Bytes?) : Nil
+      #
+      # `target`/`request` opt into the `.proto` lens (#823) when the project has a descriptor
+      # set loaded: the flow's `/package.Service/Method` names the message type, and each
+      # payload then carries a `schema` object ALONGSIDE its raw `protobuf` tree — never
+      # instead of it. With no schema loaded the output is byte-identical to before.
+      private def self.emit_grpc_messages_json(j : JSON::Builder, head : Bytes?, body : Bytes?,
+                                               target : String? = nil, request : Bool = true) : Nil
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
         return unless Proxy::H2::Grpc.grpc?(ct)
         # `scan_body`: grpc-web-text carries the frames base64-encoded on the wire.
         msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
         return if msgs.empty? && residual == 0
+        binding = Protobuf::Schemas.resolve(target, request: request)
         j.field "grpc_messages" do
           j.object do
             j.field "count", msgs.size
+            if b = binding
+              j.field "schema_method", b.method.path
+              j.field "schema_message", b.type.full_name
+            end
             if residual > 0
               j.field "residual_bytes", residual
               j.field "framing_error",
@@ -1038,8 +1049,17 @@ module Gori
                       j.field "note", "compressed payload — not decoded as protobuf"
                       j.field "bytes", Base64.strict_encode(m.data)
                     else
+                      decoded = Protobuf.decode(m.data)
                       j.field "protobuf" do
-                        Protobuf.decode(m.data).to_json(j)
+                        decoded.to_json(j)
+                      end
+                      # The lens, beside the raw tree and never over it (P7): `protobuf` stays
+                      # the octet-level report that names every reading a payload fits, and
+                      # `schema` is what one `.proto` says about the same bytes.
+                      if b = binding
+                        j.field "schema" do
+                          Protobuf::Lens.emit_json(j, decoded, b.schema, b.type)
+                        end
                       end
                     end
                   end
@@ -1087,7 +1107,8 @@ module Gori
                 j.object do
                   j.field "head", scrub(detail.request_head)
                   emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?)
-                  emit_grpc_messages_json(j, detail.request_head, detail.request_body)
+                  emit_grpc_messages_json(j, detail.request_head, detail.request_body,
+                    detail.row.target, request: true)
                 end
               end
             end
@@ -1096,7 +1117,8 @@ module Gori
                 j.object do
                   j.field "head", scrub(detail.response_head)
                   emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?)
-                  emit_grpc_messages_json(j, detail.response_head, detail.response_body)
+                  emit_grpc_messages_json(j, detail.response_head, detail.response_body,
+                    detail.row.target, request: false)
                 end
               end
               unless ws_msgs.empty?

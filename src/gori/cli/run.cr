@@ -385,6 +385,9 @@ module Gori
         # a project pinned to a jump host was dialled DIRECT by every `gori run` active
         # command, and an imported/replayed body was capped at the global limit.
         Settings.load_project_network(store, bind: false)
+        # …and this project's gRPC schema, so `gori run history show --format json` names
+        # the fields of a captured gRPC body exactly as the TUI pane does (#823).
+        Protobuf::Schemas.load_project(store)
         Env.load_project(store)
         # The project's extract rules become `Env`'s send-time layer here too (#501) — with
         # NO values, because a binding lives in the memory of the gori that observed it and

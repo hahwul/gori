@@ -1,5 +1,7 @@
 require "../../spec_helper"
+require "../../support/demo_descriptor"
 require "base64"
+require "file_utils"
 require "json"
 
 # `gori run history` / `gori run show` — the QL gate on the listing, the flow-row text and
@@ -382,6 +384,55 @@ describe "gori run show --format json" do
 
       resp_msgs = json["response"]["grpc_messages"]
       resp_msgs["messages"].as_a[0]["protobuf"]["fields"].as_a[0]["string"].as_s.should eq("Hello, alice")
+    end
+
+    # #823: with a descriptor set loaded the payload gains a `schema` object BESIDE its raw
+    # `protobuf` tree — never in place of it, so the octet-level report an operator can check
+    # the lens against is still in the same object (P7).
+    it "adds the .proto lens beside the raw tree when a schema resolves" do
+      dir = File.tempname("gori-protos-cli")
+      Dir.mkdir_p(dir)
+      File.write(File.join(dir, "demo.desc"), Base64.decode(DEMO_DESC_B64))
+      Gori::Protobuf::Schemas.apply(dir)
+
+      body = grpc_frame_for_spec(Base64.decode(DEMO_USER_B64))
+      req_head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 9_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/demo.Users/GetUser", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete,
+        content_type: "application/grpc")
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2", req_head.to_slice, nil,
+        resp_head.to_slice, body)
+
+      msgs = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))["response"]["grpc_messages"]
+      msgs["schema_method"].should eq("/demo.Users/GetUser")
+      msgs["schema_message"].should eq("demo.User")
+      m0 = msgs["messages"].as_a[0]
+      # The raw tree is untouched — same shape, same schema-less readings.
+      m0["protobuf"]["fields"].as_a[1]["string"].should eq("hahwul")
+      fields = m0["schema"]["fields"].as_a
+      fields[1]["name"].should eq("name")
+      fields[1]["value"].should eq("hahwul")
+      fields[2]["enum"].should eq("ROLE_ADMIN")
+    ensure
+      Gori::Protobuf::Schemas.clear
+      FileUtils.rm_rf(dir) if dir
+    end
+
+    it "leaves grpc_messages byte-identical when no schema is loaded" do
+      Gori::Protobuf::Schemas.clear
+      body = grpc_frame_for_spec(Base64.decode(DEMO_USER_B64))
+      resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 9_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/demo.Users/GetUser", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete,
+        content_type: "application/grpc")
+      req_head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\n\r\n"
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2", req_head.to_slice, nil, resp_head.to_slice, body)
+      msgs = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))["response"]["grpc_messages"]
+      msgs.as_h.has_key?("schema_method").should be_false
+      msgs["messages"].as_a[0].as_h.has_key?("schema").should be_false
     end
 
     it "does not feed a compressed gRPC payload to the protobuf decoder" do

@@ -466,8 +466,10 @@ module Gori
           emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?, body_cap, body_omit)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
-          emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body)
-          emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body)
+          emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
+            detail.row.target, request: true)
+          emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
+            detail.row.target, request: false)
           emit_decoded(j, detail, ws_msgs)
         end
       end
@@ -484,8 +486,15 @@ module Gori
       # `Grpc.scan`, not `Grpc.messages`: the residual is the whole point. `messages` throws
       # it away, so a deliberately-wrong prefix rendered as "no messages", which reads
       # identically to "this flow is not gRPC".
+      #
+      # `target`/`request` opt into the `.proto` lens (#823): when the project has a
+      # descriptor set loaded, the flow's `/package.Service/Method` names the message type
+      # and each payload carries a `schema` object BESIDE its raw `protobuf` tree. An agent
+      # reading this gets `user.role = "ROLE_ADMIN"` and the octets that back it, in one
+      # object — and with no schema loaded, exactly what it got before.
       def self.emit_grpc_messages(j : JSON::Builder, field_name : String,
-                                  head : Bytes?, body : Bytes?) : Nil
+                                  head : Bytes?, body : Bytes?,
+                                  target : String? = nil, request : Bool = true) : Nil
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
         return unless Proxy::H2::Grpc.grpc?(ct)
@@ -494,9 +503,14 @@ module Gori
         # would be told a gRPC call had no messages.
         msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
         return if msgs.empty? && residual == 0
+        binding = Protobuf::Schemas.resolve(target, request: request)
         j.field field_name do
           j.object do
             j.field "count", msgs.size
+            if b = binding
+              j.field "schema_method", b.method.path
+              j.field "schema_message", b.type.full_name
+            end
             if residual > 0
               j.field "residual_bytes", residual
               j.field "framing_error",
@@ -526,7 +540,11 @@ module Gori
                       j.field "note", "compressed payload — not decoded as protobuf"
                       emit_grpc_bytes(j, m.data)
                     else
-                      j.field "protobuf" { Protobuf.decode(m.data).to_json(j) }
+                      decoded = Protobuf.decode(m.data)
+                      j.field "protobuf" { decoded.to_json(j) }
+                      if b = binding
+                        j.field("schema") { Protobuf::Lens.emit_json(j, decoded, b.schema, b.type) }
+                      end
                     end
                   end
                 end

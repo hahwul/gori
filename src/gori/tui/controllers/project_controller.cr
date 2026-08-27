@@ -124,7 +124,7 @@ module Gori::Tui
     # DESCRIPTION editor to READ mode. @desc_mode is sticky, so without this you'd only have
     # to enter INS once for every later visit to that chip to land in the editor again.
     private def settle_subtab : Nil
-      commit_project_network(on_leave: true)
+      commit_project_settings(on_leave: true)
       save
       @project_view.exit_desc_insert!
       @project_view.cancel_ov_add
@@ -165,9 +165,9 @@ module Gori::Tui
       end
       return true unless pane = @project_view.pane_at(rect, mx, my)
       @host.focus_body
-      # Clicking OUT of the settings pane applies any pending network edit (mirrors the
-      # keyboard leave paths); idempotent + dirty-guarded, so a same-pane click is a no-op.
-      commit_project_network(on_leave: true) if @project_view.pane == :settings && pane != :settings
+      # Clicking OUT of the settings pane applies any pending edit (mirrors the keyboard
+      # leave paths); idempotent + dirty-guarded, so a same-pane click is a no-op.
+      commit_project_settings(on_leave: true) if @project_view.pane == :settings && pane != :settings
       case pane
       when :scope
         @project_view.focus_pane(:scope)
@@ -314,7 +314,7 @@ module Gori::Tui
 
     def commit : Nil
       save
-      commit_project_network(on_leave: true) # apply a pending network edit before the tab leaves/quits
+      commit_project_settings(on_leave: true) # apply a pending pane edit before the tab leaves/quits
     end
 
     # True while an inline add/edit row (HOST OVERRIDES or ENV) is composing — the
@@ -881,7 +881,7 @@ module Gori::Tui
     private def handle_project_settings_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
-        commit_project_network(on_leave: true)
+        commit_project_settings(on_leave: true)
         save
         @host.open_palette
       elsif key.escape?
@@ -909,8 +909,36 @@ module Gori::Tui
     # Leaving the NETWORK card always applies its pending edit first (the on_leave contract:
     # an invalid field is dropped rather than kept half-typed).
     private def leave_settings_to_strip : Nil
-      commit_project_network(on_leave: true)
+      commit_project_settings(on_leave: true)
       leave_to_strip
+    end
+
+    # Both halves of the pane, each on its OWN dirty check. Editing the proto-schema path must
+    # not re-apply (and re-BIND) six unchanged network values, and saving a bind port must not
+    # re-parse descriptor sets — so they are two commits behind one entry point rather than one
+    # commit over a seven-field tuple.
+    #
+    # Neither may swallow the other's sentence. They share ONE status line, so both toasts are
+    # joined rather than raced: a bad bind port and a loaded schema in the same ↵ used to leave
+    # only the schema on screen, with the field the operator has to fix saying nothing about
+    # why it was refused. Proto runs first so a network REFUSAL reads last.
+    private def commit_project_settings(on_leave : Bool = false) : Nil
+      proto = commit_project_protos
+      net = commit_project_network(on_leave: on_leave)
+      said = [proto, net].compact
+      @host.status(said.join(" · ")) unless said.empty?
+    end
+
+    # Persist + load this project's gRPC `.proto` schema (#823), returning its toast (nil when
+    # the field is unchanged). No validation gate: a path is not "invalid", it either resolves
+    # to descriptor sets or it does not, and the loader answers that in the toast (and in the
+    # row's own marker) far more usefully than a refusal would. A blank field means the
+    # convention directory.
+    private def commit_project_protos : String?
+      return nil unless @project_view.protos_dirty?
+      line = @host.apply_project_protos(@project_view.protos_value)
+      @project_view.refresh_protos # NOT refresh_settings — that would reset the six network fields
+      line
     end
 
     private def handle_project_settings_action(ev : Termisu::Event::Key) : Nil
@@ -926,13 +954,14 @@ module Gori::Tui
       end
     end
 
-    # Rows 2-7 (bind IP / port / upstream / timeouts / capture cap): type to edit, ↵ applies,
+    # Rows 2-8 (bind IP / port / upstream / timeouts / capture cap / proto schema): type to
+    # edit, ↵ applies,
     # ←/→ move the caret (clamped — they no longer escape the card sideways).
     private def handle_project_settings_field_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       if key.enter?
-        commit_project_network(on_leave: false)
+        commit_project_settings(on_leave: false)
       elsif key.left?
         @project_view.set_move_cursor(-1)
       elsif key.right?
@@ -949,8 +978,8 @@ module Gori::Tui
     # rebind). `on_leave` = the commit fired because the pane is being left (esc/Tab/arrow/
     # click) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
-    private def commit_project_network(on_leave : Bool = false) : Nil
-      return unless @project_view.settings_dirty?
+    private def commit_project_network(on_leave : Bool = false) : String?
+      return nil unless @project_view.settings_dirty?
       host, port_s, upstream, connect_s, idle_s, cap_s = @project_view.settings_values
       return settings_invalid("bind IP is required", on_leave) if host.empty?
       port = port_s.to_i?
@@ -967,8 +996,9 @@ module Gori::Tui
       cap = positive_secs(cap_s)
       return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
-      @host.status(@host.apply_project_network(host, port, upstream, connect, idle, cap))
+      line = @host.apply_project_network(host, port, upstream, connect, idle, cap)
       @project_view.refresh_settings
+      line
     end
 
     # A whole number of at least 1, or nil. Shared by the three numeric project fields so they
@@ -978,9 +1008,11 @@ module Gori::Tui
       n && n >= 1 ? n : nil
     end
 
-    private def settings_invalid(msg : String, on_leave : Bool) : Nil
-      @host.status(msg.starts_with?("settings:") ? msg : "project network: #{msg}")
+    # The refusal SENTENCE, handed back so `commit_project_settings` can place it beside the
+    # proto half's rather than have one overwrite the other.
+    private def settings_invalid(msg : String, on_leave : Bool) : String
       @project_view.refresh_settings if on_leave # leaving the pane drops the half-typed value
+      msg.starts_with?("settings:") ? msg : "project network: #{msg}"
     end
   end
 end

@@ -37,6 +37,14 @@ module Gori
       File.join(home_dir, "wordlists")
     end
 
+    # Convention dir for gRPC `.proto` schemas: FileDescriptorSet files (`protoc
+    # --descriptor_set_out`). A project whose "Proto schema" setting is blank loads every
+    # descriptor set found here, and a bare (slash-less) name typed into that field resolves
+    # against it first — the same rule `wordlists_dir` gives the Fuzzer's payload field.
+    def self.protos_dir : String
+      File.join(home_dir, "protos")
+    end
+
     # A tiny global marker holding the DB PATH of the project the interactive TUI last
     # opened. Headless MCP uses this only after an explicit opt-in (`--use-active-project`);
     # otherwise MCP outside a Git workspace starts unbound so the agent can list/create/
@@ -82,6 +90,11 @@ module Gori
       ensure_dir(home_dir)
       ensure_dir(projects_dir) # lock the projects ROOT too (registry only mkdir's leaves)
       ensure_dir(wordlists_dir)
+      # …and the `.proto` convention dir beside it (#823), for the same reason: the Project
+      # pane's blank-field placeholder, the CHANGELOG and the config reference all tell an
+      # operator to drop a descriptor set in here, and a directory that does not exist yet is
+      # a worse answer than an empty one.
+      ensure_dir(protos_dir)
     end
 
     # gori's tree holds captured traffic (per-project DBs), the CA private key, and

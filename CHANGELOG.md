@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- gRPC: point a project at a `protoc` descriptor set (`Project → Project settings → Proto schema`, or drop one in `~/.gori/protos/`) and captured protobuf renders as named, typed fields — the request path `/package.Service/Method` is the binding. Undeclared field numbers and wire/schema disagreements are still shown, the raw wire tree stays beside the lens on every surface, and with no descriptor set loaded nothing changes (#823)
 - TUI: the project picker marks a project an MCP client is bound to, and an open project shows a clickable `mcp:<client>` top-bar chip that lists the attached agents (#815)
 - TUI: the Comparer flow picker follows the active project Scope lens, and says `no flows in scope` rather than `no flows captured yet` when the lens hides everything; turning the lens off still exposes every captured flow (#809)
 
