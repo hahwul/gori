@@ -34,6 +34,25 @@ private def analyzer_body(name : String) : String
   src.lines.reject(&.lstrip.starts_with?('#')).join('\n')[/def #{name}.*?\n      end/m].not_nil!
 end
 
+# A store whose writes are all REFUSED, beside a writable one on the same file. `read_only` runs
+# without a writer fiber, so `set_setting` answers false exactly as a busy project does — the
+# "another instance keeps the old mode" shape, with no lock race to arrange. The writable handle is
+# the peer: it is what disk ends up holding.
+private def with_refused_writes(&)
+  path = File.tempname("gori-probe-refused", ".db")
+  peer = Gori::Store.open(path)
+  mine = Gori::Store.open(path, read_only: true)
+  begin
+    yield mine, peer
+  ensure
+    mine.close
+    peer.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
 describe "Gori::Probe::Analyzer#apply_stored_mode" do
   it "does not write the mode back" do
     body = analyzer_body("apply_stored_mode")
@@ -86,6 +105,82 @@ describe "Gori::Probe::Analyzer#apply_stored_mode" do
       store.close # every read from here on raises
       a.apply_stored_mode
       a.mode.should eq(Gori::Probe::Mode::Passive)
+    end
+  end
+
+  it "reports the DIRECTION it moved, which the caller cannot reconstruct afterwards" do
+    # #772: the announcement policy is direction-shaped — an upgrade into an actively-probing mode
+    # authorizes THIS session to fire attack payloads, a downgrade can only stop traffic. By the
+    # time either caller looks, `@mode` already holds the new value, so the pair has to come back
+    # out of the adoption itself.
+    with_probe_store do |store|
+      store.set_probe_mode(Gori::Probe::Mode::Aggressive).should be_true
+      a = analyzer(store, Gori::Probe::Mode::Passive)
+      a.apply_stored_mode.should eq({Gori::Probe::Mode::Passive, Gori::Probe::Mode::Aggressive})
+    end
+  end
+
+  it "reports nothing on the no-op tick, so the announcement cannot repeat" do
+    # Both pollers run on a cadence — the TUI's is ~1.3×/sec under live capture. A truthy return
+    # on an unchanged mode would put a line, and the bell with it, on screen every tick.
+    with_probe_store do |store|
+      store.set_probe_mode(Gori::Probe::Mode::Passive)
+      a = analyzer(store, Gori::Probe::Mode::Passive)
+      a.apply_stored_mode.should be_nil
+    end
+  end
+
+  it "says nothing when the revert is this session's OWN refused write coming back" do
+    # `set_mode` raises `@mode` before it persists, on purpose, and the surface reports the failure
+    # itself ("scan mode NOT saved — project busy; another instance keeps the old mode"). The poll
+    # that then reverts memory to disk must not ALSO announce it as a peer's doing: that is two
+    # contradictory sentences about one keypress, 750ms apart.
+    with_refused_writes do |mine, peer|
+      peer.set_probe_mode(Gori::Probe::Mode::Aggressive).should be_true
+      a = analyzer(mine, Gori::Probe::Mode::Aggressive)
+      a.set_mode(Gori::Probe::Mode::Off).should be_false
+      a.apply_stored_mode.should be_nil
+      a.mode.should eq(Gori::Probe::Mode::Aggressive)
+    end
+  end
+
+  it "keeps the OLDEST outstanding value when a second edit is refused before the poll" do
+    # `prev` is only what disk holds for the FIRST refusal; the second one's `prev` is a value that
+    # was never persisted either. Overwriting with it makes the revert stop matching, and the
+    # operator gets a `:warn` bell about a peer who did nothing.
+    with_refused_writes do |mine, peer|
+      peer.set_probe_mode(Gori::Probe::Mode::Aggressive).should be_true
+      a = analyzer(mine, Gori::Probe::Mode::Aggressive)
+      a.set_mode(Gori::Probe::Mode::Off).should be_false
+      a.set_mode(Gori::Probe::Mode::Passive).should be_false
+      a.apply_stored_mode.should be_nil
+      a.mode.should eq(Gori::Probe::Mode::Aggressive)
+    end
+  end
+
+  it "does not let a stale refusal swallow a LATER genuine peer upgrade" do
+    # The dangerous residue. Once memory and disk agree the refusal is settled, and leaving the
+    # guard armed makes it match a peer change that happens to land on the same mode — silently
+    # adopting `aggressive`, backfill and unsafe methods and all, which is the exact silence this
+    # whole feature exists to end.
+    with_refused_writes do |mine, peer|
+      peer.set_probe_mode(Gori::Probe::Mode::Off).should be_true
+      a = analyzer(mine, Gori::Probe::Mode::Aggressive)
+      a.set_mode(Gori::Probe::Mode::Off).should be_false # memory and disk now agree, by coincidence
+      a.apply_stored_mode.should be_nil                  # the settling tick
+
+      peer.set_probe_mode(Gori::Probe::Mode::Aggressive).should be_true
+      a.apply_stored_mode.should eq({Gori::Probe::Mode::Off, Gori::Probe::Mode::Aggressive})
+    end
+  end
+
+  it "reports nothing when the row cannot be read" do
+    # The rescue returns the same "nothing moved" answer as a no-op tick: an unreadable row is not
+    # a mode change, and announcing one would be a warning about a peer who did nothing.
+    with_probe_store do |store|
+      a = analyzer(store, Gori::Probe::Mode::Passive)
+      store.close
+      a.apply_stored_mode.should be_nil
     end
   end
 end

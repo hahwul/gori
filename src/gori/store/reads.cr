@@ -110,6 +110,37 @@ module Gori
       rows
     end
 
+    # The agent actions the feed recorded in the last `since_micros`, NEWEST-first.
+    #
+    # A separate read from `events_after` on purpose. That one is the AI's exactly-once forward
+    # cursor and is OLDEST-first, which is the wrong end entirely for "did an agent just do this?":
+    # an agent that sent three hundred requests before its rule edit would fill any bounded
+    # oldest-first page with the sends and never reach the edit. Here the question is only ever
+    # about the recent tail, so there is no watermark to keep and nothing to skip past.
+    #
+    # Success only. `log_agent_action` records REFUSED calls too (level "warn", "… failed (…)"),
+    # and a failed call changed nothing — crediting an agent for it would name the wrong author
+    # for a change some other peer actually made.
+    def recent_agent_actions(since_micros : Int64, limit : Int32) : Array(EventRow)
+      rows = [] of EventRow
+      # The id floor is not redundant with the LIMIT. Nothing indexes `events`, so on a project
+      # with no agent rows at all — every `gori run …`-driven session — the LIMIT can never be
+      # satisfied and SQLite walks all EVENTS_RETENTION (50k) rows before answering "none", on the
+      # fiber that paints the screen. The floor caps that at a fixed slice of the tail, which is
+      # still orders of magnitude more events than ATTRIBUTION_WINDOW can contain.
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE kind = 'agent_action' AND level = 'info' " \
+                "AND created_at >= ? AND id > (SELECT COALESCE(MAX(id), 0) - 5000 FROM events) " \
+                "ORDER BY id DESC LIMIT ?",
+        args: [since_micros, limit.to_i64] of DB::Any) do |rs|
+        rs.each { rows << read_event(rs) }
+      end
+      rows
+    rescue DB::Error | SQLite3::Exception
+      # Attribution is a garnish on a notification: an unreadable feed means the line goes out
+      # saying "another session", never that it does not go out.
+      [] of EventRow
+    end
+
     # One flow's REQUEST head bytes and nothing else. `get_flow` would materialize both body
     # BLOBs alongside it — a 40 MB response read and discarded — and the row projection carries
     # no head at all, so a caller that wants the request's HEADERS for a list of rows

@@ -398,6 +398,34 @@ module Gori
       @shutdown.send(nil) rescue nil
     end
 
+    # A peer's RULE edits, which the reload loop has already adopted into the objects this process
+    # rewrites bytes with (#772). Both kinds are taken together so they land in one coalescing
+    # window and leave as one line, and the feed is asked who wrote them ONCE for the pair.
+    #
+    # A line still being held when the loop is asked to stop is dropped. The window is a couple of
+    # seconds, the fact it reports is about traffic this process is no longer passing, and the stop
+    # channel is unbuffered — draining on that branch would put a store read between the operator's
+    # ^C and the exit.
+    private def announce_peer_rule_changes(session : Session, peer_notices : Gori::PeerNotices) : Nil
+      now = Time.instant
+      peer_notices.absorb(session.rules.take_peer_change, session.bindings.take_peer_change,
+        now, session.store)
+      if note = peer_notices.flush(now)
+        log_peer_notice(note)
+      end
+    end
+
+    # A peer-change line on the headless surface (#772). `run_capture` binds logging to STDERR, so
+    # this lands in front of whoever started the capture; the level policy is the shared one, so a
+    # peer raising the probe mode is loud here exactly as it is in the TUI's ring.
+    private def log_peer_notice(note : Gori::PeerNotices::Notice) : Nil
+      if note.level == :info
+        Log.info { note.message }
+      else
+        Log.warn { note.message }
+      end
+    end
+
     # Periodically re-reads Rewriter rules AND Scope from the store for the lifetime of a
     # headless capture session. Rewriter mirrors the TUI's manual `r` key (Rules#reload /
     # rewriter_controller#rewriter_reload); Scope mirrors the TUI's own data_version poll
@@ -409,6 +437,11 @@ module Gori
     # safely close the session right after — no fiber left querying a closed store handle.
     private def spawn_reload_loop(session : Session) : Channel(Nil)
       stop = Channel(Nil).new
+      # Peer-change announcements (#772). Built OUTSIDE the loop because it carries state across
+      # ticks (the coalescing window), and shared with the TUI so a headless operator reads the
+      # same sentence the ring shows — the CA trust-store warning below is what happens when the
+      # two surfaces each hand-write their own copy.
+      peer_notices = Gori::PeerNotices.new
       spawn(name: "gori-capture-reload") do
         loop do
           select
@@ -473,9 +506,22 @@ module Gori
               # `off`/`passive` to stop active probing was reported as done everywhere while
               # this one kept the mode it opened with and went on firing payloads. Adopts the
               # persisted value WITHOUT writing it back — see `Analyzer#apply_stored_mode`.
-              session.probe.apply_stored_mode
+              #
+              # And SAY so. A headless capture has no notification ring, but it does have the
+              # operator's terminal: `run_capture` binds logging to STDERR, so a warn here lands
+              # in front of whoever started it. Same policy object as the TUI, so the upgrade
+              # into an actively-probing mode is loud in both and the downgrade is quiet in both.
+              if moved = session.probe.apply_stored_mode
+                log_peer_notice(peer_notices.probe_mode(moved[0], moved[1],
+                  Gori::PeerNotices.agent_wrote?(session.store, Gori::PeerNotices::PROBE_TOOLS)))
+              end
             rescue ex
               Log.error(exception: ex) { "probe mode reload failed" }
+            end
+            begin
+              announce_peer_rule_changes(session, peer_notices)
+            rescue ex
+              Log.error(exception: ex) { "peer change announcement failed" }
             end
             # `session.colormarker` is DELIBERATELY absent from this loop, and adding it to
             # "complete the set" would be a regression. Every reload above has a headless

@@ -1,4 +1,5 @@
 require "./env"
+require "./rule_set_change"
 require "./intercept_filter"
 require "./store"
 require "./token_extract"
@@ -196,6 +197,8 @@ module Gori
       # — see `report_miss?`.
       @miss_reported = Set(Int64).new
       @miss_reported_rev = 0_u64
+      # A PEER's change to the extract rules, waiting to be announced (#772) — see `reload`.
+      @pending_peer_change = nil.as(RuleSetChange?)
       # A per-slot table is keyed by the slot's NAME and nothing else, so a deleted slot's
       # table has to go with the slot: an operator who deletes `admin` and creates a new
       # `admin` for a different identity would otherwise send the DELETED identity's live
@@ -578,8 +581,31 @@ module Gori
 
     # Re-read the store snapshot (an MCP / other-instance edit). Same work `refresh` does,
     # exposed so the Rewriter tab can pull external changes on enter, exactly as `Rules#reload`.
-    def reload : Nil
+    # And records a peer's edit for announcement (#772), on the same terms as `Rules#reload`: the
+    # local editors (`add`, `update`, `remove`, `toggle`) go through the private `refresh`, so
+    # only a peer adoption or a re-read arrives here.
+    #
+    # The comparison is over `@rules` — the extract RULES — and never over `rows`, which carry the
+    # extracted VALUES and therefore move on ordinary traffic. `rev` is unusable for the same
+    # reason: it bumps on every successful bind.
+    def reload(announce : Bool = true) : Nil
+      before = @mutex.synchronize { @rules }
       refresh
+      return unless announce
+      after = @mutex.synchronize { @rules }
+      return unless change = RuleSetChange.between(before, after, ->(r : Store::ExtractRule) { r.id })
+      @mutex.synchronize do
+        @pending_peer_change = (held = @pending_peer_change) ? held.merge(change) : change
+      end
+    end
+
+    # See `Rules#take_peer_change`.
+    def take_peer_change : RuleSetChange?
+      @mutex.synchronize do
+        held = @pending_peer_change
+        @pending_peer_change = nil
+        held
+      end
     end
 
     # ── the binding table ─────────────────────────────────────────────────────
