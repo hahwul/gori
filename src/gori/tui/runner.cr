@@ -107,6 +107,7 @@ require "./runner/authorize"
 require "./runner/colormarker"
 require "./runner/comparer"
 require "./runner/decoder"
+require "./runner/diff"
 require "./runner/discover"
 require "./runner/env"
 require "./runner/external_open"
@@ -349,6 +350,10 @@ module Gori::Tui
 
     private def discover_controller : DiscoverController
       target_controller.discover
+    end
+
+    private def diff_controller : DiffController
+      target_controller.diff
     end
 
     private def intercept_controller : InterceptController

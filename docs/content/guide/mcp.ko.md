@@ -117,6 +117,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
 | `list_links` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff — 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
+| `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교 — 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
 | `list_projects` | 이 호스트의 모든 gori 프로젝트 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |

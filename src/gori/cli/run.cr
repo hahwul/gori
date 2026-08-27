@@ -50,6 +50,7 @@ require "./run/history"
 require "./run/repeater"
 require "./run/repeater_minimize"
 require "./run/compare"
+require "./run/diff"
 require "./run/intercept"
 require "./run/fuzz_args"
 require "./run/fuzz"
@@ -160,6 +161,7 @@ module Gori
       private def self.dispatch_subcommand3(sub : String?, rest : Array(String)) : Nil
         case sub
         when "compare"   then cmd_compare(rest)
+        when "diff"      then cmd_diff(rest)
         when "intercept" then cmd_intercept(rest)
         when "links"     then cmd_links(rest)
         when "authorize" then cmd_authorize(rest)
@@ -184,6 +186,7 @@ module Gori
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
+        {"diff", "Retest report: diff two projects at endpoint scale (--from/--to, text/json/md)"},
         {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},

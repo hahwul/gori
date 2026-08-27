@@ -1,6 +1,7 @@
 require "json"
 require "./engine"
 require "../media_type"
+require "../tolerance"
 require "../env"
 require "../fuzz/engine"
 require "../fuzz/matcher"
@@ -578,10 +579,11 @@ module Gori::Repeater
       words = metrics.map(&.words)
       lines = metrics.map(&.lines)
       # Each band = 2× the observed calibration jitter, floored (size-proportional) so a
-      # near-static page still tolerates small natural churn. Same formula as Miner::Baseline.
-      length_tol = {(lengths.max - lengths.min) * 2, {8_i64, base.length // 100}.max}.max
-      words_tol = {(words.max - words.min) * 2, {3, base.words // 100}.max}.max
-      lines_tol = {(lines.max - lines.min) * 2, {2, base.lines // 100}.max}.max
+      # near-static page still tolerates small natural churn. `Gori::Tolerance` is that
+      # formula's one home — Miner::Baseline and the retest diff judge "changed" by it too.
+      length_tol = Tolerance.band(lengths.min, lengths.max, base.length, Tolerance::LENGTH_FLOOR)
+      words_tol = Tolerance.band(words.min, words.max, base.words, Tolerance::WORDS_FLOOR)
+      lines_tol = Tolerance.band(lines.min, lines.max, base.lines, Tolerance::LINES_FLOOR)
       Baseline.new(base.status, base.length, base.words, base.lines, length_tol, words_tol, lines_tol, stable_headers(sigs))
     end
 

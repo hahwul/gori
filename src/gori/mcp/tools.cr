@@ -27,6 +27,7 @@ require "./serialize"
 require "./request_builder"
 require "./tools/authorize"
 require "./tools/compare"
+require "./tools/diff"
 require "./tools/context"
 require "./tools/decode"
 require "./tools/cookie"
@@ -385,6 +386,11 @@ module Gori
         "decode", "jwt_decode", "jwt_encode", "jwt_attacks",
         "cookie_decode", "cookie_verify", "cookie_crack", "cookie_forge",
         "sequence_analyze", "ql_reference", "ql_explain",
+        # Both sides can be NAMED, and then the diff needs no binding at all — an agent
+        # comparing two past engagements should not have to bind one of them first. With
+        # `to` omitted it still refuses here, from `resolve_diff_target`, with the same
+        # NO_PROJECT sentence: the default side IS the bound project.
+        "diff_projects",
         "oast_presets", "oast_start", "oast_poll", "oast_payload", "oast_stop",
       }
 
@@ -733,6 +739,7 @@ module Gori
           list_intercept_tools j
           list_ql_tools j
           list_compare_tools j
+          list_diff_tools j
           list_sitemap_tools j
           list_issues_tools j
           list_probe_tools j
@@ -919,6 +926,7 @@ module Gori
         when "get_flow"                then get_flow(h)
         when "get_response_body_chunk" then get_response_body_chunk(h)
         when "compare_flows"           then compare_flows(h)
+        when "diff_projects"           then diff_projects(h)
         when "list_sitemap"            then list_sitemap(h)
         when "list_issues"             then list_issues(h)
         when "get_issue"               then get_issue(h)

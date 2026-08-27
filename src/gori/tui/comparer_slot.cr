@@ -46,12 +46,17 @@ module Gori::Tui
     end
 
     # A captured flow — the original (and still the most common) slot source.
-    def self.from_flow(d : Store::FlowDetail) : ComparerSlot
+    #
+    # `source` names where the capture came from when that is not "this project's history":
+    # the retest diff (`DiffController`) fills both slots from two DIFFERENT projects, and
+    # the two sides render identically without it — same method, same host, same path, which
+    # is precisely why they are being compared.
+    def self.from_flow(d : Store::FlowDetail, *, source : String? = nil) : ComparerSlot
       row = d.row
       new(
         "#{row.method} #{Url.origin_path(row.target)}",
         row.method, row.url, row.host, Url.origin_path(row.target),
-        Repeater::ExchangeMeta.of(row), flow_id: row.id,
+        Repeater::ExchangeMeta.of(row), source: source, flow_id: row.id,
         request_head: d.request_head, request_body: d.request_body,
         response_head: d.response_head, response_body: d.response_body, error: d.error)
     end

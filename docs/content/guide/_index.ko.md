@@ -12,7 +12,7 @@ gori를 다루는 심화 가이드입니다. TUI의 각 탭은 하나의 목적�
 
 - **[Proxy & History](/ko/guide/proxy/)**: 캡처, 인터셉트, 스코프, 임포트, Match & Replace, 호스트 오버라이드.
 - **[Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/)**: 요청 워크벤치, 환경 변수 토큰, Intruder 스타일 Fuzzer.
-- **[Scanning & Issues](/ko/guide/scanning/)**: Probe, Param Miner, Discover(스파이더 & 브루트포스), Issues, Notes, Comparer.
+- **[Scanning & Issues](/ko/guide/scanning/)**: Probe, Param Miner, Discover(스파이더 & 브루트포스), Issues, Notes, Comparer, 그리고 리테스트 Diff.
 
 **워크벤치** — 하나의 목적에 집중한 분석 도구:
 
@@ -40,7 +40,7 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | 탭 | 용도 |
 |-----|---------|
 | **Project** | 홈: 스코프, 호스트 오버라이드, 환경 변수, 설명, 네트워크 |
-| **Target** | Sitemap(host → path 엔드포인트 트리) + Discover(스파이더 & 디렉터리 브루트포스) |
+| **Target** | Sitemap(host → path 엔드포인트 트리) + Discover(스파이더 & 디렉터리 브루트포스) + Diff(리테스트: 프로젝트 두 개를 엔드포인트 단위로 비교) |
 | **History** | 캡처(및 임포트)된 플로우와 전체 요청/응답 상세 |
 | **Intercept** | 요청/응답을 붙잡아 수동 판단을 대기 |
 | **Repeater** | 요청 워크벤치 (WebSocket 및 gRPC 모드 포함) |

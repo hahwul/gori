@@ -57,6 +57,7 @@ gori run <subcommand> [verb] [options]
 | `history delete <id>` · `delete -q QL` · `clear` | Hard-delete one flow, every flow a query matches (`--yes`), or wipe the project's History (`--yes`) |
 | `show <flow-id>` | Print one flow's request and response |
 | `compare <id-a> <id-b>` | Diff two flows' request or response |
+| `diff --from A --to B` | Retest report: diff two projects at endpoint scale (added / gone / changed / unchanged / not seen) |
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
@@ -196,6 +197,55 @@ gori run compare 41 42 --pane response --changes-only
 Both sides' `status · size · time` and the A→B delta print above the diff, so a status flip or a size shift is visible before the first line is read. `--format=json` carries the same under `meta`, and a collapsed run becomes `{"kind":"fold","hidden":N}` rather than a gap.
 
 `--changes-only` says *what* changed but erases *where*: a 400-line body with one edit comes back as two lines with no position. `--context` keeps the change in place and states how much it skipped.
+
+### run diff
+
+The retest report: diff two **projects** at endpoint scale, where [`run compare`](#run-compare) diffs two messages. It answers the question half of an engagement is — *what changed since last time?*
+
+```bash
+gori run diff --from q1-audit --to q3-retest --format md
+```
+
+| Option | Description |
+|--------|-------------|
+| `--from=NAME` | Baseline project — the earlier engagement (name, slug, or short id). Required |
+| `--to=NAME` | Newer project (default: the most-recently-active one) |
+| `--from-db=PATH` / `--to-db=PATH` | Explicit SQLite files instead of registry projects |
+| `-q`, `--query=QL` | Narrow **both** sides with a [QL query](/reference/query-language/) |
+| `--in-scope` | Only hosts inside each project's own scope rules |
+| `-n`, `--limit=N` | Max endpoint groups to read per side |
+| `--verdict=LIST` | List only these verdicts (`added,gone,changed,unchanged,removed`) |
+| `--unchanged` | Also list the unchanged endpoints (they are always *counted*) |
+| `--no-issues` | Skip the issue retest |
+| `--format=FMT` | `text` (default), `json`, or `md` — a section to paste into a retest deliverable |
+
+**It sends nothing.** This diffs captured traffic on both sides. Re-confirming that a finding still reproduces takes a request, and that stays a deliberate Repeater send.
+
+#### Endpoint identity
+
+Two engagements never capture the same identifiers, so a diff keyed on literal paths reports every row twice — once removed, once added — and says nothing. Endpoints are therefore keyed by the same folded template the [Sitemap](#run-sitemap) draws: `/users/{uuid}`, `/items/{n}`, `/search` (query variants folded onto their path). The fold runs over the **union** of both sides, so a route that met the fold threshold on one side alone still matches itself on the other.
+
+#### The five verdicts
+
+| Verdict | Meaning |
+|---------|---------|
+| `added` | Captured in B, never captured in A |
+| `gone` | Captured in both — and every answer B got was `404`/`410` where A was reachable. The only evidence a capture can carry that an endpoint really is gone |
+| `changed` | Captured in both; at least one of status class, auth, content type, or size moved beyond tolerance |
+| `unchanged` | Captured in both, equivalent |
+| `removed` | In A, and **B captured no request to it at all** — a coverage gap, *not* evidence of removal |
+
+The `removed`/`gone` split is the point of the command. A thinner retest visits fewer endpoints, and collapsing those two into one bucket would report a short afternoon as a wave of fixes. Every output leads with that caveat, and the counts always cover all five verdicts even when `--verdict` narrows the listing.
+
+`changed` is judged by a tolerance band — the same calibration `repeater minimize` and `mine` use — rather than byte equality, so a page whose length wanders between captures reads `unchanged`. Status is compared by **class**: a `200` that became a `201` is not a retest finding, a `200` that became a `403` is (and is reported on its own `auth` axis).
+
+#### Issue retest
+
+By default the report closes with each of the baseline's still-open issues and what became of the endpoint it was filed against — "still answers the same way, the finding likely still stands", "answers 404/410 now", "was not requested in the newer capture, retest it before closing". No request is sent; confirming a fix is your call.
+
+#### Coverage and scope
+
+Both sides' flow count, endpoint count, host count and capture window print above the counts, so a reader can see immediately when B's coverage is thinner than A's. When the two projects carry different scope rules the report says so — an endpoint can be absent because that side's proxy was never recording it.
 
 ### run intercept
 

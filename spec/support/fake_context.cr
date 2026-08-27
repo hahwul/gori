@@ -1098,6 +1098,37 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:comparer_pick, slot)
   end
 
+  # --- retest diff (two PROJECTS at endpoint scale) ---
+  def diff_pick(slot : Symbol) : Nil
+    rec(:diff_pick, slot)
+  end
+
+  def diff_swap : Nil
+    rec(:diff_swap)
+  end
+
+  def diff_run : Nil
+    rec(:diff_run)
+  end
+
+  def diff_cycle_lens(dir : Int32) : Nil
+    rec(:diff_cycle_lens, dir)
+  end
+
+  def diff_move(delta : Int32) : Nil
+    rec(:diff_move, delta)
+  end
+
+  def diff_to_comparer : Nil
+    rec(:diff_to_comparer)
+  end
+
+  property diff_rows_shown : Bool = false
+
+  def diff_rows_shown? : Bool
+    @diff_rows_shown
+  end
+
   def comparer_swap : Nil
     rec(:comparer_swap)
   end

@@ -1,21 +1,30 @@
 require "../tab_controller"
 require "./sitemap_controller"
 require "./discover_controller"
+require "./diff_controller"
 
 module Gori::Tui
-  # The Target parent tab: a fixed two-sub-tab multiplexer over the existing Sitemap and
-  # the new Discover views — "‹ Sitemap · Discover ›". It composes both child controllers
-  # (they are NOT registered in the Runner's @tabs) and forwards nearly every hook to the
-  # active child. command_scope/command_section delegate to the child, so every existing
-  # Sitemap verb keeps firing when the Sitemap sub-tab is active, and Discover verbs fire
-  # when the Discover sub-tab is active — no re-scoping.
+  # The Target parent tab: a fixed sub-tab multiplexer over the Sitemap, Discover and Diff
+  # views — "‹ Sitemap · Discover · Diff ›". It composes the child controllers (they are NOT
+  # registered in the Runner's @tabs) and forwards nearly every hook to the active child.
+  # command_scope/command_section delegate to the child, so every existing Sitemap verb keeps
+  # firing when the Sitemap sub-tab is active, Discover verbs when Discover is, and the retest
+  # Diff verbs when Diff is — no re-scoping.
+  #
+  # Diff belongs HERE and not beside the Comparer for the same reason Sitemap does: it is a
+  # question about the endpoint map ("what is on this target that was not there last time"),
+  # and it keys its rows on the very tree the sub-tab next to it draws.
   class TargetController < TabController
-    SUBS = ["Sitemap", "Discover"]
+    SUBS = ["Sitemap", "Discover", "Diff"]
 
     def initialize(host : Host)
       super(host)
       @sitemap = SitemapController.new(host)
       @discover = DiscoverController.new(host)
+      @diff = DiffController.new(host)
+      # Built ONCE: `active_child` is on the render path and every forwarded hook goes
+      # through it, so materialising this list per call would allocate a few times per frame.
+      @children = [@sitemap, @discover, @diff] of TabController
       @active_sub = 0
     end
 
@@ -28,12 +37,18 @@ module Gori::Tui
       @discover
     end
 
+    def diff : DiffController
+      @diff
+    end
+
     def sitemap_active? : Bool
       @active_sub == 0
     end
 
+    # Indexed rather than a ternary chain: a third sub-tab is exactly where an
+    # `@active_sub == 0 ? … : …` starts answering "Discover" for Diff.
     private def active_child : TabController
-      @active_sub == 0 ? @sitemap : @discover
+      @children[@active_sub]
     end
 
     # --- identity ---
@@ -91,20 +106,20 @@ module Gori::Tui
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused,
         subtab_labels, @active_sub, @subtab_start,
         find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
-        if @active_sub == 0
-          @sitemap.render_content(screen, content, focus)
-        else
-          @discover.render_content(screen, content, focus)
+        case @active_sub
+        when 0 then @sitemap.render_content(screen, content, focus)
+        when 1 then @discover.render_content(screen, content, focus)
+        else        @diff.render_content(screen, content, focus)
         end
       end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       content = BodyChrome.content_rect(rect, strip: true)
-      if @active_sub == 0
-        @sitemap.handle_click_content(content, mx, my)
-      else
-        @discover.handle_click_content(content, mx, my)
+      case @active_sub
+      when 0 then @sitemap.handle_click_content(content, mx, my)
+      when 1 then @discover.handle_click_content(content, mx, my)
+      else        @diff.handle_click_content(content, mx, my)
       end
     end
 
@@ -178,6 +193,10 @@ module Gori::Tui
 
     def select_discover : Nil
       set_sub(1)
+    end
+
+    def diff_active? : Bool
+      @active_sub == 2
     end
   end
 end

@@ -60,6 +60,20 @@ gori run compare 41 42 --pane response --changes-only
 
 **Checkpoint.** The diff highlights the change that proves the finding — a status flip like `403 → 200`, or the one value that moved.
 
+## 3b. Retest against the last engagement
+
+The Comparer proves one message changed. A retest asks it of the whole surface: *what is new, what is gone, and what answers differently since last time?* If the previous assessment lives in its own gori project, that is one command.
+
+```bash
+gori run diff --from q1-audit --to q3-retest --format md
+```
+
+Endpoints are keyed by the same folded template the Sitemap draws (`/users/{uuid}`), so the identifiers each engagement happened to capture don't turn every row into an added/removed pair, and `changed` is judged by a tolerance band rather than byte equality, so a page whose length drifts is not a finding. Interactively it is **Target → Diff**: `a` picks the baseline, `↵` on a row hands both sides' captures to the Comparer for the byte-level detail.
+
+Read the verdicts exactly. `gone` means the newer capture *asked* and got a `404`; `not seen` means it never asked — a gap in this retest's coverage, not a fix. The report closes with each still-open issue and what became of the endpoint it was filed against, without sending anything.
+
+**Checkpoint.** `--format md` gives you a section you can paste straight into the retest deliverable, with both sides' coverage stated above the counts.
+
 ## 4. Keep notes and links
 
 Not everything is an issue. **Notes** are free-form, per-project Markdown (multiple notes per project) — a running log of what you tried, the payload that worked, the lead to return to. Create and edit them on the **Notes** tab.

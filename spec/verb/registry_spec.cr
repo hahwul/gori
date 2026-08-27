@@ -1081,6 +1081,34 @@ private class FakeContext < ExecContext
     @calls << :comparer_pick
   end
 
+  def diff_pick(slot : Symbol) : Nil
+    @calls << :diff_pick
+  end
+
+  def diff_swap : Nil
+    @calls << :diff_swap
+  end
+
+  def diff_run : Nil
+    @calls << :diff_run
+  end
+
+  def diff_cycle_lens(dir : Int32) : Nil
+    @calls << :diff_cycle_lens
+  end
+
+  def diff_move(delta : Int32) : Nil
+    @calls << :diff_move
+  end
+
+  def diff_to_comparer : Nil
+    @calls << :diff_to_comparer
+  end
+
+  def diff_rows_shown? : Bool
+    true
+  end
+
   def comparer_swap : Nil
     @calls << :comparer_swap
   end
