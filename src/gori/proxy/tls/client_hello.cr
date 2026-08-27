@@ -154,7 +154,12 @@ module Gori::Proxy::Tls
 
     # A bounds-checked cursor over the handshake bytes. Every accessor returns nil past the
     # end instead of raising, so one `return nil unless` per field is the whole error handling.
-    private struct Reader
+    #
+    # NOT private: `Tls::Fingerprint` parses the same ClientHello for JA3/JA4 and needs the
+    # identical bounds discipline over attacker-supplied bytes. A second copy of a cursor
+    # whose whole job is "never read past the end" is exactly the duplication that lets one
+    # copy grow a bug the other does not have.
+    struct Reader
       getter pos : Int32
 
       def initialize(@buf : Bytes)
@@ -190,11 +195,22 @@ module Gori::Proxy::Tls
 
       # Skip a length-prefixed vector whose length field is `len_bytes` wide.
       def skip_vec(len_bytes : Int32) : Bool
-        n = case len_bytes
-            when 1 then u8.try(&.to_i)
-            when 2 then u16
-            end
+        n = vec_len(len_bytes)
         n ? skip(n) : false
+      end
+
+      # Like `skip_vec`, but hands back the vector's contents. `Fingerprint` needs the
+      # cipher-suite list rather than only the ability to step over it.
+      def take_vec(len_bytes : Int32) : Bytes?
+        n = vec_len(len_bytes)
+        n ? take(n) : nil
+      end
+
+      private def vec_len(len_bytes : Int32) : Int32?
+        case len_bytes
+        when 1 then u8.try(&.to_i)
+        when 2 then u16
+        end
       end
     end
   end

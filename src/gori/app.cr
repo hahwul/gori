@@ -353,6 +353,11 @@ module Gori
         if Settings.verify_upstream? && (warning = Proxy::Upstream.trust_store_warning)
           runner.notifications.push(:warn, warning)
         end
+        # An outbound-TLS rule this OpenSSL cannot apply (a `groups`/`sigalgs` typo, a client
+        # certificate that has since moved). Same shape and same reason as the line above: the
+        # per-flow error explains each failure, this explains WHY up front — and this table is
+        # hand-edited JSON, so there was no save for its validator to run at.
+        Settings.outbound_tls_warnings.each { |w| runner.notifications.push(:warn, w) }
         {runner.run, nil}
       ensure
         session.close
@@ -557,6 +562,9 @@ module Gori
       if !@config.insecure_upstream? && (warning = Proxy::Upstream.trust_store_warning)
         STDERR.puts "  ⚠ #{warning}"
       end
+      # See the sibling emission in `open_and_run`: an outbound-TLS rule gori cannot apply
+      # is otherwise invisible until every dial to that one destination fails.
+      Settings.outbound_tls_warnings.each { |w| STDERR.puts "  ⚠ #{w}" }
       STDERR.puts "  press Ctrl-C to stop"
     end
 

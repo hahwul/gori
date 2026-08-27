@@ -271,7 +271,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 ### outbound_tls
 
-gori가 **거는** 연결의 목적지별 TLS 정책입니다 — 제시할 클라이언트 인증서, 그리고 협상할 프로토콜/암호군 하한. 순서가 있고 첫 일치가 이기며, 호스트 패턴 문법은 동일합니다. 편집은 `gori settings --edit`.
+gori가 **거는** 연결의 목적지별 TLS 정책입니다 — 제시할 클라이언트 인증서, 협상할 프로토콜 범위와 암호군, 그리고 gori가 보내는 ClientHello의 형태([TLS 지문](#tls-fingerprint)). 순서가 있고 첫 일치가 이기며, 호스트 패턴 문법은 동일합니다. 편집은 `gori settings --edit`.
 
 [`upstream_rules`](#upstream_rules)와 의도적으로 분리된 테이블입니다. 둘 다 목적지 호스트로 키를 잡지만 답하는 질문이 다르고, 합치면 가장 흔한 형태를 표현할 수 없게 됩니다 — "전부 사내 프록시 경유 + 한 호스트만 클라이언트 인증서"를 쓰려면 그 호스트 행에 프록시 주소를 중복해야 합니다. 하나의 first-match 테이블은 호스트당 한 행만 적용할 수 있기 때문입니다.
 
@@ -299,14 +299,71 @@ gori가 **거는** 연결의 목적지별 TLS 정책입니다 — 제시할 클�
 | `client_cert` | string | 제시할 PEM 인증서 체인 경로(상호 TLS) |
 | `client_key` | string | 대응하는 PEM 개인키 경로. 둘 다 있어야 하거나 둘 다 없어야 합니다 |
 | `min_version` | string | 협상할 최저 프로토콜: `tls1.0`, `tls1.1`, `tls1.2`, `tls1.3`. 비우면 기본값 |
+| `max_version` | string | 협상할 최고 프로토콜. 값은 동일하며 비우면 기본값 |
 | `ciphers` | string | TLS 1.2 이하용 OpenSSL 암호군 목록. 비우면 기본값 |
 | `permissive` | bool | 망가진/레거시 서버 상대: OpenSSL security level을 0으로 낮추고 재협상을 허용합니다 |
+| `preset` | string | 이름 붙은 브라우저 근사치: `chrome`, `firefox`, `safari`, `curl`. [TLS 지문](#tls-fingerprint) 참고 |
+| `groups` | string | 지원 그룹/커브와 그 순서. 예: `X25519:P-256:P-384`. 비우면 기본값 |
+| `sigalgs` | string | 서명 알고리즘과 그 순서. 예: `ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256` |
+| `ciphersuites` | string | **TLS 1.3** 스위트. `ciphers`로는 닿을 수 없는 영역입니다 |
+| `alpn` | array | 순서가 있는 ALPN 목록. 예: `["h2", "http/1.1"]`. `h2`와 `http/1.1`만 허용 — origin이 고른 것을 gori가 말할 수 있어야 합니다 |
+| `session_tickets` | bool | `false`면 hello에서 `session_ticket` 확장을 뺍니다. 생략 = OpenSSL 기본값(켬) |
+| `ocsp_stapling` | bool | `true`면 `status_request` 확장을 추가합니다 — 브라우저는 보내고 순정 OpenSSL은 보내지 않는 확장입니다. 생략 = 끔 |
 
 **`min_version`이 필요한 이유.** gori는 기본 상태로 TLS 1.0/1.1만 지원하는 장비에 접근할 수 없고, `verify_upstream: false`로도 해결되지 않습니다 — 그건 인증서 *검증*을 끄는 것이지 프로토콜 협상과 무관합니다. Crystal의 TLS 클라이언트 컨텍스트가 생성자에서 TLS 1.0과 1.1을 비활성화하므로, 여기서 하한을 낮추는 것이 유일한 방법입니다. 레거시 장비는 보통 `permissive: true`도 함께 필요합니다 — 배포판이 OpenSSL을 옛 암호군을 아예 거부하는 security level로 빌드하기 때문입니다.
 
 **인증서는 인라인 값이 아니라 파일 경로입니다.** 개인키는 공유·내보내기 대상인 `settings.json`에 들어갈 것이 아닙니다([#439](https://github.com/hahwul/gori/issues/439)). 패스프레이즈가 걸린 키는 저장 시 거부됩니다 — OpenSSL이 TUI가 점유한 터미널에 패스프레이즈를 물어보므로, gori가 그냥 멈춘 것처럼 보이게 됩니다. `openssl pkey -in key.pem -out plain.pem`으로 먼저 복호화하세요.
 
 정책은 SNI 오버라이드가 아니라 **실제 접속한 호스트**로 조회합니다 — 인증서와 프로토콜 하한은 실제로 대화하는 장비에 속하는 반면, Repeater의 SNI 필드는 도메인 프론팅·vhost 테스트를 위해 의도적으로 이름을 다르게 보내는 기능입니다.
+
+#### TLS 지문 {#tls-fingerprint}
+
+프록시를 물리면 origin이 보는 ClientHello는 **브라우저가 아니라 gori의 OpenSSL 핸드셰이크**입니다. 안티봇 스택은 그 핸드셰이크를 JA3/JA4로 찍어서, 조금 전까지 멀쩡하던 트래픽에 챌린지나 `403`을 내주기 시작합니다 — 흔히 겪는 *"브라우저에선 되는데 프록시 끼면 막힘"*이 이것입니다. 위 필드들이 그 손잡이이고,
+
+```bash
+gori settings tls-fingerprint
+```
+
+가 확인 수단입니다. 실제 dial이 만드는 것과 같은 TLS 컨텍스트에서, gori가 각 목적지로 정말 보내는 ClientHello의 JA3/JA4를 출력합니다. OpenSSL은 *협상 결과*만 알려주므로, 이 명령이 없으면 이 설정들은 검증이 불가능합니다.
+
+```json
+{
+  "outbound_tls": [
+    { "host": "shop.example.com", "preset": "chrome" },
+    {
+      "host": "api.internal",
+      "groups": "X25519:P-256",
+      "sigalgs": "ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256",
+      "ciphersuites": "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384",
+      "alpn": ["h2", "http/1.1"],
+      "ocsp_stapling": true
+    }
+  ]
+}
+```
+
+**프리셋은 근사치이며, gori는 그 이상을 주장하지 않습니다.** 프리셋은 분류기가 읽는 *값 수준* 필드를 전부 채웁니다 — 암호군 목록과 순서, TLS 1.3 스위트, 지원 그룹, 서명 알고리즘, ALPN 쌍, 그리고 `session_ticket`/`status_request`가 아예 나타나는지 여부. 하지만 브라우저의 JA3를 바이트 단위로 재현하지는 **않으며**, 할 수도 없습니다:
+
+- **확장 순서**는 OpenSSL의 것이고, OpenSSL은 자기 고정 순서로만 내보냅니다. JA3는 그 순서를 해시합니다.
+- **GREASE**([RFC 8701](https://datatracker.ietf.org/doc/html/rfc8701)) 배치도 OpenSSL의 것입니다. 두 지문 모두 GREASE 값을 걸러내지만, 브라우저가 그것을 끼워 넣는 위치는 OpenSSL이 고르는 위치와 다릅니다.
+- **포스트 퀀텀 키 셰어**(`X25519MLKEM768`) — 현재 Chrome·Firefox가 가장 먼저 제안하는 것 — 는 프리셋에서 의도적으로 뺐습니다. OpenSSL 3.5 이상에만 있고, 구버전 빌드에서 적용 자체가 실패하는 프리셋은 정직하게 불완전한 프리셋보다 나쁩니다. 빌드가 지원한다면 규칙의 `groups`에 직접 넣으세요.
+- **SHA-1 서명 알고리즘** — Firefox와 Safari가 목록 맨 뒤에 레거시 폴백으로 아직 넣는 것 — 도 같은 이유로 뺐습니다. Debian·Ubuntu는 SHA-1 서명을 비활성화한 OpenSSL을 배포하므로, 이걸 넣으면 그 환경에서 프리셋 적용 자체가 거부됩니다. 요즘 origin은 이걸 고르지 않습니다.
+
+다이제스트가 아니라 리포트가 출력하는 `JA4_r` 목록을 비교하세요 — 어떤 필드가 아직 다른지는 거기서만 보입니다. 바이트 단위 일치는 확장 순서와 GREASE를 제어할 수 있는 TLS 스택(BoringSSL, rustls, uTLS)이 있어야 하며, 그건 [#822 3단계](https://github.com/hahwul/gori/issues/822)이지 이 필드들이 하는 일이 아닙니다.
+
+규칙 자신의 필드는 프리셋을 **덮어씁니다**. `{"preset": "chrome", "groups": "P-521"}`은 "Chrome 전부 + 내 그룹 목록"입니다.
+
+**ALPN과 두 개의 leg.** gori는 그 소켓에서 자신이 무엇을 말할지에 따라 다른 ALPN을 제안합니다 — 복호화하는 터널에서는 `h2`, 자신이 HTTP/1.1을 말하게 될 leg(평문 포워드 프록시 dial, Repeater, WebSocket)에서는 아예 제안하지 않습니다. 설정한 `alpn` 목록은 앞쪽에서는 그대로 쓰이고, 뒤쪽에서는 `h2`가 **제거**됩니다 — 거기서 origin이 `h2`를 고르면 gori가 HTTP/2 연결에 HTTP/1.1을 써 넣게 되기 때문입니다. `gori settings tls-fingerprint`가 두 leg를 모두 보여주는 이유가 이것입니다.
+
+잘못된 `groups`·`sigalgs`·`ciphersuites`·`alpn` 값은 실제로 그 문자열을 소비할 바로 그 OpenSSL에게 넘겨서 검사합니다. 이 테이블은 앱 안에 편집기가 없으므로(JSON을 직접 고칩니다) 검사는 **시작 시점**에 돌고, 규칙·설정·결과를 함께 알려 줍니다. origin 탓처럼 보이는 핸드셰이크 실패로 남겨 두지 않습니다:
+
+```
+⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 — the rule for api.internal; TLS dials to that destination will fail
+```
+
+TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 목적지에만 영향을 주며, 나머지 규칙과 gori의 다른 기능은 그대로 동작합니다.
+
+인바운드 지문 *위장*(클라이언트 자신의 핸드셰이크를 다른 것처럼 보이게 하는 것)은 이 섹션의 범위가 아닙니다 — 여기서는 gori가 거는 연결의 모양만 다룹니다.
 
 ### layout {#layout}
 

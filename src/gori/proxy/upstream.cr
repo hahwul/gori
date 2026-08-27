@@ -5,6 +5,7 @@ require "../settings"
 require "../host_overrides"
 require "./socket_tuning"
 require "./socks5"
+require "./tls/client_shape"
 
 # OpenSSL's own compiled-in default trust locations — the paths SSL_CTX_set_default_verify_paths
 # consults. Not bound by the stdlib, so declared here to let the no-store warning reflect the
@@ -750,10 +751,24 @@ module Gori::Proxy
         else
           ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
         end
-        ctx.alpn_protocol = alpn if alpn
-        apply_outbound_tls(ctx, tls)
+        apply_outbound_tls(ctx, tls, alpn)
         ctx
       end
+    end
+
+    # The TLS context for one outbound-TLS policy, built the way a real dial builds it. Public
+    # so the fingerprint report (`gori settings tls-fingerprint`) shows what gori ACTUALLY
+    # sends rather than a second, parallel construction of it — the moment the report has its
+    # own copy of this wiring, the two can disagree and the report becomes the more convincing
+    # of the two lies.
+    #
+    # Takes a POLICY, not a host: the report walks the rule table, where there is a host
+    # pattern and no host to look one up with. A caller holding a host resolves it the way
+    # every dial does, with `Settings.outbound_tls_for`.
+    def self.context_for_policy(tls : Settings::OutboundTlsRule,
+                                verify : Bool = Settings.verify_upstream?,
+                                alpn : String? = nil) : OpenSSL::SSL::Context::Client
+      client_context(verify, alpn, tls)
     end
 
     # Apply one destination's outbound-TLS policy to a fresh context: the client certificate to
@@ -765,7 +780,11 @@ module Gori::Proxy
     # time, so reaching a raise means a hand-edited file or a file removed since, and the
     # dial_tls_result caller turns it into a recorded Tls error the operator can see.
     private def self.apply_outbound_tls(ctx : OpenSSL::SSL::Context::Client,
-                                        tls : Settings::OutboundTlsRule) : Nil
+                                        tls : Settings::OutboundTlsRule,
+                                        alpn : String? = nil) : Nil
+      # ALPN is applied even for the all-defaults policy — the caller's own protocol still has
+      # to reach the context, which is why this sits ABOVE the `default?` short-circuit.
+      apply_alpn(ctx, tls, alpn)
       return if tls.default?
       if tls.client_auth?
         ctx.certificate_chain = tls.client_cert
@@ -775,11 +794,38 @@ module Gori::Proxy
       apply_tls_ceiling(ctx, tls.max_version)
       # Lower the security level BEFORE the cipher list: on a distribution built at
       # SECLEVEL=2 the legacy suites a caller names here are rejected outright, so setting
-      # ciphers first would raise on exactly the legacy origin this exists to reach.
+      # ciphers first would raise on exactly the legacy origin this exists to reach. The
+      # fingerprint knobs below are applied after it for the same reason.
       ctx.security_level = 0 if tls.permissive
-      ctx.ciphers = tls.ciphers unless tls.ciphers.empty?
+      ciphers = tls.effective_ciphers
+      ctx.ciphers = ciphers unless ciphers.empty?
+      apply_fingerprint(ctx, tls)
       # Some legacy appliances renegotiate; Crystal's constructor forbids it by default.
       ctx.remove_options(OpenSSL::SSL::Options::NO_RENEGOTIATION) if tls.permissive
+    end
+
+    # The #822 ClientHello-shaping knobs: what an anti-bot stack fingerprints. Each raises on
+    # a value OpenSSL refuses, per this method's contract above — `Settings.outbound_tls_error`
+    # checks all four at save time, so reaching a raise means a hand-edited file.
+    private def self.apply_fingerprint(ctx : OpenSSL::SSL::Context::Client,
+                                       tls : Settings::OutboundTlsRule) : Nil
+      Tls::ClientShape.set_groups(ctx, tls.effective_groups)
+      Tls::ClientShape.set_sigalgs(ctx, tls.effective_sigalgs)
+      Tls::ClientShape.set_ciphersuites(ctx, tls.effective_ciphersuites)
+      # SSL_OP_NO_TICKET drops the `session_ticket` extension from the hello entirely; the
+      # default (tickets offered) needs no call, so only the OFF direction is expressed.
+      ctx.add_options(OpenSSL::SSL::Options::NO_TICKET) unless tls.effective_session_tickets?
+      Tls::ClientShape.request_ocsp_stapling(ctx) if tls.effective_ocsp_stapling?
+    end
+
+    # The ALPN offer for this context: the caller's protocol, the destination's configured
+    # list, or the safe intersection of the two. See `ClientShape.alpn_offer` — the rule that
+    # keeps a configured `h2` off a leg the caller is going to speak HTTP/1.1 on lives there,
+    # with its reasoning, rather than being spelled out at each dial site.
+    private def self.apply_alpn(ctx : OpenSSL::SSL::Context::Client,
+                                tls : Settings::OutboundTlsRule, alpn : String?) : Nil
+      offer = Tls::ClientShape.alpn_offer(alpn, tls.effective_alpn)
+      Tls::ClientShape.set_alpn(ctx, offer) if offer
     end
 
     # Move the protocol floor. Crystal's Context::Client.new adds NO_TLS_V1 | NO_TLS_V1_1, so

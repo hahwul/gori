@@ -1098,6 +1098,7 @@ gori settings --edit               # $EDITOR로 열기
 gori settings sections             # 최상위 섹션 목록
 gori settings export [-o FILE]     # 공유 가능한 프로필 출력(기본 stdout)
 gori settings import FILE          # 프로필의 섹션들을 적용
+gori settings tls-fingerprint      # 목적지별로 gori가 보내는 JA3/JA4
 ```
 
 ### 프로필 {#profiles}
@@ -1125,6 +1126,7 @@ env  (holds secrets — excluded unless named; not set — at its default)
 | `--sections a,b` | 공통 | 쉼표로 구분한 섹션 이름, 최소 하나. export 기본값은 비밀을 담은 섹션을 제외한 전부, import 기본값은 파일에 있는 전부 |
 | `-o`, `--out FILE` | export | stdout 대신 파일로 기록 |
 | `--dry-run` | import | 적용될 섹션만 출력하고 아무것도 쓰지 않고 종료 |
+| `--json` | tls-fingerprint | 리포트를 JSON으로 출력. 분해된 JA3 문자열과 `ja4_r`가 항상 포함됩니다 |
 
 선택하지 않았거나 프로필에 없는 섹션은 **그대로 남습니다**. `--sections`가 고르는 것이 바로 이 경계입니다. 프로필이 실제로 담고 있는 섹션 안에서는:
 
@@ -1142,6 +1144,32 @@ gori가 `settings.json`을 읽지 못하는 상태 — 파싱 실패, 권한 문
 `-o`가 실제 사용 중인 `settings.json`을 가리키면 거부됩니다. export는 스냅샷이 아니라 — 기본값 상태인 섹션은 모두 빠지고, `env`와 `decoder`는 이름을 지정하지 않는 한 빠집니다 — 그것을 원본 파일에 되쓰면 해당 섹션이 갱신되는 게 아니라 삭제됩니다.
 
 export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생성되고, gori가 파일에 무엇이 들어 있는지 이름을 대며 알려줍니다. 자격증명을 export하는 데 동의한 것이 그것을 누구나 읽을 수 있게 두는 데 동의한 것은 아닙니다. 일반 export는 `0644`로 남고, env 변수가 하나도 없는 설치에서 `env`를 지정한 export도 일반 export입니다 — 권한은 타이핑한 내용이 아니라 문서에 실제로 담긴 것을 따릅니다.
+
+### `gori settings tls-fingerprint` {#gori-settings-tls-fingerprint}
+
+gori가 **실제로 보내는 ClientHello의 JA3/JA4 지문**을 목적지별로 출력합니다 — Cloudflare·Akamai·DataDome·PerimeterX 같은 안티봇이 챌린지를 띄울지 판단할 때 읽는 바로 그 offer입니다. [`outbound_tls`](/ko/reference/config/#outbound_tls)의 지문 필드를 검증하는 수단입니다. OpenSSL은 *협상 결과*만 알려줄 뿐 무엇을 제안했는지는 알려주지 않으므로, 이 명령이 없으면 설정이 먹혔는지 확인할 방법이 없습니다.
+
+```bash
+gori settings tls-fingerprint                    # 모든 규칙 + 규칙 없음 기본값
+gori settings tls-fingerprint shop.example.com   # 그 호스트가 실제로 받는 정책 하나
+gori settings tls-fingerprint --json             # 원본 목록까지 담은 기계 판독용 출력
+```
+
+```
+shop.example.com  (matched rule "shop.example.com")
+  preset          chrome
+  groups          X25519:P-256:P-384
+  …
+  tunnelled (gori offers h2) — ALPN h2, http/1.1
+    JA3  c99e92e692ba483e2602b38b3c0a5645
+         771,4865-4866-…,65281-0-11-10-35-5-16-22-13-43-45-51-21,29-23-24,0
+    JA4  t13d1513h2_8daaf6152771_afafd945c4ab
+         t13d1513h2_002f,0035,…_0005,000a,…_0403,0804,…
+```
+
+정책마다 **두 개의 leg**를 보여주며, 둘의 차이는 실재합니다. gori는 복호화하는 MITM 연결에서는 `h2`를 제안하고, 자신이 HTTP/1.1을 말하게 될 leg(포워드 프록시 dial, Repeater, WebSocket)에서는 제안에서 `h2`를 빼며, `alpn`을 설정하지 않았다면 ALPN 확장 자체를 보내지 않습니다 — 그래서 두 leg의 ClientHello가 다릅니다. 각 다이제스트 아래 줄은 그 다이제스트가 해시한 목록입니다. 어떤 필드가 움직였는지는 거기서만 보이고, 브라우저와 비교할 가치가 있는 쪽도 이쪽입니다.
+
+리포트가 읽는 컨텍스트는 실제 dial이 만드는 것과 같은 객체이므로, gori가 하지 않는 핸드셰이크를 설명할 수 없습니다. 이 OpenSSL이 거부하는 `groups`/`sigalgs` 문자열은 해당 규칙에 대해 stderr로 보고하고 나머지는 계속 출력합니다.
 
 ### `--config PATH` {#config-flag}
 

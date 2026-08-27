@@ -1,13 +1,12 @@
+require "../proxy/tls/fingerprint"
+require "../proxy/upstream"
+
 # `gori settings` — inspect, export and import the settings file. Reopens Gori::CLI;
 # the argv dispatch that reaches these lives in cli.cr. Export refuses to write over the
 # live settings file, and import is section-scoped.
 module Gori::CLI
   private def self.run_settings(args : Array(String)) : Nil
-    case args[0]?
-    when "export"   then return run_settings_export(args[1..])
-    when "import"   then return run_settings_import(args[1..])
-    when "sections" then return run_settings_sections(args[1..])
-    end
+    return if dispatch_settings_verb(args)
     if unknown_settings_verb?(args)
       STDERR.puts "unknown settings subcommand: #{args[0]}"
       STDERR.puts SETTINGS_USAGE
@@ -68,6 +67,20 @@ module Gori::CLI
         abort "gori settings --edit: could not run the editor (#{cmd.join(' ')}): #{ex.message}"
       end
     abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
+  end
+
+  # Run the named sub-verb, if `args` opens with one. Split out of `run_settings` so that
+  # command's own flag parsing is not a `case` with a tail hanging off it, and so adding a verb
+  # does not push a method that also does the parsing further over its branch budget.
+  private def self.dispatch_settings_verb(args : Array(String)) : Bool
+    case args[0]?
+    when "export"          then run_settings_export(args[1..])
+    when "import"          then run_settings_import(args[1..])
+    when "sections"        then run_settings_sections(args[1..])
+    when "tls-fingerprint" then run_settings_tls_fingerprint(args[1..])
+    else                        return false
+    end
+    true
   end
 
   # `gori settings sections` — the top-level keys export/import operate on.
@@ -339,5 +352,199 @@ module Gori::CLI
             "Run 'gori settings sections' for the list."
     end
     list
+  end
+
+  # `gori settings tls-fingerprint [HOST]` — the JA3/JA4 of the ClientHello gori actually
+  # sends, per destination (#822).
+  #
+  # This exists because the `outbound_tls` fingerprint knobs are otherwise unverifiable: an
+  # operator sets `groups` or `preset: "chrome"` and OpenSSL will only ever report what got
+  # NEGOTIATED, never the offer it made — and the offer is the thing an anti-bot stack judges.
+  # The report is built from the SAME context a dial builds (`Upstream.context_for`), so it
+  # cannot drift into describing a handshake gori does not make.
+  #
+  # TWO legs per policy, and neither is redundant. gori offers `h2` on a tunnelled MITM
+  # connection and offers no ALPN at all on a leg it will speak HTTP/1.1 on (the forward-proxy
+  # dial, the Repeater, WebSocket), so those legs genuinely carry different ClientHellos — and
+  # an operator comparing one JA3 against a browser's would otherwise never learn which of the
+  # two they were looking at.
+  private def self.run_settings_tls_fingerprint(args : Array(String)) : Nil
+    json = false
+    parser = OptionParser.new do |p|
+      p.banner = "Usage: gori settings tls-fingerprint [HOST] [--json]\n\n" \
+                 "  With no HOST, reports every outbound_tls rule plus the no-rule default.\n" \
+                 "  With a HOST, reports the single policy that host would actually get."
+      p.on("--json", "Emit the report as JSON (includes the decomposed JA3 string and JA4_r)") { json = true }
+      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.missing_option { |flag| abort "missing value for #{flag}" }
+    end
+    rest = stray_args(parser, args)
+    if rest.size > 1
+      abort "gori settings tls-fingerprint: one HOST at a time (got #{rest.join(", ")})\n#{parser}"
+    end
+
+    Settings.load
+    abort_on_degraded_settings!("tls-fingerprint")
+    entries = tls_fingerprint_entries(rest.first?)
+    json ? puts(tls_fingerprint_json(entries)) : print_tls_fingerprints(entries)
+  end
+
+  # One reported policy: the pattern it is filed under, the rule, and whether the caller
+  # asked about a specific host (which changes the heading from "rule" to "this is what that
+  # host gets").
+  # `configured?` false marks the SYNTHETIC no-rule row. It is not decoration: that row's rule
+  # is `DEFAULT_OUTBOUND_TLS`, whose host is `"*"`, so without the flag `--json` would emit
+  # `"host": "*"` for a catch-all rule that is not in anyone's settings.json and a consumer
+  # keying on `host` could not tell the two apart.
+  private record TlsFingerprintEntry,
+    label : String,
+    rule : Settings::OutboundTlsRule,
+    configured : Bool do
+    def configured? : Bool
+      configured
+    end
+
+    # What to call this policy in a message. The pattern for a real rule; the whole label for
+    # the synthetic row, where `"*"` would name a rule that does not exist.
+    def name : String
+      configured ? rule.host : label
+    end
+  end
+
+  private def self.tls_fingerprint_entries(host : String?) : Array(TlsFingerprintEntry)
+    if h = host
+      rule = Settings.outbound_tls_for(h)
+      matched = Settings.outbound_tls.includes?(rule)
+      return [TlsFingerprintEntry.new(
+        matched ? "#{h}  (matched rule #{rule.host.inspect})" : "#{h}  (no rule — OpenSSL defaults)",
+        rule, matched)]
+    end
+    entries = [] of TlsFingerprintEntry
+    # The no-rule policy is listed only when a dial could actually GET it. A `*` rule is the
+    # documented catch-all, so once one exists every host matches a row below and printing the
+    # OpenSSL defaults too would invite the operator to read a fingerprint gori never sends.
+    unless Settings.outbound_tls.any? { |r| r.host.strip == "*" }
+      entries << TlsFingerprintEntry.new("(no matching rule — OpenSSL defaults)",
+        Settings::DEFAULT_OUTBOUND_TLS, false)
+    end
+    Settings.outbound_tls.each { |r| entries << TlsFingerprintEntry.new(r.host, r, true) }
+    entries
+  end
+
+  # The two legs a policy is reported for. The label is the operator's word for the leg, not
+  # the code's: "tunnelled" is the decrypted CONNECT/transparent path, "forced HTTP/1.1" is
+  # every dial where gori will speak h1 and therefore must not let an origin pick h2.
+  private TLS_FINGERPRINT_LEGS = [{"tunnelled (gori offers h2)", "h2"}, {"forced HTTP/1.1", nil}]
+
+  private def self.print_tls_fingerprints(entries : Array(TlsFingerprintEntry)) : Nil
+    puts "Outbound TLS fingerprint — the ClientHello an origin sees when gori dials it."
+    entries.each do |entry|
+      puts
+      puts entry.label
+      print_tls_policy_fields(entry.rule)
+      TLS_FINGERPRINT_LEGS.each do |(leg, alpn)|
+        offer = Proxy::Tls::ClientShape.alpn_offer(alpn, entry.rule.effective_alpn)
+        puts "  #{leg} — ALPN #{offer ? offer.join(", ") : "not offered"}"
+        report = tls_fingerprint_report(entry, alpn)
+        unless report
+          puts "    (this OpenSSL produced no ClientHello for that policy)"
+          next
+        end
+        # Digest, then the list it hashes indented under it. The digest is what an operator
+        # pastes into a fingerprint database; the raw form underneath is the only way to see
+        # WHICH field a setting moved, and a digest with nothing to decompose it is not
+        # evidence.
+        puts "    JA3  #{report.ja3}"
+        puts "         #{report.ja3_text}"
+        puts "    JA4  #{report.ja4}"
+        puts "         #{report.ja4_r}"
+      end
+    end
+    puts
+    puts TLS_FINGERPRINT_NOTE
+  end
+
+  private def self.print_tls_policy_fields(rule : Settings::OutboundTlsRule) : Nil
+    alpn = rule.effective_alpn
+    # An unknown name is kept verbatim by the loader (so the startup warning can name it), so
+    # say so here too — every other line below would otherwise read as the preset's doing.
+    preset = rule.preset.presence
+    preset = "#{preset}  (unknown preset — nothing from it is applied)" if preset && rule.preset_profile.nil?
+    puts "  #{"preset".ljust(15)} #{preset || "(none)"}"
+    {
+      "groups"              => rule.effective_groups.presence,
+      "sigalgs"             => rule.effective_sigalgs.presence,
+      "ciphers (\u22641.2)" => rule.effective_ciphers.presence,
+      "ciphersuites"        => rule.effective_ciphersuites.presence,
+    }.each { |name, value| puts "  #{name.ljust(15)} #{value || "(OpenSSL default)"}" }
+    # Not "(OpenSSL default)": OpenSSL has no ALPN default. With nothing configured the offer
+    # is whatever the CALLING path asked for, which is what the per-leg lines below report.
+    puts "  #{"alpn".ljust(15)} #{alpn.empty? ? "(not configured — see the per-leg offer below)" : alpn.join(", ")}"
+    puts "  #{"session tickets".ljust(15)} #{rule.effective_session_tickets? ? "on" : "off"}"
+    puts "  #{"OCSP stapling".ljust(15)} #{rule.effective_ocsp_stapling? ? "requested" : "not requested"}"
+  end
+
+  # P4, stated where it cannot be missed: a preset is an approximation, and the two things it
+  # cannot reach are named rather than hinted at. An operator comparing this JA3 against a
+  # browser's will find it different, and needs to know that is expected and why.
+  private TLS_FINGERPRINT_NOTE =
+    "Presets approximate a browser's VALUES — cipher, group and signature-algorithm order, the\n" \
+    "TLS 1.3 suites, the ALPN list, and whether session_ticket / status_request appear at all.\n" \
+    "They do NOT reproduce a browser's JA3 byte for byte: extension ORDER and GREASE placement\n" \
+    "are OpenSSL's own and cannot be set from it. Compare the JA4_r lists, not the digests."
+
+  private def self.tls_fingerprint_report(entry : TlsFingerprintEntry,
+                                          alpn : String?) : Proxy::Tls::Fingerprint::Report?
+    Proxy::Tls::Fingerprint.of_context(
+      Proxy::Upstream.context_for_policy(entry.rule, Settings.verify_upstream?, alpn))
+  rescue ex
+    # A `groups`/`sigalgs`/`ciphersuites` string this OpenSSL refuses is the one way to get
+    # here, and it is exactly what this command is for: say which policy cannot be built,
+    # instead of printing a backtrace over the rules that can.
+    STDERR.puts "gori settings tls-fingerprint: #{entry.name}: #{ex.message}"
+    nil
+  end
+
+  private def self.tls_fingerprint_json(entries : Array(TlsFingerprintEntry)) : String
+    JSON.build(indent: 2) do |j|
+      j.array do
+        entries.each do |entry|
+          rule = entry.rule
+          j.object do
+            # null, not `"*"`, for the synthetic no-rule row — see TlsFingerprintEntry.
+            j.field "host", entry.configured? ? rule.host : nil
+            j.field "configured", entry.configured?
+            j.field "label", entry.label
+            j.field "preset", rule.preset
+            j.field "groups", rule.effective_groups
+            j.field "sigalgs", rule.effective_sigalgs
+            j.field "ciphers", rule.effective_ciphers
+            j.field "ciphersuites", rule.effective_ciphersuites
+            j.field "alpn" { j.array { rule.effective_alpn.each { |p| j.string p } } }
+            j.field "session_tickets", rule.effective_session_tickets?
+            j.field "ocsp_stapling", rule.effective_ocsp_stapling?
+            j.field "legs" do
+              j.array do
+                TLS_FINGERPRINT_LEGS.each do |(leg, leg_alpn)|
+                  report = tls_fingerprint_report(entry, leg_alpn)
+                  j.object do
+                    j.field "leg", leg
+                    offer = Proxy::Tls::ClientShape.alpn_offer(leg_alpn, rule.effective_alpn)
+                    j.field "alpn_offered" { j.array { (offer || [] of String).each { |p| j.string p } } }
+                    if report
+                      j.field "ja3", report.ja3
+                      j.field "ja3_text", report.ja3_text
+                      j.field "ja4", report.ja4
+                      j.field "ja4_r", report.ja4_r
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
   end
 end

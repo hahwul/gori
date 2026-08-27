@@ -1,5 +1,9 @@
 require "json"
 require "../host_pattern"
+require "./tls_presets"
+# The validator for `groups` / `sigalgs` / `ciphersuites` / `alpn` asks the OpenSSL that will
+# consume them, rather than re-implementing four grammars here — see ClientShape.
+require "../proxy/tls/client_shape"
 
 # OUTBOUND TLS section (settings.json "outbound_tls"): per-destination TLS policy for the
 # connections gori MAKES — a client certificate to present, and the protocol/cipher floor to
@@ -36,6 +40,25 @@ module Gori::Settings
   # ONLY) was therefore unreachable: the two knobs together could not say "negotiate TLS 1.2
   # with AES128-SHA", which is the test they exist for. Nor could an operator ask "does this
   # target still accept TLS 1.0?", because gori could not be made to OFFER only that.
+  # The FINGERPRINT half of the record, added for #822. `ciphers` above governs TLS 1.2 and
+  # below; everything here is what an anti-bot stack actually reads off the ClientHello:
+  #
+  #   `preset`          — a named browser approximation (see tls_presets.cr). Fields set on the
+  #                       rule itself WIN over it, so a preset is a starting point.
+  #   `groups`          — supported_groups / key_share order, e.g. "X25519:P-256:P-384".
+  #   `sigalgs`         — signature_algorithms order.
+  #   `ciphersuites`    — the TLS 1.3 suites, which `ciphers` CANNOT reach.
+  #   `alpn`            — the ordered ALPN list. Today's single-protocol offer is already a tell:
+  #                       a browser offers `h2` AND `http/1.1`.
+  #   `session_tickets` — nil = OpenSSL's default (on). false adds SSL_OP_NO_TICKET, dropping
+  #                       the `session_ticket` extension from the hello.
+  #   `ocsp_stapling`   — nil = OpenSSL's default (off). true adds `status_request`, which every
+  #                       browser sends and stock OpenSSL does not.
+  #
+  # The two booleans are NILABLE and that is not decoration: with a preset in play, "the
+  # operator did not say" and "the operator said false" have to be different answers, or a
+  # preset would override an explicit `false` (or an explicit `false` could never be
+  # distinguished from the field's default and so could never override a preset's `true`).
   record OutboundTlsRule,
     host : String,
     client_cert : String = "",
@@ -43,7 +66,14 @@ module Gori::Settings
     min_version : String = "",
     max_version : String = "",
     ciphers : String = "",
-    permissive : Bool = false do
+    permissive : Bool = false,
+    preset : String = "",
+    groups : String = "",
+    sigalgs : String = "",
+    ciphersuites : String = "",
+    alpn : Array(String) = [] of String,
+    session_tickets : Bool? = nil,
+    ocsp_stapling : Bool? = nil do
     # Whether this rule asks for mutual TLS. Both halves are required — OpenSSL needs the
     # chain and the key, and a half-configured pair would fail the handshake with a message
     # that points at the origin rather than at the settings file.
@@ -51,20 +81,99 @@ module Gori::Settings
       !client_cert.empty? && !client_key.empty?
     end
 
+    # The named preset this rule builds on, or nil. An unknown name resolves to nil rather
+    # than raising: `parse_outbound_tls` already drops one, and the save-time validator is
+    # where a typo is reported.
+    def preset_profile : TlsPreset?
+      TLS_PRESETS[preset]?
+    end
+
+    # ── effective values ───────────────────────────────────────────────────────────────────
+    #
+    # What actually reaches the SSL context: the rule's own value when it set one, else the
+    # named preset's, else OpenSSL's default. Read these, never the raw fields, anywhere the
+    # handshake or a report is built — the raw fields are what the operator TYPED, and the
+    # difference between the two is exactly what a preset is for.
+
+    def effective_ciphers : String
+      ciphers.presence || preset_profile.try(&.ciphers) || ""
+    end
+
+    def effective_groups : String
+      groups.presence || preset_profile.try(&.groups) || ""
+    end
+
+    def effective_sigalgs : String
+      sigalgs.presence || preset_profile.try(&.sigalgs) || ""
+    end
+
+    def effective_ciphersuites : String
+      ciphersuites.presence || preset_profile.try(&.ciphersuites) || ""
+    end
+
+    # `dup` on the preset branch: a `TlsPreset`'s `alpn` is one array shared by every preset
+    # that names it, and this value travels out through `ClientShape.alpn_offer` (which returns
+    # it verbatim on the h2 leg) into the CLI report. One `sort!`/`uniq!`/`<<` added downstream
+    # would rewrite every preset's ALPN for the whole process, and contexts already cached
+    # under the old `cache_key` would keep serving the old offer.
+    def effective_alpn : Array(String)
+      return alpn unless alpn.empty?
+      preset_profile.try(&.alpn.dup) || [] of String
+    end
+
+    # `stated` first, and only then the preset — see the record's note on why these two are
+    # nilable. `|| default` would be wrong here: it cannot tell a preset's explicit `false`
+    # from "the preset said nothing".
+    def effective_session_tickets? : Bool
+      stated = session_tickets
+      return stated unless stated.nil?
+      profile = preset_profile
+      profile ? profile.session_tickets : true # OpenSSL offers session tickets by default
+    end
+
+    def effective_ocsp_stapling? : Bool
+      stated = ocsp_stapling
+      return stated unless stated.nil?
+      profile = preset_profile
+      profile ? profile.ocsp_stapling : false # OpenSSL does not request stapling by default
+    end
+
     # True when the rule changes nothing, so the shared default context can be reused.
     def default? : Bool
-      !client_auth? && min_version.empty? && max_version.empty? && ciphers.empty? && !permissive
+      !client_auth? && min_version.empty? && max_version.empty? && ciphers.empty? &&
+        !permissive && preset.empty? && groups.empty? && sigalgs.empty? &&
+        ciphersuites.empty? && alpn.empty? && session_tickets.nil? && ocsp_stapling.nil?
     end
 
     # A stable identity for this policy, used as part of the TLS context cache key. Contexts
     # are shared per distinct policy, so this MUST cover every field that mutates the context —
-    # a field left out here means an edit silently reuses the first context built.
+    # a field left out here means an edit silently reuses the first context built, and (since
+    # #822) that two destinations configured with DIFFERENT FINGERPRINTS would quietly share
+    # one SSL_CTX and send the same ClientHello to both.
+    #
     # Joined on a NUL escape, which no path or cipher string can contain, so two distinct
-    # policies can never collide into one key. Built with join, not string interpolation:
-    # inside a `record` block body the interpolation form does not compile here.
+    # policies can never collide into one key. The booleans are three-valued because they are
+    # three-valued on the record. Built with join, not string interpolation: inside a `record`
+    # block body the interpolation form does not compile here.
     def cache_key : String
       return "" if default?
-      [client_cert, client_key, min_version, max_version, ciphers, permissive.to_s].join('\0')
+      [client_cert, client_key, min_version, max_version, ciphers, permissive.to_s,
+       preset, groups, sigalgs, ciphersuites, alpn_key,
+       tristate(session_tickets), tristate(ocsp_stapling)].join('\0')
+    end
+
+    # `alpn` flattened LENGTH-PREFIXED rather than joined on a delimiter. An ALPN identifier is
+    # an arbitrary byte string and a hand-edited file is not required to hold to
+    # `ClientShape::ALPN_SUPPORTED` — so `["h2,http/1.1"]` (one bogus protocol) and
+    # `["h2", "http/1.1"]` (two real ones) would flatten to the same comma-joined text, share
+    # one SSL context, and send one of them the other's ClientHello. That is precisely the
+    # collision this whole method exists to make impossible, so no delimiter is chosen at all.
+    private def alpn_key : String
+      String.build { |io| alpn.each { |p| io << p.bytesize << ':' << p } }
+    end
+
+    private def tristate(value : Bool?) : String
+      value.nil? ? "" : value.to_s
     end
   end
 
@@ -111,6 +220,13 @@ module Gori::Settings
         parse_version(o["max_version"]?),
         o["ciphers"]?.try(&.as_s?).try(&.strip) || "",
         o["permissive"]?.try(&.as_bool?) || false,
+        parse_tls_preset(o["preset"]?),
+        o["groups"]?.try(&.as_s?).try(&.strip) || "",
+        o["sigalgs"]?.try(&.as_s?).try(&.strip) || "",
+        o["ciphersuites"]?.try(&.as_s?).try(&.strip) || "",
+        parse_alpn_list(o["alpn"]?),
+        o["session_tickets"]?.try(&.as_bool?),
+        o["ocsp_stapling"]?.try(&.as_bool?),
       )
     end
     out
@@ -122,6 +238,32 @@ module Gori::Settings
   private def self.parse_version(node : JSON::Any?) : String
     v = node.try(&.as_s?).try(&.strip.downcase) || ""
     TLS_VERSIONS.includes?(v) ? v : ""
+  end
+
+  # A preset NAME, normalised — and kept VERBATIM even when gori does not know it.
+  #
+  # Deliberately NOT `parse_version`'s shape, which folds an unknown value to "". Doing that
+  # here would delete the only evidence a typo ever existed: the rule would load as
+  # all-defaults, `outbound_tls_warnings` would have nothing to report, and gori would dial the
+  # host with its bare OpenSSL hello while the operator believed Chrome's was going out. An
+  # unknown name is the one case where silence is worse than a wrong value, because the whole
+  # point of the field is that you cannot see its effect. `preset_profile` still resolves to
+  # nil (so nothing is applied) and the startup warning names it.
+  private def self.parse_tls_preset(node : JSON::Any?) : String
+    node.try(&.as_s?).try(&.strip.downcase) || ""
+  end
+
+  # The ALPN list. A JSON array is the documented form; a plain STRING is also accepted and
+  # split on commas/whitespace, because `"alpn": "h2, http/1.1"` is what a hand-edit reaches
+  # for and silently loading it as "no ALPN configured" would be the section's own
+  # silent-no-op failure. Entries are NOT case-folded — an ALPN identifier is a byte string,
+  # and `H2` is not `h2` on the wire.
+  private def self.parse_alpn_list(node : JSON::Any?) : Array(String)
+    return [] of String unless node
+    if arr = node.as_a?
+      return arr.compact_map { |e| e.as_s?.try(&.strip.presence) }
+    end
+    (node.as_s? || "").split(/[,\s]+/).compact_map(&.strip.presence)
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Through the
@@ -145,10 +287,50 @@ module Gori::Settings
             j.field "max_version", r.max_version unless r.max_version.empty?
             j.field "ciphers", r.ciphers unless r.ciphers.empty?
             j.field "permissive", r.permissive if r.permissive
+            serialize_outbound_tls_fingerprint(j, r)
           end
         end
       end
     end
+  end
+
+  # Every configured rule gori would not be able to apply, as operator-facing lines.
+  #
+  # Consulted at STARTUP, and that is the point: this table is the one section with no in-app
+  # editor — `gori settings --edit` opens the JSON — so `outbound_tls_error` had no save to run
+  # at, and a typo in `groups` (or a client certificate that has since been deleted) showed up
+  # only as every dial to that host failing, with an OpenSSL message that reads like the
+  # ORIGIN's TLS leg refusing. A warning is the right severity: the rest of the table, and the
+  # rest of gori, still work.
+  def self.outbound_tls_warnings : Array(String)
+    outbound_tls.compact_map do |rule|
+      err = outbound_tls_error(rule) rescue nil
+      err ? "#{err} — the rule for #{rule.host}; TLS dials to that destination will fail" : nil
+    end
+  rescue
+    # This runs before the proxy binds, on both startup paths. A warning that can take the app
+    # down is worse than the problem it reports — the sibling it is modelled on
+    # (`Upstream.trust_store_warning`) is guarded at every level for the same reason.
+    [] of String
+  end
+
+  # The #822 ClientHello-shaping half of one row, split out so `serialize_outbound_tls` stays
+  # one loop rather than one loop and thirteen conditionals.
+  private def self.serialize_outbound_tls_fingerprint(j : JSON::Builder, r : OutboundTlsRule) : Nil
+    j.field "preset", r.preset unless r.preset.empty?
+    j.field "groups", r.groups unless r.groups.empty?
+    j.field "sigalgs", r.sigalgs unless r.sigalgs.empty?
+    j.field "ciphersuites", r.ciphersuites unless r.ciphersuites.empty?
+    unless r.alpn.empty?
+      j.field "alpn" do
+        j.array { r.alpn.each { |p| j.string p } }
+      end
+    end
+    # Written only when STATED. Emitting the effective value would bake a preset's choice into
+    # the file as if the operator had typed it, and the next release's preset edit would then
+    # be silently overridden by its own former self.
+    r.session_tickets.try { |v| j.field "session_tickets", v }
+    r.ocsp_stapling.try { |v| j.field "ocsp_stapling", v }
   end
 
   # nil if `rule` is usable; an error message otherwise. Checked at save time so a
@@ -157,6 +339,9 @@ module Gori::Settings
   def self.outbound_tls_error(rule : OutboundTlsRule) : String?
     return "settings: outbound TLS rule needs a host pattern" if rule.host.strip.empty?
     if err = protocol_range_error(rule)
+      return err
+    end
+    if err = fingerprint_error(rule)
       return err
     end
     cert = rule.client_cert
@@ -173,6 +358,49 @@ module Gori::Settings
     # message can say what to do, rather than at the first dial.
     return "settings: client_key is passphrase-protected; decrypt it first (openssl pkey -in #{key} -out key.pem)" if encrypted_key?(key)
     nil
+  end
+
+  # The ClientHello-shaping half of outbound_tls_error (#822). Every check here asks the
+  # OpenSSL that will consume the value (see `Tls::ClientShape`), so it answers for THIS build
+  # rather than for a grammar re-implemented in the settings layer.
+  #
+  # TWO passes, and they are not the same question. The first asks about the strings the
+  # OPERATOR typed and names the setting; the second asks about the values a PRESET
+  # contributes, and names the preset. Checking only the raw fields would leave a preset
+  # unvalidated on the build that has to run it — and a preset that this OpenSSL refuses
+  # raises at the first dial, on a host the operator chose it for, with a message that reads
+  # like the origin's TLS leg refusing. `effective_*` equals the raw value whenever the rule
+  # set one, so the second pass only ever exercises what the preset actually supplied.
+  #
+  # `permissive` is threaded through because `Upstream.apply_outbound_tls` drops the security
+  # level to 0 BEFORE these knobs; a validator that did not would answer for a different
+  # context than the dial builds.
+  #
+  # `ciphers` is NOT validated. It is the one pre-existing field, it predates this check, and
+  # refusing input the dial accepts is worse for it than saying nothing.
+  private def self.fingerprint_error(rule : OutboundTlsRule) : String?
+    unless rule.preset.empty? || TLS_PRESETS.has_key?(rule.preset)
+      return "settings: outbound TLS preset must be one of #{TLS_PRESET_NAMES.join(", ")} " \
+             "(got #{rule.preset.inspect})"
+    end
+    if err = shape_error(rule, rule.groups, rule.sigalgs, rule.ciphersuites, rule.alpn)
+      return err
+    end
+    return nil unless rule.preset_profile
+    err = shape_error(rule, rule.effective_groups, rule.effective_sigalgs,
+      rule.effective_ciphersuites, rule.effective_alpn)
+    err ? "settings: the #{rule.preset.inspect} outbound TLS preset is not usable on this " \
+          "OpenSSL build — #{err.lchop("settings: ")}" : nil
+  end
+
+  # The four shape checks in one place, so the raw pass and the preset pass cannot drift.
+  private def self.shape_error(rule : OutboundTlsRule, groups : String, sigalgs : String,
+                               ciphersuites : String, alpn : Array(String)) : String?
+    permissive = rule.permissive
+    Proxy::Tls::ClientShape.groups_error(groups, permissive) ||
+      Proxy::Tls::ClientShape.sigalgs_error(sigalgs, permissive) ||
+      Proxy::Tls::ClientShape.ciphersuites_error(ciphersuites, permissive) ||
+      Proxy::Tls::ClientShape.alpn_error(alpn)
   end
 
   # The floor/ceiling half of outbound_tls_error, split out so neither method carries the
