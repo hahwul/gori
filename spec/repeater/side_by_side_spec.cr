@@ -2,6 +2,8 @@ require "../spec_helper"
 
 include Gori::Repeater
 
+private alias Diff = Gori::Repeater::Diff
+
 describe Gori::Repeater::SideBySide do
   it "marks identical inputs as all Same" do
     a = ["one", "two", "three"]
