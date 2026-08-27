@@ -2,6 +2,7 @@ require "termisu"
 require "../capture_lock"
 require "../open_lock"
 require "../capture_status"
+require "../agent_presence"
 require "../project"
 require "../project_registry"
 require "../update"
@@ -42,7 +43,8 @@ module Gori::Tui
     # the filesystem on every visible project row every frame.
     RUNNING_PROBE_TTL = 400.milliseconds
 
-    record RunningProbe, at : Time::Instant, held : Bool, status : CaptureStatus::Status?
+    record RunningProbe, at : Time::Instant, held : Bool, status : CaptureStatus::Status?,
+      agents : Int32 = 0
 
     # One row in the project-list space menu (mnemonic key → action).
     record SpaceEntry, key : Char, label : String, action : Symbol
@@ -1534,12 +1536,16 @@ module Gori::Tui
           bg = is_selected ? Theme.accent_bg : (marked ? Theme.selection_dim : Theme.panel)
           screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected || marked
           screen.cell(box.x + 1, py, marked ? '▌' : (is_selected ? '▎' : ' '), Theme.accent, bg)
-          meta, meta_fg = project_meta(proj)
-          mdw = Screen.display_width(meta)
+          segments = project_meta(proj)
+          # Width of the whole meta cell: every segment plus a " · " separator between each.
+          mdw = segments.sum { |(text, _)| Screen.display_width(text) } + 3 * (segments.size - 1)
           name_w = cw - 3 - (mdw + 2)
           screen.text(box.x + 3, py, proj.name, is_selected || marked ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
-          meta_x = box.right - mdw - 2
-          screen.text(meta_x, py, meta, meta_fg, bg) unless meta.empty?
+          mx = box.right - mdw - 2
+          segments.each_with_index do |(text, fg), si|
+            mx = screen.text(mx, py, " · ", Theme.muted, bg) if si > 0
+            mx = screen.text(mx, py, text, fg, bg)
+          end
         end
       end
 
@@ -1996,40 +2002,72 @@ module Gori::Tui
       @running_cache.clear
     end
 
-    private def project_meta(proj : Project) : {String, Color}
-      held, status = probe_running(proj)
-      if held
-        if status && status.listening
-          {"● #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.green}
-        elsif status
-          {"● off · #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.yellow}
-        else
-          {"● off", Theme.yellow}
-        end
-      else
-        meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
-        {meta, Theme.muted}
+    private def project_meta(proj : Project) : Array({String, Color})
+      held, status, agents = probe_running(proj)
+      idle = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+      ProjectPicker.meta_segments(held, status, agents, idle)
+    end
+
+    # The row's meta cell, as an ordered list of coloured segments (#815). Split from the probe
+    # so a spec pins the composition rule without a live filesystem. `agents == 0` yields the
+    # byte-identical SINGLE segment `project_meta` returned before this change, so a picker with
+    # no attached agents renders exactly as it always did. When agents are present, an accent
+    # `mcp`/`mcp×N` segment leads, and the capture chip (or idle time) keeps the right-edge
+    # anchor — so a row reads `mcp · ● 127.0.0.1:8070` or `mcp · 3m ago`.
+    def self.meta_segments(held : Bool, status : CaptureStatus::Status?, agents : Int32,
+                           idle : String) : Array({String, Color})
+      right = if held
+                if status && status.listening
+                  {"● #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.green}
+                elsif status
+                  {"● off · #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.yellow}
+                else
+                  {"● off", Theme.yellow}
+                end
+              else
+                {idle, Theme.muted}
+              end
+      chip = agent_chip(agents)
+      chip.empty? ? [right] : [{chip, Theme.accent}, right]
+    end
+
+    # The picker's compact agent segment: "" / "mcp" / "mcp×N". Narrower than the top bar's
+    # `mcp:<client>` because a picker row has no space for a name and the count is the useful
+    # fact here.
+    def self.agent_chip(agents : Int32) : String
+      case
+      when agents <= 0 then ""
+      when agents == 1 then "mcp"
+      else                  "mcp×#{agents}"
       end
     end
 
-    private def probe_running(proj : Project) : {Bool, CaptureStatus::Status?}
+    private def probe_running(proj : Project) : {Bool, CaptureStatus::Status?, Int32}
       now = Time.instant
       if cached = @running_cache[proj.dir]?
-        return {cached.held, cached.status} if now - cached.at < RUNNING_PROBE_TTL
+        return {cached.held, cached.status, cached.agents} if now - cached.at < RUNNING_PROBE_TTL
       end
-      held, status = fetch_running(proj.dir)
-      @running_cache[proj.dir] = RunningProbe.new(at: now, held: held, status: status)
-      {held, status}
+      held, status, agents = fetch_running(proj)
+      @running_cache[proj.dir] = RunningProbe.new(at: now, held: held, status: status, agents: agents)
+      {held, status, agents}
     end
 
-    private def fetch_running(dir : String) : {Bool, CaptureStatus::Status?}
-      held = CaptureLock.held?(dir)
-      return {false, nil} unless held
-      status = CaptureStatus.read(dir)
-      status ||= CaptureStatus.read(dir) # retry once after a concurrent write
-      {true, status}
-    rescue IO::Error | File::Error
-      {false, nil}
+    private def fetch_running(proj : Project) : {Bool, CaptureStatus::Status?, Int32}
+      # A project an MCP client is bound to has no capture lock, so the agents probe is a
+      # SIBLING of the held branch, not nested under it — otherwise an mcp-only project would
+      # read as idle. `AgentPresence.count` never raises (it returns 0 on any hiccup) and skips
+      # the marker-body read the picker does not need — so it sits OUTSIDE the begin below, and
+      # the capture-probe rescue reports the count it already has rather than discarding it.
+      agents = AgentPresence.count(proj.db_path)
+      begin
+        held = CaptureLock.held?(proj.dir)
+        return {false, nil, agents} unless held
+        status = CaptureStatus.read(proj.dir)
+        status ||= CaptureStatus.read(proj.dir) # retry once after a concurrent write
+        {true, status, agents}
+      rescue IO::Error | File::Error
+        {false, nil, agents}
+      end
     end
 
     private def relative_time(span : Time::Span) : String
