@@ -145,9 +145,13 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--view=NAME` | Apply a saved [view](#run-views) — its query is **ANDed with** `-q`, never replacing it, exactly as the TUI's `v` picker layers over the filter bar. An unknown name is refused (and names the ones that exist) rather than ignored. Listing only |
 | `--in-scope` | Only flows in the project's configured scope — the TUI's ⇧S lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--lenient` | Don't refuse a query naming an unknown field — search that token as text |
+| `--column=SPEC` | Show an extracted value per row (repeatable). `[LABEL=][req\|res:]kind:selector` — e.g. `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. Any `--column` **replaces** this project's configured [History columns](/guide/proxy/#columns) |
+| `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` / `jsonl` (both JSON-Lines), or `har` |
 
 Subcommands: `history show <id>` (same as `run show`), `history delete <id>`, `history delete -q QL --yes`, `history clear --yes`.
+
+This project's [History columns](/guide/proxy/#columns) are drawn by default, so a headless listing shows what the TUI's History tab shows; `--no-columns` is the way back to the plain listing. In `text` they print as `label=value` after the row (every column, empty ones included — "the descriptor found nothing here" is an answer worth seeing); in `json` they arrive as a `columns` object, absent when no column is defined. A `=` separates the label only when it comes *before* the first `:`, so `regex:token=(\w+)` is the pattern and not a column named `regex:token`. Each column costs one extra read per printed row, and up to 512 KiB of body for the three body-scoped kinds.
 
 Each `json`/`jsonl` row carries the flow's absolute `url` and a compact `headers` object for the request (a repeated header name becomes an array). Bodies are not inlined — that is `run show`.
 

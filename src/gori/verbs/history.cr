@@ -52,6 +52,15 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("v")],
         available: in_history, mnemonic: 'v', group: :view) { |ctx| ctx.history_view_pick; nil }
 
+      # Menu-only, no chord. A column set is arranged ONCE and then read for the rest of the
+      # engagement — the opposite shape from `v`, which is flipped many times an hour and earns
+      # its bare key on that traffic. `C` is free across Body COMMON (the only other 'C' in the
+      # registry is Comparer-scoped), and 'c' is already a Global chord (capture).
+      r.register Verb::Definition.new(
+        "history.columns", "Columns…", "Add, reorder or remove the values the list draws beside each flow (a header, a JSON field, a regex capture)",
+        Verb::Scope::Body,
+        available: in_history, mnemonic: 'C', group: :view) { |ctx| ctx.history_columns_edit; nil }
+
       # --- multi-select marks (#442) ---
       # Marks make the EXISTING space menu act on N flows — every batch verb below reads
       # ctx.selected_flow_ids ("marks if any, else the cursor row"), so there are no

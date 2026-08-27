@@ -78,6 +78,11 @@ module Gori::Tui
     # reads. One pair rather than four kinds — the modal is the same in both tabs, only
     # its rows and its injected on_commit differ.
     NamePrompt
+    # The History tab's user-defined columns (#819): a LIST card (pick / reorder / delete) and
+    # the per-column FORM it hands off to. Two members, for the reason AuthorizeIdentities gives
+    # — the list stays the thing the form returns to.
+    Columns
+    Column
     LibraryPick
     # Prompt-tier pickers. These two name a modal that `@overlay` NEVER holds: copy-as
     # and send-to float over whatever is underneath (a tab body OR the History detail

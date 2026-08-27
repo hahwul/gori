@@ -19,6 +19,7 @@ module Gori::Tui
       @history = HistoryView.new
       @history.set_scope(@host.session.scope)
       @history.set_colormarker(@host.session.colormarker)
+      reload_columns
       @query_reload_at = nil.as(Time::Instant?)
       # A view that has gone missing since it was picked. Held rather than announced here: this
       # runs while the shell is still booting, where a status line is overwritten before anyone
@@ -85,6 +86,10 @@ module Gori::Tui
         body_here = body_focused && !@history.detail_strip_focus?
         BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_detail(screen, inner, focused: body_here, strip_focused: strip_here) }
       else
+        # The list's user-defined columns (#819) read flow bytes for the rows they are about to
+        # draw, and the list holds no store of its own — same seam, and same reason, as the
+        # preview cache one line down.
+        @history.set_column_store(@host.session.store)
         @history.refresh_preview(@host.session.store) if @history.preview_enabled?
         BodyChrome.framed(screen, rect, body_focused) do |inner|
           @history.render_list(screen, inner, focused: body_focused,
@@ -408,7 +413,15 @@ module Gori::Tui
       true
     end
 
+    # Re-read this project's History columns. Called at boot, on tab entry, when a peer's edit
+    # lands, and by the Runner right after the editor commits — the list itself never reads the
+    # table, so this is the one place the two can go out of step.
+    def reload_columns : Nil
+      @history.set_columns(Gori::DisplayColumns.load(@host.session.store))
+    end
+
     def on_enter : Nil
+      reload_columns
       # Re-resolve BEFORE the reload, and not only in `on_external_change`: the runner
       # dispatches that to `@tabs[@active_tab]` alone, so a peer deleting the active view while
       # the operator sat on another tab left History filtering by a view that no longer exists —
@@ -429,6 +442,7 @@ module Gori::Tui
     end
 
     def on_external_change : Nil
+      reload_columns
       # A peer can create, edit or DELETE a view between frames — through the CLI, through MCP,
       # or from another gori against the same project. Re-resolving here (rather than only at
       # construction) is what keeps the chip and the list agreeing with the stores.

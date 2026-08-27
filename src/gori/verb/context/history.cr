@@ -27,8 +27,9 @@ abstract class Gori::Verb::ExecContext
   abstract def history_mark_extend(delta : Int32) : Nil # ⇧↑/⇧↓: extend a range from the anchor
 
   abstract def copy_selection : Nil
-  abstract def history_query : Nil     # focus the QL filter bar
-  abstract def history_view_pick : Nil # open the view picker (#776)
+  abstract def history_query : Nil        # focus the QL filter bar
+  abstract def history_view_pick : Nil    # open the view picker (#776)
+  abstract def history_columns_edit : Nil # open the user-defined column editor (#819)
   # History destructive actions (space-menu only; each opens a confirm first).
   abstract def history_delete : Nil # delete the selected/open flow
   abstract def history_clear : Nil  # wipe every History flow for this project

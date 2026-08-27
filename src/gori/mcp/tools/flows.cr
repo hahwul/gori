@@ -63,6 +63,20 @@ module Gori
             scope_unconfigured = true
           end
         end
+        # User-defined columns (#819): the values QL can filter on but never show — a header, a
+        # JSON field, a regex capture, per row. OPT-IN and never the project's configured set,
+        # unlike `gori run history`: a per-row block an agent did not ask for is paid for on
+        # every row of a 500-row page, which is the same argument that keeps `headers` off this
+        # feed (see `CLI::Output.flow_row_fields`).
+        #
+        # Parsed BEFORE the FTS drain below, which is a WRITE: a call that is going to be
+        # refused must not take a write lock on its way to the refusal.
+        prepared = Gori::DisplayColumns.prepare([] of Store::DisplayColumn)
+        if (specs = str_list(h, "columns")) && !specs.empty?
+          parsed = Gori::DisplayColumns.parse_specs(specs)
+          return err(parsed, "INVALID_ARGUMENT", field: "columns") if parsed.is_a?(String)
+          prepared = Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
+        end
         # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
         # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it —
         # or refuse, when this server is read-only and therefore cannot drain (see the helper).
@@ -80,7 +94,19 @@ module Gori
           else
             store.recent_flows(limit, before_id, since_id)
           end
-        Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r) } } })
+        Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } } })
+      end
+
+      # One row's user-column values as `{label, value}` pairs, or nil when none were asked for.
+      #
+      # ONE capped read per RETURNED row, and none at all for a set that reads only heads — the
+      # same P8 discipline the TUI row loop keeps, applied to a page already bounded by `limit`.
+      private def row_columns(row : Store::FlowRow,
+                              prepared : Gori::DisplayColumns::Prepared) : Array({String, String})?
+        return nil if prepared.empty?
+        detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? Gori::DisplayColumns::BODY_CAP : 0)
+        values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
+        prepared.columns.map_with_index { |c, i| {c.label, values[i]? || ""} }
       end
 
       # #124 AI event feed. Forward-cursored (id > since, oldest-first). next_cursor is the
@@ -287,6 +313,7 @@ module Gori
           s.field "view", strprop("apply a saved History view by name (list_views) — its query is ANDed OVER `query`, never replacing it, the same way the TUI's `v` picker layers over the filter bar. Built-ins: All, History (src:proxy), 'History + Repeater'. An unknown name is refused rather than ignored")
           s.field "in_scope", boolprop("only flows in the project's configured scope (the TUI ⇧S lens; capture still records everything). Empty result when no scope rules exist. Default false. For finer control use the QL terms `scope:in` / `scope:out` in `query`, which negate and group like any other term (ql_explain reports whether the project has scope rules at all)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
+          s.field "columns", strarrprop("extract a value out of each returned flow and carry it on the row under `columns` — what QL can FILTER on but never shows. Each spec is [LABEL=][req|res:]kind:selector, kind being cookie|header|regex|position|jsonpath: e.g. \"header:x-request-id\", \"req:header:authorization\", \"RID=jsonpath:data.id\", \"regex:token=(\\w+)\", \"position:0:32\". Side defaults to the RESPONSE; a label defaults to the selector. A descriptor that matches nothing yields \"\" — an empty string is a MISS, not an empty value. Costs one extra read per row (and, for the three body-scoped kinds, up to 512 KiB of body each), so ask only for what you will read")
         end
 
         tool j, "list_events",

@@ -18,6 +18,7 @@ require "./viewport"
 require "./copy_menu"
 require "./preview_split"
 require "../store"
+require "../display_columns"
 require "../repeater/flow_request"
 require "../ql"
 require "../scope"
@@ -45,6 +46,10 @@ module Gori::Tui
     # cell plus a one-column gap. See render_list_body.
     STRIP_W    =   2
     TRIM_SLACK = 512
+    # Cap on remembered user-column values (#819), and the answer for a list with no columns —
+    # one shared empty array rather than a fresh allocation per row per frame.
+    COL_CACHE_MAX       = 4096
+    EMPTY_COLUMN_VALUES = [] of String
     # Cap on h2 frames / WS messages loaded into a detail view. A long-lived WS
     # (100k+ messages) or a heavily-multiplexed h2 connection would otherwise
     # materialize the whole log (objects + payloads + built lines) on detail-open.
@@ -118,6 +123,31 @@ module Gori::Tui
       @host_suggest_values = [] of String
       # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
       @popup = SuggestPopup.new
+      # User-defined columns (#819) and the values they have already been asked for.
+      #
+      # Keyed by `{id, created_at, state}`, and every part of that is load-bearing.
+      #
+      # NOT id alone: `flows.id` is a REUSABLE rowid, so a `history clear` (or deleting the
+      # newest flow) restarts numbering and the next capture lands on an id this memo may still
+      # be holding — which would paint one flow's extracted values on a different flow's row, the
+      # one failure a display column must never have. The capture instant settles it: a reused
+      # rowid belongs to a flow recorded later.
+      #
+      # And `state`, because it is the ONLY thing that changes a flow's bytes after it is first
+      # drawn: a Pending row has no response yet, and its answer stops being provisional the
+      # moment one lands. Keying on it means a Pending row is cached like any other and simply
+      # re-extracted once under its new key — where refusing to cache Pending at all re-read the
+      # top of the list, which during live capture is exactly where the Pending rows are, on
+      # every single frame.
+      #
+      # The memo is what makes P8 hold here: a value is computed the first time its row is drawn
+      # and never again, so scrolling costs one read per newly visible row rather than a
+      # re-extract of the whole screenful every frame.
+      @columns = Gori::DisplayColumns::Prepared.new([] of Store::DisplayColumn)
+      @col_values = {} of {Int64, Int64, Store::FlowState} => Array(String)
+      # The store the row bytes are read from. Set by HistoryController on the render path,
+      # beside `refresh_preview` — the list itself never opens one.
+      @col_store = nil.as(Store?)
       @scope = nil.as(Scope?)
       # The active VIEW (#776) — a named QL query ANDed over the bar, the way the ⇧S scope lens
       # is. Nil until `set_view`, exactly like @scope: every construction site outside
@@ -356,6 +386,65 @@ module Gori::Tui
 
     def set_colormarker(cm : Colormarker) : Nil
       @colormarker = cm
+    end
+
+    # --- user-defined columns (#819) -------------------------------------------------------
+
+    # The columns this project defines, left to right. Set by HistoryController from the store
+    # at boot, on tab entry, when a peer's edit lands, and after the editor commits.
+    def set_columns(columns : Array(Store::DisplayColumn)) : Nil
+      return if @columns.columns == columns
+      @columns = Gori::DisplayColumns::Prepared.new(columns)
+      # Every cached value was extracted by the OLD descriptors; keeping them would paint one
+      # column's values under another's header for as long as the rows stayed on screen.
+      forget_column_values
+    end
+
+    def columns : Array(Store::DisplayColumn)
+      @columns.columns
+    end
+
+    # Drop every remembered value. The next draw refills what is on screen.
+    def forget_column_values : Nil
+      @col_values.clear
+    end
+
+    # Where the row loop reads flow bytes from. Nil until the controller sets it, in which case
+    # every user column draws blank — the same answer a descriptor that matches nothing gives,
+    # and the list itself never opens a store.
+    def set_column_store(store : Store) : Nil
+      @col_store = store
+    end
+
+    # The values for the first `count` columns of one row, computed once and remembered.
+    #
+    # Only rows that are ON SCREEN reach here (the draw loop is bounded by `list_h`), which is
+    # the whole of P8 on this feature: no projection is built, no index is written, and a
+    # 5000-row window costs exactly what its ~50 visible rows cost.
+    private def column_values(row : Store::FlowRow, count : Int32) : Array(String)
+      return EMPTY_COLUMN_VALUES if count <= 0
+      key = {row.id, row.created_at, row.state}
+      # `>= count` and not merely present: a resize can widen the pane and grant a column the
+      # cached array was never asked to hold. Narrowing reuses the wider array untouched, so the
+      # common resize costs nothing.
+      if (cached = @col_values[key]?) && cached.size >= count
+        return cached
+      end
+      store = @col_store
+      return EMPTY_COLUMN_VALUES unless store
+      # The body budget is asked of the GRANTED prefix, not of the whole set: a column the pane
+      # is too narrow to draw must not cost a 512 KiB BLOB read and a content-decode per row for
+      # a cell nothing paints.
+      detail = store.get_flow(row.id,
+        body_max: @columns.body_scoped?(count) ? Gori::DisplayColumns::BODY_CAP : 0)
+      return Array.new(count, "") unless detail
+      values = @columns.values(detail, count)
+      # A bound the window itself cannot reach: MAX_ROWS is 5000 and the cache only ever gains a
+      # row that was drawn, so this fires on a long session of scrolling rather than on a
+      # screenful. Dropped whole rather than aged — the next draw refills what is visible.
+      @col_values.clear if @col_values.size >= COL_CACHE_MAX
+      @col_values[key] = values
+      values
     end
 
     # Which rule paints `row`, or nil.
@@ -946,6 +1035,11 @@ module Gori::Tui
       close_detail if @detail.try(&.row.id).try { |d| ids.includes?(d) }
       clear_preview if @preview_id.try { |p| ids.includes?(p) }
       unmark_ids(ids)
+      # `flows.id` is a REUSABLE rowid, so a delete is the one event after which a memo keyed by
+      # id could be asked about a DIFFERENT flow. The `{id, created_at, state}` key already makes
+      # that collision require a shared capture microsecond; dropping the memo here removes it
+      # outright for every deletion gori itself performs.
+      forget_column_values
       reload(store)
       true
     end
@@ -961,6 +1055,7 @@ module Gori::Tui
       close_detail
       clear_preview
       clear_marks
+      forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
       reload(store)
       ok
     end
@@ -2156,6 +2251,15 @@ module Gori::Tui
         cluster_w += 6
         spare -= 6
       end
+      # User-defined columns (#819) are granted right after SRC — ahead of TYPE/SIZE/DUR — and
+      # that priority is the point: they are the only cells in this row nobody sees unless they
+      # asked for them, so a terminal too narrow for everything keeps what the operator defined
+      # and drops the defaults, which are one keystroke away in the detail pane. They are also
+      # granted as a PREFIX and never with a gap: the set is read left to right, and a middle
+      # column silently missing would make the row lie about which value is which.
+      shown_cols, cols_w = granted_columns(spare)
+      cluster_w += cols_w
+      spare -= cols_w
       if show_type = spare >= 7
         cluster_w += 7
         spare -= 7
@@ -2176,6 +2280,13 @@ module Gori::Tui
       size_x = cx
       cx += 7 if show_size
       dur_x = cx
+      cx += 6 if show_dur
+      # The custom block sits at the far RIGHT of the cluster, after the built-ins. It is granted
+      # before them (above) and drawn after them, and the two orders are independent on purpose:
+      # priority decides what survives a narrow terminal, position decides what the eye scans
+      # past to reach it — and the built-in cluster is the one an operator reads without looking,
+      # so it keeps its place.
+      cols_x = cx
       mid = {status_x - host_x, 0}.max
       host_w = {(mid * 2 // 5).clamp(6, 40), mid}.min # never crosses STA even when pinned
       path_x = host_x + host_w + 1
@@ -2191,6 +2302,7 @@ module Gori::Tui
       screen.text(type_x, hdr_y, "TYPE", Theme.muted, width: 6) if show_type
       screen.text(size_x, hdr_y, "SIZE", Theme.muted, width: 6) if show_size
       screen.text(dur_x, hdr_y, "DUR", Theme.muted, width: 6) if show_dur
+      render_columns_header(screen, cols_x, hdr_y, shown_cols)
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
       list_top = hdr_y + 2
@@ -2345,12 +2457,59 @@ module Gori::Tui
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
+        render_columns_row(screen, cols_x, y, shown_cols, row, fg, bg)
       end
       # The busiest list in gori, and it had no position feedback at all: a 12-row window over
       # 400 flows looked exactly like a 12-row window over 12. `rect` is the framed interior,
       # so `rect.right` is the frame's own hairline — where `scroll_gauge` draws.
       Frame.scroll_gauge(screen, Rect.new(rect.x, list_top, rect.w, list_h),
         @rows.size, @scroll, focused)
+    end
+
+    # How many user columns fit in `spare` cells, and what they cost (each width plus its
+    # one-column gap). A PREFIX of the set — see the grant note in render_list_rows.
+    private def granted_columns(spare : Int32) : {Int32, Int32}
+      used = 0
+      n = 0
+      @columns.columns.each do |c|
+        w = Gori::DisplayColumns.width_of(c) + 1
+        break if spare - used < w
+        used += w
+        n += 1
+      end
+      {n, used}
+    end
+
+    # Each column is granted `width + 1` and DRAWN one cell in, so the spare cell is a LEADING
+    # gap rather than a trailing one. Both ends depend on it: the leading gap is what keeps the
+    # first column off DUR (whose own cell is granted flush, since it is normally last and a
+    # 6-wide duration would otherwise touch), and spending it at the front is what leaves the
+    # block ending exactly on the frame's hairline. Charged at the back, the last column's final
+    # cell fell off that hairline and the row's right margin moved by one the moment a column was
+    # configured.
+    private def render_columns_header(screen : Screen, x : Int32, y : Int32, count : Int32) : Nil
+      count.times do |i|
+        col = @columns.columns[i]
+        w = Gori::DisplayColumns.width_of(col)
+        # UPPERCASE like every other head here, and clamped to the cell — a label is operator
+        # text, so nothing bounds its length but this.
+        screen.text(x + 1, y, col.label.upcase, Theme.muted, width: w)
+        x += w + 1
+      end
+    end
+
+    private def render_columns_row(screen : Screen, x : Int32, y : Int32, count : Int32,
+                                   row : Store::FlowRow, fg : Color, bg : Color) : Nil
+      return if count == 0
+      values = column_values(row, count)
+      count.times do |i|
+        w = Gori::DisplayColumns.width_of(@columns.columns[i])
+        # A miss draws NOTHING — not the selector, not a dash. `—` is already SRC's word for
+        # "gori does not know", and a column whose descriptor simply did not match this message
+        # is not the same statement.
+        screen.text(x + 1, y, values[i]? || "", fg, bg, width: w)
+        x += w + 1
+      end
     end
 
     # Bottom preview pane: REQUEST | RESPONSE for the selected flow (settings:layout).

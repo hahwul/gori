@@ -30,7 +30,9 @@ describe Gori::Tui::SpaceMenu do
     # `D` deletes the row and `X` wipes the tab — the pairing Probe already had.
     menu.verb_for('D').try(&.id).should eq("history.delete")
     menu.verb_for('X').try(&.id).should eq("history.clear")
-    menu.verb_for('C').should be_nil # freed: 'C' is Send to Comparer in the Repeater/Fuzzer
+    # 'C' was free in Body until the History column editor claimed it (#819); the OTHER 'C'
+    # in the registry is Send to Comparer, which lives in the Repeater/Fuzzer scopes.
+    menu.verb_for('C').try(&.id).should eq("history.columns")
     menu.verb_for('Q').should be_nil # no entry bound to this key
   end
 

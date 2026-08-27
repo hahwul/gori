@@ -355,6 +355,8 @@ module Gori
         lenient = false
         in_scope = false
         view_name : String? = nil
+        column_specs = [] of String
+        no_columns = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -367,6 +369,8 @@ module Gori
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's ⇧S lens; capture still records everything)") { in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
+          p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines) | har (one HAR 1.2 log)") do |v|
             format = parse_format(v, [:text, :json, :jsonl, :har])
             format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
@@ -395,6 +399,16 @@ module Gori
         # leave a handle behind (the EMPTY-filter abort below has to `store.close` for exactly
         # that reason, and this one has nothing to close).
         Run.refuse_unknown_query_fields("history", query, lenient)
+        # BEFORE the store is opened, for the same reason the query refusal above is: `abort`
+        # skips ensure blocks, so a refused `--column` must not leave a handle behind.
+        # Refused, not resolved by declaration order: the two flags state opposite intentions,
+        # and this command aborts on an unknown query field and on a malformed `--column` spec
+        # one line down rather than picking one reading of a contradictory command line.
+        if !column_specs.empty? && no_columns
+          abort "gori run history: --column and --no-columns contradict each other — pass one"
+        end
+        ad_hoc = DisplayColumns.parse_specs(column_specs)
+        abort "gori run history: #{ad_hoc}" if ad_hoc.is_a?(String)
 
         # `body:` drains FTS, which is a write. Everything else is a read (#752).
         #
@@ -516,7 +530,32 @@ module Gori
             else
               store.recent_flows(limit)
             end
+          # Ad-hoc `--column` specs REPLACE the project's set rather than adding to it: the flag
+          # is the operator saying "this listing, these values", and a set half-configured in
+          # the TUI and half on the command line is a row whose meaning depends on a file the
+          # reader of the output cannot see.
+          columns =
+            if !ad_hoc.empty?
+              ad_hoc.map_with_index { |sp, i| sp.to_column(i) }
+            elsif no_columns
+              [] of Store::DisplayColumn
+            else
+              # The project's configured set by DEFAULT, so a headless listing shows what the
+              # TUI's History tab shows — which is the whole of the parity ask. `--no-columns`
+              # is the way back to the plain listing.
+              DisplayColumns.load(store)
+            end
+          prepared = DisplayColumns.prepare(columns)
           if format == :har
+            # Said out loud rather than dropped: a HAR log has no per-row field to carry an
+            # extracted value, and a `--column` that silently did nothing is the shape of silent
+            # failure this CLI refuses everywhere else.
+            #
+            # Keyed off the FLAG and not off `prepared`, which also holds the project's
+            # configured set: naming a flag the operator never passed would print this on every
+            # `--format har` run in any project that has a column, which is stderr noise in a
+            # script rather than a warning about anything they did.
+            STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
             emit_har(store, rows, query, view_label, limit)
           elsif format == :json
             # The same sentence the text and HAR branches print, on the same channel. JSON-Lines
@@ -528,15 +567,29 @@ module Gori
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
-            rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id)) }
+            rows.each { |r| puts CLI::Output.flow_row_json(r, store.request_head(r.id), row_columns(store, r, prepared)) }
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope)
           else
-            rows.each { |r| puts CLI::Output.flow_row_text(r) }
+            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared)) }
           end
         ensure
           store.close
         end
+      end
+
+      # One row's user-column values as `{label, value}` pairs, or nil when no column is defined.
+      #
+      # ONE capped read per PRINTED row and none at all for a set that reads only heads — the
+      # same P8 discipline the TUI row loop keeps, applied to a listing that is already bounded
+      # by `--limit`. A flow a peer deleted between the search and this read yields blanks rather
+      # than dropping the row: the row matched, and the listing has to say so.
+      private def self.row_columns(store : Store, row : Store::FlowRow,
+                                   prepared : DisplayColumns::Prepared) : Array({String, String})?
+        return nil if prepared.empty?
+        detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? DisplayColumns::BODY_CAP : 0)
+        values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
+        prepared.columns.map_with_index { |c, i| {c.label, values[i]? || ""} }
       end
 
       # The sentence an empty listing prints. It names EVERY lens that narrowed the answer, not

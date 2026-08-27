@@ -46,6 +46,8 @@ require "./rewriter_rule_overlay"
 require "./colormarker_rule_overlay"
 require "./custom_color_overlay"
 require "./extract_rule_overlay"
+require "./columns_overlay"
+require "./column_overlay"
 require "./rewriter_stub_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
@@ -132,6 +134,7 @@ require "./runner/session_slots"
 require "./runner/sitemap"
 require "./runner/subtabs"
 require "./runner/views"
+require "./runner/columns"
 
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the

@@ -190,6 +190,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:history_view_pick)
   end
 
+  def history_columns_edit : Nil
+    rec(:history_columns_edit)
+  end
+
   def history_delete : Nil
     rec(:history_delete)
   end
