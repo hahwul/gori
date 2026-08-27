@@ -177,7 +177,8 @@ module Gori::Tui
                             unread : Int32 = 0, capturing : Bool = true,
                             write_failures : Int32 = 0, bypass : Int32 = 0,
                             listeners : Int32 = 0, listener_errors : Int32 = 0,
-                            authorize : String = "", session : String = "") : Nil
+                            authorize : String = "", session : String = "",
+                            agents : String = "") : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
@@ -198,7 +199,7 @@ module Gori::Tui
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
-        session: session)
+        session: session, agents: agents)
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -216,7 +217,8 @@ module Gori::Tui
                                    unread : Int32, capturing : Bool,
                                    write_failures : Int32, bypass : Int32 = 0,
                                    listeners : Int32 = 0, listener_errors : Int32 = 0,
-                                   authorize : String = "", session : String = "") : Array(Chip)
+                                   authorize : String = "", session : String = "",
+                                   agents : String = "") : Array(Chip)
       chips = [] of Chip
       chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
       unless scope.empty?
@@ -259,6 +261,13 @@ module Gori::Tui
       # marks its baseline in, and the NAME is right there in the label, so nothing here
       # depends on the hue. Clickable: opens the same picker the `session.slot` verb does.
       chips << Chip.new(:session, session, Theme.focus_gold, clickable: true) unless session.empty?
+      # An MCP client bound to THIS project (#815). Beside the session chip because the two
+      # answer neighbouring questions — "who am I sending as" / "who else is working here".
+      # ACCENT is the colour the notification center's `ai` tag already gives agent-originated
+      # entries; the state is in the WORDS (the client's own name), never the hue alone. Absent
+      # while nothing is attached, like authorize/session, so its appearance is the signal.
+      # Clickable: opens the AGENTS card.
+      chips << Chip.new(:agents, agents, Theme.accent, clickable: true) unless agents.empty?
       chips << Chip.new(:rules, rules, Theme.text) unless rules.empty?
       chips << Chip.new(:intercept, intercept, Theme.red) unless intercept.empty?
       # TLS passthrough (#497): N hosts gori relayed WITHOUT decrypting, so nothing was
@@ -349,10 +358,12 @@ module Gori::Tui
                                rules : String = "", intercept : String = "", sandbox : String = "",
                                listen : String, unread : Int32 = 0, capturing : Bool = true,
                                write_failures : Int32 = 0, bypass : Int32 = 0,
-                               authorize : String = "", session : String = "") : Rect?
+                               authorize : String = "", session : String = "",
+                               agents : String = "") : Rect?
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
-        write_failures: write_failures, bypass: bypass, authorize: authorize, session: session)
+        write_failures: write_failures, bypass: bypass, authorize: authorize, session: session,
+        agents: agents)
       idx = chips.index { |c| c.tag == tag }
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
@@ -369,13 +380,13 @@ module Gori::Tui
                              capturing : Bool = true, write_failures : Int32 = 0,
                              bypass : Int32 = 0, listeners : Int32 = 0,
                              listener_errors : Int32 = 0, authorize : String = "",
-                             session : String = "") : Symbol?
+                             session : String = "", agents : String = "") : Symbol?
       return nil unless rect.contains?(mx, my)
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
-        session: session)
+        session: session, agents: agents)
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
       rects = chip_layout(rect, chips, name_x + 1)
       chips.each_with_index do |chip, i|

@@ -29,7 +29,7 @@ end
 private EXPECTED_OVERLAY_SYMS = {
   :none, :detail, :palette, :issue_new, :confirm, :browser, :choice, :tabs_more,
   :comparer_pick, :repeater_subtab, :links, :link_pick, :preferences,
-  :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :passthrough, :listeners, :probe_active,
+  :settings, :tabs, :hosts, :env, :hotkeys, :help, :notifications, :passthrough, :listeners, :agents, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
@@ -93,6 +93,9 @@ private MIGRATED_KINDS = [
   # Listeners (#499) — born on the seam too (the `listeners:N` chip / app.listeners), so
   # likewise never in MODAL_OVERLAYS.
   OverlayKind::Listeners,
+  # Agents (#815) — born on the seam (the `mcp:<client>` chip / app.agents), so likewise
+  # never in MODAL_OVERLAYS.
+  OverlayKind::Agents,
   # ExtractRule (#501) — born on the seam (the Rewriter tab's `extract` sub-tab), so
   # likewise never in MODAL_OVERLAYS.
   OverlayKind::ExtractRule,

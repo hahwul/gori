@@ -53,6 +53,10 @@ module Gori
       # state (which hosts actually got bypassed), not the rule list settings:network edits.
       abstract def open_passthrough : Nil
       abstract def open_listeners : Nil
+      # Open the AGENTS card: the MCP clients bound to this project (#815). Runtime state (which
+      # gori mcp processes are attached right now), read from the project's flock markers — its
+      # own intent, not a settings jump, for the same reason open_listeners is.
+      abstract def open_agents : Nil
       # Pick the ACTIVE session slot — the identity every later send goes out as (its header
       # overlay, and the binding table `$NAME` resolves out of). Its own intent rather than a
       # jump to the Authorize tab: that card edits the LIST, which is configuration, while
