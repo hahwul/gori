@@ -488,15 +488,27 @@ module Gori::Fuzz
       @positions.map(&.default)
     end
 
-    def apply_chains(payloads : Array(String), registry : Decoder::Registry) : Array(String)
-      apply_chains_reported(payloads, registry).map(&.[0])
+    def apply_chains(payloads : Array(String), registry : Decoder::Registry,
+                     run_hooks : Bool = true) : Array(String)
+      apply_chains_reported(payloads, registry, run_hooks).map(&.[0])
     end
 
     # Through `Template`'s class-method form, so a `¦chain` behaves identically on a field
     # position and on a byte one and the failure sentence has a single author.
-    def apply_chains_reported(payloads : Array(String),
-                              registry : Decoder::Registry) : Array({String, String?})
-      Template.apply_chains_reported(@positions, payloads, registry)
+    #
+    # `run_hooks` rides along for the same reason it exists on `Template` (#818/#851): a
+    # surface that REPLAYS a chain to DRAW must not fire the operator's `exec:` step again.
+    # A field position's chain is an ordinary `Template::Position` chain, so a composite that
+    # could not be told to withhold would have re-opened that hole for gRPC field runs alone.
+    def apply_chains_reported(payloads : Array(String), registry : Decoder::Registry,
+                              run_hooks : Bool = true) : Array({String, String?})
+      Template.apply_chains_reported(@positions, payloads, registry, run_hooks)
+    end
+
+    # Whether any field position's `¦chain` would run an external command — the question a
+    # surface asks before replaying for display. Same delegation, same reason as above.
+    def runs_commands?(registry : Decoder::Registry) : Bool
+      @positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(registry, pos.chain) }
     end
 
     # --- rendering one variation ----------------------------------------------

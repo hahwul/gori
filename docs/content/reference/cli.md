@@ -1154,9 +1154,13 @@ gori settings import team-profile.json --sections network
 `gori settings sections` lists every section gori knows, marking the ones this install has no value for yet:
 
 ```
+statusline  (can carry commands)
 network
-scan_rules  (not set — at its default)
+editor  (can carry commands)
 env  (holds secrets — excluded unless named; not set — at its default)
+scan_rules  (can carry commands; not set — at its default)
+decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
+rewriter  (can carry commands)
 ```
 
 A section marked *not set* is still a valid name for `--sections`: exporting it simply carries nothing (gori says so on stderr), and importing one writes it for the first time.
@@ -1166,7 +1170,44 @@ A section marked *not set* is still a valid name for `--sections`: exporting it 
 | `--sections a,b` | both | Comma-separated section names; at least one. Export defaults to everything except secret-bearing sections; import defaults to every section in the file |
 | `-o`, `--out FILE` | export | Write to a file instead of stdout |
 | `--dry-run` | import | Print which sections would be applied, then exit without writing |
+| `--allow-commands` | import | Apply rules that run an external command. Required when the profile carries one — without it the import is refused and nothing is written |
 | `--json` | tls-fingerprint | Emit the report as JSON, always including the decomposed JA3 string and `ja4_r` |
+
+### Profiles that carry commands
+
+Five sections can hold a **command** rather than data. They export like any other setting, because a team standardising on one re-signing hook is what hooks are for — but both ends say what is in the file.
+
+| Section | What carries it | How it runs |
+|---------|-----------------|-------------|
+| `rewriter` | a rule with `op: pipe` | argv, no shell — on matching proxied traffic |
+| `scan_rules` | an entry with `kind: exec` | argv, no shell — on every analyzed flow |
+| `decoder` | a `chains` spec step written `exec:…` | argv, no shell — when the chain is run |
+| `statusline` | `command` | **`/bin/sh -c`** — every `interval` seconds |
+| `editor` | `command` | argv — on `gori settings --edit` and the TUI's `^E` |
+
+The first three are [process hooks](/guide/scripting/#process-hooks). `statusline` is the sharpest of the five: it is a full shell rather than an argv exec, it carries its own `enabled` in the same section so a profile arms it outright, and it fires on a timer with no traffic needed. An `editor` command is only reported when the profile sets one — an empty value means gori falls through to your own `$VISUAL`/`$EDITOR`/`vi`.
+
+`export` counts them on stderr, leaving the profile on stdout clean:
+
+```
+note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec) — whoever imports it runs them with their own privileges
+```
+
+`import` lists them one per line, argv included, and refuses to write until you acknowledge them. `--dry-run` prints the same list and writes nothing either way:
+
+```
+$ gori settings import team-profile.json
+5 entries in this profile run a local command here, with your privileges:
+  rewriter pipe     resign body    ./resign.sh --key $TOKEN
+  rewriter pipe     (unnamed)      /usr/local/bin/hmac  [disabled]
+  scan_rules exec   leak detector  ./detect.py
+  statusline sh -c  command        gori-status --project
+  editor exec       command        nvim
+importing them is the same trust decision as running the author's script
+gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
+```
+
+Read the commands, then pass `--allow-commands`. There is no interactive prompt, so a scripted import stays scriptable — the flag *is* the acknowledgement. An entry the profile carries but leaves off is marked `[disabled]`: it runs nothing until someone arms it, and it is still in the file. Narrowing with `--sections` narrows this too — an import that applies only `network` arms nothing, so it neither lists an entry nor asks for the flag.
 
 A section you do not select — or that the profile does not carry — is left **exactly as it was**. That is the guarantee `--sections` is choosing between. Within a section the profile *does* carry:
 

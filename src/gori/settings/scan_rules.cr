@@ -17,12 +17,40 @@ module Gori::Settings
     kind : String,   # "string" | "regex" | "exec" (an argv — see Probe::CustomRule)
     pattern : String,
     severity : String, # lowercase Store::Severity label
-    enabled : Bool
+    enabled : Bool do
+    # Does this rule RUN AN EXTERNAL COMMAND when it fires? The scan-rule half of
+    # `Store::RuleOp#executes?` — the same trust boundary, asked of a `kind` instead of an op
+    # because a scan rule's kinds are bare labels with no enum behind them. `Probe::CustomRule`
+    # is what the kind means at run time (`exec_evidence`); `Settings.command_rules` is what
+    # asks it of a profile (#842).
+    def executes? : Bool
+      ScanRule.executes?(kind)
+    end
+
+    # The same question of a kind that has no record yet — a would-be rule is validated before
+    # one exists (`Probe::CustomRule.valid_pattern?`), so the predicate cannot live only on the
+    # instance.
+    def self.executes?(kind : String) : Bool
+      kind == SCAN_RULE_EXEC_KIND
+    end
+
+    # An exec rule's ARGV, or nil when it does not run one. It lives in `pattern` — the field
+    # holds a match spec for every other kind and a command line for this one (see
+    # `Probe::CustomRule#exec_evidence`). Mirrors `RewriterRule#command`.
+    def command : String?
+      executes? ? pattern : nil
+    end
+  end
   class_property scan_rules : Array(ScanRule) = [] of ScanRule
 
-  SCAN_RULE_SIDES      = %w[request response]
-  SCAN_RULE_REGIONS    = %w[whole header body]
-  SCAN_RULE_KINDS      = %w[string regex exec]
+  SCAN_RULE_SIDES   = %w[request response]
+  SCAN_RULE_REGIONS = %w[whole header body]
+
+  # The one kind whose `pattern` is an ARGV rather than a match spec (#818). Spelled once so
+  # `SCAN_RULE_KINDS` and `ScanRule.executes?` cannot disagree about it.
+  SCAN_RULE_EXEC_KIND = "exec"
+  SCAN_RULE_KINDS     = ["string", "regex", SCAN_RULE_EXEC_KIND]
+
   SCAN_RULE_SEVERITIES = %w[info low medium high critical]
 
   # Tolerant global-scan-rule parse: a non-array (or absent) node keeps the current value;

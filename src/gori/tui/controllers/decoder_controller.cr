@@ -97,10 +97,16 @@ module Gori::Tui
     end
 
     # Build a fresh session from persisted/blank text, running the initial chain.
+    #
+    # `run_hooks: false` — RESTORING is not running. Every saved sub-tab is rebuilt here when a
+    # project opens, so with hooks on, opening a project forked the `exec:` command of every
+    # conversation the operator had left lying around, before they had looked at any of them
+    # (#818; `RepeaterView#restore` had the identical defect through its Content-Length
+    # reflection). The step shows held in the PIPELINE pane and runs on the next edit.
     private def make_session(input_text : String, chain : String, name : String?) : DecoderSession
       input = TextArea.new(input_text)
       input.follow_x = true # long input lines scroll horizontally to keep the cursor visible
-      result = Decoder.run(registry, input.text.to_slice, chain)
+      result = Decoder.run(registry, input.text.to_slice, chain, run_hooks: false)
       view = DecoderView.new
       view.name = name
       DecoderSession.new(view, input, chain, chain.size, :input, result)
@@ -983,9 +989,14 @@ module Gori::Tui
     # is the operator's place in the text, and a library edit that means nothing to this
     # conversion must not throw it away.
     def library_changed : Nil
+      # `run_hooks: false`, and it is the whole reason this loop is bounded work: it re-derives
+      # EVERY open conversation, so one `^S`/`^X` in the library would otherwise fork the
+      # `exec:` command of each of them at once — for sub-tabs the operator is not even looking
+      # at (#818). What a library edit changes is which NAMES resolve; that is answerable
+      # without running anybody's command, and the next edit in a sub-tab runs its own.
       @sessions.each do |s|
         before = s.result.output
-        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain)
+        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: false)
         s.view.reset_output_scroll unless before == s.result.output
       end
     end

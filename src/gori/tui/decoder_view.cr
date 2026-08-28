@@ -313,6 +313,11 @@ module Gori::Tui
     private def output_header(result : Decoder::ChainResult) : String
       if bytes = result.output
         "OUTPUT · #{bytes.size} B"
+      elsif result.held?
+        # A HELD chain produced no output for the same reason a failed one did — but nothing
+        # failed, and `✗ chain failed` over an `exec:` step reads as "your command is broken".
+        # The PIPELINE row beside this carries the reason. See `ChainResult#held?`.
+        "OUTPUT · chain held"
       else
         "OUTPUT  ✗ chain failed"
       end

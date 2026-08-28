@@ -33,6 +33,7 @@ private RESET_FIXTURE = <<-JSON
     "probe": { "active_notify": "always" },
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
+    "hooks": { "timeout_secs": 30 },
     "rewriter": { "next_rule_id": 7, "rules": [] },
     "colormarker": { "next_rule_id": 7, "rules": [], "colors": [ { "name": "mine", "hex": "#ff0000" } ] },
     "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
