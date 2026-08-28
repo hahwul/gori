@@ -246,10 +246,10 @@ module Gori::Fuzz
       end
       unless body[0] == 0_u8
         raise GrpcFieldError.new(
-          "this message's frame flag byte is 0x#{body[0].to_s(16).rjust(2, '0')} — gori re-frames a " \
-          "re-encoded message with the compressed and trailer bits it found and nothing else, so a " \
-          "flag carrying anything more cannot be re-emitted verbatim (P7). Sweep it with §…§ " \
-          "byte positions instead")
+          "this message's frame flag byte is 0x#{body[0].to_s(16).rjust(2, '0')}, and the two bits " \
+          "`Grpc.frame` composes a flag out of — compressed (0x01) and grpc-web trailer (0x80) — " \
+          "are both refused above. What is left is a bit gori cannot re-emit, and it will not " \
+          "silently normalize a byte the producer meant (P7). Sweep it with §…§ byte positions instead")
       end
       refuse_body_positions(baseline, baseline_spans, body.size)
       {msg, body.size}
