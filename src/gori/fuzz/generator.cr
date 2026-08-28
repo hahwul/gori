@@ -31,14 +31,17 @@ module Gori::Fuzz
     # this request substitutes — see `Fuzz::AutoEncode`, which is where the decision is
     # taken (`Fuzz::Plan.build`). Defaults to the no-op, so a Generator built directly
     # renders exactly what it always did.
-    # `marked` is a `Template` for an ordinary HTTP sweep and a `WsScript` for a WebSocket one.
-    # A UNION rather than two Generators or an abstract base: every attack mode, the totals, the
-    # chain pass and the payload-set contract are defined over the payload-VALUE vector, and both
-    # types answer that vector identically (`position_count`, `positions`, `default_payloads`,
-    # `apply_chains{,_reported}`). Only the SPLICE differs — one buffer versus a handshake plus N
-    # frames — so only `emit` and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/
-    # `cluster`/`recurse`/`total` are untouched.
-    def initialize(marked : Template | WsScript, @sets : Array(PayloadSet), @config : Config,
+    # `marked` is a `Template` for an ordinary HTTP sweep, a `WsScript` for a WebSocket one, and
+    # a `GrpcFieldTemplate` for a sweep that names schema-known gRPC fields.
+    # A UNION rather than three Generators or an abstract base: every attack mode, the totals,
+    # the chain pass and the payload-set contract are defined over the payload-VALUE vector, and
+    # all three types answer that vector identically (`position_count`, `positions`,
+    # `default_payloads`, `apply_chains{,_reported}`). Only the SPLICE differs — one buffer,
+    # a handshake plus N frames, or a head plus a re-encoded protobuf message — so only `emit`
+    # and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/`cluster`/`recurse`/`total`
+    # are untouched.
+    def initialize(marked : Template | WsScript | GrpcFieldTemplate,
+                   @sets : Array(PayloadSet), @config : Config,
                    @registry : Decoder::Registry? = nil,
                    @auto_encode : AutoEncode = AutoEncode.none)
       @marked = marked
@@ -123,7 +126,22 @@ module Gori::Fuzz
       if script = @marked.as?(WsScript)
         return script.render_spans(values).handshake
       end
-      @marked.as(Template).render(values)
+      render_variation(values)[0]
+    end
+
+    # One variation's request bytes, its BASE payload spans, and the reason a schema-known gRPC
+    # field could not be encoded from this variation's payload (nil on every other run).
+    #
+    # The union's one branching seam on the HTTP side. WebSocket never reaches it — `emit`
+    # routes a script to `emit_ws` and `baseline_raw` renders the handshake above — because a
+    # WS variation is several buffers and this returns one.
+    private def render_variation(values : Array(String)) : {Bytes, Array({Int32, Int32}), String?}
+      if grpc = @marked.as?(GrpcFieldTemplate)
+        grpc.render_spans(values)
+      else
+        raw, spans = @marked.as(Template).render_spans(values)
+        {raw, spans, nil}
+      end
     end
 
     # `n` synthetic requests for auto-calibration (Engine#calibrate_baseline): each
@@ -145,15 +163,31 @@ module Gori::Fuzz
       # 101 no payload can change, so every baseline would be identical and `--ac` would
       # calibrate the sweep away.
       return [] of {Bytes, Int32} if ws?
-      template = @marked.as(Template) # narrowed by the guard above
-      count = template.position_count
+      count = @marked.position_count
+      nonced = nonceable_positions
+      defaults = @marked.default_payloads
       (0...n).map do |i|
         plen = CALIBRATION_BASE_LEN + i * CALIBRATION_STEP
-        payloads = Array.new(count) { random_nonce(plen) }
-        raw = template.render(chained(payloads))
+        payloads = Array.new(count) { |k| k < nonced ? random_nonce(plen) : defaults[k] }
+        raw, _, _ = render_variation(chained(payloads))
         bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
-        {reframed(bytes), plen * count}
+        {reframed(bytes), plen * nonced}
       end
+    end
+
+    # How many of this run's positions a calibration sample may fill with a nonce.
+    #
+    # Every one on an ordinary sweep. On a gRPC field run only the request's own `§…§` byte
+    # positions, because a nonce like `q7f2ka` is not a value an `int32` / `bool` / `enum`
+    # declaration can hold: the sample would come back with a field-encode failure and the
+    # capture's own value in place, i.e. an identical request every time, sent under a lie
+    # about how much payload it carried. A field position therefore keeps the CAPTURE's value
+    # across every sample — still an honest measure of the target's ordinary variability (a
+    # timestamp, a rotating banner, a session nonce), which is what `--ac` is for. Only
+    # `Matcher.reflects_length?` has less to work with, and it is not MISLED, because
+    # `payload_len` counts what was actually injected.
+    private def nonceable_positions : Int32
+      (grpc = @marked.as?(GrpcFieldTemplate)) ? grpc.base.position_count : @marked.position_count
     end
 
     # ── modes ────────────────────────────────────────────────────────────────────
@@ -244,7 +278,14 @@ module Gori::Fuzz
       if script = @marked.as?(WsScript)
         return emit_ws(script, idx, payloads, pos, values, chain_error)
       end
-      raw, spans = @marked.as(Template).render_spans(values)
+      raw, spans, field_error = render_variation(values)
+      # A schema-known gRPC field whose declaration could not hold THIS payload left the
+      # capture's own octets in that field — a different request than the operator declared, so
+      # the reason rides out on the row rather than being swallowed under `0 errors`. Same
+      # contract, same field, and the same argument as a `¦chain` that raised on these bytes;
+      # `Plan.build`'s preflight is what keeps it rare (see `GrpcFieldTemplate#refuse_unencodable`).
+      # `||=`: a chain failure happened FIRST in the pipeline, so it is the cause to name.
+      chain_error ||= field_error
       bytes = raw
       if @config.update_content_length?
         bytes, at, delta = ContentLength.sync_at(raw, @config.add_content_length_when_missing?)

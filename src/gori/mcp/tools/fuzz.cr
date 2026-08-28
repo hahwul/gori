@@ -418,7 +418,8 @@ module Gori
           # draft. See `Fuzz::PlanOptions#evidence?`.
           evidence: evidence,
           default_target: default_target, target: str(h, "url"),
-          auto_mark: bool_arg(h, "auto", false), marks: fuzz_marks(h), http2: use_h2,
+          auto_mark: bool_arg(h, "auto", false), marks: fuzz_marks(h),
+          grpc_fields: fuzz_grpc_fields(h), http2: use_h2,
           sources: fuzz_sources(h), processors: fuzz_processors(h),
           # A payload spliced into a query-string / form-body position is percent-encoded by
           # default (`Fuzz::AutoEncode`), on this surface for the same reason as on the other
@@ -683,19 +684,30 @@ module Gori
       # Mirrors `fuzz_sets`'s array-pulling pattern (bare array, or a JSON-encoded
       # string — LLM clients vary), but for plain string tokens.
       private def fuzz_marks(h) : Array(String)
-        raw = h["marks"]?
+        string_array_arg(h, "marks")
+      end
+
+      # The schema-known gRPC fields to sweep, as the caller NAMED them. Same acceptance as
+      # `marks` — an agent that sends a JSON-encoded string instead of an array is the common
+      # case, not an error — and the same parser, so the two cannot drift.
+      private def fuzz_grpc_fields(h) : Array(String)
+        string_array_arg(h, "fields")
+      end
+
+      private def string_array_arg(h, key : String) : Array(String)
+        raw = h[key]?
         return [] of String unless raw
         arr =
           if a = raw.as_a?
             a
           elsif s = raw.as_s?
             return [] of String if s.strip.empty?
-            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'marks' must be a JSON array of strings")
-            parsed.as_a? || raise FuzzArgError.new("'marks' must be a JSON array")
+            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'#{key}' must be a JSON array of strings")
+            parsed.as_a? || raise FuzzArgError.new("'#{key}' must be a JSON array")
           else
-            raise FuzzArgError.new("'marks' must be a JSON array of strings (not a bare string/scalar)")
+            raise FuzzArgError.new("'#{key}' must be a JSON array of strings (not a bare string/scalar)")
           end
-        arr.map { |v| v.as_s? || raise FuzzArgError.new("each 'marks' entry must be a string") }
+        arr.map { |v| v.as_s? || raise FuzzArgError.new("each '#{key}' entry must be a string") }
       end
 
       # The payload SOURCES, in position order. `Fuzz::Plan.build` pairs each with the
@@ -1112,6 +1124,7 @@ module Gori
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
           s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template. An occurrence already inside a §…§ (or flush against one) is skipped — re-wrapping it would merge the two positions — and a token left with none of its own is named in `marks_warning`")
+          s.field "fields", strarrprop("schema-known gRPC fields of a UNARY request to sweep, each a field name, a path into a nested message ('profile.age'), or a field number, with [i] for one occurrence of a repeated field ('tags[1]'); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it. Each payload goes through the field's DECLARATION on its way to bytes (-3 is a different set of octets as int32, sint32, bool or an enum), every other byte of the message is copied from the capture, and the 5-byte gRPC length prefix is recomputed. Needs a descriptor set that resolves the rpc (see grpc_schema / grpc_reflect). These positions follow the template's own §…§ positions in the run's index space, so 'mode' and 'payloads' keep their meaning. A field the schema does not declare, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request.")
           s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. Giving this pipeline REPLACES the default encoding (it applies to every position, so it is not stacked on top). Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))

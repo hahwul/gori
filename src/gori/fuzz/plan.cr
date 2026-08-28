@@ -5,6 +5,7 @@ require "../outbound"
 require "../repeater/flow_request"
 require "./engine"
 require "./generator"
+require "./grpc_fields"
 require "./matcher"
 require "./payload"
 require "./template"
@@ -163,6 +164,16 @@ module Gori::Fuzz
     # substitutes while the capture's own `$filter` stays the origin byte it is. Ignored
     # unless `evidence?` — a draft expands the full table and always has.
     property env_vars : Hash(String, String)?
+    # Schema-known gRPC fields to sweep, as the operator NAMED them: `role`, `profile.age`,
+    # `tags[1]`, a bare field number, each optionally carrying `¦chain`. Resolved against the
+    # seed message by `Fuzz::GrpcFieldTemplate.build`, which is also where every refusal lives.
+    #
+    # A NAME rather than a byte range, because the wire encoding of a value is not a thing an
+    # operator can usefully wrap `§…§` around: marking an `int32` means marking the octets of a
+    # varint, and `-3` is a different set of octets as `int32`, `sint32`, `bool` or an enum.
+    # These positions follow the template's own `§…§` positions in the run's index space, so
+    # `--mode`, the payload sets and `--mark` all keep their meaning (see `GrpcFieldTemplate`).
+    property grpc_fields : Array(String)
     # The outbound WebSocket frame script, or nil for an ordinary HTTP sweep.
     #
     # NON-NIL AND NON-EMPTY is the "this is a WebSocket run" bit — there is no separate boolean,
@@ -192,6 +203,7 @@ module Gori::Fuzz
                    @sni : String? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    @env_vars : Hash(String, String)? = nil,
+                   @grpc_fields : Array(String) = [] of String,
                    @ws_messages : Array(WsMessageSource)? = nil)
     end
   end
@@ -266,6 +278,11 @@ module Gori::Fuzz
     # whole run over an inert flag is hostile — while staying silent about it is how an operator
     # comes to believe a sweep followed redirects it never followed.
     getter ws_ignored_knobs : Array(Symbol)
+    # The resolved schema-known gRPC field positions, or nil when the run named none.
+    # `template` above stays the request's own `Template` in either case — it is part 0 of this
+    # composite's position space — so a surface reading `plan.template` keeps its type and its
+    # meaning, exactly as it does for `ws_script`.
+    getter grpc_fields : GrpcFieldTemplate?
 
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
@@ -275,7 +292,8 @@ module Gori::Fuzz
                    @shadowed_marks : Array(String) = [] of String,
                    @auto_encode : AutoEncode = AutoEncode.none,
                    @ws_script : WsScript? = nil,
-                   @ws_ignored_knobs : Array(Symbol) = [] of Symbol)
+                   @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
+                   @grpc_fields : GrpcFieldTemplate? = nil)
     end
 
     # Does this run sweep a WebSocket script rather than an HTTP request?
@@ -283,10 +301,17 @@ module Gori::Fuzz
       !@ws_script.nil?
     end
 
-    # The run's TOTAL marked positions, across every part. `template.position_count` is the
-    # handshake's alone on a WS run, so a surface that reports "N positions" must ask this.
+    # The run's TOTAL positions, across every part. `template.position_count` is the
+    # handshake's alone on a WS run, and the request's `§…§` alone on a gRPC field run, so a
+    # surface that reports "N positions" must ask this.
     def position_count : Int32
-      (ws = @ws_script) ? ws.position_count : @template.position_count
+      if ws = @ws_script
+        ws.position_count
+      elsif grpc = @grpc_fields
+        grpc.position_count
+      else
+        @template.position_count
+      end
     end
 
     # Candidate request count, or nil when unknown / Int64-overflowing. Reads the payload
@@ -376,11 +401,28 @@ module Gori::Fuzz
       end
       template = Template.parse(text, options.http2?)
 
+      # The template's BASELINE rendering — every position spliced with its own default — and
+      # the byte span each default occupies in it. Rendered ONCE here because three things
+      # below read it and they must not disagree: the Layer-1 scope gate matches on its request
+      # line, the gRPC field resolver reads the message its body carries, and that resolver
+      # refuses a `§…§` position that lands in the same body.
+      #
+      # Rendering the defaults back out (rather than reading the raw marked text) is what makes
+      # the three surfaces agree: the TUI's template arrives ALREADY marked, so the raw first
+      # line would be `/find?term=§VAL§` there and `/find?term=VAL` from the CLI and MCP.
+      baseline, baseline_spans = template.render_spans(template.default_payloads)
+      request_target = Gori::Outbound.request_target(baseline)
+
       # The WebSocket script, when this is a WS run. Built here — after marking, before every
       # guard below — because from this point on `marked` is what the whole builder reads, and
       # the two shapes answer the same protocol (see `Fuzz::WsScript`).
       ws_script = build_ws_script(options, template, ws_texts)
-      marked = ws_script || template
+      # …and the gRPC field positions, when the run named any. Same seam and the same argument:
+      # a composite that concatenates its parts' position lists into one vector (see
+      # `Fuzz::GrpcFieldTemplate`), so `marked` stays the one thing the rest of the builder reads.
+      grpc_fields = build_grpc_fields(options, template, baseline, baseline_spans,
+        request_target, ws_script)
+      marked = ws_script || grpc_fields || template
       ws_ignored = ws_script ? ws_ignored_knobs(options.config) : [] of Symbol
       # A race group is N copies of ONE request, not a payload-substitution sweep — see
       # `Config#race_count` — so it has no use for §…§ positions or payload sets at all, and
@@ -391,14 +433,6 @@ module Gori::Fuzz
       # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See
       # `refuse_unusable_chains`.
       refuse_unusable_chains(marked.positions, Decoder.shared_registry)
-
-      # The string the Layer-1 scope check matches on, taken from the template's BASELINE
-      # rendering (every position = its own default) rather than the raw text. The TUI's
-      # template arrives ALREADY marked, so reading the raw first line would hand the gate
-      # `/find?term=§VAL§` there while handing it `/find?term=VAL` from the CLI and MCP,
-      # whose text is marked by the builder. Rendering the defaults back out is marker-free
-      # on all three and byte-identical to what those two used to pass.
-      request_target = Gori::Outbound.request_target(template.render(template.default_payloads))
 
       origin = resolve_origin(options)
 
@@ -415,6 +449,11 @@ module Gori::Fuzz
       # `#total` (the only readers of `@sets`) are never called on that path; `Engine#run_race`
       # calls `Generator#baseline_request` instead, which does not touch `@sets` either.
       gen_sets = sets.empty? ? [] of PayloadSet : (config.mode.per_position? ? sets : [sets.first])
+      # A payload a field's DECLARATION cannot hold, refused before the first dial — `abc` into
+      # an `int32`, an enum name the schema does not carry. Beside `refuse_unusable_chains`
+      # above and for the same reason its comment gives, over the sets the generator will
+      # actually draw from (`gen_sets`, mapped exactly as `Generator#set_for` maps them).
+      refuse_unencodable_fields(grpc_fields, gen_sets, template.position_count)
       # Percent-encoding for the QUERY-STRING / FORM-BODY positions, decided ONCE off the
       # template's structure. Here rather than in each surface for the reason this whole
       # builder exists: `--auto`, MCP `auto:true` and the TUI's `^A params` mark the same
@@ -463,7 +502,42 @@ module Gori::Fuzz
         rewrites_content_length: config.update_content_length? &&
                                  generator.baseline_request != generator.baseline_raw,
         shadowed_marks: shadowed_marks, auto_encode: auto_encode,
-        ws_script: ws_script, ws_ignored_knobs: ws_ignored)
+        ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields)
+    end
+
+    # A payload a field's DECLARATION cannot hold, refused before the first dial — the nil-guard
+    # kept out of `build` so a run with no field position adds no branch to it.
+    private def self.refuse_unencodable_fields(grpc_fields : GrpcFieldTemplate?,
+                                               sets : Array(PayloadSet), base_count : Int32) : Nil
+      return unless grpc_fields
+      grpc_fields.refuse_unencodable(sets, base_count, Decoder.shared_registry)
+    end
+
+    # The schema-known gRPC field positions this run sweeps, or nil when it named none — in
+    # which case every existing sweep keeps the plain `Template` path, byte for byte.
+    #
+    # The two combinations refused here are genuine incompatibilities rather than inert flags
+    # (the inert ones are reported through `ws_ignored_knobs`), and both are refused HERE rather
+    # than inside `GrpcFieldTemplate.build` because they are facts about the RUN, not about the
+    # message: the resolver would otherwise have to be handed a Config to ask about them.
+    private def self.build_grpc_fields(options : PlanOptions, template : Template,
+                                       baseline : Bytes, baseline_spans : Array({Int32, Int32}),
+                                       request_target : String,
+                                       ws_script : WsScript?) : GrpcFieldTemplate?
+      return nil if options.grpc_fields.empty?
+      if ws_script
+        raise GrpcFieldError.new(
+          "a gRPC field position and a WebSocket script cannot combine: a field position names " \
+          "a declaration in a unary gRPC message, and a WebSocket exchange carries frames. " \
+          "Drop the frames to sweep the handshake's request as HTTP")
+      end
+      if options.config.race_count
+        raise GrpcFieldError.new(
+          "a gRPC field position and --race cannot combine: a race group is N byte-identical " \
+          "copies of ONE request released together, which bypasses payload substitution " \
+          "entirely — there is nothing for a field position to substitute into")
+      end
+      GrpcFieldTemplate.build(template, baseline, baseline_spans, options.grpc_fields, request_target)
     end
 
     # The marked WebSocket script, or nil when this is an ordinary HTTP sweep.

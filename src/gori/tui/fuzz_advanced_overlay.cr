@@ -16,7 +16,11 @@ module Gori::Tui
     follow : Bool, calibrate : Bool, keep_alive : Bool, update_cl : Bool,
     reframe_grpc : Bool,
     m_status : String, m_size : String, m_words : String, m_regex : String,
-    f_status : String, f_size : String, f_words : String, f_regex : String
+    f_status : String, f_size : String, f_words : String, f_regex : String,
+    # Comma-separated schema-known gRPC field specs (`Fuzz::PlanOptions#grpc_fields`).
+    # DEFAULTED, so every construction site that predates it keeps compiling — and, more to the
+    # point, so a caller that does not know about gRPC cannot accidentally clear it.
+    grpc_fields : String = ""
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -75,6 +79,15 @@ module Gori::Tui
       # the final byte, released together — bypasses Mode/payload sets entirely (see
       # Fuzz::Config#race_count). Blank = off. A warm-up request is CLI/MCP-only for this phase.
       {:race, "Race (N conns)", :text},
+      # Schema-known gRPC field positions (`gori run fuzz --field`, MCP `fields`). A NAME, not
+      # a marker: the wire encoding of a value is not something `§…§` can usefully wrap. Blank
+      # = none, which is every sweep that came before. Appended after Race for the same reason
+      # Race was appended after the matchers: it renumbers no row a spec reaches by index. Two
+      # examples still moved with it — the ones pinning WHICH row is last and the arithmetic of
+      # a click on a scrolled list — because those are facts about the table's end, not about a
+      # row's number. The field NAMES for a flow are the ones the Repeater's ␣E:FIELDS form and
+      # the History protobuf tree already show for it, so this row is typed, not browsed.
+      {:grpc_fields, "gRPC field(s)", :text},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -101,6 +114,7 @@ module Gori::Tui
         :f_size       => TextField.new(snap.f_size),
         :f_words      => TextField.new(snap.f_words),
         :f_regex      => TextField.new(snap.f_regex),
+        :grpc_fields  => TextField.new(snap.grpc_fields),
       }
     end
 
@@ -197,7 +211,8 @@ module Gori::Tui
         m_status: @fields[:m_status].value, m_size: @fields[:m_size].value,
         m_words: @fields[:m_words].value, m_regex: @fields[:m_regex].value,
         f_status: @fields[:f_status].value, f_size: @fields[:f_size].value,
-        f_words: @fields[:f_words].value, f_regex: @fields[:f_regex].value)
+        f_words: @fields[:f_words].value, f_regex: @fields[:f_regex].value,
+        grpc_fields: @fields[:grpc_fields].value)
     end
 
     # --- rendering ----------------------------------------------------------

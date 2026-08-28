@@ -123,6 +123,11 @@ module Gori::Tui
       # (`gori run fuzz --race-warmup`/MCP `race_warmup`), same as the Fuzzer tab never having
       # had a processor UI (see `commit_buffers`).
       @s_race = ""
+      # Schema-known gRPC field positions, as a comma-separated list of specs (the ADVANCED
+      # card's "gRPC field(s)" row → `Fuzz::PlanOptions#grpc_fields`). Blank = none, which is
+      # every sweep that came before. A view buffer rather than a `Fuzz::Config` knob because
+      # it declares POSITIONS, not run behaviour — the same side of that line `marks` is on.
+      @s_grpc_fields = ""
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
       @s_f_regex = ""
       # Memoized "Run · N requests" count, recomputed only when the config signature
@@ -1027,7 +1032,8 @@ module Gori::Tui
         m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
         m_words: @matcher.match_words || "", m_regex: @s_m_regex,
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
-        f_words: @matcher.filter_words || "", f_regex: @s_f_regex)
+        f_words: @matcher.filter_words || "", f_regex: @s_f_regex,
+        grpc_fields: @s_grpc_fields)
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1056,6 +1062,7 @@ module Gori::Tui
       @matcher.filter_size = blank_nil(s.f_size)
       @matcher.filter_words = blank_nil(s.f_words)
       @s_f_regex = s.f_regex
+      @s_grpc_fields = s.grpc_fields
       @dirty = true
     end
 
@@ -1069,14 +1076,26 @@ module Gori::Tui
     # frame. nil when the size is unknown (empty/invalid config, or an overflowing
     # cluster-bomb / brute set) → the Run row omits the count.
     def run_request_count : Int64?
-      sig = "#{@config.mode}|#{position_count}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
+      # The RAW field row, not the parsed list: this runs on the render fiber every frame and
+      # `grpc_field_specs` allocates, while the string it splits is the thing that actually
+      # changes. (`position_count` is memoized on the editor revision for the same reason.)
+      sig = "#{@config.mode}|#{position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
       return @run_count_cache if sig == @run_count_sig
       @run_count_sig = sig
       @run_count_cache = compute_run_count
     end
 
+    # The run's TOTAL positions: the `§…§` markers PLUS the named gRPC field positions, which
+    # `Fuzz::Plan` appends to the same index space. `position_count` stays the marker count —
+    # it backs the template tint and the Sets→marker chips, which are about markers — so the
+    # estimate asks this instead. Without it a field-only sweep reported `Run · 0 requests`
+    # for a run that was about to send one per payload.
+    private def run_position_count : Int32
+      position_count + grpc_field_specs.size
+    end
+
     private def compute_run_count : Int64?
-      return nil if @sets.empty? || position_count == 0
+      return nil if @sets.empty? || run_position_count == 0
       sizes = @sets.map { |s| estimated_set_size(s) }
       return nil if sizes.any?(Nil) # any unknown / overflowing size → unknown total
       run_count_for_mode(sizes.compact)
@@ -1105,9 +1124,9 @@ module Gori::Tui
     private def run_count_for_mode(ns : Array(Int64)) : Int64?
       first = ns.first? || 0_i64
       case @config.mode
-      when .sniper?        then mul_checked(position_count.to_i64, first)
+      when .sniper?        then mul_checked(run_position_count.to_i64, first)
       when .battering_ram? then first
-      when .pitchfork?     then (0...position_count).min_of? { |i| ns[i]? || first } || 0_i64
+      when .pitchfork?     then (0...run_position_count).min_of? { |i| ns[i]? || first } || 0_i64
       else                      combos(ns) # cluster-bomb ∏Nᵢ
       end
     end
@@ -1115,7 +1134,7 @@ module Gori::Tui
     # ∏ of the per-position set sizes (cluster-bomb), nil on Int64 overflow.
     private def combos(ns : Array(Int64)) : Int64?
       total = 1_i64
-      (0...position_count).each do |i|
+      (0...run_position_count).each do |i|
         n = ns[i]? || ns.first? || 0_i64
         total = mul_checked(total, n) || return nil
       end
@@ -1193,6 +1212,7 @@ module Gori::Tui
       options = Fuzz::PlanOptions.new(evidence_template, evidence: @evidence,
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
+        grpc_fields: grpc_field_specs,
         verify: verify, sni: sni_override, overrides: overrides, env_vars: operator_env_vars)
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
       @pending_template = plan.template # committed to @run_template in begin_run (see result_request)
@@ -1216,8 +1236,24 @@ module Gori::Tui
       {plan.engine, nil}
     rescue ex : Fuzz::PlanError
       {nil, fuzz_plan_error(ex)}
+      # `Fuzz::ChainError`, `Fuzz::WsError` and `Fuzz::GrpcFieldError` are all `Gori::Error`,
+      # and the builder writes their sentence ITSELF precisely because it reads the same on
+      # every surface (see their class comments). The bare `rescue` below was prefixing them
+      # with "config error:" — a phrase that names the wrong thing for "the schema does not
+      # declare field 9" — so they get their own arm and their own words.
+    rescue ex : Gori::Error
+      {nil, ex.message || "the run could not be built"}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The ADVANCED card's "gRPC field(s)" row, parsed.
+    #
+    # Comma-separated. A `¦chain` on one of these must separate its steps with `|` or `>`
+    # rather than `,` — `Decoder::SEPARATORS` treats all three as equivalent, so nothing is
+    # lost, and the comma is what separates FIELDS on this row.
+    private def grpc_field_specs : Array(String)
+      @s_grpc_fields.split(',').map(&.strip).reject(&.empty?)
     end
 
     # The template bytes handed to `Plan.build`, with ONE editor-owed fixup applied for an
@@ -2084,6 +2120,10 @@ module Gori::Tui
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
           j.field "extract", @matcher.extract.try(&.source)
+          # The raw row text, not the parsed list: it is what the operator typed and what the
+          # ADVANCED card has to show again, and a spec that no longer resolves (the descriptor
+          # set moved) must come back as itself rather than silently vanish on restore.
+          j.field "grpc_fields", @s_grpc_fields
         end
       end
     end
@@ -2123,9 +2163,18 @@ module Gori::Tui
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
+      @s_grpc_fields = string_knob(obj, "grpc_fields")
       sync_buffers # mirror the restored config/matcher into the editable buffers
     rescue
       # tolerate a malformed/older config blob — keep defaults
+    end
+
+    # A persisted STRING knob, or "" for a session saved before the key existed (and for a
+    # blob that carries something else there). A helper rather than the `?.try(&.as_s?) || ""`
+    # chain inline: `apply_config_json` is already at the complexity ceiling, and the next knob
+    # to be added has one example to follow instead of a fourth spelling.
+    private def string_knob(obj : Hash(String, JSON::Any), key : String) : String
+      obj[key]?.try(&.as_s?) || ""
     end
 
     private def apply_sets_json(arr : JSON::Any?) : Nil

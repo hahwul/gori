@@ -1870,3 +1870,66 @@ one. v4.0 asks questions v3.1 does not (`AT`, and the Vulnerable/Subsequent impa
 each version keeps its own selections while the card is open. A translated vector would put a score in
 someone's report that nobody assessed. Any version the parser knows is still stored and scored as
 typed — the builder is what is limited to two, not the field.
+
+### 2026-08-28: a gRPC field position is a NAME, and a chain over it acts on the value
+
+Refines: [P1](#p1), [P3](#p3), [P7](#p7). Extends the 2026-08-23 WebSocket entry (the composite
+position space) and the 2026-08-17 gRPC-reframe entry. PR for #843.
+
+The `.proto` lens landed in three parts and only two shipped: with a descriptor set loaded a
+captured message renders as named, typed fields (#823) and the Repeater's `␣E` form edits one and
+re-encodes (#837). Fuzzing one was missing, and the reason it could not simply be marked is the
+whole design. A `§…§` position is a BYTE RANGE. The value of an `int32` field is the octets of a
+varint, so marking one means wrapping markers around a wire encoding — and `-3` is ten
+sign-extended octets as `int32`, one zigzagged octet as `sint32`, and something else again as a
+`bool` or an enum. There is no payload an operator can write into that range that means anything.
+
+**So the position is the DECLARATION, named rather than marked**: `--field role`, MCP `fields`,
+the Fuzzer's **gRPC field(s)** row. The payload is TEXT and `Protobuf::Encoder` — the encoder
+#837 specced against a reference-encoded message — decides the bytes. `Fuzz::GrpcFieldTemplate`
+is a sibling of `Fuzz::WsScript` and makes the same argument it does: every attack mode, `--mark`,
+each position's `¦chain`, `PayloadSet` and `AutoEncode` are defined over the payload-VALUE vector,
+so a composite that concatenates its parts' position lists into one index space leaves `Mode`, the
+generator's four mode methods and the payload layer untouched. The request's own `§…§` positions
+are part 0 and the fields follow, which is what lets a Pitchfork lock a header to a typed field.
+
+**Which fields exist, and which of them can carry a typed value, has ONE author** (P3):
+`Protobuf::Lens.read` plus `Protobuf::Encoder.seed`, the same pair the `␣E` form reads its rows
+through. #837 renders a field the schema does not declare, and one whose wire type the declaration
+contradicts, as READ-ONLY, because re-encoding either would mean picking the schema over the
+bytes — the guess the lens exists to avoid. The Fuzzer refuses them as positions for the same
+reason and names it, and `^X` / a `§…§` over the octets remains the way to send what the schema
+calls impossible. A second notion of "which field is this" is exactly what P3 forbids.
+
+**Everything not fuzzed is COPIED** (P7). A variation is `Protobuf::Encoder.replace`-d out of the
+capture's own octets once per field — a splice, not a serializer — so an undeclared field number,
+a group, a non-minimal varint some other producer emitted and the unparsed tail of a truncated
+capture all survive the whole run. Rendering every position with its own default reproduces the
+seed request byte for byte, which is the property the run rests on rather than a nice-to-have.
+
+**The 5-byte prefix follows the message here, and that does not weaken the 2026-08-17 default.**
+That entry makes `--reframe-grpc` opt-in because a deliberately-wrong prefix is one of the
+standard gRPC parser tests — and it is a statement about a payload spliced into BYTES. A field
+position re-encodes the message through the schema at the operator's request, so a prefix
+measuring the old length would make every request in the sweep a framing-layer rejection and
+nothing else. It is `Proxy::H2::Grpc.frame`, the framer `␣F:FRAME` is built on, not a second one;
+a frame whose flag byte carries anything but the compressed and trailer bits is refused rather
+than normalized, because gori cannot re-emit it verbatim.
+
+**A `¦chain`, `--encode` and the processor pipeline transform the TEXT, before the declared type
+turns it into bytes.** The question is genuinely ambiguous and the other reading is not
+defensible: what comes out of `Encoder.encode` is a tag plus a payload the declaration describes,
+and base64-ing or hashing THAT yields octets no declaration describes, under a length prefix that
+honestly measures garbage. It is also not a test anyone loses — byte-level mutation of a gRPC
+body is what a `§…§` position over the same bytes already does. So the chain acts where the value
+is still a value: `--field name¦base64-encode` sends the base64 of the payload AS that string, and
+the same chain on an `int32` is refused up front, because base64 text is not an integer.
+
+**Refusals arrive before the first dial** (the argument `refuse_unusable_chains` already makes for
+a converter). Unlike a chain, "can this declaration hold this text" is answerable with no side
+effect and no target, so the payload set is dry-run against the declaration at plan time — bounded,
+because a payload set is not, with a render-time backstop that reports the reason on the row and
+leaves the capture's octets in place rather than sending something else in silence.
+
+The Miner is deliberately absent: hidden-parameter discovery over a typed schema is a different
+question, since the schema already tells you the fields.

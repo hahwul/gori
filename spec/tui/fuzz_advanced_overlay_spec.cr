@@ -78,9 +78,9 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.press(Termisu::Input::Key::Enter).should eq(:open)
     h.commits.should eq(0)
     # …and the last row stays FOCUSED rather than stepping out of ROWS' range: what gets
-    # typed next still lands in the last row (Race — appended after Filter regex).
+    # typed next still lands in the last row (gRPC field(s) — appended after Race).
     h.type("x").should eq(:open)
-    ov.snapshot.race.should eq("x")
+    ov.snapshot.grpc_fields.should eq("x")
   end
 
   it "a click outside the card APPLIES rather than dismissing" do
@@ -213,13 +213,13 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.type("x")
 
     # The list has scrolled, so the first VISIBLE row is no longer ROWS[0] (Concurrency):
-    # the 4th visible row is "Match size", which is where this click must land.
-    h.click_in_box(2, 4).should eq(:open)
+    # the 3rd visible row is "Match size", which is where this click must land.
+    h.click_in_box(2, 3).should eq(:open)
     h.type("9")
     ov.snapshot.m_size.should eq("9")  # lands in Retries if the click ignores @scroll
     ov.snapshot.retries.should eq("0") # …and the un-scrolled rows stay untouched
     ov.snapshot.conc.should eq("20")
-    ov.snapshot.race.should eq("x") # the last row — Race, appended after Filter regex
+    ov.snapshot.grpc_fields.should eq("x") # the last row — gRPC field(s), appended after Race
 
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(1)

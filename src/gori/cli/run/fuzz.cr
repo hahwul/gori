@@ -34,6 +34,7 @@ module Gori
         insecure = false
         auto = false
         marks = [] of String
+        grpc_fields = [] of String
         mode = Fuzz::Mode::Sniper
         sources = [] of Fuzz::PayloadSource
         processors = [] of Fuzz::Processor
@@ -78,6 +79,13 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--auto", "Auto-mark every query / cookie / body parameter value") { auto = true }
           p.on("--mark=TOKEN", "Mark each literal TOKEN occurrence as a position (repeatable)") { |v| marks << v }
+          # A gRPC field is named, not marked. Its wire encoding is not something a `§…§` can
+          # usefully wrap — marking an `int32` means marking the octets of a varint, and `-3` is
+          # a different set of octets as `int32`, `sint32`, `bool` or an enum — so the position
+          # is the DECLARATION and the payload goes through it. Needs a descriptor set for the
+          # rpc (`gori run grpc schema` says whether one is loaded); the field names are the
+          # ones the Repeater's ␣E form and the History tree already show for the same flow.
+          p.on("--field=SPEC", "Sweep a schema-known gRPC field of a unary request (repeatable). SPEC is a field name, a path into a nested message (profile.age), or a field number, with [i] to pick one occurrence of a repeated field (tags[1]); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it") { |v| grpc_fields << v }
           p.on("--message=TEXT", "WebSocket: outbound text frame (repeatable; may carry §…§ positions; replaces the seed's stored frames)") { |v| ws_overrides << Fuzz::WsMessageSource.new(1, v) }
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_overrides << fuzz_message_frame(v) }
           p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
@@ -269,7 +277,7 @@ module Gori
           # authored. See `Fuzz::PlanOptions#evidence?`.
           evidence: evidence,
           default_target: default_target, target: target_override,
-          auto_mark: auto, marks: marks, http2: http2,
+          auto_mark: auto, marks: marks, grpc_fields: grpc_fields, http2: http2,
           sources: sources, processors: processors, auto_encode: auto_encode,
           config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
             retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
@@ -311,6 +319,7 @@ module Gori
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
         note_fuzz_auto_encode(plan)
+        note_fuzz_grpc_fields(plan)
         note_fuzz_ws_ignored(plan)
         # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
         # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
@@ -455,6 +464,19 @@ module Gori
                     "position#{n == 1 ? "" : "s"} — pass --no-encode to send them raw " \
                     "(that includes an already-encoded payload: %00 → %2500, so the %00 / " \
                     "%c0%af / %2e%2e%2f probes aimed at the origin's own decoder arrive as text)"
+      end
+
+      # WHICH schema-known gRPC fields this run sweeps, and through which rpc. Once, up front,
+      # for the reason `Plan#rewrites_content_length?` is said once up front: the operator typed
+      # a NAME and gori resolved it to a declaration in a `.proto` they may not have written, so
+      # the binding it picked has to be visible before ten thousand requests go out under it.
+      private def self.note_fuzz_grpc_fields(plan : Fuzz::Plan) : Nil
+        g = plan.grpc_fields || return
+        named = g.fields.map(&.label).join(" · ")
+        STDERR.puts "gori run fuzz: note: gRPC field position#{g.fields.size == 1 ? "" : "s"} " \
+                    "#{named} — through #{g.method_path} → #{g.message_type}. Every other byte of " \
+                    "the message is copied from the capture and the 5-byte length prefix follows " \
+                    "the message it now describes"
       end
 
       # Knobs this run cannot honour because it is a WebSocket sweep. Said ONCE, up front, with
