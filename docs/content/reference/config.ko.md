@@ -25,7 +25,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 
 `settings.json`은 JSON입니다. `gori settings` / `gori settings --edit`로 찾거나 편집합니다.
 
-위치는 `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json` 순으로 결정되므로, CA·프로젝트 DB·테마·워드리스트를 옮기지 않고도 다른 설정으로 실행할 수 있습니다. 섹션 단위 이동은 [`gori settings export` / `import`](/ko/reference/cli/#profiles)로 합니다. 그중 `rewriter`·`scan_rules`·`decoder` 세 섹션은 데이터가 아니라 argv를 담을 수 있어 프로필이 명령을 실어 나를 수 있습니다. 전달 양쪽 끝에서 [그 사실을 알려줍니다](/ko/reference/cli/#profiles-that-carry-commands).
+위치는 `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/settings.json` 순으로 결정되므로, CA·프로젝트 DB·테마·워드리스트를 옮기지 않고도 다른 설정으로 실행할 수 있습니다. 섹션 단위 이동은 [`gori settings export` / `import`](/ko/reference/cli/#profiles)로 합니다. 그중 `rewriter`·`scan_rules`·`decoder`·`statusline`·`editor` 다섯 섹션은 데이터가 아니라 명령을 담을 수 있어 프로필이 코드를 실어 나를 수 있습니다. 전달 양쪽 끝에서 [그 사실을 알려줍니다](/ko/reference/cli/#profiles-that-carry-commands).
 
 ### network {#network}
 

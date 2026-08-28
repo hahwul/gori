@@ -61,11 +61,12 @@ module Gori::CLI
   # The profile execution report (#842). Both wordings are pure by design — the guards around
   # them end in `abort`, which is not catchable — so what a spec can reach is the sentence
   # itself, which is the part that has to be right.
-  def self.command_report_for_spec(rules : Array(Settings::CommandRule), dry : Bool) : Array(String)
-    command_report(rules, dry)
+  def self.command_report_for_spec(found : Array(Settings::CommandEntry), dry : Bool,
+                                   allowed : Bool = false) : Array(String)
+    command_report(found, dry, allowed)
   end
 
-  def self.exported_commands_note_for_spec(rules : Array(Settings::CommandRule)) : String
+  def self.exported_commands_note_for_spec(rules : Array(Settings::CommandEntry)) : String
     exported_commands_note(rules)
   end
 
@@ -383,8 +384,8 @@ end
 # `op: pipe`, `scan_rules` with `kind: exec`, a `decoder` chain step), and importing one arms
 # it on the proxy data path for every project.
 private def cmd_rule(section : String, kind : String, name : String, command : String,
-                     enabled : Bool = true) : Gori::Settings::CommandRule
-  Gori::Settings::CommandRule.new(section, kind, name, command, enabled)
+                     enabled : Bool = true) : Gori::Settings::CommandEntry
+  Gori::Settings::CommandEntry.new(section, kind, name, command, enabled)
 end
 
 describe "gori settings export — the note about what the profile will run" do
@@ -394,7 +395,7 @@ describe "gori settings export — the note about what the profile will run" do
       cmd_rule("rewriter", "pipe", "hmac", "/usr/local/bin/hmac"),
       cmd_rule("scan_rules", "exec", "leak", "./detect.py"),
     ])
-    note.should contain("3 rules in this profile run a local command")
+    note.should contain("3 entries in this profile run a local command")
     note.should contain("2 rewriter pipe, 1 scan_rules exec")
     # "their own", not `PeerNotices`' "your": the file is leaving this machine, and whose
     # privileges are at stake is the one thing that differs between the two ends of a profile.
@@ -403,9 +404,22 @@ describe "gori settings export — the note about what the profile will run" do
 
   it "reads as one rule in the singular" do
     note = Gori::CLI.exported_commands_note_for_spec([cmd_rule("decoder", "exec", "d", "./d.sh")])
-    note.should contain("1 rule in this profile runs a local command")
+    note.should contain("1 entry in this profile runs a local command")
     note.should contain("1 decoder exec")
     note.should contain("runs it with their own privileges")
+  end
+end
+
+describe "gori settings export — the two sections that are not rule tables" do
+  it "names statusline as the SHELL it is, and editor beside it" do
+    # `statusline.command` goes to `/bin/sh -c` on a timer, which is a bigger thing than the
+    # three no-shell hook seams — the breakdown has to say which mechanism each one is.
+    note = Gori::CLI.exported_commands_note_for_spec([
+      cmd_rule("statusline", "sh -c", "command", "~/bin/status.sh"),
+      cmd_rule("editor", "exec", "command", "nvim"),
+    ])
+    note.should contain("2 entries in this profile run a local command")
+    note.should contain("1 statusline sh -c, 1 editor exec")
   end
 end
 
@@ -418,7 +432,7 @@ describe "gori settings import — the per-rule listing" do
       cmd_rule("scan_rules", "exec", "leak", "./detect.py"),
     ], dry: false)
     # The headline is PeerNotices' sentence, verbatim in the part that carries the weight.
-    lines[0].should contain("2 rules in this profile run a local command here, with your privileges:")
+    lines[0].should contain("2 entries in this profile run a local command here, with your privileges:")
     lines[1].should contain("rewriter pipe")
     lines[1].should contain("resign")
     lines[1].should contain("./resign.sh --key $TOKEN")
@@ -440,15 +454,35 @@ describe "gori settings import — the per-rule listing" do
     dry.last.should contain("--allow-commands")
   end
 
-  it "fills in a rule with no name and a step with no command" do
-    lines = Gori::CLI.command_report_for_spec([cmd_rule("decoder", "exec", "", "")], dry: false)
+  it "fills in a rule with no name" do
+    lines = Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "", "./r.sh")], dry: false)
     lines[1].should contain("(unnamed)")
-    lines[1].should contain("(no command)")
+  end
+
+  it "does not tell you to pass a flag you already passed" do
+    # `--dry-run --allow-commands` used to end on "a real import needs --allow-commands",
+    # which reads as though the dry run had rejected the flag.
+    dry = Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "r", "./r.sh")],
+      dry: true, allowed: true)
+    dry.last.should contain("--allow-commands is set")
+    dry.last.should_not contain("needs --allow-commands")
+  end
+
+  it "aligns the columns by TERMINAL width, not codepoint count" do
+    # A CJK name is two cells per character. Measuring `String#size` under-padded its column
+    # and stepped the command beside it out of line — in a listing meant to be read carefully.
+    lines = Gori::CLI.command_report_for_spec([
+      cmd_rule("rewriter", "pipe", "재서명훅", "./a.sh"),
+      cmd_rule("rewriter", "pipe", "resign", "./b.sh"),
+    ], dry: false)
+    a = Gori::Tui::Screen.display_width(lines[1].split("./a.sh").first)
+    b = Gori::Tui::Screen.display_width(lines[2].split("./b.sh").first)
+    a.should eq(b)
   end
 
   it "says nothing at all for a profile that carries no command" do
-    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandRule, dry: false).should be_empty
-    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandRule, dry: true).should be_empty
+    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandEntry, dry: false).should be_empty
+    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandEntry, dry: true).should be_empty
   end
 end
 
@@ -465,17 +499,22 @@ describe "gori settings import — a hostile name or argv cannot rewrite the lis
     Gori::CLI.printable_for_spec("a\rb").should_not contain('\r')
   end
 
-  it "escapes a bidi override, which Char#control? does not see" do
-    # Trojan Source: `U+202E` renders the argv as something other than what runs, without
-    # changing a byte of it — and it is category Cf, so the control-character test alone
-    # misses it. A listing whose whole job is to show an argv before it is armed is exactly
-    # what the trick is for.
+  it "escapes the invisible-format class, bidi overrides included" do
+    # Trojan Source: `U+202E` renders the command as something other than what runs, without
+    # changing a byte of it. Crystal's `Char#control?` is Cc AND Cf, so it covers the bidi
+    # controls, the zero-width joiners, the soft hyphen and the BOM — this pins that, because
+    # a listing whose whole job is to show a command before it is armed is what the trick is
+    # for, and because the predicate's own comment now rests on that fact.
     out = Gori::CLI.printable_for_spec("./evil.sh \u{202E} --quiet")
     out.should contain("\\u{202e}")
     out.should_not contain('\u{202E}')
-    Gori::CLI.printable_for_spec("a\u{2066}b").should contain("\\u{2066}")
-    # U+2028 is a newline to some terminals, and would break the listing into two lines.
+    {0x2066, 0x200B, 0x200D, 0x00AD, 0xFEFF, 0x061C}.each do |cp|
+      Gori::CLI.printable_for_spec("a#{cp.unsafe_chr}b").should eq("a\\u{#{cp.to_s(16)}}b")
+    end
+    # U+2028/U+2029 are Zl/Zp, NOT Cf — `control?` is false for them and a terminal may break
+    # the line there, splitting one entry's row in two. They are the pair added by hand.
     Gori::CLI.printable_for_spec("a\u{2028}b").should contain("\\u{2028}")
+    Gori::CLI.printable_for_spec("a\u{2029}b").should contain("\\u{2029}")
   end
 
   it "leaves ordinary text, including non-ASCII, alone" do

@@ -1119,10 +1119,13 @@ gori settings import team-profile.json --sections network
 `gori settings sections`는 gori가 아는 모든 섹션을 나열하고, 이 설치본에 아직 값이 없는 것을 표시합니다:
 
 ```
+statusline  (can carry commands)
 network
-rewriter  (can carry rules that run commands)
-scan_rules  (can carry rules that run commands; not set — at its default)
+editor  (can carry commands)
 env  (holds secrets — excluded unless named; not set — at its default)
+scan_rules  (can carry commands; not set — at its default)
+decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
+rewriter  (can carry commands)
 ```
 
 *not set*으로 표시된 섹션도 `--sections`에 쓸 수 있는 정상적인 이름입니다. export하면 담을 값이 없을 뿐이고(그 사실을 stderr로 알려줍니다), import하면 그 섹션이 처음으로 기록됩니다.
@@ -1154,27 +1157,39 @@ export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생
 
 ### 명령을 담은 프로필 {#profiles-that-carry-commands}
 
-세 섹션은 데이터가 아니라 **argv**를 담을 수 있습니다 — `op: pipe`인 `rewriter` 룰, `kind: exec`인 `scan_rules` 항목, 그리고 `exec:…`로 쓴 `decoder` 체인 스텝([프로세스 훅](/ko/guide/scripting/#process-hooks) 참고). 다른 룰과 똑같이 export됩니다. 팀이 같은 재서명 훅을 표준으로 쓰는 것이야말로 훅이 존재하는 이유니까요. 대신 양쪽 끝에서 파일에 무엇이 들었는지 말해줍니다.
+다섯 섹션은 데이터가 아니라 **명령**을 담을 수 있습니다. 다른 설정과 똑같이 export됩니다 — 팀이 같은 재서명 훅을 표준으로 쓰는 것이야말로 훅이 존재하는 이유니까요. 대신 양쪽 끝에서 파일에 무엇이 들었는지 말해줍니다.
+
+| 섹션 | 무엇이 담나 | 어떻게 실행되나 |
+|------|------------|----------------|
+| `rewriter` | `op: pipe`인 룰 | argv, 셸 없음 — 매치되는 프록시 트래픽마다 |
+| `scan_rules` | `kind: exec`인 항목 | argv, 셸 없음 — 분석되는 플로우마다 |
+| `decoder` | `exec:…`로 쓴 `chains` 스텝 | argv, 셸 없음 — 체인을 실행할 때 |
+| `statusline` | `command` | **`/bin/sh -c`** — `interval`초마다 |
+| `editor` | `command` | argv — `gori settings --edit`와 TUI의 `^E`에서 |
+
+앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 가장 날카로운 건 `statusline`입니다 — argv exec이 아니라 완전한 셸이고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다 — 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
 
 `export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
 
 ```
-note: 3 rules in this profile run a local command (2 rewriter pipe, 1 scan_rules exec) — whoever imports it runs them with their own privileges
+note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec) — whoever imports it runs them with their own privileges
 ```
 
 `import`는 argv까지 한 줄씩 나열하고, 확인을 받기 전까지 쓰지 않습니다. `--dry-run`도 같은 목록을 출력하며 어느 쪽이든 아무것도 쓰지 않습니다:
 
 ```
 $ gori settings import team-profile.json
-3 rules in this profile run a local command here, with your privileges:
-  rewriter pipe    resign body    ./resign.sh --key $TOKEN
-  rewriter pipe    (unnamed)      /usr/local/bin/hmac  [disabled]
-  scan_rules exec  leak detector  ./detect.py
+5 entries in this profile run a local command here, with your privileges:
+  rewriter pipe     resign body    ./resign.sh --key $TOKEN
+  rewriter pipe     (unnamed)      /usr/local/bin/hmac  [disabled]
+  scan_rules exec   leak detector  ./detect.py
+  statusline sh -c  command        gori-status --project
+  editor exec       command        nvim
 importing them is the same trust decision as running the author's script
-gori settings import: refused — 3 rules listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
+gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
 ```
 
-argv를 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트가 없으므로 스크립트에서 실행하는 import는 그대로 스크립트로 남습니다 — 그 플래그 자체가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 룰은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다 — `network`만 적용하는 import는 아무것도 무장시키지 않으므로 룰을 나열하지도, 플래그를 요구하지도 않습니다.
+명령을 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트가 없으므로 스크립트에서 실행하는 import는 그대로 스크립트로 남습니다 — 그 플래그 자체가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 항목은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다 — `network`만 적용하는 import는 아무것도 무장시키지 않으므로 항목을 나열하지도, 플래그를 요구하지도 않습니다.
 
 ### `gori settings tls-fingerprint` {#gori-settings-tls-fingerprint}
 

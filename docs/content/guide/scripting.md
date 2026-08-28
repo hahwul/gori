@@ -149,11 +149,13 @@ tells you in as many words that it is now running a local command on your behalf
 **A shared profile can carry one.** `rewriter` and `scan_rules` are ordinary exportable sections,
 and a `decoder` chain named in `--sections` is too — so a hook travels in a
 [profile](/reference/cli/#profiles) like any other rule, which is the point: a team standardising
-on one re-signing hook is why hooks exist. Both ends say so. `gori settings export` counts what it
-wrote on stderr, and `gori settings import` lists every command-carrying rule with its argv and
-**refuses to write until you pass `--allow-commands`**. Importing someone's profile is the same
-trust decision as running their script, so read the argv first — the flag is the acknowledgement,
-and it is answerable in a script because there is no prompt.
+on one re-signing hook is why hooks exist. Two settings outside the hook seams run a command as
+well, and travel the same way: `statusline.command` (through `/bin/sh -c`, on a timer) and
+`editor.command`. Both ends say so. `gori settings export` counts what it wrote on stderr, and
+`gori settings import` lists every command-carrying entry with its command and **refuses to write
+until you pass `--allow-commands`**. Importing someone's profile is the same trust decision as
+running their script, so read the commands first — the flag is the acknowledgement, and it is
+answerable in a script because there is no prompt.
 
 ## What to Reach For
 
