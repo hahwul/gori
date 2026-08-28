@@ -171,36 +171,73 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
     it "refuses without touching the payload, and keeps the text to be corrected" do
       with_demo_schema do
         grpc_tmp_store do |store|
-          payload = get_user_request("hahwul")
-          view = grpc_view(store, payload)
+          view = grpc_view(store, get_user_request("hahwul"))
           view.toggle_grpc_fields
           view.grpc_field_begin.should be_nil
           type_into(view, "admin")
-          # The descriptor set goes away mid-edit — a project switch, a schema reload. The
-          # apply must refuse rather than encode against a declaration it no longer has.
-          Schemas.clear
-          view.grpc_field_apply.not_nil!.should_not be_empty
+          empty_the_payload_under_the_form(view)
+          # The field the value was opened against is no longer in the message. `replace`
+          # bound-checks the path rather than splicing at whatever index still exists.
+          view.grpc_field_apply.not_nil!.should contain("changed under the editor")
           view.grpc_fields_editing?.should be_true # the typed text is still there
-          sent_payload(view).should eq(payload)    # …and the capture is untouched
+          sent_payload(view).should be_empty       # …and nothing was written
         end
       end
     end
 
-    it "drops a standing refusal as soon as the value is edited" do
+    it "shows a refusal in the pane, and drops it as soon as the value is edited" do
       with_demo_schema do
         grpc_tmp_store do |store|
           view = grpc_view(store, get_user_request("hahwul"))
           view.toggle_grpc_fields
           view.grpc_field_begin
-          Schemas.clear
+          empty_the_payload_under_the_form(view)
           view.grpc_field_apply.should_not be_nil
           backend = MemoryBackend.new(160, 24)
           view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
-          backend.contains?("⚠").should be_true
+          backend.contains?("changed under the editor").should be_true
           type_into(view, "x")
           backend2 = MemoryBackend.new(160, 24)
           view.render(Screen.new(backend2), Rect.new(0, 0, 160, 24))
-          backend2.contains?("no longer loaded").should be_false
+          backend2.contains?("changed under the editor").should be_false
+        end
+      end
+    end
+
+    # The value is encoded and spliced against the row it was OPENED on. `grpc_field_rows`
+    # rebuilds on any `Schemas.revision` tick and only CLAMPS the selection across a rebuild,
+    # so re-resolving it at apply time could land the typed value on a different field.
+    it "applies to the field the value was opened against, across a schema reload" do
+      dir = File.tempname("gori-protos-reload")
+      Dir.mkdir_p(dir)
+      File.write(File.join(dir, "demo.desc"), Base64.decode(DEMO_DESC_B64))
+      Schemas.apply(dir)
+      grpc_tmp_store do |store|
+        view = grpc_view(store, get_user_request("hahwul"))
+        view.toggle_grpc_fields
+        view.grpc_field_begin.should be_nil
+        type_into(view, "admin")
+        Schemas.apply(dir) # a reload: same declarations, new revision, rows rebuilt
+        view.grpc_field_apply.should be_nil
+        sent_payload(view).should eq(get_user_request("admin"))
+      end
+    ensure
+      Schemas.clear
+      FileUtils.rm_rf(dir) if dir
+    end
+
+    it "clears the open value field when the form is toggled off under it" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          view = grpc_view(store, get_user_request("hahwul"))
+          view.toggle_grpc_fields
+          view.grpc_field_begin
+          view.grpc_fields_editing?.should be_true
+          view.toggle_grpc_fields.should be_false # the ␣E:FIELDS badge click
+          # A live `grpc_fields_editing?` with the form gone locks the tab against a
+          # cross-session reconcile forever and routes IME composition into a dead buffer.
+          view.grpc_fields_editing?.should be_false
+          view.pane_insert?(:request).should be_false
         end
       end
     end
@@ -261,6 +298,46 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
+    it "offers no field editor over a COMPRESSED payload" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          # The frame's 0x01 flag says the payload is compressed, and compressed bytes are
+          # not a protobuf message until something inflates them — which gori does not. The
+          # same carve-out `ProtobufTree.decode?` makes for every other gRPC surface.
+          head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+            method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+            head: head.to_slice,
+            body: Gori::Proxy::H2::Grpc.frame(true, Bytes[0x1F, 0x8B, 0x08, 0x00]),
+            source: Gori::FlowSource::Kind::Proxy))
+          view = RepeaterView.new
+          view.load_grpc(store.get_flow(id).not_nil!)
+          view.grpc_reframable?.should be_true # ^X still reaches the compressed octets
+          view.grpc_field_binding.should_not be_nil
+          view.grpc_fields_available?.should be_false
+          view.toggle_grpc_fields.should be_false
+        end
+      end
+    end
+
+    it "names every row it does not draw — a cut, and a truncated parse" do
+      s = demo_schema
+      user = s.message?("demo.User").not_nil!
+      # A clean field, then a length prefix claiming more than arrived.
+      truncated = Bytes[0x08, 0x2A, 0x12, 0x40, 0x41]
+      rows = RepeaterView.grpc_form_rows(truncated, s, user)
+      rows.size.should eq(2)
+      rows[0].seed.should eq("42")
+      rows[1].label.should contain("truncated")
+      rows[1].editable?.should be_false
+      # …and the octets the decoder could not read survive an edit to the field above them.
+      d = user.field?(1_u32).not_nil!
+      encoded = Gori::Protobuf::Encoder.encode(s, d, "99", packed: false).as(Bytes)
+      Gori::Protobuf::Encoder.replace(truncated, rows[0].path, encoded)
+        .as(Bytes)[2..].should eq(truncated[2..])
+    end
+
     it "leaves ^X reachable and drops the form when hex opens" do
       with_demo_schema do
         grpc_tmp_store do |store|
@@ -311,6 +388,14 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       by_name["serial"].seed.should eq("244837814094590")
     end
   end
+end
+
+# Shrink the payload out from under an open value field, the way a `^X` hex edit does —
+# the one route by which the row a value was opened on can stop existing.
+private def empty_the_payload_under_the_form(view : RepeaterView) : Nil
+  view.toggle_request_hex
+  32.times { view.hex_delete } # forward-delete: the cursor enters at byte 0
+  view.toggle_request_hex
 end
 
 # Type `text` into the open value field, replacing whatever it was seeded with.

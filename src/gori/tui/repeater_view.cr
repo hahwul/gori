@@ -257,6 +257,12 @@ module Gori::Tui
       @grpc_field_sel = 0
       @grpc_field_scroll = 0
       @grpc_field_input = nil.as(String?) # non-nil ⇔ a value is being typed
+      # The row and the schema that value was OPENED against. `grpc_field_apply` encodes and
+      # splices against these rather than re-resolving the selection, so a rows rebuild
+      # mid-edit (a descriptor set loaded, the schema cleared) cannot land the typed value on
+      # a different field. Retired together with the input by `close_grpc_field_input`.
+      @grpc_field_row = nil.as(GrpcFieldRow?)
+      @grpc_field_schema = nil.as(Gori::Protobuf::Schema?)
       @grpc_field_caret = 0
       @grpc_field_pre = "" # IME preedit for the value field
       @grpc_field_error = nil.as(String?)

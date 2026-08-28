@@ -198,6 +198,34 @@ describe Gori::Protobuf::Encoder do
       seen.should eq(10)
     end
 
+    it "refuses to seed a packed run that ended mid-element" do
+      # `read_packed` reports this one as a NOTE with `packed_more` still 0, so counting only
+      # the omitted elements let a truncated run seed as its decodable prefix — and applying
+      # it unchanged then dropped the leftover octets off a deliberately-malformed capture.
+      d = defn(5, Schema::FieldType::Int32, repeated: true)
+      f = PB::Field.new(5_u32, PB::WireType::LengthDelimited, bytes: Bytes[0x01, 0x02, 0xFF])
+      r = Lens.read(Schema.new, Schema::MessageType.new("T", {5_u32 => d}), f).not_nil!
+      r.packed.should eq([1_i64, 2_i64])
+      r.packed_more.should eq(0)
+      r.note.not_nil!.should contain("ends mid-element")
+      Encoder.seed(d, f, r).should be_nil
+    end
+
+    it "refuses to seed a string carrying a control byte" do
+      # The ROW escapes it (`"a\nb"`); a terminal cell paints a control char as a space. An
+      # operator retyping what they see would turn 0x0A into 0x20 with nothing saying so.
+      d = defn(1, Schema::FieldType::String)
+      f = PB::Field.new(1_u32, PB::WireType::LengthDelimited,
+        bytes: "a\nb".to_slice, string: "a\nb")
+      r = Lens.read(Schema.new, Schema::MessageType.new("T", {1_u32 => d}), f).not_nil!
+      r.value.should eq("a\nb")
+      Encoder.seed(d, f, r).should be_nil
+      # An ordinary string is unaffected.
+      g = PB::Field.new(1_u32, PB::WireType::LengthDelimited, bytes: "ok".to_slice, string: "ok")
+      Encoder.seed(d, g, Lens.read(Schema.new, Schema::MessageType.new("T", {1_u32 => d}), g).not_nil!)
+        .should eq("ok")
+    end
+
     it "refuses to seed a packed run longer than the lens lists" do
       # A seed built from a truncated element list would DROP the rest on apply. nil keeps
       # the row read-only instead.

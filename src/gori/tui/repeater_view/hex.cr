@@ -42,8 +42,7 @@ class Gori::Tui::RepeaterView
         @grpc_payload = h.to_bytes # keep the edited payload byte-exact (reframed on send)
         # …and tell the FIELDS form its rows are stale: it reads the same payload, and a hex
         # edit can add, remove or retype a field under names it has already drawn (#828).
-        @grpc_payload_rev += 1
-        @grpc_field_key = nil
+        invalidate_grpc_fields
       else
         # Round-trips byte-exactly now: set_text keeps each line's terminator in @eols, and
         # `String.new(Bytes)` does not scrub, so the hex buffer's bytes come back out of

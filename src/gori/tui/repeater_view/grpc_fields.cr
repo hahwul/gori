@@ -68,15 +68,30 @@ class Gori::Tui::RepeaterView
 
   # Whether the FIELDS form has anything to show. Unary only (same reason `^X` is: a 0- or
   # multi-message body has no single payload to edit), and schema-only.
+  #
+  # `!@grpc_compressed` is the carve-out `ProtobufTree.decode?` already makes for every other
+  # gRPC surface: the frame's `0x01` flag says the payload is compressed, and compressed bytes
+  # are not a protobuf message until something inflates them — which gori does not. Without
+  # this the form ran `Protobuf.decode` over a deflate stream and either reported "(no fields
+  # in this message)" (indistinguishable from an empty one) or listed whatever the compressed
+  # bytes happened to parse as, under the `.proto`'s field NAMES.
   def grpc_fields_available? : Bool
-    @grpc_mode && @grpc_reframable && !grpc_field_binding.nil?
+    @grpc_mode && @grpc_reframable && !@grpc_compressed && !grpc_field_binding.nil?
   end
 
   # `␣E` / `repeater.toggle-grpc-fields`. Returns the new state; the controller owns the
   # refusal sentences, because "no descriptor set" and "not a unary call" are different
   # problems with different fixes and the view cannot phrase either better than it can.
   def toggle_grpc_fields : Bool
-    return @grpc_fields = false if @grpc_fields
+    # `exit_grpc_fields`, not a bare `@grpc_fields = false`: the badge click reaches this with
+    # a value field open, and leaving `@grpc_field_input` set with the form gone left
+    # `grpc_fields_editing?` true — which locks the tab against a cross-session reconcile
+    # forever, prints the value-field footer over a pane that has none, and routes IME
+    # composition into a buffer nothing can see.
+    if @grpc_fields
+      exit_grpc_fields
+      return false
+    end
     return false unless grpc_fields_available?
     # Hex and FIELDS are two editors over the SAME bytes; leaving hex first commits its
     # buffer into `@grpc_payload`, which is what the form then reads.
@@ -93,8 +108,7 @@ class Gori::Tui::RepeaterView
   # does. Separate from the toggle so a caller cannot accidentally turn it ON.
   def exit_grpc_fields : Nil
     @grpc_fields = false
-    @grpc_field_input = nil
-    @grpc_field_error = nil
+    close_grpc_field_input
   end
 
   # The rows, rebuilt when the payload, the target rpc, or the loaded schema has moved.
@@ -110,8 +124,10 @@ class Gori::Tui::RepeaterView
     @grpc_field_rows
   end
 
-  # Force the next `grpc_field_rows` to rebuild. Called wherever `@grpc_payload` is replaced.
-  private def invalidate_grpc_fields : Nil
+  # Force the next `grpc_field_rows` to rebuild. THE entry point for it — every writer of
+  # `@grpc_payload` calls this (`load_grpc`, `exit_request_hex`, `grpc_field_apply`) rather
+  # than inlining the pair, so the next one to be added has one example and not three.
+  protected def invalidate_grpc_fields : Nil
     @grpc_payload_rev += 1
     @grpc_field_key = nil
   end
@@ -135,6 +151,13 @@ class Gori::Tui::RepeaterView
     row = grpc_field_selected || return "no fields to edit"
     seed = row.seed
     return row.note || "this field has no typed value — ^X edits its bytes" unless seed
+    # SNAPSHOT the row and the schema the operator is typing against. `grpc_field_rows`
+    # rebuilds whenever the payload, the target rpc or `Schemas.revision` moves, and
+    # `@grpc_field_sel` is only CLAMPED across a rebuild, never re-matched — so re-resolving
+    # the row at apply time meant a descriptor set loaded mid-edit could land the typed value
+    # on a different field, under a success toast. The value goes back where it came from.
+    @grpc_field_row = row
+    @grpc_field_schema = grpc_field_binding.try(&.schema)
     @grpc_field_input = seed
     @grpc_field_caret = seed.size
     @grpc_field_pre = ""
@@ -143,7 +166,15 @@ class Gori::Tui::RepeaterView
   end
 
   def grpc_field_cancel : Nil
+    close_grpc_field_input
+  end
+
+  # Everything the open value field owns, dropped together — so no caller can retire half of
+  # it (see `toggle_grpc_fields`).
+  private def close_grpc_field_input : Nil
     @grpc_field_input = nil
+    @grpc_field_row = nil
+    @grpc_field_schema = nil
     @grpc_field_pre = ""
     @grpc_field_error = nil
   end
@@ -153,9 +184,9 @@ class Gori::Tui::RepeaterView
   # nil on success.
   def grpc_field_apply : String?
     text = @grpc_field_input || return refuse_grpc_field("no value is being edited")
-    row = grpc_field_selected || return refuse_grpc_field("no fields to edit")
+    row = @grpc_field_row || return refuse_grpc_field("no field is open for editing")
     d = row.defn || return refuse_grpc_field("this field has no declaration to encode against")
-    schema = grpc_field_binding.try(&.schema) ||
+    schema = @grpc_field_schema ||
              return refuse_grpc_field("the descriptor set for this rpc is no longer loaded")
     encoded = Protobuf::Encoder.encode(schema, d, text, packed: row.packed)
     return refuse_grpc_field(encoded) if encoded.is_a?(String)
@@ -164,11 +195,12 @@ class Gori::Tui::RepeaterView
     # Only NOW is anything mutated — a refusal above leaves the payload exactly as captured.
     @grpc_payload = rebuilt
     @dirty = true
-    @grpc_field_input = nil
-    @grpc_field_pre = ""
-    @grpc_field_error = nil
+    close_grpc_field_input
     invalidate_grpc_fields
-    @grpc_lines_cache = nil
+    # `@grpc_lines_cache` is deliberately NOT dropped — the same rule `toggle_grpc_reframe`
+    # and `exit_request_hex` keep. Those rows describe the send that produced the result on
+    # screen, and rebuilding them now would re-label a PAST send with the byte count of a
+    # payload it never carried. `apply` rebuilds them per send.
     nil
   end
 
@@ -245,7 +277,12 @@ class Gori::Tui::RepeaterView
     seed : String? = nil,
     note : String? = nil,
     packed : Bool = false,
-    defn : Protobuf::Schema::FieldDef? = nil
+    defn : Protobuf::Schema::FieldDef? = nil,
+    # A row that is not a field at all: a cut, or the decoder saying it stopped. It skips the
+    # number/name/type columns and carries its sentence as the whole label. Every cut this
+    # form makes gets one, for the reason `ProtobufTree` gives each of its own: a silently
+    # shortened list is a worse lie than a short one that says so.
+    marker : String? = nil
 
   private def build_grpc_field_rows : Array(GrpcFieldRow)
     b = grpc_field_binding || return [] of GrpcFieldRow
@@ -268,14 +305,18 @@ class Gori::Tui::RepeaterView
                                            type : Protobuf::Schema::MessageType,
                                            path : Array(Int32), depth : Int32) : Nil
     msg.fields.each_with_index do |f, i|
-      return if draft.size >= GRPC_FIELD_MAX_ROWS
+      if draft.size >= GRPC_FIELD_MAX_ROWS
+        draft << grpc_field_marker(path, depth,
+          "… (form cut at #{GRPC_FIELD_MAX_ROWS} rows — the History tree and ^X show the rest)")
+        return
+      end
       here = path + [i]
       r = Protobuf::Lens.read(schema, type, f)
       unless r
         # Undeclared. Listed — an undocumented field is often why someone is reading the wire
         # at all — and read-only, because there is no declaration to encode a typed value by.
         draft << GrpcFieldDraft.new(here, depth, f.number, ProtobufTree::UNKNOWN_NAME,
-          f.wire_name, ProtobufTree.raw_column(f),
+          f.wire_name, ProtobufTree.raw_summary(f),
           note: "the schema does not declare field #{f.number} — ^X edits its bytes")
         next
       end
@@ -285,7 +326,7 @@ class Gori::Tui::RepeaterView
         # stays read-only: re-encoding here would mean picking the schema over the bytes,
         # which is the guess this whole lens exists to avoid.
         draft << GrpcFieldDraft.new(here, depth, f.number, d.name, d.type_label,
-          ProtobufTree.raw_column(f), note: r.note)
+          ProtobufTree.raw_summary(f), note: r.note)
         next
       end
       if nested = r.nested
@@ -294,6 +335,8 @@ class Gori::Tui::RepeaterView
         if depth + 1 < GRPC_FIELD_MAX_DEPTH
           collect_grpc_field_rows(draft, f.message || Protobuf.decode(f.bytes || Bytes.empty),
             schema, nested, here, depth + 1)
+        else
+          draft << grpc_field_marker(here, depth + 1, "… (deeper than this form edits — ^X for its bytes)")
         end
         next
       end
@@ -305,8 +348,20 @@ class Gori::Tui::RepeaterView
       # with the reason on the row rather than an editor that loses bytes.
       note ||= "no single-line value for this field — ^X edits its bytes" if seed.nil?
       draft << GrpcFieldDraft.new(here, depth, f.number, d.name, d.type_label,
-        ProtobufTree.value_column(f, r), seed: seed, note: note, packed: packed, defn: d)
+        ProtobufTree.typed_value(f, r), seed: seed, note: note, packed: packed, defn: d)
     end
+    # The decoder stopped mid-field: a truncated capture, a length that overran, an illegal
+    # wire type. The rows above it are real; what is NOT real is the impression that they are
+    # all of them. `Encoder.replace` copies the undecoded tail through on every splice, so the
+    # bytes survive an edit — this row is what says they are there.
+    unless msg.complete
+      draft << grpc_field_marker(path, depth,
+        "⚠ truncated — the rest of these bytes are not valid protobuf (^X shows them)")
+    end
+  end
+
+  private def self.grpc_field_marker(path : Array(Int32), depth : Int32, text : String) : GrpcFieldDraft
+    GrpcFieldDraft.new(path, depth, 0_u32, "", "", "", note: text, marker: text)
   end
 
   private def self.format_grpc_field_rows(draft : Array(GrpcFieldDraft)) : Array(GrpcFieldRow)
@@ -314,13 +369,18 @@ class Gori::Tui::RepeaterView
     namew = 1
     typew = 1
     draft.each do |dr|
+      next if dr.marker # a sentence, not a row of columns — it must not widen them
       numw = {numw, dr.number.to_s.size}.max
       namew = {namew, {Screen.draw_width_upto(dr.name, GRPC_FIELD_NAME_COL + 1), GRPC_FIELD_NAME_COL}.min}.max
       typew = {typew, {Screen.draw_width_upto(dr.type, GRPC_FIELD_TYPE_COL + 1), GRPC_FIELD_TYPE_COL}.min}.max
     end
     draft.map do |dr|
-      label = "#{"  " * dr.depth}#{dr.number.to_s.rjust(numw)}  " \
-              "#{ProtobufTree.pad(dr.name, namew)}  #{ProtobufTree.pad(dr.type, typew)}"
+      label = if marker = dr.marker
+                "#{"  " * dr.depth}#{marker}"
+              else
+                "#{"  " * dr.depth}#{dr.number.to_s.rjust(numw)}  " \
+                "#{ProtobufTree.cut(dr.name, namew)}  #{ProtobufTree.cut(dr.type, typew)}"
+              end
       GrpcFieldRow.new(dr.path, label, dr.value, dr.seed, dr.note, dr.packed, dr.defn)
     end
   end
@@ -337,13 +397,17 @@ class Gori::Tui::RepeaterView
     # occupies the bottom row, and an error rendered into the same cell would be invisible
     # exactly when it matters — right after an apply the operator has to correct.
     status_h = @grpc_field_input && @grpc_field_error ? 2 : 1
-    list_h = {inner.h - status_h, 1}.max
+    # …but never at the cost of the last field row. On a two-row pane the error line and the
+    # list both landed on `inner.y`, one painted over the other; the value field is the row
+    # that has to be there, so the error gives way and the toast carries it instead.
+    status_h = 1 if inner.h - status_h < 1
+    list_h = inner.h - status_h
     if rows.empty?
       screen.text(inner.x, inner.y, "(no fields in this message)", Theme.muted)
     else
       render_grpc_field_list(screen, Rect.new(inner.x, inner.y, inner.w, list_h), rows, focused)
     end
-    render_grpc_field_status(screen, inner, focused)
+    render_grpc_field_status(screen, inner, status_h, focused)
   end
 
   # Row under `my`, from the same scroll offset the list was last drawn at. Out of range —
@@ -372,16 +436,22 @@ class Gori::Tui::RepeaterView
     Frame.scroll_gauge(screen, list, rows.size, @grpc_field_scroll, focused)
   end
 
-  private def render_grpc_field_status(screen : Screen, inner : Rect, focused : Bool) : Nil
+  private def render_grpc_field_status(screen : Screen, inner : Rect, status_h : Int32,
+                                       focused : Bool) : Nil
     y = inner.y + inner.h - 1
     row = grpc_field_selected
     if value = @grpc_field_input
-      if err = @grpc_field_error
+      if (err = @grpc_field_error) && status_h > 1
         screen.text(inner.x, y - 1, "⚠ #{err}", Theme.red, Theme.bg, width: inner.w)
       end
-      prompt = "#{row.try(&.defn.try(&.name)) || "value"} ▸ "
-      screen.text(inner.x, y, prompt, Theme.accent, Theme.bg, width: inner.w)
-      fx = inner.x + prompt.size
+      # The prompt names the field the SNAPSHOT opened, not whatever the caret sits on now —
+      # `grpc_field_apply` encodes against the snapshot, and a label naming a different field
+      # would be the one thing on screen disagreeing with where the value goes.
+      prompt = "#{@grpc_field_row.try(&.defn.try(&.name)) || "value"} ▸ "
+      # `screen.text` returns the x AFTER its last cell. Adding `prompt.size` instead measured
+      # the prompt in CHARACTERS: a descriptor set gori was handed can carry a CJK field name,
+      # two cells per char, and the value would then be painted over its own label.
+      fx = screen.text(inner.x, y, prompt, Theme.accent, Theme.bg, width: inner.w)
       screen.input_line(fx, y, value, @grpc_field_caret, @grpc_field_pre,
         Theme.text_bright, Theme.bg, width: {inner.right - fx, 1}.max)
       return

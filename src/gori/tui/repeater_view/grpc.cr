@@ -83,8 +83,7 @@ class Gori::Tui::RepeaterView
     exit_grpc_fields
     @grpc_field_sel = 0
     @grpc_field_scroll = 0
-    @grpc_field_key = nil
-    @grpc_payload_rev += 1
+    invalidate_grpc_fields
     @grpc_sent_target = "" # no send yet on this tab; the transcript has nothing to describe
     @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
     @tcx = @target.size

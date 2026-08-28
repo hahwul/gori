@@ -76,7 +76,13 @@ module Gori::Protobuf
     # rather than seeding a lossy value into an editor (see `editable?`).
     def seed(d : Schema::FieldDef, f : Protobuf::Field, r : Lens::Reading) : String?
       if packed = r.packed
-        return nil if r.packed_more > 0 # elements the lens stopped listing — the seed would drop them
+        # Two ways a packed run has no faithful text form, and BOTH drop bytes on apply:
+        # elements past `Lens::PACKED_MAX` that the lens stopped listing, and a run that ended
+        # MID-ELEMENT — `read_packed` reports that one as a note with `packed_more` still 0,
+        # so counting only the omitted elements let a truncated run seed as its decodable
+        # prefix and re-encode without the leftover octets. That capture is deliberately
+        # malformed; silently repairing it is the one thing this editor must not do.
+        return nil if r.packed_more > 0 || r.note
         return packed.map { |v| scalar_text(v) }.join(", ")
       end
       return hex_text(f.bytes || Bytes.empty) if d.type.bytes?
@@ -88,6 +94,10 @@ module Gori::Protobuf
       end
       v = r.value
       return nil if v.nil?
+      # A string carrying a control byte has no one-line form: the ROW escapes it (`"a\nb"`),
+      # a terminal cell paints it as a space, and an operator retyping what they see would
+      # turn 0x0A into 0x20 with nothing on screen having said so. Read-only, and `^X`.
+      return nil if v.is_a?(String) && v.each_char.any?(&.control?)
       scalar_text(v)
     end
 

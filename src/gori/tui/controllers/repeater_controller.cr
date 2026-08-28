@@ -2392,11 +2392,16 @@ module Gori::Tui
             # is what protects the tab from a cross-session reconcile.
             @host.status("field applied — the rest of the message is byte-for-byte as captured")
           end
-        elsif key.escape?
-          view.grpc_field_cancel
         end
+        # No `escape` arm: `handle_body_key`'s own escape chain intercepts it first and calls
+        # `grpc_field_cancel` there, beside the hex and chain-pane exits. A second copy here
+        # would never run and would be the one the next reader finds.
         return
       end
+      # Space opens the space menu, exactly as it does in the request pane's READ mode. The
+      # form's own hints name `␣E` and `␣F`, and swallowing space here made both of them
+      # unpressable — a footer advertising a key that does nothing.
+      return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
       case
       when key.up?   then view.at_top? ? view.focus_first : view.grpc_field_move(-1)
       when key.down? then view.grpc_field_move(1)
