@@ -15,6 +15,9 @@ module Gori::Fuzz
     CALIBRATION_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
     @has_chains : Bool
+    # Memoized `baseline_raw`. See there — `Plan.build` asks it three structural questions, and
+    # with an `exec:` chain in the template each call would fork the operator's command again.
+    @baseline_raw : Bytes? = nil
     # Whether this run's rendered requests really get their gRPC length prefix recomputed —
     # `Config#reframe_grpc?` AND a template `GrpcVerdict.reframable_template?` accepted, the
     # decision taken once in the ctor. Exposed because it is a pass BETWEEN the splice and the
@@ -115,7 +118,20 @@ module Gori::Fuzz
     # whether the resync is about to REWRITE framing the operator authored — a template
     # declaring `Content-Length: 5` over a ten-byte body is the CL-desync probe itself, and
     # a sweep that silently corrects it tests something else and reports success.
+    #
+    # MEMOIZED, and it must be (#851/#852). `Plan.build` reads it three times — for
+    # `Outbound.request_target`, `GrpcVerdict.framed_template?`/`reframable_template?`, and
+    # `Plan#rewrites_content_length?` — and the ctor once more, all to answer questions about
+    # SHAPE. Since #818 `chained` can run an `exec:` step, so an un-memoized call forked the
+    # operator's command once per question, at plan time, before the run sent a byte. Its own
+    # comment already frames the render as "a bounded, plan-time cost"; bounding it means once.
+    # The template is immutable and `chained` is deterministic over it, so the cached bytes are
+    # the same bytes every caller would have recomputed.
     def baseline_raw : Bytes
+      @baseline_raw ||= compute_baseline_raw
+    end
+
+    private def compute_baseline_raw : Bytes
       values = chained(@marked.default_payloads)
       # On a WS script this is the HANDSHAKE, which is what every caller of `baseline_raw`
       # wants: `Outbound.request_target` needs a request line, `GrpcVerdict.framed_template?`

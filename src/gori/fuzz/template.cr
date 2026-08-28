@@ -403,19 +403,58 @@ module Gori::Fuzz
     # chain — `RepeaterView#refuse_failed_chains`, whose envelope is "§…§ chain cannot run:" —
     # the framed form stutters ("chain cannot run: chain 'x' step 'x' failed: …"). A fuzz ROW
     # keeps the frame, because there the spec is nowhere else on screen.
+    # TWO passes, and the order is a REFUSAL-BEFORE-SIDE-EFFECT rule (#851/#852). Since #818 a
+    # `¦chain` step can be an `exec:` — the operator's own command, run with their privileges
+    # and allowed to have side effects — so a template with one hook marker and one PURE marker
+    # that fails on its value used to fire the hook and only THEN have the pure failure refuse
+    # the send (`RepeaterView#refuse_failed_chains` reads this report). A refusal decidable
+    # WITHOUT a side effect must be decided before any side effect happens (the same rule
+    # `Fuzz::Plan.refuse_unrunnable_chains` states one level up, for the template-level refusal).
+    #
+    # So pass 1 runs every position whose chain forks nothing — the pure chains, the no-chain
+    # positions, and (when `run_hooks: false`) the command chains too, whose command step is
+    # WITHHELD, not run. If any of those FAILED, the deferred command positions in pass 2 are
+    # left UNTRANSFORMED with no reason: the pure failure is the one to report (its caller
+    # refuses, or the row already carries it), and running the command anyway would be the
+    # side effect this ordering exists to avoid. With no pure failure, pass 2 runs the commands
+    # exactly as before. A position maps 1:1 to its index across both passes.
     def self.apply_chains_reported(positions : Array(Position), payloads : Array(String),
                                    registry : Decoder::Registry,
                                    run_hooks : Bool = true,
                                    name_chain : Bool = true) : Array({String, String?})
-      payloads.map_with_index do |p, k|
+      # Pass 1: everything decidable with NO side effect. A `nil` slot is a DEFERRED command
+      # chain — a side effect only when hooks may fire; with `run_hooks: false` its command step
+      # is withheld inside `Decoder.run`, so it is decidable now like any pure chain.
+      settled = payloads.map_with_index do |p, k|
         spec = positions[k]?.try(&.chain)
-        next {p, nil} if spec.nil? || spec.empty?
-        res = Decoder.run(registry, p.to_slice, spec, run_hooks: run_hooks)
-        if res.ok? && (o = res.output)
-          {String.new(o), nil}
+        if spec.nil? || spec.empty?
+          {p, nil}
+        elsif run_hooks && Decoder.chain_runs_commands?(registry, spec)
+          nil
         else
-          {p, name_chain ? chain_failure_reason(spec, res) : chain_failure_detail(res)}
+          apply_one_chain(spec, p, registry, run_hooks, name_chain)
         end
+      end
+      # A non-nil reason among the pass-1 entries is a chain that did not run on its value. One
+      # such failure and the whole render is refused (send path) or the row is already an error
+      # (fuzz), so the deferred commands must not fire.
+      pure_failed = settled.any? { |r| r && r[1] }
+      settled.map_with_index do |r, k|
+        next r if r
+        spec = positions[k].chain
+        pure_failed ? {payloads[k], nil} : apply_one_chain(spec, payloads[k], registry, run_hooks, name_chain)
+      end
+    end
+
+    # One position's chain over one payload: the transformed value, or the untransformed value
+    # plus the named reason it did not run. `Decoder.run` never raises (see `apply_chains`).
+    private def self.apply_one_chain(spec : String, payload : String, registry : Decoder::Registry,
+                                     run_hooks : Bool, name_chain : Bool) : {String, String?}
+      res = Decoder.run(registry, payload.to_slice, spec, run_hooks: run_hooks)
+      if res.ok? && (o = res.output)
+        {String.new(o), nil}
+      else
+        {payload, name_chain ? chain_failure_reason(spec, res) : chain_failure_detail(res)}
       end
     end
 

@@ -264,6 +264,30 @@ module Gori::Fuzz
 
   # ── Processing pipeline (1:1 per payload, so set size is preserved) ──────────────
 
+  # This catalog is CLOSED, and an `exec:` processor is deliberately NOT in it (#818/#846). A
+  # run-wide external-command hook belongs on the per-position `§value¦exec:./sign.sh§` chain,
+  # not here, and the seam is the reason:
+  #
+  #   * A `Processor` is a pure `String -> String` with NO failure channel — `apply` must
+  #     return a String. An `exec:` step fails (a spawn that ENOENTs, a non-zero exit, a
+  #     timeout), and the only two things a Processor could do with a failure are RAISE (which
+  #     would take the whole run down over one broken command, deep inside the payload iterator)
+  #     or pass the input through UNCHANGED — and a payload silently sent un-transformed under a
+  #     clean-looking row is exactly the "absence of a finding reads as clean" corruption every
+  #     other seam refuses. The `¦chain` path already has the honest channel: `Decoder.run`
+  #     never raises, `Template#apply_chains_reported` names the per-row reason, and it lands in
+  #     `Job#chain_error` / the run's error tally instead of `0 errors`.
+  #   * A `Processor` runs deep in `ProcessedIterator` with no registry, no `Settings.hook_timeout_secs`
+  #     budget and no argv validation. The `¦chain` path is refused at `Plan.build`
+  #     (`refuse_unrunnable_chains`) when the argv cannot tokenize, is run with the shared
+  #     no-shell `ProcessHook`, and is WITHHELD on a display replay (`run_hooks: false`) so a
+  #     result row redrawn does not re-fork the command. None of that machinery exists at this
+  #     layer, and duplicating it into a pure-transform catalog would be a second, weaker copy.
+  #
+  # The cost of the marker route is that a template with N positions needs the `¦exec:` on each
+  # marker rather than one `--encode exec` for the whole run — accepted, because that is the
+  # granularity at which the operator opts a position into forking a command, and the exec
+  # safety model is worth more than saving the repetition. See `docs/content/guide/scripting.md`.
   abstract struct Processor
     abstract def apply(s : String) : String
   end

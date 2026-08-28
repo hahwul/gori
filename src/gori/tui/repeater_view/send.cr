@@ -162,8 +162,8 @@ class Gori::Tui::RepeaterView
   # unchanged. A chain-less `§v§` renders `v`.
   #
   # `refuse: true` — this is the ONE path that puts these bytes on the wire, so a `¦chain`
-  # that cannot run is REFUSED here (`refuse_unrunnable_chains` for a chain that could never
-  # run, `refuse_failed_chains` for one that failed on this value) rather than let
+  # that cannot run is REFUSED here (`Fuzz::Plan.refuse_unrunnable_chains` for a chain that
+  # could never run, `refuse_failed_chains` for one that failed on this value) rather than let
   # `Template#apply_chains` drop the raw, untransformed value onto the socket.
   private def marked_request_bytes : Bytes
     finalize_wire(render_marked(expanded_editor_bytes, refuse: true))
@@ -181,7 +181,10 @@ class Gori::Tui::RepeaterView
   private def render_marked(raw : Bytes, refuse : Bool = false) : Bytes
     tmpl = Fuzz::Template.parse(String.new(raw))
     registry = Decoder.shared_registry
-    refuse_unrunnable_chains(tmpl, registry) if refuse
+    # The template-level chain guard is ONE validator now, and it lives in `fuzz/`
+    # (`Fuzz::Plan.refuse_unrunnable_chains`) with this surface calling it — §2.1: `tui/` may
+    # depend on `fuzz/`, never the reverse. It used to be a verbatim twin here.
+    Fuzz::Plan.refuse_unrunnable_chains(tmpl.positions, registry) if refuse
     # ONE pass, and the refusal reads ITS report. The per-value check used to run the chain a
     # second time, ahead of this one: free while every step was pure compute, but since #818 a
     # step can be an `exec:` — the operator's own command — and running it twice per send both
@@ -195,42 +198,6 @@ class Gori::Tui::RepeaterView
     tmpl.render(reported.map(&.[0]))
   end
 
-  # Refuse a send whose `§value¦chain§` markers name a chain that cannot run at all. The twin
-  # of `Fuzz::Plan#refuse_unusable_chains`, and it exists for the same reason:
-  # `Template#apply_chains` returns the value UNTRANSFORMED when its chain does not run
-  # (`Decoder.run` never raises), so a §…§ marker whose chain is unknown or names an unusable
-  # saved chain would put the RAW value on the wire under a clean-looking send — a corrupted
-  # request, not a refusal.
-  #
-  # TEMPLATE-level only, and it runs NOTHING. The wording is byte-identical to `Fuzz::Plan` so
-  # the two engines report the same failure the same way (see `Fuzz::ChainError`). The
-  # per-value half — the extra case a single-send surface must also name, because the Repeater
-  # sends exactly ONE value and has no next payload to leave it to — is `refuse_failed_chains`,
-  # which reads the report of the pass that actually renders the bytes.
-  private def refuse_unrunnable_chains(tmpl : Fuzz::Template, registry : Decoder::Registry) : Nil
-    bad = [] of String
-    tmpl.positions.each do |pos|
-      next if pos.chain.empty?
-      Decoder.parse_spec(pos.chain).each do |tok|
-        # See `Fuzz::Plan.refuse_unusable_chains`: an `exec:` step is checked for a tokenizable
-        # argv, not looked up in the registry.
-        if Decoder.exec_step?(tok)
-          if reason = Decoder.exec_step_error(tok)
-            bad << reason
-          end
-          next
-        end
-        conv = registry[tok]?
-        if conv.nil?
-          bad << "#{tok}: unknown converter"
-        elsif reason = conv.unusable
-          bad << reason # already prefixed with the chain's own name
-        end
-      end
-    end
-    refuse_chains(bad)
-  end
-
   # The per-VALUE half: `base64-decode` over a value that isn't base64, a hook that exited
   # non-zero. Read off `apply_chains_reported`'s own report — the single pass that produced the
   # bytes this send would put on the socket — so the refusal is about that exact invocation
@@ -240,13 +207,12 @@ class Gori::Tui::RepeaterView
     refuse_chains(reported.compact_map(&.[1]))
   end
 
-  # The one refusal sentence both halves raise, so a template-level and a per-value failure
+  # The per-value refusal raises the SAME envelope the template-level guard does — one author,
+  # in `fuzz/` (`Fuzz::ChainError.unrunnable`) — so a template-level and a per-value failure
   # cannot drift into two different explanations of the same consequence.
   private def refuse_chains(bad : Array(String)) : Nil
     return if bad.empty?
-    raise Fuzz::ChainError.new("§…§ chain cannot run: #{bad.uniq.join("; ")}. " \
-                               "The payload would go out untransformed — fix or remove the chain " \
-                               "(list the converters with `gori run decoder list`)")
+    raise Fuzz::ChainError.unrunnable(bad)
   end
 
   # A repeater round-trip is outstanding (set/cleared by the Runner around the

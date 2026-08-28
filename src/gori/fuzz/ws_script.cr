@@ -106,15 +106,23 @@ module Gori::Fuzz
       @positions.map(&.default)
     end
 
-    def apply_chains(payloads : Array(String), registry : Decoder::Registry) : Array(String)
-      apply_chains_reported(payloads, registry).map(&.[0])
+    def apply_chains(payloads : Array(String), registry : Decoder::Registry,
+                     run_hooks : Bool = true) : Array(String)
+      apply_chains_reported(payloads, registry, run_hooks).map(&.[0])
     end
 
     # Through `Template`'s class-method form, so a `¦chain` behaves identically on a WebSocket
     # sweep and an HTTP one and the failure sentence has one author.
+    #
+    # `run_hooks` rides along for the same reason `Template` and `GrpcFieldTemplate` carry it
+    # (#818/#851): a surface that REPLAYS a chain to DRAW must not fire the operator's `exec:`
+    # step again. No caller withholds it on a WS script today, but omitting the parameter left
+    # a future one to fail to compile — and the trap is that the compile error is defused by
+    # silently forking, not by threading the flag. Added now, before that caller exists.
     def apply_chains_reported(payloads : Array(String),
-                              registry : Decoder::Registry) : Array({String, String?})
-      Template.apply_chains_reported(@positions, payloads, registry)
+                              registry : Decoder::Registry,
+                              run_hooks : Bool = true) : Array({String, String?})
+      Template.apply_chains_reported(@positions, payloads, registry, run_hooks)
     end
 
     # HANDSHAKE positions only — the global indices of the ones inside its query string or

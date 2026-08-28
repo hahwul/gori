@@ -191,6 +191,12 @@ module Gori::Tui
       c.notify = NOTIFY_CHOICES[@notify_idx]
       c.max_requests = MAX_REQ_CHOICES[@maxreq_idx].try(&.to_i64)
       c.keep_alive = @keep_alive
+      # `user_wordlist` and `hook` (#846) are NOT set here, on purpose and for the same reason:
+      # both are free-text (a filesystem path, an argv command line), and this overlay is
+      # deliberately field-free — cyclers and checkboxes only, no text input and no IME
+      # plumbing (see the class comment). They are the `gori run mine --wordlist/--hook` and MCP
+      # `wordlist`/`hook` knobs, a known and accepted CLI/MCP-only parity gap for the two knobs
+      # that cannot be a cycler; a mine started from the TUI leaves both at their defaults.
       c
     end
 

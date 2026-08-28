@@ -64,6 +64,16 @@ module Gori::Fuzz
   # shows it in place of the run. That also keeps the change inside the fuzz boundary — a new
   # `PlanError::Reason` member breaks the exhaustive `case … in` in six files outside it.
   class ChainError < Gori::Error
+    # The ONE envelope every `§…§ chain cannot run` refusal raises — the template-level guard
+    # (`Plan.refuse_unrunnable_chains`, and its Repeater twin, now the same call), the per-value
+    # guard (`RepeaterView#refuse_failed_chains`), and the WS/gRPC plan preflights. `bad` is the
+    # list of reasons; deduped and joined here so a refusal listing several kinds reads as one
+    # sentence and that sentence has a single author (§2.1: it lives in `fuzz/`).
+    def self.unrunnable(bad : Array(String)) : ChainError
+      new("§…§ chain cannot run: #{bad.uniq.join("; ")}. " \
+          "The payload would go out untransformed — fix or remove the chain " \
+          "(list the converters with `gori run decoder list`)")
+    end
   end
 
   # A WebSocket run asked for something only an HTTP sweep has, or handed frames to a template
@@ -435,8 +445,8 @@ module Gori::Fuzz
       raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if marked.position_count == 0 && !race_count
       # The twin of `refuse_unresolved`, one line down and for the same reason: a `¦chain` this
       # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See
-      # `refuse_unusable_chains`.
-      refuse_unusable_chains(marked.positions, Decoder.shared_registry)
+      # `refuse_unrunnable_chains` (the shared validator the Repeater send path also calls).
+      refuse_unrunnable_chains(marked.positions, Decoder.shared_registry)
 
       origin = resolve_origin(options)
 
@@ -454,7 +464,7 @@ module Gori::Fuzz
       # calls `Generator#baseline_request` instead, which does not touch `@sets` either.
       gen_sets = sets.empty? ? [] of PayloadSet : (config.mode.per_position? ? sets : [sets.first])
       # A payload a field's DECLARATION cannot hold, refused before the first dial — `abc` into
-      # an `int32`, an enum name the schema does not carry. Beside `refuse_unusable_chains`
+      # an `int32`, an enum name the schema does not carry. Beside `refuse_unrunnable_chains`
       # above and for the same reason its comment gives, over the sets the generator will
       # actually draw from (`gen_sets`, mapped exactly as `Generator#set_for` maps them).
       refuse_unencodable_fields(grpc_fields, gen_sets, template.position_count)
@@ -688,8 +698,31 @@ module Gori::Fuzz
     # isn't valid input for it" (`base64-decode` over a `§admin§` default raises, and refusing
     # that run would block a legitimate sweep). Asking whether the converter can run at all
     # answers the first question and leaves the second — genuinely per-payload — alone.
-    private def self.refuse_unusable_chains(positions : Array(Template::Position),
-                                            registry : Decoder::Registry) : Nil
+    # The TEMPLATE-level chain guard, and it is PUBLIC and SHARED (§2.1). It used to have a
+    # verbatim twin in `RepeaterView#refuse_unrunnable_chains` — the same scan, in the same
+    # words, raising the same envelope. Two copies of a refusal is exactly the drift the
+    # "one spelling per fact" rule exists to prevent, so there is one validator now and it
+    # lives here in `fuzz/`, with the TUI calling it (`tui/` may depend on `fuzz/`, never the
+    # reverse — copying it back up into a surface is what this consolidation forbids).
+    #
+    # Runs NOTHING. `Template#apply_chains` returns the payload VERBATIM when its chain does not
+    # run (`Decoder.run` never raises), so a `§…§` marker whose chain is unknown or names an
+    # unusable saved chain would put the RAW value on the wire under a clean-looking send — a
+    # corrupted request, not a refusal. This asks the registry (and `ProcessHook.parse_argv` for
+    # an `exec:` step) whether each chain COULD run, never whether it succeeds on a value: a
+    # refusal before the first dial is the only report a sweep of ten thousand requests can act
+    # on, and asking it must have no side effect.
+    #
+    # Two kinds, both answerable from the registry with no side effect:
+    #   * the token resolves to nothing              → unknown converter
+    #   * it resolves to an UNUSABLE saved chain      → `Converter#unusable` carries the reason
+    # The saved-chain library is why this is not a build-time dry run over each default: a dry
+    # run cannot tell "this chain is broken" from "this chain is fine and the DEFAULT value
+    # isn't valid input for it" (`base64-decode` over a `§admin§` default raises, and refusing
+    # that run would block a legitimate sweep). Asking whether the converter can run at all
+    # answers the first and leaves the second — genuinely per-payload — alone.
+    def self.refuse_unrunnable_chains(positions : Array(Template::Position),
+                                      registry : Decoder::Registry) : Nil
       bad = [] of String
       positions.each do |pos|
         next if pos.chain.empty?
@@ -714,9 +747,7 @@ module Gori::Fuzz
         end
       end
       return if bad.empty?
-      raise ChainError.new("§…§ chain cannot run: #{bad.uniq.join("; ")}. " \
-                           "The payload would go out untransformed — fix or remove the chain " \
-                           "(list the converters with `gori run decoder list`)")
+      raise ChainError.unrunnable(bad)
     end
 
     # Wrap every non-overlapping occurrence of a literal `--mark` / MCP `marks` token in

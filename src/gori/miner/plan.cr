@@ -3,9 +3,12 @@ require "../fuzz/content_length"
 require "../fuzz/engine"
 require "../host_overrides"
 require "../outbound"
+require "../process_hook"
 require "../repeater/flow_request"
+require "../settings"
 require "./detect"
 require "./engine"
+require "./hook_backend"
 require "./types"
 require "./wordlist"
 
@@ -35,6 +38,10 @@ module Gori::Miner
       # the run would put the token's own characters on the wire (`detail` = the
       # unresolved tokens, prefixed and comma-joined, for surfaces that quote them back).
       UnresolvedEnv
+      # The per-request transform hook (`--hook`, #846) is set but its argv does not tokenize
+      # (`detail` = what is wrong, from `ProcessHook.parse_argv`). Refused HERE so a bad command
+      # is a build-time error, not a per-worker one that would fail every send of the run.
+      HookArgv
     end
 
     getter reason : Reason
@@ -228,7 +235,12 @@ module Gori::Miner
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency,
         evidence: options.evidence?)
-      new(engine: Engine.new(request, options.http2?, names, sender, config), sender: sender,
+      # The per-request transform hook (#846), when the run has one. Wrapped OUTSIDE the raw
+      # sender and INSIDE the engine's `CappedBackend`, so the cap refuses a send before the
+      # hook forks once the budget is spent — see `HookBackend`. The raw `sender` is still what
+      # the plan holds for `pool`/`blocked` reporting; `HookBackend` delegates those down to it.
+      backend = build_hook_backend(config, sender, origin) || sender
+      new(engine: Engine.new(request, options.http2?, names, backend, config), sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable)
     end
@@ -278,6 +290,34 @@ module Gori::Miner
 
     private def self.body_size(bytes : Bytes) : Int32
       bytes.size - Env.head_body_boundary(bytes)
+    end
+
+    # Build the per-request transform `HookBackend` (#846), or nil when the run declared no
+    # hook. The argv is tokenized HERE so a command that cannot parse is a `PlanError` before
+    # the first send rather than a failure on every worker — the same up-front discipline
+    # `load_names` follows for a bad wordlist path. The env names the seam and the origin for a
+    # script that wants context, the way the Rewriter's `hook_env` does; the timeout is the one
+    # shared `Settings.hook_timeout_secs` budget, per request (see `HookBackend`).
+    private def self.build_hook_backend(config : Config, sender : Fuzz::Backend,
+                                        origin : Fuzz::Origin) : HookBackend?
+      spec = config.hook.try(&.presence)
+      return nil unless spec
+      argv = Gori::ProcessHook.parse_argv(spec)
+      if argv.is_a?(String)
+        raise PlanError.new(PlanError::Reason::HookArgv,
+          "hook command does not parse: #{argv}", argv)
+      end
+      HookBackend.new(sender, argv, Gori::Settings.hook_timeout_secs.seconds, hook_env(origin))
+    end
+
+    # Context for the hook, on top of the operator's inherited environment. `GORI_HOOK` names
+    # the seam (the Rewriter/Decoder/Probe hooks each set their own) and `GORI_TARGET` the
+    # origin, so one script can tell a mine's probes from a rewrite's bytes.
+    private def self.hook_env(origin : Fuzz::Origin) : Hash(String, String)
+      {
+        "GORI_HOOK"   => "miner",
+        "GORI_TARGET" => "#{origin.scheme}://#{origin.host}:#{origin.port}",
+      }
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent
