@@ -21,7 +21,12 @@ module Gori::Tui
     def self.render(screen : Screen, area : Rect, header : String, value : String, pane : ChainPane) : Nil
       return if area.w < 24 || area.h < 8
       chain = pane.value.strip
-      result = chain.empty? ? nil : Decoder.run(Decoder.shared_registry, value.to_slice, chain)
+      # `run_hooks: false` — this preview runs INSIDE the draw call, so an `exec:` step would
+      # fork the operator's command once per frame, on the UI fiber, over a chain they are
+      # still typing (#818). `Decoder.run` withholds such a step and says so on its row; the
+      # command runs on send, which is where the marker's chain has always run.
+      result = chain.empty? ? nil : Decoder.run(Decoder.shared_registry, value.to_slice, chain,
+        run_hooks: false)
       nsteps = result ? result.steps.size : 0
       box = overlay_box(area, nsteps)
       return if box.nil?
@@ -112,7 +117,9 @@ module Gori::Tui
         # `env_known` answers for a `$TOKEN` that resolved.
         {step.converter.try(&.category.saved?) ? Theme.env_known : Theme.text, Theme.green, shown}
       when .skipped?
-        {Theme.muted, Theme.muted, "(skipped)"}
+        # A step skipped BEHIND a stop says nothing more than "(skipped)"; a step withheld
+        # because it runs a command carries its reason, and that reason is the whole point.
+        {Theme.muted, Theme.muted, step.error || "(skipped)"}
       else # failed / unknown
         {Theme.red, Theme.red, step.error || "error"}
       end

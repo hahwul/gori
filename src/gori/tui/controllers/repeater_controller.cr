@@ -966,6 +966,11 @@ module Gori::Tui
     private def repeater_request_options(v : RepeaterView) : Array(CopyMenu::Option)
       # Same §…§ `¦chain` refusal as the send path: copying an untransformable request would
       # hand the operator a curl/raw command that sends the raw value — refuse it too.
+      #
+      # And it RUNS a `¦chain` hook, unlike every drawing path (#818): what this produces is a
+      # command line that must reproduce the send, and one built on the value BEFORE the hook
+      # would not. Copying is asking for the bytes of a send, not looking at a pane — the same
+      # reading `comparer_slot` takes, which is compared against a real response.
       wire = begin
         String.new(v.request_bytes)
       rescue ex : Fuzz::ChainError
@@ -1762,7 +1767,7 @@ module Gori::Tui
       end
       results = @repeater_results
       # A §…§ marker's `¦chain` that can't run refuses the send here rather than putting the
-      # raw, untransformed value on the wire (RepeaterView#refuse_bad_chains, mirroring
+      # raw, untransformed value on the wire (RepeaterView#refuse_unrunnable_chains, mirroring
       # Fuzz::Plan). Reported in the tab's own status line, like every other repeater refusal.
       begin
         wire = view.request_bytes
@@ -2085,7 +2090,7 @@ module Gori::Tui
     # `render_marked`, so without this the markers left as their OWN literal bytes:
     # `§PAYLOAD-A¦base64-encode§` on the wire under `Content-Length: 28` while the editor
     # showed the rendered `12`, reported as a clean "2/2 ok". The same divergence took the
-    # `¦chain` refusal (`RepeaterView#refuse_bad_chains`, reachable only through
+    # `¦chain` refusal (`RepeaterView#refuse_unrunnable_chains`, reachable only through
     # `render_marked(refuse: true)`) off this path entirely, so `%%%` shipped an unrunnable
     # chain that `^R` refuses two keystrokes earlier — one of the two send buttons on the
     # pane protected and the other not.

@@ -354,8 +354,27 @@ module Gori::Fuzz
     # transformed bytes are rewrapped with String.new — encoders (base64/url/hex/hash/escape)
     # stay ASCII; a decoder that produces raw bytes may lose fidelity, the same limit binary
     # bodies already have.
-    def apply_chains(payloads : Array(String), registry : Decoder::Registry) : Array(String)
-      apply_chains_reported(payloads, registry).map(&.[0])
+    #
+    # `run_hooks: false` is for a caller that REPLAYS a chain for DISPLAY rather than to put
+    # bytes on a socket. Since #818 a chain step can be an `exec:` — the operator's own
+    # command — and a display replay forks it: the Repeater's Content-Length reflection runs
+    # on every keystroke, a Fuzzer result row re-renders on every selection. Neither is a
+    # send, and a hook is by definition allowed to have side effects. See `Decoder.run`.
+    def apply_chains(payloads : Array(String), registry : Decoder::Registry,
+                     run_hooks : Bool = true) : Array(String)
+      apply_chains_reported(payloads, registry, run_hooks).map(&.[0])
+    end
+
+    # Whether any position's `¦chain` would run an EXTERNAL COMMAND (#818). The question a
+    # surface asks BEFORE it replays chains for display: with `run_hooks: false` such a step is
+    # withheld, so the value it renders is missing a transform and the surface has to say so.
+    #
+    # Through the registry rather than by scanning for the `exec:` marker, for the reason
+    # `Decoder.chain_runs_commands?` documents: a saved chain is callable BY NAME and its token
+    # says nothing about what is inside it. One home for the question — `RepeaterView`'s
+    # Content-Length reflection and `FuzzerView`'s row reconstruction both ask it here.
+    def runs_commands?(registry : Decoder::Registry) : Bool
+      @positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(registry, pos.chain) }
     end
 
     # Like `apply_chains`, but returns `{value, chain_error}` per payload: the transformed
@@ -366,8 +385,10 @@ module Gori::Fuzz
     # `chain_error` lands beside them and is counted in the run's error tally rather than
     # swallowed under `0 errors` (#567/H3 Finding 1). Kept separate from `apply_chains` so the
     # Repeater preview and baseline seeds — which have no per-row surface — need no change.
-    def apply_chains_reported(payloads : Array(String), registry : Decoder::Registry) : Array({String, String?})
-      Template.apply_chains_reported(@positions, payloads, registry)
+    def apply_chains_reported(payloads : Array(String), registry : Decoder::Registry,
+                              run_hooks : Bool = true,
+                              name_chain : Bool = true) : Array({String, String?})
+      Template.apply_chains_reported(@positions, payloads, registry, run_hooks, name_chain)
     end
 
     # The same pass over an EXPLICIT position list, for a composite whose positions do not all
@@ -376,16 +397,24 @@ module Gori::Fuzz
     # script: a `¦chain` that ran one way on an HTTP sweep and another on a WebSocket one would
     # be exactly the drift `Codec::Http1.request_token_safe?`'s "one home" rule names, and the
     # failure wording below is operator-facing text that must not fork.
+    #
+    # `name_chain: false` drops the `chain '<spec>' step '<name>' …` frame and returns the
+    # failing STEP's own sentence. For a caller whose refusal already opens by naming the
+    # chain — `RepeaterView#refuse_failed_chains`, whose envelope is "§…§ chain cannot run:" —
+    # the framed form stutters ("chain cannot run: chain 'x' step 'x' failed: …"). A fuzz ROW
+    # keeps the frame, because there the spec is nowhere else on screen.
     def self.apply_chains_reported(positions : Array(Position), payloads : Array(String),
-                                   registry : Decoder::Registry) : Array({String, String?})
+                                   registry : Decoder::Registry,
+                                   run_hooks : Bool = true,
+                                   name_chain : Bool = true) : Array({String, String?})
       payloads.map_with_index do |p, k|
         spec = positions[k]?.try(&.chain)
         next {p, nil} if spec.nil? || spec.empty?
-        res = Decoder.run(registry, p.to_slice, spec)
+        res = Decoder.run(registry, p.to_slice, spec, run_hooks: run_hooks)
         if res.ok? && (o = res.output)
           {String.new(o), nil}
         else
-          {p, chain_failure_reason(spec, res)}
+          {p, name_chain ? chain_failure_reason(spec, res) : chain_failure_detail(res)}
         end
       end
     end
@@ -396,10 +425,28 @@ module Gori::Fuzz
     # did. Read-only over Decoder's public `ChainResult` (the codec package owns that struct).
     private def self.chain_failure_reason(spec : String, res : Decoder::ChainResult) : String
       if (i = res.failed_at) && (step = res.steps[i]?)
+        # A step WITHHELD by `run_hooks: false` did not fail — it was never run, on purpose —
+        # and "failed" about the operator's own command reads as "your command is broken".
+        # It is the only Skipped step that carries a reason (the ones behind a stop do not).
+        if step.state.skipped? && (why = step.error)
+          return "chain '#{spec}' step '#{step.name}': #{why}"
+        end
         detail = step.error || (step.state.unknown? ? "unknown converter" : "failed")
         "chain '#{spec}' step '#{step.name}' failed: #{detail}"
       else
         "chain '#{spec}' produced no output"
+      end
+    end
+
+    # The same fact with the chain named ONCE — by the caller, not here. `<step>: <detail>`,
+    # which is the shape `Fuzz::Plan`'s template-level items already use, so a Repeater refusal
+    # listing both kinds reads as one list rather than two grammars.
+    private def self.chain_failure_detail(res : Decoder::ChainResult) : String
+      if (i = res.failed_at) && (step = res.steps[i]?)
+        detail = step.error || (step.state.unknown? ? "unknown converter" : "failed")
+        "#{step.name}: #{detail}"
+      else
+        "chain produced no output"
       end
     end
 

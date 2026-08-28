@@ -140,6 +140,25 @@ writes the operator can see. And a Probe `exec` rule runs **once per flow** on t
 analyzer, so a slow detector is the whole rule set's bottleneck under live capture — keep its
 command fast.
 
+**Drawing something is not running it.** Every surface that replays a chain in order to *draw*
+withholds the `exec:` step and marks the row held: the Rewriter's OUTPUT pane, the `^Q` chain
+editor's preview, and a Fuzzer result row rebuilt from the template (which says the value shown
+is the payload *before* that step). The Repeater's Content-Length reflection cannot say it in
+place, so it stops rewriting the header instead — `^R` computes the real length from the rendered
+bytes, and `^L` recomputes it once at the moment you take the header over. **Restoring is not
+running either**: reopening a project rebuilds every saved Repeater tab and Decoder sub-tab
+without firing their commands.
+
+**Two places do run it, and both are asking for the bytes of a send.** `^R` obviously. Less
+obviously, anything that hands you those exact bytes — the Repeater's `Copy as…` menu and its
+Comparer slot — because a `curl` line that omitted the hook would not reproduce the request it
+claims to be.
+
+**The Decoder tab's chain is live, including while you type it.** That tab is the workbench
+`exec:` was built for, so every edit re-runs the pipeline — and each prefix of a command you are
+typing is itself a complete command (`exec:rm -rf /tmp/x` runs `rm -rf /tmp` on the way). Compose
+the argv somewhere else and paste it, or point the step at a wrapper script you edit on disk.
+
 **A hook runs as you.** It is not sandboxed, jailed or confined — same trust level as a
 `--config` file or any other Rewriter rule. gori never invents a hook: every one of them is
 configuration a human wrote, and each is listed plainly in the rule list it belongs to. When
