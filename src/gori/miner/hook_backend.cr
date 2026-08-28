@@ -15,14 +15,29 @@ module Gori::Miner
   # same way it answers a raw candidate, and an unsigned baseline is "unreachable" (the run is
   # refused before it starts). The hook lets that same app be mined.
   #
-  # ORDER — bindings, then hook, then byte-exact. Session bindings resolve HERE, before the
-  # hook, so a signature the hook computes covers the bytes that actually ship; the injected
-  # candidate spans keep candidate bytes literal through that pass (an evidence run widens to
-  # the whole captured request, which is what `Sender#send` does too). The hook is then the
-  # FINAL transform, and its stdout is handed to the inner backend as `all_verbatim` so the
-  # Sender's own binding pass is a no-op over signed bytes it must not touch. A hook that needs
-  # a live `$TOKEN` *inside* what it signs still gets it — the token is resolved before the
-  # hook sees the request.
+  # ORDER — bindings, then the session-slot overlay, then the hook, then byte-exact. Everything
+  # the sender would otherwise do to a request AFTER the hook is pulled IN FRONT of it here, so
+  # the hook genuinely signs the bytes that ship:
+  #   * Session bindings resolve first (injected-candidate spans keep candidates literal; an
+  #     evidence run widens to the whole captured request, as `Sender#send` does), so a live
+  #     `$TOKEN` is inside what the hook signs.
+  #   * The active session slot's header overlay is applied next — by THIS wrapper, because the
+  #     sender applies it one transform too late (after `$NAME` expansion, over bytes a hook has
+  #     already signed). `Plan.build` builds the inner sender with `slot_overlay: false` when a
+  #     hook is present precisely so the two do not both apply it; without a hook the sender
+  #     keeps doing it. So `--slot analyst --hook ./sign.sh` against a signed API signs the
+  #     slot's identity headers too, instead of shipping an overlay the signature cannot cover.
+  # The hook is then the FINAL transform, and its stdout is handed to the inner backend as
+  # `all_verbatim` so the sender's own binding pass is a no-op over signed bytes it must not
+  # touch (the sender's overlay is off, per above).
+  #
+  # ONE thing still runs after the hook, and it is a REFUSAL, not a transform: the sender's
+  # Sandbox / scope-exclude gate (`Outbound#sweep_block`), which lives with the blocked-count
+  # accounting it owns. So a send the gate refuses has already forked the hook — but a mine
+  # against a wholly out-of-scope origin fails that gate on its very first baseline probe and is
+  # refused before a single candidate is tested (`Engine#orchestrate`'s unreachable-baseline
+  # path), so the forks are bounded to calibration, not one per candidate. The cap, which CAN
+  # multiply per candidate, is outside this wrapper and refuses before the hook forks.
   #
   # P6 — THE TIMEOUT UNIT IS PER OUTBOUND REQUEST, and it is bounded, not multiplied. Each send
   # forks the command once and gives it `Settings.hook_timeout_secs` (clamped 1..60 by
@@ -83,6 +98,9 @@ module Gori::Miner
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       spans = @inner.evidence? ? Fuzz::Backend.all_verbatim(bytes) : verbatim
       prepared = Gori::Env.expand_bindings(bytes, spans)
+      # The active slot's identity headers, BEFORE the hook signs them (the inner sender's own
+      # overlay is off — see the class comment). A no-op when no slot is active.
+      prepared = Gori::Env.overlay_slot(prepared)
       sent, reason = Inject.hook(prepared, @argv, @timeout, @env)
       if sent.nil?
         # A hook that could not run is a SKIP with a reported reason, never a clean negative:

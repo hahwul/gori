@@ -46,7 +46,7 @@ module Gori::Fuzz
   # defined over the payload-VALUE vector, not over a buffer — the only buffer-level operation
   # in `Generator#emit` is the splice itself. So a composite that concatenates its parts'
   # position lists into one vector, and fans a rendered value vector back out to the parts,
-  # leaves `Mode`, `Generator#sniper/battering/pitchfork/cluster`, `Plan.refuse_unusable_chains`
+  # leaves `Mode`, `Generator#sniper/battering/pitchfork/cluster`, `Plan.refuse_unrunnable_chains`
   # and the payload layer working unchanged. That is the whole trick: Sniper over a two-frame
   # script means what it has always meant, and a Pitchfork can lock a handshake header to a
   # frame field.

@@ -54,6 +54,29 @@ private def with_counting_hook(&)
   end
 end
 
+# A minimal layer whose overlay inserts one header after the request line — stands in for an
+# active session slot's `set_headers` without a store.
+private class HeaderOverlayLayer < Gori::Env::Layer
+  def declared : Array(String)
+    [] of String
+  end
+
+  def values : Hash(String, String)
+    {} of String => String
+  end
+
+  def rev : UInt64
+    0_u64
+  end
+
+  def overlay(wire : Bytes) : Bytes
+    s = String.new(wire)
+    idx = s.index("\r\n")
+    return wire unless idx
+    "#{s[0, idx + 2]}X-Sig-Me: 1\r\n#{s[(idx + 2)..]}".to_slice
+  end
+end
+
 private def drain(engine : M::Engine) : {Array(M::Finding), Bool}
   findings = [] of M::Finding
   done = false
@@ -115,5 +138,45 @@ describe "Miner per-request hook (#846)" do
   # re-forked `retries` times per candidate.
   it "does not retry a hook failure" do
     M.permanent_refusal?("miner hook: ./x: could not run it (No such file or directory)").should be_true
+  end
+
+  # The active session slot's header overlay must be applied BEFORE the hook, so the hook signs
+  # the slot's identity headers — otherwise a `--slot` overlay lands on top of already-signed
+  # bytes and the signature no longer covers what ships. The hook here REWRITES the overlaid
+  # header, so seeing the rewrite proves the overlay ran first.
+  it "applies the active slot overlay before the hook, so the hook signs the slot's headers" do
+    dir = File.tempname("gori-slot-hook")
+    Dir.mkdir_p(dir)
+    hook = File.join(dir, "sign.sh")
+    File.write(hook, "#!/bin/sh\nexec sed 's/X-Sig-Me: 1/X-Sig-Me: SIGNED/'\n")
+    File.chmod(hook, 0o755)
+    prev = Gori::Env.layer
+    Gori::Env.layer = HeaderOverlayLayer.new
+    begin
+      inner = RecordingBackend.new(F::Origin.new("http", "h", 80))
+      backend = M::HookBackend.new(inner, [hook], 5.seconds)
+      base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: ["a"], backend: backend, config: cfg)
+      drain(engine)
+
+      inner.received.should_not be_empty
+      # The hook rewrote the overlaid header → the overlay ran before the hook.
+      inner.received.all?(&.includes?("X-Sig-Me: SIGNED")).should be_true
+      # Applied exactly once — not the raw `1` (overlay-after-hook) and not doubled.
+      inner.received.first.scan("X-Sig-Me").size.should eq 1
+    ensure
+      Gori::Env.layer = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # …and the production wiring that keeps the inner sender from ALSO applying the overlay (which
+  # would land it back on top of the hook's output): `Plan.build` builds the sender with
+  # `slot_overlay: false` exactly when a hook is present. The sender exposes no getter for the
+  # flag, so this pins the wiring at its source, the way the Decoder restore-path specs do.
+  it "builds the inner sender with the slot overlay off when a hook is present" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "miner", "plan.cr"))
+      .lines.reject(&.lstrip.starts_with?('#'))
+    src.any?(&.includes?("slot_overlay: hook_argv.nil?")).should be_true
   end
 end

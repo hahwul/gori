@@ -347,7 +347,7 @@ module Gori::Fuzz
     # What this must NOT be reached with is a chain that could never run at all — an unknown
     # token, or a saved chain the library registered as unusable (recursive, past MAX_TOKENS).
     # Those are a property of the TEMPLATE, not of a payload, so they are refused once at
-    # `Fuzz::Plan.build` (`refuse_unusable_chains`) before the first dial. What is left is
+    # `Fuzz::Plan.build` (`refuse_unrunnable_chains`) before the first dial. What is left is
     # genuinely per-payload — `base64-decode` over a payload that isn't base64, `shell-escape`
     # over a non-UTF-8 payload — where the next payload may well succeed and there is nothing
     # to refuse up front. Decoder works on Bytes but the template splices Strings, so the

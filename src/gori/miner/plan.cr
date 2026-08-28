@@ -229,17 +229,31 @@ module Gori::Miner
       # injection at all. Reproduced: `gori run mine <flow> --bind-from <flow>` put the live
       # session token on the wire in 6 of 8 requests.
       #
+      # The per-request transform hook argv (#846), parsed HERE so a bad command is a build-time
+      # `PlanError`, not a per-worker one. Decided BEFORE the sender is built because it moves the
+      # session-slot overlay: a hook must sign the FINAL bytes, so when one is present the overlay
+      # becomes the hook wrapper's job and the sender must not also apply it (see below).
+      hook_argv = resolve_hook_argv(config)
       # `idle_conns: concurrency` — one parked socket per worker fiber is the most that can
       # ever be checked out at once, so a larger pool would only hold dead sockets open.
+      #
+      # `slot_overlay: hook_argv.nil?` — the active session slot's header overlay is applied by
+      # the sender by default (true), AFTER `$NAME` expansion. That is one transform too late for
+      # a hook: it would rewrite headers over bytes the hook already signed, so a `--slot analyst
+      # --hook ./sign.sh` run against a signed API would ship an overlay the signature does not
+      # cover and the target would reject every probe. So when a hook is present the sender leaves
+      # the overlay alone and `HookBackend` applies it BEFORE the hook — the hook signs the slot's
+      # identity headers along with everything else.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency,
-        evidence: options.evidence?)
+        evidence: options.evidence?, slot_overlay: hook_argv.nil?)
       # The per-request transform hook (#846), when the run has one. Wrapped OUTSIDE the raw
       # sender and INSIDE the engine's `CappedBackend`, so the cap refuses a send before the
       # hook forks once the budget is spent — see `HookBackend`. The raw `sender` is still what
       # the plan holds for `pool`/`blocked` reporting; `HookBackend` delegates those down to it.
-      backend = build_hook_backend(config, sender, origin) || sender
+      backend = hook_argv ? HookBackend.new(sender, hook_argv,
+        Gori::Settings.hook_timeout_secs.seconds, hook_env(origin)) : sender
       new(engine: Engine.new(request, options.http2?, names, backend, config), sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable)
@@ -292,14 +306,11 @@ module Gori::Miner
       bytes.size - Env.head_body_boundary(bytes)
     end
 
-    # Build the per-request transform `HookBackend` (#846), or nil when the run declared no
-    # hook. The argv is tokenized HERE so a command that cannot parse is a `PlanError` before
-    # the first send rather than a failure on every worker — the same up-front discipline
-    # `load_names` follows for a bad wordlist path. The env names the seam and the origin for a
-    # script that wants context, the way the Rewriter's `hook_env` does; the timeout is the one
-    # shared `Settings.hook_timeout_secs` budget, per request (see `HookBackend`).
-    private def self.build_hook_backend(config : Config, sender : Fuzz::Backend,
-                                        origin : Fuzz::Origin) : HookBackend?
+    # The per-request transform hook's argv (#846), or nil when the run declared no hook. The
+    # argv is tokenized HERE so a command that cannot parse is a `PlanError` before the first
+    # send rather than a failure on every worker — the same up-front discipline `load_names`
+    # follows for a bad wordlist path.
+    private def self.resolve_hook_argv(config : Config) : Array(String)?
       spec = config.hook.try(&.presence)
       return nil unless spec
       argv = Gori::ProcessHook.parse_argv(spec)
@@ -307,7 +318,7 @@ module Gori::Miner
         raise PlanError.new(PlanError::Reason::HookArgv,
           "hook command does not parse: #{argv}", argv)
       end
-      HookBackend.new(sender, argv, Gori::Settings.hook_timeout_secs.seconds, hook_env(origin))
+      argv
     end
 
     # Context for the hook, on top of the operator's inherited environment. `GORI_HOOK` names
