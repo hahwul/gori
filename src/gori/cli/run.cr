@@ -69,6 +69,7 @@ require "./run/jwt"
 require "./run/cookie"
 require "./run/decoder"
 require "./run/rewriter"
+require "./run/grpc"
 require "./run/colormarker"
 require "./run/views"
 require "./run/project"
@@ -150,6 +151,7 @@ module Gori
         when "cookie"      then cmd_cookie(rest)
         when "decoder"     then cmd_decoder(rest)
         when "rewriter"    then cmd_rewriter(rest)
+        when "grpc"        then cmd_grpc(rest)
         when "colormarker" then cmd_colormarker(rest)
         when "project"     then cmd_project(rest)
         else                    dispatch_subcommand3(sub, rest)
@@ -212,6 +214,9 @@ module Gori
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
         {"cookie [<cookie>]", "Decode, verify, brute-force, or forge a Flask/Rack/Django session cookie"},
         {"decoder <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
+        {"grpc reflect <url>", "Fetch a gRPC target's .proto descriptors by server reflection (ACTIVE) and cache them"},
+        {"grpc schema", "What .proto schema this project loaded, and where each piece came from"},
+        {"grpc forget", "Drop a cached reflection result (by target, or --all)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
         {"colormarker", "Manage History row-colour rules (list, add, rm, enable/disable, move, preview)"},
         {"views", "Manage History views — named QL filters (list, add, rm, rename, set, scope)"},

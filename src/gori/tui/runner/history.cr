@@ -82,6 +82,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_history_columns
   end
 
+  # See HistoryController#grpc_reflect — the target is the selected row's, so the verb has
+  # nothing to prompt for, and the fetch runs off the UI fiber.
+  def history_grpc_reflect : Nil
+    history_controller.grpc_reflect
+  end
+
   def history_delete : Nil
     history_controller.history_delete
   end

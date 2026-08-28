@@ -183,7 +183,11 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 
 **입력할 수 없는 행은 그 이유를 말합니다.** `(undeclared)` 필드 번호와 스키마가 부정하는 와이어 타입은 둘 다 읽기 전용으로 남고 원본 해석을 유지합니다 — 무엇**으로** 입력해야 할지가 없고, 거기에 타입 편집기를 내미는 것이야말로 이 렌즈가 피하려고 존재하는 추측이기 때문입니다. 그 옥텟을 바꾸는 방법은 여전히 `^X`이고, 스키마가 불가능하다고 말하는 것을 보내는 방법도 여전히 `^X`입니다. 편집된 메시지 앞의 5바이트 길이 접두사는 hex 편집 때와 똑같이 `␣F:FRAME` 토글이 관장합니다.
 
-gRPC **서버 리플렉션**(파일 대신 대상에서 디스크립터를 받아오는 것)은 아직 구현되지 않았습니다. 아웃바운드 요청이므로, 들어올 때는 operator가 명시적으로 실행하고 다른 모든 능동 전송과 같이 프로젝트 scope의 통제를 받습니다.
+**대상에게 직접 물어볼 수도 있습니다.** gRPC **서버 리플렉션**에 응답하는 서버는 이미 디스크립터를 갖고 있습니다. `gori run grpc reflect https://api.test:443`이 그것을 받아와 프로젝트에 캐시하고, 에이전트는 MCP `grpc_reflect`로 같은 일을 합니다. TUI에서는 캡처된 flow 위에서 실행합니다 — 스페이스 메뉴의 **gRPC: fetch schema (reflection)**이며, 그 행의 호스트를 대상으로 합니다. `grpc.reflection.v1`을 먼저, `v1alpha`를 그다음으로 시도하고(실제 배포된 서버 대부분은 아직 v1alpha입니다), 둘 다 응답하지 않으면 조용히 실패하지 않고 그렇다고 말합니다. 서비스 목록 → 각 서비스를 선언한 파일 → 그 파일들의 import 순으로, 그래프가 닫힐 때까지 따라갑니다.
+
+결과는 같은 렌즈입니다. 하나의 `Schema`, 같은 `/package.Service/Method` 바인딩, 같은 렌더러와 같은 필드 편집기. Proto schema 행은 각각이 어디서 왔는지 말합니다 — `1 file · reflection https://api.test:443 · 41 messages · 12 rpcs` — 그리고 두 출처가 어긋나는 선언은 조용히 병합되지 않고 `redefined`로 집계되며, 대상 자신의 말이 우선합니다.
+
+이것은 **아웃바운드 요청**이고, 그렇게 다뤄집니다. 물었을 때만 실행되고 캡처·flow 열기·프로젝트 열기에서는 절대 실행되지 않습니다(P4). 다른 모든 능동 전송과 같은 scope chokepoint를 지나므로, scope 밖이거나 scope가 없는 대상은 연결이 열리기 전에 거절됩니다(`--allow-unscoped` / `allow_unscoped:true`는 사전 검사만 면제하고, Sandbox는 면제하지 않습니다). 스스로 다시 가져오는 일도 없습니다. `gori run grpc schema`가 캐시된 것을 보여주고, `gori run grpc forget <target>`이 하나를 지웁니다. 그리고 이렇게 얻은 스키마도 여전히 렌즈입니다 — 무엇을 받는지에 대한 대상의 말일 뿐, 진실은 여전히 바이트입니다.
 
 ### MessagePack과 CBOR {#binary-documents}
 
