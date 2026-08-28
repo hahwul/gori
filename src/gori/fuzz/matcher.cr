@@ -54,6 +54,15 @@ module Gori::Fuzz
       Proxy::H2::Grpc.grpc?(header(request, "content-type"))
     end
 
+    # The declared content-type STRING, for a caller that needs more than the two predicates
+    # around it. `Fuzz::GrpcFieldTemplate` has three refusals to tell apart — not gRPC at all,
+    # gRPC but grpc-web-TEXT, gRPC but already mis-framed — and they carry different remedies,
+    # so answering them from one boolean would name the wrong fix. Read once per plan, like
+    # everything else here.
+    def self.content_type(request : Bytes) : String?
+      header(request, "content-type")
+    end
+
     # Tail bytes of the request body that are NOT a complete gRPC frame — `Grpc.scan`'s
     # residual, i.e. "a length prefix claiming more than arrived". 0 for a body that frames
     # cleanly and for a request with no body at all.

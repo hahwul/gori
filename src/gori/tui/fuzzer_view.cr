@@ -123,6 +123,11 @@ module Gori::Tui
       # (`gori run fuzz --race-warmup`/MCP `race_warmup`), same as the Fuzzer tab never having
       # had a processor UI (see `commit_buffers`).
       @s_race = ""
+      # Schema-known gRPC field positions, as a comma-separated list of specs (the ADVANCED
+      # card's "gRPC field(s)" row → `Fuzz::PlanOptions#grpc_fields`). Blank = none, which is
+      # every sweep that came before. A view buffer rather than a `Fuzz::Config` knob because
+      # it declares POSITIONS, not run behaviour — the same side of that line `marks` is on.
+      @s_grpc_fields = ""
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
       @s_f_regex = ""
       # Memoized "Run · N requests" count, recomputed only when the config signature
@@ -156,6 +161,14 @@ module Gori::Tui
       # showed the stale one — which for a gRPC sweep is exactly the byte under test.
       @run_reframe_grpc = false
       @pending_reframe_grpc = false
+      # …and the gRPC field positions it swept, frozen for the same reason as everything above:
+      # `result_request` reconstructs a row whose bytes were not retained, and a field position's
+      # payload lives INSIDE a re-encoded protobuf message, not in a `§…§` span of the template.
+      # Without it the reconstruction hands the base `Template` a payload vector longer than its
+      # position list, which `render_spans` appends past the last segment — the capture with the
+      # payload dangling off the end of the frame, under a Content-Length resynced to cover it.
+      @run_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
+      @pending_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       # `Fuzz::Plan#rewrites_content_length?` as of the last plan build, plus the
       # `@editor.edits` revision it was computed at — an edit to the template invalidates
       # the answer, and a stale "your CL is being rewritten" is worse than none.
@@ -881,6 +894,7 @@ module Gori::Tui
       @run_policy = @pending_policy             # ...and the CL knobs + retention its generator ran under
       @run_auto_encode = @pending_auto_encode   # ...and the positions it percent-encoded for
       @run_reframe_grpc = @pending_reframe_grpc # ...and whether it re-length-prefixed gRPC
+      @run_grpc_fields = @pending_grpc_fields   # ...and the schema-known gRPC fields it swept
       @results_rev += 1
       # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
       # cache — otherwise an old row's lines could survive under a colliding new index.
@@ -1027,7 +1041,8 @@ module Gori::Tui
         m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
         m_words: @matcher.match_words || "", m_regex: @s_m_regex,
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
-        f_words: @matcher.filter_words || "", f_regex: @s_f_regex)
+        f_words: @matcher.filter_words || "", f_regex: @s_f_regex,
+        grpc_fields: @s_grpc_fields)
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1056,6 +1071,7 @@ module Gori::Tui
       @matcher.filter_size = blank_nil(s.f_size)
       @matcher.filter_words = blank_nil(s.f_words)
       @s_f_regex = s.f_regex
+      @s_grpc_fields = s.grpc_fields
       @dirty = true
     end
 
@@ -1069,14 +1085,26 @@ module Gori::Tui
     # frame. nil when the size is unknown (empty/invalid config, or an overflowing
     # cluster-bomb / brute set) → the Run row omits the count.
     def run_request_count : Int64?
-      sig = "#{@config.mode}|#{position_count}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
+      # The RAW field row, not the parsed list: this runs on the render fiber every frame and
+      # `grpc_field_specs` allocates, while the string it splits is the thing that actually
+      # changes. (`position_count` is memoized on the editor revision for the same reason.)
+      sig = "#{@config.mode}|#{position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
       return @run_count_cache if sig == @run_count_sig
       @run_count_sig = sig
       @run_count_cache = compute_run_count
     end
 
+    # The run's TOTAL positions: the `§…§` markers PLUS the named gRPC field positions, which
+    # `Fuzz::Plan` appends to the same index space. `position_count` stays the marker count —
+    # it backs the template tint and the Sets→marker chips, which are about markers — so the
+    # estimate asks this instead. Without it a field-only sweep reported `Run · 0 requests`
+    # for a run that was about to send one per payload.
+    private def run_position_count : Int32
+      position_count + grpc_field_specs.size
+    end
+
     private def compute_run_count : Int64?
-      return nil if @sets.empty? || position_count == 0
+      return nil if @sets.empty? || run_position_count == 0
       sizes = @sets.map { |s| estimated_set_size(s) }
       return nil if sizes.any?(Nil) # any unknown / overflowing size → unknown total
       run_count_for_mode(sizes.compact)
@@ -1105,9 +1133,9 @@ module Gori::Tui
     private def run_count_for_mode(ns : Array(Int64)) : Int64?
       first = ns.first? || 0_i64
       case @config.mode
-      when .sniper?        then mul_checked(position_count.to_i64, first)
+      when .sniper?        then mul_checked(run_position_count.to_i64, first)
       when .battering_ram? then first
-      when .pitchfork?     then (0...position_count).min_of? { |i| ns[i]? || first } || 0_i64
+      when .pitchfork?     then (0...run_position_count).min_of? { |i| ns[i]? || first } || 0_i64
       else                      combos(ns) # cluster-bomb ∏Nᵢ
       end
     end
@@ -1115,7 +1143,7 @@ module Gori::Tui
     # ∏ of the per-position set sizes (cluster-bomb), nil on Int64 overflow.
     private def combos(ns : Array(Int64)) : Int64?
       total = 1_i64
-      (0...position_count).each do |i|
+      (0...run_position_count).each do |i|
         n = ns[i]? || ns.first? || 0_i64
         total = mul_checked(total, n) || return nil
       end
@@ -1193,6 +1221,7 @@ module Gori::Tui
       options = Fuzz::PlanOptions.new(evidence_template, evidence: @evidence,
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
+        grpc_fields: grpc_field_specs,
         verify: verify, sni: sni_override, overrides: overrides, env_vars: operator_env_vars)
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
       @pending_template = plan.template # committed to @run_template in begin_run (see result_request)
@@ -1206,6 +1235,10 @@ module Gori::Tui
       # `Generator` also requires a template `GrpcVerdict.reframable_template?` accepts, and a
       # reconstruction that reframed where the run did not would be wrong in the other direction.
       @pending_reframe_grpc = plan.generator.reframe_grpc?
+      # The composite the generator spliced through, so `result_request` can reproduce a
+      # non-retained row instead of splicing a typed payload into a template that has no
+      # position for it. nil for every run that named no field, which is every run there was.
+      @pending_grpc_fields = plan.grpc_fields
       # The template declares a Content-Length that disagrees with its own body BEFORE any
       # payload is substituted — so the auto-resync is about to rewrite framing the operator
       # authored deliberately, on every variation, and the sweep would report a clean
@@ -1216,8 +1249,24 @@ module Gori::Tui
       {plan.engine, nil}
     rescue ex : Fuzz::PlanError
       {nil, fuzz_plan_error(ex)}
+      # `Fuzz::ChainError`, `Fuzz::WsError` and `Fuzz::GrpcFieldError` are all `Gori::Error`,
+      # and the builder writes their sentence ITSELF precisely because it reads the same on
+      # every surface (see their class comments). The bare `rescue` below was prefixing them
+      # with "config error:" — a phrase that names the wrong thing for "the schema does not
+      # declare field 9" — so they get their own arm and their own words.
+    rescue ex : Gori::Error
+      {nil, ex.message || "the run could not be built"}
     rescue ex
       {nil, "config error: #{ex.message}"}
+    end
+
+    # The ADVANCED card's "gRPC field(s)" row, parsed.
+    #
+    # Comma-separated. A `¦chain` on one of these must separate its steps with `|` or `>`
+    # rather than `,` — `Decoder::SEPARATORS` treats all three as equivalent, so nothing is
+    # lost, and the comma is what separates FIELDS on this row.
+    private def grpc_field_specs : Array(String)
+      @s_grpc_fields.split(',').map(&.strip).reject(&.empty?)
     end
 
     # The template bytes handed to `Plan.build`, with ONE editor-owed fixup applied for an
@@ -2084,6 +2133,10 @@ module Gori::Tui
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
           j.field "extract", @matcher.extract.try(&.source)
+          # The raw row text, not the parsed list: it is what the operator typed and what the
+          # ADVANCED card has to show again, and a spec that no longer resolves (the descriptor
+          # set moved) must come back as itself rather than silently vanish on restore.
+          j.field "grpc_fields", @s_grpc_fields
         end
       end
     end
@@ -2123,9 +2176,18 @@ module Gori::Tui
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
+      @s_grpc_fields = string_knob(obj, "grpc_fields")
       sync_buffers # mirror the restored config/matcher into the editable buffers
     rescue
       # tolerate a malformed/older config blob — keep defaults
+    end
+
+    # A persisted STRING knob, or "" for a session saved before the key existed (and for a
+    # blob that carries something else there). A helper rather than the `?.try(&.as_s?) || ""`
+    # chain inline: `apply_config_json` is already at the complexity ceiling, and the next knob
+    # to be added has one example to follow instead of a fourth spelling.
+    private def string_knob(obj : Hash(String, JSON::Any), key : String) : String
+      obj[key]?.try(&.as_s?) || ""
     end
 
     private def apply_sets_json(arr : JSON::Any?) : Nil
@@ -2668,10 +2730,12 @@ module Gori::Tui
       if err = r.error
         screen.text(x, y, err, Theme.red, bg, width: {inner.right - x, 0}.max)
       elsif r.chain_error
-        # The send succeeded, but this row's `¦chain` did not run — its payload went out raw.
-        # Flag it in the list (the detail request pane names the reason) so a swallowed chain
-        # isn't invisible among clean rows. #567/H3 Finding 1.
-        screen.text(x, y, "⚠ ¦chain not applied", Theme.yellow, bg, width: {inner.right - x, 0}.max)
+        # The send succeeded, but this row is not the request the operator declared: a `¦chain`
+        # did not run so its payload went out RAW, or a schema-known gRPC field's declaration
+        # could not hold the payload so that field kept the capture's own value. Flag it in the
+        # list (the detail request pane names which, and why) so neither is invisible among
+        # clean rows. #567/H3 Finding 1; the gRPC half is #843.
+        screen.text(x, y, "⚠ payload not as declared", Theme.yellow, bg, width: {inner.right - x, 0}.max)
       else
         line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
         # Compact per-row markers — the detail panes carry the full story; here they flag a SHORT
@@ -3021,13 +3085,23 @@ module Gori::Tui
         return ResultRequest.new(sent, false)
       end
       tmpl = run_template
+      # A gRPC field run splices through the COMPOSITE, whose position space is the template's
+      # `§…§` plus the named fields — so the chain pass, the value vector and the splice all have
+      # to go through it. Handing the base `Template` a vector that long renders the capture with
+      # the extra payloads appended past the last segment (`Template#render_spans` writes
+      # `@segments[k + 1]?`, which is nil past the end): a body no socket carried, under a
+      # Content-Length resynced to cover it, shown in the detail pane and seeded into Repeater.
+      # ONE read, so the chain pass and the splice below cannot come to disagree about which
+      # shape this row was rendered through.
+      grpc = @run_grpc_fields
       # Values only — the reason a chain didn't run is already carried on the row
       # (r.chain_error), surfaced by detail_request_lines below.
       #
       # `run_hooks: false`: this is a RECONSTRUCTION for the pane, re-derived every time a row
       # is selected, and since #818 a `¦chain` step can be an `exec:` — the operator's own
       # command. The engine already ran it once, on the send this row records; re-running it to
-      # redraw the row would fire a side effect for a request that is over.
+      # redraw the row would fire a side effect for a request that is over. The composite takes
+      # the same flag, so a gRPC field run is withheld on exactly the same terms (#851).
       #
       # The step is withheld and the value shown UNTRANSFORMED, which is a second caveat on top
       # of "not retained" and has to be carried as one: `r.chain_error` cannot cover it (on the
@@ -3035,14 +3109,14 @@ module Gori::Tui
       # against these shorter bytes. Without `chain_withheld` the pane — and `Send to Repeater`
       # and the Comparer slot, which take these bytes — would show a coherent-looking request
       # that no socket carried and say nothing.
-      payloads = tmpl.apply_chains(r.payloads, Decoder.shared_registry, run_hooks: false)
+      payloads = (grpc || tmpl).apply_chains(r.payloads, Decoder.shared_registry, run_hooks: false)
       withheld = reconstruction_withholds_hook?
       # The same last transform the generator applied, off the SAME decision object — see
       # `@run_auto_encode`. `r.position` is the Sniper discriminator the generator used
       # (`Job#position`): only the substituted position was encoded, the rest kept their
       # template defaults.
       payloads = (@run_auto_encode || Fuzz::AutoEncode.none).apply(payloads, r.position)
-      raw = tmpl.render(payloads)
+      raw = grpc ? grpc.render_spans(payloads)[0] : tmpl.render(payloads)
       sync, add, _ = run_policy
       raw = Fuzz::ContentLength.sync(raw, add) if sync
       # AFTER the Content-Length pass, the order `Generator#emit` uses and for its reason: the
@@ -3076,8 +3150,12 @@ module Gori::Tui
     # Whether rebuilding a row would leave a `¦chain` hook out (#818). A property of the run's
     # frozen template, so both the note above and `result_request` below read it from one place
     # and cannot disagree about a caveat one of them prints.
+    # Asked of the COMPOSITE when the run swept gRPC fields: a field position carries an
+    # ordinary `¦chain`, so asking only the base template would answer "nothing withheld" for a
+    # run whose every chain lives on a field — and the pane would then omit the note while
+    # `result_request` was in fact withholding the step (#843 × #851).
     private def reconstruction_withholds_hook? : Bool
-      run_template.runs_commands?(Decoder.shared_registry)
+      (@run_grpc_fields || run_template).runs_commands?(Decoder.shared_registry)
     end
 
     # The template a rebuild renders through: the run's frozen one, or the live buffer before a
@@ -3097,11 +3175,13 @@ module Gori::Tui
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
       lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
       lines.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld
-      # This pane already SHOWS the untransformed bytes for a row whose `¦chain` did not run
-      # (result_request re-applies the same chains the engine did). Say WHY, so the operator
-      # doesn't read the raw payload as the request they declared. #567/H3 Finding 1.
+      # This pane already SHOWS what actually went out for a row whose `¦chain` did not run, or
+      # whose gRPC field declaration could not hold the payload (result_request replays the same
+      # passes the engine did). Say WHY, so the operator doesn't read those bytes as the request
+      # they declared. The reason names itself — `chain '…' step '…' failed` vs `field role: …`
+      # — so the prefix stays neutral. #567/H3 Finding 1; the gRPC half is #843.
       if ce = r.chain_error
-        lines.unshift("(¦chain not applied: #{ce})")
+        lines.unshift("(payload not as declared: #{ce})")
       end
       # The `--retries` config re-sent this request after a network error (DISTINCT from a
       # keep-alive re-send) — a note here because it qualifies the REQUEST that went out, and

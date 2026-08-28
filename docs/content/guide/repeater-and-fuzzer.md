@@ -86,6 +86,8 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 
 Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
+A gRPC message is the one place a marker cannot go usefully — see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
+
 A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Y` to open the chain editor, which previews the value through every step before you send. Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way.
 
 ### Matching
@@ -97,6 +99,55 @@ Filter results with ffuf-style matchers and filters on status, size, words, line
 `Content-Length` is recomputed after every payload is spliced in, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`) turns that off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test.
 
 A gRPC template carries a second length declaration — the 5-byte prefix in front of each message — and it gets the opposite default: gori leaves it exactly as the payload left it, and says so once at the end of the run (`2 of 3 requests left it stale`, `grpc_stale_prefix` in MCP `fuzz_status`). That is the right answer when a deliberately-wrong prefix is what you are testing, and the wrong one when you are sweeping an ordinary unary call and every request is being rejected at the framing layer. `--reframe-grpc` (MCP `reframe_grpc: true`, or the **gRPC reframe (unary)** toggle on the Fuzzer's ADVANCED card) recomputes it per request. It is off by default on all three surfaces, and it only touches a single message: a client-streaming body, a `grpc-web-text` body, and a seed whose framing was already broken are left alone and still reported.
+
+### Sweeping a gRPC Field
+
+Marking bytes inside a protobuf message is not something an operator can usefully do: the
+value of an `int32` field is the octets of a varint, and `§…§` around them is a test of the
+wire format rather than of the field. So a gRPC field position is **named**, not marked —
+`--field role`, the MCP `fields` argument, or the **gRPC field(s)** row on the Fuzzer's
+ADVANCED card:
+
+```
+gori run fuzz --flow 42 --field role --payloads ROLE_ADMIN,ROLE_USER,99
+```
+
+`SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or
+`tags[1]` for one occurrence of a repeated field. It needs a descriptor set that resolves the
+rpc — a `protoc --descriptor_set_out` file or a `gori run grpc reflect` fetch; the field names
+are the ones the Repeater's `␣E:FIELDS` form and the History protobuf tree already show for
+the same flow.
+
+Two things follow from what a splice can do. The field has to be **present on the captured
+message** — gori replaces an occurrence, it never adds one — so a proto3 field left at its
+default is absent from the wire and is not a position; the refusal lists what the message does
+carry. And a payload for a **`bytes`** field is read as **hex** (`de ad be ef`), because that
+declaration's value is binary and a text field would silently send the UTF-8 of what you typed
+instead of the octets you meant.
+
+Each payload goes **through the declaration** on its way to bytes, which is the whole reason
+the schema is needed: `-3` is ten sign-extended octets as `int32`, one zigzagged octet as
+`sint32`, and something else again as a `bool` or an enum. Everything outside the fuzzed field
+is copied from the capture rather than re-serialized — an undeclared field number, a group, a
+non-minimal varint, the unparsed tail of a truncated capture — and the 5-byte length prefix is
+recomputed to describe the message that is actually going out.
+
+A `¦chain` on a field position, and `--encode`/`--prefix`/`--hash` and the rest of the
+processor pipeline, transform the **text** before the declared type encodes it. So
+`--field name¦base64-encode` sends the base64 of the payload *as that string field*; the same
+chain on an `int32` field is refused up front, because base64 text is not an integer. (Use the
+steps' `|` or `>` separators inside a chain on the TUI row — the comma there separates fields.)
+
+Three things are refused before the first request rather than discovered mid-sweep: a field the
+schema does not declare, a field whose wire type the declaration contradicts (both of which the
+Repeater's form renders read-only for the same reason — `^X` is still the way to change those
+octets), and a payload the declared type cannot hold.
+
+One combination is *reported* rather than refused: `--verbatim` leaves `Content-Length` at the
+capture's value, and a re-encoded message is a different size — so every request declares the
+wrong body length and is rejected at the HTTP framing layer before the gRPC layer is reached.
+That is the same argument this feature makes for rebuilding the 5-byte prefix, pointed at the
+other length declaration, and a CL desync is a real test, so the run says so and proceeds.
 
 ### Fuzzing a WebSocket
 

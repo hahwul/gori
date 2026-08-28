@@ -88,6 +88,8 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Y`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 동일합니다.
 
+gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다 — 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
+
 ### 매칭 {#matching}
 
 ffuf 스타일 matcher와 filter로 status, size, words, lines, 본문 정규식에 대해 결과를 필터링합니다. 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
@@ -97,6 +99,49 @@ ffuf 스타일 matcher와 filter로 status, size, words, lines, 본문 정규식
 `Content-Length`는 페이로드가 삽입될 때마다 다시 계산되므로 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--verbatim`(MCP `update_content_length: false`)은 이 계산을 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다.
 
 gRPC 템플릿에는 두 번째 길이 선언 — 각 메시지 앞의 5바이트 접두사 — 이 있으며, 기본값은 반대입니다. gori는 페이로드가 남긴 그대로 두고, 실행이 끝날 때 한 번 알려줍니다(`2 of 3 requests left it stale`, MCP `fuzz_status`의 `grpc_stale_prefix`). 의도적으로 잘못된 접두사를 테스트할 때는 이것이 맞는 동작이지만, 평범한 단항 호출을 스윕하는데 모든 요청이 프레이밍 계층에서 거부된다면 원하는 동작이 아닙니다. `--reframe-grpc`(MCP `reframe_grpc: true`, 또는 Fuzzer ADVANCED 카드의 **gRPC reframe (unary)** 토글)는 요청마다 접두사를 다시 계산합니다. 세 표면 모두 기본값은 꺼짐이며, 단일 메시지에만 적용됩니다. 클라이언트 스트리밍 본문, `grpc-web-text` 본문, 그리고 이미 프레이밍이 깨진 시드는 그대로 두고 여전히 보고합니다.
+
+### gRPC 필드 스윕 {#sweeping-a-grpc-field}
+
+protobuf 메시지 안의 바이트에 마커를 씌우는 건 실무에서 쓸 수 있는 동작이 아닙니다. `int32`
+필드의 값은 varint의 옥텟이고, 그 위에 `§…§`를 두르면 필드가 아니라 와이어 포맷을 테스트하는
+셈입니다. 그래서 gRPC 필드 위치는 마킹이 아니라 **이름으로 지정**합니다 — `--field role`, MCP의
+`fields` 인자, 또는 Fuzzer ADVANCED 카드의 **gRPC field(s)** 행:
+
+```
+gori run fuzz --flow 42 --field role --payloads ROLE_ADMIN,ROLE_USER,99
+```
+
+`SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 또는 반복 필드의 특정
+occurrence(`tags[1]`)입니다. 해당 rpc를 해석할 descriptor set이 필요합니다 —
+`protoc --descriptor_set_out` 파일이든 `gori run grpc reflect`로 받아온 것이든. 필드 이름은
+같은 플로우에서 Repeater의 `␣E:FIELDS` 폼과 History의 protobuf 트리가 이미 보여 주는 그 이름입니다.
+
+스플라이스가 할 수 있는 일에서 두 가지가 따라옵니다. 필드는 **캡처된 메시지에 실제로 있어야**
+합니다 — gori는 occurrence를 교체할 뿐 추가하지 않으므로, 기본값으로 남아 와이어에 없는 proto3
+필드는 위치가 될 수 없습니다(거부 메시지가 그 메시지에 실제로 있는 필드들을 나열합니다). 그리고
+**`bytes`** 필드의 페이로드는 **hex**로 읽습니다(`de ad be ef`). 그 선언의 값은 바이너리이고,
+텍스트로 받으면 의도한 옥텟 대신 입력한 문자열의 UTF-8이 조용히 나가기 때문입니다.
+
+페이로드는 **선언을 거쳐** 바이트가 됩니다. 스키마가 필요한 이유가 바로 이것입니다: `-3`은
+`int32`에서 부호 확장된 10바이트, `sint32`에서 지그재그 1바이트, `bool`이나 enum에서는 또 다른
+옥텟입니다. 퍼징 대상이 아닌 바이트는 재직렬화가 아니라 캡처에서 그대로 복사됩니다 — 선언되지
+않은 필드 번호, group, 최소가 아닌 varint, 잘린 캡처의 파싱되지 않은 꼬리까지 — 그리고 5바이트
+길이 접두사는 실제로 나가는 메시지에 맞춰 다시 계산됩니다.
+
+필드 위치의 `¦chain`과 `--encode`/`--prefix`/`--hash` 등 프로세서 파이프라인은 선언된 타입이
+인코딩하기 **전의 텍스트**를 변환합니다. 그래서 `--field name¦base64-encode`는 페이로드의 base64를
+*그 string 필드로* 보내고, 같은 체인을 `int32` 필드에 걸면 base64 텍스트는 정수가 아니므로 미리
+거부됩니다. (TUI 행에서는 체인 안 단계 구분에 `|`나 `>`를 쓰세요 — 거기서 쉼표는 필드 구분입니다.)
+
+세 가지는 스윕 도중이 아니라 첫 요청 전에 거부됩니다: 스키마가 선언하지 않은 필드, 선언과 와이어
+타입이 충돌하는 필드(둘 다 Repeater 폼이 같은 이유로 read-only로 그리는 것들입니다 — 그 옥텟을
+바꾸는 길은 여전히 `^X`입니다), 그리고 선언된 타입이 담을 수 없는 페이로드입니다.
+
+한 가지 조합은 거부가 아니라 **보고**됩니다. `--verbatim`은 `Content-Length`를 캡처 값 그대로
+두는데, 재인코딩된 메시지는 크기가 다르므로 모든 요청이 잘못된 본문 길이를 선언하고 gRPC 계층에
+닿기도 전에 HTTP 프레이밍 계층에서 거부됩니다. 5바이트 접두사를 다시 계산하는 것과 정확히 같은
+논리를 다른 길이 선언에 겨눈 것이지만, CL 디싱크는 실제 테스트이므로 실행은 그 사실을 알리고
+진행합니다.
 
 ### WebSocket 퍼징 {#fuzzing-a-websocket}
 
