@@ -372,6 +372,123 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "decodes a gzip request in the Req/Res preview, like the detail pane beside it" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        plain = %({"query":"{ me { id } }"})
+        wire = history_gzip(plain)
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/graphql", http_version: "HTTP/1.1",
+          head: "POST /graphql HTTP/1.1\r\nHost: h.test\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: wire, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        view.@preview_req_lines.not_nil!.join("\n").should contain(plain)
+        store.get_flow(id).not_nil!.request_body.should eq(wire) # evidence is still the wire form
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "marks truncation when the Store bounded the ENCODED input but the entity fits under the cap" do
+    # The inverse of the "small gzip inflating past cap" case: here the decoded projection is
+    # far SMALLER than the cap, so the shown-size test alone reports nothing — yet the pane is
+    # showing a prefix, because the body handed to the decoder was already cut at cap+1. Without
+    # the second half of the marker test a cut capture reads as a complete one.
+    prev_enabled = Gori::Settings.history_preview
+    prev_cap = Gori::Settings.preview_body_kib
+    begin
+      Gori::Settings.history_preview = true
+      Gori::Settings.preview_body_kib = 1
+      tmp_store do |store|
+        cap = Gori::Settings.preview_body_cap
+        # 1-byte chunks: 6 wire bytes ("1\r\nX\r\n") per byte of entity, so the wire form runs
+        # past the cap while the de-chunked entity lands nowhere near it.
+        io = IO::Memory.new
+        (cap * 2).times { io << "1\r\nX\r\n" }
+        io << "0\r\n\r\n"
+        wire = io.to_slice
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/chunked", http_version: "HTTP/1.1",
+          head: "GET /chunked HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice,
+          body: wire, content_type: "text/plain"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        fetched = view.@preview_detail.not_nil!.response_body.not_nil!
+        fetched.size.should be > cap # the Store cut the encoded input
+        lines = view.@preview_res_lines.not_nil!
+        # With the framing still in place every chunk-size line splits out as a bare "1".
+        lines.should_not contain("1")
+        entity = lines.find { |l| l.starts_with?("XXXX") }.not_nil!
+        entity.bytesize.should be < cap       # the entity is nowhere near the cap …
+        lines.last.should eq("… [truncated]") # … and the pane still says it is a prefix
+      end
+    ensure
+      Gori::Settings.history_preview = prev_enabled
+      Gori::Settings.preview_body_kib = prev_cap
+    end
+  end
+
+  it "keeps the cached preview projection when a re-fetched flow's bytes have not moved" do
+    # A pending / 101 / h2 flow is deliberately let past the immutability guard, so it re-fetches
+    # every render tick. The FETCH has to repeat; the decode + scrub/split + highlight rebuild
+    # behind it does not, and on a compressed body that is a full inflate per frame. A PENDING
+    # flow is used precisely because it cannot take the early return — a Complete h1 flow would
+    # pass this test on the old guard and prove nothing. Identity, not equality: a rebuilt array
+    # compares equal while having cost exactly what this is here to avoid.
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        plain = %({"query":"{ me { id } }"})
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/graphql", http_version: "HTTP/1.1",
+          head: "POST /graphql HTTP/1.1\r\nHost: h.test\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: history_gzip(plain), source: Gori::FlowSource::Kind::Proxy))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        view.@preview_detail.not_nil!.row.state.complete?.should be_false # the guard cannot fire
+        first_req = view.@preview_req_lines.not_nil!
+        first_res = view.@preview_res_lines.not_nil!
+        first_req.join("\n").should contain(plain)
+
+        view.refresh_preview(store)
+        view.@preview_req_lines.not_nil!.same?(first_req).should be_true
+        view.@preview_res_lines.not_nil!.same?(first_res).should be_true
+
+        # …and bytes that DO move still rebuild.
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: history_gzip(%({"landed":true})), content_type: "application/json",
+          content_encoding: "gzip"))
+        view.refresh_preview(store)
+        view.@preview_res_lines.not_nil!.same?(first_res).should be_false
+        view.@preview_res_lines.not_nil!.join("\n").should contain("landed")
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "re-fetches the preview of a still-pending flow after its response lands" do
     # The refresh_preview cache guard skips the per-frame get_flow ONLY for a Complete,
     # non-streaming flow (whose bytes are immutable). A pending flow must keep refreshing
