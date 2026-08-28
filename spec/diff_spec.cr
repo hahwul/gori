@@ -538,8 +538,8 @@ end
 # turn a coverage gap into a removal it never observed.
 describe Gori::Diff::Record do
   it "says a coverage-gap row was NOT REQUESTED, never that it was removed" do
-    ctx = Gori::Diff::Record::Context.new("q1", "q3")
-    draft = Gori::Diff::Record.draft(row_for(Gori::Diff::Verdict::Removed), ctx)
+    draft = Gori::Diff::Record.draft(row_for(Gori::Diff::Verdict::Removed),
+      Gori::Diff::Record::Context.new("q1", "q3"))
     draft.title.should contain("not requested in q3 (coverage gap, not a removal)")
     draft.body.should contain("not proof of removal")
     draft.body.should contain("not evidence the endpoint was removed")
@@ -550,7 +550,6 @@ describe Gori::Diff::Record do
   end
 
   it "opens a coverage gap on `info`, because it is not a finding" do
-    ctx = Gori::Diff::Record::Context.new("q1", "q3")
     Gori::Diff::Record.severity(row_for(Gori::Diff::Verdict::Removed)).should eq(Gori::Store::Severity::Info)
     # Everything else takes the form's own default and the operator moves it — the diff
     # measured that an axis moved, it did not judge what that is worth.
@@ -576,7 +575,7 @@ describe Gori::Diff::Record do
       [Gori::Diff::Change.new(Gori::Diff::Axis::Auth, "not required", "required")])
     draft = Gori::Diff::Record.draft(row, ctx)
     draft.title.should contain("auth: not required → required")
-    draft.body.should contain("q1 (baseline) → q3 (newer)")
+    draft.body.should contain("A: q1 (baseline) → B: q3 (newer)")
     draft.body.should contain("Baseline   q1 · 200")
     draft.body.should contain("Newer      q3 · 200")
     draft.host.should eq("acme.test")
@@ -619,13 +618,60 @@ describe Gori::Diff::Record do
       .should contain("folded path template")
   end
 
-  it "scrubs a project name and an endpoint that carry control bytes" do
-    # Both reach a TUI form title from here, and `Hotkeys.retag`'s regex raises on invalid
-    # UTF-8 display text.
+  it "scrubs every captured string on its way into a title, not just the endpoint" do
+    # `Hotkeys.retag`'s regex raises on invalid UTF-8 display text, and an ESC painted into
+    # the IssueForm title row drives the terminal. The endpoint is NOT the only captured
+    # string here: `MediaType.essence` lower-cases and drops parameters without touching
+    # control bytes, so a moved content-type axis carries the response's own header in.
     ctx = Gori::Diff::Record::Context.new("q1\e]0;pwn\a", "q3")
     ctx.a_label.should_not contain('\e')
-    key = Gori::Diff::Key.new("acme.test", "GET", "/a\nb")
-    Gori::Diff::Record.endpoint(key).should_not contain('\n')
+    row = row_for(Gori::Diff::Verdict::Changed,
+      [Gori::Diff::Change.new(Gori::Diff::Axis::ContentType, "text/html", "text/html\e]0;pwn\a")])
+    draft = Gori::Diff::Record.draft(row, ctx)
+    draft.title.should_not contain('\e')
+    draft.title.should_not contain('\a')
+    draft.host.should_not contain('\e')
+    # The body keeps its newlines (it is a document) and loses everything else.
+    body = Gori::Diff::Record.body(row, ctx)
+    body.should_not contain('\e')
+    body.lines.size.should be > 5
+  end
+
+  it "names the A/B legend the verdict heading speaks in" do
+    # `Render.heading` says "B"; unlike the report it was written for, a record prints no
+    # A/B coverage table above it, so the reader would have to guess which project that is.
+    body = Gori::Diff::Record.body(row_for(Gori::Diff::Verdict::Removed),
+      Gori::Diff::Record::Context.new("q1", "q3"))
+    body.should contain("A: q1 (baseline) → B: q3 (newer)")
+    body.should contain("Not seen in B")
+  end
+
+  it "does not call a pending capture an answer on a `gone` row" do
+    # `Compare.status_label` appends "pending" for a flow that never got a response, and
+    # "every answer was 404, pending" claims a pending flow ANSWERED. Pending is the same
+    # "no evidence" state the removed/gone split exists to keep out of a deliverable.
+    key = Gori::Diff::Key.new("acme.test", "GET", "/orders")
+    a = record_facts(key, 200, 1_i64)
+    b = record_facts(key, 404, 2_i64)
+    b.observe(Gori::Store::EndpointObservation.new(
+      key.host, key.method, key.path, nil, nil, 1_i64, nil, nil, 1_i64, 1_i64, 3_i64))
+    b.pending?.should be_true
+    row = Gori::Diff::Row.new(key, Gori::Diff::Verdict::Gone, a, b, [] of Gori::Diff::Change)
+    ctx = Gori::Diff::Record::Context.new("q1", "q3")
+    # Scoped to the OBSERVATION. The two side lines still print `404, pending` — there it is
+    # the report's own readout of what this side holds, and dropping it would hide a fact.
+    # The claim "every answer was X" is the one that must not absorb a non-answer.
+    sentence = Gori::Diff::Record.observation(row, ctx)
+    sentence.should contain("every captured answer was 404,")
+    sentence.should_not contain("was 404, pending")
+    sentence.should contain("never got a response at all")
+    Gori::Diff::Record.body(row, ctx).should contain(sentence)
+  end
+
+  it "names the endpoint exactly as the Markdown report does" do
+    # One spelling: a pasted report and the issue filed from it must point at one row.
+    key = Gori::Diff::Key.new("acme.test", "GET", "/orders")
+    Gori::Diff::Record.endpoint(key).should eq(Gori::Diff::Render.endpoint_label(key))
   end
 
   it "hands the agent surface the same sentence at the ROW, not only in the caveats" do

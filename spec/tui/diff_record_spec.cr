@@ -212,9 +212,9 @@ describe "Gori::Tui::DiffController record exit" do
       ctrl.set_slot(:b, session.project)
       ctrl.view.rows.should_not be_empty
 
-      recorded = ctrl.selected_record.should_not be_nil
-      draft, flow_id = recorded
+      flow_id, build = ctrl.selected_record.should_not be_nil
       flow_id.should eq(live) # B is the open project — its flow is the linkable one
+      draft = build.call(true)
       draft.body.should contain("now flow ##{live} — linked to this record")
       # The baseline's capture is NOT dropped and NOT linked: it is named, with the target
       # it was captured on, so the reader can still reach it by opening that project.
@@ -233,8 +233,7 @@ describe "Gori::Tui::DiffController record exit" do
       ctrl.set_slot(:a, before)
       ctrl.set_slot(:b, session.project)
       ctrl.swap
-      recorded = ctrl.selected_record.should_not be_nil
-      _, flow_id = recorded
+      flow_id, _ = ctrl.selected_record.should_not be_nil
       flow_id.should eq(live)
     end
   end
@@ -250,10 +249,9 @@ describe "Gori::Tui::DiffController record exit" do
       ctrl.set_slot(:b, session.project)
       session.store.delete_flow(live)
 
-      recorded = ctrl.selected_record.should_not be_nil
-      draft, flow_id = recorded
+      flow_id, build = ctrl.selected_record.should_not be_nil
       flow_id.should be_nil
-      draft.body.should contain("no longer captured in this project")
+      build.call(false).body.should contain("no longer captured in this project")
     end
   end
 
@@ -274,11 +272,43 @@ describe "Gori::Tui::DiffController record exit" do
       row.verdict.removed?.should be_true
       ctrl.view.select_index(ctrl.view.rows.index!(row))
 
-      draft, flow_id = ctrl.selected_record.should_not be_nil
+      flow_id, build = ctrl.selected_record.should_not be_nil
       flow_id.should be_nil # nothing on the open project's side to link
+      draft = build.call(false)
       draft.severity.should eq(Gori::Store::Severity::Info)
       draft.title.should contain("coverage gap, not a removal")
       draft.body.should contain("not evidence the endpoint was removed")
+    end
+  end
+
+  it "lets the caller build the record from what the link ACTUALLY did" do
+    # The body prints "linked to this record". A note is two writes where an issue is one, so
+    # the text has to be built after the link, not from the intention to make one.
+    with_diff_controller do |ctrl, _host, session, before|
+      seed_baseline(before) { |s| diff_ctrl_flow(s, "/orders") }
+      diff_ctrl_flow(session.store, "/orders", status: 403)
+      ctrl.set_slot(:a, before)
+      ctrl.set_slot(:b, session.project)
+      _, build = ctrl.selected_record.should_not be_nil
+      build.call(true).body.should contain("linked to this record")
+      build.call(false).body.should_not contain("linked to this record")
+    end
+  end
+
+  it "stops naming the row verbs once a lens empties the list" do
+    # All three gate on `diff_rows_shown?`; a hint that names a key doing nothing is the tab
+    # lying about what it can do.
+    with_diff_controller do |ctrl, _host, session, before|
+      seed_baseline(before) { |s| diff_ctrl_flow(s, "/orders") }
+      diff_ctrl_flow(session.store, "/orders", status: 403)
+      ctrl.set_slot(:a, before)
+      ctrl.set_slot(:b, session.project)
+      ctrl.body_hint(:body).should contain("⇧F issue")
+      ctrl.view.cycle_lens(1) # added — no rows
+      ctrl.view.selected_row.should be_nil
+      hint = ctrl.body_hint(:body)
+      hint.should_not contain("⇧F issue")
+      hint.should contain("v lens") # the scope-gated half stays
     end
   end
 end

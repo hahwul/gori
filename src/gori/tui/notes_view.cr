@@ -375,12 +375,18 @@ module Gori::Tui
     end
 
     # Open a fresh note and make it current (the new tab gets focus to type into).
-    # `text` prefills it: a record filed from another tab (the retest Diff's `n`) arrives
-    # whole rather than being typed, and `duplicate_current` below already builds a note
-    # from a string this way.
-    def new_note(text : String = "") : Nil
-      @notes << Note.new(alloc_note_id, text)
+    def new_note : Nil
+      @notes << Note.new(alloc_note_id)
       @current = @notes.size - 1
+      @dirty = true
+    end
+
+    # Replace the ACTIVE note's text. For a record written from another tab (the retest
+    # Diff's `n`), which arrives whole rather than being typed — and which is written AFTER
+    # its evidence link, so the body cannot claim a link the store refused. Marks dirty, so
+    # the caller's `save` is what persists it.
+    def set_current_text(text : String) : Nil
+      current.area.set_text(text)
       @dirty = true
     end
 

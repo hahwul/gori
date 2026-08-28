@@ -362,17 +362,31 @@ module Gori::Tui
       @notes.current_note_id
     end
 
-    # A note carrying `text`, created WITHOUT focusing the Notes tab — the retest Diff's
-    # one-keystroke exit, and the sibling of `create_blank_note_id` above.
+    # A note created WITHOUT focusing the Notes tab — the retest Diff's one-keystroke exit,
+    # and the sibling of `create_blank_note_id` above.
+    #
+    # The note is minted BLANK and its id handed to the block, whose return becomes the body.
+    # That order is the point: a caller that attaches evidence needs the id first, and unlike
+    # `insert_issue` — one transaction for the issue AND its flow link — the note path has two
+    # writes that can disagree. Building the body before the link let it say "linked to this
+    # record" over a link the store had refused, which is a false evidence claim in something
+    # an operator pastes into a deliverable.
     #
     # Returns {stable id, whether it reached disk}. The id is minted locally and is stable
     # either way, so a link filed against it resolves as soon as the buffer does save; the
-    # flag exists so the caller's toast can say "not saved yet" rather than claim a write
-    # the store refused — which is the whole reason `save_notes` reports at all.
-    def create_note_with_text(text : String) : {Int64, Bool}
+    # flag exists so the caller's toast can say "not saved yet" rather than claim a write the
+    # store refused — which is the whole reason `save_notes` reports at all.
+    def create_note(& : Int64 -> String) : {Int64, Bool}
       save_notes
-      @notes.new_note(text)
-      {@notes.current_note_id, save_notes}
+      @notes.new_note
+      id = @notes.current_note_id
+      @notes.set_current_text(yield id)
+      # `link_preview` is ONE view-level string, not per note, so a new current note inherits
+      # whatever the last one showed until this runs. `notes_duplicate` calls it right after
+      # `duplicate_current` for exactly this reason, and a block that linked nothing would
+      # otherwise leave the previous note's evidence line under this one.
+      refresh_link_preview
+      {id, save_notes}
     end
 
     # Content-only clone of the active note (new id; entity_links not copied).

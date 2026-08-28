@@ -167,7 +167,10 @@ module Gori::Diff
       row.changes.each { |c| io << "  - " << c << '\n' }
     end
 
-    private def self.endpoint_label(key : Key) : String
+    # PUBLIC for `Render.facts_line`'s reason: `Diff::Record` names the same endpoint in an
+    # Issue title, and one spelling is what keeps the pasted report and the filed issue
+    # pointing at the same row.
+    def self.endpoint_label(key : Key) : String
       "#{key.method} #{key.host}#{key.path}"
     end
 

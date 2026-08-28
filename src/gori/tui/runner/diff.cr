@@ -98,10 +98,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def diff_issue : Nil
     recorded = target_controller.diff.selected_record
     return (@toast = "select an endpoint first") unless recorded
-    draft, flow_id = recorded
+    flow_id, build = recorded
+    # `insert_issue` writes the issue AND its flow link in ONE transaction, and the shell
+    # bails on `new_id == 0` — so a committed issue implies a committed link, and the body
+    # may say so up front. (The note path below cannot; see there.)
+    #
     # `flow_id` is nil when neither slot names the OPEN project, or when the capture behind
     # the row is gone. The form still opens: the body names both sides either way, and a
     # record with a weaker anchor beats the retyped one this verb exists to replace.
+    draft = build.call(!flow_id.nil?)
     open_issue_form(IssueForm.new(draft.title, draft.host, flow_id, draft.severity,
       notes: draft.body, stay_on_create: true))
   end
@@ -113,14 +118,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def diff_note : Nil
     recorded = target_controller.diff.selected_record
     return (@toast = "select an endpoint first") unless recorded
-    draft, flow_id = recorded
-    note_id, saved = notes_controller.create_note_with_text(draft.note_text)
-    # `commit_link_to_owner` rather than a bare `add_link`: it is the one place that also
-    # refreshes the note's link preview, and it already reports "already linked".
-    linked = !flow_id.nil? &&
-             commit_link_to_owner(Store::LinkOwnerKind::Note, note_id, Store::LinkRefKind::Flow, flow_id)
+    flow_id, build = recorded
+    linked = false
+    # The note is minted blank, LINKED, and only then given its body — because the body says
+    # "linked to this record". A note is two writes where an issue is one (`insert_issue`
+    # carries its own `entity_links` row), so building the text first let a store-busy
+    # rollback leave a note asserting evidence that was never attached.
+    _, saved = notes_controller.create_note do |id|
+      # `commit_link_to_owner` rather than a bare `add_link`: it is the one place that also
+      # refreshes the note's link preview, and it already reports "already linked".
+      linked = !flow_id.nil? &&
+               commit_link_to_owner(Store::LinkOwnerKind::Note, id, Store::LinkRefKind::Flow, flow_id)
+      build.call(linked).note_text
+    end
     parts = [saved ? "note filed" : "note filed — NOT saved yet (project busy)"]
     parts << "capture linked" if linked
+    parts << "capture NOT linked (store busy)" if !flow_id.nil? && !linked
     @toast = parts.join(" · ")
   end
 end

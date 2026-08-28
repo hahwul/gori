@@ -89,7 +89,7 @@ module Gori::Diff
     end
 
     def self.draft(row : Row, ctx : Context) : Draft
-      Draft.new(title(row, ctx), severity(row), body(row, ctx), row.key.host)
+      Draft.new(title(row, ctx), severity(row), body(row, ctx), Issues::Export.one_line(row.key.host))
     end
 
     # A coverage gap is NOT a finding — that is the whole reason `removed` and `gone` are
@@ -105,13 +105,19 @@ module Gori::Diff
     # in their tail would read alike. The form the operator commits from is where a title
     # gets shortened, by the human who knows which half matters.
     def self.title(row : Row, ctx : Context) : String
-      "#{endpoint(row.key)} — #{title_tail(row, ctx)}"
+      # Scrubbed at the RETURN, not on the parts. The endpoint is not the only captured
+      # string on this line — a moved `content-type` axis puts the response's own
+      # `Content-Type` in the tail through `Change#to_s`, and `MediaType.essence` lower-cases
+      # and drops parameters without touching control bytes. One chokepoint, so a fifth axis
+      # or a fourth verdict phrase cannot arrive unscrubbed (memory: 정규화는 write 쵸크포인트).
+      Issues::Export.one_line("#{endpoint(row.key)} — #{title_tail(row, ctx)}")
     end
 
-    # `METHOD host/path`, scrubbed. A captured host or target can be invalid UTF-8 and can
-    # carry control bytes; both reach a TUI form title from here.
+    # `METHOD host/path` as `Render` spells it. NOT a second copy: a diff row and the pasted
+    # Markdown report have to name one endpoint identically, and a port, a scheme or a
+    # trailing-slash rule added to one spelling and not the other is how they stop.
     def self.endpoint(key : Key) : String
-      Issues::Export.one_line("#{key.method} #{key.host}#{key.path}")
+      Render.endpoint_label(key)
     end
 
     # The sentence the record exists for: what this row is EVIDENCE of, and — for the two
@@ -132,8 +138,21 @@ module Gori::Diff
         "about it. That is a gap in the retest's coverage, not evidence the endpoint was " \
         "removed — request it before recording it as gone."
       in .gone?
-        "#{ctx.b_label} asked and every answer was #{b_statuses(row)}, where #{ctx.a_label} " \
-        "reached it. That is captured evidence the endpoint is gone."
+        # `b_statuses` deliberately drops the `pending` marker `Compare.status_label` appends:
+        # "every answer was 404, pending" claims a pending flow ANSWERED. Pending means no
+        # answer was captured, which is the same "we have no evidence" state the removed/gone
+        # split exists to keep out of a deliverable, so it is named as its own sentence.
+        # (The VERDICT is `Facts#absent?`'s call and is out of scope here — only the claim
+        # this record makes about it is.)
+        String.build do |io|
+          io << ctx.b_label << " asked and every captured answer was " << b_statuses(row)
+          io << ", where " << ctx.a_label << " reached it. That is captured evidence the "
+          io << "endpoint is gone."
+          if row.b.try(&.pending?)
+            io << " Some of " << ctx.b_label << "'s captures never got a response at all, so "
+            io << "this covers the answers it did capture, not every request it made."
+          end
+        end
       in .changed?
         "Both captures reached this endpoint and the answer moved beyond the retest tolerance " \
         "on #{axes_phrase(row)}. Size is compared against a band and status by CLASS, so an " \
@@ -150,8 +169,19 @@ module Gori::Diff
     # The full record: what was compared, what each side answered, what moved, what that is
     # and is not evidence of, and where the bytes are.
     def self.body(row : Row, ctx : Context) : String
+      # `scrub_controls`, not `one_line`: this is a multi-line document and its newlines and
+      # tabs are structure. Same chokepoint argument as `title` — a captured content type
+      # reaches the two side lines through `Render.facts_line`, and a captured target reaches
+      # the evidence block.
+      Issues::Export.scrub_controls(build_body(row, ctx))
+    end
+
+    private def self.build_body(row : Row, ctx : Context) : String
       String.build do |io|
-        io << "Retest diff — " << ctx.a_label << " (baseline) → " << ctx.b_label << " (newer)\n\n"
+        # The A/B legend, spelled out because `Render.heading` below says "B" and this
+        # document — unlike the report that heading was written for — prints no A/B coverage
+        # table above it. The reader of a deliverable must not have to guess which is which.
+        io << "Retest diff — A: " << ctx.a_label << " (baseline) → B: " << ctx.b_label << " (newer)\n\n"
         field(io, "Endpoint", endpoint(row.key))
         field(io, "Verdict", Render.heading(row.verdict))
         io << '\n'
@@ -188,7 +218,7 @@ module Gori::Diff
       case row.verdict
       in .added?     then "captured only in #{ctx.b_label}"
       in .removed?   then "not requested in #{ctx.b_label} (coverage gap, not a removal)"
-      in .gone?      then "gone in #{ctx.b_label} (#{b_statuses(row)})"
+      in .gone?      then "gone in #{ctx.b_label} (#{b_statuses(row)})" # never "pending" — see b_statuses
       in .changed?   then changed_tail(row)
       in .unchanged? then "unchanged since #{ctx.a_label}"
       end
@@ -210,12 +240,18 @@ module Gori::Diff
       "#{names[0..-2].join(", ")} and #{names.last}"
     end
 
-    # What B answered, as a report prints it. `row.b` is nilable on every verdict and
-    # non-nil on the two that call this; the fallback names the rule rather than the
-    # observation, so a caller that ever gets here cannot read it as a captured status.
+    # The statuses B actually CAPTURED — `sorted_statuses`, not `Compare.status_label`, which
+    # appends "pending" for a flow that never got a response. Both callers below are `gone`
+    # sentences of the form "every answer was X", and a pending capture is not an answer.
+    #
+    # `row.b` is nilable on every verdict and non-nil on `gone`; the fallback names the RULE
+    # rather than an observation, so a caller that ever gets here cannot read it as a status
+    # this retest saw.
     private def self.b_statuses(row : Row) : String
       f = row.b
-      f ? Compare.status_label(f) : "404/410"
+      return "404/410" unless f
+      sts = f.sorted_statuses
+      sts.empty? ? "404/410" : sts.join(", ")
     end
 
     private def self.side_line(label : String, f : Facts?) : String

@@ -89,7 +89,12 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
-      @diff.ready? ? "a/b pick · s swap · r run · v lens · ↵ Comparer · ⇧F issue · n note" : "a pick the baseline project"
+      return "a pick the baseline project" unless @diff.ready?
+      base = "a/b pick · s swap · r run · v lens"
+      # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
+      # lens can empty the list. Naming a key that would do nothing is the hint lying about
+      # what the tab can do — which it already did for `↵` before these two joined it.
+      @diff.selected_row ? "#{base} · ↵ Comparer · ⇧F issue · n note" : base
     end
 
     # --- verbs ---------------------------------------------------------------
@@ -188,7 +193,7 @@ module Gori::Tui
 
     # --- record: a row leaves the tab as an Issue or a Note --------------------
 
-    # The selected row as a `Diff::Record::Draft`, plus the flow id the record may link to.
+    # {the flow id a record from this row may link to, a builder for the record itself}.
     #
     # A record is written to the project that is OPEN — the only store this TUI holds a
     # writer on — and `entity_links.ref_id` is a bare rowid with no project column. So the
@@ -196,15 +201,22 @@ module Gori::Tui
     # and the other side's capture is NAMED in the body rather than linked to a rowid that
     # means a different flow here. nil when there is no row under the cursor, or a slot is
     # empty (both of which the caller reports rather than filing an unanchored record).
-    def selected_record : {Gori::Diff::Record::Draft, Int64?}?
-      row = @diff.selected_row
-      a = @diff.slot(:a)
-      b = @diff.slot(:b)
-      return nil unless row && a && b
+    #
+    # A BUILDER rather than a finished draft, because the body prints "linked to this
+    # record" and that is an evidence claim: only the caller knows whether the link write
+    # actually landed, and it cannot know until after it has run (a note has to exist before
+    # anything can be linked to it). One nil check, one gate, and the text is built from what
+    # happened rather than from what was intended.
+    def selected_record : {Int64?, Proc(Bool, Gori::Diff::Record::Draft)}?
+      row = @diff.selected_row || return nil
+      a = @diff.slot(:a) || return nil
+      b = @diff.slot(:b) || return nil
       home, flow_id = home_side(row, a, b)
-      ctx = Gori::Diff::Record::Context.new(a.name, b.name, home, linked: !flow_id.nil?,
-        a_path: a.db_path, b_path: b.db_path)
-      {Gori::Diff::Record.draft(row, ctx), flow_id}
+      build = ->(linked : Bool) {
+        Gori::Diff::Record.draft(row, Gori::Diff::Record::Context.new(a.name, b.name, home,
+          linked: linked, a_path: a.db_path, b_path: b.db_path))
+      }
+      {flow_id, build}
     end
 
     # {the side that names the OPEN project, the flow id a record may link to}. The side is

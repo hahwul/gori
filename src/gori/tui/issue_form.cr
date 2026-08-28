@@ -70,9 +70,11 @@ module Gori::Tui
     # middle of a list the operator is still reading — the retest Diff, which exists to be
     # swept row by row — where being moved to Issues after every ↵ ends the sweep.
     #
-    # `link_ref` used to double as this predicate, and it is not the same question: a diff
-    # row whose capture lives in the OTHER project's database has nothing to link and still
-    # must not move the operator off the tab.
+    # `link_ref` was doubling as this predicate and it is not the same question: a diff row
+    # whose capture lives in the OTHER project's database has nothing to link and still must
+    # not move the operator off the tab. It still decides its OWN path first (it raises the
+    # open-vs-stay confirm, which is also a stay), so this flag is read only when no ref was
+    # attached — a future open-site that wants both gets the confirm, not the jump.
     getter? stay_on_create : Bool
 
     # Whether the severity showing was DERIVED from the cvss rather than picked. Only the
