@@ -169,12 +169,25 @@ module Gori
       # that produced the responses stored beside them. Retained on the same `keep_bodies` axis
       # as `request`; nil when nothing rewrote the template.
       getter wire : Bytes?
-      # The declared `¦chain` for one of this request's positions did NOT run on that payload
-      # (it raised on these bytes, or its output exceeded MAX_OUT), so the payload went out
-      # untransformed — a different test than the operator asked for. Carried per row and
-      # counted in the run's error tally so a swallowed chain is never hidden inside `0 errors`.
-      # Distinct from `error` (a network/send failure): a request can succeed on the wire yet
-      # still carry a chain_error. nil when every position's chain ran (or none was declared).
+      # This request is not the one the operator DECLARED, though it went out cleanly. Two
+      # populations, and the sentence names which:
+      #
+      #   * the declared `¦chain` for one of its positions did not run on that payload (it
+      #     raised on these bytes, or its output exceeded MAX_OUT), so the payload went out
+      #     untransformed — `chain '…' step '…' failed: …`;
+      #   * a schema-known gRPC field's DECLARATION could not hold that payload, so the field
+      #     kept the capture's own octets — `field role: "abc" is not an integer` (#843).
+      #     `Plan.build` refuses those before the first dial wherever the payload set can be
+      #     dry-run; this is the backstop past that bound, and it is not allowed to be silent.
+      #
+      # Carried per row and counted in the run's error tally so neither is hidden inside
+      # `0 errors`. Distinct from `error` (a network/send failure): a request can succeed on
+      # the wire yet still carry one. nil when nothing intervened.
+      #
+      # The NAME predates the second population and is kept deliberately: it is the JSON key
+      # `fuzz_results` and `--format json` have always emitted, and renaming it would break
+      # every reader for a wording improvement. The surfaces label it neutrally
+      # ("payload not as declared") and let the sentence say which.
       getter chain_error : String?
       # The gRPC CALL's outcome, from the response's `grpc-status` / `grpc-message` (the
       # trailers the Assembler merges into the head). nil for every non-gRPC response, and for

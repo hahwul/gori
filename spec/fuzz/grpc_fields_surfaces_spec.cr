@@ -101,6 +101,15 @@ private class RecordingOrigin
   end
 end
 
+# The rendered request's single gRPC message payload — what the origin would parse.
+private def rendered_message(bytes : Bytes) : Bytes
+  body = Fuzz::GrpcVerdict.body(bytes).not_nil!
+  msgs, residual = Grpc.scan(body)
+  residual.should eq(0)
+  msgs.size.should eq(1)
+  msgs[0].data
+end
+
 private def call_raw(tools, name, args : String) : {String, Bool}
   r = tools.call(name, JSON.parse(args))
   {r.text, r.is_error}
@@ -182,6 +191,15 @@ describe "gRPC field positions reach every fuzz surface" do
             }.to_json
             start = call_json(tools, "fuzz_start", args)
             start["total"].as_i.should eq(2)
+            # WHICH declaration the named field bound to. The CLI prints this once up front and
+            # an agent needs it for the same reason: it passed a NAME, and a stale descriptor
+            # set resolving it to a different field is otherwise undetectable.
+            g = start["grpc"]
+            g["method"].as_s.should eq("/demo.Users/GetUser")
+            g["message"].as_s.should eq("demo.GetUserRequest")
+            g["fields"][0]["spec"].as_s.should eq("name")
+            g["fields"][0]["number"].as_i.should eq(1)
+            g["fields"][0]["type"].as_s.should eq("string")
             job_id = start["job_id"].as_s
             done = false
             last = JSON::Any.new(nil)
@@ -201,12 +219,23 @@ describe "gRPC field positions reach every fuzz surface" do
           residual.should eq(0) # the 5-byte prefix follows the message it now describes
           msgs.size.should eq(1)
         end
-        Grpc.scan(origin.bodies[0])[0][0].data.should eq(
-          Protobuf::Encoder.length_delimited(1_u32, "zz".to_slice))
-        Grpc.scan(origin.bodies[1])[0][0].data.should eq(
-          Protobuf::Encoder.length_delimited(1_u32, "a-much-longer-value".to_slice))
+        # By CONTENT, not by arrival order: the sweep runs both variations concurrently, so
+        # which connection the origin accepts first is not the generator's emit order.
+        seen = origin.bodies.map { |b| Grpc.scan(b)[0][0].data.to_a }.to_set
+        ["zz", "a-much-longer-value"].each do |v|
+          seen.should contain(Protobuf::Encoder.length_delimited(1_u32, v.to_slice).to_a)
+        end
       ensure
         origin.close
+      end
+    end
+
+    it "leaves the echo alone for a sweep that named no field" do
+      with_surf_store do |store|
+        tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+        text, err = call_raw(tools, "fuzz_start", %({"template":"x"}))
+        err.should be_true # no payloads/target — but the point is the key, not the refusal
+        text.should_not contain(%("grpc"))
       end
     end
   end
@@ -253,6 +282,44 @@ describe "gRPC field positions reach every fuzz surface" do
         f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex,
         grpc_fields: "name"))
       view.run_request_count.should eq(3_i64)
+    end
+
+    # `result_request` reconstructs a row whose bytes were not retained (`keep_bodies: :matched`
+    # and the row missed — the TUI default, so EVERY non-matching row). A field payload lives
+    # inside a re-encoded protobuf message, not in a `§…§` span, so handing the base `Template` a
+    # vector that long appends it past the last segment: the capture with the payload dangling
+    # off the end of the frame, under a Content-Length resynced to cover it — shown in the detail
+    # pane and seeded into Repeater by "Send to Repeater".
+    it "reconstructs a non-retained row through the composite, not the base template" do
+      with_demo_schema do
+        view = Gori::Tui::FuzzerView.new
+        view.load_request("https://api.test", grpc_template("api.test"), false, "")
+        view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "zz"))
+        snap = view.advanced_snapshot
+        view.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
+          conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+          max_requests: snap.max_requests, race: snap.race,
+          follow: snap.follow, calibrate: snap.calibrate, keep_alive: snap.keep_alive,
+          update_cl: snap.update_cl, reframe_grpc: snap.reframe_grpc,
+          m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+          f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex,
+          grpc_fields: "name"))
+        with_surf_store do |store|
+          engine, err = view.build_engine(false, Gori::Scope.load(store), nil)
+          err.should be_nil
+          engine.should_not be_nil
+        end
+        view.begin_run(nil) # freezes the template AND the composite the generator spliced through
+
+        row = Gori::Fuzz::Result.new(0_i64, ["zz"], 0, 200, 0_i64, 0, 0, 1_i64, nil, false, false, nil)
+        req = view.result_request(row)
+        req.reconstructed.should be_true
+        # One frame, framed correctly, carrying the typed field — not the capture with `zz`
+        # appended past the end of it.
+        Grpc.scan(Fuzz::GrpcVerdict.body(req.bytes).not_nil!)[1].should eq(0)
+        rendered_message(req.bytes).should eq(
+          Protobuf::Encoder.length_delimited(1_u32, "zz".to_slice))
+      end
     end
 
     it "shows the builder's own sentence rather than prefixing it with `config error`" do

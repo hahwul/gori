@@ -98,6 +98,12 @@ module Gori::Fuzz
   # --encode/--case/--hash/--regex-replace` run inside `PayloadSet`, a position's `¦chain` runs
   # in `Generator#chained_reported`, and both are upstream of the encode by construction.
   #
+  # `AutoEncode` never reaches a field position at all, which is the same decision from the
+  # other side: it is built from the BASE `Template` (`Plan.build`), so its index set only ever
+  # holds query-string and form-body positions. Percent-encoding a payload on its way into an
+  # `int32` would turn a number into text the declaration cannot hold, refused for a default
+  # nobody asked for.
+  #
   # The other reading — transform the wire bytes the declaration produced — is not defensible.
   # What comes out of `Encoder.encode` is a tag plus a payload the declaration describes;
   # base64-ing or hashing THAT yields octets no declaration describes, spliced into a message
@@ -188,11 +194,16 @@ module Gori::Fuzz
       assemble(base, specs, binding, msg, body_size)
     end
 
-    # `build`, against a binding the caller already holds.
+    # `build`, against a binding the caller already holds — the GENERAL form, which the
+    # `request_target` overload above delegates to after resolving one.
     #
-    # Class-level and binding-taking for the reason `RepeaterView.grpc_form_rows` is: the
-    # position/path model has to be exercisable against ANY message in a descriptor set, not
-    # only the ones an rpc's REQUEST side happens to use.
+    # Its second caller today is `spec/fuzz/grpc_fields_spec.cr`, and that is said out loud
+    # rather than dressed up: the reference descriptor set's only rpc takes a one-field
+    # `GetUserRequest`, so the type variety this feature exists for (int64 sign-extension,
+    # sint32 zigzag, an enum, a packed run, `bytes`, a nested message) lives in `demo.User` and
+    # is unreachable through the path overload. `RepeaterView.grpc_form_rows` is class-level for
+    # the same reason and has production callers; this one is waiting for a surface that
+    # resolves a binding for its own display before building — a field PICKER is the obvious one.
     def self.build(base : Template, baseline : Bytes,
                    baseline_spans : Array({Int32, Int32}), specs : Array(String),
                    binding : Protobuf::Schemas::Binding) : GrpcFieldTemplate
@@ -488,14 +499,6 @@ module Gori::Fuzz
       Template.apply_chains_reported(@positions, payloads, registry)
     end
 
-    # BASE positions only. A field position is not a query string or a form body, and
-    # percent-encoding a payload on its way into an `int32` would turn a number into text the
-    # declaration cannot hold — refused, for a default nobody asked for. (`AutoEncode.build`
-    # is handed the base `Template` in `Plan.build`, so this is belt and braces.)
-    def urlencoded_positions : Array(Int32)
-      @base.urlencoded_positions
-    end
-
     # --- rendering one variation ----------------------------------------------
 
     # `{request bytes, this variation's payload spans, the first field that could not be
@@ -518,13 +521,36 @@ module Gori::Fuzz
       error = nil.as(String?)
       @fields.each_with_index do |fp, k|
         text = payloads[n + k]? || fp.seed
+        # THIS VARIATION IS NOT FUZZING THIS FIELD — so copy it, do not re-encode it.
+        #
+        # Every Sniper variation carries the OTHER positions at their defaults, and a field
+        # position's default is `Encoder.seed`, i.e. the capture's value read back as text. Text
+        # is a lossy handle on octets: `Encoder` writes MINIMAL varints and canonical spellings,
+        # while a wire field is free not to. A `bool` that arrived as `02` reads `true` and
+        # re-encodes as `01`; a legal non-minimal `80 00` collapses to `00`; a five-byte negative
+        # `int32` comes back sign-extended to ten. Re-encoding a field nobody is fuzzing would
+        # normalize exactly the deliberately-odd producer a gRPC sweep exists to test — the same
+        # "picking the schema over the bytes" `build` refuses a wire/schema disagreement for.
+        #
+        # So the skip is not an optimization, it is what makes "everything not fuzzed is COPIED"
+        # (P7) true BYTE for byte rather than nearly: with every position at its default the
+        # message is `@message` itself, and a Sniper variation touches only the one field it is
+        # injecting into. (It is also free on the common path — no encode, no splice, no copy.)
+        next if text == fp.seed
         case encoded = Protobuf::Encoder.encode(@schema, fp.defn, text, packed: fp.packed?)
         in String
           error ||= "field #{fp.spec}: #{encoded}"
         in Bytes
           case replaced = Protobuf::Encoder.replace(msg, fp.path, encoded)
-          in String then error ||= "field #{fp.spec}: #{replaced}"
-          in Bytes  then msg = replaced
+          in String
+            # Unreachable by construction: `fp.path` was resolved against THESE bytes at plan
+            # time and `@message` is frozen, so no occurrence can have moved. Worded here rather
+            # than passed through because `Encoder.replace`'s own sentences are written for the
+            # Repeater's field EDITOR ("reopen the field list"), which is not a thing a fuzz row
+            # or an MCP result has.
+            error ||= "field #{fp.spec}: the encoded value could not be spliced into the " \
+                      "captured message (#{replaced})"
+          in Bytes then msg = replaced
           end
         end
       end

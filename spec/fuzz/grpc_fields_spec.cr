@@ -421,6 +421,44 @@ describe Fuzz::GrpcFieldTemplate do
     end
   end
 
+  describe "a field this variation is not fuzzing is COPIED, not re-encoded" do
+    # `Encoder.seed` reads octets back as TEXT and `Encoder` writes MINIMAL varints, so
+    # re-encoding a field's own seed is only byte-identical when the producer was canonical.
+    # A Sniper variation carries every OTHER position at its default, so without the skip a
+    # field merely NAMED as a position gets its non-canonical encoding normalized on every
+    # request that is not injecting into it — the deliberately-odd producer a gRPC sweep exists
+    # to test, silently repaired.
+    it "keeps a bool that arrived as 0x02 rather than folding it to 0x01" do
+      # field 7 (`bool active`) as varint 2 — a legal encoding no canonical writer emits.
+      odd = concat_bytes(Bytes[0x38, 0x02], Protobuf::Encoder.length_delimited(2_u32, "hahwul".to_slice))
+      text = grpc_request(odd)
+      tmpl = build_user_template(text, ["active", "name"])
+      # `name` is the injected position; `active` carries its own seed and must not move.
+      rendered, _, err = tmpl.render_spans(["true", "zz"])
+      err.should be_nil
+      carries?(rendered_message(rendered), Bytes[0x38, 0x02]).should be_true
+      carries?(rendered_message(rendered), Bytes[0x38, 0x01]).should be_false
+    end
+
+    it "keeps a non-minimal varint on a field that IS a position" do
+      odd = concat_bytes(Bytes[0x08, 0x81, 0x00],
+        Protobuf::Encoder.length_delimited(2_u32, "hahwul".to_slice))
+      text = grpc_request(odd)
+      tmpl = build_user_template(text, ["id", "name"])
+      # `id` seeds as "1"; typing that same "1" must give the capture back, not `08 01`.
+      rendered, _, err = tmpl.render_spans(["1", "hahwul"])
+      err.should be_nil
+      rendered.should eq(text.to_slice)
+    end
+
+    it "still re-encodes the field the payload actually changes" do
+      text = grpc_request(demo_user_bytes)
+      tmpl = build_user_template(text, ["delta"])
+      carries?(rendered_message(tmpl.render_spans(["-3"])[0]), Bytes[0x50, 0x05]).should be_true # the seed: copied
+      carries?(rendered_message(tmpl.render_spans(["7"])[0]), Bytes[0x50, 0x0e]).should be_true  # changed: encoded
+    end
+  end
+
   describe "framing" do
     it "recomputes the 5-byte prefix for a message that grew" do
       with_demo_schema do
@@ -581,6 +619,33 @@ describe "Fuzz::Plan with gRPC field positions" do
       bytes = job.not_nil!.bytes
       String.new(bytes).should contain("x-key: p1")
       rendered_message(bytes).should eq(Protobuf::Encoder.length_delimited(1_u32, "p1".to_slice))
+    end
+  end
+
+  # `--ac` with NOTHING a nonce can fill. Each "sample" would be every position at its default,
+  # i.e. a byte-identical replay of the CAPTURED request — the captured rpc fired
+  # CALIBRATION_SAMPLES times with its own argument values, before the sweep. That is the side
+  # effect `Engine#calibrate_baseline` refuses a race run and a WebSocket run for, and the
+  # samples measure nothing anyway (`payload_len` 0 on every one).
+  it "sends NO calibration sample when every position is a typed field" do
+    with_demo_schema do
+      plan = build_plan(grpc_request(demo_request_bytes), ["name"],
+        config: Fuzz::Config.new(auto_calibrate: true))
+      plan.position_count.should eq(1)
+      plan.generator.calibration_requests(6).should be_empty
+    end
+  end
+
+  it "names --race 1 as a bad race count, not as a gRPC incompatibility" do
+    with_demo_schema do
+      # `build_grpc_fields` tests `race_count` for truthiness, so an unvalidated 1 would be
+      # reported as "a gRPC field position and --race cannot combine" and the operator would
+      # never learn that a race of 1 is refused on its own terms.
+      ex = expect_raises(Fuzz::PlanError) do
+        build_plan(grpc_request(demo_request_bytes), ["name"],
+          config: Fuzz::Config.new(race_count: 1))
+      end
+      ex.reason.should eq(Fuzz::PlanError::Reason::BadRaceCount)
     end
   end
 

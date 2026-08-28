@@ -416,6 +416,10 @@ module Gori::Fuzz
       # The WebSocket script, when this is a WS run. Built here — after marking, before every
       # guard below — because from this point on `marked` is what the whole builder reads, and
       # the two shapes answer the same protocol (see `Fuzz::WsScript`).
+      # BEFORE `build_grpc_fields`, which tests `race_count` for truthiness: an invalid `--race 1`
+      # would otherwise be reported as "a gRPC field position and --race cannot combine" and the
+      # operator would never learn that a race of 1 is refused on its own terms.
+      race_count = validate_race_count(options.config.race_count)
       ws_script = build_ws_script(options, template, ws_texts)
       # …and the gRPC field positions, when the run named any. Same seam and the same argument:
       # a composite that concatenates its parts' position lists into one vector (see
@@ -427,7 +431,7 @@ module Gori::Fuzz
       # A race group is N copies of ONE request, not a payload-substitution sweep — see
       # `Config#race_count` — so it has no use for §…§ positions or payload sets at all, and
       # both guards below (and NoPayloads, one screen down) are skipped when it is set.
-      race_count = validate_race_count(options.config.race_count)
+      # (`race_count` is validated above, ahead of the gRPC field guard — see there.)
       raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if marked.position_count == 0 && !race_count
       # The twin of `refuse_unresolved`, one line down and for the same reason: a `¦chain` this
       # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See

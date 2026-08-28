@@ -118,6 +118,13 @@ rpc — a `protoc --descriptor_set_out` file or a `gori run grpc reflect` fetch;
 are the ones the Repeater's `␣E:FIELDS` form and the History protobuf tree already show for
 the same flow.
 
+Two things follow from what a splice can do. The field has to be **present on the captured
+message** — gori replaces an occurrence, it never adds one — so a proto3 field left at its
+default is absent from the wire and is not a position; the refusal lists what the message does
+carry. And a payload for a **`bytes`** field is read as **hex** (`de ad be ef`), because that
+declaration's value is binary and a text field would silently send the UTF-8 of what you typed
+instead of the octets you meant.
+
 Each payload goes **through the declaration** on its way to bytes, which is the whole reason
 the schema is needed: `-3` is ten sign-extended octets as `int32`, one zigzagged octet as
 `sint32`, and something else again as a `bool` or an enum. Everything outside the fuzzed field
@@ -135,6 +142,12 @@ Three things are refused before the first request rather than discovered mid-swe
 schema does not declare, a field whose wire type the declaration contradicts (both of which the
 Repeater's form renders read-only for the same reason — `^X` is still the way to change those
 octets), and a payload the declared type cannot hold.
+
+One combination is *reported* rather than refused: `--verbatim` leaves `Content-Length` at the
+capture's value, and a re-encoded message is a different size — so every request declares the
+wrong body length and is rejected at the HTTP framing layer before the gRPC layer is reached.
+That is the same argument this feature makes for rebuilding the 5-byte prefix, pointed at the
+other length declaration, and a CL desync is a real test, so the run says so and proceeds.
 
 ### Fuzzing a WebSocket
 

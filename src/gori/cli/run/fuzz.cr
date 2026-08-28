@@ -85,7 +85,7 @@ module Gori
           # is the DECLARATION and the payload goes through it. Needs a descriptor set for the
           # rpc (`gori run grpc schema` says whether one is loaded); the field names are the
           # ones the Repeater's ␣E form and the History tree already show for the same flow.
-          p.on("--field=SPEC", "Sweep a schema-known gRPC field of a unary request (repeatable). SPEC is a field name, a path into a nested message (profile.age), or a field number, with [i] to pick one occurrence of a repeated field (tags[1]); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it") { |v| grpc_fields << v }
+          p.on("--field=SPEC", "Sweep a schema-known gRPC field of a unary request (repeatable). SPEC is a field name, a path into a nested message (profile.age), or a field number, with [i] to pick one occurrence of a repeated field (tags[1]); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it. The field must be PRESENT on the captured message — gori replaces an occurrence, it never adds one, so a proto3 field left at its default is not a position. Payloads for a `bytes` field are read as HEX (`de ad be ef`), because that declaration's value is binary") { |v| grpc_fields << v }
           p.on("--message=TEXT", "WebSocket: outbound text frame (repeatable; may carry §…§ positions; replaces the seed's stored frames)") { |v| ws_overrides << Fuzz::WsMessageSource.new(1, v) }
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_overrides << fuzz_message_frame(v) }
           p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
@@ -477,6 +477,18 @@ module Gori
                     "#{named} — through #{g.method_path} → #{g.message_type}. Every other byte of " \
                     "the message is copied from the capture and the 5-byte length prefix follows " \
                     "the message it now describes"
+        # …and the OTHER length declaration, when the operator turned its resync off. A
+        # re-encoded message is a different size, so `--verbatim` here means every request in
+        # the sweep declares the CAPTURE's body length and is rejected at the HTTP framing layer
+        # before the gRPC layer is reached — which is exactly the argument this feature makes
+        # for rebuilding the 5-byte prefix, pointed at the header instead. Said rather than
+        # refused: `--verbatim` means "send it as written" and a CL desync is a real test, so
+        # combining the two is the operator's call to make knowingly.
+        return if plan.config.update_content_length?
+        STDERR.puts "gori run fuzz: note: --verbatim leaves Content-Length at the capture's " \
+                    "value while a field position changes the message's size — every request " \
+                    "will declare the wrong body length. Drop --verbatim unless the desync is " \
+                    "the test"
       end
 
       # Knobs this run cannot honour because it is a WebSocket sweep. Said ONCE, up front, with

@@ -165,6 +165,16 @@ module Gori::Fuzz
       return [] of {Bytes, Int32} if ws?
       count = @marked.position_count
       nonced = nonceable_positions
+      # NOTHING a nonce can fill — a gRPC field run whose every position is a typed field.
+      # Each "sample" would then be every position at its DEFAULT, i.e. a byte-identical replay
+      # of the CAPTURED request, fired CALIBRATION_SAMPLES times before the sweep with the
+      # capture's own argument values. That is the side effect `Engine#calibrate_baseline`
+      # refuses a race run and a WebSocket run for, in those same words, and `random_nonce`'s
+      # own contract ("never a real payload, so a calibration send can't coincide with anything
+      # meaningful on the target") is what it breaks. It also measures nothing: `payload_len`
+      # would be 0 on every sample, so `Matcher.reflects_length?` sees no length delta to
+      # correlate and answers false regardless. Skipped outright rather than sent for no answer.
+      return [] of {Bytes, Int32} if nonced == 0
       defaults = @marked.default_payloads
       (0...n).map do |i|
         plen = CALIBRATION_BASE_LEN + i * CALIBRATION_STEP
