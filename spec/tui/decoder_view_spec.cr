@@ -7,10 +7,11 @@ private REG = Gori::Decoder.default_registry
 
 private def render_decoder(*, input : String, chain : String, pane : Symbol = :input,
                            popup : ChainComplete = ChainComplete.new,
+                           run_hooks : Bool = true,
                            w : Int32 = 80, h : Int32 = 30) : MemoryBackend
   view = DecoderView.new
   ta = TextArea.new(input)
-  result = Gori::Decoder.run(REG, input.to_slice, chain)
+  result = Gori::Decoder.run(REG, input.to_slice, chain, run_hooks: run_hooks)
   backend = MemoryBackend.new(w, h)
   view.render(Screen.new(backend), Rect.new(0, 0, w, h),
     input: ta, chain: chain, chain_cx: chain.size, chain_pre: "",
@@ -45,6 +46,15 @@ describe Gori::Tui::DecoderView do
     b = render_decoder(input: "!!notbase64!!", chain: "base64-decode > sha256")
     b.contains?("✗").should be_true
     b.contains?("chain failed").should be_true # OUTPUT header marks the failure
+  end
+
+  # A chain whose `exec:` step was WITHHELD (`run_hooks: false` — a project open, a library
+  # edit) has no output either, and the header used to call that a failure: `✗ chain failed`
+  # over the operator's own command reads as "your command is broken" (#818).
+  it "says HELD, not failed, when a hook was withheld" do
+    b = render_decoder(input: "hello", chain: "exec:/bin/cat", run_hooks: false)
+    b.contains?("chain held").should be_true
+    b.contains?("chain failed").should be_false
   end
 
   it "draws the autocomplete dropdown when the chain pane has an open popup" do

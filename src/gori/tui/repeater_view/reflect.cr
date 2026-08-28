@@ -28,10 +28,15 @@ class Gori::Tui::RepeaterView
   # last line's terminator — correct around a separator, wrong for a body that legitimately
   # ends in one. Reflecting through it made a captured `…tail-after-blank\r\n` read as 32
   # where the send framed 34: the same display-vs-wire lie in the other direction.
-  private def reflect_content_length_in_editor : Nil
+  private def reflect_content_length_in_editor(allow_hooks : Bool = false) : Nil
     return unless @auto_content_length
     return if @req_hex_edit || @grpc_mode || ws_mode?
     return if @decode_kind && @req_pane == :decoded
+    # Asked ONCE for the whole buffer, not once per `%%%` chunk: the answer is a property of
+    # the marker set, and `reflect_chunk_content_length` below parses the template again for
+    # every chunk it renders — asking there doubled the parse count on the busiest editor in
+    # the app. `allow_hooks` is what an explicit gesture (`^L`) passes; see the method below.
+    return if !allow_hooks && marker_chain_runs_command?
 
     wl = @editor.wire_lines
     # `chunked_reflection?`, not "is there a `%%%` anywhere". A separator the CAPTURE brought
@@ -44,6 +49,31 @@ class Gori::Tui::RepeaterView
     else
       reflect_chunk_content_length(@editor.wire_text, wl, 0...wl.size)
     end
+  end
+
+  # Whether any `§value¦chain§` in this buffer would run an EXTERNAL COMMAND (#818) — the one
+  # condition under which the reflection above declines to touch the header.
+  #
+  # THIS RUNS ON THE KEYSTROKE PATH, and `render_marked` below derives the length by replaying
+  # every marker's chain — so an `exec:` step forked the operator's command once per typed
+  # character, and once more on every `restore` (a project reopen therefore ran every saved
+  # tab's command). A hook is by definition allowed to have side effects; typing is not a send.
+  #
+  # LEAVING THE HEADER ALONE, rather than reflecting with the hook withheld. A length measured
+  # on the UNTRANSFORMED value is a number no request will ever carry — the display-vs-wire lie
+  # this file exists to prevent, told in the other direction. The visible line can therefore lag
+  # while such a tab is edited; both places where that would REACH the wire close it. `^R` goes
+  # through `finalize_wire`, which resyncs from the fully rendered bytes; and `^L` — the moment
+  # the operator takes ownership of the header — reflects once with `allow_hooks: true`, because
+  # an explicit gesture may spend one run of the command where a keystroke may not.
+  #
+  # Asked of the EXPANDED bytes, the ones `render_marked` will parse: a `$KEY` inside a chain
+  # spec is substituted before the spec is tokenized, so the editor's own text can spell a
+  # command it does not contain. And asked through `Decoder.chain_runs_commands?`, not by
+  # scanning for the marker: a saved chain is callable by NAME and its token says nothing.
+  private def marker_chain_runs_command? : Bool
+    return false if marker_regions.empty? # the common case, and `marker_regions` is cached
+    Fuzz::Template.parse(String.new(expanded_editor_bytes)).runs_commands?(Decoder.shared_registry)
   end
 
   # The reflection for ONE request: `text` is exactly the bytes that request will be built

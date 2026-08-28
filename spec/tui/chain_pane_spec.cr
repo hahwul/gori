@@ -89,4 +89,56 @@ describe Gori::Tui::ChainOverlay do
     backend.contains?("PREVIEW").should be_true
     backend.contains?("61ff62").should be_true # `Decoder.run` got the wire bytes, not a scrubbed copy
   end
+
+  # #818: the preview runs INSIDE the draw call, so an `exec:` step here forks the operator's
+  # command once per frame — on the UI fiber, blocking it for up to `hooks.timeout_secs`, over
+  # a chain they are still typing. The count is what this asserts: rendering is not a send.
+  it "withholds an `exec:` step instead of forking the command on every repaint" do
+    dir = File.tempname("gori-chain-overlay-hook")
+    Dir.mkdir_p(dir)
+    hook = File.join(dir, "hook.sh")
+    tally = File.join(dir, "runs")
+    File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+    File.chmod(hook, 0o755)
+    begin
+      pane = ChainPane.new
+      pane.load("exec:#{hook}")
+
+      backend = MemoryBackend.new(90, 24)
+      5.times { ChainOverlay.render(Screen.new(backend), Rect.new(0, 0, 90, 24), "CHAIN · §1", "payload", pane) }
+
+      (File.exists?(tally) ? File.read(tally).lines.size : 0).should eq 0
+      # And the row SAYS so — a bare "(skipped)" would read as "an earlier step failed".
+      backend.contains?("runs a command").should be_true
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # A saved chain is callable BY NAME, so the token says nothing about the command inside it.
+  it "withholds a SAVED chain that carries an exec: step" do
+    dir = File.tempname("gori-chain-overlay-saved")
+    Dir.mkdir_p(dir)
+    hook = File.join(dir, "hook.sh")
+    tally = File.join(dir, "runs")
+    File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+    File.chmod(hook, 0o755)
+    saved = Gori::Decoder.library
+    begin
+      Gori::Decoder.library = [{"signer", "exec:#{hook}"}]
+      pane = ChainPane.new
+      pane.load("signer")
+
+      backend = MemoryBackend.new(90, 24)
+      3.times { ChainOverlay.render(Screen.new(backend), Rect.new(0, 0, 90, 24), "CHAIN · §1", "payload", pane) }
+
+      (File.exists?(tally) ? File.read(tally).lines.size : 0).should eq 0
+      # Same contract as the inline case above, so assert the same axis: a bare "(skipped)"
+      # would read as "an earlier step failed" — which is what the reason exists to prevent.
+      backend.contains?("runs a command").should be_true
+    ensure
+      Gori::Decoder.library = saved
+      FileUtils.rm_rf(dir)
+    end
+  end
 end
