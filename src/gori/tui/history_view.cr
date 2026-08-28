@@ -297,17 +297,36 @@ module Gori::Tui
         return
       end
       detail = store.get_flow(id, body_max: Settings.preview_body_cap + 1)
+      prev = @preview_detail
       @preview_detail = detail
       @preview_id = id
+      # The guard above deliberately lets a pending / 101 / h2 flow past, because its bytes can
+      # still grow — but "can grow" is not "did grow", and in the steady state (an h2 response
+      # that has landed, the dominant real-traffic shape) the fetch hands back the very same
+      # bytes every frame. Only the FETCH has to repeat for those flows; the derived half below
+      # is a pure function of the four slices compared here, and it is the expensive half — a
+      # compressed body pays a full inflate, then a scrub/split, then a highlight rebuild. So
+      # compare the source bytes and keep the cached projection when nothing moved. The
+      # comparison is a memcmp over at most preview_body_cap+1 bytes; the work it skips is not.
+      return if detail && prev && @preview_req_lines && preview_source_unchanged?(detail, prev)
       # Split the (bounded) preview text once, here — render reads the cached arrays.
       if detail
-        @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body)
+        @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body, decode: true)
         @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body, decode: true)
       else
         @preview_req_lines = nil
         @preview_res_lines = nil
       end
       rebuild_preview_highlight
+    end
+
+    # Whether a re-fetch of the SAME flow brought back the same message bytes. Compares the
+    # four slices the preview projection is built from — NOT the row, whose mutable columns
+    # (state, duration, size counters) settle after the bytes do and would keep invalidating a
+    # projection that is already correct.
+    private def preview_source_unchanged?(a : Store::FlowDetail, b : Store::FlowDetail) : Bool
+      a.request_head == b.request_head && a.request_body == b.request_body &&
+        a.response_head == b.response_head && a.response_body == b.response_body
     end
 
     def clear_preview : Nil
@@ -2649,11 +2668,16 @@ module Gori::Tui
       cache[li] = styled.line_at(li)
     end
 
-    # Build a bounded message projection for the split list preview. Responses ask for the
-    # decoded entity (gzip/deflate/br/zstd + de-chunk), while requests keep the preview's
-    # existing wire-body reading. The decoder receives cap+1 as its output ceiling so compression
-    # cannot turn this small navigation pane into a multi-MiB allocation; the final slice and
-    # marker apply to whichever projection is shown.
+    # Build a bounded message projection for the split list preview. BOTH panes ask for the
+    # decoded entity (gzip/deflate/br/zstd + de-chunk), which is what the History DETAIL pane
+    # two keystrokes away has always shown for both halves — a gzip'd GraphQL POST is the
+    # motivating case in `Gori::Entity`'s own doc comment, and it rendered as garbage here while
+    # the response beside it rendered clean. `decode:` stays a parameter rather than becoming
+    # unconditional because the byte-faithful reading is the right one for a request DIFF
+    # (`Repeater::MessageLines` passes `decode: false` for exactly that reason) and this seam
+    # should keep being able to say so. The decoder receives cap+1 as its output ceiling so
+    # compression cannot turn this small navigation pane into a multi-MiB allocation; the final
+    # slice and marker apply to whichever projection is shown.
     private def preview_text_lines(head : Bytes?, body : Bytes?, *, decode : Bool = false) : Array(String)
       return ["(empty)"] if head.nil? || head.empty?
       cap = Settings.preview_body_cap
