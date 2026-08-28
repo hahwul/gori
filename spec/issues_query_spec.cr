@@ -70,4 +70,27 @@ describe Gori::Issues::Filter do
     filtered("host:", list).size.should eq(4)
     filtered("-status:", list).size.should eq(0) # negated empty → match none
   end
+
+  cvss_list = [
+    Store::Issue.new(1_i64, 0_i64, 0_i64, "Crit Issue", Store::Severity::Critical, "api.test", nil, "", Store::Status::Open, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    Store::Issue.new(2_i64, 0_i64, 0_i64, "High Issue", Store::Severity::High, "app.test", nil, "", Store::Status::Open, "7.5"),
+    Store::Issue.new(3_i64, 0_i64, 0_i64, "Med Issue", Store::Severity::Medium, "app.test", nil, "", Store::Status::Open, "5.0"),
+    Store::Issue.new(4_i64, 0_i64, 0_i64, "No CVSS", Store::Severity::Low, "cdn.test", nil, "", Store::Status::Open, nil),
+  ]
+
+  it "filters by CVSS numeric comparisons" do
+    filtered("cvss:>=7.0", cvss_list).map(&.title).should eq(["Crit Issue", "High Issue"])
+    filtered("cvss:>9.0", cvss_list).map(&.title).should eq(["Crit Issue"])
+    filtered("cvss:<=5.0", cvss_list).map(&.title).should eq(["Med Issue"])
+    filtered("cvss:<5.0", cvss_list).should be_empty
+  end
+
+  it "matches CVSS vector substring or exact score" do
+    filtered("cvss:3.1", cvss_list).map(&.title).should eq(["Crit Issue"])
+    filtered("cvss:7.5", cvss_list).map(&.title).should eq(["High Issue"])
+  end
+
+  it "supports negative CVSS filters" do
+    filtered("-cvss:>=7.0", cvss_list).map(&.title).should eq(["Med Issue", "No CVSS"])
+  end
 end

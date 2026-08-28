@@ -319,5 +319,20 @@ describe Gori::Issues::Export do
         parsed.as_a.first["host"].raw.should be_nil
       end
     end
+
+    it "includes CVSS in markdown and json exports" do
+      with_store do |store|
+        store.insert_issue("SQLi", Gori::Store::Severity::Critical, "app.test", nil,
+          cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
+        md.should contain("- **CVSS:** 9.8 (CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)")
+
+        json_out = Gori::Issues::Export.json(store.issues, store)
+        parsed = JSON.parse(json_out).as_a.first
+        parsed["cvss"].as_s.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+        parsed["cvss_score"].as_f.should eq(9.8)
+      end
+    end
   end
 end

@@ -523,5 +523,20 @@ describe Gori::Issues::Export do
         Time.parse_rfc3339(props["gori/updatedAt"].as_s).should be_a(Time)
       end
     end
+
+    it "carries CVSS in result properties and uses CVSS score for rule security-severity" do
+      with_store do |store|
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Critical, "h.test", nil,
+          cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+
+        doc = JSON.parse(export(store))
+        res = doc["runs"][0]["results"][0]
+        res["properties"]["gori/cvss"].as_s.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+        res["properties"]["gori/cvssScore"].as_f.should eq(9.8)
+
+        rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
+        rule["properties"]["security-severity"].as_s.should eq("9.8")
+      end
+    end
   end
 end

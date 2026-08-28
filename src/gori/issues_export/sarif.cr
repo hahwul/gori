@@ -192,6 +192,8 @@ module Gori
           bag["gori/updatedAt"] = JSON::Any.new(rfc3339(f.updated_at))
           f.host.try { |h| bag["gori/host"] = JSON::Any.new(one_line(h)) }
           f.flow_id.try { |fid| bag["gori/flowId"] = JSON::Any.new(fid) }
+          f.cvss.try { |c| bag["gori/cvss"] = JSON::Any.new(one_line(c)) }
+          f.cvss_score.try { |s| bag["gori/cvssScore"] = JSON::Any.new(s) }
           link_json = sarif_links(links[i])
           bag["gori/links"] = JSON::Any.new(link_json) unless link_json.empty?
           res.properties = bag
@@ -215,16 +217,22 @@ module Gori
         # severity if that ever stopped holding.
         descriptors.each do |d|
           bag = ::Sarif::PropertyBag.new(tags: ["security", "gori"])
-          live, any = worst[d.id]? || {nil, nil}
-          bag["security-severity"] =
-            JSON::Any.new(Sarif.security_severity(live || any || Store::Severity::Info))
+          live, any, live_score, any_score = worst[d.id]? || {nil, nil, nil, nil}
+          score = live_score || any_score
+          sec_sev = if score
+                      sprintf("%.1f", score)
+                    else
+                      Sarif.security_severity(live || any || Store::Severity::Info)
+                    end
+          bag["security-severity"] = JSON::Any.new(sec_sev)
           d.properties = bag
         end
       end
 
       # Per rule id, the severity its badge should show: {the worst among its LIVE results, the
-      # worst among all of them}. A rule shared by a Critical and a Low is a Critical in a
-      # dashboard's list, which is the reading an operator triaging from that list needs.
+      # worst among all of them, and the highest CVSS score among live results / any results}.
+      # A rule shared by a Critical and a Low is a Critical in a dashboard's list, which is the
+      # reading an operator triaging from that list needs.
       #
       # SUPPRESSED results are excluded from the live half, because GitHub applies this badge
       # PER ALERT, not just in the rules list: a Critical the operator triaged to false-positive
@@ -246,19 +254,26 @@ module Gori
       #
       # It runs SYNCHRONOUSLY on the TUI's UI fiber (`IssuesController`), which is the same fiber
       # the `flows`/`links` pre-reads at the top of `sarif` were introduced to stop stalling.
-      private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Store::Severity?, Store::Severity?})
-        out = {} of String => {Store::Severity?, Store::Severity?}
+      private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Store::Severity?, Store::Severity?, Float64?, Float64?})
+        out = {} of String => {Store::Severity?, Store::Severity?, Float64?, Float64?}
         run.results.try &.each do |res|
           rule_id = res.rule_id
           next unless rule_id
           sev = res.properties.try(&.get_string("gori/severity")).try { |l| Store::Severity.parse?(l) }
           next unless sev
-          live, any = out[rule_id]? || {nil.as(Store::Severity?), nil.as(Store::Severity?)}
+          score = res.properties.try(&.get_float("gori/cvssScore"))
+          live, any, live_score, any_score = out[rule_id]? || {nil.as(Store::Severity?), nil.as(Store::Severity?), nil.as(Float64?), nil.as(Float64?)}
           any = sev if any.nil? || sev.value > any.not_nil!.value
+          if score
+            any_score = score if any_score.nil? || score > any_score.not_nil!
+          end
           unless res.suppressions.try { |sup| !sup.empty? }
             live = sev if live.nil? || sev.value > live.not_nil!.value
+            if score
+              live_score = score if live_score.nil? || score > live_score.not_nil!
+            end
           end
-          out[rule_id] = {live, any}
+          out[rule_id] = {live, any, live_score, any_score}
         end
         out
       end

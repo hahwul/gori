@@ -42,6 +42,13 @@ module Gori
                                     resolved_links : Array(Links::Resolved), evidence : Bool = true) : Nil
         io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
         io << "- **Severity:** " << f.severity.label << "\n"
+        if cvss = f.cvss
+          score = f.cvss_score
+          vec = f.cvss_vector
+          io << "- **CVSS:** " << (score ? score.to_s : one_line(cvss))
+          io << " (" << one_line(cvss) << ")" if vec && score && cvss != score.to_s
+          io << "\n"
+        end
         io << "- **Status:** " << f.status.label << "\n"
         io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
         if fid = f.flow_id
@@ -94,6 +101,8 @@ module Gori
                 j.field "title", one_line(f.title)
                 j.field "severity", f.severity.label
                 j.field "status", f.status.label
+                j.field "cvss", f.cvss.try { |c| one_line(c) }
+                j.field "cvss_score", f.cvss_score
                 j.field "host", f.host.try { |h| one_line(h) }
                 j.field "flow_id", f.flow_id
                 j.field "created_at", f.created_at

@@ -63,6 +63,9 @@ module Gori
           when "severity", "sev"
             op, text = split_op(value)
             return Term.new(:severity, op, text.downcase, negate)
+          when "cvss"
+            op, text = split_op(value)
+            return Term.new(:cvss, op, text.downcase, negate)
           when "status", "st"
             return Term.new(:status, :eq, value.downcase, negate)
           when "host"
@@ -95,12 +98,36 @@ module Gori
         return !t.negate if t.text.empty?
         hit = case t.kind
               when :severity then match_severity(t, f.severity)
+              when :cvss     then match_cvss(t, f)
               when :status   then match_status(t.text, f.status)
               when :host     then (f.host || "").downcase.includes?(t.text)
               when :title    then f.title.downcase.includes?(t.text)
               else                free_text(t.text, f)
               end
         t.negate ? !hit : hit
+      end
+
+      private def match_cvss(t : Term, f : Store::Issue) : Bool
+        cvss_str = f.cvss
+        return false unless cvss_str
+        if target = t.text.to_f?
+          score = f.cvss_score
+          return false unless score
+          cmp = score <=> target
+          return false unless cmp
+          matched = case t.op
+                    when :ge then cmp >= 0
+                    when :gt then cmp > 0
+                    when :le then cmp <= 0
+                    when :lt then cmp < 0
+                    else          cmp == 0
+                    end
+          return true if matched
+          return cvss_str.downcase.includes?(t.text) if t.op == :eq
+          false
+        else
+          cvss_str.downcase.includes?(t.text)
+        end
       end
 
       private def free_text(text : String, f : Store::Issue) : Bool
