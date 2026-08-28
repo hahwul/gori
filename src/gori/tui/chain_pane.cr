@@ -118,7 +118,11 @@ module Gori::Tui
     private def refilter : Nil
       ts, te = token_span
       tok = @chain[ts...te].strip
-      if tok.empty?
+      # An `exec:` step is FREE TEXT — an argv, not a name — so the converter list stays shut
+      # over it (#818). Otherwise every character of `exec:./sign --key k` would be filtered
+      # against the catalog, and ↹ would silently overwrite the operator's command with
+      # whatever converter happened to rank first.
+      if tok.empty? || Decoder.exec_step?(tok)
         @complete.close
       else
         matches = Decoder.shared_registry.match(tok).map(&.name).uniq!

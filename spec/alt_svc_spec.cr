@@ -71,6 +71,113 @@ describe Gori::AltSvc do
     end
   end
 
+  describe ".kept_note" do
+    it "names the evidence and the setting to throw about it" do
+      # The mirror of `.removal_note`, for the switch position where gori used to say nothing.
+      # A gap in History that nothing explains is indistinguishable from an origin that had
+      # nothing more to say — which is the failure this sentence exists to end (#835).
+      note = Gori::AltSvc.kept_note([%(h3=":443"; ma=86400)])
+      note.should contain("kept 1 Alt-Svc HTTP/3 advertisement (")
+      note.should contain(%(h3=":443"; ma=86400))
+      note.should contain("network.strip_alt_svc is off")
+      note.should_not contain("advertisements")
+    end
+
+    it "counts exactly and quotes a bounded number, like its mirror" do
+      # Same remote-chosen evidence, same flood, same bound — shared through `quote_evidence`
+      # so the cap cannot drift onto one of the two sentences and not the other.
+      note = Gori::AltSvc.kept_note((1..9).map { |i| %(h3=":#{i}") })
+      note.should contain("kept 9 Alt-Svc HTTP/3 advertisements")
+      note.should contain(%(h3=":4"))
+      note.should_not contain(%(h3=":5"))
+      note.should contain("and 5 more")
+    end
+
+    it "is a different sentence from the removal it mirrors" do
+      # Both are about the same header and the same setting, and an operator scanning History
+      # has to be able to tell "gori took this off the wire" from "gori let this through".
+      kept = Gori::AltSvc.kept_note([%(h3=":443")])
+      kept.should_not eq(Gori::AltSvc.removal_note([%(h3=":443")]))
+      kept.should contain("leaves the proxy")
+      Gori::AltSvc.removal_note([%(h3=":443")]).should contain("would have left the proxy")
+    end
+  end
+
+  describe "the two views of one head" do
+    it "disagree about an obs-folded Alt-Svc, which is why h1 asks strip_h3" do
+      # RFC 7230 §3.2.4. `parse_headers` keeps only the first line of a folded field;
+      # `strip_header_lines` hands its block the JOINED value on purpose — what a lenient
+      # recipient acts on, not what gori filed. So the projection reports no h3 for a head the
+      # strip removes an h3 from, and a detection built on the projection went silent in
+      # exactly the configuration #835 exists to make loud.
+      head = "HTTP/1.1 200 OK\r\nAlt-Svc: h2=\":8443\"\r\n , h3=\":443\"\r\nContent-Length: 0\r\n\r\n".to_slice
+      projected = Gori::Proxy::Codec::Http1.parse_response_head(head).headers.get_all("alt-svc")
+      projected.should eq([%(h2=":8443")])
+      Gori::AltSvc.h3_evidence_all(projected).should be_empty  # the wrong answer, pinned
+      Gori::AltSvc.strip_h3(head)[1].should eq([%(h3=":443")]) # the right one
+    end
+  end
+
+  describe ".h3_evidence_all" do
+    it "returns one entry per FIELD that advertises h3, and skips the rest" do
+      # The read-only twin of `strip_h3`: what the strip WOULD have removed, without removing
+      # it. Reusing `h3_evidence` is what keeps the near-misses out — a second parse here is
+      # exactly the drift this module exists to prevent.
+      Gori::AltSvc.h3_evidence_all([%(h3=":443"), "clear", %(h2=":8443"),
+                                    %(fooh3=":443"), %(h32=":443"), %(h3-29=":8443")])
+        .should eq([%(h3=":443"), %(h3-29=":8443")])
+    end
+
+    it "is empty when nothing advertises h3" do
+      Gori::AltSvc.h3_evidence_all(["clear", %(h2=":8443")]).should be_empty
+      Gori::AltSvc.h3_evidence_all([] of String).should be_empty
+    end
+  end
+
+  describe "the h3 notice's wiring" do
+    it "is emitted by BOTH transports from the one constructor" do
+      # One wording or two events. `AltSvc` owns the words precisely so an operator comparing
+      # an h1 flow with an h2 one is reading the same fact — the reason `removal_note` is
+      # shared, applied to its mirror.
+      %w[src/gori/proxy/conn/client_conn.cr src/gori/proxy/h2/head_rewrite.cr].each do |path|
+        src = File.read(File.join(__DIR__, "..", path))
+        src.should contain("private def note_alt_svc_kept")
+        src.should contain("Gori::AltSvc.kept_note(kept)")
+      end
+    end
+
+    it "detects on the view each transport's own bytes have" do
+      # NOT one shared helper, and that is the point. h1 asks `strip_h3` (and throws the bytes
+      # away) because the parsed projection is a different view of the same head — see the
+      # obs-fold example above. h2's HPACK fields carry whole values and have no second view.
+      h1 = File.read(File.join(__DIR__, "..", "src/gori/proxy/conn/client_conn.cr"))
+      h1.should contain("_, kept = Gori::AltSvc.strip_h3(head)")
+      h1.should_not contain("h3_evidence_all")
+      File.read(File.join(__DIR__, "..", "src/gori/proxy/h2/head_rewrite.cr"))
+        .should contain("Gori::AltSvc.h3_evidence_all(values)")
+    end
+
+    it "does not depend on a rule engine being wired, on h2" do
+      # The h2 notice lives inside `HeadRewrite#finish`, the only point in the response path
+      # where the decoded fields exist and nothing has been written yet. Gating that pipeline
+      # on `@rewriter` would make "on both transports" a claim about an unrelated object; on
+      # `strip_alt_svc?` it would read a live-per-response switch once per connection. The
+      # REQUEST direction keeps its own gates — a rule, or `notice_unreachable`'s extractor.
+      src = File.read(File.join(__DIR__, "..", "src/gori/proxy/h2/relay.cr"))
+      src.should contain(%(if rw || @extractor || direction == "in"))
+    end
+
+    it "is announced to gori.log once per host per SESSION, not per connection" do
+      # This half fires in the DEFAULT configuration (`strip_alt_svc` is off) against origins
+      # that mostly advertise h3, and a browser opens several connections per origin. The
+      # strip's per-connection latches beside it were affordable only because it is opt-in.
+      %w[src/gori/proxy/conn/client_conn.cr src/gori/proxy/h2/head_rewrite.cr].each do |path|
+        File.read(File.join(__DIR__, "..", path))
+          .should contain("Settings.first_alt_svc_h3_notice?")
+      end
+    end
+  end
+
   describe ".strip_h3" do
     it "removes the advertising field and copies every other byte verbatim" do
       original = head("HTTP/1.1 200 OK", "Content-Type: text/html", %(Alt-Svc: h3=":443"; ma=86400),

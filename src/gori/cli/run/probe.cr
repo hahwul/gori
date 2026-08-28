@@ -518,11 +518,13 @@ module Gori
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-tTITLE", "--title=TITLE", "Rule name, shown as the finding title (required)") { |v| title = v }
-          p.on("-pPATTERN", "--pattern=PATTERN", "String to look for, or a regex with --regex (required)") { |v| pattern = v }
+          p.on("-pPATTERN", "--pattern=PATTERN", "String to look for, a regex with --regex, or a command with --exec (required)") { |v| pattern = v }
           p.on("--description=TEXT", "What the rule is for") { |v| description = v }
           p.on("--side=SIDE", "request|response (default response)") { |v| side = v.strip.downcase }
           p.on("--region=REGION", "whole|header|body (default body)") { |v| region = v.strip.downcase }
           p.on("--regex", "Treat --pattern as a regex instead of a literal string") { match_kind = "regex" }
+          p.on("--exec", "Treat --pattern as a COMMAND: the region goes to it on stdin, exit 0 = " \
+                         "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec" }
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run probe rules add: unknown option: #{f}\n#{p}" }
@@ -537,7 +539,12 @@ module Gori
         abort "gori run probe rules add: invalid --side '#{side}' (#{Probe::CustomRule::SIDES.join("|")})" unless Probe::CustomRule::SIDES.includes?(side)
         abort "gori run probe rules add: invalid --region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})" unless Probe::CustomRule::REGIONS.includes?(region)
         # A regex PCRE rejects would match nothing forever while reporting the rule saved fine.
-        abort "gori run probe rules add: invalid regex --pattern (PCRE rejected it)" unless Probe::CustomRule.valid_pattern?(pat, match_kind)
+        unless Probe::CustomRule.valid_pattern?(pat, match_kind)
+          abort match_kind == "exec" \
+                               ? "gori run probe rules add: --pattern is the command to run for --exec and it does not " \
+                                 "tokenize (it is exec'd directly — there is no shell, so quote arguments, not pipelines)" \
+                                  : "gori run probe rules add: invalid regex --pattern (PCRE rejected it)"
+        end
         severity = Store::Severity.parse?(sev_s.strip) || abort("gori run probe rules add: invalid --severity '#{sev_s}' (info|low|medium|high|critical)")
 
         store = open_store(resolve_read_project(project_name, db_path))

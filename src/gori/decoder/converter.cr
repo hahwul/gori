@@ -54,9 +54,16 @@ module Gori
       # guessed instead put un-transformed payloads on the wire and reported `0 errors`.
       # Asking the registry is the same fact, one step earlier and with no side effect.
       getter unusable : String?
+      # Whether running this converter runs an EXTERNAL COMMAND. Only a saved chain sets it,
+      # and only when its flattened steps contain an `exec:` one (#818) — a built-in never
+      # does. It exists because a saved chain is callable BY NAME, so `myenc` can run a command
+      # with nothing in the token to say so, and a caller that must refuse command execution
+      # (the MCP `decode` tool, which is exposed read-only and unbound) cannot see that by
+      # looking at the spec. Askable without calling it, for the same reason `unusable` is.
+      getter? runs_commands : Bool
 
       def initialize(@name, @aliases, @category, @direction, @description, @fn,
-                     @unusable : String? = nil)
+                     @unusable : String? = nil, @runs_commands : Bool = false)
       end
 
       def apply(input : Bytes) : Bytes

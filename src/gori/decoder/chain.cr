@@ -74,6 +74,19 @@ module Gori::Decoder
         steps << StepResult.new(tok, registry[tok]?, StepState::Skipped)
         next
       end
+      # An `exec:` step is an EXTERNAL COMMAND, not a converter (#818) — checked before the
+      # registry so a command whose argv happens to spell a converter name still runs as a
+      # command. See `Decoder::EXEC_PREFIX`.
+      if Decoder.exec_step?(tok)
+        step = exec_step(tok, current, max_out)
+        steps << step
+        if step.ok?
+          current = step.output || current
+        else
+          stopped = true
+        end
+        next
+      end
       conv = registry[tok]?
       if conv.nil?
         steps << StepResult.new(tok, nil, StepState::Unknown, error: "unknown converter")
@@ -99,5 +112,35 @@ module Gori::Decoder
     end
 
     ChainResult.new(input, steps)
+  end
+
+  # Run one `exec:` step: the running value goes to the command on stdin, its stdout becomes
+  # the step's output.
+  #
+  # A FAILURE STOPS THE CHAIN, and that is the right disposition HERE even though the Rewriter's
+  # `pipe` op passes the original bytes through instead. The two seams answer to different
+  # halves of the same principle. The Rewriter sits on the proxy data path, where P6 says a
+  # broken hook must never cost the operator a flow — so it degrades to the original octets and
+  # writes a notice. The Decoder is an interactive workbench: nothing is in flight, the operator
+  # is looking at the PIPELINE pane, and silently carrying the input forward as if the step had
+  # run would hand them a value that is not what the chain says it is. A `Failed` row with the
+  # reason in it is the honest answer, and it is the one every other converter failure already
+  # gives.
+  #
+  # `max_out` is enforced on top of `ProcessHook::MAX_OUTPUT` because a caller may ask for less
+  # (the chain's own per-step ceiling); the hook's cap is the memory bound, this is the chain's.
+  private def self.exec_step(token : String, input : Bytes, max_out : Int32) : StepResult
+    spec = Decoder.exec_spec(token) || ""
+    parsed = ProcessHook.parse_argv(spec)
+    return StepResult.new(token, nil, StepState::Failed, error: parsed) if parsed.is_a?(String)
+    res = ProcessHook.run(parsed, input, Settings.hook_timeout_secs.seconds,
+      {"GORI_HOOK" => "decoder"})
+    if reason = res.failure
+      return StepResult.new(token, nil, StepState::Failed, error: reason)
+    end
+    if res.stdout.size > max_out
+      return StepResult.new(token, nil, StepState::Failed, error: "output exceeds #{max_out} bytes")
+    end
+    StepResult.new(token, nil, StepState::Ok, output: res.stdout)
   end
 end

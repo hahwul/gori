@@ -61,7 +61,7 @@ module Gori::Settings
 
   RULE_TARGETS = %w[request response]
   RULE_PARTS   = %w[head body ws]
-  RULE_OPS     = %w[replace add_header set_header remove_header short_circuit]
+  RULE_OPS     = %w[replace add_header set_header remove_header short_circuit pipe]
   RULE_KINDS   = %w[literal regex]
 
   # Parse the `rewriter` section: `rules` when present, else the pre-upgrade `presets` block.

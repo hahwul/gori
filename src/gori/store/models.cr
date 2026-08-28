@@ -767,6 +767,15 @@ module Gori
     # in `replacement` (empty for `RemoveHeader`). Stored lowercase; default `replace`
     # so every pre-op rule keeps its exact meaning.
     #
+    # `Pipe` (#818) is the second odd one: it does not carry its replacement, it COMPUTES it.
+    # `pattern` selects the region exactly as `Replace` does (literal or regex, per
+    # `match_kind`), and `replacement` holds an ARGV — the operator's own command, exec'd with
+    # no shell, fed the matched bytes on stdin, its stdout taken as the replacement
+    # (`Gori::ProcessHook`). It is the one op whose effect is not derivable from the row, which
+    # is why every surface renders it as `pipe` rather than as a replacement string, and why a
+    # peer creating one gets a louder announcement than a peer creating any other rule
+    # (`PeerNotices`).
+    #
     # `ShortCircuit` (#511) is the odd one out and deliberately so: the other four REWRITE a
     # message that already exists, this one ANSWERS the request and `Upstream.dial` is never
     # reached. It carries the request match in `pattern` (literal or regex, like `Replace`)
@@ -780,6 +789,7 @@ module Gori
       SetHeader
       RemoveHeader
       ShortCircuit
+      Pipe
 
       def label : String
         case self
@@ -788,6 +798,7 @@ module Gori
         in RuleOp::SetHeader    then "set_header"
         in RuleOp::RemoveHeader then "remove_header"
         in RuleOp::ShortCircuit then "short_circuit"
+        in RuleOp::Pipe         then "pipe"
         end
       end
 
@@ -797,14 +808,29 @@ module Gori
         when "set_header"    then SetHeader
         when "remove_header" then RemoveHeader
         when "short_circuit" then ShortCircuit
+        when "pipe"          then Pipe
         else                      Replace
         end
       end
 
       # A header-name-keyed op (mutates the HEAD by name, not a substring gsub). Header
       # ops are head-only regardless of a rule's `part`.
+      #
+      # An explicit list, not `!replace? && !short_circuit?`. That negation read "everything
+      # that is not one of the two ops I know about", so ADDING `Pipe` silently made it a
+      # header op: `normalize_shape` would have forced every pipe rule onto the head, the
+      # `ws`/`body` refusals in the CLI and MCP would have fired on shapes that are legal, and
+      # `apply` would have routed its bytes into `head_set_header`. A predicate that decides
+      # what an op DOES has to name the ops it is true for.
       def header? : Bool
-        !replace? && !short_circuit?
+        add_header? || set_header? || remove_header?
+      end
+
+      # Does this op run an EXTERNAL COMMAND when it fires? True only for `Pipe`. The trust
+      # boundary the surfaces mark and `PeerNotices` raises its voice about — see the enum's
+      # own comment and `Gori::ProcessHook`.
+      def executes? : Bool
+        pipe?
       end
 
       # Does this op REWRITE bytes in flight? False only for `ShortCircuit`, which produces

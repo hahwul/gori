@@ -375,7 +375,13 @@ module Gori
         # TUI's rule overlay validates before it saves. SafeRegexp.compile RAISES on a bad
         # pattern, it does not return nil.
         unless Probe::CustomRule.valid_pattern?(pattern, kind)
-          return err("invalid regex pattern (PCRE rejected it)", "INVALID_ARGUMENT", field: "pattern")
+          # An `exec` rule's pattern is an argv, not a regex, so it fails for a different reason
+          # and has to say so — "PCRE rejected it" about a command line sends the operator
+          # looking for a regex bug in something that is not a regex.
+          return err(kind == "exec" \
+                              ? "'pattern' is the command to run for match_kind=exec and it does not tokenize — " \
+                                "it is exec'd directly with no shell, so quote arguments, not pipelines" : "invalid regex pattern (PCRE rejected it)",
+            "INVALID_ARGUMENT", field: "pattern")
         end
         {side, region, kind}
       end
@@ -543,11 +549,11 @@ module Gori
           "each captured flow, emitting a finding on a hit. A regex PCRE rejects is refused " \
           "rather than silently never matching." do |s|
           s.field "title", strprop("short rule name (shown as the finding title)"), required: true
-          s.field "pattern", strprop("the string to look for, or a regex when match_kind=regex"), required: true
+          s.field "pattern", strprop("the string to look for, a regex when match_kind=regex, or the COMMAND as an argv when match_kind=exec"), required: true
           s.field "description", strprop("what the rule is for (default empty)")
           s.field "side", strprop("request|response (default response)")
           s.field "region", strprop("whole|header|body (default body)")
-          s.field "match_kind", strprop("string|regex (default string)")
+          s.field "match_kind", strprop("string|regex|exec (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event")
           s.field "severity", strprop("info|low|medium|high|critical (default info)")
         end
 
@@ -556,11 +562,11 @@ module Gori
           "Built-ins are not editable — disable them with set_probe_rule_enabled instead." do |s|
           s.field "id", strprop("custom rule id from list_probe_rules (custom_p_…)"), required: true
           s.field "title", strprop("short rule name"), required: true
-          s.field "pattern", strprop("the string or regex to match"), required: true
+          s.field "pattern", strprop("the string or regex to match, or the COMMAND as an argv when match_kind=exec"), required: true
           s.field "description", strprop("what the rule is for")
           s.field "side", strprop("request|response (default response)")
           s.field "region", strprop("whole|header|body (default body)")
-          s.field "match_kind", strprop("string|regex (default string)")
+          s.field "match_kind", strprop("string|regex|exec (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event")
           s.field "severity", strprop("info|low|medium|high|critical (default info)")
         end
 

@@ -105,6 +105,8 @@ gori does not intercept HTTP/3: QUIC is UDP, and every gori listener is a TCP so
 
 It is off by default on purpose. gori edits a response you did not ask it to edit only where *not* editing it would make gori lie about what it captured — the `Sec-WebSocket-Extensions` strip is that case, because a negotiated `permessage-deflate` leaves every stored frame a deflate stream presented as the payload. An `Alt-Svc` left in place corrupts nothing gori records; it only means the client may leave. That is a call about the test in front of you, so it is a switch the human throws.
 
+**With it off, gori says so instead.** A response that advertises h3 and reaches the client un-stripped now carries an advisory naming the evidence and the setting — *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy for a transport gori cannot see, and whatever it does there is missing from History rather than absent (settings network.strip_alt_svc is off)."* — on both HTTP/1.1 and HTTP/2, in the same places the removal advisory appears. Nothing on the wire changes: the origin's head reaches the client byte for byte, and only the flow gains a sentence. Each host is also named once in `gori.log`, and the passive probe's existing `tech_http3` fingerprint still raises its own once-per-host `Alt-Svc: <host> advertised HTTP/3` event, clickable through to the Probe tab — so the session-level view of "which hosts are inviting clients away" is where it already was. What was missing, and is what this adds, is the per-flow record: a gap in History that nothing explains reads exactly like an origin that had nothing more to say.
+
 Removal is per **field**, and only for fields that advertise h3. `Alt-Svc: clear` is never removed: RFC 7838 §3 makes it the instruction to *forget* cached alternatives, which is the one spelling that helps here. A plain `h2=":8443"` alternative is never removed either — that is another TCP port, still tunnelled through gori.
 
 The strip runs *before* Match & Replace, so a response head rule that puts the header back wins. An operator saying so about one host outranks a switch thrown for all of them.
@@ -640,8 +642,8 @@ Your own Probe match rules, global across every project. Project-scoped rules li
 | `description` | string | Shown in the finding detail |
 | `side` | string | `request` or `response` |
 | `region` | string | `whole`, `header`, or `body` |
-| `kind` | string | `string` or `regex` |
-| `pattern` | string | Literal or regex to match |
+| `kind` | string | `string`, `regex`, or `exec` (an argv — see [Process hooks](/guide/scripting/#process-hooks)) |
+| `pattern` | string | Literal or regex to match, or the command to run when `kind` is `exec` |
 | `severity` | string | `info`, `low`, `medium`, `high`, or `critical` |
 | `enabled` | bool | Whether the rule runs |
 
@@ -757,6 +759,7 @@ Omitted until you apply or star a wordlist.
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
+| `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
 | `rewriter` | GLOBAL Match & Replace rules — applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules) |
 | `colormarker` | GLOBAL History row-colour rules — the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |

@@ -40,6 +40,7 @@ require "./repeater_view/focus"
 require "./repeater_view/geometry"
 require "./repeater_view/group"
 require "./repeater_view/grpc"
+require "./repeater_view/grpc_fields"
 require "./repeater_view/hex"
 require "./repeater_view/markers"
 require "./repeater_view/pointer"
@@ -244,6 +245,30 @@ module Gori::Tui
       @grpc_compressed = false    # the editable message's compressed flag (preserved on reframe)
       @grpc_payload = Bytes.empty # the current (possibly hex-edited) single-message payload
       @grpc_lines_cache = nil.as(Array({String, Color})?)
+      # `␣E` FIELDS: the schema-typed form over that same payload (#828). Available only when
+      # a descriptor set resolves the rpc being sent — with none loaded this whole slice is
+      # inert and the tab is exactly what it was. See repeater_view/grpc_fields.cr.
+      @grpc_fields = false
+      @grpc_field_rows = [] of GrpcFieldRow
+      # What the cached rows were built from — the payload revision, the loaded schema's
+      # revision and the target rpc. Any of the three moving means different names on
+      # different bytes, so they are one key rather than three flags.
+      @grpc_field_key = nil.as(String?)
+      @grpc_field_sel = 0
+      @grpc_field_scroll = 0
+      @grpc_field_input = nil.as(String?) # non-nil ⇔ a value is being typed
+      # The row and the schema that value was OPENED against. `grpc_field_apply` encodes and
+      # splices against these rather than re-resolving the selection, so a rows rebuild
+      # mid-edit (a descriptor set loaded, the schema cleared) cannot land the typed value on
+      # a different field. Retired together with the input by `close_grpc_field_input`.
+      @grpc_field_row = nil.as(GrpcFieldRow?)
+      @grpc_field_schema = nil.as(Gori::Protobuf::Schema?)
+      @grpc_field_caret = 0
+      @grpc_field_pre = "" # IME preedit for the value field
+      @grpc_field_error = nil.as(String?)
+      # Bumped every time @grpc_payload is REPLACED (a hex-edit commit, a field apply, a
+      # fresh load). The rows cache keys on it because `Bytes` has no identity to compare.
+      @grpc_payload_rev = 0
       # "Send group" mode (space → g): the editor holds several requests separated by a lone
       # `%%%` line; a group send pipelines them on ONE keep-alive connection (active smuggling
       # / keep-alive-reuse), and the response pane shows a TRANSCRIPT of every response. Set

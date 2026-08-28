@@ -114,6 +114,35 @@ describe Gori::PeerNotices do
       p.flush(t0 + 5.seconds).not_nil!.message.should contain("Match&Replace and extract rules")
     end
 
+    it "escalates a peer's PIPE rule above the byte-level wording" do
+      # #818: the byte sentence is true and would not have told them this session is about to
+      # fork a program off local disk. See `RuleSetChange#executes`.
+      t0 = Time.instant
+      p = notices
+      p.record_rules(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 1, executes: 1), t0)
+      note = p.flush(t0 + 5.seconds).not_nil!
+      note.level.should eq(:warn)
+      note.tab.should eq(:rewriter)
+      note.message.should contain("pipe rule")
+      note.message.should contain("runs a local command")
+      note.message.should_not contain("rewriting live traffic here")
+    end
+
+    it "does not escalate when the peer's change touched no pipe rule" do
+      t0 = Time.instant
+      p = notices
+      p.record_rules(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 4), t0)
+      p.flush(t0 + 5.seconds).not_nil!.message.should_not contain("local command")
+    end
+
+    it "carries an escalation through a coalesced burst" do
+      t0 = Time.instant
+      p = notices
+      p.record_rules(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 1, executes: 1), t0)
+      p.record_rules(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 2), t0 + 1.second)
+      p.flush(t0 + 5.seconds).not_nil!.message.should contain("local command")
+    end
+
     it "says nothing at all when nothing was recorded" do
       notices.flush(Time.instant).should be_nil
     end

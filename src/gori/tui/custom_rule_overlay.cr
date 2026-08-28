@@ -36,8 +36,11 @@ module Gori::Tui
     SCOPES  = %w[project global]
     SIDES   = %w[request response]
     REGIONS = %w[whole header body]
-    KINDS   = %w[string regex]
-    SEVS    = %w[info low medium high critical]
+    # `exec` turns `pattern:` into an ARGV: the region goes to that command on stdin and its
+    # exit code is the verdict (#818). It sits last so the two match kinds that have always
+    # been here keep their cycler positions.
+    KINDS = %w[string regex exec]
+    SEVS  = %w[info low medium high critical]
 
     getter edit_id : String?
     getter edit_scope : String?
@@ -263,9 +266,11 @@ module Gori::Tui
       x = box.x + 3
       fg = sel ? Theme.text_bright : Theme.text
       case i
-      when ROW_TITLE   then draw_field(screen, box, py, bg, fg, sel, "title:", @fields[:title])
-      when ROW_DESC    then draw_field(screen, box, py, bg, fg, sel, "desc:", @fields[:desc])
-      when ROW_PATTERN then draw_field(screen, box, py, bg, fg, sel, "pattern:", @fields[:pattern])
+      when ROW_TITLE then draw_field(screen, box, py, bg, fg, sel, "title:", @fields[:title])
+      when ROW_DESC  then draw_field(screen, box, py, bg, fg, sel, "desc:", @fields[:desc])
+        # The label follows the KIND, because an operator looking at "pattern:" over a command
+        # line has been told the wrong thing about what the field means.
+      when ROW_PATTERN then draw_field(screen, box, py, bg, fg, sel, kind == "exec" ? "run:" : "pattern:", @fields[:pattern])
       when ROW_SCOPE   then Frame.option_cycle(screen, x, py, box.right - 2, bg, "scope:", SCOPES, @scope_i, sel)
       when ROW_SIDE    then Frame.option_cycle(screen, x, py, box.right - 2, bg, "side:", SIDES, @side_i, sel)
       when ROW_REGION  then Frame.option_cycle(screen, x, py, box.right - 2, bg, "region:", REGIONS, @region_i, sel)
@@ -273,7 +278,7 @@ module Gori::Tui
       when ROW_SEV     then Frame.option_cycle(screen, x, py, box.right - 2, bg, "severity:", SEVS, @sev_i, sel)
       else
         ok = valid?
-        label = ok ? "[ Save rule ]" : "[ complete title, description & pattern ]"
+        label = ok ? "[ Save rule ]" : "[ complete title, description & #{kind == "exec" ? "command" : "pattern"} ]"
         screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
     end

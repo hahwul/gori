@@ -81,6 +81,8 @@ module Gori::Settings
   # writing log lines, while hitting this one stops the TUI's list from being complete, which
   # is why passthrough_over_cap exists to say so out loud.
   PASSTHROUGH_INVENTORY_MAX = 1024
+  # Cap on the once-per-host h3 kept-notice (#835), the twin of PASSTHROUGH_NOTICE_MAX above.
+  H3_NOTICE_MAX = 1024
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -239,6 +241,33 @@ module Gori::Settings
     else
       @@tls_passthrough_over_cap += 1
     end
+  end
+
+  # Hosts whose un-stripped h3 `Alt-Svc` has already been written to `gori.log` (#835). Exactly
+  # `@@tls_passthrough_noticed` above: a SESSION-global, bounded, log-dedup marker, so a browser
+  # that opens six connections per origin and churns them does not write a line per connection,
+  # and an origin that advertises on every response does not write one per response.
+  #
+  # Session-global and not per-connection deliberately. The strip's own latches are
+  # per-connection (`ClientConn#@alt_svc_logged`, `HeadRewrite#@warned_alt_svc`), which was
+  # affordable only because the strip is opt-in; this notice fires in the DEFAULT configuration,
+  # against origins that almost all advertise h3, so a per-connection latch would be a log flood.
+  @@alt_svc_h3_noticed : Set(String) = Set(String).new
+
+  # Whether THIS is the first time `host`'s kept advertisement is being logged, admitting it to
+  # the set when it is. Bounded like the passthrough notice and for the same reason: a cleartext
+  # forward-proxy connection serves whatever hosts the client names, so the set is capped rather
+  # than trusted. Past the cap it stops admitting — a log-dedup marker going quiet costs a log
+  # line, and the fact itself is on every affected flow (`AltSvc.kept_note`).
+  def self.first_alt_svc_h3_notice?(host : String) : Bool
+    return false if host.empty? || @@alt_svc_h3_noticed.size >= H3_NOTICE_MAX
+    @@alt_svc_h3_noticed.add?(host)
+  end
+
+  # Test-only reset: the marker is deliberately never cleared in production, so specs asserting
+  # on the log line would otherwise leak into each other through class state.
+  def self.reset_alt_svc_h3_notices : Nil
+    @@alt_svc_h3_noticed = Set(String).new
   end
 
   def self.effective_connect_timeout_secs : Int32

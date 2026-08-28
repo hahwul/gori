@@ -310,6 +310,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:repeater_toggle_ws_key)
   end
 
+  def repeater_toggle_grpc_fields : Nil
+    rec(:repeater_toggle_grpc_fields)
+  end
+
   def repeater_toggle_grpc_reframe : Nil
     rec(:repeater_toggle_grpc_reframe)
   end

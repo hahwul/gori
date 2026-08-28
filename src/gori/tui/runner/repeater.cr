@@ -94,6 +94,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_toggle_ws_key
   end
 
+  def repeater_toggle_grpc_fields : Nil
+    repeater_controller.repeater_toggle_grpc_fields
+  end
+
   def repeater_toggle_grpc_reframe : Nil
     repeater_controller.repeater_toggle_grpc_reframe
   end
