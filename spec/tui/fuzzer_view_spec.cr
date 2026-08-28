@@ -1,8 +1,15 @@
 require "../spec_helper"
 require "../support/memory_backend"
 require "file_utils"
+require "compress/gzip"
 
 include Gori::Tui
+
+private def fuzzer_gzip(text : String) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io, &.print(text))
+  io.to_slice
+end
 
 private def fuzz_result(idx : Int32, status : Int32?, len : Int32, *,
                         words : Int32 = 40, matched : Bool = false, error : String? = nil) : Gori::Fuzz::Result
@@ -118,6 +125,36 @@ private def body_start(s : String) : Int32
 end
 
 describe Gori::Tui::FuzzerView do
+  describe "decoded response detail" do
+    it "shows a gzip response as its decoded entity without changing retained evidence" do
+      plain = %({"decoded_response":true})
+      wire = fuzzer_gzip(plain)
+      head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\n\r\n".to_slice
+      view = loaded_fuzzer
+      view.append_result(Gori::Fuzz::Result.new(
+        0_i64, ["p0"], nil, 200, plain.bytesize.to_i64, 1, 0, 1000_i64,
+        nil, true, false, nil, head, wire))
+      view.open_detail
+
+      lines = view.detail_plain_lines
+      lines.should contain("Content-Encoding: gzip")
+      lines.should contain(plain)
+      view.selected_result.not_nil!.body.should eq(wire)
+    end
+
+    it "falls back to captured bytes when the declared encoding cannot be decoded" do
+      raw = "not a gzip stream"
+      head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_slice
+      view = loaded_fuzzer
+      view.append_result(Gori::Fuzz::Result.new(
+        0_i64, ["p0"], nil, 200, raw.bytesize.to_i64, 4, 0, 1000_i64,
+        nil, true, false, nil, head, raw.to_slice))
+      view.open_detail
+
+      view.detail_plain_lines.should contain(raw)
+    end
+  end
+
   describe "a failed send's reason" do
     # Fuzz::Engine returns a scope/sandbox refusal as a Result whose `error` carries the
     # reason and whose head is EMPTY — and Matcher#present nils an empty head, so no

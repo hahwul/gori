@@ -25,6 +25,7 @@ require "../scope"
 require "../proxy/h2/frame"
 require "../proxy/h2/grpc"
 require "../proxy/codec/body"
+require "../entity"
 require "./protobuf_tree"
 
 module Gori::Tui
@@ -301,7 +302,7 @@ module Gori::Tui
       # Split the (bounded) preview text once, here — render reads the cached arrays.
       if detail
         @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body)
-        @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body)
+        @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body, decode: true)
       else
         @preview_req_lines = nil
         @preview_res_lines = nil
@@ -2648,15 +2649,23 @@ module Gori::Tui
       cache[li] = styled.line_at(li)
     end
 
-    private def preview_text_lines(head : Bytes?, body : Bytes?) : Array(String)
+    # Build a bounded message projection for the split list preview. Responses ask for the
+    # decoded entity (gzip/deflate/br/zstd + de-chunk), while requests keep the preview's
+    # existing wire-body reading. The decoder receives cap+1 as its output ceiling so compression
+    # cannot turn this small navigation pane into a multi-MiB allocation; the final slice and
+    # marker apply to whichever projection is shown.
+    private def preview_text_lines(head : Bytes?, body : Bytes?, *, decode : Bool = false) : Array(String)
       return ["(empty)"] if head.nil? || head.empty?
       cap = Settings.preview_body_cap
+      shown = decode ? Entity.bytes(head, body, cap + 1) : body
       io = IO::Memory.new
       io.write(head)
-      if body && !body.empty?
-        n = {body.size, cap}.min
-        io.write(body[0, n])
-        io << "\n… [truncated]" if body.size > cap
+      if shown && !shown.empty?
+        n = {shown.size, cap}.min
+        io.write(shown[0, n])
+        # `body` is fetched at cap+1, so this also names an encoded input prefix that the Store
+        # bounded before decode. `shown` catches the inverse: a small gzip that expands past cap.
+        io << "\n… [truncated]" if shown.size > cap || body.try { |b| b.size > cap }
       end
       String.new(io.to_slice).scrub.split('\n').map(&.rstrip('\r'))
     end

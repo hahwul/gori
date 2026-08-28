@@ -17,6 +17,8 @@ require "./chain_overlay"
 require "./viewport"
 require "../store"
 require "../fuzz"
+require "../entity"
+require "../proxy/codec/body"
 require "../proxy/h2/grpc"
 require "../decoder"
 require "./fuzz_set_overlay"
@@ -3073,7 +3075,11 @@ module Gori::Tui
       end
       head = r.head
       return ["(response not retained — only matched results keep the response)"] unless head
-      body = r.body
+      # `Result#body` is retained in its captured wire form. Read the response pane through
+      # the same decoded-entity seam as the Fuzzer matcher, at the same output ceiling, so the
+      # body on screen agrees with the row's decoded length/word/line metrics without changing
+      # the evidence kept on the result.
+      body = Entity.bytes(head, r.body, Proxy::Codec::Body::CAPTURE_READ_MAX)
       lines = String.new(head).scrub.split('\n').map(&.rstrip('\r'))
       if body && !body.empty?
         lines << ""

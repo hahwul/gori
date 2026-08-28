@@ -1,7 +1,14 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "compress/gzip"
 
 include Gori::Tui
+
+private def history_gzip(text : String) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io, &.print(text))
+  io.to_slice
+end
 
 private def tmp_store(&)
   path = File.tempname("gori-hv", ".db")
@@ -295,6 +302,73 @@ describe Gori::Tui::HistoryView do
     ensure
       Theme.apply(saved_theme)
       Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "decodes a gzip response in the Req/Res preview" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        plain = %({"decoded_response":true})
+        wire = history_gzip(plain)
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/compressed", http_version: "HTTP/1.1",
+          head: "GET /compressed HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: wire, content_type: "application/json", content_encoding: "gzip"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        backend = MemoryBackend.new(100, 30)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 30))
+
+        body_y = (0...30).find { |y| backend.row(y).includes?("decoded_response") }.not_nil!
+        body_x = backend.row(body_y).index(%("decoded_response")).not_nil!
+        backend.fg_at(body_x, body_y).should eq(Theme.syn_header)
+        store.get_flow(id).not_nil!.response_body.should eq(wire) # display decode never rewrites evidence
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "caps the decoded response projection in the Req/Res preview" do
+    prev_enabled = Gori::Settings.history_preview
+    prev_cap = Gori::Settings.preview_body_kib
+    begin
+      Gori::Settings.history_preview = true
+      Gori::Settings.preview_body_kib = 1
+      tmp_store do |store|
+        plain = "BEGIN-#{"A" * 3000}-END"
+        wire = history_gzip(plain)
+        wire.size.should be < Gori::Settings.preview_body_cap # compressed input fits; entity does not
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/compressed-big", http_version: "HTTP/1.1",
+          head: "GET /compressed-big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n\r\n".to_slice,
+          body: wire, content_type: "text/plain", content_encoding: "gzip"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        lines = view.@preview_res_lines.not_nil!
+        lines.join("\n").should contain("BEGIN-")
+        lines.join("\n").should_not contain("-END")
+        lines.last.should eq("… [truncated]")
+      end
+    ensure
+      Gori::Settings.history_preview = prev_enabled
+      Gori::Settings.preview_body_kib = prev_cap
     end
   end
 
