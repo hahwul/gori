@@ -547,10 +547,14 @@ module Gori::CLI
   # two they were looking at.
   private def self.run_settings_tls_fingerprint(args : Array(String)) : Nil
     json = false
+    preset : String? = nil
     parser = OptionParser.new do |p|
-      p.banner = "Usage: gori settings tls-fingerprint [HOST] [--json]\n\n" \
+      p.banner = "Usage: gori settings tls-fingerprint [HOST] [--preset NAME] [--json]\n\n" \
                  "  With no HOST, reports every outbound_tls rule plus the no-rule default.\n" \
-                 "  With a HOST, reports the single policy that host would actually get."
+                 "  With a HOST, reports the single policy that host would actually get.\n" \
+                 "  With --preset, reports what a PER-SEND override would send instead — the\n" \
+                 "  same narrowing `--tls-preset` applies on a Repeater send or a fuzz run."
+      p.on("--preset=NAME", "Report the ClientHello a per-send --tls-preset override would produce (#{Settings::TLS_PRESET_NAMES.join(" | ")}), narrowing each reported policy the way a send does") { |v| preset = v }
       p.on("--json", "Emit the report as JSON (includes the decomposed JA3 string and JA4_r)") { json = true }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
       p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
@@ -563,7 +567,12 @@ module Gori::CLI
 
     Settings.load
     abort_on_degraded_settings!("tls-fingerprint")
-    entries = tls_fingerprint_entries(rest.first?)
+    # Refused, not ignored: a report is EVIDENCE, and one built from an unknown name would
+    # print gori's bare hello under a heading naming the preset the operator asked about.
+    if err = Settings.tls_preset_error(preset)
+      abort "gori settings tls-fingerprint: #{err}"
+    end
+    entries = tls_fingerprint_entries(rest.first?, Settings.tls_preset_normalize(preset))
     json ? puts(tls_fingerprint_json(entries)) : print_tls_fingerprints(entries)
   end
 
@@ -577,7 +586,11 @@ module Gori::CLI
   private record TlsFingerprintEntry,
     label : String,
     rule : Settings::OutboundTlsRule,
-    configured : Bool do
+    configured : Bool,
+    # The per-send `--tls-preset` this row was narrowed by (#844), or nil. Reported as its own
+    # JSON field because `rule.preset` alone cannot answer "did settings.json ask for this, or
+    # did I?" — after narrowing the two are the same string.
+    override : String? = nil do
     def configured? : Bool
       configured
     end
@@ -589,23 +602,32 @@ module Gori::CLI
     end
   end
 
-  private def self.tls_fingerprint_entries(host : String?) : Array(TlsFingerprintEntry)
+  # `override` is a per-send fingerprint preset (#844): every reported policy is narrowed by
+  # it exactly as a send narrows it, so this command answers "what will `--tls-preset chrome`
+  # actually put on the wire for this host" from the SAME record the dial builds. `matched` is
+  # still decided on the UN-narrowed rule — the question it answers is "is there a row in
+  # settings.json for this host", which an override does not change.
+  private def self.tls_fingerprint_entries(host : String?, override : String? = nil) : Array(TlsFingerprintEntry)
+    suffix = override ? "  [--tls-preset #{override}]" : ""
     if h = host
       rule = Settings.outbound_tls_for(h)
       matched = Settings.outbound_tls.includes?(rule)
       return [TlsFingerprintEntry.new(
-        matched ? "#{h}  (matched rule #{rule.host.inspect})" : "#{h}  (no rule — OpenSSL defaults)",
-        rule, matched)]
+        (matched ? "#{h}  (matched rule #{rule.host.inspect})" : "#{h}  (no rule — OpenSSL defaults)") + suffix,
+        override ? rule.with_fingerprint(override) : rule, matched, override)]
     end
     entries = [] of TlsFingerprintEntry
     # The no-rule policy is listed only when a dial could actually GET it. A `*` rule is the
     # documented catch-all, so once one exists every host matches a row below and printing the
     # OpenSSL defaults too would invite the operator to read a fingerprint gori never sends.
     unless Settings.outbound_tls.any? { |r| r.host.strip == "*" }
-      entries << TlsFingerprintEntry.new("(no matching rule — OpenSSL defaults)",
-        Settings::DEFAULT_OUTBOUND_TLS, false)
+      entries << TlsFingerprintEntry.new("(no matching rule — OpenSSL defaults)#{suffix}",
+        override ? Settings::DEFAULT_OUTBOUND_TLS.with_fingerprint(override) : Settings::DEFAULT_OUTBOUND_TLS,
+        false, override)
     end
-    Settings.outbound_tls.each { |r| entries << TlsFingerprintEntry.new(r.host, r, true) }
+    Settings.outbound_tls.each do |r|
+      entries << TlsFingerprintEntry.new(r.host + suffix, override ? r.with_fingerprint(override) : r, true, override)
+    end
     entries
   end
 
@@ -693,6 +715,7 @@ module Gori::CLI
             j.field "host", entry.configured? ? rule.host : nil
             j.field "configured", entry.configured?
             j.field "label", entry.label
+            j.field "tls_preset_override", entry.override
             j.field "preset", rule.preset
             j.field "groups", rule.effective_groups
             j.field "sigalgs", rule.effective_sigalgs

@@ -1200,6 +1200,10 @@ gori가 **실제로 보내는 ClientHello의 JA3/JA4 지문**을 목적지별로
 gori settings tls-fingerprint                    # 모든 규칙 + 규칙 없음 기본값
 gori settings tls-fingerprint shop.example.com   # 그 호스트가 실제로 받는 정책 하나
 gori settings tls-fingerprint --json             # 원본 목록까지 담은 기계 판독용 출력
+
+# …그리고 per-send 오버라이드가 대신 무엇을 보낼지. Repeater 탭의 ␣T나 `--tls-preset`
+# 실행이 적용하는 것과 같은 좁히기를, settings.json을 건드리지 않고 미리 봅니다:
+gori settings tls-fingerprint shop.example.com --preset curl
 ```
 
 ```
@@ -1217,6 +1221,35 @@ shop.example.com  (matched rule "shop.example.com")
 정책마다 **두 개의 leg**를 보여주며, 둘의 차이는 실재합니다. gori는 복호화하는 MITM 연결에서는 `h2`를 제안하고, 자신이 HTTP/1.1을 말하게 될 leg(포워드 프록시 dial, Repeater, WebSocket)에서는 제안에서 `h2`를 빼며, `alpn`을 설정하지 않았다면 ALPN 확장 자체를 보내지 않습니다 — 그래서 두 leg의 ClientHello가 다릅니다. 각 다이제스트 아래 줄은 그 다이제스트가 해시한 목록입니다. 어떤 필드가 움직였는지는 거기서만 보이고, 브라우저와 비교할 가치가 있는 쪽도 이쪽입니다.
 
 리포트가 읽는 컨텍스트는 실제 dial이 만드는 것과 같은 객체이므로, gori가 하지 않는 핸드셰이크를 설명할 수 없습니다. 이 OpenSSL이 거부하는 `groups`/`sigalgs` 문자열은 해당 규칙에 대해 stderr로 보고하고 나머지는 계속 출력합니다.
+
+`--preset NAME`은 보고되는 모든 정책을 **per-send 오버라이드**와 똑같이 좁혀서 출력합니다([전송 단위 TLS 지문](#per-send-tls-fingerprints) 참고). 이미 `chrome` 규칙이 걸린 호스트에 `--tls-preset curl`이 실제로 무엇을 실어 보낼지 확인할 때 씁니다. 클라이언트 인증서·프로토콜 범위·`permissive`는 목적지 것이 그대로 남고, ClientHello 모양만 교체됩니다. 모르는 이름은 빈 hello로 보고하지 않고 거부합니다.
+
+### 전송 단위 TLS 지문 {#per-send-tls-fingerprints}
+
+`outbound_tls`는 목적지 호스트로만 키가 잡힙니다. 상시 정책에는 맞지만, 지문 기능이 존재하는 이유인 질문 — **이 엔드포인트가 `chrome`일 때와 `curl`일 때 다르게 답하나?** — 에는 맞지 않습니다. 그건 같은 호스트에 대한 A/B이고, 전송 사이에 전역 규칙을 고쳐서 하면 두 전송이 비교 불가능해질 뿐 아니라 그 호스트로 가는 다른 모든 탭과 백그라운드 캡처의 핸드셰이크까지 바뀝니다.
+
+per-send 오버라이드는 목적지 테이블을 건드리지 않고 **전송 하나 또는 실행 하나**에 대해 프리셋을 지정하며, dial 시점에 해석됩니다:
+
+```bash
+gori run repeater 42 --tls-preset chrome           # 캡처한 플로우를 Chrome처럼 재전송
+gori run repeater 42 --tls-preset curl             # …그리고 curl로 한 번 더, 비교 가능하게
+gori run repeater send 7 --tls-preset firefox      # 저장된 세션을 이번 전송만 덮어쓰기
+gori run repeater create --tls-preset chrome …     # 세션에 저장
+gori run fuzz --flow 42 --auto --tls-preset chrome # 스윕 전체를 한 핸드셰이크로
+```
+
+TUI에서는 Repeater 탭의 `␣T`(TARGET 밴드의 `␣T:…` 칩)이고, 탭과 함께 영속화되므로 다시 연 탭은 이전에 보낸 지문 그대로 보냅니다. Fuzzer는 `^O` 고급 카드의 **TLS fingerprint** 행입니다. MCP는 `send_request{tls_preset}`와 `fuzz_start{tls_preset}`이며, 결과 세트가 어느 핸드셰이크에서 나왔는지 말할 수 있도록 그대로 되돌려 줍니다.
+
+오버라이드는 목적지 정책을 통째로 갈아치우는 게 아니라 **좁힙니다**:
+
+| 필드 | 오버라이드 하에서 |
+|------|------------------|
+| `preset`, `groups`, `sigalgs`, `ciphers`, `ciphersuites`, `alpn`, `session_tickets`, `ocsp_stapling` | 지정한 프리셋 것으로 **교체** — 이것이 ClientHello 모양이고, 병합하면 목적지 자신의 값이 계속 이기게 됩니다 |
+| `client_cert`, `client_key` | **유지** — 오버라이드는 hello가 어떻게 보일지를 말하지 gori가 누구인지를 말하지 않습니다. 인증서를 떨어뜨리면 "chrome vs curl"이 "인증됨 vs 익명"이 됩니다 |
+| `min_version`, `max_version` | **유지** — 버전 범위는 그 목적지의 도달 가능성에 대한 사실입니다 |
+| `permissive` | **유지** — 오버라이드는 security level 0을 줄 수도 뺏을 수도 없습니다 |
+
+오버라이드만 다른 두 전송은 서로 다른 SSL 컨텍스트를 dial하므로 정말로 두 개의 핸드셰이크입니다. `https` 전용입니다 — 평문 leg는 ClientHello를 보내지 않고, gori는 보내지 않은 것을 보고하지 않습니다. 목적지 단위 프리셋과 마찬가지로 이것들은 **근사치**입니다(확장 순서와 GREASE 배치는 OpenSSL의 것). 가정하지 말고 `gori settings tls-fingerprint HOST --preset NAME`으로 확인하세요.
 
 ### `--config PATH` {#config-flag}
 

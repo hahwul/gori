@@ -20,7 +20,11 @@ module Gori::Tui
     # Comma-separated schema-known gRPC field specs (`Fuzz::PlanOptions#grpc_fields`).
     # DEFAULTED, so every construction site that predates it keeps compiling — and, more to the
     # point, so a caller that does not know about gRPC cannot accidentally clear it.
-    grpc_fields : String = ""
+    grpc_fields : String = "",
+    # The run's TLS fingerprint override (#844) — a `Settings::TLS_PRESETS` name, "" for none.
+    # DEFAULTED for the same reason `grpc_fields` is: every construction site that predates it
+    # keeps compiling, and a caller that does not know about it cannot silently clear it.
+    tls_preset : String = ""
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -88,6 +92,18 @@ module Gori::Tui
       # row's number. The field NAMES for a flow are the ones the Repeater's ␣E:FIELDS form and
       # the History protobuf tree already show for it, so this row is typed, not browsed.
       {:grpc_fields, "gRPC field(s)", :text},
+      # The run's TLS fingerprint (#844) — the same knob `gori run fuzz --tls-preset` and MCP
+      # `fuzz_start{tls_preset}` set. Blank = none, i.e. the destination's own outbound_tls
+      # policy, which is what every sweep did before. A NAME (chrome / firefox / safari /
+      # curl), typed rather than cycled because this row is a text row like its neighbours; an
+      # unknown one is refused by `Fuzz::Plan.build` when the run starts, and the tab reports
+      # it — never applied-as-nothing, which would sweep with gori's bare hello under a
+      # heading naming a browser.
+      #
+      # RUN-level, not per request: keep-alive parks a socket whose handshake is already done.
+      # Appended LAST for the reason the two rows above it were — it renumbers no row a spec
+      # reaches by index.
+      {:tls_preset, "TLS fingerprint", :text},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -115,6 +131,7 @@ module Gori::Tui
         :f_words      => TextField.new(snap.f_words),
         :f_regex      => TextField.new(snap.f_regex),
         :grpc_fields  => TextField.new(snap.grpc_fields),
+        :tls_preset   => TextField.new(snap.tls_preset),
       }
     end
 
@@ -212,7 +229,8 @@ module Gori::Tui
         m_words: @fields[:m_words].value, m_regex: @fields[:m_regex].value,
         f_status: @fields[:f_status].value, f_size: @fields[:f_size].value,
         f_words: @fields[:f_words].value, f_regex: @fields[:f_regex].value,
-        grpc_fields: @fields[:grpc_fields].value)
+        grpc_fields: @fields[:grpc_fields].value,
+        tls_preset: @fields[:tls_preset].value)
     end
 
     # --- rendering ----------------------------------------------------------

@@ -103,12 +103,13 @@ module Gori
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil,
-                    overrides : Gori::HostOverrides? = nil) : Result
+                    overrides : Gori::HostOverrides? = nil,
+                    tls_preset : String? = nil) : Result
         started = Time.instant
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
-        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides)
+        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         return error(connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
         begin
@@ -125,22 +126,29 @@ module Gori
       # between reads/writes), exactly as in `send`.
       def self.dial(scheme : String, host : String, port : Int32, verify_upstream : Bool,
                     sni : String?, timeout : Time::Span?,
-                    overrides : Gori::HostOverrides?) : IO?
-        dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides)[0]
+                    overrides : Gori::HostOverrides?, tls_preset : String? = nil) : IO?
+        dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)[0]
       end
 
       # The same dial, paired with WHY there is no socket. Every active send path in gori
       # (repeater, fuzz, mine, sequence, discover, probe, MCP) reaches the network through
       # this one function or through `ConnPool`, which also uses it — so carrying the reason
       # here is what makes an upstream proxy's 407 legible on ALL of them rather than on one.
+      # `tls_preset` is the PER-SEND TLS fingerprint override (#844) — the Repeater tab's or
+      # the fuzz run's own choice, narrowing the destination policy at the dial (see
+      # `Settings.outbound_tls_for`). nil on every path that did not ask for one, which is
+      # what keeps the no-override behaviour byte-identical. Plaintext ignores it: there is no
+      # ClientHello on an http:// leg, and silently pretending otherwise would let a surface
+      # report a fingerprint that was never sent.
       def self.dial_result(scheme : String, host : String, port : Int32, verify_upstream : Bool,
                            sni : String?, timeout : Time::Span?,
-                           overrides : Gori::HostOverrides?) : {IO?, Proxy::Upstream::DialError?}
+                           overrides : Gori::HostOverrides?,
+                           tls_preset : String? = nil) : {IO?, Proxy::Upstream::DialError?}
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
           Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni,
-            connect_timeout: ct, io_timeout: it, overrides: overrides)
+            connect_timeout: ct, io_timeout: it, overrides: overrides, tls_preset: tls_preset)
         else
           Proxy::Upstream.dial_result(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         end
@@ -160,10 +168,11 @@ module Gori
       def self.send_pipeline(requests : Array(Bytes), *, scheme : String, host : String, port : Int32,
                              verify_upstream : Bool, sni : String? = nil,
                              timeout : Time::Span? = nil,
-                             overrides : Gori::HostOverrides? = nil) : Array(Result)
+                             overrides : Gori::HostOverrides? = nil,
+                             tls_preset : String? = nil) : Array(Result)
         results = [] of Result
         return results if requests.empty?
-        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides)
+        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         unless upstream
           msg = connect_error(scheme, host, port, verify_upstream, dial_error)
           now = Time.instant

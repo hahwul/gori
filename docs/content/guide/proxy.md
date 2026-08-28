@@ -654,6 +654,14 @@ That prints the JA3 and JA4 of the hello gori really sends there, built from the
 
 **Read the presets as approximations.** They match every value-level field a classifier reads, and they will not reproduce a browser's JA3 byte for byte: extension order and GREASE placement come from OpenSSL and are not settable from it. That is usually enough to stop looking like a bare OpenSSL client, which is the thing being detected — but compare the `JA4_r` lists rather than the digests, and expect the digests to differ.
 
+### Asking the question the other way round
+
+A destination rule answers "always look like Chrome to this origin". The question that gets you there is usually the opposite one — **does this endpoint answer differently as `chrome` than as `curl`?** — and that is an A/B on *one* host. Editing the rule between two sends cannot answer it: the two sends run under different settings, nothing records which was which, and every other tab and background capture hitting that host changes handshake with them.
+
+So a **single send or a single run** can name a fingerprint of its own, resolved at dial time, with the destination table untouched. Open the flow in the Repeater, press `␣T` until the TARGET band reads `␣T:chrome`, send; duplicate the tab, cycle it to `curl`, send again. Two tabs, one host, two real handshakes, both responses on screen. Headless it is `gori run repeater 42 --tls-preset chrome`, and a whole sweep can take one with `gori run fuzz --tls-preset chrome`.
+
+The override *narrows* the destination policy rather than replacing it: it takes the ClientHello shape and leaves the destination's client certificate, protocol range and `permissive` flag exactly where they were — a fingerprint comparison must not quietly become authenticated-versus-anonymous. The reference has the full field-by-field table under [per-send TLS fingerprints](/reference/cli/#per-send-tls-fingerprints), and `gori settings tls-fingerprint HOST --preset curl` prints what an override will actually send before you send it.
+
 ## Project Tab
 
 The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.

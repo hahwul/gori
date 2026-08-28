@@ -305,6 +305,16 @@ module Gori::Tui
       # which is the only way to ask what a server does with an absent, short, duplicated or
       # non-base64 key. See `WsEngine.build_handshake`.
       @ws_keep_key = false
+      # The TLS fingerprint THIS TAB presents (#844), or nil for "whatever the destination's
+      # outbound_tls policy says" — which is what every tab did before it existed. `␣T` cycles
+      # it; the TARGET band carries a chip whenever it is set.
+      #
+      # PER TAB, which is the entire point: two tabs against one host with different values
+      # dial two different SSL contexts, so "does this endpoint answer differently as chrome
+      # than as curl?" is a question you ask by opening a second tab, not by editing a global
+      # rule between two sends. Persisted (`repeaters.tls_preset`), so a reopened tab sends
+      # the handshake it was saved with.
+      @tls_preset = nil.as(String?)
       @saml_param = "SAMLResponse"
       @saml_binding = :post       # :post (base64) | :redirect (deflate+base64)
       @saml_location = :body      # :body (form) | :query (request line)

@@ -103,6 +103,13 @@ module Gori
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
             @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
             overrides: HostOverrides.load(store), evidence: verbatim,
+            # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
+            # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
+            # every candidate is judged by an answer the tab will never get: an origin that
+            # 403s a bare OpenSSL hello (which is the reason to set a preset at all) refuses
+            # them uniformly, the bisection reads that as "every header is removable", and
+            # `--apply` then rewrites the stored request from responses no real send produced.
+            tls_preset: rec.tls_preset,
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
@@ -114,13 +121,14 @@ module Gori
 
         applied = false
         if apply && !report.aborted && !report.removed.empty?
-          # ws_keep_key/ws_http_only for the reason the CLI twin gives: update_repeater's SQL
-          # sets both columns unconditionally and its signature defaults them to false, so
-          # omitting them CLEARS a session that carried either.
+          # ws_keep_key/ws_http_only/tls_preset for the reason the CLI twin gives:
+          # update_repeater's SQL sets every one of those columns unconditionally and its
+          # signature defaults them, so omitting one CLEARS a session that carried it.
           applied = store.update_repeater(id: id, target: rec.target,
             request: report.minimized_text.to_slice, http2: rec.http2?,
             auto_cl: rec.auto_content_length?, sni: rec.sni,
-            ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?)
+            ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?,
+            tls_preset: rec.tls_preset)
         end
 
         Result.new(JSON.build do |j|

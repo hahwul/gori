@@ -35,15 +35,29 @@ class Gori::Tui::RepeaterView
     rect.x + 9
   end
 
-  # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker,
-  # then the `^V` transport chip. Returns `{sni_x, transport_right_edge}` — `sni_x` nil when
-  # no override is set or the marker doesn't fit. Pure geometry, shared by `render_target`
-  # and `chrome_hit`.
+  # The TARGET band's `␣T` TLS-fingerprint chip label (#844). ONE definition, read by the
+  # draw and by the hit test — the two must invert each other exactly, and a chip whose label
+  # width is computed twice is a click that lands on the wrong cell the first time the two
+  # spellings drift (#839).
+  #
+  # ALWAYS drawn, muted while nothing is set: it is the only thing on screen saying `␣T` has
+  # anything to offer, and this band has no other home for the affordance. Deliberately does
+  # NOT consult the target's SCHEME — that would put a `URI.parse` on every frame for a
+  # question only the chip's COLOUR needs (`tls_preset_live?` asks it, and only when an
+  # override is actually set).
+  private def tls_chip_label : String
+    " ␣T:#{@tls_preset || "tls"} "
+  end
+
+  # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker, the
+  # `␣T` fingerprint chip, then the `^V` transport chip. Returns
+  # `{sni_x, tls_x, transport_right_edge}` — the first two nil when that piece is not shown or
+  # does not fit. Pure geometry, shared by `render_target` and `chrome_hit`.
   #
   # The SNI marker used to place itself at `rect.right - size - 1`, which is INSIDE the mode
   # chip's cells: setting an SNI override painted over the right columns of the mode label,
   # leaving a truncated chip behind. Chaining it fixes that too.
-  private def target_chrome_chain(rect : Rect) : {Int32?, Int32}
+  private def target_chrome_chain(rect : Rect) : {Int32?, Int32?, Int32}
     min_x = target_chip_min(rect)
     edge = rect.right - 1
     mode = Frame.mode_badge_label(target_insert?)
@@ -53,7 +67,13 @@ class Gori::Tui::RepeaterView
       edge -= SNI_BADGE.size
       sni_x = edge
     end
-    {sni_x, edge}
+    tls_x = nil
+    tls_w = tls_chip_label.size # bound once — the label is built, not stored
+    if edge - tls_w >= min_x
+      edge -= tls_w
+      tls_x = edge
+    end
+    {sni_x, tls_x, edge}
   end
 
   private def field_base(rect : Rect, prefix : String) : Int32

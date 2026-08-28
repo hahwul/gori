@@ -469,6 +469,11 @@ module Gori
         # Whether the run asked for `reframe_grpc` — read only to word `grpc_stale_prefix_reason`,
         # since the remedy an agent should act on differs by whether it already passed it.
         property? reframe_grpc = false
+        # The TLS fingerprint override every send in this run presented (#844), or nil for the
+        # destination policy's. Held on the JOB so `fuzz_start`, `fuzz_status` and
+        # `fuzz_results` can all say WHICH HANDSHAKE produced this result set — the A/B the
+        # override exists for is only readable if the run says which side it was.
+        property tls_preset : String? = nil
         property error_msg : String? = nil
         # How many times the drain / history-record rescues have fired for this job. Those
         # rescues log, and they sit on the per-EVENT path: a persistent failure (a broken

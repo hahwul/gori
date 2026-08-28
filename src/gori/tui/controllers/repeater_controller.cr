@@ -54,7 +54,7 @@ module Gori::Tui
         view.restore(r.target, request_text, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", ws_messages: ws_msgs, ws_keep_key: r.ws_keep_key?,
-          ws_http_only: r.ws_http_only?, evidence: !r.flow_id.nil?)
+          ws_http_only: r.ws_http_only?, tls_preset: r.tls_preset, evidence: !r.flow_id.nil?)
         view.name = r.name                       # custom sub-tab label survives reopen
         view.tags = Repeater::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_repeater_original(view, r.flow_id)
@@ -724,6 +724,26 @@ module Gori::Tui
                          : "gRPC reframe: off — sending the captured length prefix (stale after a ^X edit)")
     end
 
+    # `␣T` — cycle this tab's TLS fingerprint override (#844).
+    #
+    # The status line carries the honesty clause every other surface carries: #822 documents
+    # these presets as APPROXIMATIONS, and a chip that reads `chrome` is exactly the place an
+    # operator would otherwise conclude gori is sending Chrome's ClientHello. It also names the
+    # one condition under which the choice does nothing (a plaintext target), rather than
+    # leaving the muted chip to be noticed.
+    def repeater_cycle_tls_preset : Nil
+      return unless view = current_view
+      name = view.cycle_tls_preset # marks the tab dirty; the save-on-leave path persists it
+      if name.nil?
+        @host.status("TLS fingerprint: none — this tab uses the destination's outbound_tls policy")
+      elsif view.tls_preset_live?
+        @host.status("TLS fingerprint: #{name} — this tab only; an approximation of that client's " \
+                     "hello (`gori settings tls-fingerprint HOST --preset #{name}` prints the JA3/JA4)")
+      else
+        @host.status("TLS fingerprint: #{name} — set, but this target is not https, so no ClientHello is sent")
+      end
+    end
+
     def repeater_pretty_request : Nil
       return unless view = current_view
       if err = view.pretty_print_request
@@ -816,6 +836,10 @@ module Gori::Tui
         # invalidates. Moving focus here would yank the caret out of whatever pane was being
         # edited — the key (`^V`) doesn't, and the click should not differ.
         repeater_toggle_http2 # cycles WS→h1→h2 on a handshake tab, flips h1⇄h2 elsewhere
+      when :tls_preset
+        # No `focus_pane`, for the same reason `:transport` gives: the fingerprint belongs to
+        # the tab, not to a pane, and the `␣T` key does not move the caret either.
+        repeater_cycle_tls_preset
       when :mark
         # The chord the badge names, doing what the chord does. It used to read `^K` — a
         # legacy key bound to nothing anywhere in the app, echoed by two hint strings — while
@@ -1280,7 +1304,13 @@ module Gori::Tui
     private def persist_repeater_tab(tab : RepeaterTab) : Nil
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?, v.sni_override)
+      # Every column `update_repeater` writes, off the view — see the note on the sibling in
+      # `save_current_repeater`. Minimize is gated off WS tabs, so the two WS flags are
+      # normally false here; passing them keeps this call from being the one that clears a
+      # flag the OTHER surfaces preserve.
+      @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
+        v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+        tls_preset: v.tls_preset)
       v.clear_dirty
     end
 
@@ -1396,7 +1426,8 @@ module Gori::Tui
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
         next if v.request_side_matches?(row.target, String.new(row.request), row.http2?,
-                  row.auto_content_length?, row.sni, row.ws_keep_key?, row.ws_http_only?)
+                  row.auto_content_length?, row.sni, row.ws_keep_key?, row.ws_http_only?,
+                  row.tls_preset)
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
@@ -1408,7 +1439,7 @@ module Gori::Tui
         end
         v.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
-          ws_http_only: row.ws_http_only?, evidence: !row.flow_id.nil?)
+          ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
         seed_repeater_original(v, row.flow_id) # baseline may need re-seed if it was empty
       end
 
@@ -1424,7 +1455,7 @@ module Gori::Tui
         end
         view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
-          ws_http_only: row.ws_http_only?, evidence: !row.flow_id.nil?)
+          ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
         seed_repeater_original(view, row.flow_id)
         @repeaters << RepeaterTab.new(view, row.flow_id, row.id)
       end
@@ -1617,7 +1648,13 @@ module Gori::Tui
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_repeater(view.target, view.request_text.to_slice, view.http2?,
         view.auto_content_length?, flow_id, @repeaters.size, view.sni_override,
-        ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?)
+        ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?,
+        # …and the fingerprint (#844). `duplicate_from` deliberately copies it ("a send knob,
+        # so the clone sends the handshake its source would"), and leaving it out of the INSERT
+        # meant the row said "no override" until some later save-on-leave committed: a peer
+        # session reconciling the project, `repeater list` and MCP all read nil off the row
+        # while the chip on screen read `␣T:chrome`, and a crash before that save lost it.
+        tls_preset: view.tls_preset)
       id == 0 ? nil : id
     end
 
@@ -1911,6 +1948,13 @@ module Gori::Tui
           !@host.session.config.insecure_upstream?,
           view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
           overrides: @host.session.host_overrides, evidence: evidence,
+          # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
+          # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
+          # every candidate is judged by an answer the tab will never get: an origin that
+          # 403s a bare OpenSSL hello (which is the reason to set a preset at all) refuses
+          # them uniformly, the bisection reads that as "every header is removable", and
+          # `--apply` then rewrites the stored request from responses no real send produced.
+          tls_preset: view.tls_preset,
           keep_alive: true, idle_conns: 1),
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
@@ -2163,6 +2207,9 @@ module Gori::Tui
       Repeater::Plan.build(Repeater::PlanOptions.new(requests,
         expand_request: false, auto_content_length: false, evidence: view.evidence?,
         target: view.target, http2: http2, sni: view.sni_override,
+        # This tab's own TLS fingerprint (#844) — the thing that makes two tabs against one
+        # host with different values dial two different SSL contexts.
+        tls_preset: view.tls_preset,
         verify: !@host.session.config.insecure_upstream?,
         # The session's LIVE instance, not a fresh `HostOverrides.load` — the proxy reads
         # this one and the Project tab's HOST OVERRIDES pane edits it under a Mutex, so a
@@ -2178,6 +2225,11 @@ module Gori::Tui
         "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
       in Repeater::PlanError::Reason::UnresolvedEnv
         "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+      in Repeater::PlanError::Reason::TlsPreset
+        # Unreachable from the TUI, where the value is only ever chosen by cycling the
+        # known presets — but a tab restored from a project another version (or another
+        # tool) wrote can carry any string, and this is the surface that has to say so.
+        "repeater: #{ex.message}"
       end)
       nil
     end
@@ -2197,7 +2249,8 @@ module Gori::Tui
         # line endings the editor holds), NOT ws_upgrade_bytes (env-expanded): baking the
         # expanded form in would write secrets to the DB and defeat the reconcile guard.
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?)
+          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+          tls_preset: v.tls_preset)
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         # Checked, and BEFORE `ws_out_persisted`/`clear_dirty`: that write opens with
         # `DELETE FROM ws_messages`, so a rolled-back batch (a busy store, a live capture
@@ -2210,8 +2263,18 @@ module Gori::Tui
         end
         v.ws_out_persisted
       else
+        # `ws_keep_key` is passed on the NON-WebSocket branch too, and that is not belt and
+        # braces: `update_repeater` writes every column unconditionally with a `false` default,
+        # while `apply_request_fields` sets `@ws_keep_key` WITHOUT gating it on `is_ws` — so a
+        # session created as `repeater create --ws-keep-key -f plain.txt` (a non-upgrade request
+        # carrying the flag) reopened here, was edited, and had the flag silently written back
+        # as 0. Pre-existing; caught while threading `tls_preset` through the same call, which
+        # is the third column this hazard now covers. (`ws_http_only` is genuinely false on this
+        # branch — the view forces it false for a non-upgrade request — so it is passed for
+        # symmetry with the branch above rather than to preserve anything.)
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override)
+          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+          tls_preset: v.tls_preset)
       end
       v.clear_dirty
     end

@@ -363,6 +363,14 @@ module Gori
         "repeater.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
         Verb::Scope::Repeater, [Verb::Chord.new("s", ctrl: true)],
         available: in_repeater, mnemonic: 's', section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
+      # Target-pane cycle, no chord. Same reasoning `␣K` and `␣F` give: the ctrl- space in
+      # Repeater is dense, a fingerprint is a per-tab decision an operator makes once rather
+      # than a key they reach for mid-edit, and the TARGET band carries a `␣T:…` chip either
+      # way — so the state is on screen (and clickable) without opening the menu.
+      r.register Verb::Definition.new(
+        "repeater.cycle-tls-preset", "Cycle TLS fingerprint",
+        "Shape THIS TAB's ClientHello like a named browser (chrome / firefox / safari / curl) instead of gori's own, for this tab only — the way to ask whether an origin answers differently by handshake, with a second tab on the same host set to a different preset. The destination's outbound_tls client certificate, protocol range and permissive flag still apply, and settings.json is not touched. An APPROXIMATION of that client's hello, not a byte-exact JA3 match: `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out. https targets only",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'T', section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Repeater, [Verb::Chord.new("l", ctrl: true)],

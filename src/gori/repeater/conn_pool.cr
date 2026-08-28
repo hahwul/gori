@@ -183,9 +183,15 @@ module Gori::Repeater
     # The origin is taken apart rather than as a struct: `Fuzz::Origin` (which folds ws→http)
     # and a Discover URL's `Url::Parts` are different types carrying the same three fields,
     # and the pool needs nothing else from either.
+    # `tls_preset` is the run's per-send TLS fingerprint override (#844). It belongs to the
+    # POOL, not to an individual send: a parked socket already completed its handshake, so two
+    # fingerprints sharing one pool would serve the second run's requests over the first one's
+    # ClientHello. One pool per sender, one fingerprint per sender, and the value only ever
+    # reaches the dial below.
     def initialize(@scheme : String, @host : String, @port : Int32, @verify : Bool,
                    @sni : String?, @timeout : Time::Span?,
-                   @overrides : Gori::HostOverrides?, @max_idle : Int32)
+                   @overrides : Gori::HostOverrides?, @max_idle : Int32,
+                   @tls_preset : String? = nil)
       @idle = [] of IO
       @consecutive_stale = 0
     end
@@ -337,7 +343,7 @@ module Gori::Repeater
       # handshake is part of what that request cost. A reused one honestly reports less.
       started = Time.instant
       io, dial_error = Repeater::Engine.dial_result(@scheme, @host, @port, @verify,
-        @sni, @timeout, @overrides)
+        @sni, @timeout, @overrides, @tls_preset)
       unless io
         err = Repeater::Engine.error(
           Repeater::Engine.connect_error(@scheme, @host, @port, @verify, dial_error), started)

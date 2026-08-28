@@ -230,6 +230,14 @@ module Gori
         # WebSocket mode check — on the bytes that will be STORED and sent, not a projection.
         is_ws = Repeater::WsEngine.upgrade_request?(request)
 
+        # Read and REFUSED before the insert, like the frames below: an unknown preset name
+        # applies nothing, so a session stored with one would dial with gori's bare hello on
+        # every later send while the row claimed a browser. See `Settings.tls_preset_error`.
+        tls_preset = tls_preset_arg(h)
+        if err = Settings.tls_preset_error(tls_preset)
+          return Result.new(err, is_error: true)
+        end
+
         # Parsed BEFORE the row is inserted: a refused frame must leave nothing behind. Doing
         # it after produced a half-created session — an error result and a persisted repeater
         # whose message list was empty — which is the "partial operation reported as one
@@ -248,7 +256,8 @@ module Gori
           position: position.to_i32,
           sni: sni.try { |s| wire_field(s) },
           ws_keep_key: bool_arg(h, "ws_keep_key", false),
-          ws_http_only: bool_arg(h, "ws_http_only", false)
+          ws_http_only: bool_arg(h, "ws_http_only", false),
+          tls_preset: tls_preset
         )
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
@@ -460,6 +469,19 @@ module Gori
         s.matches?(/\A(opcode|fin|rsv|mask|mask_key|len|hex|b64|text)=/)
       end
 
+      # The `tls_preset` argument, normalised to the spelling the dial and the SSL-context
+      # cache key see — so a tab stored as `"Chrome "` and one stored as `"chrome"` are one
+      # policy rather than two contexts. Blank/absent is nil ("no override").
+      #
+      # An UNKNOWN name comes back as itself (lowercased) rather than as nil: the CALLER's
+      # `Settings.tls_preset_error` is what names it, and folding a typo to "no override" here
+      # would store a session that silently dials with gori's bare hello.
+      private def tls_preset_arg(h) : String?
+        raw = str(h, "tls_preset")
+        return nil if raw.nil? || raw.strip.empty?
+        Settings.tls_preset_normalize(raw)
+      end
+
       private def update_repeater(h) : Result
         id = int(h, "id")
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
@@ -480,6 +502,14 @@ module Gori
         sni = present?(h, "sni") ? str(h, "sni") : existing.sni
         ws_keep_key = bool_arg(h, "ws_keep_key", existing.ws_keep_key?)
         ws_http_only = bool_arg(h, "ws_http_only", existing.ws_http_only?)
+        # Same shape as `sni` above, and for the same reason `update_repeater`'s SQL demands
+        # it: every column is written unconditionally, so a call that does not mention this
+        # one must hand back what the row already holds or a plain rename would drop the
+        # tab's fingerprint. `present?` (not `.presence`) so an explicit `""` can CLEAR it.
+        tls_preset = present?(h, "tls_preset") ? tls_preset_arg(h) : existing.tls_preset
+        if err = Settings.tls_preset_error(tls_preset)
+          return Result.new(err, is_error: true)
+        end
 
         # Masked for the REPLY only. `target`/`sni` are stored as authored (`wire_field`) —
         # this is the write that made a plain RENAME destroy them: both fall back to the
@@ -501,7 +531,8 @@ module Gori
                  auto_cl: auto_cl,
                  sni: sni.try { |s| wire_field(s) },
                  ws_keep_key: ws_keep_key,
-                 ws_http_only: ws_http_only
+                 ws_http_only: ws_http_only,
+                 tls_preset: tls_preset
                )
           return busy("repeater NOT updated (store busy or unwritable); it is unchanged")
         end
@@ -604,6 +635,7 @@ module Gori
           s.field "name", strprop("optional custom name for the repeater tab")
           s.field "ws_out_messages", ws_out_messages_prop
           s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one (default false)")
+          s.field "tls_preset", strprop("TLS fingerprint this session presents: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. Stored on the session, so `send_request{repeater_id}`, `gori run repeater send` and a reopened TUI tab all present it. Two sessions on ONE host with different values dial two separate SSL contexts — that A/B is what it is for. The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match. https targets only")
           s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — `gori run repeater send` and the TUI send the upgrade handshake as an ordinary request and read the 101 as a response, instead of performing the framed exchange. The bytes are unchanged and the session's messages are kept (default false)")
         end
 
@@ -619,6 +651,7 @@ module Gori
           s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label); empty string clears them")
           s.field "ws_out_messages", ws_out_messages_prop
           s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one")
+          s.field "tls_preset", strprop("TLS fingerprint this session presents (#{Settings::TLS_PRESET_NAMES.join(" | ")}), overriding the settings.json outbound_tls policy for its own sends only. Pass \"\" to clear it; omit to leave it unchanged")
           s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and the 101 read as a response. The bytes are unchanged and the session's messages are kept")
         end
 

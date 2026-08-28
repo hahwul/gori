@@ -45,10 +45,25 @@ class Gori::Tui::RepeaterView
     return if rect.h < 2
     Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: Frame.pane_border(focused))
     Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?) # the REAL mode, not focused&&mode — see Frame.mode_badge
-    sni_x, tr_edge = target_chrome_chain(rect)
+    sni_x, tls_x, tr_edge = target_chrome_chain(rect)
     # An at-a-glance SNI marker on the top border (right of the title) whenever an
     # override is set, so a custom SNI is visible even before the row is reached.
     screen.text(sni_x, rect.y, SNI_BADGE, Theme.text_bright, Theme.accent_bg) if sni_x
+    # ` ␣T:tls ` / ` ␣T:chrome ` — the TLS fingerprint THIS TAB will present (#844), and the
+    # only thing on screen saying `␣T` has anything to offer. It rides the TARGET band for the
+    # same reason `^V` does: this is where "how do we connect" already lives.
+    #
+    # Three dresses. Muted while no override is set — this one really does have an off state,
+    # unlike `^V`, and the off state is "the destination's own policy". Accent-filled when an
+    # override is in play, because two tabs against one host differing only here is the whole
+    # feature and it must be readable at a glance. And MUTED AGAIN when the override cannot
+    # apply (an http:// target has no ClientHello): the chip still NAMES it, so the operator
+    # can see the value is set and see that it is doing nothing, which is exactly the state a
+    # lit chip would lie about.
+    if tls_x
+      fg, bg = tls_preset_live? ? {Theme.text_bright, Theme.accent_bg} : {Theme.muted, Theme.bg}
+      screen.text(tls_x, rect.y, tls_chip_label, fg, bg)
+    end
     # ` ^V:h1 ` / ` ^V:h2 ` / ` ^V:WS ` — the transport `^R` will dial, and the only thing on
     # screen saying `^V` has anything to offer. It rides the TARGET band rather than the
     # REQUEST border because that is where the rest of "how do we connect" already lives
