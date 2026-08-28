@@ -230,6 +230,24 @@ describe Gori::ProjectRegistry do
 end
 
 describe Gori::Session do
+  # Session.open installs the effective Settings bind over its Config, so these examples must
+  # not inherit the developer's real default port. A running gori on 8070 otherwise turns every
+  # "first" session below into capture-off before the behavior under test is reached.
+  around_each do |example|
+    saved_bind_port = Gori::Settings.bind_port
+    saved_cli_bind_port = Gori::Settings.cli_bind_port
+    available = TCPServer.new("127.0.0.1", 0)
+    Gori::Settings.bind_port = available.local_address.port
+    Gori::Settings.cli_bind_port = nil
+    available.close
+    begin
+      example.run
+    ensure
+      Gori::Settings.bind_port = saved_bind_port
+      Gori::Settings.cli_bind_port = saved_cli_bind_port
+    end
+  end
+
   it "opens a project store + proxy and captures, then cleans up a temp project" do
     with_root do |root|
       ca_dir = File.join(root, "ca")

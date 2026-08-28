@@ -78,9 +78,9 @@ module Gori
       begin
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
         # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
-        # and Upstream.dial (reads Settings.effective_upstream_proxy) tunnels through its upstream.
+        # and Upstream.dial (reads Settings.upstream_route) tunnels through its upstream.
         # `bind: true` — a Session is the one surface that LISTENS (the TUI and `gori run capture`
-        # both open the project this way), so all six keys apply here; the headless callers of
+        # both open the project this way), so all eight keys apply here; the headless callers of
         # `CLI::Run.open_store` and the MCP bind path pass `bind: false`. Mutating `config` is
         # safe — App re-seeds it from the global Settings on every project open. Inside the begin
         # so a failing settings read is torn down below rather than leaking store+channels.

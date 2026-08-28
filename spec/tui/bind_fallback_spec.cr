@@ -14,7 +14,7 @@ include Gori::Tui
 #
 # Both branches destroyed the port the operator deliberately pinned. Via the PROJECT layer,
 # because `ProjectView#load_settings_values` seeds its dirty BASELINE from `effective_*` and
-# `ProjectController#commit_project_network` writes all six network fields whenever any ONE of
+# `ProjectController#commit_project_network` writes all network fields whenever any ONE of
 # them is dirty — so editing the idle timeout silently re-pinned the fallback port. Via the
 # GLOBAL layer, because `Settings.bind_port` is what `Settings.save` serializes into
 # settings.json on every unrelated save (the companion toggle, tabs, hotkeys, env), which the NEXT
@@ -48,6 +48,9 @@ private def reset_projnet
   Gori::Settings.project_bind_host = nil
   Gori::Settings.project_bind_port = nil
   Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.project_upstream_destination = nil
+  Gori::Settings.project_upstream_auth = nil
+  Gori::Settings.project_upstream_auth_error = nil
   Gori::Settings.project_connect_timeout_secs = nil
   Gori::Settings.project_io_timeout_secs = nil
   Gori::Settings.project_capture_max_mib = nil
@@ -82,10 +85,12 @@ describe "startup port fallback" do
       view.settings_dirty?.should be_false      # an untouched pane has nothing to commit
 
       # Now the operator edits ONLY the idle timeout. `commit_project_network` hands
-      # `apply_project_network` all six fields, so whatever sits in the port slot here is what
+      # `apply_project_network` all fields, so whatever sits in the port slot here is what
       # gets persisted — it must still be 8080.
       view.focus_pane(:settings)
-      view.select_setting(ProjectView::SETTINGS_FIELD_BASE + 4) # rows: host, port, upstream, connect, IDLE, cap
+      # fields: host, port, protocol, proxy host, proxy port, destination, auth, user,
+      # pass, connect, IDLE, cap
+      view.select_setting(ProjectView::SETTINGS_FIELD_BASE + 10)
       view.set_backspace.should be_true
       view.set_input('9')
       view.settings_dirty?.should be_true

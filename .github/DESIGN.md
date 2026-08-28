@@ -1815,6 +1815,40 @@ lensed and an all-hidden list reads `no flows in scope` (plus `⇧S toggles the 
 For the same reason the open-site passes `raise_on_error: true`: `Store#search` otherwise degrades
 a SQLite failure to an empty result, which on this card is indistinguishable from an empty scope.
 
+### 2026-08-26: upstream proxying is fail-closed for app-owned egress
+
+Refines: [P1](#p1), [P4](#p4), [P5](#p5). #434.
+
+`network.upstream_proxy` used to govern the proxy/send engines but not the updater or OAST's
+stdlib HTTP clients. That made the setting read as a catch-all while two owned request paths
+could still leave directly. The routing decision now stays in `Settings.upstream_route(host)`
+and every app-owned socket, including those service clients, is opened by `Proxy::Upstream`.
+An invalid declaration or a failed HTTP CONNECT/SOCKS handshake is a proxy error before any
+origin socket; there is no direct retry. The existing blank project pin and ordered `direct`
+rules remain explicit operator choices, not accidental fallbacks.
+
+The scalar and ordered rules use the conventional SOCKS distinction uniformly: `socks5`
+resolves destination names locally and sends an address literal, while `socks5h` sends RFC 1928
+`ATYP DOMAIN` for proxy-side DNS. The local lookup is an intentional operator choice, visible in
+both settings editors and the reference documentation rather than an implicit leak. Resolution
+failure is a DNS error before the proxy socket is opened; there is still no direct retry. The
+proxy endpoint itself is always resolved locally.
+
+Project-scoped proxy authentication is one JSON value in the owner-only project DB, with the
+method derived from the pinned route: HTTP Basic for an HTTP CONNECT proxy, RFC 1929 for
+SOCKS5. Enabling it turns an inherited catch-all into an explicit project pin; otherwise a
+later global edit or first-match rule could send the credential to a different proxy. A
+malformed value or credentials without that pin is an invalid route for a matching
+destination and fails before an origin socket. The Project editor shows the password only
+while its row is focused and masks it again on leave; object inspection and status text remain redacted. Global rules retain
+their environment-variable indirection so a shareable `settings.json` still contains no
+proxy password.
+
+`net.upstream_destination_host` is a project-only gate in front of the routing precedence.
+Missing or `*` preserves the old proxy-all behaviour; a non-match is explicitly direct and
+does not fall through to the global rule table or scalar. The same loader installs the gate
+for TUI, headless and MCP surfaces, so every gori-owned dial receives the same answer.
+
 ### 2026-08-27: agent presence is a flock+sidecar marker, not a DB row
 
 Refines: [P1](#p1), [P6](#p6). #815.

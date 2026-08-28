@@ -6,6 +6,9 @@ private def reset_upstream : Nil
   Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
   Gori::Settings.upstream_proxy = ""
   Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.project_upstream_destination = nil
+  Gori::Settings.project_upstream_auth = nil
+  Gori::Settings.project_upstream_auth_error = nil
 end
 
 private def rule(host : String, kind : String, addr : String = "",
@@ -164,11 +167,17 @@ describe "upstream rules" do
       reset_upstream
     end
 
-    it "defaults the port per kind: 8080 for http, 1080 for socks5" do
-      Gori::Settings.upstream_rules = [rule("a.test", "http", "p.test"), rule("b.test", "socks5", "s.test")]
+    it "defaults the port per kind: 8080 for http, 1080 for either SOCKS mode" do
+      Gori::Settings.upstream_rules = [
+        rule("a.test", "http", "p.test"),
+        rule("b.test", "socks5", "s.test"),
+        rule("c.test", "socks5h", "h.test"),
+      ]
       Gori::Settings.upstream_route("a.test").port.should eq(8080)
       Gori::Settings.upstream_route("b.test").port.should eq(1080)
       Gori::Settings.upstream_route("b.test").socks5?.should be_true
+      Gori::Settings.upstream_route("c.test").port.should eq(1080)
+      Gori::Settings.upstream_route("c.test").remote_dns?.should be_true
     ensure
       reset_upstream
     end
@@ -192,6 +201,52 @@ describe "upstream rules" do
       route = Gori::Settings.upstream_route("anything.test")
       route.host.should eq("pinned.test")
       route.port.should eq(9)
+    ensure
+      reset_upstream
+    end
+
+    it "uses the project destination pattern as a direct-or-proxy gate" do
+      Gori::Settings.upstream_rules = [rule("*", "http", "table.test:1")]
+      Gori::Settings.project_upstream_destination = "*.corp.test"
+
+      Gori::Settings.upstream_route("corp.test").direct?.should be_true
+      route = Gori::Settings.upstream_route("api.corp.test")
+      {route.kind, route.host, route.port}.should eq({"http", "table.test", 1})
+      Gori::Settings.upstream_route("outside.test").direct?.should be_true
+
+      Gori::Settings.project_upstream_destination = "10.*"
+      Gori::Settings.upstream_route("10.2.3.4").host.should eq("table.test")
+      Gori::Settings.upstream_route("11.2.3.4").direct?.should be_true
+
+      Gori::Settings.project_upstream_destination = "*"
+      Gori::Settings.upstream_route("outside.test").host.should eq("table.test")
+    ensure
+      reset_upstream
+    end
+
+    it "keeps credentials on matching destinations and sends non-matches direct" do
+      Gori::Settings.project_upstream_proxy = "http://proxy.test:8080"
+      Gori::Settings.project_upstream_destination = "target.test"
+      Gori::Settings.project_upstream_auth =
+        Gori::Settings::ProjectProxyAuth.new("basic", "alice", "secret")
+
+      route = Gori::Settings.upstream_route("api.target.test")
+      {route.host, route.username, route.password}.should eq({"proxy.test", "alice", "secret"})
+      Gori::Settings.upstream_route("outside.test").direct?.should be_true
+    ensure
+      reset_upstream
+    end
+
+    it "fails closed when a persisted destination pattern is invalid" do
+      Gori::Settings.project_upstream_destination = "https://target.test"
+      route = Gori::Settings.upstream_route("target.test")
+      route.invalid?.should be_true
+      route.configuration_error.to_s.should contain("destination proxy filter is invalid")
+
+      socket, error = Gori::Proxy::Upstream.dial_result("target.test", 443)
+      socket.should be_nil
+      error.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+      error.try(&.detail).to_s.should contain("origin was never contacted")
     ensure
       reset_upstream
     end
@@ -222,17 +277,53 @@ describe "upstream rules" do
       reset_upstream
     end
 
-    # A hand-edited file can hold a rule the validator would have rejected. Degrading to
-    # direct beats failing every dial for the host.
-    it "degrades a proxy rule with no address to direct" do
+    # A hand-edited file can hold a rule the validator would have rejected. Sending direct in
+    # that case would leak the exact destination the operator intended to proxy.
+    it "fails a proxy rule with no address closed" do
       Gori::Settings.upstream_rules = [rule("a.test", "http", "")]
-      Gori::Settings.upstream_route("a.test").direct?.should be_true
+      route = Gori::Settings.upstream_route("a.test")
+      route.invalid?.should be_true
+      route.direct?.should be_false
+
+      sock, err = Gori::Proxy::Upstream.dial_result("a.test", 443)
+      sock.should be_nil
+      err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+      err.try(&.detail).to_s.should contain("origin was never contacted")
+    ensure
+      reset_upstream
+    end
+
+    it "fails a malformed host pattern closed instead of falling through to direct" do
+      Gori::Settings.upstream_rules = [rule("[", "http", "proxy.test:8080")]
+
+      route = Gori::Settings.upstream_route("origin.test")
+      route.invalid?.should be_true
+      route.direct?.should be_false
+      route.configuration_error.to_s.should contain("invalid upstream rule host pattern")
     ensure
       reset_upstream
     end
   end
 
   describe "HTTP proxy authentication" do
+    it "sends the Basic credentials saved in Project settings" do
+      with_capturing_http_proxy do |pport, head|
+        Gori::Settings.project_upstream_proxy = "http://127.0.0.1:#{pport}"
+        Gori::Settings.project_upstream_auth =
+          Gori::Settings::ProjectProxyAuth.new("basic", "project-user", "project-pass")
+
+        sock = Gori::Proxy::Upstream.dial("example.test", 443)
+        sock.should_not be_nil
+        sent = head.receive
+        sock.try(&.close) rescue nil
+
+        sent.should contain("CONNECT example.test:443 HTTP/1.1")
+        sent.should contain("Proxy-Authorization: Basic #{Base64.strict_encode("project-user:project-pass")}")
+      end
+    ensure
+      reset_upstream
+    end
+
     # The headline fix: before upstream rules, gori emitted no Proxy-Authorization at all, so
     # an authenticating proxy could not be used.
     it "sends Basic Proxy-Authorization when the rule carries credentials" do
@@ -286,16 +377,51 @@ describe "upstream rules" do
   end
 
   describe "SOCKS5" do
-    it "reaches a hostname target through a SOCKS5 proxy, letting the proxy resolve it" do
-      with_socks5_proxy do |sport, seen|
-        Gori::Settings.upstream_rules = [rule("*", "socks5", "127.0.0.1:#{sport}")]
-        sock = Gori::Proxy::Upstream.dial("example.test", 443)
+    it "uses Project settings credentials and delegates SOCKS5H DNS to the proxy" do
+      with_socks5_proxy(auth_method: 2_u8) do |sport, seen|
+        Gori::Settings.project_upstream_proxy = "socks5h://127.0.0.1:#{sport}"
+        Gori::Settings.project_upstream_auth =
+          Gori::Settings::ProjectProxyAuth.new("socks5", "project-user", "project-pass")
+
+        sock = Gori::Proxy::Upstream.dial("remote-only.test", 443)
         sock.should_not be_nil
         got = seen.receive
         sock.try(&.close) rescue nil
 
-        got[:atyp].should eq(3_u8) # ATYP DOMAIN — remote resolution ("socks5h"), not a local lookup
-        got[:addr].should eq("example.test")
+        got[:user].should eq("project-user")
+        got[:pass].should eq("project-pass")
+        got[:atyp].should eq(3_u8)
+        got[:addr].should eq("remote-only.test")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "uses the scalar socks5h:// form and sends hostnames as ATYP DOMAIN" do
+      with_socks5_proxy do |sport, seen|
+        Gori::Settings.upstream_proxy = "socks5h://127.0.0.1:#{sport}"
+        sock = Gori::Proxy::Upstream.dial("remote-only.test", 80)
+        sock.should_not be_nil
+        got = seen.receive
+        sock.try(&.close) rescue nil
+
+        got[:atyp].should eq(3_u8)
+        got[:addr].should eq("remote-only.test")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "resolves a hostname locally for a SOCKS5 rule and sends its address literal" do
+      with_socks5_proxy do |sport, seen|
+        Gori::Settings.upstream_rules = [rule("*", "socks5", "127.0.0.1:#{sport}")]
+        sock = Gori::Proxy::Upstream.dial("localhost", 443)
+        sock.should_not be_nil
+        got = seen.receive
+        sock.try(&.close) rescue nil
+
+        [1_u8, 4_u8].includes?(got[:atyp]).should be_true
+        got[:addr].should_not eq("localhost")
         got[:port].should eq(443)
       end
     ensure
@@ -338,7 +464,7 @@ describe "upstream rules" do
       ENV["GORI_SPEC_SOCKS_PASS"] = "socks-pass"
       with_socks5_proxy(auth_method: 2_u8) do |sport, seen|
         Gori::Settings.upstream_rules = [
-          rule("*", "socks5", "127.0.0.1:#{sport}", "alice", "GORI_SPEC_SOCKS_PASS"),
+          rule("*", "socks5h", "127.0.0.1:#{sport}", "alice", "GORI_SPEC_SOCKS_PASS"),
         ]
         sock = Gori::Proxy::Upstream.dial("example.test", 443)
         sock.should_not be_nil
@@ -347,6 +473,8 @@ describe "upstream rules" do
 
         got[:user].should eq("alice")
         got[:pass].should eq("socks-pass")
+        got[:atyp].should eq(3_u8)
+        got[:addr].should eq("example.test")
       end
     ensure
       ENV.delete("GORI_SPEC_SOCKS_PASS")
@@ -357,7 +485,7 @@ describe "upstream rules" do
       ENV["GORI_SPEC_SOCKS_PASS"] = "wrong"
       with_socks5_proxy(auth_method: 2_u8, auth_ok: false) do |sport, _seen|
         Gori::Settings.upstream_rules = [
-          rule("*", "socks5", "127.0.0.1:#{sport}", "alice", "GORI_SPEC_SOCKS_PASS"),
+          rule("*", "socks5h", "127.0.0.1:#{sport}", "alice", "GORI_SPEC_SOCKS_PASS"),
         ]
         Gori::Proxy::Upstream.dial("example.test", 443).should be_nil
       end
@@ -366,11 +494,51 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    it "reports rejected Project settings credentials as a proxy error" do
+      with_socks5_proxy(auth_method: 2_u8, auth_ok: false) do |sport, _seen|
+        Gori::Settings.project_upstream_proxy = "socks5h://127.0.0.1:#{sport}"
+        Gori::Settings.project_upstream_auth =
+          Gori::Settings::ProjectProxyAuth.new("socks5", "project-user", "wrong")
+
+        sock, error = Gori::Proxy::Upstream.dial_result("example.test", 443)
+        sock.should be_nil
+        error.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+        error.try(&.detail).to_s.should contain("refused the tunnel")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "fails a local-DNS SOCKS5 dial before contacting the proxy when resolution fails" do
+      server = TCPServer.new("127.0.0.1", 0)
+      Gori::Settings.upstream_proxy = "socks5://127.0.0.1:#{server.local_address.port}"
+
+      sock, error = Gori::Proxy::Upstream.dial_result("does-not-exist.invalid", 443)
+      sock.should be_nil
+      error.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Dns)
+
+      accepted = Channel(Nil).new(1)
+      spawn do
+        conn = server.accept
+        conn.close rescue nil
+        accepted.send(nil)
+      rescue
+      end
+      contacted = select
+      when accepted.receive then true
+      when timeout(20.milliseconds) then false
+      end
+      contacted.should be_false
+    ensure
+      server.try(&.close) rescue nil
+      reset_upstream
+    end
+
     # 0xFF is "no acceptable methods" — the dial must fail rather than proceed onto a socket
     # that is not a tunnel.
     it "fails the dial when the proxy accepts no offered auth method" do
       with_socks5_proxy(auth_method: 0xFF_u8) do |sport, _seen|
-        Gori::Settings.upstream_rules = [rule("*", "socks5", "127.0.0.1:#{sport}")]
+        Gori::Settings.upstream_rules = [rule("*", "socks5h", "127.0.0.1:#{sport}")]
         Gori::Proxy::Upstream.dial("example.test", 443).should be_nil
       end
     ensure
@@ -383,6 +551,7 @@ describe "upstream rules" do
       Gori::Settings.upstream_rule_error(rule("*", "direct")).should be_nil
       Gori::Settings.upstream_rule_error(rule("a.test", "http", "p.test:3128")).should be_nil
       Gori::Settings.upstream_rule_error(rule("a.test", "socks5", "127.0.0.1:1080")).should be_nil
+      Gori::Settings.upstream_rule_error(rule("a.test", "socks5h", "127.0.0.1:1080")).should be_nil
     end
 
     it "rejects a missing host, an unknown kind, and a proxy rule with no address" do
@@ -414,6 +583,20 @@ describe "upstream rules" do
   # ORIGIN, a machine gori had never tried to contact. These assert the reason survives the
   # dialer and reaches the send path.
   describe "a refused CONNECT" do
+    it "identifies rejected Project settings credentials without printing the password" do
+      with_refusing_http_proxy(407, "Proxy Authentication Required") do |pport|
+        Gori::Settings.project_upstream_proxy = "http://127.0.0.1:#{pport}"
+        Gori::Settings.project_upstream_auth =
+          Gori::Settings::ProjectProxyAuth.new("basic", "alice", "do-not-print")
+        _, err = Gori::Proxy::Upstream.dial_result("example.test", 443)
+        detail = err.try(&.detail).to_s
+        detail.should contain("configured upstream proxy credentials were rejected")
+        detail.should_not contain("do-not-print")
+      end
+    ensure
+      reset_upstream
+    end
+
     it "names the proxy and the status it returned, not the origin" do
       with_refusing_http_proxy(407, "Proxy Authentication Required") do |pport|
         Gori::Settings.upstream_rules = [rule("*", "http", "127.0.0.1:#{pport}")]

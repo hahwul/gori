@@ -107,6 +107,15 @@ module Gori::Tui
     # Persist + apply the Project settings pane's per-project network config; returns a toast.
     abstract def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
                                        connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
+
+    # Secret-bearing extension used by the real Runner. The positional overload stays as the
+    # compatibility contract for the small controller Host doubles; their tests do not own a
+    # project DB and deliberately exercise controller routing rather than persistence.
+    def apply_project_network(config : Settings::ProjectNetworkConfig) : String
+      apply_project_network(config.bind_host, config.bind_port, config.upstream,
+        config.connect_secs, config.io_secs, config.capture_mib)
+    end
+
     # Persist + load this project's gRPC `.proto` descriptor set path (#823); returns a toast
     # naming what loaded (or why nothing did). Blank = the `~/.gori/protos` convention dir.
     abstract def apply_project_protos(spec : String) : String

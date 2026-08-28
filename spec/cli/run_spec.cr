@@ -698,7 +698,7 @@ end
 # #538 — `CLI::Run.open_store` is the second caller of Settings.load_project_network. Every
 # `gori run` subcommand except `capture` reads its project through here, and none of them
 # LISTENS (capture opens its project through Session.open instead), so the loader is called
-# with bind: false: the pinned upstream / timeouts / capture cap apply, the bind pair does not.
+# with bind: false: the pinned upstream/auth / timeouts / capture cap apply, the bind pair does not.
 module Gori::CLI::Run
   def self.open_store_for_spec(project : Project) : Store
     open_store(project)
@@ -712,6 +712,9 @@ describe "Gori::CLI::Run.open_store per-project network overrides" do
     seed.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
     seed.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
     seed.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+    seed.set_setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*.example.com")
+    seed.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY,
+      Gori::Settings::ProjectProxyAuth.new("basic", "runner", "secret").to_json)
     seed.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
     seed.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
     seed.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
@@ -721,7 +724,10 @@ describe "Gori::CLI::Run.open_store per-project network overrides" do
     begin
       # The dial decision the fuzzer/miner/repeater actually consult.
       route = Gori::Settings.upstream_route("example.com")
+      route.direct?.should be_true
+      route = Gori::Settings.upstream_route("api.example.com")
       {route.kind, route.host, route.port}.should eq({"http", "jump", 8888})
+      {route.username, route.password}.should eq({"runner", "secret"})
       Gori::Settings.effective_connect_timeout_secs.should eq(7)
       Gori::Settings.effective_io_timeout_secs.should eq(9)
       Gori::Settings.effective_capture_max_mib.should eq(16)
@@ -732,6 +738,9 @@ describe "Gori::CLI::Run.open_store per-project network overrides" do
     ensure
       store.close
       Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.project_upstream_destination = nil
+      Gori::Settings.project_upstream_auth = nil
+      Gori::Settings.project_upstream_auth_error = nil
       Gori::Settings.project_connect_timeout_secs = nil
       Gori::Settings.project_io_timeout_secs = nil
       Gori::Settings.project_capture_max_mib = nil
@@ -747,6 +756,7 @@ describe "Gori::CLI::Run.open_store per-project network overrides" do
     store = Gori::CLI::Run.open_store_for_spec(Gori::Project.new("plain", path))
     begin
       Gori::Settings.project_upstream_proxy.should be_nil
+      Gori::Settings.project_upstream_destination.should be_nil
       Gori::Settings.effective_capture_max_mib.should eq(Gori::Settings.capture_max_mib)
       Gori::Settings.effective_connect_timeout_secs.should eq(Gori::Settings.connect_timeout_secs)
     ensure

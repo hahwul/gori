@@ -27,10 +27,18 @@ module Gori::Tui
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
       opener : Symbol? = nil, readonly : Bool = false
 
+    PROXY_PROTOCOL_CHOICES = ["None", "HTTP", "SOCKS5", "SOCKS5H"]
+    NETWORK_PROXY_PROTOCOL = 2
+    NETWORK_PROXY_HOST     = 3
+    NETWORK_PROXY_PORT     = 4
+
     NETWORK_FIELDS = [
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
       Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
-      Field.new("Upstream proxy", "host:port — blank = connect directly; projects may override"),
+      Field.new("Proxy protocol", "None = direct · SOCKS5 resolves names locally · SOCKS5H resolves at the proxy — ←/→ cycles",
+        choices: PROXY_PROTOCOL_CHOICES),
+      Field.new("Proxy host", "upstream proxy hostname or IP — disabled when protocol is None"),
+      Field.new("Proxy port", "upstream proxy port (1-65535) — disabled when protocol is None"),
       Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
       Field.new("Info page and CA download", "serve a gori welcome + CA-download page to browsers that hit the listen address, or http://gori.proxy/ when already proxied — ←/→/space toggles", bool: true),
       Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
@@ -41,7 +49,7 @@ module Gori::Tui
       Field.new("Strip HTTP/3 Alt-Svc", "remove Alt-Svc alternatives advertising h3 from the response the client gets, so a browser cannot switch to QUIC/UDP where gori sees nothing — Alt-Svc: clear and non-h3 alternatives are left alone; ←/→/space toggles", bool: true),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Upstream rules",
-        "per-host routing / SOCKS5 / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
+        "per-host routing / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
         readonly: true),
       Field.new("Outbound TLS",
         "per-host client certificates, protocol range and TLS fingerprint (groups/sigalgs/ALPN, or a chrome/firefox/safari/curl preset) — edit with `gori settings --edit` (outbound_tls); check what actually goes on the wire with `gori settings tls-fingerprint`",
@@ -199,6 +207,7 @@ module Gori::Tui
     def initialize
       @values = ["", "", ""]
       @baseline = [] of String # last persisted/loaded values — @values != @baseline means unsaved
+      @network_upstream_raw = ""
       @focused = 0
       @cursor = 0
       @preedit = ""
@@ -298,7 +307,19 @@ module Gori::Tui
                   Settings::DEFAULT_RETENTION_FLOWS.to_s,
                   Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, Settings::DEFAULT_HTTP2, Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off", passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH), rule_count_label(Settings.upstream_rules.size, "rule"), outbound_tls_summary, hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
+                      proxy_protocol_label("none"), "", "",
+                      Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off",
+                      Settings::DEFAULT_SERVE_LANDING ? "on" : "off",
+                      Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s,
+                      Settings::DEFAULT_IO_TIMEOUT_SECS.to_s,
+                      Settings::DEFAULT_CAPTURE_MAX_MIB.to_s,
+                      Settings::DEFAULT_HTTP2,
+                      Settings::DEFAULT_STRIP_ALT_SVC ? "on" : "off",
+                      passthrough_label(Settings::DEFAULT_TLS_PASSTHROUGH),
+                      rule_count_label(Settings.upstream_rules.size, "rule"),
+                      outbound_tls_summary,
+                      hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -311,10 +332,14 @@ module Gori::Tui
     # NETWORK_FIELDS — the values are positional, so an inserted field would otherwise have to
     # be mirrored in three separate literals.
     private def network_values : Array(String)
+      @network_upstream_raw = Settings.upstream_proxy
+      proxy = upstream_proxy_field_values(@network_upstream_raw)
       [
         Settings.bind_host,
         Settings.bind_port.to_s,
-        Settings.upstream_proxy,
+        proxy[0],
+        proxy[1],
+        proxy[2],
         Settings.verify_upstream? ? "on" : "off",
         Settings.serve_landing? ? "on" : "off",
         Settings.connect_timeout_secs.to_s,
@@ -327,6 +352,27 @@ module Gori::Tui
         outbound_tls_summary,
         hostnames_summary,
       ]
+    end
+
+    private def upstream_proxy_field_values(raw : String) : {String, String, String}
+      if fields = Settings.upstream_proxy_fields(raw)
+        {proxy_protocol_label(fields[0]), fields[1], fields[2]}
+      else
+        {"Invalid · #{raw}", "", ""}
+      end
+    end
+
+    private def proxy_protocol_label(kind : String) : String
+      case kind
+      when "http"    then "HTTP"
+      when "socks5"  then "SOCKS5"
+      when "socks5h" then "SOCKS5H"
+      else                "None"
+      end
+    end
+
+    private def proxy_protocol_kind(label : String) : String
+      label.downcase
     end
 
     # The EDITOR row values, read from the live Settings — same reason as #network_values:
@@ -483,7 +529,8 @@ module Gori::Tui
     def insert(ch : Char) : Nil
       return if readonly_field? # a display row — nothing to type into
       return if opener_field?   # an action row — typing does nothing (↵ opens its overlay)
-      if bool_field?            # a toggle field swallows typing; space flips it
+      return if disabled_field?
+      if bool_field? # a toggle field swallows typing; space flips it
         toggle if ch == ' '
         return
       end
@@ -500,7 +547,7 @@ module Gori::Tui
     end
 
     def backspace : Nil
-      return if bool_field? || choice_field? || opener_field? || readonly_field? || @cursor == 0
+      return if bool_field? || choice_field? || opener_field? || readonly_field? || disabled_field? || @cursor == 0
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       @values[@focused] = "#{v[0, c - 1]}#{v[c..]}"
@@ -517,7 +564,7 @@ module Gori::Tui
     # the `c >= v.size` brake below — so Del would chew up the live summary and flip
     # `dirty?`, painting a spurious "● unsaved" for an edit the operator never made.
     def delete : Nil
-      return if bool_field? || choice_field? || opener_field? || readonly_field?
+      return if bool_field? || choice_field? || opener_field? || readonly_field? || disabled_field?
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       return if c >= v.size
@@ -537,6 +584,7 @@ module Gori::Tui
     end
 
     def move_cursor(delta : Int32) : Nil
+      return if disabled_field?
       @cursor = (@cursor + delta).clamp(0, @values[@focused].size)
     end
 
@@ -554,6 +602,13 @@ module Gori::Tui
 
     private def readonly_field? : Bool
       fields[@focused].readonly
+    end
+
+    private def disabled_field?(index : Int32 = @focused) : Bool
+      return false unless @section == :network
+      return false unless index == NETWORK_PROXY_HOST || index == NETWORK_PROXY_PORT
+      protocol = @values[NETWORK_PROXY_PROTOCOL]
+      protocol == "None" || protocol.starts_with?("Invalid ·")
     end
 
     # The sub-overlay the focused action row opens (↵), or nil for an ordinary field. The
@@ -588,9 +643,28 @@ module Gori::Tui
       end
       choices = fields[@focused].choices
       return unless choices
+      previous = @values[@focused]
       i = choices.index(@values[@focused]) || 0
       @values[@focused] = choices[(i + delta) % choices.size]
+      update_proxy_default_port(previous, @values[@focused]) if @section == :network && @focused == NETWORK_PROXY_PROTOCOL
       @status = nil
+    end
+
+    # Change 8080↔1080 only while the port still looks automatic. A custom port is operator
+    # intent and survives protocol cycling; None clears the automatic value and disables it.
+    private def update_proxy_default_port(previous : String, current : String) : Nil
+      port = @values[NETWORK_PROXY_PORT].strip
+      previous_default = proxy_default_port(previous)
+      return unless port.empty? || port == previous_default
+      @values[NETWORK_PROXY_PORT] = proxy_default_port(current)
+    end
+
+    private def proxy_default_port(label : String) : String
+      case label
+      when "HTTP"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
+      when "SOCKS5", "SOCKS5H" then Settings::DEFAULT_SOCKS_PORT.to_s
+      else                          ""
+      end
     end
 
     # The currently-selected theme name (for live preview as the user cycles) — only
@@ -705,28 +779,39 @@ module Gori::Tui
         @status = "invalid port"
         return "settings: invalid bind port #{@values[1].inspect}"
       end
-      up = @values[2].strip
-      if err = Settings.upstream_proxy_port_error(up)
-        @status = "invalid upstream port"
+      proxy_fields_unchanged = @values[NETWORK_PROXY_PROTOCOL, 3] == @baseline[NETWORK_PROXY_PROTOCOL, 3]
+      if proxy_fields_unchanged
+        up = @network_upstream_raw
+      else
+        up, proxy_error = Settings.build_upstream_proxy(
+          proxy_protocol_kind(@values[NETWORK_PROXY_PROTOCOL]),
+          @values[NETWORK_PROXY_HOST], @values[NETWORK_PROXY_PORT])
+        if proxy_error
+          @status = "invalid upstream proxy"
+          return proxy_error
+        end
+      end
+      if err = Settings.upstream_proxy_error(up)
+        @status = "invalid upstream proxy"
         return err
       end
-      ct = @values[5].strip.to_i?
+      ct = @values[7].strip.to_i?
       unless ct && ct >= 1
         @status = "invalid connect timeout"
-        return "settings: invalid connect timeout #{@values[5].inspect} (seconds, min 1)"
+        return "settings: invalid connect timeout #{@values[7].inspect} (seconds, min 1)"
       end
-      it = @values[6].strip.to_i?
+      it = @values[8].strip.to_i?
       unless it && it >= 1
         @status = "invalid idle timeout"
-        return "settings: invalid idle timeout #{@values[6].inspect} (seconds, min 1)"
+        return "settings: invalid idle timeout #{@values[8].inspect} (seconds, min 1)"
       end
-      cap = @values[7].strip.to_i?
+      cap = @values[9].strip.to_i?
       unless cap && cap >= 1
         @status = "invalid capture limit"
-        return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
+        return "settings: invalid capture limit #{@values[9].inspect} (MiB, min 1)"
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
-      passthrough = passthrough_from_label(@values[10]) # index 9 is the Strip HTTP/3 Alt-Svc bool inserted above it
+      passthrough = passthrough_from_label(@values[12])
       if err = Settings.tls_passthrough_error(passthrough)
         @status = "invalid TLS passthrough host"
         return err
@@ -745,13 +830,13 @@ module Gori::Tui
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
-      Settings.verify_upstream = @values[3] == "on"
-      Settings.serve_landing = @values[4] == "on"
+      Settings.verify_upstream = @values[5] == "on"
+      Settings.serve_landing = @values[6] == "on"
       Settings.connect_timeout_secs = ct
       Settings.io_timeout_secs = it
       Settings.capture_max_mib = cap
-      Settings.http2 = @values[8]
-      Settings.strip_alt_svc = @values[9] == "on"
+      Settings.http2 = @values[10]
+      Settings.strip_alt_svc = @values[11] == "on"
       Settings.tls_passthrough = passthrough
       @values = network_values
       persist
@@ -863,17 +948,25 @@ module Gori::Tui
         screen.text(rect.x + 2 + label_w + 1, ry, "›", focused ? Theme.accent : Theme.muted, bg)
         vx = rect.x + 2 + label_w + 3
         vw = {rect.right - vx, 1}.max
-        render_field_value(screen, field, @values[i], vx, ry, vw, focused, bg)
+        render_field_value(screen, field, @values[i], vx, ry, vw, focused, bg,
+          disabled: disabled_field?(i))
       end
     end
 
     # The value column of one field: a choice cycle, a bool toggle, the editable line
     # (focused), the hint (empty + unfocused), or the plain value.
     private def render_field_value(screen : Screen, field : Field, value : String,
-                                   vx : Int32, ry : Int32, vw : Int32, focused : Bool, bg : Color) : Nil
-      if field.opener # an action row: show its summary (display-only), accent to signal ↵ opens it
+                                   vx : Int32, ry : Int32, vw : Int32, focused : Bool, bg : Color,
+                                   *, disabled : Bool = false) : Nil
+      if disabled
+        screen.text(vx, ry, "—", Theme.muted, bg, width: vw)
+      elsif field.opener # an action row: show its summary (display-only), accent to signal ↵ opens it
         screen.text(vx, ry, value, focused ? Theme.text_bright : Theme.accent, bg, width: vw)
       elsif choices = field.choices
+        unless choices.includes?(value)
+          screen.text(vx, ry, value, Theme.yellow, bg, width: vw)
+          return
+        end
         # List the options left-to-right; the active one is emphasised (◉ + bright).
         cx = vx
         left = vw

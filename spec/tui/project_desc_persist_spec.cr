@@ -85,9 +85,9 @@ describe Gori::Tui::NotesView do
   end
 end
 
-# The contract the Project SETTINGS pane's fix rests on. `Runner#set_or_clear` now returns this
-# Bool and `apply_project_network` refuses to say "saved" when any of its six fields answers
-# false — that pane cannot be driven without a live Session, so the seam it depends on is pinned
+# The contract the Project SETTINGS pane's persistence report rests on. Store setting writes
+# return this Bool, and `apply_project_network` refuses to say "saved" when any field answers
+# false. That pane cannot be driven without a live Session, so the seam it depends on is pinned
 # here instead.
 describe "per-project setting writes report whether they committed" do
   it "answers false for both store calls once the project can no longer be written" do

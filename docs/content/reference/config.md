@@ -43,7 +43,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
-| `upstream_proxy` | string | `""` | Global default upstream (`host:port`); empty = direct. Project `net.upstream_proxy` wins when set |
+| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`); if none is found, HTTPS verification fails — set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
 | `serve_landing` | bool | `true` | Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host `http://gori.proxy/` (or `http://gori/`) for a client already pointed at the proxy |
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
@@ -228,7 +228,11 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 ### upstream_rules
 
-Per-destination upstream routing. `network.upstream_proxy` is a single address for *everything*; a rule table can say "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and reach a SOCKS proxy.
+`network.upstream_proxy` is the catch-all route. Bare `host:port`, `http://…` (and the legacy `https://…` spelling) use an HTTP CONNECT proxy. `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both default to port 1080. URI credentials are refused—configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
+
+All networking owned by gori uses this routing decision, including capture/replay/scan engines, the updater, and OAST provider traffic. A configured proxy that is malformed, unreachable, or refuses a tunnel fails closed; gori does not retry the destination directly. A blank project pin and a matching `direct` rule remain explicit operator exceptions.
+
+Per-destination upstream routing can say "route `*.corp.internal` through the internal proxy, everything else direct", carry credentials, and choose different proxies.
 
 Rules are **ordered** and the **first match wins**, so specific rules go above general ones. Edit them with `gori settings --edit`.
 
@@ -243,7 +247,7 @@ Rules are **ordered** and the **first match wins**, so specific rules go above g
       "username": "alice",
       "password_env": "CORP_PROXY_PASS"
     },
-    { "host": "*.onion", "kind": "socks5", "addr": "127.0.0.1:9050" }
+    { "host": "*.onion", "kind": "socks5h", "addr": "127.0.0.1:9050" }
   ]
 }
 ```
@@ -251,14 +255,14 @@ Rules are **ordered** and the **first match wins**, so specific rules go above g
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | Host pattern, same dialect as scope `host` rules: `corp.internal` covers that host and its subdomains, `*.corp.internal` is a glob, `*` is the catch-all. Case-insensitive |
-| `kind` | string | `direct`, `http`, or `socks5`. An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
-| `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http` and `1080` for `socks5`. Must be absent for `direct` |
-| `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http`, or via the RFC 1929 exchange for `socks5` |
+| `kind` | string | `direct`, `http`, `socks5` (local DNS), or `socks5h` (proxy DNS). An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
+| `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http` and `1080` for either SOCKS kind. Must be absent for `direct` |
+| `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http`, or via the RFC 1929 exchange for either SOCKS kind |
 | `password_env` | string | Optional. The **name** of an OS environment variable holding the password |
 
-**Credentials are never stored in `settings.json`.** Only the username and the environment-variable *name* are written; the password is read from the OS environment at dial time, so `export CORP_PROXY_PASS=…` takes effect without a restart. gori's own `env` section is deliberately not used for this — those variables live in `settings.json` in plaintext, which would put the secret in the file by another route and defeat sharing or exporting a config (see [#439](https://github.com/hahwul/gori/issues/439)). A `password_env` containing `$` is rejected: it holds a variable name, not a value.
+**Global-rule passwords are never stored in `settings.json`.** Only the username and the environment-variable *name* are written; the password is read from the OS environment at dial time, so `export CORP_PROXY_PASS=…` takes effect without a restart. gori's own `env` section is deliberately not used for this — those variables live in `settings.json` in plaintext, which would put the secret in the file by another route and defeat sharing or exporting a config (see [#439](https://github.com/hahwul/gori/issues/439)). A `password_env` containing `$` is rejected: it holds a variable name, not a value. Direct credentials entered in Project settings have different storage described under [Per-Project Overrides](#per-project-overrides).
 
-For `socks5`, a hostname target is sent as `ATYP DOMAIN` so the **proxy** resolves it (the `socks5h` behaviour). That is what makes Tor and a jump host into an otherwise unreachable network work; gori does not resolve names on the dial path itself.
+The scalar and rules use the same DNS distinction: `socks5` performs the destination lookup on the gori host, while `socks5h` delegates it to the proxy. Use `socks5h` for Tor, split DNS, or a jump host that can resolve names unavailable locally. A failed local lookup stops before connecting to the proxy and never falls back to a direct origin connection.
 
 Precedence, highest first:
 
@@ -268,6 +272,10 @@ Precedence, highest first:
 | 2 | `upstream_rules`, first host match |
 | 3 | `network.upstream_proxy` — the implicit catch-all |
 | 4 (lowest) | Direct |
+
+For an open project, **Destination host** is evaluated before this table. `*` (the default)
+leaves the precedence above unchanged; a non-matching destination goes direct without falling
+through to a global rule or scalar proxy.
 
 A rule is matched against the **original** hostname, before any [host override](#hostname_overrides) is applied — an override only changes which IP is dialled.
 
@@ -452,7 +460,7 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `capturing` | bool | Whether the proxy is currently capturing |
 | `flows` | integer | Number of captured flows |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
-| `upstream` | string | The **catch-all** upstream proxy `host:port`, or empty when connecting directly. A destination matched by an [upstream rule](#upstream_rules) routes elsewhere — this field does not reflect that |
+| `upstream` | string | The **catch-all** upstream proxy address/URI, or empty when connecting directly. A destination matched by an [upstream rule](#upstream_rules) routes elsewhere — this field does not reflect that |
 | `upstream_rules` | integer | Number of [upstream rules](#upstream_rules) in effect. Non-zero means routing is per-destination and `upstream` alone does not describe where traffic goes |
 
 ### display
@@ -772,13 +780,19 @@ Omitted until you apply or star a wordlist.
 
 ## Per-Project Overrides
 
-A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **PROJECT SETTINGS** sub-tab.
+A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab.
+
+**Destination host** limits proxy routing to one case-insensitive host pattern. `*` is the default and makes every destination eligible; `example.com` covers that host and its subdomains, while `*.example.com` covers subdomains only. Domain, IPv4, IPv6, and `*`-based IP patterns are accepted. A non-match always goes direct and does not fall through to `upstream_rules` or `network.upstream_proxy`. This gate applies to every gori-owned dial while the project is active, including capture, replay, scanners, the updater, and OAST traffic.
+
+To authenticate, choose a **Proxy protocol**, enter the **Proxy host** and **Proxy port**, turn **Proxy auth** on, then enter **Username** and **Password**. **SOCKS5** resolves destination names locally; **SOCKS5H** resolves them at the proxy. HTTP uses Basic authentication, while either SOCKS protocol uses RFC 1929 username/password authentication. NTLM is not supported. Turning authentication on always pins the displayed upstream address to the project—even when it was inherited from the global setting—so the credentials cannot later follow a changed global route or a destination rule.
+
+The password is visible while the **Password** row is focused for editing and masked again when focus leaves. It is stored as plaintext inside the project's owner-only (`0600`) SQLite database, alongside captured engagement data that may already contain credentials. Use a global `upstream_rules` entry with `password_env` instead when the secret must not be stored in a project. For a matching destination, a malformed or orphaned project auth value fails closed before an origin connection.
 
 The timeout and capture-limit keys are engagement properties rather than machine ones: a slow internal appliance needs its own idle timeout, and one target returning very large responses needs its own capture cap — raising either globally would tax every other project.
 
-**Which surfaces apply which keys.** The two bind keys only mean something where gori opens a listening socket; the other four apply wherever gori dials out or stores a body.
+**Which surfaces apply which keys.** The two bind keys only mean something where gori opens a listening socket; all other keys, including proxy authentication, apply wherever gori dials out or stores a body.
 
-| Surface | `bind_host` / `bind_port` | `upstream_proxy` / `connect_timeout_secs` / `io_timeout_secs` / `capture_max_mib` |
+| Surface | `bind_host` / `bind_port` | upstream / destination / auth / timeouts / capture limit |
 |---------|---------------------------|-----------------------------------------------------------------------------------|
 | TUI (`gori`) | applied — the proxy listens on the pinned address | applied |
 | `gori run capture` | applied — the one headless subcommand that listens (the pin wins over `--listen`/`--port`) | applied |
@@ -789,12 +803,12 @@ The timeout and capture-limit keys are engagement properties rather than machine
 
 | Priority | Source |
 |----------|--------|
-| 1 (highest) | Project DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.connect_timeout_secs` / `net.io_timeout_secs` / `net.capture_max_mib` when set |
+| 1 (highest) | Project DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.upstream_destination_host` / `net.upstream_auth` / timeouts / capture limit when set |
 | 2 | CLI `--listen` / `--port` (process-only override of the global layer) |
 | 3 | `settings.json` `network.*` |
 | 4 (lowest) | Factory defaults `127.0.0.1:8070` / direct |
 
-Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate.
+Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate. **Destination host** has no global counterpart; saving its default `*` deletes its project key.
 
 ## Projects & Database
 

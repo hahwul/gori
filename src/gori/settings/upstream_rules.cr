@@ -1,4 +1,5 @@
 require "json"
+require "uri"
 require "../host_pattern"
 
 # UPSTREAM RULES section (settings:network → Upstream rules): per-destination upstream
@@ -8,11 +9,12 @@ require "../host_pattern"
 #
 # WHY a table: one global proxy address cannot say "route *.corp.internal through the
 # internal proxy, everything else direct", cannot carry credentials (so gori was unusable
-# behind an authenticating proxy at all), and cannot reach a SOCKS proxy.
+# behind an authenticating proxy at all), and can choose different proxies per destination.
 module Gori::Settings
   # The transports a rule can route through. "direct" is a real, useful rule: it is how an
   # exception is carved out of a broader proxy rule below it in the table.
-  UPSTREAM_KINDS = ["direct", "http", "socks5"]
+  UPSTREAM_KINDS     = ["direct", "http", "socks5", "socks5h"]
+  UPSTREAM_PROTOCOLS = ["none", "http", "socks5", "socks5h"]
 
   # One routing rule. `host` is a HostPattern (see Gori::HostPattern) — the same dialect as
   # scope host rules, with "*" as the catch-all. Rules are ORDERED and the FIRST match wins,
@@ -35,7 +37,11 @@ module Gori::Settings
     end
 
     def socks5? : Bool
-      kind == "socks5"
+      kind == "socks5" || kind == "socks5h"
+    end
+
+    def remote_dns? : Bool
+      kind == "socks5h"
     end
 
     # The password, read from the OS environment at DIAL time (not at load), so exporting a
@@ -74,19 +80,33 @@ module Gori::Settings
     port : Int32 = 0,
     username : String = "",
     password : String? = nil,
-    credential_error : String? = nil do
+    credential_error : String? = nil,
+    configuration_error : String? = nil do
     def direct? : Bool
       kind == "direct"
     end
 
     def socks5? : Bool
-      kind == "socks5"
+      kind == "socks5" || kind == "socks5h"
+    end
+
+    def remote_dns? : Bool
+      kind == "socks5h"
+    end
+
+    def invalid? : Bool
+      !configuration_error.nil?
     end
 
     DIRECT = new("direct")
   end
 
   @@upstream_rules : Array(UpstreamRule) = [] of UpstreamRule
+  # Load-time shape errors cannot be represented by UpstreamRule without inventing a host or
+  # transport. Keep them beside the parsed table and turn them into an invalid route before a
+  # socket is opened. A hand-edited proxy declaration must never disappear into DIRECT.
+  @@upstream_rules_load_error : String? = nil
+  @@upstream_proxy_load_error : String? = nil
   # Patterns compiled once per assignment, paired with their rule — the proxy resolves a route
   # per dial, so the glob/suffix decision must not be re-derived there.
   @@upstream_rules_compiled : Array({HostPattern::Compiled, UpstreamRule}) = [] of {HostPattern::Compiled, UpstreamRule}
@@ -98,6 +118,16 @@ module Gori::Settings
   def self.upstream_rules=(rules : Array(UpstreamRule)) : Array(UpstreamRule)
     @@upstream_rules = rules
     @@upstream_rules_compiled = rules.map { |r| {HostPattern::Compiled.new(r.host), r} }
+    # A malformed host pattern never matches, so without retaining its error the route lookup
+    # would skip the rule and fall through to the scalar/direct path. Validate on assignment as
+    # well as persisted load: tests and settings editors install arrays through this setter.
+    @@upstream_rules_load_error = nil
+    rules.each do |rule|
+      if err = upstream_rule_host_error(rule.host)
+        @@upstream_rules_load_error = err
+        break
+      end
+    end
     rules
   end
 
@@ -111,70 +141,272 @@ module Gori::Settings
 
   # How to reach `dest_host`. Precedence, highest first:
   #
+  #   0. the PROJECT destination gate — a non-match is explicitly direct;
   #   1. the PROJECT upstream override (net.upstream_proxy) — an explicit per-project pin,
   #      unchanged from before rules existed, so an upgrade can't reroute a pinned project;
   #   2. the rule table (first host match);
   #   3. the global `network.upstream_proxy` scalar — the implicit catch-all;
   #   4. direct.
   #
-  # A project override deliberately bypasses the table wholesale: "this project goes through
-  # this proxy, period". Per-project RULES are a separate change (#440).
+  # A project override deliberately bypasses the table wholesale. Its Destination host gate
+  # is orthogonal: `*` keeps "this project goes through this proxy, period", while a narrower
+  # pattern makes every non-match direct before the table/scalar can claim it.
   def self.upstream_route(dest_host : String) : UpstreamRoute
+    destination_match, destination_error = project_upstream_destination_match(dest_host)
+    if destination_error
+      return invalid_upstream_route("#{destination_error} — the destination proxy filter is invalid")
+    end
+    return UpstreamRoute::DIRECT unless destination_match
+
     if pinned = project_upstream_proxy
       # An explicit project "" means direct and must beat a non-blank global (the same
       # nil-vs-empty distinction effective_upstream_proxy relies on).
-      return UpstreamRoute::DIRECT if pinned.strip.empty?
-      return http_route(pinned) || UpstreamRoute::DIRECT
+      return project_upstream_route(pinned)
+    end
+    if err = project_upstream_auth_error
+      return invalid_upstream_route(err)
+    end
+    if project_upstream_auth
+      return invalid_upstream_route(
+        "project proxy authentication has no project upstream proxy"
+      )
+    end
+    if err = @@upstream_rules_load_error
+      return invalid_upstream_route(err)
     end
     if rule = upstream_rule_for(dest_host)
       return rule_route(rule)
     end
-    http_route(upstream_proxy) || UpstreamRoute::DIRECT
+    if err = @@upstream_proxy_load_error
+      return invalid_upstream_route(err)
+    end
+    parse_upstream_proxy(upstream_proxy)
   end
 
-  # A rule turned into a route. An unparseable/blank addr degrades to DIRECT rather than
-  # failing every dial for the host: the save-time validator rejects such a rule, so reaching
-  # here means a hand-edited file, and refusing to connect at all would be a worse outcome
-  # than ignoring one bad line (which the log records via upstream_rule_error at load).
+  # A rule turned into a route. Save-time validation catches these errors in the normal path;
+  # a hand-edited file can still reach here, and must fail closed rather than silently sending
+  # the destination direct.
   private def self.rule_route(rule : UpstreamRule) : UpstreamRoute
+    if err = upstream_rule_error(rule)
+      return invalid_upstream_route(err)
+    end
     return UpstreamRoute::DIRECT if rule.direct?
     addr = proxy_addr(rule.addr, default_port: rule.socks5? ? DEFAULT_SOCKS_PORT : DEFAULT_HTTP_PROXY_PORT)
-    return UpstreamRoute::DIRECT unless addr
+    return invalid_upstream_route("settings: invalid #{rule.kind} upstream proxy #{rule.addr.inspect}") unless addr
     UpstreamRoute.new(rule.kind, addr[0], addr[1], rule.username, rule.password, rule.credential_error)
   end
 
-  # An "host:port" string as an unauthenticated HTTP-proxy route, or nil when blank/unparseable.
-  private def self.http_route(value : String) : UpstreamRoute?
-    addr = proxy_addr(value, default_port: DEFAULT_HTTP_PROXY_PORT)
-    addr ? UpstreamRoute.new("http", addr[0], addr[1]) : nil
+  # The scalar/project upstream grammar follows the conventional SOCKS URI distinction:
+  # `socks5` resolves destination names locally; `socks5h` sends them to the proxy as
+  # ATYP DOMAIN. Keeping the kind here lets the dialer make that decision once.
+  # `https://` keeps its historical meaning (a plaintext HTTP CONNECT proxy) for compatibility;
+  # TLS-to-proxy is not implemented.
+  def self.parse_upstream_proxy(value : String) : UpstreamRoute
+    raw = value.strip
+    return UpstreamRoute::DIRECT if raw.empty?
+    return legacy_upstream_route(raw, value) unless raw.includes?("://")
+    uri_upstream_route(URI.parse(raw), raw, value)
+  rescue URI::Error | ArgumentError | OverflowError
+    invalid_upstream_route("settings: invalid upstream proxy #{value.inspect}")
   end
 
-  # Tolerant parse: entries missing host/kind are dropped, an unknown kind is dropped (rather
-  # than silently treated as "direct", which would quietly disable an intended proxy), and a
-  # non-array node keeps the current value. Mirrors parse_oast_providers' robustness.
-  private def self.parse_upstream_rules(node : JSON::Any?) : Array(UpstreamRule)
-    arr = node.try(&.as_a?)
-    return upstream_rules unless arr
+  private def self.legacy_upstream_route(raw : String, original : String) : UpstreamRoute
+    addr = proxy_addr(raw, default_port: DEFAULT_HTTP_PROXY_PORT)
+    return UpstreamRoute.new("http", addr[0], addr[1]) if addr
+    invalid_upstream_route("settings: invalid upstream proxy #{original.inspect}")
+  end
+
+  private def self.uri_upstream_route(uri : URI, raw : String,
+                                      original : String) : UpstreamRoute
+    route_kind = upstream_route_kind(uri.scheme.try(&.downcase) || "")
+    return route_kind if route_kind.is_a?(UpstreamRoute)
+    kind, default_port = route_kind
+    if uri.user || uri.password
+      return invalid_upstream_route(
+        "settings: upstream proxy URI credentials are not stored here; use an upstream rule with username + password_env"
+      )
+    end
+    unless uri.query.nil? && uri.fragment.nil? && (uri.path.empty? || uri.path == "/")
+      return invalid_upstream_route("settings: upstream proxy must be an authority without a path, query, or fragment")
+    end
+    authority_route(raw, original, kind, default_port)
+  end
+
+  private def self.upstream_route_kind(scheme : String) : {String, Int32} | UpstreamRoute
+    case scheme
+    when "http", "https" then {"http", DEFAULT_HTTP_PROXY_PORT}
+    when "socks5"        then {"socks5", DEFAULT_SOCKS_PORT}
+    when "socks5h"       then {"socks5h", DEFAULT_SOCKS_PORT}
+    else
+      invalid_upstream_route(
+        "settings: unsupported upstream proxy scheme #{scheme.inspect}; use http, socks5, or socks5h"
+      )
+    end
+  end
+
+  private def self.authority_route(raw : String, original : String, kind : String,
+                                   default_port : Int32) : UpstreamRoute
+    authority = raw[(raw.index!("://") + 3)..]
+    authority = authority[...-1] if authority.ends_with?('/')
+    addr = proxy_addr(authority, default_port: default_port)
+    return UpstreamRoute.new(kind, addr[0], addr[1]) if addr
+    invalid_upstream_route("settings: invalid upstream proxy #{original.inspect}")
+  end
+
+  def self.upstream_proxy_error(value : String) : String?
+    parse_upstream_proxy(value).configuration_error
+  end
+
+  # Validate the single project Destination host pattern. This intentionally uses the shared
+  # HostPattern `*` dialect but accepts only host-shaped input: a URL/port can never match the
+  # bare destination name Upstream passes to #upstream_route. IPv6 may be bare or bracketed;
+  # wildcard labels support domain and IPv4 patterns such as `*.corp.test` / `10.*`.
+  def self.upstream_destination_error(value : String) : String?
+    pattern = value.strip
+    return "settings: destination host is required (use * for all traffic)" if pattern.empty?
+    return "settings: destination host must not include a scheme" if pattern.includes?("://")
+    return "settings: destination host must not include a path" if pattern.includes?('/')
+
+    literal, literal_error = upstream_destination_literal(pattern)
+    return literal_error if literal
+    return "settings: destination host must not include a :port" if pattern.includes?(':')
+    return nil if pattern == "*"
+
+    return nil if upstream_destination_pattern?(pattern)
+    "settings: invalid destination host pattern #{pattern.inspect}"
+  end
+
+  # `{handled, error}` distinguishes "not an IP literal" from "a valid literal" (both have no
+  # error). A bracket declares IPv6 intent, so a malformed bracketed value is handled+invalid
+  # rather than falling through to the hostname wildcard grammar.
+  private def self.upstream_destination_literal(pattern : String) : {Bool, String?}
+    if pattern.starts_with?('[')
+      return {true, nil} if pattern.ends_with?(']') && Socket::IPAddress.valid_v6?(pattern[1...-1])
+      return {true, "settings: invalid destination host #{pattern.inspect}"}
+    end
+    return {true, nil} if Socket::IPAddress.valid_v4?(pattern) || Socket::IPAddress.valid_v6?(pattern)
+    {false, nil}
+  end
+
+  private def self.upstream_destination_pattern?(pattern : String) : Bool
+    pattern.split('.').all? do |label|
+      !label.empty? && label.matches?(/\A[A-Za-z0-9*](?:[A-Za-z0-9*\-]*[A-Za-z0-9*])?\z/)
+    end
+  end
+
+  # The three editable values used by both settings surfaces. nil preserves an invalid raw
+  # declaration as something the UI can show and refuse, rather than laundering it into
+  # direct access merely because it could not be projected into fields.
+  def self.upstream_proxy_fields(value : String) : {String, String, String}?
+    route = parse_upstream_proxy(value)
+    return nil if route.invalid?
+    return {"none", "", ""} if route.direct?
+    {route.kind, route.host, route.port.to_s}
+  end
+
+  # Compose the split UI fields back into the existing scalar storage format. The setting
+  # remains one string for compatibility; this is the single validation seam shared by the
+  # global and project editors. An IPv6 authority is bracketed only at serialization time.
+  def self.build_upstream_proxy(protocol : String, host : String,
+                                port : String) : {String, String?}
+    kind = protocol.strip.downcase
+    return {"", nil} if kind == "none"
+    unless UPSTREAM_PROTOCOLS.includes?(kind)
+      return {"", "settings: proxy protocol must be one of none, http, socks5, socks5h"}
+    end
+    bare = host.strip
+    bare = bare[1...-1] if bare.starts_with?('[') && bare.ends_with?(']')
+    return {"", "settings: proxy host is required"} if bare.empty?
+    parsed_port = port.strip.to_i?
+    unless parsed_port && parsed_port.in?(1..65535)
+      return {"", "settings: proxy port must be between 1 and 65535"}
+    end
+    authority_host = bare.includes?(':') ? "[#{bare}]" : bare
+    value = "#{kind}://#{authority_host}:#{parsed_port}"
+    if err = upstream_proxy_error(value)
+      {"", err}
+    else
+      {value, nil}
+    end
+  end
+
+  # Build and validate the credential value the Project Settings card persists. HTTP Basic
+  # and SOCKS5 RFC 1929 are the only methods offered, and the proxy URI chooses between them;
+  # there is no second method selector that can disagree with the actual transport.
+  def self.build_project_proxy_auth(upstream : String, enabled : Bool,
+                                    username : String, password : String) : {ProjectProxyAuth?, String?}
+    return {nil, nil} unless enabled
+    route = parse_upstream_proxy(upstream)
+    if err = route.configuration_error
+      return {nil, err}
+    end
+    if route.direct?
+      return {nil, "project proxy authentication requires an upstream proxy"}
+    end
+    method = route.socks5? ? "socks5" : "basic"
+    auth = ProjectProxyAuth.new(method, username, password)
+    {auth, project_proxy_auth_error(auth, route)}
+  end
+
+  # Apply a scalar node without allowing a present-but-non-string value to disappear into the
+  # previous blank default. Absent means "leave this layer alone", as profile imports require.
+  protected def self.apply_upstream_proxy(node : JSON::Any?) : Nil
+    return unless node
+    if value = node.as_s?
+      self.upstream_proxy = value
+      @@upstream_proxy_load_error = nil
+    else
+      @@upstream_proxy_load_error = "settings: network.upstream_proxy must be a string"
+    end
+  end
+
+  # Apply the rule table and retain any malformed declaration as a global configuration error.
+  # Without a trustworthy host pattern there is no safe destination to scope the refusal to.
+  protected def self.apply_upstream_rules(node : JSON::Any?) : Nil
+    return unless node
+    arr = node.as_a?
+    unless arr
+      @@upstream_rules_load_error = "settings: upstream_rules must be an array"
+      return
+    end
     out = [] of UpstreamRule
-    arr.each do |e|
-      next unless o = e.as_h?
-      host = o["host"]?.try(&.as_s?).try(&.strip)
+    error = nil.as(String?)
+    arr.each_with_index do |e, index|
+      unless o = e.as_h?
+        error ||= "settings: upstream_rules[#{index}] must be an object"
+        next
+      end
+      host = o["host"]?.try(&.as_s?).try(&.strip).try(&.presence)
       kind = o["kind"]?.try(&.as_s?).try(&.strip.downcase)
-      next if host.nil? || host.empty? || kind.nil? || !UPSTREAM_KINDS.includes?(kind)
-      out << UpstreamRule.new(
+      unless host && kind && UPSTREAM_KINDS.includes?(kind)
+        error ||= "settings: upstream_rules[#{index}] needs a host and kind #{UPSTREAM_KINDS.join("/")}"
+        next
+      end
+      rule = UpstreamRule.new(
         host, kind,
         o["addr"]?.try(&.as_s?).try(&.strip) || "",
         o["username"]?.try(&.as_s?) || "",
         o["password_env"]?.try(&.as_s?).try(&.strip) || "",
       )
+      error ||= upstream_rule_error(rule)
+      out << rule
     end
-    out
+    self.upstream_rules = out
+    @@upstream_rules_load_error = error
+  end
+
+  # A fresh disk load means a removed/fixed declaration must release the old refusal. Imports
+  # do not call this, so omitted sections keep their current state.
+  protected def self.reset_upstream_route_errors : Nil
+    @@upstream_rules_load_error = nil
+    @@upstream_proxy_load_error = nil
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Through the
   # SETTER, so the compiled host patterns are dropped with the rules.
   private def self.reset_upstream_rules : Nil
     self.upstream_rules = [] of UpstreamRule
+    @@upstream_proxy_load_error = nil
   end
 
   # Omit when empty so an untouched install never writes "upstream_rules": [].
@@ -196,11 +428,13 @@ module Gori::Settings
   end
 
   # nil if `rule` is usable; an error message otherwise. A non-direct rule needs an address,
-  # and its port must parse — a typo there would otherwise resolve to the default port and
-  # fail every dial for the host, far from the mistake (same reasoning as
-  # upstream_proxy_port_error, which this reuses for the port check).
+  # and its authority must parse — a typo there would otherwise fail every dial for the host,
+  # far from the mistake. Rule addresses remain bare authorities; the kind column owns the
+  # transport, unlike the catch-all scalar whose URI scheme selects it.
   def self.upstream_rule_error(rule : UpstreamRule) : String?
-    return "settings: upstream rule needs a host pattern" if rule.host.strip.empty?
+    if err = upstream_rule_host_error(rule.host)
+      return err
+    end
     return "settings: upstream rule kind must be one of #{UPSTREAM_KINDS.join(", ")}" unless UPSTREAM_KINDS.includes?(rule.kind)
     if rule.direct?
       # A direct rule carrying an address/credentials is a sign the operator meant http/socks5;
@@ -212,7 +446,73 @@ module Gori::Settings
     if err = upstream_proxy_port_error(rule.addr)
       return err
     end
+    default_port = rule.socks5? ? DEFAULT_SOCKS_PORT : DEFAULT_HTTP_PROXY_PORT
+    unless proxy_addr(rule.addr, default_port: default_port)
+      return "settings: invalid #{rule.kind} upstream proxy #{rule.addr.inspect}"
+    end
     return "settings: upstream rule password_env is an environment variable NAME, not a value" if rule.password_env.includes?('$')
+    nil
+  end
+
+  # Upstream rules and the project Destination host use the same host-only pattern dialect.
+  # Reuse that validator so a malformed glob cannot compile as a permanently non-matching rule
+  # and leak its intended destinations through the next routing layer.
+  private def self.upstream_rule_host_error(value : String) : String?
+    pattern = value.strip
+    return "settings: upstream rule needs a host pattern" if pattern.empty?
+    return nil unless upstream_destination_error(pattern)
+    "settings: invalid upstream rule host pattern #{pattern.inspect}"
+  end
+
+  private def self.invalid_upstream_route(message : String) : UpstreamRoute
+    UpstreamRoute.new("invalid", configuration_error: message)
+  end
+
+  private def self.project_upstream_route(value : String) : UpstreamRoute
+    if err = project_upstream_auth_error
+      return invalid_upstream_route(err)
+    end
+    route = parse_upstream_proxy(value)
+    return route if route.invalid?
+    auth = project_upstream_auth
+    return route unless auth
+    if err = project_proxy_auth_error(auth, route)
+      return invalid_upstream_route(err)
+    end
+    UpstreamRoute.new(route.kind, route.host, route.port, auth.username, auth.password)
+  end
+
+  private def self.project_proxy_auth_error(auth : ProjectProxyAuth,
+                                            route : UpstreamRoute) : String?
+    return "project proxy authentication requires an upstream proxy" if route.direct?
+    method_error = project_proxy_auth_method_error(auth, route)
+    return method_error unless method_error.nil?
+    project_proxy_auth_value_error(auth)
+  end
+
+  private def self.project_proxy_auth_method_error(auth : ProjectProxyAuth,
+                                                   route : UpstreamRoute) : String?
+    unless ProjectProxyAuth::METHODS.includes?(auth.method)
+      return "project proxy authentication method must be basic or socks5"
+    end
+    expected = route.socks5? ? "socks5" : "basic"
+    unless auth.method == expected
+      return "project proxy authentication method #{auth.method.inspect} does not match the #{route.kind} proxy"
+    end
+    nil
+  end
+
+  private def self.project_proxy_auth_value_error(auth : ProjectProxyAuth) : String?
+    return "project proxy authentication requires a username" if auth.username.empty?
+    if auth.username.includes?('\r') || auth.username.includes?('\n') ||
+       auth.password.includes?('\r') || auth.password.includes?('\n')
+      return "project proxy credentials cannot contain CR or LF"
+    end
+    if auth.method == "basic"
+      return "HTTP Basic proxy usernames cannot contain ':'" if auth.username.includes?(':')
+    elsif auth.username.bytesize > 255 || auth.password.empty? || auth.password.bytesize > 255
+      return "SOCKS5 proxy username and password must each be 1-255 bytes"
+    end
     nil
   end
 end

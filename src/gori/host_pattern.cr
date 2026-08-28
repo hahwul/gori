@@ -1,8 +1,8 @@
 module Gori
-  # The ONE host-pattern dialect, shared by Scope's `host` rules (Scope::Rule#host_match?)
-  # and the TLS passthrough list (Settings.tls_passthrough). Shared deliberately: a pattern
-  # the operator learned in the scope editor must mean the same thing in the passthrough
-  # field, and two copies of the glob/suffix decision would be two places to drift.
+  # The ONE host-pattern dialect, shared by Scope's `host` rules (Scope::Rule#host_match?),
+  # TLS passthrough, upstream rules and the project's Destination host gate. Shared
+  # deliberately: a pattern the operator learned in one editor must mean the same thing in
+  # another, and copies of the glob/suffix decision would be places to drift.
   #
   #   acme.test    → the host itself AND any subdomain (api.acme.test)
   #   *.acme.test  → a glob (File.match?) — matches subdomains but NOT the bare host
@@ -10,7 +10,7 @@ module Gori
   #
   # Matching is case-insensitive. Patterns are COMPILED once (see Compiled) because both
   # callers evaluate the same patterns repeatedly on the proxy hot path — per captured row
-  # for scope, per CONNECT for passthrough.
+  # for scope and per destination dial for routing/passthrough.
   module HostPattern
     # "[::1]" → "::1". Host matching compares bare forms so an IPv6 pattern matches whether
     # the host arrived bracketed (some URL paths) or bare (the CONNECT/tunnel path).

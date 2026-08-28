@@ -4715,7 +4715,7 @@ describe "MCP get_current_context" do
 end
 
 # #538 — the MCP server is the third caller of Settings.load_project_network. It never opens
-# a listening socket (OAST polls a remote collector), so it binds the four outbound/capture
+# a listening socket (OAST polls a remote collector), so it binds the outbound/capture
 # keys and none of the bind pair.
 describe "MCP per-project network overrides" do
   it "installs the project's upstream/timeouts/capture cap at bind time, and no bind address" do
@@ -4723,6 +4723,9 @@ describe "MCP per-project network overrides" do
       store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
       store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
       store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+      store.set_setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*.example.com")
+      store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY,
+        Gori::Settings::ProjectProxyAuth.new("basic", "agent", "secret").to_json)
       store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
       store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
       store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
@@ -4730,18 +4733,25 @@ describe "MCP per-project network overrides" do
       Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 
       Gori::Settings.project_upstream_proxy.should eq("jump:8888")
+      Gori::Settings.project_upstream_destination.should eq("*.example.com")
       Gori::Settings.project_connect_timeout_secs.should eq(7)
       Gori::Settings.project_io_timeout_secs.should eq(9)
       Gori::Settings.project_capture_max_mib.should eq(16)
       # The dial decision Upstream.dial consults — the actual defect in #538 was `send_request`
       # and `fuzz_start` reaching a pinned project's targets DIRECT.
       route = Gori::Settings.upstream_route("example.com")
+      route.direct?.should be_true
+      route = Gori::Settings.upstream_route("api.example.com")
       {route.kind, route.host, route.port}.should eq({"http", "jump", 8888})
+      {route.username, route.password}.should eq({"agent", "secret"})
       # Nothing on this surface listens, so the bind pin must not be installed.
       Gori::Settings.project_bind_host.should be_nil
       Gori::Settings.project_bind_port.should be_nil
     ensure
       Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.project_upstream_destination = nil
+      Gori::Settings.project_upstream_auth = nil
+      Gori::Settings.project_upstream_auth_error = nil
       Gori::Settings.project_connect_timeout_secs = nil
       Gori::Settings.project_io_timeout_secs = nil
       Gori::Settings.project_capture_max_mib = nil
@@ -4751,14 +4761,21 @@ describe "MCP per-project network overrides" do
   it "clears a previous project's pins when it binds an unpinned project" do
     with_store do |store|
       Gori::Settings.project_upstream_proxy = "stale:8888"
+      Gori::Settings.project_upstream_destination = "stale.test"
+      Gori::Settings.project_upstream_auth = Gori::Settings::ProjectProxyAuth.new("basic", "stale", "old")
       Gori::Settings.project_capture_max_mib = 64
 
       Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 
       Gori::Settings.project_upstream_proxy.should be_nil
+      Gori::Settings.project_upstream_destination.should be_nil
+      Gori::Settings.project_upstream_auth.should be_nil
       Gori::Settings.project_capture_max_mib.should be_nil
     ensure
       Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.project_upstream_destination = nil
+      Gori::Settings.project_upstream_auth = nil
+      Gori::Settings.project_upstream_auth_error = nil
       Gori::Settings.project_capture_max_mib = nil
     end
   end

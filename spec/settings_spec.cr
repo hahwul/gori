@@ -5,6 +5,9 @@ private def reset_net
   Gori::Settings.project_bind_host = nil
   Gori::Settings.project_bind_port = nil
   Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.project_upstream_destination = nil
+  Gori::Settings.project_upstream_auth = nil
+  Gori::Settings.project_upstream_auth_error = nil
   Gori::Settings.project_connect_timeout_secs = nil
   Gori::Settings.project_io_timeout_secs = nil
   Gori::Settings.project_capture_max_mib = nil
@@ -121,6 +124,69 @@ describe Gori::Settings do
       route = Gori::Settings.upstream_route("example.com")
       {route.host, route.port}.should eq({"2001:db8::1", 3128})
     ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+
+    it "keeps the SOCKS5 local-DNS and SOCKS5H proxy-DNS kinds distinct" do
+      Gori::Settings.upstream_proxy = "socks5://proxy.local"
+      route = Gori::Settings.upstream_route("not-locally-resolvable.test")
+      {route.kind, route.host, route.port}.should eq({"socks5", "proxy.local", 1080})
+
+      Gori::Settings.upstream_proxy = "socks5h://[::1]:9050/"
+      route = Gori::Settings.upstream_route("not-locally-resolvable.test")
+      {route.kind, route.host, route.port}.should eq({"socks5h", "::1", 9050})
+      route.remote_dns?.should be_true
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+
+    it "projects and composes the split proxy fields without changing storage shape" do
+      Gori::Settings.upstream_proxy_fields("proxy.local").should eq({"http", "proxy.local", "8080"})
+      Gori::Settings.upstream_proxy_fields("socks5h://[::1]:9050").should eq({"socks5h", "::1", "9050"})
+      Gori::Settings.upstream_proxy_fields("").should eq({"none", "", ""})
+      Gori::Settings.upstream_proxy_fields("socks4://bad").should be_nil
+
+      Gori::Settings.build_upstream_proxy("http", "proxy.local", "3128").should eq(
+        {"http://proxy.local:3128", nil})
+      Gori::Settings.build_upstream_proxy("socks5h", "2001:db8::1", "1080").should eq(
+        {"socks5h://[2001:db8::1]:1080", nil})
+      Gori::Settings.build_upstream_proxy("none", "ignored", "9999").should eq({"", nil})
+      Gori::Settings.build_upstream_proxy("socks5", "", "1080")[1].to_s.should contain("host is required")
+      Gori::Settings.build_upstream_proxy("http", "proxy.local", "0")[1].to_s.should contain("between 1 and 65535")
+    end
+
+    it "marks malformed non-blank proxy declarations invalid instead of direct" do
+      ["socks4://proxy.test:1080", "socks5://user:pass@proxy.test", "socks5://proxy.test/path",
+       "socks5://proxy.test:", "proxy.test:8O80"].each do |value|
+        Gori::Settings.upstream_proxy = value
+        route = Gori::Settings.upstream_route("example.com")
+        route.invalid?.should be_true
+        route.direct?.should be_false
+        route.configuration_error.should_not be_nil
+      end
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+  end
+
+  it "retains a malformed persisted upstream-rule host as a fail-closed load error" do
+    dir = File.tempname("gori-settings-upstream-host")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path,
+        %({"upstream_rules":[{"host":"[","kind":"http","addr":"proxy.test:8080"}]}))
+      Gori::Settings.load
+
+      route = Gori::Settings.upstream_route("origin.test")
+      route.invalid?.should be_true
+      route.direct?.should be_false
+      route.configuration_error.to_s.should contain("invalid upstream rule host pattern")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
       Gori::Settings.upstream_proxy = ""
     end
   end
@@ -1881,11 +1947,16 @@ describe Gori::Settings do
         Gori::Settings.project_bind_host = "10.9.9.9"
         Gori::Settings.project_bind_port = 9100
         Gori::Settings.project_upstream_proxy = "corp:8888"
+        Gori::Settings.project_upstream_destination = "*.project-only.test"
+        Gori::Settings.project_upstream_auth =
+          Gori::Settings::ProjectProxyAuth.new("basic", "alice", "project-only-secret")
         Gori::Settings.save.should be_true
         raw = File.read(Gori::Settings.path)
         raw.includes?("10.9.9.9").should be_false
         raw.includes?("9100").should be_false
         raw.includes?("corp:8888").should be_false
+        raw.includes?("project-only.test").should be_false
+        raw.includes?("project-only-secret").should be_false
       ensure
         prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
         FileUtils.rm_rf(dir)
@@ -1911,12 +1982,15 @@ describe Gori::Settings do
   # #538 — the ONE loader every surface that opens a project store calls. Session.open passes
   # bind: true (it listens), CLI::Run.open_store and the MCP bind path pass bind: false.
   describe ".load_project_network" do
-    it "installs all six keys with bind: true" do
+    it "installs every key with bind: true, including the destination and proxy credentials" do
       with_net_store do |store|
         reset_net
+        auth = Gori::Settings::ProjectProxyAuth.new("basic", "alice", "s3cret")
         store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
         store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
         store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*.example.com")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, auth.to_json)
         store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
         store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
         store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
@@ -1926,12 +2000,16 @@ describe Gori::Settings do
         Gori::Settings.effective_bind_host.should eq("0.0.0.0")
         Gori::Settings.effective_bind_port.should eq(9100)
         Gori::Settings.effective_upstream_proxy.should eq("jump:8888")
+        Gori::Settings.effective_project_upstream_destination.should eq("*.example.com")
         Gori::Settings.effective_connect_timeout_secs.should eq(7)
         Gori::Settings.effective_io_timeout_secs.should eq(9)
         Gori::Settings.effective_capture_max_mib.should eq(16)
         # The routing decision Upstream.dial actually consults, not just the scalar.
         route = Gori::Settings.upstream_route("example.com")
+        route.direct?.should be_true
+        route = Gori::Settings.upstream_route("api.example.com")
         {route.kind, route.host, route.port}.should eq({"http", "jump", 8888})
+        {route.username, route.password}.should eq({"alice", "s3cret"})
       ensure
         reset_net
       end
@@ -1940,12 +2018,14 @@ describe Gori::Settings do
     # The whole point of the named flag: a headless command that never opens a socket must
     # not end up holding a bind address, because effective_bind_* is also read for display
     # and for the listeners duplicate check.
-    it "with bind: false applies the four outbound/capture keys and CLEARS the two bind keys" do
+    it "with bind: false applies the outbound/capture keys and CLEARS the two bind keys" do
       with_net_store do |store|
         reset_net
+        auth = Gori::Settings::ProjectProxyAuth.new("basic", "alice", "s3cret")
         store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
         store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "9100")
         store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, auth.to_json)
         store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
         store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "9")
         store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
@@ -1960,6 +2040,8 @@ describe Gori::Settings do
         Gori::Settings.effective_bind_host.should eq("127.0.0.1") # the global
         Gori::Settings.effective_bind_port.should eq(8070)
         Gori::Settings.effective_upstream_proxy.should eq("jump:8888")
+        route = Gori::Settings.upstream_route("example.com")
+        {route.username, route.password}.should eq({"alice", "s3cret"})
         Gori::Settings.effective_connect_timeout_secs.should eq(7)
         Gori::Settings.effective_io_timeout_secs.should eq(9)
         Gori::Settings.effective_capture_max_mib.should eq(16)
@@ -1976,12 +2058,18 @@ describe Gori::Settings do
         Gori::Settings.upstream_proxy = "glob:3128"
         # Whatever the previously-bound project left behind.
         Gori::Settings.project_upstream_proxy = "stale:8888"
+        Gori::Settings.project_upstream_destination = "stale.test"
+        Gori::Settings.project_upstream_auth = Gori::Settings::ProjectProxyAuth.new("basic", "stale", "old")
         Gori::Settings.project_connect_timeout_secs = 7
         Gori::Settings.project_capture_max_mib = 16
 
         Gori::Settings.load_project_network(store, bind: true)
 
         Gori::Settings.project_upstream_proxy.should be_nil
+        Gori::Settings.project_upstream_destination.should be_nil
+        Gori::Settings.effective_project_upstream_destination.should eq("*")
+        Gori::Settings.project_upstream_auth.should be_nil
+        Gori::Settings.project_upstream_auth_error.should be_nil
         Gori::Settings.project_connect_timeout_secs.should be_nil
         Gori::Settings.project_capture_max_mib.should be_nil
         Gori::Settings.effective_upstream_proxy.should eq("glob:3128")
@@ -2018,6 +2106,111 @@ describe Gori::Settings do
         Gori::Settings.load_project_network(store, bind: true)
         Gori::Settings.effective_upstream_proxy.should eq("")
         Gori::Settings.upstream_route("example.com").direct?.should be_true
+      ensure
+        reset_net
+      end
+    end
+
+    it "fails closed on malformed or orphaned project proxy authentication" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, %({"method":"basic","username":"alice"}))
+        Gori::Settings.load_project_network(store, bind: true)
+
+        route = Gori::Settings.upstream_route("example.com")
+        route.invalid?.should be_true
+        route.configuration_error.to_s.should contain("malformed")
+
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY,
+          Gori::Settings::ProjectProxyAuth.new("basic", "alice", "secret").to_json)
+        Gori::Settings.load_project_network(store, bind: true)
+        route = Gori::Settings.upstream_route("example.com")
+        route.invalid?.should be_true
+        route.configuration_error.to_s.should contain("no project upstream proxy")
+
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "socks5://proxy.test:1080")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY,
+          Gori::Settings::ProjectProxyAuth.new("basic", "alice", "secret").to_json)
+        Gori::Settings.load_project_network(store, bind: true)
+        route = Gori::Settings.upstream_route("example.com")
+        route.invalid?.should be_true
+        route.configuration_error.to_s.should contain("does not match the socks5 proxy")
+      ensure
+        reset_net
+      end
+    end
+  end
+
+  describe ".build_project_proxy_auth" do
+    it "chooses Basic for HTTP and RFC 1929 for SOCKS5" do
+      basic, basic_error = Gori::Settings.build_project_proxy_auth("http://proxy.test:8080", true, "alice", "secret")
+      basic_error.should be_nil
+      basic.try(&.method).should eq("basic")
+
+      socks, socks_error = Gori::Settings.build_project_proxy_auth("socks5h://proxy.test:1080", true, "bob", "pass")
+      socks_error.should be_nil
+      socks.try(&.method).should eq("socks5")
+    end
+
+    it "rejects credentials that cannot be encoded safely" do
+      _, error = Gori::Settings.build_project_proxy_auth("proxy.test:8080", true, "a:b", "secret")
+      error.to_s.should contain("cannot contain ':'")
+
+      _, error = Gori::Settings.build_project_proxy_auth("socks5://proxy.test", true, "bob", "")
+      error.to_s.should contain("1-255 bytes")
+    end
+
+    it "redacts the password from string and inspection output" do
+      auth = Gori::Settings::ProjectProxyAuth.new("basic", "alice", "do-not-print")
+      auth.to_s.should_not contain("do-not-print")
+      auth.inspect.should_not contain("do-not-print")
+      auth.to_json.should contain("do-not-print")
+    end
+  end
+
+  describe ".upstream_destination_error" do
+    it "accepts the shared host wildcard dialect and IP literals" do
+      ["*", "example.com", "*.example.com", "10.*", "127.0.0.1", "::1", "[::1]"].each do |value|
+        Gori::Settings.upstream_destination_error(value).should be_nil
+      end
+    end
+
+    it "rejects values that cannot match a bare destination host" do
+      ["", "https://example.com", "example.com/path", "example.com:443", "bad host", "[::1]:443"].each do |value|
+        Gori::Settings.upstream_destination_error(value).should_not be_nil
+      end
+    end
+  end
+
+  describe ".save_project_network" do
+    it "pins an inherited proxy when saving auth and removes both pins when auth is disabled" do
+      with_net_store do |store|
+        reset_net
+        Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+        auth = Gori::Settings::ProjectProxyAuth.new("basic", "alice", "secret")
+        config = Gori::Settings::ProjectNetworkConfig.new(
+          "127.0.0.1", 8070, "http://proxy.test:8080", auth, 30, 30, 2, "*.example.test"
+        )
+
+        Gori::Settings.save_project_network(store, config).should be_true
+        # Equal-to-global normally deletes a project row. Auth is the exception: its address
+        # must remain pinned so a later global edit cannot move the credential.
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should eq("http://proxy.test:8080")
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY).should eq("*.example.test")
+        stored = store.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).not_nil!
+        stored.should contain("secret")
+        Gori::Settings.project_upstream_proxy.should eq("http://proxy.test:8080")
+        Gori::Settings.upstream_route("example.test").direct?.should be_true
+        Gori::Settings.upstream_route("api.example.test").username.should eq("alice")
+
+        without_auth = config.copy_with(auth: nil, destination_host: "*")
+        Gori::Settings.save_project_network(store, without_auth).should be_true
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should be_nil
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).should be_nil
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY).should be_nil
+        Gori::Settings.project_upstream_proxy.should be_nil
+        Gori::Settings.project_upstream_destination.should be_nil
+        Gori::Settings.project_upstream_auth.should be_nil
       ensure
         reset_net
       end
