@@ -120,4 +120,52 @@ class Gori::Tui::RepeaterView
   def target_copy_text : String
     @target_read.copy_text(target_active_line, target_active_cx)
   end
+
+  # --- per-send TLS fingerprint (#844) --------------------------------------------------
+  #
+  # The cycle order: no override, then the presets in `Settings::TLS_PRESETS` order. `nil`
+  # leads because it is the default and the way back — a tab that has been cycled all the way
+  # round is where it started, and there is no separate "clear" key to find.
+
+  # The fingerprint this tab sends with, or nil for the destination's own policy.
+  def tls_preset : String?
+    @tls_preset
+  end
+
+  # Is this tab's fingerprint override actually going to shape a ClientHello? An http:// target
+  # has no handshake to shape, so the value sits there inert.
+  #
+  # Deliberately NOT a silent reset of `@tls_preset` when the target is plaintext — the
+  # operator set it, it is persisted, and retargeting back to https:// must bring it back
+  # (P4). The chip goes muted instead, which says "set, and doing nothing" rather than
+  # discarding the choice or claiming it applies.
+  def tls_preset_live? : Bool
+    return false if @tls_preset.nil?
+    # Parses the target, so it is asked ONLY when an override is set — the chip's label does
+    # not consult it (see `tls_chip_label`), which keeps a `URI.parse` off the ordinary frame.
+    begin
+      parse_target[0] == "https"
+    rescue
+      false
+    end
+  end
+
+  # `␣T`: advance to the next fingerprint. Cycles nil → chrome → firefox → safari → curl → nil,
+  # so every value including "no override" is reachable with one key and nothing has to be
+  # typed — which is also why an unknown preset can never originate here.
+  def cycle_tls_preset : String?
+    names = Settings::TLS_PRESET_NAMES
+    current = @tls_preset
+    @tls_preset =
+      if current.nil?
+        names.first?
+      else
+        idx = names.index(current)
+        # A value this build does not know (a row written by another version) cycles to "none"
+        # rather than to a neighbour it has no position among.
+        idx.nil? ? nil : names[idx + 1]?
+      end
+    @dirty = true
+    @tls_preset
+  end
 end

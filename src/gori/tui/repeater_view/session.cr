@@ -175,6 +175,7 @@ class Gori::Tui::RepeaterView
               ws_messages : Array(Store::WsOutMessage)? = nil,
               ws_keep_key : Bool = false,
               ws_http_only : Bool = false,
+              tls_preset : String? = nil,
               evidence : Bool = false) : Nil
     @flow = nil
     # `@flow` is deliberately cleared on a restore (the FlowDetail is not persisted), so
@@ -187,7 +188,8 @@ class Gori::Tui::RepeaterView
     # can defend — see `markers_live?`. (A marked-up capture reopens with its markers inert
     # and the border chip saying so; ^T re-declares.)
     @markers_declared = false
-    apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only)
+    apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only,
+      tls_preset)
 
     @original_lines = [] of String
     # Rebuild the persisted result: a head (success) or an error (failed send)
@@ -219,11 +221,13 @@ class Gori::Tui::RepeaterView
                          ws_messages : Array(Store::WsOutMessage)? = nil,
                          ws_keep_key : Bool = false,
                          ws_http_only : Bool = false,
+                         tls_preset : String? = nil,
                          evidence : Bool = false) : Nil
     @evidence = evidence
     # A peer's row carries the same two facts a restore does, so the same answer: see restore.
     @markers_declared = false
-    apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only)
+    apply_request_fields(target, request, http2, auto_cl, sni, ws_messages, ws_keep_key, ws_http_only,
+      tls_preset)
     @req_hex_edit = nil
     # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
     reflect_content_length_in_editor if @auto_content_length
@@ -244,12 +248,18 @@ class Gori::Tui::RepeaterView
   # `ws_http_only` is compared for the same reason `ws_keep_key` is: it is a stored,
   # cross-session request-side field, so a peer's `^V` has to converge here. Leaving it out
   # meant the poll saw the row as unchanged and the override never crossed sessions.
+  #
+  # `tls_preset` is compared for the same reason, and normalised the same way SNI is: a row
+  # may hold "" (a peer, an older writer, an MCP clear) where the view holds nil, and without
+  # folding the two together every poll would see the row as changed and re-apply it — which
+  # on this field also means slamming the caret through `apply_request_fields`.
   def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                             sni : String?, ws_keep_key : Bool = false,
-                            ws_http_only : Bool = false) : Bool
+                            ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
     @target == target && request_text == request &&
       @http2 == http2 && @auto_content_length == auto_cl &&
       @ws_keep_key == ws_keep_key && @ws_http_only == ws_http_only &&
+      (@tls_preset || "") == (tls_preset || "") &&
       (sni_override || "") == (sni || "")
   end
 
@@ -258,8 +268,13 @@ class Gori::Tui::RepeaterView
                                    sni : String,
                                    ws_messages : Array(Store::WsOutMessage)?,
                                    ws_keep_key : Bool = false,
-                                   ws_http_only : Bool = false) : Nil
+                                   ws_http_only : Bool = false,
+                                   tls_preset : String? = nil) : Nil
     @ws_keep_key = ws_keep_key
+    # "" is nil here (a row written as empty means "no override"), and the name is folded to
+    # the spelling the dial and the cache key see — so a hand-edited `"Chrome "` and a cycled
+    # `"chrome"` are one policy rather than two SSL contexts.
+    @tls_preset = Settings.tls_preset_normalize(tls_preset)
     @http2 = http2
     @target = target
     @tcx = @target.size
@@ -361,6 +376,7 @@ class Gori::Tui::RepeaterView
     @target_field = :url
     @auto_content_length = src.@auto_content_length
     @ws_keep_key = src.@ws_keep_key
+    @tls_preset = src.@tls_preset # a send knob, so the clone sends the handshake its source would
     @name = SubtabClone.copy_name(src.@name)
 
     @ws_mode = src.@ws_mode

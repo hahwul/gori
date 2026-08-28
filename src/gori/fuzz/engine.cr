@@ -278,17 +278,23 @@ module Gori::Fuzz
     getter ws_notes : Int64 = 0_i64
     getter ws_note_reason : String? = nil
 
+    # The run's TLS fingerprint override, or nil (#844). Normalised once here so the pool,
+    # every send site below, and whatever a surface reports all name one spelling — see
+    # `Fuzz::Config#tls_preset`, which is where the operator's choice comes from.
+    getter tls_preset : String?
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    @sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
                    @evidence : Bool = false, @slot_overlay : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
-                   @ws_keep_key : Bool = false)
+                   @ws_keep_key : Bool = false, tls_preset : String? = nil)
+      @tls_preset = Settings.tls_preset_normalize(tls_preset)
       # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
       # a separate change with its own stream-state rules.
       @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
-        @verify, @sni, @timeout, @overrides, Math.max(idle_conns, 1)) : nil
+        @verify, @sni, @timeout, @overrides, Math.max(idle_conns, 1), @tls_preset) : nil
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -354,12 +360,14 @@ module Gori::Fuzz
       result =
         if @http2
           Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,
+            overrides: @overrides, tls_preset: @tls_preset)
         elsif p = @pool
           p.send(bytes)
         else
           Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
-            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+            port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,
+            overrides: @overrides, tls_preset: @tls_preset)
         end
       # `bytes` here is the message, not the template `Job` carried: the two passes above
       # changed it. `Fuzz::Result#request` — the row a surface prints and the Repeater seeds
@@ -399,7 +407,7 @@ module Gori::Fuzz
       res = Repeater::WsEngine.send(wire, msgs,
         scheme: @origin.scheme, host: @origin.host, port: @origin.port,
         verify_upstream: @verify, sni: @sni, idle: @ws_idle,
-        overrides: @overrides, keep_key: @ws_keep_key)
+        overrides: @overrides, keep_key: @ws_keep_key, tls_preset: @tls_preset)
       if note = res.note || res.truncated
         @ws_notes += 1
         @ws_note_reason ||= note
@@ -506,7 +514,7 @@ module Gori::Fuzz
       reqs = reqs.map { |b| Gori::Env.overlay_slot(b) }
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
-        timeout: timeout || @timeout, overrides: @overrides)
+        timeout: timeout || @timeout, overrides: @overrides, tls_preset: @tls_preset)
         .map_with_index { |r, i| reqs[i]?.try { |w| r.with_wire(w) } || r }
     end
 
@@ -568,7 +576,7 @@ module Gori::Fuzz
       # ── assemble: dial, optionally warm up, write everything but the final byte ──────────
       n.times do |i|
         upstream, dial_error = Repeater::Engine.dial_result(@origin.scheme, @origin.host,
-          @origin.port, @verify, @sni, dial_timeout, @overrides)
+          @origin.port, @verify, @sni, dial_timeout, @overrides, @tls_preset)
         unless upstream
           msg = Repeater::Engine.connect_error(@origin.scheme, @origin.host, @origin.port, @verify, dial_error)
           results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: dial failed — #{msg}")

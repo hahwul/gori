@@ -238,6 +238,11 @@ module Gori
           j.field "name", Serialize.text(r.name) if r.name
           j.field "tags", Serialize.text(r.tags) if r.tags
           j.field "sni", Serialize.text(r.sni) if r.sni
+          # The tab's own TLS fingerprint (#844), when it has one. Absent means "the
+          # destination's outbound_tls policy" — which is what every tab meant before it
+          # existed, so a listing of untouched sessions is unchanged. An agent replaying one
+          # through `send_request{repeater_id}` inherits this unless it passes its own.
+          j.field "tls_preset", r.tls_preset if r.tls_preset
           r_request_text = String.new(r.request).scrub
           if include_content
             emit_capped_text(j, "request", Serialize.redact_head(String.new(r.request), include_sensitive),

@@ -365,6 +365,8 @@ gori settings tls-fingerprint
 
 TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 목적지에만 영향을 주며, 나머지 규칙과 gori의 다른 기능은 그대로 동작합니다.
 
+**이 테이블은 목적지 단위이고, 지문 A/B는 그렇지 않습니다.** "이 엔드포인트가 `chrome`일 때와 `curl`일 때 다르게 답하나?"는 같은 호스트 하나에 대한 질문이며, 전송 사이에 여기 규칙을 고치면 그 호스트로 가는 다른 모든 탭과 백그라운드 캡처의 핸드셰이크까지 함께 바뀝니다. 대신 Repeater 탭(`␣T`)과 fuzz 실행(`--tls-preset`)이 각자 자기 지문을 지정할 수 있고, dial 시점에 해석되며 이 테이블은 건드리지 않습니다 — [전송 단위 TLS 지문](/ko/reference/cli/#per-send-tls-fingerprints) 참고. 그런 오버라이드는 ClientHello 모양만 교체합니다. 여기 설정한 `client_cert`/`client_key`, `min_version`/`max_version`, `permissive`는 그대로 적용됩니다.
+
 인바운드 지문 *위장*(클라이언트 자신의 핸드셰이크를 다른 것처럼 보이게 하는 것)은 이 섹션의 범위가 아닙니다 — 여기서는 gori가 거는 연결의 모양만 다룹니다.
 
 ### layout {#layout}

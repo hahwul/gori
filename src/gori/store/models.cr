@@ -1225,11 +1225,17 @@ module Gori
       # stays what every existing session does. The request bytes are untouched either way, and
       # the tab's `ws_messages` rows survive the override, so it is reversible without loss.
       getter? ws_http_only : Bool
+      # The TLS fingerprint preset this tab sends with (Schema V22), or nil for "use the
+      # destination's outbound-TLS policy" — which is what every tab meant before #844 and
+      # still means today. PER TAB, so two tabs against one host can dial two different
+      # ClientHellos; a reopened tab sends the one it was saved with.
+      getter tls_preset : String?
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
                      @response_duration_us = nil, @name = nil, @sni = nil,
-                     @tags = nil, @ws_keep_key = false, @ws_http_only = false)
+                     @tags = nil, @ws_keep_key = false, @ws_http_only = false,
+                     @tls_preset = nil)
       end
     end
 

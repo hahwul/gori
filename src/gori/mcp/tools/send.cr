@@ -100,11 +100,14 @@ module Gori
 
         repeater_id = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id, plan.h2_fields,
-          sni: plan.sni, auto_cl: send_persist_auto_cl(h))
+          sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules, plan.h2_fields,
-          request_line_rewritten, plan.websocket?, unbound_overlay),
+          request_line_rewritten, plan.websocket?, unbound_overlay,
+          # https only: a plaintext leg sends no ClientHello, so naming a preset there would
+          # report a handshake that did not happen.
+          plan.scheme == "https" ? plan.tls_preset : nil),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -266,6 +269,18 @@ module Gori
       # function rather than the expression inlined per branch, so the precedence is stated once.
       private def send_sni(h, stored : String? = nil) : String?
         str(h, "sni").presence || stored
+      end
+
+      # The PER-SEND TLS fingerprint override (#844), with the same precedence `send_sni` uses:
+      # the argument wins, else what the stored source (a repeater tab) was saved with, else
+      # none. `.presence` so `""` means "no override for this send" rather than an empty preset
+      # name — that is the only way an agent can drop a stored tab's fingerprint for one call.
+      #
+      # An unknown name is NOT normalised away here. `Repeater::Plan.build` refuses it, so the
+      # agent gets an INVALID_ARGUMENT naming the presets rather than a send that silently went
+      # out with gori's bare hello under a tool result claiming Chrome's.
+      private def send_tls_preset(h, stored : String? = nil) : String?
+        str(h, "tls_preset").presence || stored
       end
 
       # Per-operation (connect + idle read/write) timeout for a one-shot send, from
@@ -444,7 +459,8 @@ module Gori
                                         http2 : Bool, result : Repeater::Result,
                                         issue_id : Int64?, recorded_flow_id : Int64?,
                                         h2_fields : Array({String, String})? = nil,
-                                        *, sni : String? = nil, auto_cl : Bool = false) : Int64?
+                                        *, sni : String? = nil, auto_cl : Bool = false,
+                                        tls_preset : String? = nil) : Int64?
         return nil unless save
         port_suffix = ((built.scheme == "https" && built.port == 443) ||
                        (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
@@ -503,7 +519,11 @@ module Gori
           # The SNI the send actually used, so re-sending the saved row reproduces the same
           # ClientHello. Through the effective value above, not a hard-coded nil / arg-only
           # read that silently dropped the source's SNI.
-          sni: effective_sni
+          sni: effective_sni,
+          # Same rule for the fingerprint (#844), and the same reason: a tab saved from a send
+          # that presented Chrome's shape has to present it again when it is replayed, or the
+          # saved row is a different request from the one that produced the response beside it.
+          tls_preset: tls_preset
         )
         return nil unless repeater_id > 0
 
@@ -675,7 +695,8 @@ module Gori
                                    h2_fields : Array({String, String})? = nil,
                                    request_line_rewritten : Bool = false,
                                    websocket_handshake : Bool = false,
-                                   unbound_overlay : String? = nil) : String
+                                   unbound_overlay : String? = nil,
+                                   tls_preset : String? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -690,6 +711,11 @@ module Gori
             # bytes — an agent that reads the response alone cannot tell this send from one
             # that carried the session. Absent when every reference resolved.
             j.field "unbound_overlay_warning", unbound_overlay if unbound_overlay
+            # WHICH HANDSHAKE produced this response — absent when no override was in play, so
+            # a run of two sends that differ only here is legible from the results alone. It
+            # names the preset gori APPLIED, not a JA3 it can prove: see the argument's own
+            # schema text, and #822 on why these are approximations.
+            j.field "tls_preset", tls_preset if tls_preset
             # `send_request` has always sent an RFC 6455 upgrade as an ordinary HTTP request —
             # it dials `Engine`/`H2Engine` and reads the 101 as a response, where the TUI and
             # `gori run repeater send` would perform the framed exchange. That is a useful
@@ -858,6 +884,11 @@ module Gori
             # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
             # a captured `ws_messages` row's payload.)
             expand_request: !verbatim,
+            # The session's stored fingerprint (#844), overridable per call the way `sni` and
+            # `keep_sec_websocket_key` are. WS is a real TLS dial on `wss://`, so a session
+            # saved as `chrome` has to hand its handshake to `WsEngine` too — leaving it out
+            # here would make this the one send surface that ignored the tab's own choice.
+            tls_preset: send_tls_preset(h, repeater.tls_preset),
             overrides: HostOverrides.load(store)), ob)
         rescue ex : Repeater::PlanError
           return send_plan_error(ex, "repeater_id")
@@ -1020,6 +1051,7 @@ module Gori
           in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
           in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
           in Repeater::PlanError::Reason::UnresolvedEnv     then env_unresolved_error(detail)
+          in Repeater::PlanError::Reason::TlsPreset         then ex.message || "unknown tls_preset"
           end
         err(message, "INVALID_ARGUMENT", field: field)
       end
@@ -1088,7 +1120,8 @@ module Gori
           h2_fields: fields, h2_body: h2_body_arg(h),
           origin: Repeater::Origin.new(scheme, host, port),
           http2: true, verify: !bool_arg(h, "insecure", false) && @verify_upstream,
-          timeout: send_timeout(h), overrides: HostOverrides.load(store))
+          timeout: send_timeout(h), overrides: HostOverrides.load(store),
+          tls_preset: send_tls_preset(h))
       end
 
       # The option set plus "did gori rewrite the stored request line?" — the second half is
@@ -1125,7 +1158,7 @@ module Gori
           return {Repeater::PlanOptions.new([rec.request], default_target: rec.target,
             http2: bool_arg(h, "http2", rec.http2?), sni: send_sni(h, rec.sni),
             auto_content_length: rec.auto_content_length?, verify: verify,
-            reframe_grpc: reframe_grpc,
+            reframe_grpc: reframe_grpc, tls_preset: send_tls_preset(h, rec.tls_preset),
             timeout: timeout, overrides: overrides), false}
         end
         if present?(h, "flow_id")
@@ -1181,6 +1214,7 @@ module Gori
             expand_request: false, evidence: true,
             auto_content_length: false, reframe_grpc: reframe_grpc,
             http2: bool_arg(h, "http2", flow.http2), sni: send_sni(h, flow.sni), verify: verify,
+            tls_preset: send_tls_preset(h),
             timeout: timeout, overrides: overrides), flow.rewrote_request_line}
         else
           # `RequestBuilder` already expanded, framed and range-checked this one, with
@@ -1205,6 +1239,7 @@ module Gori
             # ClientHello — was unreachable even with the argument present. `Repeater::Plan`
             # owns the `Env.expand` over it (`PlanOptions#sni`), so it goes in raw.
             sni: send_sni(h),
+            tls_preset: send_tls_preset(h),
             http2: bool_arg(h, "http2", false), verify: verify,
             timeout: timeout, overrides: overrides), false}
         end
@@ -1315,6 +1350,7 @@ module Gori
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni). OVERRIDES the SNI a flow_id/repeater_id source carries, the way `gori run repeater <flow-id> --sni` does; omit to keep the stored one.")
+          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, for one send, without touching the settings.json outbound_tls table. Use it to ask whether an origin answers differently by handshake — two sends to one host differing only here dial two separate SSL contexts. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES the preset a repeater_id source carries (pass \"\" to drop it for this send). An APPROXIMATION of that client's hello, NOT a byte-exact JA3 match — extension order and GREASE placement are OpenSSL's; `gori settings tls-fingerprint HOST --preset NAME` prints the JA3/JA4 that actually goes out. https targets only")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
           s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
@@ -1335,6 +1371,7 @@ module Gori
           s.field "repeater_id", intprop("WebSocket repeater database id"), required: true
           s.field "messages", ws_out_messages_prop("optional outbound message override; stored repeater messages are used when absent")
           s.field "keep_sec_websocket_key", boolprop("send the repeater request's OWN Sec-WebSocket-Key instead of a fresh one, so an absent/short/duplicate/non-base64 key can be tested (default: the repeater's stored setting, itself false)")
+          s.field "tls_preset", strprop("TLS fingerprint for this handshake: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table (default: the repeater's stored setting). The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match. wss:// targets only")
           s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "allow_unscoped", boolprop("connect even when the target host is outside (or without) a configured scope (default false)")

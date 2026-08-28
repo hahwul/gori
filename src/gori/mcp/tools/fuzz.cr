@@ -16,7 +16,7 @@ module Gori
 
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc = build_fuzz_job(h, ob)
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset = build_fuzz_job(h, ob)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
@@ -36,6 +36,9 @@ module Gori
         # `fuzz_config` applies, so a second accessor on the plan would only be a second place
         # for the two to disagree.
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
+        # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
+        # tell an agent its A/B happened when nothing about the handshake changed.
+        fjob.tls_preset = tls_preset if origin.scheme == "https"
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, optional_int_arg(h, "max_requests"))
@@ -79,6 +82,10 @@ module Gori
             j.field "total", total
             j.field "status", "running"
             j.field "record_history", fjob.record_history.to_s
+            # WHICH HANDSHAKE this run's results came from — absent when no override was in
+            # play. Named on the START echo and on every `fuzz_status` so a result set read
+            # later still says which side of a fingerprint A/B it is.
+            j.field("tls_preset", fjob.tls_preset) if fjob.tls_preset
             if wf = ws_frames
               j.field "websocket", true
               j.field "ws_frames_out", wf
@@ -333,6 +340,7 @@ module Gori
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
             j.field "record_history", fjob.record_history.to_s
+            j.field("tls_preset", fjob.tls_preset) if fjob.tls_preset
             j.field "recorded_flows", fjob.recorded_flows
             j.field "history_truncated", fjob.history_truncated?
             j.field "job_complete", fjob.status != :running
@@ -408,7 +416,7 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?}
+      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?}
         text, default_target, src_h2, evidence, src_sni = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -469,7 +477,8 @@ module Gori
         # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded
         # from a `repeater_id` cannot otherwise tell whether its frames were picked up.
         {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks,
-         plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields}
+         plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
+         plan.tls_preset}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -508,6 +517,8 @@ module Gori
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
           "race_count must be at least 2 (a race needs at least two connections in flight; 1 is just a send)"
+        in Fuzz::PlanError::Reason::TlsPreset
+          ex.message || "unknown tls_preset"
         end
       end
 
@@ -1105,6 +1116,10 @@ module Gori
         # false, i.e. the P7 behaviour the `grpc_stale_prefix` field reports — see
         # `Fuzz::Config#reframe_grpc?`.
         cfg.reframe_grpc = bool_arg(h, "reframe_grpc", cfg.reframe_grpc?)
+        # The run's TLS fingerprint override (#844). `.presence` so `""` is "no override";
+        # an unknown NAME is not folded away here — `Fuzz::Plan.build` refuses it, so the
+        # agent is told rather than left with a sweep that silently used gori's bare hello.
+        cfg.tls_preset = str(h, "tls_preset").presence
         # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
         # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
@@ -1167,6 +1182,7 @@ module Gori
           s.field "auto_calibrate", boolprop("drop responses identical to the baseline, so only what a payload CHANGED is reported (mirrors CLI --ac)")
           s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test")
+          s.field "tls_preset", strprop("TLS fingerprint for this WHOLE RUN: shape every ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. Run-level, not per request — keep-alive parks a socket whose handshake is already done. The destination's client certificate, protocol range and permissive flag still apply. Echoed back on fuzz_start so the result set says which handshake produced it. An APPROXIMATION of that client's hello, NOT a byte-exact JA3 match — extension order and GREASE placement are OpenSSL's. https targets only")
           s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection across many requests (default true) — one TCP/TLS handshake per worker instead of per request. Set false to dial a fresh connection per request, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection) or when keep-alive handling is itself what you are probing.")
           s.field "http2", boolprop("use real HTTP/2 (default false)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")

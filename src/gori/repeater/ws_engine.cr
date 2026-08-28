@@ -147,7 +147,8 @@ module Gori
                     idle : Time::Span = DEFAULT_IDLE,
                     overrides : Gori::HostOverrides? = nil,
                     keep_key : Bool = false,
-                    deadline : Time::Span = DRAIN_DEADLINE) : Result
+                    deadline : Time::Span = DRAIN_DEADLINE,
+                    tls_preset : String? = nil) : Result
         started = Time.instant
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
@@ -161,7 +162,7 @@ module Gori
         # "connect failed: host:port" for an untrusted certificate, a plaintext port and an
         # origin that accepts the connection and then goes silent.
         upstream, dial_error = if tls
-                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni, io_timeout: ht, overrides: overrides)
+                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni, io_timeout: ht, overrides: overrides, tls_preset: tls_preset)
                                else
                                  Proxy::Upstream.dial_result(host, port, io_timeout: ht, overrides: overrides)
                                end

@@ -2,6 +2,17 @@
 module Gori
   module CLI
     module Run
+      # The `--tls-preset` help text, written once. Four commands take the flag and the
+      # honesty clause has to be on every one of them: #822 documents these presets as
+      # APPROXIMATIONS, and a flag whose help implied "sends Chrome's ClientHello" would
+      # upgrade that claim from a surface gori never audits.
+      TLS_PRESET_HELP = "TLS fingerprint for this send: shape the ClientHello like " \
+                        "#{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching " \
+                        "the settings.json outbound_tls table. The destination's client certificate, " \
+                        "protocol range and permissive flag still apply. An APPROXIMATION of that " \
+                        "client's hello, not a byte-exact JA3 match — `gori settings tls-fingerprint " \
+                        "HOST --preset NAME` prints what actually goes out. Empty value = no override"
+
       private def self.cmd_repeater(args : Array(String)) : Nil
         sub = args.first?
         if sub == "list"
@@ -45,6 +56,7 @@ module Gori
         allow_unscoped = false
         format = :text
         timeout : Time::Span? = nil
+        tls_preset : String? = nil
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater h2 --target URL --fields FILE [options]\n\n" \
@@ -57,6 +69,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater h2: unknown option: #{f}\n#{p}" }
@@ -82,7 +95,8 @@ module Gori
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new(
             h2_fields: fields, h2_body: body, target: tgt,
-            http2: true, verify: !insecure, timeout: timeout, overrides: overrides), outbound)
+            http2: true, verify: !insecure, timeout: timeout, overrides: overrides,
+            tls_preset: tls_preset), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater h2", ex)
         end
@@ -92,7 +106,7 @@ module Gori
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
-        emit_repeater_result(result, new_body, nil, format)
+        emit_repeater_result(result, new_body, nil, format, tls_preset: plan.tls_preset)
         exit 1 unless result.ok?
       end
 
@@ -227,6 +241,7 @@ module Gori
         ws_keep_key = false
         ws_http_only = false
         keep_request_line = false
+        tls_preset : String? = nil
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater create [options]"
@@ -247,6 +262,7 @@ module Gori
           p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v, "gori run repeater create") }
           p.on("--keep-request-line", "With --flow: store the flow's request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
+          p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}. Stored on the session, so `repeater send` and a reopened TUI tab present it too") { |v| tls_preset = v }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the upgrade handshake is sent as an ordinary request and the 101 read as a response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -341,6 +357,14 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
+          # Refused HERE, not left for the first send. An unknown preset applies nothing, so a
+          # session stored with one dials with gori's bare OpenSSL hello on every later send
+          # while `repeater list` and the TUI chip both name a browser — and unlike the
+          # destination table there is no startup warning to catch it.
+          if err = Settings.tls_preset_error(tls_preset)
+            abort "gori run repeater create: #{err}"
+          end
+          tls_preset = Settings.tls_preset_normalize(tls_preset)
 
           pos = store.repeaters_meta.size
 
@@ -367,7 +391,8 @@ module Gori
             position: pos.to_i32,
             sni: sni,
             ws_keep_key: ws_keep_key,
-            ws_http_only: ws_http_only
+            ws_http_only: ws_http_only,
+            tls_preset: tls_preset
           )
 
           abort "gori run repeater create: failed to create repeater session" if id == 0
@@ -436,11 +461,15 @@ module Gori
       # `PlanOptions` cannot reach: dropping `auto_content_length: rec.auto_content_length?`
       # here silently overwrites a `repeater create --no-auto-cl` session's hand-set
       # Content-Length on every replay, and no `Plan`-level spec would notice.
+      # `tls_preset` is the PER-SEND override of the session's stored fingerprint: nil keeps
+      # what the tab was saved with (which is what makes a reopened session send the handshake
+      # it sent before), and an explicit `--tls-preset=` (empty) clears it for this send only.
       private def self.session_plan_options(rec : Store::RepeaterRecord, insecure : Bool,
                                             overrides : Gori::HostOverrides?,
                                             verbatim : Bool = false,
                                             timeout : Time::Span? = nil,
-                                            reframe_grpc : Bool = false) : Repeater::PlanOptions
+                                            reframe_grpc : Bool = false,
+                                            tls_preset : String? = nil) : Repeater::PlanOptions
         Repeater::PlanOptions.new([rec.request],
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
@@ -452,7 +481,8 @@ module Gori
           # `--verbatim` means for h2.
           preserve_field_case: verbatim,
           auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
-          overrides: overrides)
+          overrides: overrides,
+          tls_preset: tls_preset || rec.tls_preset)
       end
 
       # `gori run repeater`'s wording for a builder refusal. `Repeater::Plan` reports a
@@ -477,6 +507,8 @@ module Gori
           "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
         in Repeater::PlanError::Reason::UnresolvedEnv
           "#{prefix}: #{env_unresolved_error(detail, where)}"
+        in Repeater::PlanError::Reason::TlsPreset
+          "#{prefix}: #{ex.message}"
         end)
       end
 
@@ -515,6 +547,7 @@ module Gori
         reframe_grpc = false
         ws_keep_key = false
         record_history = false
+        tls_preset : String? = nil
         # nil = use the session's stored setting; true = this send is plain HTTP whatever it says.
         # There is no `--websocket` counterpart: the stored default IS WebSocket unless the
         # operator turned it off, so the only direction that needs a per-send override is this one.
@@ -542,6 +575,7 @@ module Gori
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--http", "WebSocket: send the upgrade handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
           p.on("--record-history", "Also write the outbound request + response to History as a captured flow, and print its flow id (default: off — a Repeater send leaves no flow). HTTP only") { record_history = true }
+          p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the session's stored one for this send") { |v| tls_preset = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -571,7 +605,7 @@ module Gori
         outbound = project_outbound(project_name, db_path, allow_unscoped)
 
         plan = begin
-          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc), outbound)
+          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc, tls_preset), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -627,7 +661,8 @@ module Gori
         # Recorded regardless of ok?: an error flow is evidence too (and matches MCP
         # send_request, which records the attempt).
         recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project_name, db_path) : nil
-        emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id)
+        emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
+          tls_preset: plan.tls_preset)
         # The session slot's `$NAME` that went out LITERALLY, after the response and before the
         # exit code. A Repeater send under a slot is how an operator MINTS a binding, so this is
         # also the surface that has to say when the mint never happened: the origin answers 401
@@ -907,12 +942,13 @@ module Gori
       private def self.emit_repeater_result(result : Repeater::Result, new_body : Bytes?,
                                             diff : Array(Repeater::DiffLine)?, format : Symbol,
                                             diff_capped : Bool = false,
-                                            recorded_flow_id : Int64? = nil) : Nil
+                                            recorded_flow_id : Int64? = nil,
+                                            tls_preset : String? = nil) : Nil
         # Text mode: the id goes to STDERR beside the other status lines, so a `> resp.txt`
         # redirect still captures exactly the response and nothing else.
         STDERR.puts "recorded to History as flow ##{recorded_flow_id}" if recorded_flow_id && format != :json
         if format == :json
-          puts repeater_json(result, diff, diff_capped, recorded_flow_id)
+          puts repeater_json(result, diff, diff_capped, recorded_flow_id, tls_preset)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
@@ -1263,6 +1299,7 @@ module Gori
         keep_request_line = false
         slot : String? = nil
         timeout : Time::Span? = nil
+        tls_preset : String? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -1280,6 +1317,7 @@ module Gori
           p.on("--http1", "Force HTTP/1.1 — downgrades an h2-captured flow (default follows how the flow was captured)") { http2_override = false }
           p.on("--no-http2", "Alias for --http1") { http2_override = false }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni_override = v }
+          p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
@@ -1422,7 +1460,8 @@ module Gori
             # operator's OWN `-H`/`-b`/`--target` above, so nothing downstream needs to (and
             # nothing downstream can still tell the operator's bytes from the capture's).
             evidence: true,
-            verify: !insecure, timeout: timeout, overrides: host_overrides), outbound)
+            verify: !insecure, timeout: timeout, overrides: host_overrides,
+            tls_preset: tls_preset), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater", ex)
         end
@@ -1446,7 +1485,7 @@ module Gori
           diff = Repeater::Diff.lines(orig, fresh)
         end
 
-        emit_repeater_result(result, new_body, diff, format, diff_capped)
+        emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: plan.tls_preset)
         # `--slot NAME` on a single-flow replay: the same drain the session-send path takes,
         # because it is the same overlay seam and a notice fixed on one of the two would drift.
         report_unbound_slot_overlay("gori run repeater")
@@ -1454,10 +1493,15 @@ module Gori
       end
 
       private def self.repeater_json(result : Repeater::Result, diff : Array(Repeater::DiffLine)?,
-                                     diff_capped : Bool = false, recorded_flow_id : Int64? = nil) : String
+                                     diff_capped : Bool = false, recorded_flow_id : Int64? = nil,
+                                     tls_preset : String? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
+            # WHICH HANDSHAKE produced this response (#844) — absent when no override was in
+            # play, so two sends differing only in `--tls-preset` are told apart from the JSON
+            # alone. The name gori APPLIED, not a JA3 it can prove: see `--tls-preset`'s help.
+            j.field("tls_preset", tls_preset) if tls_preset
             # `--record-history` only. Present ⇒ the send is on the record under this id; absent
             # ⇒ it was not recorded. Inside THIS object, never a second one: `--format json` has
             # always emitted exactly one, and a trailing object breaks every `jq` consumer.

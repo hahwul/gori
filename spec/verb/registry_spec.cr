@@ -280,6 +280,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_toggle_grpc_fields
   end
 
+  def repeater_cycle_tls_preset : Nil
+    @calls << :repeater_cycle_tls_preset
+  end
+
   def repeater_toggle_grpc_reframe : Nil
     @calls << :repeater_toggle_grpc_reframe
   end

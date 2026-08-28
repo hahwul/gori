@@ -373,6 +373,8 @@ An invalid `groups`, `sigalgs`, `ciphersuites` or `alpn` value is checked by han
 
 The same line appears as a notification in the TUI. A bad rule affects only its own destination; every other rule, and the rest of gori, still work.
 
+**This table is per DESTINATION, and a fingerprint A/B is not.** "Does this endpoint answer differently as `chrome` than as `curl`?" is a question about one host, and editing a rule here between two sends changes the handshake for every other tab and background capture hitting that host at the same time. A Repeater tab (`␣T`) and a fuzz run (`--tls-preset`) can each name a fingerprint for themselves instead, resolved at dial time and leaving this table alone — see [per-send TLS fingerprints](/reference/cli/#per-send-tls-fingerprints). Such an override replaces the ClientHello shape only: the `client_cert`/`client_key`, `min_version`/`max_version` and `permissive` configured here still apply.
+
 Inbound fingerprint *spoofing* (making the client's own handshake look like something else) is not in scope here; this section only shapes the connections gori makes.
 
 ### layout

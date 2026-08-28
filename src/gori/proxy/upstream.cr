@@ -954,9 +954,9 @@ module Gori::Proxy
                       connect_timeout : Time::Span = Settings.connect_timeout,
                       io_timeout : Time::Span = Settings.io_timeout,
                       *, overrides : Gori::HostOverrides? = nil,
-                      pin : String? = nil) : OpenSSL::SSL::Socket::Client?
+                      pin : String? = nil, tls_preset : String? = nil) : OpenSSL::SSL::Socket::Client?
       dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout,
-        overrides: overrides, pin: pin)[0]
+        overrides: overrides, pin: pin, tls_preset: tls_preset)[0]
     end
 
     # Like `dial_tls` but also reports WHY the dial failed (see DialError) as the second
@@ -966,7 +966,8 @@ module Gori::Proxy
                              connect_timeout : Time::Span = Settings.connect_timeout,
                              io_timeout : Time::Span = Settings.io_timeout,
                              *, overrides : Gori::HostOverrides? = nil,
-                             pin : String? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
+                             pin : String? = nil,
+                             tls_preset : String? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
       tcp, dial_err = dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin)
       return {nil, dial_err || DialError::ORIGIN_UNREACHABLE} unless tcp
       # `hostname:` below is unaffected by `pin` on purpose: SNI and the verified name stay the
@@ -977,7 +978,13 @@ module Gori::Proxy
       # The outbound-TLS policy is looked up on the DIALED host, not `sni`: a client
       # certificate and a protocol floor belong to the machine we are actually talking to,
       # whereas `sni` deliberately lies about the name for domain-fronting / vhost tests.
-      tls_policy = Settings.outbound_tls_for(host)
+      #
+      # `tls_preset` is the PER-SEND override (#844): a Repeater tab or a fuzz run that named
+      # a fingerprint for THIS send. It narrows the same rule rather than arriving on a second
+      # policy path (see `Settings.outbound_tls_for`), so it enters `cache_key` by
+      # construction — which is the whole safety property, because two sends with different
+      # fingerprints sharing one SSL_CTX would answer the A/B with one handshake.
+      tls_policy = Settings.outbound_tls_for(host, tls_preset)
       ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn, tls_policy),
         sync_close: true, hostname: sni || host)
       ssl.sync = true

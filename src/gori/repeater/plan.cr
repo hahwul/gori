@@ -29,6 +29,13 @@ module Gori::Repeater
       # nothing, so the send would put the token's own characters on the wire (`detail` =
       # the unresolved tokens, prefixed and comma-joined, for surfaces that quote back).
       UnresolvedEnv
+      # The per-send TLS fingerprint override names a preset gori does not have (`detail` =
+      # the name as typed). Refused rather than ignored: an unknown name applies NOTHING, so
+      # the send would go out with gori's bare OpenSSL hello while the operator believed a
+      # browser's was — the same reasoning `Settings.parse_tls_preset` gives for keeping an
+      # unknown destination-rule preset verbatim, except that a per-send override has no
+      # startup warning to catch it.
+      TlsPreset
     end
 
     getter reason : Reason
@@ -89,6 +96,11 @@ module Gori::Repeater
     # from. Only a surface can reach a Store (or the live `Session#host_overrides`), so this
     # is passed in rather than loaded.
     property overrides : Gori::HostOverrides?
+
+    # PER-SEND TLS fingerprint override (#844): the name of a `Settings::TLS_PRESETS` entry
+    # this send should present, or nil to use whatever the destination policy already says.
+    # `build` refuses an unknown name before anything dials — see `PlanError::Reason::Tls`.
+    property tls_preset : String?
 
     # Replay of a CAPTURED flow: keep the stored Content-Length byte-exact, and recompute it
     # ONLY where env expansion changed the body's length. Distinct from `auto_content_length`,
@@ -184,7 +196,8 @@ module Gori::Repeater
                    @sni : String? = nil,
                    @verify : Bool = true,
                    @timeout : Time::Span? = nil,
-                   @overrides : Gori::HostOverrides? = nil)
+                   @overrides : Gori::HostOverrides? = nil,
+                   @tls_preset : String? = nil)
     end
   end
 
@@ -237,11 +250,18 @@ module Gori::Repeater
     getter h2_fields : Array({String, String})?
     getter h2_body : Bytes?
 
+    # The validated per-send TLS fingerprint override (#844), or nil. Carried on the plan
+    # and not only inside the `Sender` for the same reason `preserve_field_case?` is: a
+    # surface that REPORTS what this send did has to be able to name the handshake that
+    # produced it, and deriving it a second time from the options would be a second answer.
+    # It is only meaningful on an https target — a plaintext leg has no ClientHello.
+    getter tls_preset : String?
+
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,
                    @websocket : Bool, @sni : String?, @preserve_field_case : Bool = false,
                    @h2_fields : Array({String, String})? = nil, @h2_body : Bytes? = nil,
-                   @reframe_grpc : Bool = false)
+                   @reframe_grpc : Bool = false, @tls_preset : String? = nil)
     end
 
     # The single request's wire bytes (the first, for a group).
@@ -403,15 +423,16 @@ module Gori::Repeater
       # `Env.expand_bindings` at the send seam — and that seam ran unconditionally, so
       # everything `evidence?` turns off here was turned back on one layer down for any
       # extract rule whose name collides with a token in the capture. See `Sender#evidence?`.
+      tls_preset = resolve_tls_preset(options)
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: options.http2?, sni: sni,
         timeout: options.timeout, overrides: options.overrides,
         preserve_field_case: options.preserve_field_case?, evidence: options.evidence?,
-        reframe_grpc: options.reframe_grpc?)
+        reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
         preserve_field_case: options.preserve_field_case?,
-        reframe_grpc: options.reframe_grpc?)
+        reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
     end
 
     # The request wires with `$KEY` expansion applied, or the originals when the surface says
@@ -449,12 +470,13 @@ module Gori::Repeater
       end
       options.sni.try { |s| refuse_unresolved(Env.unresolved(s, deferred: nil)) }
       sni = options.sni.try { |s| Env.expand(s).presence }
+      tls_preset = resolve_tls_preset(options)
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: true, sni: sni,
-        timeout: options.timeout, overrides: options.overrides)
+        timeout: options.timeout, overrides: options.overrides, tls_preset: tls_preset)
       new(sender: sender, requests: [H2Engine.field_scope_line(fields)], scheme: scheme,
         host: host, port: port, http2: true, websocket: false, sni: sni,
-        h2_fields: fields, h2_body: options.h2_body)
+        h2_fields: fields, h2_body: options.h2_body, tls_preset: tls_preset)
     end
 
     # The pre-resolved origin when the surface has one, else the explicit target, else the
@@ -496,6 +518,17 @@ module Gori::Repeater
     # makes `Outbound.scope_url` ask about `https://$SESSION/a` — a URL no rule can match —
     # so the send comes back refused as OUT-OF-SCOPE, naming a gate that was never the
     # problem. Refusing here names the real one.
+    # The validated per-send fingerprint override, or nil. Refuses an unknown name HERE — one
+    # place, before any surface dials — so `gori run repeater`, MCP `send_request` and the TUI
+    # cannot each decide differently what an unrecognised preset means (P1).
+    private def self.resolve_tls_preset(options : PlanOptions) : String?
+      name = options.tls_preset
+      if err = Settings.tls_preset_error(name)
+        raise PlanError.new(PlanError::Reason::TlsPreset, err, name.try(&.strip))
+      end
+      Settings.tls_preset_normalize(name)
+    end
+
     private def self.refuse_unresolved(names : Array(String)) : Nil
       return if names.empty?
       detail = Env.token_list(names)

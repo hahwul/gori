@@ -1042,7 +1042,8 @@ module Gori::Tui
         m_words: @matcher.match_words || "", m_regex: @s_m_regex,
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
         f_words: @matcher.filter_words || "", f_regex: @s_f_regex,
-        grpc_fields: @s_grpc_fields)
+        grpc_fields: @s_grpc_fields,
+        tls_preset: @config.tls_preset || "")
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1072,6 +1073,12 @@ module Gori::Tui
       @matcher.filter_words = blank_nil(s.f_words)
       @s_f_regex = s.f_regex
       @s_grpc_fields = s.grpc_fields
+      # Normalised, not stored as typed: "" and "  " both mean "no override", and a
+      # `"Chrome "` must be the same policy as a `"chrome"` or the two dial two SSL contexts
+      # for one intent. An unknown NAME survives — `Fuzz::Plan.build` refuses it when the run
+      # starts, which is where the operator finds out, rather than here where a silent clear
+      # would leave the row empty and the sweep looking like it was never asked.
+      @config.tls_preset = Settings.tls_preset_normalize(s.tls_preset)
       @dirty = true
     end
 
@@ -1349,6 +1356,10 @@ module Gori::Tui
         "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Fuzz::PlanError::Reason::BadRaceCount
         "race needs at least 2 connections — set Race to 2 or more (^O config)"
+      in Fuzz::PlanError::Reason::TlsPreset
+        # Unreachable from the config pane, which only ever cycles the known presets — but a
+        # session restored from a project another version wrote can carry any string.
+        ex.message || "unknown TLS fingerprint preset"
       end
     end
 
@@ -2123,6 +2134,7 @@ module Gori::Tui
           j.field "keep_alive", @config.keep_alive?
           j.field "update_cl", @config.update_content_length?
           j.field "reframe_grpc", @config.reframe_grpc?
+          j.field "tls_preset", @config.tls_preset
           j.field("sets") { j.array { @sets.each { |s| j.object { j.field "kind", s.kind.to_s; j.field "value", s.value } } } }
           j.field "match_status", @matcher.match_status
           j.field "filter_status", @matcher.filter_status
@@ -2166,6 +2178,10 @@ module Gori::Tui
       # (a session saved before this key existed) must mean OFF, the ctor default and the
       # headless one (DESIGN.md §7).
       @config.reframe_grpc = obj["reframe_grpc"]?.try(&.as_bool?) || false
+      # Absent (a session saved before this key existed) reads as nil, which IS the default —
+      # no override, the destination's own policy. No `!= false` dance is needed here because
+      # the field is nilable rather than a boolean with a non-false default.
+      @config.tls_preset = Settings.tls_preset_normalize(obj["tls_preset"]?.try(&.as_s?))
       apply_sets_json(obj["sets"]?)
       @matcher.match_status = obj["match_status"]?.try(&.as_s?)
       @matcher.filter_status = obj["filter_status"]?.try(&.as_s?)

@@ -78,9 +78,9 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.press(Termisu::Input::Key::Enter).should eq(:open)
     h.commits.should eq(0)
     # …and the last row stays FOCUSED rather than stepping out of ROWS' range: what gets
-    # typed next still lands in the last row (gRPC field(s) — appended after Race).
+    # typed next still lands in the last row (TLS fingerprint — appended after gRPC field(s)).
     h.type("x").should eq(:open)
-    ov.snapshot.grpc_fields.should eq("x")
+    ov.snapshot.tls_preset.should eq("x")
   end
 
   it "a click outside the card APPLIES rather than dismissing" do
@@ -213,13 +213,16 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.type("x")
 
     # The list has scrolled, so the first VISIBLE row is no longer ROWS[0] (Concurrency):
-    # the 3rd visible row is "Match size", which is where this click must land.
+    # the 3rd visible row is "Match words", which is where this click must land. (WHICH row
+    # that is moves by one every time a row is appended to the end of ROWS — the scroll needed
+    # to reach the new last row is one deeper — so this is a fact about the arithmetic, not
+    # about "Match words".)
     h.click_in_box(2, 3).should eq(:open)
     h.type("9")
-    ov.snapshot.m_size.should eq("9")  # lands in Retries if the click ignores @scroll
+    ov.snapshot.m_words.should eq("9") # lands near Retries if the click ignores @scroll
     ov.snapshot.retries.should eq("0") # …and the un-scrolled rows stay untouched
     ov.snapshot.conc.should eq("20")
-    ov.snapshot.grpc_fields.should eq("x") # the last row — gRPC field(s), appended after Race
+    ov.snapshot.tls_preset.should eq("x") # the last row — TLS fingerprint, appended after gRPC field(s)
 
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(1)
