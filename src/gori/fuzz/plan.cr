@@ -37,6 +37,11 @@ module Gori::Fuzz
       # `--race`/`race_count` below 2 — a race needs at least two connections in flight
       # together, so 1 is just a send (refused, not silently clamped, so the operator sees why).
       BadRaceCount
+      # The run's TLS fingerprint override names a preset gori does not have (`detail` = the
+      # name as given). Refused rather than ignored, for the reason `Repeater::PlanError`'s
+      # twin gives: an unknown name applies NOTHING, so the whole sweep would go out with
+      # gori's bare hello while the result set claimed a browser's.
+      TlsPreset
     end
 
     getter reason : Reason
@@ -294,6 +299,11 @@ module Gori::Fuzz
     # meaning, exactly as it does for `ws_script`.
     getter grpc_fields : GrpcFieldTemplate?
 
+    # The VALIDATED per-run TLS fingerprint override (#844), or nil. Carried on the plan so a
+    # surface can say which handshake produced this run's results without re-deriving it from
+    # `config` — `config.tls_preset` is what the operator typed, this is what the dial uses.
+    getter tls_preset : String?
+
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
@@ -303,7 +313,8 @@ module Gori::Fuzz
                    @auto_encode : AutoEncode = AutoEncode.none,
                    @ws_script : WsScript? = nil,
                    @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
-                   @grpc_fields : GrpcFieldTemplate? = nil)
+                   @grpc_fields : GrpcFieldTemplate? = nil,
+                   @tls_preset : String? = nil)
     end
 
     # Does this run sweep a WebSocket script rather than an HTTP request?
@@ -430,6 +441,10 @@ module Gori::Fuzz
       # would otherwise be reported as "a gRPC field position and --race cannot combine" and the
       # operator would never learn that a race of 1 is refused on its own terms.
       race_count = validate_race_count(options.config.race_count)
+      # Beside the race guard rather than at the `Sender` it feeds, so an unknown preset is
+      # refused before the run reads a wordlist off disk or resolves a `.proto` — everything
+      # after this point is work the operator does not want done for a run that cannot start.
+      tls_preset = validate_tls_preset(options.config.tls_preset)
       ws_script = build_ws_script(options, template, ws_texts)
       # …and the gRPC field positions, when the run named any. Same seam and the same argument:
       # a composite that concatenates its parts' position lists into one vector (see
@@ -508,7 +523,12 @@ module Gori::Fuzz
         keep_alive: config.keep_alive? && ws_script.nil?,
         idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY),
         evidence: options.evidence?,
-        ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?)
+        ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?,
+        # The run's fingerprint override (#844), validated just above so an unknown name is
+        # refused before the first dial rather than applying nothing and dialling with gori's
+        # bare hello. `config` — not `options` — is the carrier, because a finished run has to
+        # be able to say which handshake produced its results.
+        tls_preset: tls_preset)
       new(engine: Engine.new(generator, matcher, sender, config), generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
@@ -516,7 +536,8 @@ module Gori::Fuzz
         rewrites_content_length: config.update_content_length? &&
                                  generator.baseline_request != generator.baseline_raw,
         shadowed_marks: shadowed_marks, auto_encode: auto_encode,
-        ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields)
+        ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
+        tls_preset: sender.tls_preset)
     end
 
     # A payload a field's DECLARATION cannot hold, refused before the first dial — the nil-guard
@@ -655,6 +676,17 @@ module Gori::Fuzz
           "flight together, or it is just a send)")
       end
       race_count
+    end
+
+    # The run's fingerprint override, validated. Same shape and same reasoning as
+    # `validate_race_count` above: a plan-INPUT refusal, so it rides the `rescue
+    # Fuzz::PlanError` every surface already wraps `Plan.build` in. Returns the NORMALISED
+    # name, which is what the sender, the pool and the run record all carry.
+    private def self.validate_tls_preset(name : String?) : String?
+      if err = Settings.tls_preset_error(name)
+        raise PlanError.new(PlanError::Reason::TlsPreset, err, name.try(&.strip))
+      end
+      Settings.tls_preset_normalize(name)
     end
 
     # Refuse a run whose TARGET carries a token that resolves to nothing.

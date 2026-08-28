@@ -32,13 +32,14 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def repeaters : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0)
+            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
+            tls_preset: rs.read(String?))
         end
       end
       list
@@ -49,13 +50,13 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def get_repeater(id : Int64) : RepeaterRecord?
       @db.query(
-        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, name, ws_keep_key, ws_http_only FROM repeaters WHERE id = ?",
+        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, name, ws_keep_key, ws_http_only, tls_preset FROM repeaters WHERE id = ?",
         id) do |rs|
         return RepeaterRecord.new(
           rs.read(Int64), rs.read(String), rs.read(Bytes),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
           sni: rs.read(String?), name: rs.read(String?), ws_keep_key: rs.read(Int32) != 0,
-          ws_http_only: rs.read(Int32) != 0) if rs.move_next
+          ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?)) if rs.move_next
       end
       nil
     end
@@ -66,14 +67,15 @@ module Gori
     def get_repeater_full(id : Int64) : RepeaterRecord?
       @db.query(
         "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, " \
-        "response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only " \
+        "response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset " \
         "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
           return RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0)
+            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
+            tls_preset: rs.read(String?))
         end
       end
       nil
@@ -81,12 +83,13 @@ module Gori
 
     def repeaters_meta : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            sni: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0)
+            sni: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
+            tls_preset: rs.read(String?))
         end
       end
       list
@@ -98,14 +101,14 @@ module Gori
       list = [] of RepeaterRecord
       @db.query(
         "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, " \
-        "name, tags, response_head, response_error, response_duration_us, ws_keep_key, ws_http_only FROM repeaters ORDER BY position, id") do |rs|
+        "name, tags, response_head, response_error, response_duration_us, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(Bytes),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             sni: rs.read(String?), name: rs.read(String?), tags: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?),
-            ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0)
+            ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?))
         end
       end
       list
@@ -115,11 +118,12 @@ module Gori
     # 0 → nil so a later update never targets a bogus row).
     def insert_repeater(target : String, request : Bytes, http2 : Bool,
                         auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil,
-                        ws_keep_key : Bool = false, ws_http_only : Bool = false) : Int64
+                        ws_keep_key : Bool = false, ws_http_only : Bool = false,
+                        tls_preset : String? = nil) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0)
+        c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only, tls_preset) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0, tls_preset)
         nil
       }
     end
@@ -127,10 +131,10 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing).
     def update_repeater(id : Int64, target : String, request : Bytes, http2 : Bool, auto_cl : Bool,
                         sni : String? = nil, ws_keep_key : Bool = false,
-                        ws_http_only : Bool = false) : Bool
+                        ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
       exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, ws_keep_key = ?, ws_http_only = ?, updated_at = ? WHERE id = ?",
-          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0, now_us, id)
+        c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, ws_keep_key = ?, ws_http_only = ?, tls_preset = ?, updated_at = ? WHERE id = ?",
+          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, ws_keep_key ? 1 : 0, ws_http_only ? 1 : 0, tls_preset, now_us, id)
         nil
       }
     end

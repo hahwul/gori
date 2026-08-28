@@ -52,11 +52,23 @@ module Gori
       # `encoded_request` reports the wire through.
       getter? reframe_grpc : Bool
 
+      # The TLS fingerprint this tab/send was told to present, or nil for "whatever the
+      # destination policy says" (#844). PER-SEND, not per destination: two tabs against one
+      # host with different values dial two different SSL contexts, which is the A/B the
+      # override exists for. It reaches only the https dial — `Settings.outbound_tls_for`
+      # narrows the destination rule with it, so there is no second TLS policy path (P1).
+      #
+      # NEVER inferred (P4): every surface either takes it from the operator or leaves it nil.
+      # It is an APPROXIMATION of the named client's hello, exactly as #822 documents the
+      # presets — reporting it does not claim a byte-exact JA3 match.
+      getter tls_preset : String?
+
       def initialize(@outbound : Gori::Outbound, *, @scheme : String, @host : String, @port : Int32,
                      @verify : Bool, @http2 : Bool = false, @sni : String? = nil,
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil,
                      @preserve_field_case : Bool = false, @evidence : Bool = false,
-                     @reframe_grpc : Bool = false)
+                     @reframe_grpc : Bool = false, tls_preset : String? = nil)
+        @tls_preset = Settings.tls_preset_normalize(tls_preset)
       end
 
       # The reason this request may not go out, or nil to proceed. ONE rule stops a deliberate
@@ -152,10 +164,12 @@ module Gori
           if @http2
             H2Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-              preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
+              preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc,
+              tls_preset: @tls_preset)
           else
             Engine.send(wire, scheme: @scheme, host: @host, port: @port,
-              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
+              tls_preset: @tls_preset)
           end
         extract(wire, result)
         result
@@ -179,7 +193,8 @@ module Gori
         # HPACK field list, which is the "two copies of one rule" this file's own history warns
         # about. An operator who wants an identity on these bytes writes the field.
         result = H2Engine.send_fields(fields, body, scheme: @scheme, host: @host, port: @port,
-          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
+          tls_preset: @tls_preset)
         extract(scope, result)
         result
       end
@@ -192,7 +207,8 @@ module Gori
         # deliberate sequence, and every member of it goes out as the same identity.
         requests = requests.map { |b| wire(b) }
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
-          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+          verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
+          tls_preset: @tls_preset)
         # A group is ONE connection carrying a deliberate sequence, so every member is as
         # hand-authored as a lone `send` and every response is an equally legitimate source.
         # Later members win on a name both write, which is the wire order.
@@ -218,7 +234,7 @@ module Gori
         # header lines for a header overlay to write.
         WsEngine.send(Gori::Env.overlay_slot(Gori::Env.expand_bindings(upgrade)), expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
-          idle: idle, overrides: @overrides, keep_key: keep_key)
+          idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset)
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

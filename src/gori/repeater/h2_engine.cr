@@ -174,9 +174,10 @@ module Gori
                     timeout : Time::Span? = nil,
                     overrides : Gori::HostOverrides? = nil,
                     preserve_field_case : Bool = false,
-                    reframe_grpc : Bool = false) : Result
+                    reframe_grpc : Bool = false,
+                    tls_preset : String? = nil) : Result
         started = Time.instant
-        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides)
+        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
@@ -208,9 +209,10 @@ module Gori
       # widens WHAT the HEADERS block carries, not HOW it is framed.
       def self.send_fields(fields : Array({String, String}), body : Bytes?, *, scheme : String,
                            host : String, port : Int32, verify_upstream : Bool, sni : String? = nil,
-                           timeout : Time::Span? = nil, overrides : Gori::HostOverrides? = nil) : Result
+                           timeout : Time::Span? = nil, overrides : Gori::HostOverrides? = nil,
+                           tls_preset : String? = nil) : Result
         started = Time.instant
-        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides)
+        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
@@ -394,12 +396,14 @@ module Gori
       # operator as one sentence while the same tab one `^V` away named three of them.
       private def self.open(scheme : String, host : String, port : Int32, verify : Bool,
                             sni : String? = nil, timeout : Time::Span? = nil,
-                            overrides : Gori::HostOverrides? = nil) : {IO?, DialFailure?}
+                            overrides : Gori::HostOverrides? = nil,
+                            tls_preset : String? = nil) : {IO?, DialFailure?}
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
           ssl, err = Proxy::Upstream.dial_tls_result(host, port, verify: verify, alpn: "h2",
-            sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides)
+            sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides,
+            tls_preset: tls_preset)
           unless ssl
             return {nil, DialFailure.new(dial_error: err || Proxy::Upstream::DialError::ORIGIN_UNREACHABLE)}
           end

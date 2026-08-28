@@ -86,6 +86,13 @@ module Gori
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
             !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
             overrides: host_overrides, evidence: verbatim,
+            # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
+            # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
+            # every candidate is judged by an answer the tab will never get: an origin that
+            # 403s a bare OpenSSL hello (which is the reason to set a preset at all) refuses
+            # them uniformly, the bisection reads that as "every header is removable", and
+            # `--apply` then rewrites the stored request from responses no real send produced.
+            tls_preset: rec.tls_preset,
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
@@ -124,13 +131,16 @@ module Gori
           w = open_store(project)
           begin
             # EVERY column `update_repeater` writes comes off the stored row. Its SQL sets
-            # ws_keep_key and ws_http_only unconditionally and its signature defaults both to
-            # false, so omitting them CLEARS them — and a session can hold either flag with a
-            # request that is not a WebSocket upgrade (`repeater create --ws-http-only -f
-            # plain.txt`), which is exactly the shape `minimize_target_or_abort` lets through.
+            # ws_keep_key, ws_http_only and tls_preset unconditionally and its signature
+            # defaults all three, so omitting one CLEARS it — and a session can hold either WS
+            # flag with a request that is not a WebSocket upgrade (`repeater create
+            # --ws-http-only -f plain.txt`), which is exactly the shape
+            # `minimize_target_or_abort` lets through. `tls_preset` joined the list in #844
+            # and would otherwise make `--apply` silently drop the tab's fingerprint.
             applied = w.update_repeater(id: id, target: rec.target, request: report.minimized_text.to_slice,
               http2: rec.http2?, auto_cl: rec.auto_content_length?, sni: rec.sni,
-              ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?)
+              ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?,
+              tls_preset: rec.tls_preset)
           ensure
             w.close
           end

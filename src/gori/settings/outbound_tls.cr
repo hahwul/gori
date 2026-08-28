@@ -138,6 +138,56 @@ module Gori::Settings
       profile ? profile.ocsp_stapling : false # OpenSSL does not request stapling by default
     end
 
+    # ── per-send fingerprint override (#844) ───────────────────────────────────────────────
+    #
+    # This same rule, with its ClientHello SHAPE replaced by `name`'s preset — what a Repeater
+    # tab or a fuzz run asks for when the operator picks a fingerprint for THAT send. The
+    # destination table is not touched, and neither is any other tab dialing the same host.
+    #
+    # It NARROWS rather than replaces, and the split is field by field:
+    #
+    #   kept   `client_cert` / `client_key` — the destination's mutual-TLS IDENTITY. An
+    #          override says what the hello should look like, not who gori is; dropping the
+    #          certificate would turn "chrome vs curl" into "authenticated vs anonymous" and
+    #          answer a different question than the one asked.
+    #   kept   `min_version` / `max_version` — the version range is a reachability fact about
+    #          that destination (a TLS 1.0-only appliance stays reachable under any preset).
+    #   kept   `permissive` — a security-level-0 / renegotiation decision about that
+    #          destination, and the one knob that WIDENS what gori will accept. An override
+    #          must not be able to grant it, and must not be able to take it away either:
+    #          without it a legacy destination's own preset would stop applying mid-A/B.
+    #   kept   `host` — identity of the row; never reaches a context.
+    #
+    #   taken  `preset`, `groups`, `sigalgs`, `ciphersuites`, `ciphers`, `alpn`,
+    #          `session_tickets`, `ocsp_stapling` — the whole ClientHello shape, REPLACED and
+    #          not merged. Merging would leave the destination's own `groups` winning (rule
+    #          fields beat a preset — see `effective_groups`), so the override could not change
+    #          the one thing it exists to change. `ciphers` goes with them: it is the TLS 1.2
+    #          cipher list and its ORDER, which is a primary JA3 input.
+    #
+    # `name` is kept VERBATIM even when unknown, for the reason `parse_tls_preset` gives —
+    # nothing here folds a typo to "no override". Surfaces refuse an unknown name before the
+    # send (`Settings.tls_preset_error`); if one ever reaches here, `preset_profile` resolves
+    # to nil, nothing is applied, and `cache_key` still separates it from every other value.
+    def with_fingerprint(name : String) : OutboundTlsRule
+      OutboundTlsRule.new(
+        host: host,
+        client_cert: client_cert,
+        client_key: client_key,
+        min_version: min_version,
+        max_version: max_version,
+        ciphers: "",
+        permissive: permissive,
+        preset: name,
+        groups: "",
+        sigalgs: "",
+        ciphersuites: "",
+        alpn: [] of String,
+        session_tickets: nil,
+        ocsp_stapling: nil,
+      )
+    end
+
     # True when the rule changes nothing, so the shared default context can be reused.
     def default? : Bool
       !client_auth? && min_version.empty? && max_version.empty? && ciphers.empty? &&
@@ -192,13 +242,58 @@ module Gori::Settings
     rules
   end
 
-  # The TLS policy for `dest_host` — the first matching rule, else the all-defaults policy.
-  # Called once per TLS dial, so the patterns are precompiled (see the setter above).
-  def self.outbound_tls_for(dest_host : String) : OutboundTlsRule
-    return DEFAULT_OUTBOUND_TLS if @@outbound_tls_compiled.empty?
-    bare = HostPattern.bare(dest_host.downcase)
-    match = @@outbound_tls_compiled.find { |(pattern, _)| pattern.matches_bare?(bare) }
-    match ? match[1] : DEFAULT_OUTBOUND_TLS
+  # The TLS policy for `dest_host` — the first matching rule, else the all-defaults policy,
+  # narrowed by a per-send fingerprint `override` when the operator set one on this tab or
+  # this run (#844). Called once per TLS dial, so the patterns are precompiled (see the
+  # setter above).
+  #
+  # ONE resolution path, and that is the point (P1): the override is not a second TLS policy
+  # source that a dial has to consult beside this one — it is this same `OutboundTlsRule`,
+  # narrowed. Everything downstream (`apply_outbound_tls`, `cache_key`, the fingerprint
+  # report) keeps reading exactly one record and cannot tell where its shape came from.
+  #
+  # A nil/blank `override` returns the matched rule UNCHANGED — byte-identical to the
+  # pre-#844 behaviour, including the same `cache_key` and therefore the same cached context.
+  def self.outbound_tls_for(dest_host : String, override : String? = nil) : OutboundTlsRule
+    rule =
+      if @@outbound_tls_compiled.empty?
+        DEFAULT_OUTBOUND_TLS
+      else
+        bare = HostPattern.bare(dest_host.downcase)
+        match = @@outbound_tls_compiled.find { |(pattern, _)| pattern.matches_bare?(bare) }
+        match ? match[1] : DEFAULT_OUTBOUND_TLS
+      end
+    # Through `tls_preset_normalize`, not a second `strip.downcase` here: this is the
+    # function that decides which spellings are ONE policy, and a copy of that decision is a
+    # copy that drifts — the two would then disagree about whether `"Chrome "` shares a cache
+    # key with `"chrome"`, which is exactly the collision the key exists to prevent.
+    name = tls_preset_normalize(override)
+    name ? rule.with_fingerprint(name) : rule
+  end
+
+  # nil if `name` can be used as a per-send fingerprint override; the operator-facing refusal
+  # otherwise. Every surface that accepts one (`gori run repeater/fuzz --tls-preset`, MCP
+  # `send_request`/`fuzz_start`, the Repeater tab's persisted value on restore) calls this
+  # BEFORE the send, for the reason `parse_tls_preset` spells out at length: an unknown name
+  # applies nothing, so gori would dial with its bare OpenSSL hello while the operator
+  # believed Chrome's was going out — and unlike the destination table, a per-send override
+  # has no startup warning to catch it. A blank/absent name is "no override" and passes.
+  # Through `tls_preset_normalize` for the reason `outbound_tls_for` gives right above it: a
+  # second `strip.downcase` here is a second answer to "which spellings are ONE name", and the
+  # day that answer changes, validation and the cache key would disagree about which names are
+  # even valid.
+  def self.tls_preset_error(name : String?) : String?
+    n = tls_preset_normalize(name)
+    return nil if n.nil? || TLS_PRESETS.has_key?(n)
+    "unknown TLS fingerprint preset #{name.inspect} — expected one of #{TLS_PRESET_NAMES.join(", ")}"
+  end
+
+  # `name` normalised to the form the dial and the cache key see, or nil for "no override".
+  # Surfaces store and report THIS, so a tab persisted as `"Chrome "` and one persisted as
+  # `"chrome"` are one policy rather than two contexts.
+  def self.tls_preset_normalize(name : String?) : String?
+    n = name.try(&.strip.downcase)
+    n && !n.empty? ? n : nil
   end
 
   # Tolerant parse, like every other section: an entry with no host is dropped, an

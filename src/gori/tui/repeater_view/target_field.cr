@@ -120,4 +120,62 @@ class Gori::Tui::RepeaterView
   def target_copy_text : String
     @target_read.copy_text(target_active_line, target_active_cx)
   end
+
+  # --- per-send TLS fingerprint (#844) --------------------------------------------------
+  #
+  # The cycle order: no override, then the presets in `Settings::TLS_PRESETS` order. `nil`
+  # leads because it is the default and the way back — a tab that has been cycled all the way
+  # round is where it started, and there is no separate "clear" key to find.
+
+  # The fingerprint this tab sends with, or nil for the destination's own policy.
+  def tls_preset : String?
+    @tls_preset
+  end
+
+  # Is this tab's fingerprint override actually going to shape a ClientHello? An http:// target
+  # has no handshake to shape, so the value sits there inert.
+  #
+  # Deliberately NOT a silent reset of `@tls_preset` when the target is plaintext — the
+  # operator set it, it is persisted, and retargeting back to https:// must bring it back
+  # (P4). The chip goes muted instead, which says "set, and doing nothing" rather than
+  # discarding the choice or claiming it applies.
+  def tls_preset_live? : Bool
+    return false if @tls_preset.nil?
+    https_target?
+  end
+
+  # Is the target field an `https://` URL? A PREFIX test, not `parse_target` — this is called
+  # from `render_target` on every drawn frame, and `parse_target` is `Env.expand` plus a
+  # `URI.parse`, i.e. an env scan and a URL parse per frame to pick one chip's colour. The
+  # chip's LABEL was already kept off that path (see `tls_chip_label`); routing the colour
+  # through the full parse put it straight back.
+  #
+  # The one case the two answers differ on is a target whose scheme comes from a variable
+  # (`$BASE/path`), where this says "not https" and the parse would too — `parse_target`
+  # prepends `http://` to anything with no `://`, and `$BASE` has none. A target written
+  # `$SCHEME://host` is the genuine gap, and it fails SAFE: the chip goes muted, which
+  # understates rather than overstates what the handshake will carry.
+  private def https_target? : Bool
+    t = @target.lstrip
+    t.size >= 8 && t[0, 8].compare("https://", case_insensitive: true) == 0
+  end
+
+  # `␣T`: advance to the next fingerprint. Cycles nil → chrome → firefox → safari → curl → nil,
+  # so every value including "no override" is reachable with one key and nothing has to be
+  # typed — which is also why an unknown preset can never originate here.
+  def cycle_tls_preset : String?
+    names = Settings::TLS_PRESET_NAMES
+    current = @tls_preset
+    @tls_preset =
+      if current.nil?
+        names.first?
+      else
+        idx = names.index(current)
+        # A value this build does not know (a row written by another version) cycles to "none"
+        # rather than to a neighbour it has no position among.
+        idx.nil? ? nil : names[idx + 1]?
+      end
+    @dirty = true
+    @tls_preset
+  end
 end

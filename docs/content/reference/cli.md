@@ -1234,6 +1234,10 @@ Prints the **JA3 and JA4 fingerprint of the ClientHello gori actually sends**, p
 gori settings tls-fingerprint                    # every rule, plus the no-rule default
 gori settings tls-fingerprint shop.example.com   # the one policy that host would get
 gori settings tls-fingerprint --json             # machine-readable, with the raw lists
+
+# …and what a PER-SEND override would send instead — the same narrowing a Repeater tab's
+# ␣T or a `--tls-preset` run applies, without touching settings.json:
+gori settings tls-fingerprint shop.example.com --preset curl
 ```
 
 ```
@@ -1251,6 +1255,35 @@ shop.example.com  (matched rule "shop.example.com")
 Each policy is reported for **two legs**, and the difference between them is real. gori offers `h2` on a decrypted MITM connection; on a leg it is going to speak HTTP/1.1 on (the forward-proxy dial, the Repeater, WebSocket) it drops `h2` from the offer, and with no `alpn` configured it sends no ALPN extension at all — so those legs carry different ClientHellos. The second line under each digest is the list it hashes: that is where you see *which* field a setting moved, and it is the half worth comparing against a browser.
 
 The context the report reads is the same one a dial builds, so it cannot describe a handshake gori does not make. A `groups` or `sigalgs` string this OpenSSL rejects is reported on stderr for that rule and the rest still print.
+
+`--preset NAME` narrows every reported policy the way a **per-send override** does — see [Per-send TLS fingerprints](#per-send-tls-fingerprints) — so you can check what `--tls-preset curl` will actually put on the wire for a host that already has a `chrome` rule. The client certificate, protocol range and `permissive` flag stay the destination's; only the ClientHello shape is replaced. An unknown name is refused rather than reported as an empty hello.
+
+### Per-send TLS fingerprints
+
+`outbound_tls` is keyed by destination host, which is right for a standing policy and wrong for the question the fingerprints exist to answer: **does this endpoint answer differently as `chrome` than as `curl`?** That is an A/B on one host, and doing it by editing a global rule between two sends makes the two sends incomparable — and changes the handshake for every other tab and background capture hitting that host at the same time.
+
+A per-send override names a preset for **one send or one run**, resolved at dial time, without touching the destination table:
+
+```bash
+gori run repeater 42 --tls-preset chrome           # replay a captured flow as Chrome
+gori run repeater 42 --tls-preset curl             # …and again as curl, comparably
+gori run repeater send 7 --tls-preset firefox      # override a saved session for one send
+gori run repeater create --tls-preset chrome …     # store it on the session
+gori run fuzz --flow 42 --auto --tls-preset chrome # the whole sweep, one handshake
+```
+
+In the TUI it is `␣T` on a Repeater tab (a `␣T:…` chip on the TARGET band), persisted with the tab so a reopened one sends what it sent before, and the Fuzzer's **TLS fingerprint** row on the `^O` advanced card. Over MCP it is `send_request{tls_preset}` and `fuzz_start{tls_preset}`, both echoed back so a result set says which handshake produced it.
+
+The override **narrows** the destination policy rather than replacing it:
+
+| Field | Under an override |
+|-------|-------------------|
+| `preset`, `groups`, `sigalgs`, `ciphers`, `ciphersuites`, `alpn`, `session_tickets`, `ocsp_stapling` | **replaced** by the named preset's — this is the ClientHello shape, and merging would leave the destination's own values winning |
+| `client_cert`, `client_key` | **kept** — an override says what the hello looks like, not who gori is; dropping the certificate would turn "chrome vs curl" into "authenticated vs anonymous" |
+| `min_version`, `max_version` | **kept** — the version range is a reachability fact about that destination |
+| `permissive` | **kept** — an override can neither grant nor revoke security level 0 |
+
+Two sends differing only in the override dial two separate SSL contexts, so they really are two handshakes. `https` only: a plaintext leg sends no ClientHello, and gori will not report one it did not send. As with the destination-level presets, these are **approximations** — extension order and GREASE placement are OpenSSL's — so check one with `gori settings tls-fingerprint HOST --preset NAME` rather than assuming it.
 
 ### `--config PATH`
 

@@ -1154,8 +1154,27 @@ module Gori
           SQL
       ]
 
+      # `repeaters.tls_preset` — the per-send TLS fingerprint override (#844) THIS TAB sends
+      # with, so a reopened tab dials the handshake it was saved with rather than falling back
+      # to the destination policy. Two tabs against one host with different values is the
+      # whole point of the feature, and a per-TAB column is the only shape that can express it.
+      #
+      # NULL and '' both mean "no override — use the destination policy", which is what every
+      # existing row means and what makes this migration a no-op for them. The value is a
+      # PRESET NAME (`Settings::TLS_PRESETS`), kept verbatim: an unknown one is refused at the
+      # send (`Settings.tls_preset_error`), never folded away here, so a project written by a
+      # newer gori reads back as the name it holds rather than as silence.
+      #
+      # The Fuzzer gets NO column of its own. Its per-run value rides `fuzz_sessions.config`,
+      # the opaque JSON the frontend already owns, and a RUN reports its fingerprint through
+      # the same summary/JSON/MCP-job metadata that reports the rest of its settings —
+      # `fuzz_runs` has no production writer at all, so a column there would record nothing.
+      V22 = [
+        "ALTER TABLE repeaters ADD COLUMN tls_preset TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21]
+                    V18, V19, V20, V21, V22]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

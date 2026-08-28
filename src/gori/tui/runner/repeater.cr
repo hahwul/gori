@@ -98,6 +98,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_toggle_grpc_fields
   end
 
+  def repeater_cycle_tls_preset : Nil
+    repeater_controller.repeater_cycle_tls_preset
+  end
+
   def repeater_toggle_grpc_reframe : Nil
     repeater_controller.repeater_toggle_grpc_reframe
   end

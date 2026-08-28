@@ -20,7 +20,11 @@ module Gori
         sni : String?,
         # The session's outbound frames, or nil when the seed is not a WebSocket. Non-nil is
         # what makes this a WS run — see `Fuzz::PlanOptions#ws_messages`.
-        ws : Array(Fuzz::WsMessageSource)? = nil
+        ws : Array(Fuzz::WsMessageSource)? = nil,
+        # The seeding SESSION's TLS fingerprint (#844), or nil. Carried for the same reason
+        # `sni` is: a sweep seeded from a tab has to dial the handshake that tab dials, or
+        # every result is about a ClientHello the tab never sends. `--tls-preset` overrides it.
+        tls_preset : String? = nil
 
       private def self.cmd_fuzz(args : Array(String)) : Nil
         db_path : String? = nil
@@ -30,6 +34,7 @@ module Gori
         request_file : String? = nil
         target_override : String? = nil
         sni : String? = nil
+        tls_preset : String? = nil
         force_h2 = false
         insecure = false
         auto = false
@@ -76,6 +81,11 @@ module Gori
           p.on("--target=URL", "Send to this origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
+          # RUN-level, not per request: keep-alive parks a socket whose handshake is already
+          # done, so a per-request fingerprint is a value the wire could not carry. The
+          # honesty clause is the same one every other surface carries — #822 documents these
+          # as approximations and a sweep tagged `chrome` did not send Chrome's ClientHello.
+          p.on("--tls-preset=NAME", "TLS fingerprint for this whole run: shape every ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match — `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out") { |v| tls_preset = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--auto", "Auto-mark every query / cookie / body parameter value") { auto = true }
           p.on("--mark=TOKEN", "Mark each literal TOKEN occurrence as a position (repeatable)") { |v| marks << v }
@@ -201,6 +211,10 @@ module Gori
         evidence = seed.evidence
         # An explicit --sni wins; otherwise the source's own (a repeater session's stored SNI).
         sni ||= seed.sni
+        # …and the same precedence for the fingerprint. `||=` rather than a `presence` fold, so
+        # an explicit `--tls-preset ""` still means "no override for this run" and can take the
+        # baseline half of an A/B against a tab that carries one.
+        tls_preset = seed.tls_preset if tls_preset.nil?
         http2 = force_h2 || seed.http2
 
         # ── the WebSocket decision, taken once ────────────────────────────────────────────
@@ -285,7 +299,8 @@ module Gori
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,
             race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
             ws_idle: ws_idle,
-            ws_keep_key: ws_keep_key),
+            ws_keep_key: ws_keep_key,
+            tls_preset: tls_preset),
           ws_messages: ws_messages,
           matcher: matcher, verify: !insecure, sni: sni,
           overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id))
@@ -345,7 +360,8 @@ module Gori
         # order it this way — MCP checks FUZZ_MAX_REQUESTS in `fuzz_start` before spawning the
         # job fiber that calibrates, and the TUI's confirm dialog gates `start_run`, which is
         # what hands the engine over and calibrates.
-        total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force)
+        total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force,
+          plan.tls_preset)
         # A store held open across the sweep ONLY when recording — each matched/all Result is
         # written as a flow as it arrives (#749). Opened here, after the plan proved the target
         # is valid, so a refused run never touches the DB.
@@ -407,6 +423,8 @@ module Gori
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount
           "--race needs at least 2 connections (a race of 1 is just a send)"
+        in Fuzz::PlanError::Reason::TlsPreset
+          ex.message || "unknown --tls-preset"
         end
       end
 
@@ -601,8 +619,11 @@ module Gori
         # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
         # origin) must be swept against THAT name, or `fuzz --repeater N` reaches a different
         # vhost — or fails the handshake — where `repeater send N` succeeds.
+        # …and `rec.tls_preset` for the same reason `rec.sni` does, one layer up: an origin
+        # that answers a bare OpenSSL hello with a challenge is exactly why the tab carries a
+        # preset, and a sweep that drops it measures the challenge, not the endpoint.
         FuzzSeed.new(String.new(Fuzz::Template.escape_literal_markers(rec.request)),
-          rec.target, rec.http2?, false, rec.sni, ws)
+          rec.target, rec.http2?, false, rec.sni, ws, rec.tls_preset)
       end
 
       # A captured flow's outbound frames, as a fuzz seed. `evidence: true` throughout — every
@@ -769,7 +790,8 @@ module Gori
       # with the project store connection open and its `-wal`/`-shm` uncheckpointed.
       private def self.fuzz_preflight(engine : Fuzz::Engine, outbound : Gori::Outbound,
                                       mode : Fuzz::Mode, race : Int32?, scheme : String,
-                                      host : String, port : Int32, force : Bool) : Int64?
+                                      host : String, port : Int32, force : Bool,
+                                      tls_preset : String? = nil) : Int64?
         total = begin
           engine.total
         rescue ex
@@ -785,7 +807,11 @@ module Gori
                       "(max #{Fuzz::Engine::MAX_RACE_SIZE} connections)"
         end
         label = race ? "race ×#{effective_race || race}" : mode.label
-        STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}"
+        # The fingerprint rides the RUN's own banner line, so a result set read later — or
+        # scrolled back to — says which handshake produced it. Only on https: a plaintext leg
+        # sends no ClientHello, and printing a preset there would name a hello nobody sent.
+        tls = tls_preset && scheme == "https" ? " · tls #{tls_preset}" : ""
+        STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}#{tls}"
         if (total.nil? || total > FUZZ_AUTO_CAP) && !force
           outbound.close
           abort "gori run fuzz: refusing to send #{total ? total.to_s : "an unbounded number of"} requests without --force (narrow positions/payloads or pass --force)"

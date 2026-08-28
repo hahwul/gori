@@ -321,6 +321,10 @@ class Gori::Tui::RepeaterView
       j.field "decode_kind", kind.to_s
     end
     j.field "sni", @sni unless @sni.empty?
+    # The tab's per-send TLS fingerprint (#844) — the same fact `get_repeater_context`'s
+    # persisted-session listing carries, reported here for the tabs that never reach the
+    # `repeaters` table at all (WS / gRPC / decode).
+    @tls_preset.try { |p| j.field "tls_preset", p }
     j.field "inflight", inflight?
     j.field "focus", @focus.to_s
     if fid = source_flow_id

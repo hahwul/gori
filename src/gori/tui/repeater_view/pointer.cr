@@ -22,8 +22,14 @@ class Gori::Tui::RepeaterView
       if Frame.mode_badge_hit(mx, my, rect.y, rect.right - 1, rect.x + 8, target_insert?)
         return :target_mode
       end
+      _, tls_x, tr_edge = target_chrome_chain(rect)
+      # The `␣T` fingerprint chip (#844). Tested against the SAME `tls_chip_label` the draw
+      # writes, at the same x the chain placed it — the geometry is inverted exactly, not
+      # re-derived, which is the rule the `option_cycle` cue miss in #839 was about.
+      if tls_x && mx >= tls_x && mx < tls_x + tls_chip_label.size
+        return :tls_preset
+      end
       if transport_switchable?
-        _, tr_edge = target_chrome_chain(rect)
         if hit = Frame.right_badge_hit(mx, my, rect.y, tr_edge, target_chip_min(rect),
              [{:transport, "^V", transport_label}] of {Symbol, String, String})
           return hit

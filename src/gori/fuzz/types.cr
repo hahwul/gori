@@ -403,6 +403,22 @@ module Gori
       property ws_idle : Time::Span
       property? ws_keep_key : Bool
 
+      # PER-RUN TLS fingerprint override (#844): the name of a `Settings::TLS_PRESETS` entry
+      # every send in this run presents, or nil to use whatever the destination policy says.
+      #
+      # RUN-level rather than per request, and that is the honest granularity: keep-alive
+      # parks a socket whose handshake is already done, so a per-request fingerprint would be
+      # a value the wire cannot carry. It rides `Config` (not `PlanOptions`) because this is
+      # what a finished run has to be able to REPORT — "which handshake produced these
+      # results" is a property of the result set, and `Config` is what every surface already
+      # reads a run's settings back off.
+      #
+      # An APPROXIMATION of the named client's hello, exactly as #822 documents the presets.
+      # A run tagged `chrome` did not send Chrome's ClientHello; it sent gori's, shaped by
+      # Chrome's value-level fields. `gori settings tls-fingerprint --preset chrome` prints
+      # the JA3/JA4 that actually goes out.
+      property tls_preset : String?
+
       def initialize(@mode : Mode = Mode::Sniper,
                      @concurrency : Int32 = 20,
                      @rps : Float64? = nil,
@@ -423,7 +439,8 @@ module Gori
                      @race_count : Int32? = nil,
                      @race_warmup : Bytes? = nil,
                      @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
-                     @ws_keep_key : Bool = false)
+                     @ws_keep_key : Bool = false,
+                     @tls_preset : String? = nil)
       end
     end
   end
