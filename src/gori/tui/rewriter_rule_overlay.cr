@@ -42,8 +42,8 @@ module Gori::Tui
     SCOPES       = %w[project global]
     SCOPE_LABELS = ["this project", "global (every project)"]
     TARGETS      = %w[request response]
-    OPS          = %w[replace add_header set_header remove_header short_circuit]
-    OP_LABELS    = ["replace", "add header", "set header", "remove header", "stub"]
+    OPS          = %w[replace add_header set_header remove_header short_circuit pipe]
+    OP_LABELS    = ["replace", "add header", "set header", "remove header", "stub", "pipe (run a command)"]
     MATCHES      = %w[literal regex]
     # `ws` rewrites a WebSocket MESSAGE on an upgraded (101) flow, with `target:` picking
     # the direction (request = client→server, response = server→client). It is its own part
@@ -187,6 +187,11 @@ module Gori::Tui
       op.short_circuit?
     end
 
+    # The op whose `value:` row is an ARGV, not a replacement — see `Store::RuleOp::Pipe`.
+    def pipe_op? : Bool
+      op.pipe?
+    end
+
     # Rows the CURRENT op has no meaning for, skipped by ↑/↓ so the form never parks the
     # caret on a field that does nothing. target/match/part are already drawn "n/a" for the
     # ops that ignore them; this stops the two body-source rows from appearing at all for the
@@ -209,6 +214,11 @@ module Gori::Tui
     def valid? : Bool
       return false if pattern.empty?
       return false if short_circuit_op? && !RuleStub.valid?(@stub)
+      # A pipe rule's `value:` is the command, so an empty or unparseable one is exactly as
+      # unsaveable as an empty pattern: the rule would match live traffic and then do nothing
+      # at all, silently, on every message. Same validator the CLI and MCP call
+      # (`Rules.pipe_argv_error`).
+      return false if pipe_op? && !Gori::Rules.pipe_argv_error(op, replacement).nil?
       return true unless match_kind.regex? && !op.header?
       SafeRegexp.compile(pattern)
       true
@@ -220,6 +230,9 @@ module Gori::Tui
     def invalid_reason : String
       return "enter a #{header_op? ? "header name" : "pattern"}" if pattern.empty?
       return "write a stub response (↵ on response:)" if short_circuit_op? && !RuleStub.valid?(@stub)
+      if pipe_op? && (why = Gori::Rules.pipe_argv_error(op, replacement))
+        return replacement.strip.empty? ? "enter a command to pipe through" : "fix the command: #{why}"
+      end
       "fix the regex"
     end
 
@@ -459,7 +472,11 @@ module Gori::Tui
       case op
       when .add_header?, .set_header? then "value:"
       when .remove_header?            then "value: (n/a)"
-      else                                 "replace:"
+        # Not "replace:" — the field holds a COMMAND, and a row labelled "replace" over an
+        # argv is the one place this form could make an operator think the text on the right
+        # is what lands on the wire.
+      when .pipe? then "run:"
+      else             "replace:"
       end
     end
 

@@ -124,6 +124,20 @@ module Gori
     end
 
     private def rule_notice(rules : RuleSetChange?, extract : RuleSetChange?, by_agent : Bool) : Notice?
+      # A peer's rule that RUNS A COMMAND pre-empts every other wording, because it is the one
+      # change here whose consequence is not "different bytes" (#818). See `RuleSetChange#executes`
+      # for why it earns its own line; the short version is that the byte-level sentence is true
+      # and would not have told the operator that this process is now forking a program off local
+      # disk on their behalf. Always `:warn` — there is no version of this that is a quiet
+      # `:info` line, and by construction it cannot be one anyway (the count only includes
+      # ENABLED rules, so `enabled` is non-zero whenever it fires).
+      if (change = rules) && change.executes > 0
+        return Notice.new(:warn,
+          "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
+          "#{author(by_agent)} — #{change.executes == 1 ? "it runs" : "they run"} a local command " \
+          "here, with your privileges, on every message #{change.executes == 1 ? "it matches" : "they match"}",
+          :rewriter, by_agent)
+      end
       # ONE level for the whole line. A change that leaves nothing enabled cannot move a byte on
       # the wire, whatever just happened to the list — and the operator must not get a bell or no
       # bell depending only on whether the peer happened to touch one list or two.

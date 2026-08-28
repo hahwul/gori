@@ -1,4 +1,5 @@
 require "base64"
+require "./process_hook"
 require "./decoder/converter"
 require "./decoder/registry"
 require "./decoder/codecs"
@@ -10,6 +11,52 @@ module Gori::Decoder
   # Output ceiling for any single step / decompression drain — lifted from
   # Proxy::Codec::ContentDecode::MAX_OUT (32 MiB) so a chained decompress can't bomb.
   MAX_OUT = 32 * 1024 * 1024
+
+  # The marker that turns a chain step into an EXTERNAL COMMAND (#818):
+  # `base64-decode > exec:./mytool --flag > json-pretty`. Everything after the colon is the
+  # argv, tokenized by `ProcessHook.parse_argv` and exec'd with NO SHELL.
+  #
+  # Why `exec:` and not the `| argv` the issue drew. `|` is already one of this grammar's three
+  # interchangeable SEPARATORS (`SEPARATORS`, documented in the CLI reference), so `a > | ./tool`
+  # splits into a bare `./tool` token with the marker gone before anything can read it — and
+  # repurposing `|` would silently change what every existing `a | b` chain means, from "then run
+  # converter b" to "then exec the program b". A colon-prefixed kind marker is the idiom already
+  # in the tree (`DisplayColumns`: `header:x`, `regex:…`, `position:…`), collides with no
+  # separator, and survives a shell's own quoting rules unremarkably.
+  #
+  # LIMIT, and it comes from the same place: the spec is split on `>`, `|` and `,` BEFORE a step
+  # is looked at, so those three characters cannot appear anywhere in an exec step's argv. There
+  # is no shell here, so redirection and pipelines were never meanings they could carry; an
+  # argument that genuinely needs a comma has to be passed some other way (a file, an env var).
+  EXEC_PREFIX = "exec:"
+
+  # The argv text of an exec step, or nil when this token is an ordinary converter name. The one
+  # place the marker is recognised — the chain executor, the autocomplete panes, the Fuzzer and
+  # Repeater pre-send gates and the saved-chain flattener all ask HERE rather than each spelling
+  # the prefix out (P1).
+  def self.exec_spec(token : String) : String?
+    t = token.strip
+    return nil unless t.size > EXEC_PREFIX.size && t[0, EXEC_PREFIX.size].compare(EXEC_PREFIX, case_insensitive: true) == 0
+    t[EXEC_PREFIX.size..].strip
+  end
+
+  # Whether this token names an exec step at all (however broken its argv is). Separated from
+  # `exec_spec` because the callers that REFUSE a bad chain need "this was meant to be an exec
+  # step" to be true even when the argv does not tokenize — otherwise a typo'd command falls
+  # through to the registry and is reported as an unknown converter, which sends the operator
+  # looking for a converter name.
+  def self.exec_step?(token : String) : Bool
+    !exec_spec(token).nil?
+  end
+
+  # Why this exec step cannot run, or nil when it can. The shared validator behind every
+  # pre-send refusal — see `Fuzz::Plan.refuse_unusable_chains`.
+  def self.exec_step_error(token : String) : String?
+    spec = exec_spec(token)
+    return nil if spec.nil?
+    out = ProcessHook.parse_argv(spec)
+    out.is_a?(String) ? "#{token}: #{out}" : nil
+  end
 
   # How a (possibly binary) value is rendered in the Output/pipeline panes.
   enum RenderAs

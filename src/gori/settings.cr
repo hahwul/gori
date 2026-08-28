@@ -14,6 +14,7 @@ require "./settings/tabs"
 require "./settings/keymap"
 require "./settings/decoder"
 require "./settings/rewriter"
+require "./settings/hooks"
 require "./settings/colormarker"
 require "./settings/saved_views"
 require "./settings/miner"
@@ -237,6 +238,7 @@ module Gori
         self.editor = ed["command"]?.try(&.as_s?) || editor
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
+      parse_hooks(root["hooks"]?)
       self.upstream_rules = parse_upstream_rules(root["upstream_rules"]?)
       self.outbound_tls = parse_outbound_tls(root["outbound_tls"]?)
       parse_retention(root["retention"]?)
@@ -1091,6 +1093,7 @@ module Gori
       reset_discover
       reset_decoder
       reset_rewriter
+      reset_hooks
       reset_colormarker
       reset_saved_views
       # `$KEY` highlighting is cached against this revision, exactly as apply_sections does
@@ -1133,6 +1136,7 @@ module Gori
           serialize_discover(j)
           serialize_decoder(j)
           serialize_rewriter(j)
+          serialize_hooks(j)
           serialize_colormarker(j)
           serialize_saved_views(j)
         end

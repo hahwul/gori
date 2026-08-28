@@ -511,7 +511,7 @@ module Gori::Tui
         if @popup.open?
           return @popup_engaged ? "↑/↓ pick · ↹/↵ complete · esc close · type to filter" : "↓ browse · type to filter · ⇥ output · esc sub-tabs"
         end
-        "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc sub-tabs"
+        "chain (> | ,) · exec:CMD runs a command · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc"
       when :output
         # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
         # so it is not re-listed here as a second, different action.
@@ -934,6 +934,13 @@ module Gori::Tui
       # passive discovery menu (engaged? = false → Tab keeps navigating the focus ring,
       # ↓ dives in). A typed token filters AND engages it (Tab/↵ accept). set() opens the
       # popup iff the match list is non-empty.
+      # An `exec:` step is free text (an argv), so the catalog popup stays shut over it — see
+      # `ChainPane#refilter`, which makes the same call for the same reason (#818).
+      if Decoder.exec_step?(tok)
+        @popup.close
+        @popup_engaged = false
+        return
+      end
       matches = registry.match(tok).map(&.name).uniq!
       @popup.set(matches.first(64), ts, te)
       @popup_engaged = !tok.empty?

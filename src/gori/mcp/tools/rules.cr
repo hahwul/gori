@@ -118,6 +118,9 @@ module Gori
         if bad = short_circuit_error(op, replacement, body_file)
           return bad
         end
+        if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
         # Atomic disabled creation: insert already-disabled so there is no window
         # where a just-created rule is live before a follow-up disable call.
         enabled = bool_arg(h, "enabled", true)
@@ -175,6 +178,9 @@ module Gori
         if bad = short_circuit_error(op, replacement, body_file)
           return bad
         end
+        if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
         updated =
           if scope.global?
             Settings.update_rewriter_rule(id, target.label, part.label, pattern, replacement,
@@ -230,6 +236,9 @@ module Gori
         end
         replacement = str(h, "replacement") || ""
         host = str(h, "host") || ""
+        if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
         candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)
         # Reuse the engine's preview over a throwaway Rules bound only to the store.
         pv = Gori::Rules.new(store, [] of Store::MatchRule).preview(candidate)
@@ -261,6 +270,17 @@ module Gori
         {target, part}
       end
 
+      # Why this rule's command cannot run, as an MCP error — the `Rules.pipe_argv_error`
+      # validator the TUI editor and `gori run rewriter` also call. A pipe rule whose argv does
+      # not tokenize matches live traffic and then does nothing, so it is refused at the write
+      # rather than discovered from traffic that went out untouched.
+      private def pipe_shape_error(op : Store::RuleOp, replacement : String) : Result?
+        return nil unless why = Gori::Rules.pipe_argv_error(op, replacement)
+        err("'replacement' is the command to run for op=pipe and #{why} — it is exec'd " \
+            "directly with no shell, so quote arguments, not pipelines",
+          "INVALID_ARGUMENT", field: "replacement")
+      end
+
       # Only `replace` acts on a WebSocket message: a header op names a header and a WS
       # message has none, and a short-circuit rule answers a request that a WS message is
       # not. Refused rather than normalized — `Rules.normalize_shape` would coerce the part
@@ -268,8 +288,8 @@ module Gori
       # caller asked to rewrite WebSocket frames and would have got one rewriting HTTP heads.
       private def ws_shape_error(op : Store::RuleOp, part : Store::RulePart) : Result?
         return nil unless part.ws?
-        return nil if op.replace?
-        err("op '#{op.label}' cannot target part 'ws' — only 'replace' rewrites a WebSocket " \
+        return nil if op.replace? || op.pipe?
+        err("op '#{op.label}' cannot target part 'ws' — only 'replace' and 'pipe' rewrite a WebSocket " \
             "message; use part=head for an HTTP header or short-circuit rule",
           "INVALID_ARGUMENT", field: "part")
       end
@@ -287,10 +307,11 @@ module Gori
                when "set_header"    then Store::RuleOp::SetHeader
                when "remove_header" then Store::RuleOp::RemoveHeader
                when "short_circuit" then Store::RuleOp::ShortCircuit
+               when "pipe"          then Store::RuleOp::Pipe
                else                      nil
                end
              end
-        return err("invalid 'op' (expected replace|add_header|set_header|remove_header|short_circuit)", "INVALID_ARGUMENT", field: "op") unless op
+        return err("invalid 'op' (expected replace|add_header|set_header|remove_header|short_circuit|pipe)", "INVALID_ARGUMENT", field: "op") unless op
         # Validate `match` explicitly instead of leaning on MatchKind.from_label
         # (which coerces any unknown label to Literal). A silent literal fallback
         # would mislead a caller into thinking a `regex` rule was applied while the
@@ -624,10 +645,10 @@ module Gori
           "pick it up immediately." do |s|
           s.field "scope", strprop("project (default) | global — a global rule lives in settings.json and applies in EVERY project")
           s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME; for short_circuit: the substring/regex matched against the REQUEST head"), required: true
-          s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body")
+          s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body; for pipe: the COMMAND as an argv ('./sign --key k'), tokenized with quote/backslash rules but NEVER interpreted by a shell")
           s.field "target", strprop("request|response (default request; short_circuit is always request)")
-          s.field "part", strprop("head|body|ws — head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws")
-          s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist")
+          s.field "part", strprop("head|body|ws — head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)")
+          s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header | pipe (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND: 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)")
           s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
           s.field "match", strprop("for replace: literal | regex (default literal). Regex supports $1/\\1 capture groups")
           s.field "name", strprop("optional label for the rule")

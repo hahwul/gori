@@ -296,6 +296,7 @@ module Gori
         when .add_header?    then "+hdr"
         when .set_header?    then "~hdr"
         when .short_circuit? then "stub"
+        when .pipe?          then "pipe/#{r.part.badge}"
         else                      "-hdr"
         end
       end
@@ -306,7 +307,10 @@ module Gori
         case r.op
         when .remove_header? then r.pattern
         when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r.replacement, r.body_file)}"
-        else                      "#{r.pattern} -> #{r.replacement}"
+          # `<>` rather than `->`: the text on the right is the COMMAND, not the bytes it puts
+          # on the wire. Same distinction `Rules.describe` draws with `⇄` in the TUI.
+        when .pipe? then "#{r.pattern} <> #{r.replacement}"
+        else             "#{r.pattern} -> #{r.replacement}"
         end
       end
 
@@ -390,7 +394,8 @@ module Gori
         when "set_header"    then Store::RuleOp::SetHeader
         when "remove_header" then Store::RuleOp::RemoveHeader
         when "short_circuit" then Store::RuleOp::ShortCircuit
-        else                      abort "gori run rewriter: invalid --op '#{s}' (replace|add_header|set_header|remove_header|short_circuit)"
+        when "pipe"          then Store::RuleOp::Pipe
+        else                      abort "gori run rewriter: invalid --op '#{s}' (replace|add_header|set_header|remove_header|short_circuit|pipe)"
         end
       end
 
@@ -427,18 +432,22 @@ module Gori
                      "For a header op: --find is the header NAME, --value the value.\n" \
                      "For short_circuit: --find matches the request head and --value (or\n" \
                      "--response-file) is the canned response gori answers with — nothing is\n" \
-                     "sent upstream. --body-file replaces the response BODY, read per request."
+                     "sent upstream. --body-file replaces the response BODY, read per request.\n" \
+                     "For pipe: --find selects the region and --value is a COMMAND, run with\n" \
+                     "no shell, fed the matched bytes on stdin; its stdout replaces them. It\n" \
+                     "runs with YOUR privileges. On timeout, non-zero exit or a failed spawn\n" \
+                     "the bytes pass through unchanged and a notice is written."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
-          p.on("--match=KIND", "literal|regex (default literal; replace/short_circuit only)") { |v| match_s = v }
-          p.on("--part=PART", "head|body|ws (default head; replace only; ws = a WebSocket message)") { |v| part_s = v }
+          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
+          p.on("--match=KIND", "literal|regex (default literal; replace/pipe/short_circuit only)") { |v| match_s = v }
+          p.on("--part=PART", "head|body|ws (default head; replace/pipe only; ws = a WebSocket message)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
-          p.on("-vVALUE", "--value=VALUE", "Replacement, header value, or canned response (default empty)") { |v| value = v }
+          p.on("-vVALUE", "--value=VALUE", "Replacement, header value, canned response, or (--op=pipe) the COMMAND (default empty)") { |v| value = v }
           p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin)") { |v| response_file = v }
           p.on("--body-file=PATH", "short_circuit: serve PATH as the response BODY (re-read when it changes)") { |v| body_file = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
@@ -457,6 +466,7 @@ module Gori
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
         value = check_short_circuit_args(op, value, response_file, body_file)
+        check_pipe_value(op, value, "add")
         check_ws_part(op, part, "add")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
@@ -509,9 +519,21 @@ module Gori
       # operator asked to rewrite WebSocket frames and would have got a rule rewriting HTTP
       # request heads, with nothing on screen to say so.
       private def self.check_ws_part(op : Store::RuleOp, part : Store::RulePart, verb : String) : Nil
-        return unless part.ws? && !op.replace?
+        return unless part.ws? && !(op.replace? || op.pipe?)
         abort "gori run rewriter #{verb}: --op=#{op.label} cannot use --part=ws — only replace " \
-              "rewrites a WebSocket message; use --part=head for an HTTP header or short-circuit rule"
+              "and pipe rewrite a WebSocket message; use --part=head for an HTTP header or short-circuit rule"
+      end
+
+      # A pipe rule's --value is the ARGV, so an unparseable one is a rule that matches live
+      # traffic and then does nothing at all. Refused here for the reason the stub check above
+      # is: the alternative is discovering it from traffic that silently went out untouched.
+      # `Rules.pipe_argv_error` is the same validator the TUI editor and the MCP tools call.
+      private def self.check_pipe_value(op : Store::RuleOp, value : String, verb : String) : Nil
+        return unless op.pipe?
+        if why = Gori::Rules.pipe_argv_error(op, value)
+          abort "gori run rewriter #{verb}: --value is the command to run and #{why} " \
+                "(it is exec'd directly — there is no shell, so quote arguments, not pipelines)"
+        end
       end
 
       private def self.valid_regex?(pattern : String) : Bool
@@ -657,7 +679,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit (default replace)") { |v| op_s = v }
+          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal)") { |v| match_s = v }
           p.on("--part=PART", "head|body|ws (default head)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob") { |v| host = v }
@@ -681,6 +703,7 @@ module Gori
         if match.regex? && !op.header? && !valid_regex?(f)
           abort "gori run rewriter preview: invalid regex --find (failed to compile)"
         end
+        check_pipe_value(op, value, "preview")
         check_ws_part(op, part, "preview")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 

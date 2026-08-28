@@ -99,7 +99,18 @@ module Gori::Decoder
         # token fails the chain as unusable (see comment above). Everything else is a
         # saved name and gets spliced — in EITHER direction, because `r` holds no saved
         # entry at this point.
-        if r[tok]?
+        if Decoder.exec_step?(tok)
+          # An `exec:` step is not a name and cannot be spliced — it stays as written and runs
+          # when the saved chain does (#818). It IS refused here when its argv does not
+          # tokenize, for the same reason an unknown converter is: the entry would otherwise
+          # register as usable and the payload would go out untransformed.
+          if reason = Decoder.exec_step_error(tok)
+            failed = true
+            why[nk] = reason
+            break
+          end
+          out << tok
+        elsif r[tok]?
           out << tok
         elsif !specs.has_key?(tk)
           failed = true

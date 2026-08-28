@@ -626,8 +626,8 @@ Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록�
 | `description` | string | 발견 상세에 표시 |
 | `side` | string | `request` 또는 `response` |
 | `region` | string | `whole`, `header`, `body` |
-| `kind` | string | `string` 또는 `regex` |
-| `pattern` | string | 매칭할 리터럴 또는 정규식 |
+| `kind` | string | `string`, `regex`, 또는 `exec`(argv — [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고) |
+| `pattern` | string | 매칭할 리터럴 또는 정규식, `kind`가 `exec`이면 실행할 명령 |
 | `severity` | string | `info`, `low`, `medium`, `high`, `critical` |
 | `enabled` | bool | 규칙 실행 여부 |
 
@@ -743,6 +743,7 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname_overrides) 참고 |
 | `env` | Env 토큰 접두사와 전역 값. 위의 [env](#env) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
+| `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |
 | `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#reusing-a-rule-across-projects) 참고 |
 | `colormarker` | 전역 History 행 색상 규칙. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
