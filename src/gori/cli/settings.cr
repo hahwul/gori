@@ -104,6 +104,9 @@ module Gori::CLI
     Settings::SECTION_KEYS.each do |k|
       notes = [] of String
       notes << "holds secrets — excluded unless named" if Settings::SECRET_SECTIONS.includes?(k)
+      # The second axis (#842). Says "can", not "does": whether THIS install's section holds a
+      # command is a question about its contents, which the export/import ends answer per entry.
+      notes << "can carry commands" if Settings::COMMAND_SECTIONS.includes?(k)
       notes << "not set — at its default" unless present.includes?(k)
       puts notes.empty? ? k : "#{k}  (#{notes.join("; ")})"
     end
@@ -143,6 +146,50 @@ module Gori::CLI
     else
       puts doc
     end
+    # LAST, and after the write. This is the sentence about what the file the operator just
+    # made will DO on someone else's machine, so it must not arrive above a `cannot write`
+    # abort for a file that does not exist — the same ordering the -o refusal above keeps.
+    report_exported_commands(doc)
+  end
+
+  # What this profile will RUN on the machine that imports it (#842).
+  #
+  # Nothing is dropped to earn this line — see `Settings.command_rules` for why reporting beats
+  # excluding — so the export's whole job here is to say what it wrote. On STDERR, so a piped
+  # profile stays clean; exit stays 0, because nothing went wrong.
+  #
+  # Counts what the FILE carries, disabled rules included. `PeerNotices` counts only ENABLED
+  # ones and is right to: it is announcing what a running proxy is forking right now. An export
+  # is not that — a disabled rule is in the bytes either way, and `enabled` is one keystroke on
+  # the far side. The import end lists them individually and marks the inert ones.
+  private def self.report_exported_commands(doc : String) : Nil
+    found = Settings.command_entries(JSON.parse(doc))
+    STDERR.puts "note: #{exported_commands_note(found)}" unless found.empty?
+  end
+
+  # Pure, so the wording is spec-callable. "with their own privileges", not `PeerNotices`'
+  # "with your privileges": the profile is leaving this machine, and whose privileges are at
+  # stake is the one thing that differs between the two ends of it.
+  private def self.exported_commands_note(found : Array(Settings::CommandEntry)) : String
+    "#{run_a_command(found.size)} a local command (#{command_breakdown(found)}) — " \
+    "whoever imports it runs #{found.size == 1 ? "it" : "them"} with their own privileges"
+  end
+
+  # "N entries in this profile run(s)", the one clause every surface here opens with. Spelled
+  # once so a reword does not have to be made in three places and kept in step by three
+  # separate assertions. "entries", not "rules": two of the five shapes are scalar settings
+  # (`statusline.command`, `editor.command`), not rows in a rule table.
+  private def self.run_a_command(count : Int32) : String
+    one = count == 1
+    "#{count} #{one ? "entry" : "entries"} in this profile #{one ? "runs" : "run"}"
+  end
+
+  # "2 rewriter pipe, 1 statusline sh -c". Grouped by {section, kind} and therefore emitted in
+  # COMMAND_SECTIONS order, since that is the order `command_entries` collects in.
+  private def self.command_breakdown(found : Array(Settings::CommandEntry)) : String
+    found.group_by { |e| {e.section, e.kind} }
+      .map { |(section, kind), group| "#{group.size} #{section} #{kind}" }
+      .join(", ")
   end
 
   # `-o` aimed at the LIVE settings file is data loss wearing an export's clothes, so refuse
@@ -241,10 +288,12 @@ module Gori::CLI
   private def self.run_settings_import(args : Array(String)) : Nil
     sections = nil.as(Array(String)?)
     dry = false
+    allow_commands = false
     parser = OptionParser.new do |p|
-      p.banner = "Usage: gori settings import FILE [--sections a,b] [--dry-run]"
+      p.banner = "Usage: gori settings import FILE [--sections a,b] [--dry-run] [--allow-commands]"
       p.on("--sections=LIST", "Comma-separated top-level sections to apply (default: every section in FILE)") { |v| sections = split_sections("import", v) }
       p.on("--dry-run", "Print which sections would be applied, then exit without writing") { dry = true }
+      p.on("--allow-commands", "Apply rules that run an external command (required when the profile carries one)") { allow_commands = true }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
       p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       p.missing_option { |flag| abort "missing value for #{flag}" }
@@ -267,11 +316,15 @@ module Gori::CLI
     # Reject a non-object before touching anything: apply_sections is tolerant by design and
     # would silently no-op on a JSON array or scalar, which reads as "imported, nothing
     # happened" rather than "this is not a settings document".
-    begin
-      abort "gori settings import: #{file} is not a settings document (expected a JSON object)" unless JSON.parse(raw).as_h?
+    # Parsed ONCE and carried down to `command_entries` below — this is the same document the
+    # shape check needs, and re-reading the file's JSON per consumer is a parse of every rule
+    # table the profile holds, per consumer.
+    root = begin
+      JSON.parse(raw)
     rescue
       abort "gori settings import: #{file} is not valid JSON"
     end
+    abort "gori settings import: #{file} is not a settings document (expected a JSON object)" unless root.as_h?
 
     Settings.load
     # Settings gori could not load leave EVERY section at its factory default and the 3-way
@@ -290,6 +343,12 @@ module Gori::CLI
     applicable, changed, unknown = Settings.import_preview(raw, sections)
     STDERR.puts "warning: unrecognised section(s) ignored: #{unknown.join(", ")}" unless unknown.empty?
 
+    # Over the sections that would ACTUALLY be applied, not over the file: `--sections network`
+    # against a profile whose `rewriter` block happens to carry a hook arms nothing, so it must
+    # neither report a rule nor be refused over one. `applicable` is exactly that set — the
+    # same list the summary below counts.
+    commands = Settings.command_entries(root, applicable)
+
     if dry
       if applicable.empty?
         puts "nothing to apply — #{file} carries none of the selected sections"
@@ -307,8 +366,14 @@ module Gori::CLI
         puts "would apply #{applicable.size} section(s) to #{Settings.path}:"
         applicable.each { |k| puts changed.includes?(k) ? "  #{k}" : "  #{k}  (unchanged)" }
       end
+      report_import_commands(commands, dry: true, allowed: allow_commands)
       return
     end
+
+    # BEFORE the write, and before the refusal that may follow it — a summary the operator
+    # reads after the rules are already on disk is not a summary, it is a receipt.
+    report_import_commands(commands, dry: false, allowed: allow_commands)
+    refuse_unacknowledged_commands!(commands, allowed: allow_commands)
 
     # import_document drops unrecognised keys itself and raises if the write fails, so what it
     # returns IS what was handed to the settings. Subtracting `unknown` from it here was the
@@ -316,6 +381,118 @@ module Gori::CLI
     # read "imported 0 section(s)" over a write that had just happened.
     applied = Settings.import_document(raw, sections)
     puts "imported #{applied.size} section(s) into #{Settings.path}#{applied.empty? ? "" : ": #{applied.join(", ")}"}"
+  end
+
+  # The command-carrying rules this import would arm, one per line, argv included (#842).
+  #
+  # Section granularity cannot say this. "would apply 1 section(s): rewriter" is equally true
+  # of a profile that restyles your header rewrites and of one that installs a hook, and those
+  # are not the same decision — the second is the trust decision you make when you run someone
+  # else's script.
+  #
+  # STDERR on BOTH paths, `--dry-run` included, even though the section list beside it goes to
+  # STDOUT. It is a notice about a hazard rather than the command's output, so it has to
+  # survive `--dry-run > plan.txt` and still reach a person; and it is the stream the export
+  # end says the same fact on.
+  private def self.report_import_commands(found : Array(Settings::CommandEntry), dry : Bool,
+                                          allowed : Bool) : Nil
+    command_report(found, dry, allowed).each { |line| STDERR.puts line }
+  end
+
+  # The lines themselves. Pure, so the wording is spec-callable — every guard around it ends in
+  # `abort`, which is not catchable.
+  #
+  # The headline is `PeerNotices`' sentence, verbatim in the part that carries the weight: a
+  # peer's `pipe` rule and an imported one arm the identical thing, and one spelling of that
+  # fact per tool is the point (#818, #772). What differs is only the subject — a burst of
+  # changes there, a file here.
+  #
+  # `allowed` only picks the last line. It is threaded in rather than tested at the call site
+  # because `--dry-run --allow-commands` otherwise ended on "a real import needs
+  # --allow-commands", which reads as if the dry run had rejected the flag they just passed.
+  private def self.command_report(found : Array(Settings::CommandEntry), dry : Bool,
+                                  allowed : Bool) : Array(String)
+    return [] of String if found.empty?
+    rows = found.map do |e|
+      # `printable` on both operator-supplied strings: they come out of a file someone else
+      # wrote, and a name or command carrying `\e[2K` would erase the warning printed above it.
+      {"#{e.section} #{e.kind}", printable(e.name.presence || "(unnamed)"), printable(e.command), e.enabled}
+    end
+    shape_w = rows.max_of { |(shape, _, _, _)| column_width(shape) }
+    name_w = rows.max_of { |(_, name, _, _)| column_width(name) }
+    lines = ["#{run_a_command(found.size)} a local command here, with your privileges:"]
+    rows.each do |(shape, name, command, enabled)|
+      lines << "  #{pad(shape, shape_w)}  #{pad(name, name_w)}  #{command}#{"  [disabled]" unless enabled}"
+    end
+    lines << command_report_footer(found.size, dry, allowed)
+    lines
+  end
+
+  private def self.command_report_footer(count : Int32, dry : Bool, allowed : Bool) : String
+    return "importing #{count == 1 ? "it" : "them"} is the same trust decision as running the author's script" unless dry
+    return "--dry-run writes nothing; --allow-commands is set, so a real import would apply #{count == 1 ? "it" : "them"}" if allowed
+    "--dry-run writes nothing; a real import of this profile needs --allow-commands"
+  end
+
+  # Column padding by TERMINAL WIDTH, not codepoint count. `ljust` measures `String#size`, so a
+  # CJK rule name — two cells per character — under-padded its column and stepped the command
+  # beside it out of line, in a listing whose whole purpose is to be read carefully before a
+  # command is armed. `Screen.display_width` is the measure the TUI already draws with.
+  private def self.column_width(s : String) : Int32
+    Tui::Screen.display_width(s)
+  end
+
+  private def self.pad(s : String, width : Int32) : String
+    s + " " * {width - column_width(s), 0}.max
+  end
+
+  # A string from a profile, safe to put on a terminal: scrubbed to valid UTF-8, with every
+  # character that could make the line read as something other than what it says escaped
+  # rather than emitted.
+  #
+  # A rule NAME and a command are text that arrived in a file someone else wrote, and this
+  # listing exists to be READ before a trust decision — which makes "what is displayed is what
+  # is in the file" the property it has to have. `\e[1A\e[2K` in a name would otherwise rewrite
+  # the line above it, which is the count of how many commands the profile carries.
+  #
+  # Escaping is by codepoint, not by byte, so a non-ASCII path stays readable instead of
+  # turning into a run of `\xNN`.
+  private def self.printable(s : String) : String
+    s.scrub.gsub { |ch| unsafe_char?(ch) ? "\\u{#{ch.ord.to_s(16)}}" : ch }
+  end
+
+  # Crystal's `Char#control?` is Cc AND Cf, so it already covers the whole invisible-format
+  # class this listing has to fear: the bidi overrides and isolates (`U+202E` renders
+  # `./evil.sh` as something else entirely without changing a byte of what runs — Trojan
+  # Source), the zero-width joiners, the soft hyphen and the BOM.
+  #
+  # What it does NOT cover is `U+2028`/`U+2029`, which are Zl/Zp rather than Cf — and which a
+  # terminal may well break the line on, splitting one entry's row in two.
+  private def self.unsafe_char?(ch : Char) : Bool
+    ch.control? || ch.ord == 0x2028 || ch.ord == 0x2029
+  end
+
+  # An import that arms execution needs the operator to say so, once, on the command line.
+  #
+  # A GATE, not a veto: the refusal names the flag that answers it, and that flag is answerable
+  # NON-INTERACTIVELY because there is no prompt here at all — `gori settings import` is
+  # scriptable and stays so. The two alternative shapes are both worse. Importing quietly makes
+  # the tool complicit in a decision it never surfaced, which is the whole of #842. Importing
+  # everything EXCEPT the hooks would half-apply a section that replaces wholesale, leaving a
+  # rule table that is neither the profile's nor the operator's — and doing it silently, since
+  # the operator asked for the section.
+  #
+  # Nothing has been written when this fires: `import_document` is below it. A refusal that
+  # arrives after its side effect is not a refusal.
+  # `allowed` is taken rather than tested at the call site so the whole gate — the flag, the
+  # empty case and the refusal — reads in one place.
+  private def self.refuse_unacknowledged_commands!(found : Array(Settings::CommandEntry),
+                                                   allowed : Bool) : Nil
+    return if allowed || found.empty?
+    one = found.size == 1
+    abort "gori settings import: refused — the #{found.size} #{one ? "entry" : "entries"} listed " \
+          "above run#{"s" if one} a local command with your privileges. Read " \
+          "#{one ? "it" : "them"}, then pass --allow-commands. Nothing was written."
   end
 
   # Split a `--sections` value into names. Pure, so the suite can exercise it — `abort` calls

@@ -60,11 +60,10 @@ jobs:
         # `--production` (= `--frozen --without-development`) rather than a bare
         # install. Two reasons, one of each kind:
         #
-        # LIGHTER: the only development dependency is ameba, whose postinstall
-        # COMPILES the ameba binary — and no job here runs ameba (see the note above
-        # `tests`). That build was the bulk of this step's half-minute, paid once per
-        # job, for a tool nothing in CI invokes. `--frozen` costs nothing on top and
-        # leaves shard.lock untouched, so this stays a read of the tree, not an edit.
+        # LIGHTER: the only development dependency is ameba — and no job here runs it
+        # (see the note above `tests`), so `--without-development` skips a clone paid
+        # once per job for a tool nothing in CI invokes. `--frozen` costs nothing on top
+        # and leaves shard.lock untouched, so this stays a read of the tree, not an edit.
         #
         # STRICTER: `--frozen` fails when shard.lock does not satisfy shard.yml, which
         # is the one dependency mistake a green build would otherwise hide — a shard
@@ -135,8 +134,9 @@ jobs:
   # real refactor, not lint cleanup, and `.ameba.yml` already records the decision to
   # raise the bar to 12 rather than carve them up. `just check` still runs it locally —
   # which is now the ONLY place it runs at all: the install steps pass `--production`, so
-  # no runner clones or compiles ameba any more. Whichever job gains the gate has to drop
-  # that flag for itself.
+  # no runner clones ameba any more. Whichever job gains the gate has to drop that flag
+  # for itself, and compile `lib/ameba/bin/ameba.cr` itself: since 1.7.0 the shard ships
+  # no postinstall, so installing it no longer leaves a binary behind.
   # Add the gate when that category is dealt with, not by excluding it — a check that is
   # always red is a check nobody reads, but one that is green by exclusion is worse.
   tests:

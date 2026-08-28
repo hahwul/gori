@@ -74,7 +74,7 @@ describe "the group-send decision on a real RepeaterView" do
   end
 
   it "refuses the unrunnable chain the single send already refuses, instead of sending it" do
-    # Round 6's `refuse_bad_chains` covers `^R` only; before this the group path sent
+    # Round 6's chain refusal covers `^R` only; before this the group path sent
     # `§PAYLOAD-A¦no-such-conv§` verbatim and reported "2/2 ok on one connection".
     view = RepeaterView.new
     view.restore("http://127.0.0.1", "POST /bad1 HTTP/1.1\r\nHost: h\r\n\r\n§PAYLOAD-A¦no-such-conv§", false, true)

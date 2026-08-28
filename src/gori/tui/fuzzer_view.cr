@@ -2977,7 +2977,14 @@ module Gori::Tui
     # `reconstructed: false` means `bytes` is the exact octets the engine put on the socket
     # (`Result#request` = `Job#bytes`), retained under the run's keep_bodies policy.
     # `reconstructed: true` means nothing kept them and they were re-derived here.
-    record ResultRequest, bytes : Bytes, reconstructed : Bool
+    #
+    # `chain_withheld: true` adds a second caveat on top of the first: the row's template holds
+    # a `¦chain` step that RUNS A COMMAND, this rebuild did not run it (#818 — redrawing a row
+    # is not a send), and the value shown is therefore the payload before that step. It is not
+    # covered by `Result#chain_error`, which reports what happened on the WIRE — where the hook
+    # ran fine — so without carrying it here the pane would show untransformed bytes, with a
+    # Content-Length computed to match them, and say nothing.
+    record ResultRequest, bytes : Bytes, reconstructed : Bool, chain_withheld : Bool = false
 
     # The one sentence every surface uses for a reconstruction — kept next to the record so
     # the detail pane, the copy buffer and the Repeater seed cannot word it differently, and
@@ -2985,6 +2992,15 @@ module Gori::Tui
     # sits beside it and would otherwise imply by contrast that the request pane is real.
     def self.reconstruction_note(keep_bodies : Symbol) : String
       "(reconstructed from the template — this row's request was not retained; keep_bodies: #{keep_bodies})"
+    end
+
+    # The second half of that sentence, for a rebuild whose template runs a command. Separate
+    # from `reconstruction_note` because it is a DIFFERENT fact — not "these bytes were not
+    # kept" but "these bytes are missing a step" — and because a row can be a reconstruction
+    # without one.
+    def self.withheld_hook_note : String
+      "(a ¦chain step runs a command and was NOT re-run for this rebuild — the value below is " \
+      "the payload before it; the wire got the transformed one)"
     end
 
     # `Result#request` is the byte-exact request the engine sent. When it wasn't retained
@@ -3004,10 +3020,23 @@ module Gori::Tui
       if sent = r.request
         return ResultRequest.new(sent, false)
       end
-      tmpl = @run_template || Fuzz::Template.parse(String.new(Env.expand_wire(@editor.wire_text)), @http2)
+      tmpl = run_template
       # Values only — the reason a chain didn't run is already carried on the row
       # (r.chain_error), surfaced by detail_request_lines below.
-      payloads = tmpl.apply_chains(r.payloads, Decoder.shared_registry)
+      #
+      # `run_hooks: false`: this is a RECONSTRUCTION for the pane, re-derived every time a row
+      # is selected, and since #818 a `¦chain` step can be an `exec:` — the operator's own
+      # command. The engine already ran it once, on the send this row records; re-running it to
+      # redraw the row would fire a side effect for a request that is over.
+      #
+      # The step is withheld and the value shown UNTRANSFORMED, which is a second caveat on top
+      # of "not retained" and has to be carried as one: `r.chain_error` cannot cover it (on the
+      # wire the hook ran fine), and `Fuzz::ContentLength.sync` below then measures the header
+      # against these shorter bytes. Without `chain_withheld` the pane — and `Send to Repeater`
+      # and the Comparer slot, which take these bytes — would show a coherent-looking request
+      # that no socket carried and say nothing.
+      payloads = tmpl.apply_chains(r.payloads, Decoder.shared_registry, run_hooks: false)
+      withheld = reconstruction_withholds_hook?
       # The same last transform the generator applied, off the SAME decision object — see
       # `@run_auto_encode`. `r.position` is the Sniper discriminator the generator used
       # (`Job#position`): only the substituted position was encoded, the rest kept their
@@ -3020,7 +3049,7 @@ module Gori::Tui
       # reframe is size-preserving, so it can neither invalidate the CL just written nor move a
       # byte. Skipped when THAT run did not reframe (`@run_reframe_grpc`), which is the common case.
       raw = Fuzz::GrpcVerdict.reframe(raw) if @run_reframe_grpc
-      ResultRequest.new(raw, true)
+      ResultRequest.new(raw, true, withheld)
     end
 
     # The frozen {update_cl, add_cl_when_missing, keep_bodies} of the run that produced
@@ -3035,7 +3064,26 @@ module Gori::Tui
     # the detail pane shows.
     def result_request_note(r : Fuzz::Result) : String?
       return nil unless r.request.nil?
-      FuzzerView.reconstruction_note(run_policy[2])
+      note = FuzzerView.reconstruction_note(run_policy[2])
+      # Carried on the SEED and the Comparer chip too, not only in the detail pane: those two
+      # hand the bytes to another tab, where nothing else would say the transform is missing.
+      # Asked of the TEMPLATE, not by building the request — this is a label path (the chip in
+      # `fuzzer_controller`), and `repeater_seed_for` already calls `result_request` beside it.
+      note += " #{FuzzerView.withheld_hook_note}" if reconstruction_withholds_hook?
+      note
+    end
+
+    # Whether rebuilding a row would leave a `¦chain` hook out (#818). A property of the run's
+    # frozen template, so both the note above and `result_request` below read it from one place
+    # and cannot disagree about a caveat one of them prints.
+    private def reconstruction_withholds_hook? : Bool
+      run_template.runs_commands?(Decoder.shared_registry)
+    end
+
+    # The template a rebuild renders through: the run's frozen one, or the live buffer before a
+    # run has frozen anything. Named because three callers now need exactly this fallback.
+    private def run_template : Fuzz::Template
+      @run_template || Fuzz::Template.parse(String.new(Env.expand_wire(@editor.wire_text)), @http2)
     end
 
     # Bytes only — for callers that have already accounted for provenance (the decode strip,
@@ -3048,6 +3096,7 @@ module Gori::Tui
       req = result_request(r)
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
       lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
+      lines.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld
       # This pane already SHOWS the untransformed bytes for a row whose `¦chain` did not run
       # (result_request re-applies the same chains the engine did). Say WHY, so the operator
       # doesn't read the raw payload as the request they declared. #567/H3 Finding 1.
