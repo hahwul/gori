@@ -1122,8 +1122,36 @@ module Gori
           SQL
       ]
 
+      # gRPC server-reflection cache (#827). ONE row per reflected target, holding the
+      # FileDescriptorSet gori synthesized from the FileDescriptorProtos the server returned
+      # — so one operator-initiated fetch serves every flow on that host, across restarts,
+      # without a second outbound request (P4: the network is touched when someone asks, and
+      # this table is what makes "once" enough).
+      #
+      # Keyed by `scheme://authority`, not by bare host: the plaintext port of a host is not
+      # necessarily the same server as its TLS port, and a descriptor set is the server's word
+      # about ITSELF.
+      #
+      # `descriptor` is a BLOB and stays byte-exact (P7) — it is re-parsed by the same
+      # `Schema.parse` a file-loaded set goes through, which is what makes a reflected schema
+      # and a `protoc --descriptor_set_out` one indistinguishable downstream. `service` records
+      # WHICH reflection service answered (`grpc.reflection.v1…` / `…v1alpha…`), because
+      # "where did this schema come from" is a question the Project settings row has to answer.
+      V20 = [
+        <<-SQL,
+          CREATE TABLE grpc_reflection (
+            target     TEXT    PRIMARY KEY,
+            service    TEXT    NOT NULL DEFAULT '',
+            fetched_at INTEGER NOT NULL DEFAULT 0,
+            services   INTEGER NOT NULL DEFAULT 0,
+            files      INTEGER NOT NULL DEFAULT 0,
+            descriptor BLOB    NOT NULL
+          )
+          SQL
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19]
+                    V18, V19, V20]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

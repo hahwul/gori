@@ -344,7 +344,12 @@ module Gori::Protobuf
 
     # --- primitives -----------------------------------------------------------
 
-    private def length_delimited(number : UInt32, payload : Bytes) : Bytes
+    # PUBLIC: `Protobuf::Reflection` builds `ServerReflectionRequest` messages — a host
+    # string and one `oneof` member, both length-delimited — and wraps each returned
+    # FileDescriptorProto as field 1 of a FileDescriptorSet. That is the same tag+length+
+    # payload rule, and a second copy of the varint writer beside the reflection client is
+    # how two encoders come to disagree about a boundary case.
+    def length_delimited(number : UInt32, payload : Bytes) : Bytes
       io = IO::Memory.new(payload.size + 10)
       write_tag(io, number, Protobuf::WireType::LengthDelimited)
       write_varint(io, payload.size.to_u64)

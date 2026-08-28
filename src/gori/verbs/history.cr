@@ -56,6 +56,16 @@ module Gori
       # engagement — the opposite shape from `v`, which is flipped many times an hour and earns
       # its bare key on that traffic. `C` is free across Body COMMON (the only other 'C' in the
       # registry is Comparer-scoped), and 'c' is already a Global chord (capture).
+      # Menu-only, no chord, and deliberately so: this is the one History verb that puts a
+      # request on the wire. A bare key next to the navigation cluster would make an outbound
+      # call one mistyped keystroke away, which is the shape P4 exists to prevent. `G` is free
+      # across Scope::Body and reads as the feature's initial.
+      r.register Verb::Definition.new(
+        "history.grpc-reflect", "gRPC: fetch schema (reflection)",
+        "Ask the selected flow's target for its .proto descriptors over gRPC server reflection, and cache them in this project — ACTIVE: sends a real request to that host",
+        Verb::Scope::Body, [] of Verb::Chord,
+        available: history_selected, mnemonic: 'G', group: :view) { |ctx| ctx.history_grpc_reflect; nil }
+
       r.register Verb::Definition.new(
         "history.columns", "Columns…", "Add, reorder or remove the values the list draws beside each flow (a header, a JSON field, a regex capture)",
         Verb::Scope::Body,

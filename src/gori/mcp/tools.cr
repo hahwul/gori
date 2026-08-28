@@ -32,6 +32,7 @@ require "./tools/context"
 require "./tools/decode"
 require "./tools/cookie"
 require "./tools/discover"
+require "./tools/grpc"
 require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
@@ -115,6 +116,9 @@ module Gori
         "intercept_toggle", "intercept_set_filter", "intercept_set_direction",
         "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop",
         "authorize_start", "authorize_stop", "stop_job",
+        # An outbound request to a target, and a project mutation (the descriptor cache) —
+        # both halves of what AGENT_ACTION_TOOLS records. `grpc_forget` mutates the same row.
+        "grpc_reflect", "grpc_forget",
         "create_issue", "update_issue",
         "probe_dismiss", "probe_promote", "probe_delete",
         "set_probe_rule_enabled", "create_probe_rule", "update_probe_rule", "delete_probe_rule", "set_probe_mode",
@@ -766,6 +770,7 @@ module Gori
           list_fuzz_tools j
           list_mine_tools j
           list_discover_tools j
+          list_grpc_tools j
           list_authorize_tools j
           list_jobs_tools j
         end
@@ -1042,6 +1047,9 @@ module Gori
         when "discover_status"           then gated { discover_status(h) }
         when "discover_results"          then gated { discover_results(h) }
         when "discover_stop"             then gated { discover_stop(h) }
+        when "grpc_schema"               then grpc_schema(h)
+        when "grpc_reflect"              then gated { grpc_reflect(h) }
+        when "grpc_forget"               then gated { grpc_forget(h) }
         when "authorize_start"           then gated { authorize_start(h) }
         when "authorize_status"          then gated { authorize_status(h) }
         when "authorize_results"         then gated { authorize_results(h) }

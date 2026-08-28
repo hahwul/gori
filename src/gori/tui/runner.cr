@@ -529,6 +529,9 @@ module Gori::Tui
             dirty = true if sequencer_controller.drain_events
             dirty = true if discover_controller.drain_events
             dirty = true if authorize_controller.drain_events
+            # A finished gRPC reflection fetch (#827): applied on THIS fiber because
+            # `Schemas.adopt` writes to the store, which the send fiber must never wait on.
+            dirty = true if history_controller.drain_reflection
             if (rev = @session.interceptor.revision) != last_rev
               last_rev = rev
               dirty = true

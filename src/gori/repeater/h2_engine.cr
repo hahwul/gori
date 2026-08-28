@@ -1231,7 +1231,11 @@ module Gori
         end
       end
 
-      private def self.authority(host : String, port : Int32, scheme : String) : String
+      # PUBLIC: `send_fields` injects no pseudo-headers (that is its whole point), so a
+      # caller that BUILDS a field list — `Protobuf::Reflection` — has to write `:authority`
+      # itself, and the IPv6 bracketing / default-port rule below is exactly the one it must
+      # not re-derive differently.
+      def self.authority(host : String, port : Int32, scheme : String) : String
         default = scheme == "https" ? 443 : 80
         # An IPv6 literal host must be bracketed in the :authority pseudo-header, else the
         # colons collide with the port separator and a strict server rejects the stream

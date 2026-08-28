@@ -3,6 +3,8 @@ require "../history_view"
 require "../clipboard"
 require "../url"
 require "../../hotkeys"
+require "../../protobuf/reflection"
+require "../../protobuf/schemas"
 
 module Gori::Tui
   # The History tab: the live flow list + the in-frame detail drill-in. The detail
@@ -21,6 +23,10 @@ module Gori::Tui
       @history.set_colormarker(@host.session.colormarker)
       reload_columns
       @query_reload_at = nil.as(Time::Instant?)
+      # Buffered so the send fiber's hand-off never blocks; `grpc_reflect` allows one at a
+      # time, and the spare slots absorb a result the operator has already navigated away from.
+      @reflect_results = Channel(ReflectDone).new(4)
+      @reflect_inflight = false
       # A view that has gone missing since it was picked. Held rather than announced here: this
       # runs while the shell is still booting, where a status line is overwritten before anyone
       # reads it. `on_enter` says it at the moment the operator actually looks at History.
@@ -595,6 +601,109 @@ module Gori::Tui
 
     def selected_flow_id : Int64?
       @history.selected_id
+    end
+
+    # --- gRPC server reflection (#827) ---------------------------------------
+    #
+    # Reflection is an OUTBOUND request, so it happens here and only here: when the operator
+    # runs the verb on a row they picked (P4). Nothing on the capture path, the detail-open
+    # path or the render path reaches this method.
+
+    # One completed fetch, on its way back from the send fiber to the UI fiber. The Store
+    # write (`Schemas.adopt`) is deliberately NOT done on that fiber: `Store#put_*` blocks on
+    # the writer, which a live capture may be holding, and the UI must never be behind it —
+    # the same split `RepeaterController` draws for a Repeater send's history record.
+    private record ReflectDone,
+      target : String,
+      outcome : Gori::Protobuf::Reflection::Outcome
+
+    # Fetch the selected flow's target schema by gRPC server reflection.
+    #
+    # The row supplies the target, which is what makes this verb safe to put on a bare
+    # gesture: there is nothing to type, and the host is one the operator is already looking
+    # at in their own capture. It still goes through `Outbound.interactive` — Layer 1 waived
+    # because the operator picked the row, Sandbox still hard-stopping the send.
+    def grpc_reflect : Nil
+      row = @history.selected_row
+      unless row
+        @host.status("gRPC reflection: no flow selected")
+        return
+      end
+      if @reflect_inflight
+        @host.status("gRPC reflection: already running")
+        return
+      end
+      client = Gori::Protobuf::Reflection::Client.new(Gori::Outbound.interactive(@host.session.scope),
+        scheme: row.scheme, host: row.host, port: row.port,
+        verify: Settings.verify_upstream?, overrides: @host.session.host_overrides)
+      # Asked BEFORE anything is printed and before the fiber is spawned, so a blocked target
+      # costs no thread and reads as a refusal rather than as a failed send.
+      if reason = client.refusal
+        @host.status("gRPC reflection: #{reason}")
+        return
+      end
+      target = client.target
+      results = @reflect_results
+      @reflect_inflight = true
+      @host.status("gRPC reflection → #{target}…")
+      spawn(name: "gori-grpc-reflect") do
+        outcome = begin
+          client.fetch
+        rescue ex
+          # `fetch` rescues its own failures, so anything here is a bug — and an unrescued
+          # raise in a spawn kills the fiber silently under the alternate screen, leaving the
+          # status line saying "…" forever.
+          ::Log.error(exception: ex) { "grpc reflection fiber died" }
+          Gori::Protobuf::Reflection::Outcome.new(error: ex.message || "reflection failed")
+        end
+        select
+        when results.send(ReflectDone.new(target, outcome))
+        else
+          # The operator left the project: drop the late result rather than block forever.
+        end
+      ensure
+        @reflect_inflight = false
+      end
+    end
+
+    # Apply any finished reflection on the UI fiber. Returns whether the frame is dirty.
+    #
+    # NON-BLOCKING, the same `select … else` shape `RepeaterController#drain_results` uses:
+    # this runs once per frame, and `receive?` would park the UI fiber on an empty channel.
+    def drain_reflection : Bool
+      dirty = false
+      while done = nonblocking_reflection
+        dirty = true
+        apply_reflection(done)
+      end
+      dirty
+    end
+
+    private def nonblocking_reflection : ReflectDone?
+      select
+      when d = @reflect_results.receive
+        d
+      else
+        nil
+      end
+    end
+
+    private def apply_reflection(done : ReflectDone) : Nil
+      outcome = done.outcome
+      if err = outcome.error
+        @host.status("gRPC reflection #{done.target}: #{err}")
+        return
+      end
+      set = outcome.descriptor_set
+      unless set
+        @host.status("gRPC reflection #{done.target}: no descriptors returned")
+        return
+      end
+      committed = Gori::Protobuf::Schemas.adopt(@host.session.store, done.target,
+        outcome.service, outcome.services.size, outcome.files, set)
+      line = "gRPC reflection #{done.target} (#{outcome.version}): #{Gori::Protobuf::Schemas.status}"
+      line += " — but NOT saved (project busy); it reverts when you reopen this project" unless committed
+      @host.status(line)
     end
 
     # The effective target set for a batch verb: the marks if any, else the cursor row

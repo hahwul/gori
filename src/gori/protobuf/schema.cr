@@ -330,7 +330,12 @@ module Gori::Protobuf
     # asks for the ONE reading its field number declares. Last-wins on a repeated occurrence
     # of a singular field, which is what protobuf's own parsers do.
 
-    protected def self.text(m : Protobuf::Message, number : Int32) : String?
+    # PUBLIC, like `submessages` below: `Protobuf::Reflection` reads FileDescriptorProto
+    # headers (`name`, `dependency`) off the wire to walk the import graph, and those are
+    # descriptor-shaped messages read by the same one-declared-reading rule. A second copy of
+    # these four readers beside the reflection client is the "two answers to one question"
+    # shape this file's own `submessages` comment warns about.
+    def self.text(m : Protobuf::Message, number : Int32) : String?
       v = nil.as(String?)
       m.fields.each do |f|
         v = f.string if f.number == number && f.wire.length_delimited? && f.string
@@ -338,7 +343,7 @@ module Gori::Protobuf
       v
     end
 
-    protected def self.varint(m : Protobuf::Message, number : Int32) : UInt64?
+    def self.varint(m : Protobuf::Message, number : Int32) : UInt64?
       v = nil.as(UInt64?)
       m.fields.each { |f| v = f.uint if f.number == number && f.wire.varint? }
       v
@@ -346,7 +351,7 @@ module Gori::Protobuf
 
     # An int32 descriptor field. Negative values arrive sign-extended to 64 bits, so the
     # reinterpretation — not a truncation — is what recovers them.
-    protected def self.int32(m : Protobuf::Message, number : Int32) : Int64?
+    def self.int32(m : Protobuf::Message, number : Int32) : Int64?
       varint(m, number).try(&.to_i64!)
     end
 
@@ -354,7 +359,7 @@ module Gori::Protobuf
     # decoder's nested probe declined it: the probe requires a CLEAN parse, and a truncated
     # sub-descriptor would otherwise vanish from the schema without a word — the partial
     # parse still carries the leading name/number fields.
-    protected def self.submessages(m : Protobuf::Message, number : Int32) : Array(Protobuf::Message)
+    def self.submessages(m : Protobuf::Message, number : Int32) : Array(Protobuf::Message)
       out = [] of Protobuf::Message
       m.fields.each do |f|
         next unless f.number == number && f.wire.length_delimited?
@@ -363,6 +368,34 @@ module Gori::Protobuf
         elsif b = f.bytes
           out << Protobuf.decode(b, max_depth: MAX_DEPTH)
         end
+      end
+      out
+    end
+
+    # EVERY value of a repeated string field, in wire order — `FileDescriptorProto.dependency`
+    # (3) is the one the reflection client walks, and `text` above is deliberately last-wins,
+    # which for a repeated field would silently reduce an import list to its final entry.
+    # A payload that is not valid UTF-8 is skipped rather than scrubbed: a `.proto` path is
+    # ASCII by construction, and a lossy repair here would produce a filename the server
+    # cannot answer `file_by_filename` for.
+    def self.strings(m : Protobuf::Message, number : Int32) : Array(String)
+      out = [] of String
+      m.fields.each do |f|
+        next unless f.number == number && f.wire.length_delimited?
+        (s = f.string) && (out << s)
+      end
+      out
+    end
+
+    # EVERY value of a repeated bytes field — `FileDescriptorResponse.file_descriptor_proto`
+    # (1), whose entries are serialized FileDescriptorProtos. Distinct from `submessages`:
+    # that one DECODES the payload, and these bytes have to survive verbatim to be cached
+    # and re-parsed (P7 — the octets the server sent are what gets stored).
+    def self.blobs(m : Protobuf::Message, number : Int32) : Array(Bytes)
+      out = [] of Bytes
+      m.fields.each do |f|
+        next unless f.number == number && f.wire.length_delimited?
+        (b = f.bytes) && (out << b)
       end
       out
     end

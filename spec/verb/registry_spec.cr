@@ -160,6 +160,10 @@ private class FakeContext < ExecContext
     @calls << :history_columns_edit
   end
 
+  def history_grpc_reflect : Nil
+    @calls << :history_grpc_reflect
+  end
+
   def history_delete : Nil
     @calls << :history_delete
   end

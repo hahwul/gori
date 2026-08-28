@@ -19,12 +19,21 @@ module Gori::Protobuf
   # network overrides — see the call sites in `Session.open`, `CLI::Run.open_store` and MCP's
   # bind/switch.
   #
-  # ## Loading a file is not an outbound action
+  # ## Loading a file is not an outbound action; reflection is
   #
   # P4 constrains gori from touching the network unasked; reading a descriptor set the
   # operator dropped in their own directory is neither a request nor a disclosure. Server
-  # REFLECTION — the other schema source #823 describes — IS an outbound request and is a
-  # separate, operator-initiated path that does not exist yet.
+  # REFLECTION (#827) IS an outbound request, and nothing in THIS module makes one: the
+  # network belongs to `Protobuf::Reflection`, which runs only when an operator asks. What
+  # arrives here is the CACHED result (`Store#grpc_reflections`) — bytes already on disk,
+  # read exactly as a file source is read.
+  #
+  # ## Both sources merge, with reflection last
+  #
+  # Files load first, then each cached reflection target in fetch order. Last-wins on a
+  # fully-qualified name, so a target reflected after a file was loaded supersedes it — which
+  # is the direction the operator's most recent deliberate act points. Nothing is hidden by
+  # it: `Schema#conflicts` counts every differing redefinition and `status` prints the count.
   module Schemas
     # Per-project settings row: the file or directory this project's schema comes from.
     # Blank (or absent) means the convention directory below.
@@ -43,14 +52,35 @@ module Gori::Protobuf
     # generated-artifact tree should stop, not stall the project open.
     MAX_FILES = 64
 
-    # One file the loader tried. `error` is nil on success — and is shown, not swallowed:
+    # WHERE one loaded schema came from. A file the operator pointed at, or a gRPC server
+    # reflection fetch they ran against a target (#827) — the Project settings row has to say
+    # which, because "3 messages · 1 rpc" reads identically for both and only one of them
+    # involved touching the network.
+    enum Origin
+      File
+      Reflection
+    end
+
+    # One source the loader tried. `error` is nil on success — and is shown, not swallowed:
     # an operator who set a path and sees no field names needs to know whether the file was
     # missing, was the `.proto` source, or simply covers different services.
+    #
+    # `path` is the file path for a File source and the reflected TARGET
+    # (`https://api.test:443`) for a Reflection one — in both cases the thing the operator
+    # names to change or remove it.
     record Source,
       path : String,
       error : String? = nil,
       messages : Int32 = 0,
-      methods : Int32 = 0
+      methods : Int32 = 0,
+      origin : Origin = Origin::File do
+      # The short label a status line or a settings row shows. A file is named by its
+      # basename (the directory is in the field beside it); a reflection source is named by
+      # its target, because there is no field anywhere that already shows it.
+      def label : String
+        origin.reflection? ? path : (File.basename(path).presence || path)
+      end
+    end
 
     # A captured gRPC path, bound to the message type it carries.
     record Binding,
@@ -71,9 +101,21 @@ module Gori::Protobuf
     # `Theme.revision` exists for, answered the same way.
     class_getter revision : Int32 = 0
 
-    # Publish the open project's schema. Never raises: a project must open even when its
-    # descriptor path is gone, and the failure is reported through `sources`.
+    # The reflected descriptor sets in play, in fetch order — the project's cache as of the
+    # last `load_project` / `adopt` / `forget`. Held here rather than re-read from the Store
+    # on every `apply` for the reason the whole module exists: the four rendering surfaces
+    # have no Store in hand, and `apply` is called from a settings edit that must not turn
+    # into a database read on the UI fiber.
+    class_getter reflections : Array(Store::GrpcReflection) = [] of Store::GrpcReflection
+
+    # Publish the open project's schema: the descriptor-set path from settings, plus every
+    # target this project has already reflected against. Never raises — a project must open
+    # even when its descriptor path is gone, and the failure is reported through `sources`.
+    #
+    # Reads the cache; sends nothing. The one place a reflection REQUEST is made is
+    # `Protobuf::Reflection::Client#fetch`, from a verb / CLI command / MCP tool (P4).
     def self.load_project(store : Store) : Nil
+      @@reflections = store.grpc_reflections
       apply(store.setting(SETTING_KEY))
     rescue ex
       # `clear`, NOT `apply(nil)`. A blank spec means the convention directory, so falling back
@@ -87,22 +129,38 @@ module Gori::Protobuf
     # Load `spec` — a file, a directory, or blank for the convention directory — replacing
     # whatever was loaded before. A REPLACEMENT and not a merge: carrying one project's
     # `.proto` into the next would put another engagement's field names over these bytes.
+    #
+    # The reflected sources ride through unchanged: `spec` is the FILE half of the answer,
+    # and an operator editing the path in Project settings has not withdrawn a fetch they ran.
+    # `forget` is how a reflected target is removed.
     def self.apply(spec : String?) : Nil
       @@spec = spec.try(&.strip) || ""
-      @@dropped = 0
-      paths, error = resolve_paths(@@spec)
-      if error
-        @@schema = nil
-        @@sources = [Source.new(@@spec, error: error)]
-        @@revision += 1
-        return
-      end
-      merged = Schema.new
-      sources = [] of Source
-      paths.each { |p| sources << load_file(merged, p) }
-      @@schema = merged.empty? ? nil : merged
-      @@sources = sources
-      @@revision += 1
+      rebuild
+    end
+
+    # Adopt a completed reflection fetch: remember it in the project (so one fetch serves
+    # every flow on that target, and survives a restart) and re-publish the merged schema.
+    # Returns whether the row COMMITTED — the schema is applied either way, on the trade
+    # `Runner#apply_project_protos` already states: the operator asked to look through these
+    # descriptors, and a busy writer must not be the reason they cannot.
+    def self.adopt(store : Store, target : String, service : String, services : Int32,
+                   files : Int32, descriptor : Bytes) : Bool
+      committed = store.put_grpc_reflection(target, service, services, files, descriptor)
+      # Re-read rather than splice the row in by hand: the Store is what orders them and what
+      # the next `load_project` will replay, and two constructions of one list is how they
+      # come to disagree.
+      @@reflections = store.grpc_reflections
+      rebuild
+      committed
+    end
+
+    # Drop one reflected target (or every one, with a nil target) and re-publish. The
+    # operator's exit from a schema they fetched — nothing here expires on its own.
+    def self.forget(store : Store, target : String?) : Bool
+      committed = target ? store.delete_grpc_reflection(target) : store.clear_grpc_reflections
+      @@reflections = store.grpc_reflections
+      rebuild
+      committed
     end
 
     def self.clear : Nil
@@ -110,7 +168,48 @@ module Gori::Protobuf
       @@sources = [] of Source
       @@spec = ""
       @@dropped = 0
+      @@reflections = [] of Store::GrpcReflection
       @@revision += 1
+    end
+
+    # Merge everything in play into one published schema. The ONE place `@@schema`,
+    # `@@sources` and `@@revision` are written together, so a caller cannot advance one
+    # without the others — which is the trap `revision` exists to close.
+    private def self.rebuild : Nil
+      @@dropped = 0
+      paths, error = resolve_paths(@@spec)
+      merged = Schema.new
+      sources = [] of Source
+      if error
+        sources << Source.new(@@spec, error: error)
+      else
+        paths.each { |p| sources << load_file(merged, p) }
+      end
+      @@reflections.each { |r| sources << absorb_reflection(merged, r) }
+      @@schema = merged.empty? ? nil : merged
+      @@sources = sources
+      @@revision += 1
+    end
+
+    # One cached reflection target folded into the merged schema. Parsed by `Schema.parse` —
+    # the SAME entry point a file goes through — which is what makes #827's third acceptance
+    # criterion ("fetched descriptors resolve exactly as a file-loaded set does") true by
+    # construction rather than by a parallel reader.
+    private def self.absorb_reflection(into : Schema, row : Store::GrpcReflection) : Source
+      case parsed = Schema.parse(row.descriptor)
+      in String
+        Source.new(row.target, error: parsed, origin: Origin::Reflection)
+      in Schema
+        before_msgs = into.messages.size
+        before_rpcs = into.methods.size
+        into.merge!(parsed)
+        Source.new(row.target,
+          messages: into.messages.size - before_msgs,
+          methods: into.methods.size - before_rpcs,
+          origin: Origin::Reflection)
+      end
+    rescue ex
+      Source.new(row.target, error: ex.message || "could not be read", origin: Origin::Reflection)
     end
 
     # Whether anything was lost — a file that failed to parse, or one the directory cap
@@ -125,13 +224,26 @@ module Gori::Protobuf
     def self.status : String
       return "no descriptor set loaded" if @@sources.empty?
       if (bad = @@sources.select(&.error)) && bad.size == @@sources.size
-        return bad.size == 1 ? "#{File.basename(bad[0].path)}: #{bad[0].error}" : "#{bad.size} files failed to load"
+        return bad.size == 1 ? "#{bad[0].label}: #{bad[0].error}" : "#{bad.size} sources failed to load"
       end
       s = @@schema
       msgs = s.try(&.messages.size) || 0
       rpcs = s.try(&.methods.size) || 0
-      ok = @@sources.count { |src| src.error.nil? }
-      line = "#{ok} file#{ok == 1 ? "" : "s"} · #{msgs} message#{msgs == 1 ? "" : "s"} · #{rpcs} rpc#{rpcs == 1 ? "" : "s"}"
+      loaded = @@sources.select { |src| src.error.nil? }
+      files = loaded.count(&.origin.file?)
+      reflected = loaded.select(&.origin.reflection?)
+      # WHERE the schema came from, named on the row itself — #827's fourth acceptance
+      # criterion. One target is named; several are counted, because the row has one line.
+      # A count of zero for either half is LEFT OUT rather than printed: "0 files · reflection
+      # https://api.test" reads as a partial failure, and a project that only ever reflected
+      # has no file to have failed.
+      where = [] of String
+      where << "#{files} file#{files == 1 ? "" : "s"}" if files > 0 || reflected.empty?
+      unless reflected.empty?
+        where << (reflected.size == 1 ? "reflection #{reflected[0].path}" : "reflection ×#{reflected.size}")
+      end
+      line = where.join(" · ")
+      line += " · #{msgs} message#{msgs == 1 ? "" : "s"} · #{rpcs} rpc#{rpcs == 1 ? "" : "s"}"
       line += " · #{bad.size} failed" unless bad.empty?
       line += " · #{@@dropped} over the #{MAX_FILES}-file limit" if @@dropped > 0
       line += " · #{s.conflicts} redefined" if s && s.conflicts > 0
