@@ -311,8 +311,10 @@ module Gori::Tui
       return if detail && prev && @preview_req_lines && preview_source_unchanged?(detail, prev)
       # Split the (bounded) preview text once, here — render reads the cached arrays.
       if detail
-        @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body, decode: true)
-        @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body, decode: true)
+        @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body,
+          decode: true, wire_size: detail.request_wire_body_size)
+        @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body,
+          decode: true, wire_size: detail.response_wire_body_size)
       else
         @preview_req_lines = nil
         @preview_res_lines = nil
@@ -2678,18 +2680,33 @@ module Gori::Tui
     # should keep being able to say so. The decoder receives cap+1 as its output ceiling so
     # compression cannot turn this small navigation pane into a multi-MiB allocation; the final
     # slice and marker apply to whichever projection is shown.
-    private def preview_text_lines(head : Bytes?, body : Bytes?, *, decode : Bool = false) : Array(String)
+    private def preview_text_lines(head : Bytes?, body : Bytes?, *, decode : Bool = false,
+                                   wire_size : Int64) : Array(String)
       return ["(empty)"] if head.nil? || head.empty?
       cap = Settings.preview_body_cap
       shown = decode ? Entity.bytes(head, body, cap + 1) : body
       io = IO::Memory.new
       io.write(head)
       if shown && !shown.empty?
-        n = {shown.size, cap}.min
-        io.write(shown[0, n])
-        # `body` is fetched at cap+1, so this also names an encoded input prefix that the Store
-        # bounded before decode. `shown` catches the inverse: a small gzip that expands past cap.
-        io << "\n… [truncated]" if shown.size > cap || body.try { |b| b.size > cap }
+        if binary_body?(shown)
+          # The same placeholder the DETAIL pane shows, for the same reason: `scrub` below only
+          # rewrites INVALID UTF-8, so a VALID multi-byte sequence occurring by chance in binary
+          # data survives it and puts a wide/emoji grapheme on screen, which desyncs the
+          # terminal's cursor tracking (the 잔상 the placeholder was introduced for). No
+          # "press ^X" pointer: hex is a detail-pane mode and this pane has none — the same
+          # reason `Repeater::MessageLines` omits it for the Comparer.
+          #
+          # Sized from the flow's TRUE wire body size, not from `shown`: this pane's bytes are
+          # bounded at cap+1, so a 2 MB image would otherwise announce itself as 64 KiB. The
+          # head sits right above and still declares whatever encoding was applied.
+          io << "— binary body (#{Fmt.size(wire_size)}) — not shown as text —"
+        else
+          n = {shown.size, cap}.min
+          io.write(shown[0, n])
+          # `body` is fetched at cap+1, so this also names an encoded input prefix that the Store
+          # bounded before decode. `shown` catches the inverse: a small gzip that expands past cap.
+          io << "\n… [truncated]" if shown.size > cap || body.try { |b| b.size > cap }
+        end
       end
       String.new(io.to_slice).scrub.split('\n').map(&.rstrip('\r'))
     end

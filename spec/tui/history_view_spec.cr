@@ -372,6 +372,75 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "shows a binary body as a placeholder in the Req/Res preview, never as text" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        # A PNG signature, a NUL, then bytes that happen to be VALID UTF-8 for a wide
+        # grapheme. `scrub` cannot remove those — it only rewrites INVALID sequences — so
+        # without the placeholder they reach the terminal and desync its cursor tracking.
+        binary = Bytes[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xE3, 0x81, 0x82]
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/logo.png", http_version: "HTTP/1.1",
+          head: "GET /logo.png HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\n".to_slice,
+          body: binary, content_type: "image/png"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        text = view.@preview_res_lines.not_nil!.join("\n")
+        text.should_not contain("あ") # the wide grapheme never reaches the pane
+        text.should contain("binary body")
+        text.should contain("not shown as text")
+        store.get_flow(id).not_nil!.response_body.should eq(binary) # evidence untouched
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "sizes the binary placeholder from the true wire body, not the capped preview slice" do
+    # The preview fetches at cap+1, so sizing the placeholder from the bytes in hand would
+    # announce every large binary body as exactly the cap.
+    prev_enabled = Gori::Settings.history_preview
+    prev_cap = Gori::Settings.preview_body_kib
+    begin
+      Gori::Settings.history_preview = true
+      Gori::Settings.preview_body_kib = 1
+      tmp_store do |store|
+        cap = Gori::Settings.preview_body_cap
+        binary = Bytes.new(cap * 8) { |i| i.zero? ? 0_u8 : (i % 251).to_u8 }
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/big.bin", http_version: "HTTP/1.1",
+          head: "GET /big.bin HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n".to_slice,
+          body: binary, content_type: "application/octet-stream"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        detail = view.@preview_detail.not_nil!
+        detail.response_body.not_nil!.size.should eq(cap + 1) # the slice in hand IS the cap
+        line = view.@preview_res_lines.not_nil!.find(&.includes?("binary body")).not_nil!
+        line.should contain(Fmt.size(detail.response_wire_body_size))
+        line.should_not contain(Fmt.size((cap + 1).to_i64))
+      end
+    ensure
+      Gori::Settings.history_preview = prev_enabled
+      Gori::Settings.preview_body_kib = prev_cap
+    end
+  end
+
   it "decodes a gzip request in the Req/Res preview, like the detail pane beside it" do
     prev = Gori::Settings.history_preview
     begin
