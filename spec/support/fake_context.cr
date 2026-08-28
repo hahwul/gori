@@ -1135,6 +1135,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:diff_to_comparer)
   end
 
+  def diff_issue : Nil
+    rec(:diff_issue)
+  end
+
+  def diff_note : Nil
+    rec(:diff_note)
+  end
+
   property diff_rows_shown : Bool = false
 
   def diff_rows_shown? : Bool

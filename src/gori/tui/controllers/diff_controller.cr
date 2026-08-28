@@ -89,7 +89,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
-      @diff.ready? ? "a/b pick · s swap · r run · v lens · ↵ to Comparer" : "a pick the baseline project"
+      @diff.ready? ? "a/b pick · s swap · r run · v lens · ↵ Comparer · ⇧F issue · n note" : "a pick the baseline project"
     end
 
     # --- verbs ---------------------------------------------------------------
@@ -184,6 +184,55 @@ module Gori::Tui
       ensure
         store.close if owned
       end
+    end
+
+    # --- record: a row leaves the tab as an Issue or a Note --------------------
+
+    # The selected row as a `Diff::Record::Draft`, plus the flow id the record may link to.
+    #
+    # A record is written to the project that is OPEN — the only store this TUI holds a
+    # writer on — and `entity_links.ref_id` is a bare rowid with no project column. So the
+    # linkable side is whichever slot names the open project (B by default, A after `s`),
+    # and the other side's capture is NAMED in the body rather than linked to a rowid that
+    # means a different flow here. nil when there is no row under the cursor, or a slot is
+    # empty (both of which the caller reports rather than filing an unanchored record).
+    def selected_record : {Gori::Diff::Record::Draft, Int64?}?
+      row = @diff.selected_row
+      a = @diff.slot(:a)
+      b = @diff.slot(:b)
+      return nil unless row && a && b
+      home, flow_id = home_side(row, a, b)
+      ctx = Gori::Diff::Record::Context.new(a.name, b.name, home, linked: !flow_id.nil?,
+        a_path: a.db_path, b_path: b.db_path)
+      {Gori::Diff::Record.draft(row, ctx), flow_id}
+    end
+
+    # {the side that names the OPEN project, the flow id a record may link to}. The side is
+    # reported even when the flow is not linkable, because "the capture was pruned" and "the
+    # capture is in the other engagement's database" are two different things to tell the
+    # reader of the record (see `Diff::Record::Context`).
+    #
+    # The flow is re-checked against the store rather than trusted: the report is a SNAPSHOT
+    # taken at `r`, and a capture deleted since (a retention prune, a `history delete`, a
+    # peer session) must not become a link row pointing at a rowid SQLite will later hand to
+    # an unrelated flow. Same guard `create_issue_from_form` puts on its extra flow ids.
+    private def home_side(row : Gori::Diff::Row, a : Project,
+                          b : Project) : {Gori::Diff::Record::Side?, Int64?}
+      session_path = @host.session.project.db_path
+      # B first: it is the open project by default, and after `s` moves it to A the check
+      # below catches that. Both slots naming it is impossible — `run` refuses that pair.
+      if b.db_path == session_path
+        return {Gori::Diff::Record::Side::B, linkable_flow(row.b)}
+      elsif a.db_path == session_path
+        return {Gori::Diff::Record::Side::A, linkable_flow(row.a)}
+      end
+      {nil, nil}
+    end
+
+    private def linkable_flow(facts : Gori::Diff::Facts?) : Int64?
+      return nil unless facts
+      id = facts.sample_flow_id
+      @host.session.store.flow_row(id) ? id : nil
     end
 
     # A read-only, non-indexing open of a project this TUI is not capturing into. Retention

@@ -362,6 +362,19 @@ module Gori::Tui
       @notes.current_note_id
     end
 
+    # A note carrying `text`, created WITHOUT focusing the Notes tab — the retest Diff's
+    # one-keystroke exit, and the sibling of `create_blank_note_id` above.
+    #
+    # Returns {stable id, whether it reached disk}. The id is minted locally and is stable
+    # either way, so a link filed against it resolves as soon as the buffer does save; the
+    # flag exists so the caller's toast can say "not saved yet" rather than claim a write
+    # the store refused — which is the whole reason `save_notes` reports at all.
+    def create_note_with_text(text : String) : {Int64, Bool}
+      save_notes
+      @notes.new_note(text)
+      {@notes.current_note_id, save_notes}
+    end
+
     # Content-only clone of the active note (new id; entity_links not copied).
     def notes_duplicate : Nil
       # The clone happens either way — it is in-memory, and the source note keeps its text and

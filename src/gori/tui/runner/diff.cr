@@ -85,4 +85,42 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     goto_tab(:comparer)
     @toast = "comparer: set #{which.to_s.upcase} — this endpoint was captured on one side only"
   end
+
+  # --- the exit: a row becomes an Issue or a Note -----------------------------
+
+  # File the selected endpoint as an Issue, prefilled with what the retest observed.
+  #
+  # The deliverable of a retest is a list of findings and this tab produces exactly its
+  # input, so until this verb the operator retyped every row somewhere else — losing the
+  # part only Diff holds: WHICH two projects, which side answered what, which axis moved.
+  # `Diff::Record` builds that text once (the Note below and the JSON row both take it from
+  # there); the create itself is `IssueForm` + `create_issue_from_form`, untouched (P1/P3).
+  def diff_issue : Nil
+    recorded = target_controller.diff.selected_record
+    return (@toast = "select an endpoint first") unless recorded
+    draft, flow_id = recorded
+    # `flow_id` is nil when neither slot names the OPEN project, or when the capture behind
+    # the row is gone. The form still opens: the body names both sides either way, and a
+    # record with a weaker anchor beats the retyped one this verb exists to replace.
+    open_issue_form(IssueForm.new(draft.title, draft.host, flow_id, draft.severity,
+      notes: draft.body, stay_on_create: true))
+  end
+
+  # The lighter exit, and on a retest the one that gets used: most rows are worth
+  # MENTIONING, not filing. One keystroke, no form — the note carries the same text the
+  # issue would, links the same capture, and leaves the cursor where it was so the next row
+  # is one `j` away.
+  def diff_note : Nil
+    recorded = target_controller.diff.selected_record
+    return (@toast = "select an endpoint first") unless recorded
+    draft, flow_id = recorded
+    note_id, saved = notes_controller.create_note_with_text(draft.note_text)
+    # `commit_link_to_owner` rather than a bare `add_link`: it is the one place that also
+    # refreshes the note's link preview, and it already reports "already linked".
+    linked = !flow_id.nil? &&
+             commit_link_to_owner(Store::LinkOwnerKind::Note, note_id, Store::LinkRefKind::Flow, flow_id)
+    parts = [saved ? "note filed" : "note filed — NOT saved yet (project busy)"]
+    parts << "capture linked" if linked
+    @toast = parts.join(" · ")
+  end
 end

@@ -65,6 +65,16 @@ module Gori::Tui
     getter extra_flow_ids : Array(Int64)
     getter notes : String
 
+    # Where the shell lands after a SUCCESSFUL create. False (the default) is History's
+    # ⇧F: you file the issue and the shell takes you to it. True is a create raised in the
+    # middle of a list the operator is still reading — the retest Diff, which exists to be
+    # swept row by row — where being moved to Issues after every ↵ ends the sweep.
+    #
+    # `link_ref` used to double as this predicate, and it is not the same question: a diff
+    # row whose capture lives in the OTHER project's database has nothing to link and still
+    # must not move the operator off the tab.
+    getter? stay_on_create : Bool
+
     # Whether the severity showing was DERIVED from the cvss rather than picked. Only the
     # label reads it — an operator who cycles severity by hand after scoring one has made a
     # deliberate override, and the row says which of the two it is looking at.
@@ -77,7 +87,8 @@ module Gori::Tui
                    @link_ref : {Store::LinkRefKind, Int64}? = nil,
                    @extra_flow_ids : Array(Int64) = [] of Int64,
                    @notes : String = "",
-                   @cvss : String = "")
+                   @cvss : String = "",
+                   @stay_on_create : Bool = false)
       @cx = @issue_title.size
       @preedit = ""
       @sel = ROW_TITLE

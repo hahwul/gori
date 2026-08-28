@@ -375,8 +375,11 @@ module Gori::Tui
     end
 
     # Open a fresh note and make it current (the new tab gets focus to type into).
-    def new_note : Nil
-      @notes << Note.new(alloc_note_id)
+    # `text` prefills it: a record filed from another tab (the retest Diff's `n`) arrives
+    # whole rather than being typed, and `duplicate_current` below already builds a note
+    # from a string this way.
+    def new_note(text : String = "") : Nil
+      @notes << Note.new(alloc_note_id, text)
       @current = @notes.size - 1
       @dirty = true
     end

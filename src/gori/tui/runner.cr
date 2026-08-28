@@ -2007,6 +2007,15 @@ module Gori::Tui
           # that inert anyway; saying false states the intent rather than relying on it.
           offer_open_created(:issue, new_id)
           return false
+        elsif form.stay_on_create?
+          # Filed from a list the operator is still reading (the retest Diff): the create
+          # must not move them off it, so the Issues list is refreshed IN PLACE and the
+          # toast names the id and whether evidence went with it. `offer_open_created`'s
+          # confirm is deliberately not raised here either — a retest sweep files row after
+          # row, and one modal per row is one modal too many.
+          issues_controller.view.reload(@session.store)
+          msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
+          @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
         else
           @active_tab = :issues
           @focus = :body

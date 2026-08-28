@@ -58,6 +58,31 @@ module Gori
         "Send this endpoint's capture from each side to the Comparer for the byte-level diff",
         Verb::Scope::Diff, [Verb::Chord.new("o"), Verb::Chord.new("enter")],
         available: rows_shown, group: :send) { |ctx| ctx.diff_to_comparer; nil }
+
+      # The retest's EXIT. ⇧F is History's and OAST's `issue.create` chord deliberately —
+      # "file what I'm looking at" is one gesture across the app, and `Keymap#lookup` is
+      # per-scope so the three never resolve together. The chord is
+      # `Chord.new("f", shift: true)`, NOT `Chord.new("F")`: `Keybind.from_event`
+      # normalises a typed capital to shift+lowercase, so an "F" chord would never fire —
+      # and `menu_key` skips shift chords, hence the explicit mnemonic.
+      #
+      # That mnemonic is 'i', not the 'a' its siblings use: `diff.pick-a`'s chord already
+      # claims 'a' in this scope, and `Registry#validate_menu_keys!` raises at BOOT on the
+      # collision rather than silently dropping one of the two from the space menu.
+      r.register Verb::Definition.new(
+        "diff.issue", "Add issue",
+        "File this endpoint as an Issue — prefilled with both projects, both sides' answers and what moved",
+        Verb::Scope::Diff, [Verb::Chord.new("f", shift: true)],
+        available: rows_shown, mnemonic: 'i', group: :triage) { |ctx| ctx.diff_issue; nil }
+
+      # The lighter exit, and the one a retest actually leans on: most rows are worth
+      # MENTIONING, not filing. One keystroke, no form — a modal per row would cost more
+      # than retyping, which is the whole thing this pair exists to stop.
+      r.register Verb::Definition.new(
+        "diff.note", "Add note",
+        "Record this endpoint in a Note — the same text as the Issue, without the form",
+        Verb::Scope::Diff, [Verb::Chord.new("n")],
+        available: rows_shown, group: :triage) { |ctx| ctx.diff_note; nil }
     end
   end
 end

@@ -9,6 +9,11 @@ abstract class Gori::Verb::ExecContext
   # Hand the selected endpoint's two captures to the Comparer — the byte-level answer to a
   # row the endpoint diff can only summarize.
   abstract def diff_to_comparer : Nil
+  # Record the selected row where a retest's output belongs. The Issue opens the shared
+  # form prefilled; the Note is the one-keystroke form of the same text, because most
+  # retest rows are worth mentioning rather than filing.
+  abstract def diff_issue : Nil
+  abstract def diff_note : Nil
   # A report is on screen with rows under the cursor — the gate for the row verbs.
   abstract def diff_rows_shown? : Bool
 end
