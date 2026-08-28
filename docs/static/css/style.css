@@ -654,98 +654,6 @@ kbd {
   opacity: 0.9;
 }
 
-/* A slow glint sweeping the hero photograph: a brightened copy of the very
-   same frame (scrims included, so the layers cancel exactly) revealed through
-   a narrow travelling band. Brightness is multiplicative, so the gold rings —
-   the brightest pixels in the frame — catch nearly all of the light while the
-   marble stays night. The band lives on a 300%-wide window whose diagonal
-   mask never moves: the window slides left while the frame inside it
-   counter-slides right, so the photograph holds still and only the light
-   travels. Everything animated is a transform — a mask-position animation
-   repaints this filtered, viewport-sized layer on the main thread every
-   frame, which stuttered in Safari; transforms stay on the compositor. The
-   whole travelling layer lives inside this @media(no-preference) block, so
-   under reduced motion neither the window nor the frame is emitted and there
-   is nothing to show; parking the band off-frame at both keyframe ends only
-   buys the quiet rest between sweeps. */
-.hero-glint {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: min(120vh, 70rem);
-  pointer-events: none;
-  -webkit-mask: linear-gradient(180deg, #000 58%, transparent 100%);
-  mask: linear-gradient(180deg, #000 58%, transparent 100%);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .hero-glint > span {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    /* 300% wide and translated past the edges: only .home-main's
-       overflow:hidden keeps this off the page's horizontal scroll. */
-    width: 300%;
-    -webkit-mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%);
-    mask: linear-gradient(115deg, transparent 40%, #000 50%, transparent 60%);
-    will-change: transform;
-    animation: glint-window 11s linear infinite;
-  }
-
-  .hero-glint > span::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: calc(100% / 3);
-    background:
-      linear-gradient(96deg, rgb(6 8 14 / 0.78) 0%, rgb(6 8 14 / 0.42) 34%, rgb(6 8 14 / 0) 58%),
-      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
-      url("../images/hero-orbits.webp") 66% 24% / cover no-repeat;
-    filter: brightness(1.5) saturate(1.15);
-    opacity: 0.55;
-    will-change: transform;
-    animation: glint-frame 11s linear infinite;
-  }
-
-  /* Match the inverted base frame, then lift the result toward paper so the
-     sweep reads as sheen on the bronze rather than a shadow. */
-  :root[data-theme="light"] .hero-glint > span::before {
-    filter: invert(1) hue-rotate(180deg) saturate(0.82) brightness(1.22);
-    opacity: 0.5;
-  }
-}
-
-/* The window is 300% of the hero wide, so sliding it two thirds of its own
-   width carries the band from past the right edge to past the left one; the
-   frame inside (one third of the window, i.e. hero-sized) counter-slides the
-   same distance — 200% of itself — so the photograph never appears to move.
-   -200%/3 of the window equals exactly 200% of the hero-sized frame, so the
-   two cancel with no sub-pixel drift (a rounded -66.6667% would not). The
-   tail of the cycle is a quiet rest. */
-@keyframes glint-window {
-  0% {
-    transform: translateX(0);
-  }
-  55%,
-  100% {
-    transform: translateX(calc(-200% / 3));
-  }
-}
-
-@keyframes glint-frame {
-  0% {
-    transform: translateX(0);
-  }
-  55%,
-  100% {
-    transform: translateX(200%);
-  }
-}
-
 .home-hero,
 .home-showcase,
 .home-paths,
@@ -775,26 +683,16 @@ kbd {
 .home-kicker {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
   width: max-content;
   margin-bottom: 1.2rem;
-  padding: 0.38rem 0.8rem;
-  border: 1px solid var(--line);
+  padding: 0.34rem 0.78rem;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
   border-radius: var(--radius-pill);
   background: rgb(var(--accent-rgb) / 0.08);
   color: var(--accent-strong);
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   letter-spacing: 0.02em;
-}
-
-.home-kicker::before {
-  content: "";
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 50%;
-  background: var(--grad-gold-leaf);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.2);
 }
 
 .home-hero h1 {
@@ -803,17 +701,17 @@ kbd {
   font-size: 5.1rem;
   line-height: 1.04;
   font-weight: 780;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.022em;
   text-wrap: balance;
 }
 
 .hero-lede {
-  max-width: 35rem;
+  max-width: 33rem;
   margin-top: 1.25rem;
   color: var(--muted);
-  font-family: var(--font-serif);
-  font-size: 1.08rem;
-  line-height: 1.75;
+  font-size: 1.1rem;
+  line-height: 1.7;
+  text-wrap: pretty;
 }
 
 .home-actions {
@@ -1014,7 +912,13 @@ kbd {
   width: 100%;
   height: auto;
   border-radius: 14px;
-  filter: drop-shadow(0 26px 60px rgb(0 0 0 / 0.5));
+  outline: 1px solid rgb(var(--ink-rgb) / 0.1);
+  outline-offset: -1px;
+  filter: drop-shadow(0 24px 54px rgb(0 0 0 / 0.42));
+}
+
+:root[data-theme="light"] .showcase-frame img {
+  filter: drop-shadow(0 20px 46px rgb(60 50 30 / 0.2));
 }
 
 .showcase-note {
@@ -1030,170 +934,105 @@ kbd {
   color: var(--heading);
 }
 
-/* --- Paths: three links woven into a chain ----------------------------- */
+/* --- Paths: three doc entry points on hairline rails ------------------- */
 
 .home-paths {
-  display: flex;
-  justify-content: center;
   padding: 1rem 0 var(--space-8);
 }
 
-/* --lead/--link/--lap size the whole chain; the breakpoints only resize
-   those three. --cut is the width of the background band each ring carries
-   to erase the stroke running beneath it. */
-.path-chain {
-  --lead: clamp(19rem, 27vw, 25rem);
-  --link: clamp(15.5rem, 22vw, 20rem);
-  --lap: clamp(2.8rem, 4.2vw, 4rem);
-  --cut: 5px;
+.path-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 2rem;
+  max-width: 1080px;
+}
+
+/* Same hairline-rail language as .structure-grid: a rule above each entry,
+   no card box. The gold segment on the rule grows to full width on hover,
+   and the arrow answers from the far end. */
+.path-link {
   position: relative;
-  width: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
-  height: var(--lead);
-}
-
-/* z-index stays auto on the rings themselves: no stacking context, so the
-   woven ::after halves below can rise above .path-ring-mid. */
-.path-ring {
-  position: absolute;
-  top: calc((var(--lead) - var(--link)) / 2);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  width: var(--link);
-  height: var(--link);
-  /* Reserve --lap on both sides: that is exactly how far the neighbouring
-     ring reaches into this one, and a label must not sit on its stroke.
-     Not a percentage either, since padding percentages would resolve
-     against .path-chain rather than against the ring. */
-  padding: 0 calc(var(--lap) + 0.8rem);
-  border: 1.5px solid;
-  /* Opaque, so the half redrawn in ::after does not composite over itself
-     and read brighter than the half that is not. */
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--bg));
-  border-radius: 50%;
-  color: var(--text);
-  text-align: center;
+  display: block;
+  padding: 1.3rem 2.4rem 0.4rem 0;
+  border-top: 1px solid var(--line-strong);
   text-decoration: none;
-  text-wrap: balance;
-  transition: border-color var(--transition), background var(--transition);
 }
 
-.path-ring:focus-visible {
-  outline-offset: 8px;
-}
-
-/* On hover a signal runs just inside the ring: an arc cut from a conic wash
-   with a thin radial mask, spun in the motion block. Inset past --cut so it
-   clears the opaque weave bands the ::after halves draw over the border. */
-.path-ring::before {
+.path-link::before {
   content: "";
   position: absolute;
-  inset: 7px;
-  border-radius: 50%;
-  background: conic-gradient(transparent 0 70%, rgb(var(--accent-rgb) / 0.9) 88%, transparent 97%);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition);
-}
-
-.path-ring:hover::before,
-.path-ring:focus-visible::before {
-  opacity: 1;
-}
-
-.path-ring:hover,
-.path-ring:active {
-  border-color: var(--accent-strong);
-  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.09), transparent 72%);
-}
-
-.path-ring:active {
-  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.17), transparent 70%);
-}
-
-.path-ring:hover h2 {
-  color: var(--accent-strong);
-}
-
-/* The first link is the wide one, and the only one drawn at full strength.
-   Size and stroke carry the hierarchy; the weave carries the metaphor. */
-.path-ring-lead {
-  top: 0;
+  top: -1px;
   left: 0;
-  width: var(--lead);
-  height: var(--lead);
-  border-color: color-mix(in srgb, var(--accent) 70%, var(--bg));
+  width: 2.4rem;
+  height: 1px;
+  background: var(--accent);
+  transition: width 340ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* The middle ring rides above both neighbours and cuts them; each neighbour
-   then redraws one half of itself higher still and cuts the middle ring
-   back. So every pair crosses over on one side and under on the other,
-   which is what makes the three read as woven rather than stacked. */
-.path-ring-mid {
-  z-index: 1;
-  left: calc(var(--lead) - var(--lap));
-  box-shadow:
-    0 0 0 var(--cut) var(--bg),
-    inset 0 0 0 var(--cut) var(--bg);
+.path-link:hover::before,
+.path-link:focus-visible::before {
+  width: 100%;
 }
 
-.path-ring-tail {
-  left: calc(var(--lead) + var(--link) - 2 * var(--lap));
-}
-
-.path-ring-lead::after,
-.path-ring-tail::after {
-  content: "";
+.path-link::after {
+  content: "\2192";
   position: absolute;
-  z-index: 2;
-  inset: -1px;
-  border: inherit;
-  border-radius: 50%;
-  pointer-events: none;
-  box-shadow:
-    0 0 0 var(--cut) var(--bg),
-    inset 0 0 0 var(--cut) var(--bg);
+  top: 1.15rem;
+  right: 0;
+  color: var(--quiet);
+  font-size: 1.05rem;
+  transition: color var(--transition), transform var(--transition);
 }
 
-.path-ring-lead::after {
-  clip-path: inset(0 0 50% 0);
+.path-link:hover::after,
+.path-link:focus-visible::after {
+  color: var(--accent-strong);
+  transform: translateX(3px);
 }
 
-.path-ring-tail::after {
-  clip-path: inset(50% 0 0 0);
+.path-link:focus-visible {
+  outline-offset: 6px;
 }
 
-.path-ring span,
+.path-link span {
+  display: block;
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .flow-list span,
 .structure-grid strong {
   color: var(--accent-strong);
   font-weight: 760;
 }
 
-.path-ring h2 {
+.path-link h2 {
+  margin-top: 0.55rem;
   color: var(--heading);
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   line-height: 1.24;
   letter-spacing: -0.01em;
   transition: color var(--transition);
 }
 
-.path-ring p {
+.path-link:hover h2 {
+  color: var(--accent-strong);
+}
+
+.path-link p {
+  max-width: 30ch;
+  margin-top: 0.45rem;
   color: var(--muted);
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: 0.9rem;
+  line-height: 1.55;
 }
 
-.path-ring-lead h2 {
-  font-size: 1.5rem;
-}
-
-.path-ring-lead p {
-  font-size: 0.95rem;
+.path-link-lead h2 {
+  font-size: 1.55rem;
 }
 
 .home-structure {
@@ -1258,7 +1097,7 @@ kbd {
   font-size: 3.05rem;
   line-height: 1.08;
   font-weight: 780;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -1346,8 +1185,14 @@ kbd {
   margin: 0;
   aspect-ratio: 1206 / 520;
   overflow: hidden;
-  border-radius: 8px;
-  box-shadow: 0 18px 44px rgb(0 0 0 / 0.42);
+  border-radius: 12px;
+  outline: 1px solid rgb(var(--ink-rgb) / 0.1);
+  outline-offset: -1px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.36);
+}
+
+:root[data-theme="light"] .flow-shot {
+  box-shadow: 0 14px 34px rgb(60 50 30 / 0.16);
 }
 
 .flow-shot img {
@@ -1381,7 +1226,7 @@ kbd {
   font-size: 3.05rem;
   line-height: 1.08;
   font-weight: 780;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -1707,7 +1552,7 @@ kbd {
   font-size: 3.05rem;
   font-weight: 780;
   line-height: 1;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 /* --muted, not --quiet: --quiet is 3.9:1 here and fails AA at this size. */
@@ -2989,11 +2834,6 @@ html.search-lock body {
     animation-delay: 320ms;
   }
 
-  .path-ring:hover::before,
-  .path-ring:focus-visible::before {
-    animation: ring-run 2.2s linear infinite;
-  }
-
   .seam-pulse::before {
     opacity: 1;
     animation: seam-run 2.6s ease-in-out infinite alternate;
@@ -3024,10 +2864,32 @@ html.search-lock body {
     transform: none;
   }
 
+  /* Paths: the three rails step in one after another. */
+  html.js .home-paths.rv {
+    transform: none;
+  }
+
+  html.js .home-paths.rv .path-link {
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html.js .home-paths.rv .path-link:nth-child(2) {
+    transition-delay: 90ms;
+  }
+
+  html.js .home-paths.rv .path-link:nth-child(3) {
+    transition-delay: 180ms;
+  }
+
+  html.js .home-paths.rv.in .path-link {
+    opacity: 1;
+    transform: none;
+  }
+
   /* Structure: art and copy close in from opposite sides, then the three
-     hairline entries step in. The chain in .home-paths above stays on the
-     base reveal: it rises as one piece, staggering the rings would pull the
-     weave apart mid-animation. */
+     hairline entries step in. */
   html.js .home-structure.rv {
     transform: none;
   }
@@ -3218,15 +3080,6 @@ html.search-lock body {
   }
 }
 
-@keyframes ring-run {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* The streak is 34% of the wire; 320% of its own width clears the far end. */
 @keyframes seam-run {
   from {
@@ -3313,17 +3166,6 @@ html.search-lock body {
       url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
   }
 
-  .hero-glint {
-    height: min(90vh, 46rem);
-  }
-
-  .hero-glint > span::before {
-    background:
-      linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
-      url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
-  }
-
   .home-hero h1,
   .structure-copy h2,
   .home-flow h2 {
@@ -3339,44 +3181,15 @@ html.search-lock body {
     padding-bottom: 4rem;
   }
 
-  /* Narrow enough that the chain hangs vertically instead. The weave cuts
-     move from top/bottom halves to left/right halves to follow it. */
-  .path-chain {
-    --lead: min(84vw, 22rem);
-    --link: min(76vw, 19rem);
-    --lap: 2.6rem;
-    width: var(--lead);
-    height: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
+  /* Stacked, the rails read as one list; the row gap collapses so the
+     hairlines carry the rhythm alone. */
+  .path-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 
-  /* Stacked, the neighbours reach in from above and below, so the sides are
-     free again and --lap no longer belongs in the horizontal padding. */
-  .path-ring {
-    top: auto;
-    left: calc((var(--lead) - var(--link)) / 2);
-    padding: 0 calc(var(--link) * 0.14);
-  }
-
-  .path-ring-lead {
-    top: 0;
-    left: 0;
-    padding: 0 calc(var(--lead) * 0.15);
-  }
-
-  .path-ring-mid {
-    top: calc(var(--lead) - var(--lap));
-  }
-
-  .path-ring-tail {
-    top: calc(var(--lead) + var(--link) - 2 * var(--lap));
-  }
-
-  .path-ring-lead::after {
-    clip-path: inset(0 50% 0 0);
-  }
-
-  .path-ring-tail::after {
-    clip-path: inset(0 0 0 50%);
+  .path-link {
+    padding-bottom: 1.3rem;
   }
 
   .structure-grid {
