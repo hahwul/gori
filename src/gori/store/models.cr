@@ -662,9 +662,30 @@ module Gori
       getter flow_id : Int64?
       getter notes : String
       getter status : Status
+      getter cvss : String?
+
+      # Resolved ONCE, here, rather than on each read. `::CVSS.parse?` is `rescue`-based, so
+      # a bare score costs two raised-and-unwound exceptions per question asked — and the
+      # questions are asked in loops: the Issues list draws a score per visible row per
+      # repaint, `cvss:` filters every issue on every keystroke, and Markdown export asks
+      # twice per issue. An issue with no cvss pays nothing (the `try` short-circuits), so
+      # the cost is bounded by how many issues actually carry one.
+      getter cvss_score : Float64?
+      @cvss_vector : Bool = false
 
       def initialize(@id, @created_at, @updated_at, @title, @severity, @host, @flow_id, @notes,
-                     @status = Status::Open)
+                     @status = Status::Open, @cvss : String? = nil)
+        if r = @cvss.try { |c| Cvss.read(c) }
+          @cvss_score = r[0]
+          @cvss_vector = r[3]
+        end
+      end
+
+      # Whether the stored string is a VECTOR rather than a bare score — the one thing a
+      # reader cannot recover from the score alone, and what Markdown export uses to decide
+      # whether there is a vector worth printing beside the number.
+      def cvss_vector? : Bool
+        @cvss_vector
       end
     end
 

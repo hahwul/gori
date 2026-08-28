@@ -35,6 +35,10 @@ abstract class Gori::Verb::ExecContext
   # the pick to every marked issue and the detail form to the one it has open.
   abstract def issue_set_severity : Nil # open the severity colour picker
   abstract def issue_set_status : Nil   # open the triage-status colour picker
+  # The cvss builder, registered and implemented the same way: the calculator writes the
+  # vector AND the severity it derives, so the badge can never disagree with the score
+  # sitting next to it.
+  abstract def issue_set_cvss : Nil
   abstract def issue_edit_notes : Nil
   abstract def issues_notes_read_mode? : Bool       # detail open, notes not in INS (gates y/copy)
   abstract def issues_copy : Nil                    # copy selection from issue notes (READ)

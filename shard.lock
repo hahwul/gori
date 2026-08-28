@@ -4,6 +4,10 @@ shards:
     git: https://github.com/crystal-ameba/ameba.git
     version: 1.7.0-dev+git.commit.cdd58b34b0d8a9c785d67183a7a8f07541549e55
 
+  cvss:
+    git: https://github.com/hahwul/cvss.cr.git
+    version: 0.2.0
+
   db:
     git: https://github.com/crystal-lang/crystal-db.git
     version: 0.14.0

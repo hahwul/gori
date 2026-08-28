@@ -200,16 +200,17 @@ Every filter bar shares the grammar above (fields, comparisons, `~` regex, `AND`
 | Colour rules (Colormarker) | The same — a colour rule takes the query the History bar takes |
 | Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body` — **no `scope:`** |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
-| Issues | `severity` (`sev`), `status` (`st`), `host`, `title` |
+| Issues | `severity` (`sev`), `status` (`st`), `host`, `title`, `cvss` |
 
 `scope:` is the one field a hold gate and an extract-rule condition refuse rather than answer:
 they evaluate a live message, and a project's scope rules are not part of one. The condition rows
 say so where you type them, and an extract rule carrying `scope:` will not save.
 
-Probe and Issues take severity names (`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`) and triage states (`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, plus `closed` for any non-open state). Severity supports comparisons, so `sev:>=high` works.
+Probe and Issues take severity names (`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`) and triage states (`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, plus `closed` for any non-open state). Severity supports comparisons, so `sev:>=high` works. Issues also accepts `cvss:` with numeric comparison operators (`cvss:>=7.0`, `cvss:<4.0`), exact scores (`cvss:7.5`), or vector substrings (`cvss:3.1`).
 
 ```text
 sev:>=high -status:fp                 Issues: high and critical, no false positives
+cvss:>=7.0 status:open                Issues: high or critical CVSS findings still open
 cat:cors sev:medium                   Probe: medium CORS findings
 host:api.example.com method:POST      Intercept: hold POSTs to one host
 body:secret AND -host:cdn             Colour rule: paint leaks, ignore the CDN

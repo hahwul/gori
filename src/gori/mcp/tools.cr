@@ -1256,6 +1256,29 @@ module Gori
         Result.new("invalid severity: #{s} (info|low|medium|high|critical)", is_error: true)
       end
 
+      # The optional `cvss` argument as {value, clear}. THREE readings, because an agent has
+      # three things to say: absent means "leave it alone", JSON null or an empty string
+      # means "clear it", and anything else is the value. Read in one place because the two
+      # call sites had each spelled it out and only one of them treated null as a clear.
+      # A JSON number rides through `to_s`, so `cvss: 9.8` works as well as `"9.8"`.
+      private def cvss_arg(h) : {String?, Bool}
+        node = h["cvss"]?
+        return {nil, false} unless node
+        return {nil, true} if node.raw.nil?
+        s = (node.as_s? || node.to_s).strip
+        s.empty? ? {nil, true} : {s, false}
+      end
+
+      # Refuse a cvss nothing can score rather than storing it. An agent typo would otherwise
+      # land in a column the Issues list, `cvss:` queries and every export read through a
+      # parser that answers nil for it — a written field the tool reported success on. Same
+      # shape as bad_severity/bad_status.
+      private def bad_cvss(s : String?) : Result?
+        return nil if s.nil?
+        return nil if Gori::Cvss.valid?(s)
+        Result.new("invalid cvss: #{s} (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)", is_error: true)
+      end
+
       private def bad_status(s : String?) : Result?
         return nil if s.nil? || s.strip.empty?
         return nil if status_from(s)

@@ -41,6 +41,14 @@ describe "gori run issues — the text listing" do
     txt.should eq("#12  [high/open]  Reflected XSS  (shop.test)  flow#7")
   end
 
+  it "includes CVSS tag when score is present" do
+    txt = Gori::CLI::Run.issues_text_for_spec([
+      Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "SQLi", Gori::Store::Severity::Critical, "api.test", nil, "",
+        Gori::Store::Status::Open, "9.8"),
+    ])
+    txt.should eq("#1  [critical/open]  [CVSS 9.8]  SQLi  (api.test)")
+  end
+
   it "omits the host and flow clauses when the issue has neither" do
     txt = Gori::CLI::Run.issues_text_for_spec([
       issue(3_i64, "manual note", Gori::Store::Severity::Info, nil, nil),
