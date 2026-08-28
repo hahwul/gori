@@ -7,11 +7,12 @@ require "../store"
 # body capture cap, and per-project overrides of the same. See settings.cr for the
 # module-level overview and the load/save/serialize orchestration.
 module Gori::Settings
-  DEFAULT_BIND_HOST       = "127.0.0.1"
-  DEFAULT_BIND_PORT       = 8070
-  DEFAULT_UPSTREAM_PROXY  = ""
-  DEFAULT_VERIFY_UPSTREAM = true
-  DEFAULT_SERVE_LANDING   = true
+  DEFAULT_BIND_HOST                    = "127.0.0.1"
+  DEFAULT_BIND_PORT                    = 8070
+  DEFAULT_UPSTREAM_PROXY               = ""
+  DEFAULT_PROJECT_UPSTREAM_DESTINATION = "*"
+  DEFAULT_VERIFY_UPSTREAM              = true
+  DEFAULT_SERVE_LANDING                = true
   # Outbound dial timeouts (settings:network). connect = how long a TCP/upstream connect
   # may take; io = the initial read/write timeout on the upstream socket (relaxed to nil
   # for long-lived streaming tunnels — that clearing is orthogonal). Seconds, min 1.
@@ -86,7 +87,19 @@ module Gori::Settings
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
-  class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # "host:port" HTTP proxy; "" = connect directly
+  class_getter upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # HTTP/SOCKS URI or legacy host:port; "" = direct
+
+  # Assigning the scalar RETIRES the retained load error. A non-string `network.upstream_proxy`
+  # makes every route fail closed (apply_upstream_proxy), and the settings editor corrects it by
+  # assigning here and saving — it does not reload. A setter that only wrote the value therefore
+  # left the refusal standing until restart: the operator saw the fix applied and still could
+  # not dial. The value now in memory is the one upstream_route must judge.
+  def self.upstream_proxy=(value : String) : String
+    @@upstream_proxy = value
+    @@upstream_proxy_load_error = nil
+    value
+  end
+
   # Whether the proxy/probe/repeater verify the UPSTREAM TLS certificate. The launch
   # flag --insecure-upstream seeds this false for the session (see CLI.run_tui); the
   # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
@@ -312,9 +325,15 @@ module Gori::Settings
   # while the global settings:network editor keeps writing the shared defaults. Stored in the
   # project's generic KV `settings` table under these keys
   # (Store#setting/#set_setting/#delete_setting).
-  PROJECT_BIND_HOST_KEY = "net.bind_host"
-  PROJECT_BIND_PORT_KEY = "net.bind_port"
-  PROJECT_UPSTREAM_KEY  = "net.upstream_proxy"
+  PROJECT_BIND_HOST_KEY            = "net.bind_host"
+  PROJECT_BIND_PORT_KEY            = "net.bind_port"
+  PROJECT_UPSTREAM_KEY             = "net.upstream_proxy"
+  PROJECT_UPSTREAM_DESTINATION_KEY = "net.upstream_destination_host"
+  # One atomic JSON value rather than three independent KV rows: a busy Store cannot commit
+  # the method without its password (or vice versa) and leave a half-authenticated project.
+  # Unlike global settings.json, the project DB already holds captured credentials and is
+  # owner-only (0600); the password deliberately stays scoped to this engagement.
+  PROJECT_UPSTREAM_AUTH_KEY = "net.upstream_auth"
   # Promoted from global-only (#440). These are ENGAGEMENT properties, not machine ones: a slow
   # internal appliance needs its own idle timeout, and one target returning fat JSON needs its
   # own capture cap — raising either globally taxes every other project.
@@ -324,9 +343,42 @@ module Gori::Settings
   class_property project_bind_host : String? = nil
   class_property project_bind_port : Int32? = nil
   class_property project_upstream_proxy : String? = nil
+  @@project_upstream_destination : String? = nil
+  @@project_upstream_destination_compiled = HostPattern::Compiled.new(DEFAULT_PROJECT_UPSTREAM_DESTINATION)
+  @@project_upstream_destination_error : String? = nil
+  class_property project_upstream_auth : ProjectProxyAuth? = nil
+  class_property project_upstream_auth_error : String? = nil
   class_property project_connect_timeout_secs : Int32? = nil
   class_property project_io_timeout_secs : Int32? = nil
   class_property project_capture_max_mib : Int32? = nil
+
+  def self.project_upstream_destination : String?
+    @@project_upstream_destination
+  end
+
+  # Compile the project routing gate when the project is loaded/saved, never on the dial hot
+  # path. Keep an invalid hand-edited value as an error rather than turning it into `*`: a
+  # malformed pattern must not silently send a destination through (or around) a proxy.
+  def self.project_upstream_destination=(value : String?) : String?
+    @@project_upstream_destination = value.try(&.strip)
+    pattern = effective_project_upstream_destination
+    @@project_upstream_destination_error = upstream_destination_error(pattern)
+    @@project_upstream_destination_compiled = HostPattern::Compiled.new(pattern) unless @@project_upstream_destination_error
+    value
+  end
+
+  def self.effective_project_upstream_destination : String
+    project_upstream_destination || DEFAULT_PROJECT_UPSTREAM_DESTINATION
+  end
+
+  # The routing decision asks this before considering any proxy layer. nil means the pattern
+  # itself is unusable, so the caller must fail closed rather than guess direct/proxy.
+  protected def self.project_upstream_destination_match(dest_host : String) : {Bool?, String?}
+    if error = @@project_upstream_destination_error
+      return {nil, error}
+    end
+    {@@project_upstream_destination_compiled.matches?(dest_host), nil}
+  end
 
   # Install *store*'s per-project network overrides into the runtime layer above. THE one
   # implementation, called by every surface that opens a project store — `Session.open` (TUI
@@ -339,7 +391,7 @@ module Gori::Settings
   # a surface that switches projects (MCP `switch_project`, the TUI project picker) must not
   # carry the previous project's upstream into the next one.
   #
-  # `bind:` is REQUIRED, and gates the two LISTEN keys only. The four outbound/capture keys
+  # `bind:` is REQUIRED, and gates the two LISTEN keys only. The outbound/capture keys
   # apply on every surface — anything that dials reads `upstream_route` + `connect_timeout` /
   # `io_timeout`, and anything that stores a body reads `capture_max` — but a bind address is
   # meaningless where nothing binds, and worse than meaningless if left set: `effective_bind_*`
@@ -351,9 +403,129 @@ module Gori::Settings
     self.project_bind_host = bind ? store.setting(PROJECT_BIND_HOST_KEY) : nil
     self.project_bind_port = bind ? store.setting(PROJECT_BIND_PORT_KEY).try(&.to_i?) : nil
     self.project_upstream_proxy = store.setting(PROJECT_UPSTREAM_KEY)
+    self.project_upstream_destination = store.setting(PROJECT_UPSTREAM_DESTINATION_KEY)
+    load_project_upstream_auth(store.setting(PROJECT_UPSTREAM_AUTH_KEY))
     self.project_connect_timeout_secs = store.setting(PROJECT_CONNECT_TIMEOUT_KEY).try(&.to_i?)
     self.project_io_timeout_secs = store.setting(PROJECT_IO_TIMEOUT_KEY).try(&.to_i?)
     self.project_capture_max_mib = store.setting(PROJECT_CAPTURE_MAX_KEY).try(&.to_i?)
+  end
+
+  # The direct project credential stored in the owner-only project DB. `inspect` is redacted:
+  # this object is threaded through the TUI save seam, and an innocent debug interpolation
+  # must not turn the password into a log/status line.
+  record ProjectProxyAuth, method : String, username : String, password : String do
+    METHODS = ["basic", "socks5"]
+
+    def to_json(json : JSON::Builder) : Nil
+      json.object do
+        json.field "method", method
+        json.field "username", username
+        json.field "password", password
+      end
+    end
+
+    def self.parse?(raw : String) : ProjectProxyAuth?
+      obj = JSON.parse(raw).as_h?
+      return nil unless obj
+      method = obj["method"]?.try(&.as_s?)
+      username = obj["username"]?.try(&.as_s?)
+      password = obj["password"]?.try(&.as_s?)
+      return nil unless method && username && password
+      new(method, username, password)
+    rescue JSON::ParseException
+      nil
+    end
+
+    def inspect(io : IO) : Nil
+      io << "Gori::Settings::ProjectProxyAuth(method="
+      method.inspect(io)
+      io << ", username="
+      username.inspect(io)
+      io << ", password=[REDACTED])"
+    end
+
+    def to_s(io : IO) : Nil
+      inspect(io)
+    end
+  end
+
+  # One normalized hand-off from the Project Settings card to the Runner. Keeping auth and the
+  # destination gate inside the value prevents the already-long positional save signature
+  # growing tails whose order every test Host has to guess.
+  record ProjectNetworkConfig,
+    bind_host : String,
+    bind_port : Int32,
+    upstream : String,
+    auth : ProjectProxyAuth?,
+    connect_secs : Int32,
+    io_secs : Int32,
+    capture_mib : Int32,
+    destination_host : String = DEFAULT_PROJECT_UPSTREAM_DESTINATION
+
+  # Persist one Project Settings network edit and install the same values in the live runtime
+  # layer. Auth deliberately pins the displayed upstream even when it equals the global: a
+  # credential must stay attached to the proxy the operator saw, never fall through to a rule
+  # or follow a later global edit. `*` is represented by an absent destination row so every
+  # pre-feature project keeps the same proxy-all behaviour without migration. Each Store call
+  # reports commit success; all are attempted so an independently busy row cannot leave the
+  # rest of the live edit unapplied — except the three ROUTING rows, which go in one task
+  # (below) because they are only meaningful together.
+  def self.save_project_network(store : Store, config : ProjectNetworkConfig) : Bool
+    auth = config.auth
+    destination = config.destination_host.strip
+    # The pin, its credentials and the destination gate are ONE decision about where this
+    # project's traffic goes. Written as three tasks, a busy row could commit the credentials
+    # beside the address the project used to have — and the next open would send the secret
+    # there. Auth pins the upstream unconditionally; without it the pin follows the
+    # equals-global-means-inherit rule the other rows use.
+    routing_saved = store.set_settings([
+      {PROJECT_UPSTREAM_KEY, auth ? config.upstream : project_row(config.upstream, upstream_proxy)},
+      {PROJECT_UPSTREAM_AUTH_KEY, auth.try(&.to_json)},
+      {PROJECT_UPSTREAM_DESTINATION_KEY,
+       destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination},
+    ] of {String, String?})
+    persisted = [
+      set_or_clear_project(store, PROJECT_BIND_HOST_KEY, config.bind_host, bind_host),
+      set_or_clear_project(store, PROJECT_BIND_PORT_KEY, config.bind_port.to_s, bind_port.to_s),
+      routing_saved,
+      set_or_clear_project(store, PROJECT_CONNECT_TIMEOUT_KEY, config.connect_secs.to_s, connect_timeout_secs.to_s),
+      set_or_clear_project(store, PROJECT_IO_TIMEOUT_KEY, config.io_secs.to_s, io_timeout_secs.to_s),
+      set_or_clear_project(store, PROJECT_CAPTURE_MAX_KEY, config.capture_mib.to_s, capture_max_mib.to_s),
+    ].all?
+
+    self.project_bind_host = config.bind_host == bind_host ? nil : config.bind_host
+    self.project_bind_port = config.bind_port == bind_port ? nil : config.bind_port
+    self.project_upstream_proxy = auth || config.upstream != upstream_proxy ? config.upstream : nil
+    self.project_upstream_destination = destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination
+    self.project_upstream_auth = auth
+    self.project_upstream_auth_error = nil
+    self.project_connect_timeout_secs = config.connect_secs == connect_timeout_secs ? nil : config.connect_secs
+    self.project_io_timeout_secs = config.io_secs == io_timeout_secs ? nil : config.io_secs
+    self.project_capture_max_mib = config.capture_mib == capture_max_mib ? nil : config.capture_mib
+    persisted
+  end
+
+  private def self.set_or_clear_project(store : Store, key : String,
+                                        value : String, global : String) : Bool
+    value == global ? store.delete_setting(key) : store.set_setting(key, value)
+  end
+
+  # `set_or_clear_project`'s decision as a VALUE, for rows batched into one write task:
+  # nil means "drop the key so the project inherits the global".
+  private def self.project_row(value : String, global : String) : String?
+    value == global ? nil : value
+  end
+
+  private def self.load_project_upstream_auth(raw : String?) : Nil
+    self.project_upstream_auth = nil
+    self.project_upstream_auth_error = nil
+    return unless raw
+    if auth = ProjectProxyAuth.parse?(raw)
+      self.project_upstream_auth = auth
+    else
+      self.project_upstream_auth_error =
+        "project proxy authentication is malformed — edit Project settings before sending"
+    end
   end
 
   # A `-l` / `-p` (`gori tui`, `gori run capture`) override for THIS PROCESS only, nil when the
@@ -470,9 +642,9 @@ module Gori::Settings
   DEFAULT_HTTP_PROXY_PORT = 8080
   DEFAULT_SOCKS_PORT      = 1080
 
-  # The shared "host:port" parse behind the legacy scalar and the upstream RULE table (which
-  # needs a different default port per kind). Accepts an optional "http://" prefix and a
-  # bracketed IPv6 literal; nil when blank or when the host part is empty.
+  # The shared strict authority parse behind legacy scalar addresses and the upstream RULE
+  # table (which needs a different default port per kind). Accepts the historical HTTP scheme
+  # prefix and bracketed IPv6; nil when any authority component is malformed.
   #
   # There is deliberately no `upstream_proxy_addr` helper wrapping this over the scalar any
   # more. It existed when the scalar WAS the routing decision; once `upstream_route` folded
@@ -483,23 +655,45 @@ module Gori::Settings
     value = value.strip
     return nil if value.empty?
     value = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
+    return nil if unsafe_proxy_authority?(value)
     # Bracketed IPv6 ("[::1]" / "[::1]:8080"): host is inside the brackets, the
     # optional port follows ']'. Without this the rindex(':') below would split
     # inside the IPv6 literal and yield a garbage host/port.
-    if value.starts_with?('[')
-      if close = value.index(']')
-        host = value[1...close]
-        return nil if host.empty?
-        rest = value[(close + 1)..]
-        return {host, rest.starts_with?(':') ? (rest[1..].to_i? || default_port) : default_port}
-      end
-    end
+    return bracketed_proxy_addr(value, default_port) if value.starts_with?('[')
+    plain_proxy_addr(value, default_port)
+  end
+
+  private def self.unsafe_proxy_authority?(value : String) : Bool
+    value.empty? || value.includes?('/') || value.includes?('?') ||
+      value.includes?('#') || value.includes?('@') || value.matches?(/\s/)
+  end
+
+  private def self.bracketed_proxy_addr(value : String,
+                                        default_port : Int32) : {String, Int32}?
+    close = value.index(']')
+    return nil unless close
+    host = value[1...close]
+    return nil if host.empty?
+    rest = value[(close + 1)..]
+    return {host, default_port} if rest.empty?
+    return nil unless rest.starts_with?(':') && rest.size > 1
+    parsed_proxy_addr(host, rest[1..])
+  end
+
+  private def self.plain_proxy_addr(value : String,
+                                    default_port : Int32) : {String, Int32}?
     idx = value.rindex(':')
     return {value, default_port} unless idx
     host = value[0...idx]
     return nil if host.empty?
     return {value, default_port} if host.includes?(':') # unbracketed IPv6 literal → no port
-    {host, value[(idx + 1)..].to_i? || default_port}
+    parsed_proxy_addr(host, value[(idx + 1)..])
+  end
+
+  private def self.parsed_proxy_addr(host : String, port_segment : String) : {String, Int32}?
+    port = port_segment.to_i?
+    return nil unless port && 0 <= port <= 65_535
+    {host, port}
   end
 
   # nil if `host` is an acceptable proxy BIND address; an error message otherwise. Accepts
@@ -549,20 +743,22 @@ module Gori::Settings
   # instead of silently resolving to 8080 (upstream_proxy_addr) and failing every captured
   # flow later, far from the mistake. Shared by settings:network AND the Project settings pane.
   def self.upstream_proxy_port_error(value : String) : String?
-    return nil if value.empty?
-    bare = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
-    if bare.starts_with?('[') # bracketed IPv6 literal: [::1] or [::1]:port — the port is after ']'
-      return nil unless close = bare.index(']')
-      rest = bare[(close + 1)..]
-      return nil unless rest.starts_with?(':') && rest.size > 1 # no explicit port → defaults fine
-      seg = rest[1..]
-    else
-      i = bare.rindex(':')
-      return nil unless i && i < bare.size - 1 # no explicit port → defaults fine
-      return nil if bare[0...i].includes?(':') # pre-colon host has a ':' → unbracketed IPv6 literal, no port
-      seg = bare[(i + 1)..]
+    error = upstream_proxy_error(value)
+    return nil unless error
+    bare = value.sub(/\A[A-Za-z][A-Za-z0-9+.-]*:\/\//, "").rstrip('/')
+    segment = nil.as(String?)
+    if bare.starts_with?('[')
+      if close = bare.index(']')
+        rest = bare[(close + 1)..]
+        segment = rest[1..] if rest.starts_with?(':') && rest.size > 1
+      end
+    elsif (i = bare.rindex(':')) && !bare[0...i].includes?(':') && i < bare.size - 1
+      segment = bare[(i + 1)..]
     end
-    p = seg.to_i?
-    (p && 0 <= p <= 65535) ? nil : "settings: invalid upstream proxy port #{seg.inspect}"
+    if segment
+      port = segment.to_i?
+      return "settings: invalid upstream proxy port #{segment.inspect}" unless port && 0 <= port <= 65_535
+    end
+    error
   end
 end

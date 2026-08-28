@@ -43,7 +43,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | 전역 기본 리스닝 주소 (프로젝트에 `net.bind_host`가 없을 때 사용) |
 | `bind_port` | integer | `8070` | 전역 기본 리스닝 포트 (프로젝트에 `net.bind_port`가 없을 때 사용) |
-| `upstream_proxy` | string | `""` | 전역 기본 업스트림(`host:port`); 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선 |
+| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…` 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선 |
 | `verify_upstream` | bool | `true` | 시스템 CA 트러스트 스토어로 업스트림 TLS 인증서 검증(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR` 존중; 스토어를 못 찾으면 HTTPS 검증 실패 — `SSL_CERT_FILE` 지정 또는 끄기). 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. `--insecure-upstream`은 해당 세션에만 끈 상태로 시작 |
 | `serve_landing` | bool | `true` | 내장 안내 / CA 다운로드 페이지 제공. 리슨 주소로 직접 접속한 경우와, 이미 프록시를 설정한 클라이언트가 예약 호스트 `http://gori.proxy/`(또는 `http://gori/`)로 접속한 경우 모두 해당 |
 | `connect_timeout_secs` | integer | `30` | 업스트림 연결 타임아웃(초, 최소 `1`) |
@@ -228,7 +228,11 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 ### upstream_rules
 
-목적지별 업스트림 라우팅입니다. `network.upstream_proxy`는 *모든* 트래픽에 대한 단일 주소인 반면, 규칙 테이블은 "`*.corp.internal`은 사내 프록시로, 나머지는 직결"을 표현할 수 있고 자격증명을 실을 수 있으며 SOCKS 프록시에 접근할 수 있습니다.
+`network.upstream_proxy`는 catch-all 경로입니다. `host:port`, `http://…`(기존 `https://…` 표기 포함)는 HTTP CONNECT 프록시를 사용합니다. `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 둘 다 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
+
+캡처·재전송·스캔 엔진, 업데이트 확인, OAST 제공자 통신을 포함해 gori가 소유한 모든 네트워크 연결은 이 라우팅 결정을 사용합니다. 설정된 프록시가 잘못되었거나 연결할 수 없거나 터널을 거부하면 직결로 재시도하지 않고 실패합니다. 빈 프로젝트 고정값과 일치하는 `direct` 규칙은 명시적인 운영자 예외로 유지됩니다.
+
+목적지별 규칙은 "`*.corp.internal`은 사내 프록시로, 나머지는 직결"을 표현하고 자격증명을 실으며 서로 다른 프록시를 선택할 수 있습니다.
 
 규칙은 **순서가 있고 첫 일치가 이깁니다**. 구체적인 규칙을 위에 두세요. 편집은 `gori settings --edit`.
 
@@ -243,7 +247,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
       "username": "alice",
       "password_env": "CORP_PROXY_PASS"
     },
-    { "host": "*.onion", "kind": "socks5", "addr": "127.0.0.1:9050" }
+    { "host": "*.onion", "kind": "socks5h", "addr": "127.0.0.1:9050" }
   ]
 }
 ```
@@ -251,14 +255,14 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | 호스트 패턴. 스코프 `host` 룰과 같은 문법 — `corp.internal`은 해당 호스트와 서브도메인, `*.corp.internal`은 글롭, `*`는 catch-all. 대소문자 무관 |
-| `kind` | string | `direct`, `http`, `socks5`. 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
-| `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, `socks5`가 `1080`. `direct`에는 없어야 합니다 |
-| `username` | string | 선택. `http`는 HTTP Basic(RFC 7617), `socks5`는 RFC 1929 교환으로 전송 |
+| `kind` | string | `direct`, `http`, `socks5`(로컬 DNS), `socks5h`(프록시 DNS). 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
+| `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, 두 SOCKS kind가 `1080`. `direct`에는 없어야 합니다 |
+| `username` | string | 선택. `http`는 HTTP Basic(RFC 7617), 두 SOCKS kind는 RFC 1929 교환으로 전송 |
 | `password_env` | string | 선택. 비밀번호를 담은 **OS 환경변수의 이름** |
 
-**자격증명은 `settings.json`에 저장되지 않습니다.** 사용자명과 환경변수 *이름*만 기록되고, 비밀번호는 dial 시점에 OS 환경에서 읽습니다. 따라서 `export CORP_PROXY_PASS=…`가 재시작 없이 반영됩니다. gori 자체의 `env` 섹션은 의도적으로 쓰지 않습니다 — 그 변수들은 `settings.json`에 평문으로 저장되므로, 결국 다른 경로로 비밀을 파일에 넣는 셈이고 설정 공유·내보내기([#439](https://github.com/hahwul/gori/issues/439))를 무의미하게 만듭니다. `$`가 포함된 `password_env`는 거부됩니다 — 값이 아니라 변수 이름을 담는 필드입니다.
+**전역 규칙 비밀번호는 `settings.json`에 저장되지 않습니다.** 사용자명과 환경변수 *이름*만 기록되고, 비밀번호는 dial 시점에 OS 환경에서 읽습니다. 따라서 `export CORP_PROXY_PASS=…`가 재시작 없이 반영됩니다. gori 자체의 `env` 섹션은 의도적으로 쓰지 않습니다 — 그 변수들은 `settings.json`에 평문으로 저장되므로, 결국 다른 경로로 비밀을 파일에 넣는 셈이고 설정 공유·내보내기([#439](https://github.com/hahwul/gori/issues/439))를 무의미하게 만듭니다. `$`가 포함된 `password_env`는 거부됩니다 — 값이 아니라 변수 이름을 담는 필드입니다. Project settings에서 직접 입력한 자격증명의 저장 방식은 [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.
 
-`socks5`의 경우 호스트명 대상은 `ATYP DOMAIN`으로 전송되어 **프록시가** 이름을 해석합니다(`socks5h` 동작). Tor나 점프호스트 뒤의 도달 불가 네트워크가 이 덕분에 동작하며, gori 자체는 dial 경로에서 이름을 해석하지 않습니다.
+스칼라와 규칙은 같은 DNS 구분을 사용합니다. `socks5`는 gori 호스트에서 대상 이름을 조회하고, `socks5h`는 프록시에 조회를 맡깁니다. Tor, 분할 DNS, 로컬에서 해석할 수 없는 이름을 아는 점프호스트에는 `socks5h`를 사용하세요. 로컬 조회가 실패하면 프록시에 연결하기 전에 중단되며 원 서버 직결로 폴백하지 않습니다.
 
 우선순위(높은 것부터):
 
@@ -444,7 +448,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | `capturing` | bool | 프록시가 현재 캡처 중인지 여부 |
 | `flows` | integer | 캡처한 플로우 수 |
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
-| `upstream` | string | **캐치올** 업스트림 프록시 `host:port`, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream_rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
+| `upstream` | string | **캐치올** 업스트림 프록시 주소/URI, 직접 연결이면 비어 있음. [업스트림 규칙](#upstream_rules)에 걸린 목적지는 다른 경로로 나가며, 이 필드는 그것을 반영하지 않음 |
 | `upstream_rules` | integer | 적용 중인 [업스트림 규칙](#upstream_rules) 수. 0이 아니면 라우팅이 목적지별로 갈라지므로 `upstream` 하나로는 트래픽 경로를 설명할 수 없음 |
 
 ### display {#display}
@@ -758,13 +762,19 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 
-프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **PROJECT SETTINGS** 서브탭에서 편집합니다.
+프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서 편집합니다.
+
+**Destination host**는 프록시 라우팅을 대소문자를 구분하지 않는 하나의 호스트 패턴으로 제한합니다. 기본값 `*`는 모든 목적지를 프록시 대상으로 허용합니다. `example.com`은 해당 호스트와 서브도메인을 포함하고, `*.example.com`은 서브도메인만 포함합니다. 도메인, IPv4, IPv6 및 `*` 기반 IP 패턴을 사용할 수 있습니다. 일치하지 않는 목적지는 항상 직접 연결되며 `upstream_rules`나 `network.upstream_proxy`로 폴백하지 않습니다. 이 게이트는 프로젝트가 활성화된 동안 캡처, 재생, 스캐너, 업데이터 및 OAST 트래픽을 포함해 gori가 여는 모든 연결에 적용됩니다.
+
+인증하려면 **Proxy protocol**을 고르고 **Proxy host**와 **Proxy port**를 입력한 뒤 **Proxy auth**를 켜고 **Username**과 **Password**를 입력합니다. **SOCKS5**는 대상 이름을 로컬에서, **SOCKS5H**는 프록시에서 해석합니다. HTTP는 Basic 인증을, 두 SOCKS 프로토콜은 RFC 1929 사용자명/비밀번호 인증을 사용합니다. NTLM은 지원하지 않습니다. 인증을 켜면 표시 중인 업스트림 주소가 전역 설정에서 상속된 값이더라도 항상 프로젝트에 고정됩니다. 따라서 나중에 전역 경로나 목적지 규칙이 바뀌어 자격증명이 다른 프록시로 전송되지 않습니다.
+
+비밀번호는 **Password** 행에 포커스가 있어 편집하는 동안 표시되고, 포커스가 벗어나면 다시 마스킹됩니다. 캡처된 engagement 데이터와 함께 소유자 전용(`0600`) 프로젝트 SQLite 데이터베이스에는 평문으로 저장됩니다. 프로젝트에 비밀을 저장하면 안 되는 경우 `password_env`를 쓰는 전역 `upstream_rules` 항목을 사용하세요. 일치하는 목적지에서는 잘못되거나 업스트림 주소 없이 남은 프로젝트 인증 값이 원 서버 연결 전에 fail-closed 처리됩니다.
 
 타임아웃과 캡처 상한 키는 머신 속성이 아니라 engagement 속성입니다 — 느린 내부 장비는 자체 유휴 타임아웃이 필요하고, 아주 큰 응답을 주는 대상은 자체 캡처 상한이 필요합니다. 어느 쪽이든 전역으로 올리면 다른 모든 프로젝트가 비용을 치릅니다.
 
-**어느 표면에 어느 키가 적용되는가.** bind 키 둘은 gori가 리스닝 소켓을 여는 곳에서만 의미가 있고, 나머지 넷은 gori가 밖으로 다이얼하거나 바디를 저장하는 모든 곳에 적용됩니다.
+**어느 표면에 어느 키가 적용되는가.** bind 키 둘은 gori가 리스닝 소켓을 여는 곳에서만 의미가 있고, 프록시 인증을 포함한 나머지 키는 gori가 밖으로 다이얼하거나 바디를 저장하는 모든 곳에 적용됩니다.
 
-| 표면 | `bind_host` / `bind_port` | `upstream_proxy` / `connect_timeout_secs` / `io_timeout_secs` / `capture_max_mib` |
+| 표면 | `bind_host` / `bind_port` | 업스트림 / 목적지 / 인증 / 타임아웃 / 캡처 상한 |
 |------|---------------------------|-----------------------------------------------------------------------------------|
 | TUI (`gori`) | 적용 — 프록시가 고정된 주소로 리슨 | 적용 |
 | `gori run capture` | 적용 — 리슨하는 유일한 헤드리스 서브커맨드 (핀이 `--listen`/`--port`보다 우선) | 적용 |
@@ -775,12 +785,12 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 
 | Priority | Source |
 |----------|--------|
-| 1 (최우선) | 설정되어 있으면 프로젝트 DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.connect_timeout_secs` / `net.io_timeout_secs` / `net.capture_max_mib` |
+| 1 (최우선) | 설정되어 있으면 프로젝트 DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` / `net.upstream_destination_host` / `net.upstream_auth` / 타임아웃 / 캡처 상한 |
 | 2 | CLI `--listen` / `--port` (전역 계층의 프로세스 한정 오버라이드) |
 | 3 | `settings.json` `network.*` |
 | 4 (최하위) | 공장 기본값 `127.0.0.1:8070` / 직접 연결 |
 
-현재 전역 값과 같은 Project 탭 필드를 저장하면 해당 KV 키가 삭제되므로, 프로젝트는 중복을 고정하는 대신 이후의 전역 변경을 계속 상속합니다.
+현재 전역 값과 같은 Project 탭 필드를 저장하면 해당 KV 키가 삭제되므로, 프로젝트는 중복을 고정하는 대신 이후의 전역 변경을 계속 상속합니다. **Destination host**에는 전역 대응 값이 없으며, 기본값 `*`를 저장하면 프로젝트 키가 삭제됩니다.
 
 ## 프로젝트와 데이터베이스 {#projects-database}
 

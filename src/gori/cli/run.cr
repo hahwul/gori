@@ -389,7 +389,7 @@ module Gori
         # The project's pinned upstream / dial timeouts / capture cap (#538). `bind: false`:
         # not one command routed through here LISTENS — `gori run capture` is the only
         # subcommand that binds and it opens its project through `Session.open` instead — so
-        # the two bind keys are deliberately left out and the other four apply. Without this,
+        # the two bind keys are deliberately left out and the outbound/capture keys apply. Without this,
         # a project pinned to a jump host was dialled DIRECT by every `gori run` active
         # command, and an imported/replayed body was capped at the global limit.
         Settings.load_project_network(store, bind: false)

@@ -34,8 +34,10 @@ module Gori::Proxy
                   connect_timeout : Time::Span = Settings.connect_timeout,
                   io_timeout : Time::Span = Settings.io_timeout,
                   *, overrides : Gori::HostOverrides? = nil,
-                  pin : String? = nil) : TCPSocket?
-      dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin)[0]
+                  pin : String? = nil,
+                  apply_host_overrides : Bool = true) : TCPSocket?
+      dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
+        apply_host_overrides: apply_host_overrides)[0]
     end
 
     # Like `dial`, but also says WHY there is no socket. Every dial failure used to collapse
@@ -48,14 +50,17 @@ module Gori::Proxy
                          connect_timeout : Time::Span = Settings.connect_timeout,
                          io_timeout : Time::Span = Settings.io_timeout,
                          *, overrides : Gori::HostOverrides? = nil,
-                         pin : String? = nil) : {TCPSocket?, DialError?}
-      target, target_port = connect_target(host, port, overrides, pin)
+                         pin : String? = nil,
+                         apply_host_overrides : Bool = true) : {TCPSocket?, DialError?}
+      target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
       # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
       # project pin, the rule table and the legacy scalar together. Resolved on the ORIGINAL
       # host, not `target` — a rule is written against the name the operator sees, and a
       # hostname override only changes where we dial (see connect_target).
       route = Settings.upstream_route(host)
-      if route.direct?
+      if err = route.configuration_error
+        {nil, DialError.new(DialErrorKind::Proxy, "#{err} — the origin was never contacted")}
+      elsif route.direct?
         direct_dial_result(target, target_port, connect_timeout, io_timeout)
       elsif route.socks5?
         dial_via_socks5(route, target, target_port, connect_timeout, io_timeout)
@@ -387,7 +392,8 @@ module Gori::Proxy
     # How an error names the upstream proxy. One spelling so a 407 and an unreachable proxy
     # point at the same line of settings.json.
     private def self.proxy_label(route : Settings::UpstreamRoute) : String
-      "upstream #{route.socks5? ? "SOCKS5" : "HTTP"} proxy #{route.host}:#{route.port}"
+      transport = route.socks5? ? route.kind.upcase : "HTTP"
+      "upstream #{transport} proxy #{route.host}:#{route.port}"
     end
 
     # `proxy_label`, but nil for a direct route — the question a FAILURE BUILDER asks once it
@@ -451,14 +457,43 @@ module Gori::Proxy
       if err = route.credential_error
         return {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: #{err}")}
       end
-      sock = direct_dial(route.host, route.port, connect_timeout, io_timeout)
-      return {nil, DialError.new(DialErrorKind::Connect, "#{proxy_label(route)} unreachable (DNS/refused/timeout) — the origin was never contacted")} unless sock
-      return {sock, nil} if socks5_handshake(sock, route, host, port)
-      sock.close rescue nil
+      sock = nil.as(TCPSocket?)
+      targets = socks5_targets(route, host, port)
+      if targets.empty?
+        return {nil, DialError.new(DialErrorKind::Dns, "destination name resolved to no addresses")}
+      end
+      handshake_error = false
+      targets.each do |target|
+        begin
+          sock = direct_dial(route.host, route.port, connect_timeout, io_timeout)
+          return {nil, DialError.new(DialErrorKind::Connect, "#{proxy_label(route)} unreachable (DNS/refused/timeout) — the origin was never contacted")} unless sock
+          return {sock, nil} if socks5_handshake(sock, route, target, port)
+        rescue
+          handshake_error = true
+        end
+        sock.try(&.close) rescue nil
+        sock = nil
+      end
+      if handshake_error
+        return {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: the SOCKS5 handshake failed")}
+      end
       {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)} refused the tunnel to #{host}:#{port}")}
-    rescue
+    rescue ex : Socket::Addrinfo::Error
       sock.try(&.close) rescue nil
-      {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: the SOCKS5 handshake failed")}
+      {nil, DialError.new(DialErrorKind::Dns, cause: exception_cause(ex))}
+    end
+
+    # SOCKS5 resolves locally and sends an address literal; SOCKS5H preserves the hostname
+    # for proxy-side resolution. Each local result gets a fresh tunnel because a failed
+    # SOCKS CONNECT reply leaves that socket unusable for another request.
+    private def self.socks5_targets(route : Settings::UpstreamRoute,
+                                    host : String, port : Int32) : Array(String)
+      return [host] if route.remote_dns?
+      bare = bare_host(host)
+      return [bare] if parse_ip(bare)
+      addresses = Socket::Addrinfo.tcp(bare, port).map(&.ip_address.address)
+      addresses.uniq!
+      addresses
     end
 
     # Method negotiation → optional auth → CONNECT. False on any refusal, so the caller closes.
@@ -497,10 +532,8 @@ module Gori::Proxy
     # The CONNECT request, then the reply (whose BND.ADDR must be drained by its own address
     # type, or the socket would be left mid-reply and the origin stream would start desynced).
     #
-    # An IP literal target is sent as ATYP IPV4/IPV6; a hostname is sent as ATYP DOMAIN, so the
-    # SOCKS proxy resolves it (the "socks5h" behaviour). That is the right default here: it is
-    # what makes Tor and a jump host into a network gori cannot otherwise see work at all, and
-    # gori deliberately does not resolve names on the dial path anyway (see parse_ip).
+    # An IP literal target is sent as ATYP IPV4/IPV6; a hostname is sent as ATYP DOMAIN.
+    # `socks5_targets` ensures only SOCKS5H reaches this method with a hostname.
     private def self.socks5_connect(sock : TCPSocket, host : String, port : Int32) : Bool
       sock.write(Bytes[Socks5::VERSION, Socks5::CMD_CONNECT, 0_u8])
       return false unless socks5_write_address(sock, host)
@@ -596,9 +629,9 @@ module Gori::Proxy
       case code
       when 407
         if authenticating?(route)
-          " — the credentials on the matching upstream rule were rejected"
+          " — the configured upstream proxy credentials were rejected"
         else
-          " — the proxy requires authentication; set `username` + `password_env` on the matching upstream rule"
+          " — the proxy requires authentication; configure it in Project settings or on a matching upstream rule"
         end
       when 403 then " — the proxy's ACL does not permit CONNECT to that host/port"
       when 502, 503, 504

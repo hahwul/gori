@@ -55,5 +55,24 @@ module Gori
         nil
       }
     end
+
+    # Several rows in ONE writer task, so they commit or roll back together. A nil value
+    # deletes its key. For rows that are only meaningful as a set — a proxy address and the
+    # credentials pinned to it — per-key writes can land one half and lose the other, leaving
+    # the project pointing a live secret at the address it used to have. Returns whether the
+    # batch COMMITTED, like the single-key calls above.
+    def set_settings(entries : Array({String, String?})) : Bool
+      return true if entries.empty?
+      exec_task_ok ->(c : DB::Connection) {
+        entries.each do |(key, value)|
+          if value
+            c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, value, value)
+          else
+            c.exec("DELETE FROM settings WHERE key = ?", key)
+          end
+        end
+        nil
+      }
+    end
   end
 end

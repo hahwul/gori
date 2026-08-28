@@ -103,14 +103,16 @@ module Gori::Tui
       @env_icx = 0
       @env_preedit = ""
 
-      # NETWORK pane: two toggle rows (scope lens, sandbox) + inline-editable network fields
-      # (bind IP / bind port / upstream proxy). @set_values holds the three text
-      # fields; @set_overridden tracks whether each is a project override (vs inheriting global).
+      # PROJECT SETTINGS pane: two policy toggles plus project network/proxy fields and the
+      # target's protobuf schema. Authentication belongs to the project proxy pin, not global
+      # settings.json; the schema has its own baseline and commit path.
       @set_sel = 0
-      @set_values = ["", "", ""]
-      @set_overridden = [false, false, false]
-      @set_baseline = {"", "", "", "", "", ""} # the six NETWORK fields as last loaded; drives settings_dirty?
-      @protos_baseline = ""                    # …and the proto-schema field's own, per its own commit
+      @set_values = ["", "", "", "", "", "", "", "", "", "", "", "", ""]
+      @set_overridden = [false, false, false, false, false, false,
+                         false, false, false, false, false, false]
+      @set_baseline = {"", "", "", "", "", "", "", "", "", "", "", ""}
+      @set_upstream_raw = ""
+      @protos_baseline = ""
       @set_cursor = 0
       @set_preedit = ""
       load_settings_values
@@ -195,7 +197,8 @@ module Gori::Tui
 
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
     # override when pinned, else the global default (Session.open populated Settings.project_*
-    # from this project's DB on open). @set_overridden drives the "· project/global" marker.
+    # from this project's DB on open). @set_overridden drives the "· project/global" marker
+    # (the project-only fields use "· default" — see SETTINGS_PROJECT_ONLY_INDICES).
     #
     # The bind pair uses `configured_bind_*`, NOT `effective_bind_*`: those two differ only by
     # the process-only `-l`/`-p` layer, which is neither a project pin nor the global — so it
@@ -208,7 +211,7 @@ module Gori::Tui
       load_protos_value
     end
 
-    # The six NETWORK fields only, written in place so the proto-schema slot beside them
+    # The twelve NETWORK fields only, written in place so the proto-schema slot beside them
     # survives. Partial ON PURPOSE: the two halves commit separately, so each half's refresh
     # must leave the other's pending edit alone — see `refresh_settings` / `refresh_protos`.
     private def load_network_values : Nil
@@ -217,6 +220,12 @@ module Gori::Tui
         !Settings.project_bind_host.nil?,
         !Settings.project_bind_port.nil?,
         !Settings.project_upstream_proxy.nil?,
+        !Settings.project_upstream_proxy.nil?,
+        !Settings.project_upstream_proxy.nil?,
+        !Settings.project_upstream_destination.nil?,
+        !Settings.project_upstream_auth.nil?,
+        !Settings.project_upstream_auth.nil?,
+        !Settings.project_upstream_auth.nil?,
         !Settings.project_connect_timeout_secs.nil?,
         !Settings.project_io_timeout_secs.nil?,
         !Settings.project_capture_max_mib.nil?,
@@ -234,14 +243,39 @@ module Gori::Tui
     end
 
     private def network_values : Array(String)
+      @set_upstream_raw = Settings.effective_upstream_proxy
+      proxy = project_proxy_field_values(@set_upstream_raw)
       [
         Settings.configured_bind_host,
         Settings.configured_bind_port.to_s,
-        Settings.effective_upstream_proxy,
+        proxy[0],
+        proxy[1],
+        proxy[2],
+        Settings.effective_project_upstream_destination,
+        Settings.project_upstream_auth ? "on" : "off",
+        Settings.project_upstream_auth.try(&.username) || "",
+        Settings.project_upstream_auth.try(&.password) || "",
         Settings.effective_connect_timeout_secs.to_s,
         Settings.effective_io_timeout_secs.to_s,
         Settings.effective_capture_max_mib.to_s,
       ]
+    end
+
+    private def project_proxy_field_values(raw : String) : {String, String, String}
+      if fields = Settings.upstream_proxy_fields(raw)
+        {project_proxy_protocol_label(fields[0]), fields[1], fields[2]}
+      else
+        {"Invalid · #{raw}", "", ""}
+      end
+    end
+
+    private def project_proxy_protocol_label(kind : String) : String
+      case kind
+      when "http"    then "HTTP"
+      when "socks5"  then "SOCKS5"
+      when "socks5h" then "SOCKS5H"
+      else                "None"
+      end
     end
 
     private def current_set_value : String
@@ -382,26 +416,41 @@ module Gori::Tui
     # One row for the sub-tab chips.
     STRIP_H = 1
 
-    # PROJECT SETTINGS pane rows: two toggles (scope-lens, sandbox) over the inline text
-    # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
-    # it (the fields live in @set_values, indexed @set_sel - FIELD_BASE).
-    # Row order is the tuple order everywhere (settings_values, @set_overridden, the controller's
-    # commit). The three timeout/capture fields were global-only until #440; they are ENGAGEMENT
-    # properties, so a slow appliance or a fat-response target no longer taxes every project.
+    # PROJECT SETTINGS pane rows: two toggles (scope-lens, sandbox) over the inline project
+    # fields. The auth method is inferred from the proxy kind, so its row is only off/on: HTTP
+    # means Basic and SOCKS5 means RFC 1929. This prevents a method selector disagreeing with
+    # the transport it is supposed to authenticate.
     #
     # "Proto schema" (#823) sits LAST and is deliberately not part of the network tuple: it is
-    # committed on its own baseline, so editing it never re-applies (and re-BINDS) six network
-    # values that did not change. It is an engagement property for the same reason the timeouts
-    # are — a `.proto` describes THIS target's API and must not follow the operator to the next.
-    SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy",
-                       "Connect timeout", "Idle timeout", "Capture limit", "Proto schema"]
-    SETTINGS_SCOPE_ROW   =  0
-    SETTINGS_SANDBOX_ROW =  1
-    SETTINGS_FIELD_BASE  =  2 # first inline-editable text-field row
-    SETTINGS_LABEL_W     = 16 # value column starts past the widest label ("Connect timeout")
-    # Index into @set_values / @set_overridden of the "Proto schema" field (its row is
-    # SETTINGS_FIELD_BASE + this). Named because three places have to agree on it.
-    SETTINGS_PROTOS_FIELD = 6
+    # committed on its own baseline, so editing it never re-applies (and re-BINDS) unchanged
+    # network values. It is an engagement property for the same reason the timeouts are.
+    SETTINGS_LABELS = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Proxy protocol",
+                       "Proxy host", "Proxy port", "Destination host", "Proxy auth", "Username",
+                       "Password", "Connect timeout", "Idle timeout", "Capture limit", "Proto schema"]
+    SETTINGS_SCOPE_ROW         =  0
+    SETTINGS_SANDBOX_ROW       =  1
+    SETTINGS_FIELD_BASE        =  2 # first inline-editable network-field row
+    SETTINGS_PROTOCOL_ROW      =  4
+    SETTINGS_PROXY_HOST_ROW    =  5
+    SETTINGS_PROXY_PORT_ROW    =  6
+    SETTINGS_DESTINATION_ROW   =  7
+    SETTINGS_AUTH_ROW          =  8
+    SETTINGS_USERNAME_ROW      =  9
+    SETTINGS_PASSWORD_ROW      = 10
+    SETTINGS_PROTOCOL_INDEX    = SETTINGS_PROTOCOL_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_PROXY_HOST_INDEX  = SETTINGS_PROXY_HOST_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_PROXY_PORT_INDEX  = SETTINGS_PROXY_PORT_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_DESTINATION_INDEX = SETTINGS_DESTINATION_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_AUTH_INDEX        = SETTINGS_AUTH_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_USERNAME_INDEX    = SETTINGS_USERNAME_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_PASSWORD_INDEX    = SETTINGS_PASSWORD_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_PROTOS_FIELD      = 12
+    SETTINGS_LABEL_W           = 16 # value column starts past the widest label ("Connect timeout")
+    SETTINGS_PROTOCOL_CHOICES  = ["None", "HTTP", "SOCKS5", "SOCKS5H"]
+    # Fields with no global counterpart to inherit — their unset marker is "· default", not
+    # "· global" (see render_settings_field).
+    SETTINGS_PROJECT_ONLY_INDICES = [SETTINGS_DESTINATION_INDEX, SETTINGS_USERNAME_INDEX,
+                                     SETTINGS_PASSWORD_INDEX]
 
     # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
     # either list).
@@ -643,7 +692,62 @@ module Gori::Tui
     end
 
     def settings_text_row? : Bool
+      return false if settings_protocol_row?
+      return false if settings_auth_row?
+      return false if settings_credential_row? && !settings_auth_enabled?
+      return false if settings_proxy_field_disabled?
       @set_sel >= SETTINGS_FIELD_BASE
+    end
+
+    def settings_protocol_row? : Bool
+      @set_sel == SETTINGS_PROTOCOL_ROW
+    end
+
+    def settings_auth_row? : Bool
+      @set_sel == SETTINGS_AUTH_ROW
+    end
+
+    private def settings_credential_row? : Bool
+      @set_sel == SETTINGS_USERNAME_ROW || @set_sel == SETTINGS_PASSWORD_ROW
+    end
+
+    def settings_auth_enabled? : Bool
+      @set_values[SETTINGS_AUTH_INDEX] == "on"
+    end
+
+    def toggle_settings_auth : Nil
+      @set_values[SETTINGS_AUTH_INDEX] = settings_auth_enabled? ? "off" : "on"
+      @set_cursor = 0
+      @set_preedit = ""
+    end
+
+    def cycle_settings_protocol(delta : Int32 = 1) : Nil
+      choices = SETTINGS_PROTOCOL_CHOICES
+      previous = @set_values[SETTINGS_PROTOCOL_INDEX]
+      index = choices.index(previous) || 0
+      current = choices[(index + delta) % choices.size]
+      @set_values[SETTINGS_PROTOCOL_INDEX] = current
+      port = @set_values[SETTINGS_PROXY_PORT_INDEX].strip
+      previous_default = project_proxy_default_port(previous)
+      if port.empty? || port == previous_default
+        @set_values[SETTINGS_PROXY_PORT_INDEX] = project_proxy_default_port(current)
+      end
+      @set_cursor = 0
+      @set_preedit = ""
+    end
+
+    private def project_proxy_default_port(label : String) : String
+      case label
+      when "HTTP"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
+      when "SOCKS5", "SOCKS5H" then Settings::DEFAULT_SOCKS_PORT.to_s
+      else                          ""
+      end
+    end
+
+    private def settings_proxy_field_disabled? : Bool
+      return false unless @set_sel == SETTINGS_PROXY_HOST_ROW || @set_sel == SETTINGS_PROXY_PORT_ROW
+      protocol = @set_values[SETTINGS_PROTOCOL_INDEX]
+      protocol == "None" || protocol.starts_with?("Invalid ·")
     end
 
     # On row 0 → ↑ pops up to the sub-tab strip. There's no matching at_bottom? / at_cursor_start?
@@ -652,12 +756,23 @@ module Gori::Tui
       @set_sel <= 0
     end
 
-    # The six NETWORK fields, trimmed, for commit: {bind IP, bind port, upstream proxy,
-    # connect timeout, idle timeout, capture limit}. Deliberately NOT including the proto
-    # schema path — see SETTINGS_PROTOS_FIELD.
-    def settings_values : {String, String, String, String, String, String}
-      {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip,
-       @set_values[3].strip, @set_values[4].strip, @set_values[5].strip}
+    # All persisted network fields, in the same order as the rows after the two toggles.
+    # Deliberately excludes the proto schema path, which has its own baseline and commit.
+    def settings_values : {String, String, String, String, String, String, String, String, String, String, String, String}
+      {@set_values[0].strip, @set_values[1].strip,
+       @set_values[2], @set_values[3].strip, @set_values[4].strip,
+       @set_values[5].strip, @set_values[6], @set_values[7], @set_values[8],
+       @set_values[9].strip, @set_values[10].strip, @set_values[11].strip}
+    end
+
+    # Preserve the exact inherited/project scalar while its three-field projection is
+    # untouched (including legacy host:port spelling). Once edited, serialize canonically.
+    def settings_upstream_proxy : {String, String?}
+      unchanged = @set_values[2] == @set_baseline[2] &&
+                  @set_values[3] == @set_baseline[3] &&
+                  @set_values[4] == @set_baseline[4]
+      return {@set_upstream_raw, nil} if unchanged
+      Settings.build_upstream_proxy(@set_values[2].downcase, @set_values[3], @set_values[4])
     end
 
     # The "Proto schema" field, trimmed: a `.desc` file, a directory of them, or blank for
@@ -1920,25 +2035,22 @@ module Gori::Tui
       @desc_read.paint_chrome(screen, rect, @desc_area, active)
     end
 
-    # PROJECT SETTINGS card: the scope-lens + sandbox toggles over the inline-editable text
-    # fields. Each network row carries a "· project" / "· global" marker so a pinned override
-    # reads distinct from an inherited global value; the proto-schema row shows what actually
-    # LOADED instead, because a path with nothing behind it is the failure that matters there.
+    # PROJECT SETTINGS card: policy toggles plus project network, proxy-auth, and protobuf
+    # fields. It is windowed so keyboard and pointer hit-tests can keep every selected row
+    # visible. Network rows show their project/global source; the schema row shows what loaded.
     private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "PROJECT SETTINGS", bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
       return if inner.h <= 0 || inner.w <= 0
-      # Scrolled, not clipped. The card takes whatever height is left under the OVERVIEW band,
-      # so on a short terminal the LAST rows fall off — and `set_select` clamps to the full
-      # label count regardless, which let the selection (and typing, and a commit that toasts)
-      # land on a row nothing had drawn.
-      off = settings_scroll(inner.h)
-      SETTINGS_LABELS.each_with_index do |label, i|
-        next if i < off
-        break if i - off >= inner.h
-        render_settings_row(screen, inner, inner.y + (i - off), i, label, focused && @set_sel == i)
+      # Scrolled, not clipped: every selected row remains visible on a short terminal.
+      start = settings_scroll(inner.h)
+      inner.h.times do |row|
+        i = start + row
+        break if i >= SETTINGS_LABELS.size
+        render_settings_row(screen, inner, inner.y + row, i, SETTINGS_LABELS[i], focused && @set_sel == i)
       end
+      Frame.scroll_gauge(screen, inner, SETTINGS_LABELS.size, start, focused, Theme.bg)
     end
 
     # Rows scrolled off the TOP of the settings card, so render and hit-test agree.
@@ -1964,9 +2076,53 @@ module Gori::Tui
         screen.text(vx, y, on ? "ON" : "OFF", on ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       when SETTINGS_SANDBOX_ROW
         render_sandbox_toggle(screen, inner, y, vx, bg)
+      when SETTINGS_PROTOCOL_ROW
+        render_proxy_protocol(screen, inner, y, vx, selected, bg)
+      when SETTINGS_AUTH_ROW
+        render_proxy_auth(screen, inner, y, vx, selected, bg)
       else
-        render_settings_field(screen, inner, y, vx, i - SETTINGS_FIELD_BASE, selected, bg)
+        render_settings_value(screen, inner, y, vx, i, selected, bg)
       end
+    end
+
+    private def render_settings_value(screen : Screen, inner : Rect, y : Int32, vx : Int32,
+                                      row : Int32, selected : Bool, bg : Color) : Nil
+      proxy_disabled = (row == SETTINGS_PROXY_HOST_ROW || row == SETTINGS_PROXY_PORT_ROW) &&
+                       (@set_values[SETTINGS_PROTOCOL_INDEX] == "None" ||
+                        @set_values[SETTINGS_PROTOCOL_INDEX].starts_with?("Invalid ·"))
+      if proxy_disabled || ((row == SETTINGS_USERNAME_ROW || row == SETTINGS_PASSWORD_ROW) && !settings_auth_enabled?)
+        screen.text(vx, y, "—", Theme.muted, bg)
+      else
+        render_settings_field(screen, inner, y, vx, row - SETTINGS_FIELD_BASE, selected, bg)
+      end
+    end
+
+    private def render_proxy_protocol(screen : Screen, inner : Rect, y : Int32, vx : Int32,
+                                      selected : Bool, bg : Color) : Nil
+      value = @set_values[SETTINGS_PROTOCOL_INDEX]
+      overridden = @set_overridden[SETTINGS_PROTOCOL_INDEX]
+      marker = overridden ? "· project" : "· global"
+      mx = inner.right - marker.size
+      width = {mx - vx - 1, 3}.max
+      shown = SETTINGS_PROTOCOL_CHOICES.includes?(value) && selected ? "‹ #{value} ›" : value
+      color = SETTINGS_PROTOCOL_CHOICES.includes?(value) ? (selected ? Theme.text_bright : Theme.text) : Theme.yellow
+      screen.text(vx, y, shown, color, bg, width: width)
+      screen.text(mx, y, marker, overridden ? Theme.accent : Theme.muted, bg) if mx > vx + 3
+    end
+
+    private def render_proxy_auth(screen : Screen, inner : Rect, y : Int32, vx : Int32,
+                                  selected : Bool, bg : Color) : Nil
+      label = if !settings_auth_enabled?
+                "None"
+              elsif @set_values[SETTINGS_PROTOCOL_INDEX] == "SOCKS5" ||
+                    @set_values[SETTINGS_PROTOCOL_INDEX] == "SOCKS5H"
+                "SOCKS5 username/password"
+              else
+                "Basic"
+              end
+      label = "‹ #{label} ›" if selected
+      screen.text(vx, y, label, settings_auth_enabled? ? Theme.accent : Theme.muted, bg,
+        width: {inner.right - vx, 1}.max)
     end
 
     # The Sandbox toggle value + an ALWAYS-VISIBLE, state-aware guidance note. This is a
@@ -1989,18 +2145,30 @@ module Gori::Tui
     end
 
     # One network text field: the value (editable input_line when the row is focused) plus a
-    # right-aligned "· project" / "· global" override marker.
+    # right-aligned override marker ("· project" versus "· global" / "· default").
     private def render_settings_field(screen : Screen, inner : Rect, y : Int32, vx : Int32,
                                       fi : Int32, selected : Bool, bg : Color) : Nil
       return render_protos_field(screen, inner, y, vx, selected, bg) if fi == SETTINGS_PROTOS_FIELD
       overridden = @set_overridden[fi]
-      marker = overridden ? "· project" : "· global"
+      # "· global" claims settings.json supplied the inherited value. The destination gate and
+      # the two credentials have no global counterpart at all — a project-only field that is
+      # unset is at its DEFAULT, and naming a source that cannot exist would send an operator
+      # looking for the credential in the global editor.
+      marker = if SETTINGS_PROJECT_ONLY_INDICES.includes?(fi)
+                 overridden ? "· project" : "· default"
+               else
+                 overridden ? "· project" : "· global"
+               end
       mx = inner.right - marker.size
       fw = {mx - vx - 1, 3}.max
+      value = @set_values[fi]
+      masked = fi == SETTINGS_PASSWORD_INDEX && !selected
+      shown = masked ? "•" * value.size : value
+      preedit = masked ? "•" * @set_preedit.size : @set_preedit
       if selected
-        screen.input_line(vx, y, @set_values[fi], @set_cursor, @set_preedit, Theme.text_bright, bg, width: fw)
+        screen.input_line(vx, y, shown, @set_cursor, preedit, Theme.text_bright, bg, width: fw)
       else
-        screen.text(vx, y, @set_values[fi], Theme.text, bg, width: fw)
+        screen.text(vx, y, shown, Theme.text, bg, width: fw)
       end
       screen.text(mx, y, marker, overridden ? Theme.accent : Theme.muted, bg) if mx > vx + 3
     end

@@ -5,6 +5,7 @@ require "file_utils"
 require "random/secure"
 require "digest/sha256"
 
+require "./http_transport"
 require "./update/asset"
 require "./update/channel"
 require "./update/verify"
@@ -98,7 +99,7 @@ module Gori
     # by type) pass through untouched.
     private def self.io_guard(what : String, &)
       yield
-    rescue ex : IO::Error | OpenSSL::Error
+    rescue ex : IO::Error | OpenSSL::Error | HttpTransport::Error
       raise Error.new("#{what}: #{ex.message.presence || ex.class}")
     end
 
@@ -137,25 +138,6 @@ module Gori
         "could not resolve the running gori executable: #{ex.message.presence || ex.class} " \
         "(it may have been moved or deleted while running)"
       )
-    end
-
-    private def self.http_client(host : String, port : Int32, tls : Bool,
-                                 timeout : Time::Span = HTTP_TIMEOUT) : HTTP::Client
-      # When tls is a bare `true`, HTTP::Client builds OpenSSL::SSL::Context::Client.new
-      # with only the compiled-in OPENSSLDIR store. A static-musl release binary's store
-      # is often empty (#323/#333) — exactly the environment `gori update` exists to
-      # serve (Channel::Binary). Apply the same system-trust repair the proxy uses so
-      # GitHub HTTPS verification works out of the box; additive and rescue-guarded.
-      client = if tls
-                 ctx = OpenSSL::SSL::Context::Client.new
-                 Proxy::Upstream.apply_system_trust(ctx)
-                 HTTP::Client.new(host, port, ctx)
-               else
-                 HTTP::Client.new(host, port, false)
-               end
-      client.connect_timeout = timeout
-      client.read_timeout = timeout
-      client
     end
 
     # Best-effort latest published release version (normalized, no leading `v`), or
@@ -213,8 +195,7 @@ module Gori
       uri = URI.parse(RELEASES_LATEST_URL)
       host = uri.host
       return nil unless host
-      port = uri.port || (uri.scheme == "https" ? 443 : 80)
-      client = http_client(host, port, uri.scheme == "https", timeout)
+      client = HttpTransport.client(uri, connect_timeout: timeout, read_timeout: timeout)
       begin
         response = client.head(uri.request_target,
           headers: HTTP::Headers{"User-Agent" => USER_AGENT})
@@ -344,9 +325,9 @@ module Gori
       if host == "api.github.com" && (token = github_token)
         headers["Authorization"] = "Bearer #{token}"
       end
-      port = uri.port || (uri.scheme == "https" ? 443 : 80)
-      tls = uri.scheme == "https"
-      client = http_client(host, port, tls, timeout)
+      client = io_guard("could not reach #{host}") do
+        HttpTransport.client(uri, connect_timeout: timeout, read_timeout: timeout)
+      end
       begin
         response = io_guard("could not reach #{host}") do
           client.get(uri.request_target, headers: headers)
@@ -366,12 +347,12 @@ module Gori
       raise Error.new("too many redirects downloading #{url}") if redirects_left < 0
 
       uri = parse_url(url, "invalid download URL: #{url}")
-      host = uri.host || raise Error.new("invalid download URL: #{url}")
-      port = uri.port || (uri.scheme == "https" ? 443 : 80)
-      tls = uri.scheme == "https"
+      uri.host || raise Error.new("invalid download URL: #{url}")
       headers = HTTP::Headers{"User-Agent" => USER_AGENT}
 
-      client = http_client(host, port, tls)
+      client = io_guard("could not download #{url}") do
+        HttpTransport.client(uri, connect_timeout: HTTP_TIMEOUT, read_timeout: HTTP_TIMEOUT)
+      end
       begin
         # Capture result outside the HTTP block (block return is not always the method return).
         result = 0_i64

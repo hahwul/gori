@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "file_utils"
+require "socket"
 
 private def with_root(&)
   root = File.tempname("gori-projects")
@@ -67,6 +68,23 @@ describe Gori::CaptureLock do
 end
 
 describe Gori::Session, "capture status sidecar" do
+  # Session.open replaces its Config bind with the effective Settings bind. Isolate these
+  # examples from a developer's live proxy on the default port, then restore the global layer.
+  around_each do |example|
+    saved_bind_port = Gori::Settings.bind_port
+    saved_cli_bind_port = Gori::Settings.cli_bind_port
+    available = TCPServer.new("127.0.0.1", 0)
+    Gori::Settings.bind_port = available.local_address.port
+    Gori::Settings.cli_bind_port = nil
+    available.close
+    begin
+      example.run
+    ensure
+      Gori::Settings.bind_port = saved_bind_port
+      Gori::Settings.cli_bind_port = saved_cli_bind_port
+    end
+  end
+
   it "writes status on open and clears on close" do
     with_root do |root|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))

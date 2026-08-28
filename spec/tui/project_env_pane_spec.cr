@@ -241,6 +241,7 @@ private class FakeHost
   include Gori::Tui::Host
 
   getter statuses = [] of String
+  getter applied_config : Gori::Settings::ProjectNetworkConfig? = nil
 
   def initialize(@session : Gori::Session)
     @jobs = Gori::Tui::Jobs.new
@@ -372,6 +373,11 @@ private class FakeHost
     ""
   end
 
+  def apply_project_network(config : Gori::Settings::ProjectNetworkConfig) : String
+    @applied_config = config
+    "project network captured"
+  end
+
   def apply_project_protos(spec : String) : String
     ""
   end
@@ -411,6 +417,39 @@ private def type_keys(c : ProjectController, text : String) : Nil
 end
 
 describe Gori::Tui::ProjectController do
+  it "hands inline proxy credentials to the secret-bearing project save seam" do
+    with_env_controller do |c, host, _session|
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      c.view.refresh_settings
+      c.view.focus_pane(:settings)
+
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_DESTINATION_ROW)
+      c.handle_body_key(key(Termisu::Input::Key::Backspace))
+      type_keys(c, "*.target.test")
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_AUTH_ROW)
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_USERNAME_ROW)
+      type_keys(c, "alice")
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_PASSWORD_ROW)
+      type_keys(c, "secret")
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+
+      config = host.applied_config.not_nil!
+      config.upstream.should eq("http://proxy.test:8080")
+      config.destination_host.should eq("*.target.test")
+      config.auth.try(&.method).should eq("basic")
+      config.auth.try(&.username).should eq("alice")
+      config.auth.try(&.password).should eq("secret")
+      host.statuses.last.should eq("project network captured")
+    ensure
+      Gori::Settings.upstream_proxy = ""
+      Gori::Settings.project_upstream_proxy = nil
+      Gori::Settings.project_upstream_destination = nil
+      Gori::Settings.project_upstream_auth = nil
+      Gori::Settings.project_upstream_auth_error = nil
+    end
+  end
+
   it "says a rolled-back env write did NOT save, instead of reporting success" do
     with_env_controller do |c, host, session|
       c.env_add_var

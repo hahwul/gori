@@ -26,6 +26,9 @@ private def reset_projnet
   Gori::Settings.project_bind_host = nil
   Gori::Settings.project_bind_port = nil
   Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.project_upstream_destination = nil
+  Gori::Settings.project_upstream_auth = nil
+  Gori::Settings.project_upstream_auth_error = nil
   Gori::Settings.bind_host = "127.0.0.1"
   Gori::Settings.bind_port = 8070
   Gori::Settings.upstream_proxy = ""
@@ -355,7 +358,7 @@ describe "ProjectView#pane_at" do
 end
 
 describe "ProjectView PROJECT SETTINGS pane" do
-  it "renders the scope-lens + sandbox toggles + the network fields with an inherit marker" do
+  it "renders proxy authentication, protobuf, and inherited network fields" do
     tmp_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -375,8 +378,16 @@ describe "ProjectView PROJECT SETTINGS pane" do
       b.contains?("Sandbox").should be_true
       b.contains?("Bind IP").should be_true
       b.contains?("Bind Port").should be_true
-      b.contains?("Upstream proxy").should be_true
+      b.contains?("Proxy protocol").should be_true
+      b.contains?("Proxy host").should be_true
+      b.contains?("Proxy port").should be_true
+      b.contains?("Destination host").should be_true
+      b.contains?("· default").should be_true
+      b.contains?("Proxy auth").should be_true
+      b.contains?("Username").should be_true
+      b.contains?("Password").should be_true
       b.contains?("Proto schema").should be_true
+      b.contains?("None").should be_true
       b.contains?("127.0.0.1").should be_true # inherited global bind host
       b.contains?("· global").should be_true  # no override yet → inheriting
     ensure
@@ -400,6 +411,85 @@ describe "ProjectView PROJECT SETTINGS pane" do
     end
   end
 
+  it "splits the effective proxy and applies smart ports while cycling protocols" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+
+      values = view.settings_values
+      {values[2], values[3], values[4]}.should eq({"HTTP", "proxy.test", "8080"})
+      view.select_setting(ProjectView::SETTINGS_PROTOCOL_ROW)
+      view.cycle_settings_protocol
+      values = view.settings_values
+      {values[2], values[3], values[4]}.should eq({"SOCKS5", "proxy.test", "1080"})
+      view.settings_upstream_proxy.should eq({"socks5://proxy.test:1080", nil})
+
+      view.select_setting(ProjectView::SETTINGS_PROXY_PORT_ROW)
+      4.times { view.set_backspace }
+      "9051".each_char { |c| view.set_input(c) }
+      view.select_setting(ProjectView::SETTINGS_PROTOCOL_ROW)
+      view.cycle_settings_protocol
+      view.settings_values[4].should eq("9051")
+      view.settings_upstream_proxy.should eq({"socks5h://proxy.test:9051", nil})
+
+      view.cycle_settings_protocol # SOCKS5H → None
+      view.select_setting(ProjectView::SETTINGS_PROXY_HOST_ROW)
+      view.settings_text_row?.should be_false
+      view.select_setting(ProjectView::SETTINGS_PROXY_PORT_ROW)
+      view.settings_text_row?.should be_false
+      view.settings_upstream_proxy.should eq({"", nil})
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "defaults Destination host to all traffic and edits one project pattern" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.settings_values[ProjectView::SETTINGS_DESTINATION_INDEX].should eq("*")
+
+      view.select_setting(ProjectView::SETTINGS_DESTINATION_ROW)
+      view.set_backspace.should be_true
+      "*.target.test".each_char { |char| view.set_input(char) }
+      view.settings_values[ProjectView::SETTINGS_DESTINATION_INDEX].should eq("*.target.test")
+      view.settings_dirty?.should be_true
+    ensure
+      reset_projnet
+    end
+  end
+
+  # The credential rows only draw a marker once auth is ON (before that they render "—"), and
+  # settings.json has no proxy username/password to inherit — so "· global" there would name a
+  # source that cannot exist and send the operator to the wrong editor looking for it.
+  it "marks the project-only credential rows · default rather than · global" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.focus_pane(:settings)
+      view.select_setting(ProjectView::SETTINGS_AUTH_ROW)
+      view.toggle_settings_auth
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+
+      username = (0...30).map { |y| b.row(y) }.find(&.includes?("Username")).to_s
+      password = (0...30).map { |y| b.row(y) }.find(&.includes?("Password")).to_s
+      username.should contain("· default")
+      username.should_not contain("· global")
+      password.should contain("· default")
+      password.should_not contain("· global")
+      # The proxy host beside them DOES inherit settings.json, so it keeps naming that source.
+      (0...30).map { |y| b.row(y) }.find(&.includes?("Proxy host")).to_s.should contain("· global")
+    ensure
+      reset_projnet
+    end
+  end
+
   it "hit-tests a settings row and edits a text field (dirty-tracked)" do
     tmp_store do |store|
       reset_projnet
@@ -418,8 +508,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.settings_text_row?.should be_true
       view.set_input('9')
       view.set_input('9')
-      _, port, _ = view.settings_values
-      port.should eq("807099") # inserted at the caret (field end)
+      view.settings_values[1].should eq("807099") # inserted at the caret (field end)
       view.settings_dirty?.should be_true
 
       view.set_backspace
@@ -430,7 +519,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   # #823: the proto-schema path is its OWN field with its OWN baseline, so editing it neither
-  # marks the network half dirty (which would re-apply and re-BIND six unchanged values on the
+  # marks the network half dirty (which would re-apply and re-BIND unchanged values on the
   # next tab-leave) nor is marked dirty by a network edit.
   it "keeps the proto-schema field on a baseline of its own" do
     tmp_store do |store|
@@ -440,7 +529,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.protos_value.should eq("")
       view.protos_dirty?.should be_false
 
-      view.select_setting(2 + Gori::Tui::ProjectView::SETTINGS_PROTOS_FIELD) # the "Proto schema" row
+      view.select_setting(2 + Gori::Tui::ProjectView::SETTINGS_PROTOS_FIELD)
       view.settings_text_row?.should be_true
       "api.desc".each_char { |c| view.set_input(c) }
       view.protos_value.should eq("api.desc")
@@ -451,6 +540,53 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.set_input('9')
       view.settings_dirty?.should be_true
       view.protos_dirty?.should be_true # …and the proto edit is still pending, not swallowed
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "shows the password while editing and masks it after focus leaves" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.project_upstream_proxy = "http://proxy.test:8080"
+      Gori::Settings.project_upstream_auth =
+        Gori::Settings::ProjectProxyAuth.new("basic", "alice", "do-not-render")
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.focus_pane(:settings)
+      view.select_setting(ProjectView::SETTINGS_PASSWORD_ROW)
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+
+      b.contains?("alice").should be_true
+      b.contains?("Basic").should be_true
+      b.contains?("do-not-render").should be_true
+      view.settings_values[8].should eq("do-not-render")
+
+      view.select_setting(ProjectView::SETTINGS_USERNAME_ROW)
+      masked = MemoryBackend.new(120, 30)
+      view.render(Screen.new(masked), Rect.new(0, 0, 120, 30), focused: true)
+      masked.contains?("do-not-render").should be_false
+      masked.contains?("•••••••••••••").should be_true
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "enables credential rows only when proxy authentication is on" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+
+      view.select_setting(ProjectView::SETTINGS_USERNAME_ROW)
+      view.settings_text_row?.should be_false
+      view.select_setting(ProjectView::SETTINGS_AUTH_ROW)
+      view.settings_auth_row?.should be_true
+      view.toggle_settings_auth
+      view.settings_values[6].should eq("on")
+      view.select_setting(ProjectView::SETTINGS_USERNAME_ROW)
+      view.settings_text_row?.should be_true
     ensure
       reset_projnet
     end
@@ -482,6 +618,28 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.settings_values[1].should end_with("9") # the half-typed port survives
       view.settings_dirty?.should be_true
       view.protos_dirty?.should be_false
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "windows the expanded card and hit-tests the selected credential row on a short terminal" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.project_upstream_proxy = "socks5://proxy.test:1080"
+      Gori::Settings.project_upstream_auth =
+        Gori::Settings::ProjectProxyAuth.new("socks5", "alice", "secret")
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.focus_pane(:settings)
+      view.select_setting(ProjectView::SETTINGS_PASSWORD_ROW)
+      rect = Rect.new(0, 0, 80, 16)
+      b = MemoryBackend.new(80, 16)
+      view.render(Screen.new(b), rect, focused: true)
+
+      b.contains?("Password").should be_true
+      hits = (rect.y...rect.bottom).compact_map { |y| view.set_row_at(rect, rect.x + 4, y) }
+      hits.should contain(ProjectView::SETTINGS_PASSWORD_ROW)
     ensure
       reset_projnet
     end

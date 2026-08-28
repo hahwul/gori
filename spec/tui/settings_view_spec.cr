@@ -53,6 +53,60 @@ describe SettingsView do
     end
   end
 
+  it "edits split proxy fields with smart defaults and preserves custom ports" do
+    dir = File.tempname("gori-settings-proxy-fields")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.upstream_proxy
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.upstream_proxy = "http://proxy.local:8080"
+      v = SettingsView.new
+      v.reload(:network)
+      2.times { v.move_field(1) } # Proxy protocol: HTTP
+      v.toggle_or_move(1)         # SOCKS5, automatic 8080 → 1080
+      v.save
+      Gori::Settings.upstream_proxy.should eq("socks5://proxy.local:1080")
+
+      v.reload(:network)
+      4.times { v.move_field(1) } # Proxy port
+      set_text(v, "9051")
+      2.times { v.move_field(-1) } # Proxy protocol
+      v.toggle_or_move(1)          # SOCKS5H; custom port survives
+      v.save
+      Gori::Settings.upstream_proxy.should eq("socks5h://proxy.local:9051")
+
+      v.reload(:network)
+      2.times { v.move_field(1) }
+      v.toggle_or_move(1) # SOCKS5H → None
+      v.save
+      Gori::Settings.upstream_proxy.should eq("")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.upstream_proxy = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  it "shows and preserves an invalid raw proxy declaration until it is repaired" do
+    prev = Gori::Settings.upstream_proxy
+    begin
+      Gori::Settings.upstream_proxy = "socks4://bad.test:1080"
+      v = SettingsView.new
+      v.reload(:network)
+      b = MemoryBackend.new(120, 30)
+      v.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+      b.contains?("Invalid · socks4://bad.test:1080").should be_true
+
+      v.move_field(1) # edit only Bind Port
+      set_text(v, "9090")
+      v.save.should contain("unsupported upstream proxy scheme")
+      Gori::Settings.upstream_proxy.should eq("socks4://bad.test:1080")
+    ensure
+      Gori::Settings.upstream_proxy = prev
+    end
+  end
+
   it "toggles Verify upstream TLS off, then resets it to the default on save" do
     dir = File.tempname("gori-settings-verify")
     Dir.mkdir_p(dir)
@@ -63,11 +117,9 @@ describe SettingsView do
       Gori::Settings.verify_upstream = true
       v = SettingsView.new
       v.reload(:network)
-      v.move_field(1)      # Bind IP → Bind Port
-      v.move_field(1)      # → Upstream proxy
-      v.move_field(1)      # → Verify upstream TLS (index 3, the bool)
-      v.toggle_or_move(-1) # flip the bool off
-      v.save               # persists the working copy back to the live Settings
+      5.times { v.move_field(1) } # Bind IP → … → Verify upstream TLS (index 5)
+      v.toggle_or_move(-1)        # flip the bool off
+      v.save                      # persists the working copy back to the live Settings
       Gori::Settings.verify_upstream?.should be_false
 
       v.reset_to_defaults
@@ -90,7 +142,7 @@ describe SettingsView do
       Gori::Settings.serve_landing = true
       v = SettingsView.new
       v.reload(:network)
-      4.times { v.move_field(1) } # Bind IP → Port → Upstream → Verify → Info page (index 4)
+      6.times { v.move_field(1) } # Bind IP → … → Info page (index 6)
       v.toggle_or_move(-1)        # flip the Info-page bool off
       v.save
       Gori::Settings.serve_landing?.should be_false
@@ -272,12 +324,12 @@ describe SettingsView do
       Gori::Settings.capture_max_mib = 2
       v = SettingsView.new
       v.reload(:network)
-      # Bind IP → Port → Upstream → Verify → Info page → Connect timeout (index 5, text)
-      5.times { v.move_field(1) }
+      # Bind IP → … → Connect timeout (index 7, text)
+      7.times { v.move_field(1) }
       set_text(v, "5")
-      v.move_field(1) # → Idle timeout (index 6, text)
+      v.move_field(1) # → Idle timeout (index 8, text)
       set_text(v, "7")
-      v.move_field(1) # → Capture body limit (index 7, text)
+      v.move_field(1) # → Capture body limit (index 9, text)
       set_text(v, "9")
       v.save
       Gori::Settings.connect_timeout_secs.should eq(5)

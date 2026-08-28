@@ -64,6 +64,8 @@ module Gori::Tui
       when :settings
         if @project_view.settings_text_row?
           "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
+        elsif @project_view.settings_protocol_row?
+          "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
         elsif @project_view.settings_sandbox_row?
           "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
         else
@@ -209,17 +211,22 @@ module Gori::Tui
         end
         @project_view.desc_click_to_cursor(rect, mx, my)
       when :settings
-        @project_view.focus_pane(:settings)
-        if idx = @project_view.set_row_at(rect, mx, my)
-          @project_view.select_setting(idx)
-          case idx
-          when ProjectView::SETTINGS_SCOPE_ROW   then @host.toggle_scope_lens
-          when ProjectView::SETTINGS_SANDBOX_ROW then @host.toggle_sandbox
-          else                                        @project_view.setting_click_to_cursor(rect, mx, my)
-          end
-        end
+        handle_project_settings_click(rect, mx, my)
       end # :overview band → just take body focus
       true
+    end
+
+    private def handle_project_settings_click(rect : Rect, mx : Int32, my : Int32) : Nil
+      @project_view.focus_pane(:settings)
+      return unless idx = @project_view.set_row_at(rect, mx, my)
+      @project_view.select_setting(idx)
+      case idx
+      when ProjectView::SETTINGS_SCOPE_ROW    then @host.toggle_scope_lens
+      when ProjectView::SETTINGS_SANDBOX_ROW  then @host.toggle_sandbox
+      when ProjectView::SETTINGS_PROTOCOL_ROW then @project_view.cycle_settings_protocol
+      when ProjectView::SETTINGS_AUTH_ROW     then @project_view.toggle_settings_auth
+      else                                         @project_view.setting_click_to_cursor(rect, mx, my)
+      end
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
@@ -937,12 +944,29 @@ module Gori::Tui
     private def commit_project_protos : String?
       return nil unless @project_view.protos_dirty?
       line = @host.apply_project_protos(@project_view.protos_value)
-      @project_view.refresh_protos # NOT refresh_settings — that would reset the six network fields
+      @project_view.refresh_protos # NOT refresh_settings — that would reset the network fields
       line
     end
 
     private def handle_project_settings_action(ev : Termisu::Event::Key) : Nil
-      @project_view.settings_text_row? ? handle_project_settings_field_key(ev) : handle_project_settings_toggle_key(ev)
+      if @project_view.settings_protocol_row?
+        handle_project_settings_protocol_key(ev)
+      elsif @project_view.settings_auth_row?
+        handle_project_settings_auth_key(ev)
+      elsif @project_view.settings_toggle_row?
+        handle_project_settings_toggle_key(ev)
+      elsif @project_view.settings_text_row?
+        handle_project_settings_field_key(ev)
+      end
+    end
+
+    private def handle_project_settings_protocol_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if key.left?
+        @project_view.cycle_settings_protocol(-1)
+      elsif key.right? || key.enter? || key.space?
+        @project_view.cycle_settings_protocol(1)
+      end
     end
 
     # The two toggle rows (scope lens, sandbox): space/↵ flips whichever is selected. ↑/↓ are
@@ -954,7 +978,14 @@ module Gori::Tui
       end
     end
 
-    # Rows 2-8 (bind IP / port / upstream / timeouts / capture cap / proto schema): type to
+    private def handle_project_settings_auth_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if key.enter? || key.space? || key.left? || key.right?
+        @project_view.toggle_settings_auth
+      end
+    end
+
+    # Text rows (bind / proxy / credentials / timeouts / capture cap / proto schema): type to
     # edit, ↵ applies,
     # ←/→ move the caret (clamped — they no longer escape the card sideways).
     private def handle_project_settings_field_key(ev : Termisu::Event::Key) : Nil
@@ -980,14 +1011,26 @@ module Gori::Tui
     # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
     private def commit_project_network(on_leave : Bool = false) : String?
       return nil unless @project_view.settings_dirty?
-      host, port_s, upstream, connect_s, idle_s, cap_s = @project_view.settings_values
+      host, port_s, _protocol, _proxy_host, _proxy_port, destination, auth_s, username, password, connect_s, idle_s, cap_s =
+        @project_view.settings_values
       return settings_invalid("bind IP is required", on_leave) if host.empty?
       port = port_s.to_i?
       unless port && 0 <= port <= 65535
         return settings_invalid("invalid bind port #{port_s.inspect}", on_leave)
       end
-      if err = Settings.upstream_proxy_port_error(upstream)
+      upstream, proxy_error = @project_view.settings_upstream_proxy
+      if proxy_error
+        return settings_invalid(proxy_error, on_leave)
+      end
+      if err = Settings.upstream_proxy_error(upstream)
         return settings_invalid(err, on_leave)
+      end
+      if err = Settings.upstream_destination_error(destination)
+        return settings_invalid(err, on_leave)
+      end
+      auth, auth_error = Settings.build_project_proxy_auth(upstream, auth_s == "on", username, password)
+      if auth_error
+        return settings_invalid(auth_error, on_leave)
       end
       connect = positive_secs(connect_s)
       return settings_invalid("invalid connect timeout #{connect_s.inspect} (seconds, min 1)", on_leave) unless connect
@@ -996,7 +1039,8 @@ module Gori::Tui
       cap = positive_secs(cap_s)
       return settings_invalid("invalid capture limit #{cap_s.inspect} (MiB, min 1)", on_leave) unless cap
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 inside Int32
-      line = @host.apply_project_network(host, port, upstream, connect, idle, cap)
+      config = Settings::ProjectNetworkConfig.new(host, port, upstream, auth, connect, idle, cap, destination)
+      line = @host.apply_project_network(config)
       @project_view.refresh_settings
       line
     end

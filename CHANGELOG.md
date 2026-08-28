@@ -20,6 +20,7 @@
 - Proxy: with `network.strip_alt_svc` off, a response advertising `Alt-Svc: h3=…` now says so on the flow instead of passing silently — the advertisement still reaches the client byte-for-byte, but a client leaving for QUIC is a reported blind spot rather than an unexplained gap in History (#835)
 - TUI: the project picker marks a project an MCP client is bound to, and an open project shows a clickable `mcp:<client>` top-bar chip that lists the attached agents (#815)
 - TUI: the Comparer flow picker follows the active project Scope lens, and says `no flows in scope` rather than `no flows captured yet` when the lens hides everything; turning the lens off still exposes every captured flow (#809)
+- Proxy: distinguish SOCKS5 local DNS from SOCKS5H proxy DNS (existing SOCKS5 rules that need remote resolution should switch to SOCKS5H), add project-scoped proxy authentication and destination filtering, and route updater/OAST traffic through the same fail-closed upstream path. Project proxy passwords are shown only while editing and stored in the owner-only project database (#434)
 
 ## v0.4.0
 

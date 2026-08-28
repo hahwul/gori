@@ -112,6 +112,7 @@ module Gori
       @@loaded_raw = nil
       @@load_partial = false
       @@load_unreadable = false
+      reset_upstream_route_errors
       # A full load rewrites every section's class properties, including the two
       # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
       # these bytes" from outliving the memory it was an assertion about — a load that ends in
@@ -221,7 +222,7 @@ module Gori
       if net = object_section(root, "network")
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = int_field(net, "bind_port") || bind_port
-        self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
+        apply_upstream_proxy(net["upstream_proxy"]?)
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
         self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
         int_field(net, "connect_timeout_secs").try { |v| self.connect_timeout_secs = {v, 1}.max }
@@ -239,7 +240,7 @@ module Gori
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
       parse_hooks(root["hooks"]?)
-      self.upstream_rules = parse_upstream_rules(root["upstream_rules"]?)
+      apply_upstream_rules(root["upstream_rules"]?)
       self.outbound_tls = parse_outbound_tls(root["outbound_tls"]?)
       parse_retention(root["retention"]?)
       self.listeners = parse_listeners(root["listeners"]?)

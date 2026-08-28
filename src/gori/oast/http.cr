@@ -1,11 +1,13 @@
 require "http/client"
 require "uri"
+require "../http_transport"
 
 module Gori::Oast
   # The outbound-HTTP seam every provider talks through. Abstracting it lets specs drive
   # register/poll with a scripted fake (no sockets) while production dials real servers.
-  # OAST talks to THIRD-PARTY interaction servers directly (not through gori's proxy /
-  # host-override machinery) — same stance as the self-updater.
+  # OAST talks to THIRD-PARTY interaction servers outside the active-testing scope gate. The
+  # production client follows configured upstream routing but skips target host overrides —
+  # the same stance as the self-updater.
   abstract class Http
     record Response, status : Int32, body : String
 
@@ -14,7 +16,7 @@ module Gori::Oast
                          body : String? = nil) : Response
   end
 
-  # Production client over stdlib HTTP::Client (template: Gori::Update#fetch_latest_release_json).
+  # Production client over the shared routed HTTP transport.
   # A fresh client per call, keyed on the URL's own origin — the poll cadence is seconds,
   # not a hot path, and each provider may hit a different host.
   class HttpClient < Http
@@ -37,15 +39,8 @@ module Gori::Oast
       uri = URI.parse(url)
       host = uri.host
       raise Gori::Error.new("OAST: invalid URL #{url}") unless host
-      tls = uri.scheme == "https"
-      port = uri.port || (tls ? 443 : 80)
-
-      client = HTTP::Client.new(host, port, tls)
-      client.connect_timeout = TIMEOUT
-      client.read_timeout = TIMEOUT
-      # A public interactsh/webhook host we don't (and can't) pin; the callback content is
-      # decrypted/verified out of band, so an unverified transport is acceptable here.
-      client.tls.try(&.verify_mode = OpenSSL::SSL::VerifyMode::NONE) unless @verify_tls
+      client = Gori::HttpTransport.client(uri, verify_tls: @verify_tls,
+        connect_timeout: TIMEOUT, read_timeout: TIMEOUT)
 
       hdrs = HTTP::Headers.new
       headers.each { |k, v| hdrs[k] = v }

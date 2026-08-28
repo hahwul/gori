@@ -465,6 +465,7 @@ module Gori
       end
       parser.parse(args)
       begin
+        Settings.load
         Update.run(exec_package_commands: exec_pkg)
       rescue ex : Error
         abort "gori update: #{ex.message}"

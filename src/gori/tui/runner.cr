@@ -457,7 +457,7 @@ module Gori::Tui
       end
       # The Project SETTINGS pane is an editor for the PINNED config, so its snapshot (and the
       # dirty baseline `load_settings_values` takes from it) must read the pin, not the port
-      # the environment forced us onto. `commit_project_network` writes all six fields
+      # the environment forced us onto. `commit_project_network` writes every network field
       # whenever ANY one of them is dirty, so a baseline seeded from the fallback turns an edit
       # to the idle timeout into a silent re-pin of the wrong port. The LIVE port is shown by
       # every surface that answers "where am I listening": the top-bar chip
@@ -4738,8 +4738,8 @@ module Gori::Tui
     # global that any later `Settings.save` flushes to settings.json and every future project
     # then inherits; and not `Settings.project_bind_port`, which `apply_project_network`
     # persists into THIS project's DB and which `ProjectView#load_settings_values` seeds its
-    # dirty baseline from, so that a subsequent edit to ANY of the six network fields re-pins
-    # the port along with it (`commit_project_network` passes all six). Config records what the
+    # dirty baseline from, so that a subsequent edit to ANY network field re-pins the port
+    # along with it (`commit_project_network` passes every field). Config records what the
     # operator asked for; the proxy object records what the OS gave us. Keeping the two
     # separate is the whole point — see `Runner#run` and `.port_fallback_stands?`.
     def self.port_fallback(requested : Int32, actual : Int32) : Tuple(Int32, Int32)?
@@ -4809,41 +4809,33 @@ module Gori::Tui
       end
     end
 
-    # Persist + apply the Project settings pane's per-project network config. Each field is
-    # stored only when it DIFFERS from the current global (else the KV key is dropped, so the
-    # project inherits — and later global edits propagate). Refreshes the Settings runtime
-    # override layer, then rebinds the live proxy (the upstream is already live via effective_*).
+    # Persist + apply the Project settings pane's per-project network config. Non-auth fields
+    # are stored only when they differ from the current global; auth pins its proxy address as
+    # well. Refreshes the Settings runtime layer, then rebinds the live proxy (the upstream is
+    # already live via upstream_route).
     def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
                               connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
+      apply_project_network(Settings::ProjectNetworkConfig.new(
+        bind_host, bind_port, upstream, Settings.project_upstream_auth,
+        connect_secs, io_secs, capture_mib, Settings.effective_project_upstream_destination
+      ))
+    end
+
+    def apply_project_network(config : Settings::ProjectNetworkConfig) : String
       # The bind pair compares against the bare GLOBAL, which is exactly what ProjectView seeded
       # the pane with for an unpinned project (`Settings.configured_bind_*`) — so "unchanged
       # means inherit" tracks what the operator was shown. A `-l`/`-p` override is in neither
       # value, which is what keeps a one-run flag from being pinned into this project's DB the
       # next time someone saves this pane for an unrelated reason: the mistake
       # `Runner.port_fallback` describes, one layer down.
-      # Both store writes report whether they COMMITTED, and all six are collected: a project
+      # Every store write reports whether it COMMITTED, and all eight are collected: a project
       # whose writer is held by another instance rolls them back, and this pane used to answer
       # "project network saved" anyway. The pin then existed only in the process globals set
       # below — so the operator saw it applied, the proxy really did rebind, and reopening the
       # project silently reverted every field. That is the same failure `gori run project
       # sandbox on` refuses to have, in its own words: "the in-memory flag flips either way,
       # and the next reload reverts it to the disk value".
-      persisted = [
-        set_or_clear(Settings::PROJECT_BIND_HOST_KEY, bind_host, Settings.bind_host),
-        set_or_clear(Settings::PROJECT_BIND_PORT_KEY, bind_port.to_s, Settings.bind_port.to_s),
-        set_or_clear(Settings::PROJECT_UPSTREAM_KEY, upstream, Settings.upstream_proxy),
-        set_or_clear(Settings::PROJECT_CONNECT_TIMEOUT_KEY, connect_secs.to_s, Settings.connect_timeout_secs.to_s),
-        set_or_clear(Settings::PROJECT_IO_TIMEOUT_KEY, io_secs.to_s, Settings.io_timeout_secs.to_s),
-        set_or_clear(Settings::PROJECT_CAPTURE_MAX_KEY, capture_mib.to_s, Settings.capture_max_mib.to_s),
-      ].all?
-      Settings.project_bind_host = bind_host == Settings.bind_host ? nil : bind_host
-      Settings.project_bind_port = bind_port == Settings.bind_port ? nil : bind_port
-      Settings.project_upstream_proxy = upstream == Settings.upstream_proxy ? nil : upstream
-      # Same equals-global-means-inherit rule as the three above: storing a duplicate would
-      # freeze the project against later global edits.
-      Settings.project_connect_timeout_secs = connect_secs == Settings.connect_timeout_secs ? nil : connect_secs
-      Settings.project_io_timeout_secs = io_secs == Settings.io_timeout_secs ? nil : io_secs
-      Settings.project_capture_max_mib = capture_mib == Settings.capture_max_mib ? nil : capture_mib
+      persisted = Settings.save_project_network(@session.store, config)
       # The globals above are still assigned and the rebind below still happens even when the
       # write did not land: the operator asked for this address, and refusing to apply it would
       # be the worse half of the trade. What must not happen is calling it saved. `apply_settings`
@@ -4871,13 +4863,6 @@ module Gori::Tui
       # did (a missing path, or the `.proto` SOURCE file mistaken for a descriptor set).
       line = "proto schema: #{Gori::Protobuf::Schemas.status}"
       persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project"
-    end
-
-    # Store the per-project value, or drop the key so the project inherits the global.
-    # Returns whether that write COMMITTED (both store calls are `exec_task_ok`).
-    private def set_or_clear(key : String, value : String, global : String) : Bool
-      store = @session.store
-      value == global ? store.delete_setting(key) : store.set_setting(key, value)
     end
 
     # Open the settings editor for `section` (palette → settings:network/editor/theme/
