@@ -962,6 +962,13 @@ module Gori::Proxy
           sent_resp = Codec::Http1.parse_response_head(sent_resp_head)
         end
       end
+      # The OFF half of the h3 `Alt-Svc` seam (#835), and the reason it sits HERE rather than
+      # beside the strip: the sentence is about what the CLIENT is being invited onto, so it has
+      # to be asked of the head the rules have finished with. An operator's response rule removing
+      # `Alt-Svc` for one host is the documented per-host alternative to the global switch, and
+      # warning "a client acting on it leaves the proxy" for a header that rule already took off
+      # the wire is a false alarm on the one host they had handled.
+      @alt_svc_note = note_alt_svc_kept(sent_resp_head, sent_resp, host) unless Settings.strip_alt_svc?
       # The `Sec-WebSocket-Extensions` half of a 101 (#518): removed when it answers an offer
       # gori itself removed, kept when it answers one the origin really received. Either way
       # the operator gets told, on the flow and not only in gori.log. Runs on the head that
@@ -1822,8 +1829,12 @@ module Gori::Proxy
       end
     end
 
-    # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), HTTP/1.1's half. Returns the
+    # The h3 `Alt-Svc` seam (settings `network.strip_alt_svc`), HTTP/1.1's half. Returns the
     # head and projection the CLIENT should receive, plus the advisory for the flow.
+    #
+    # This is the ON half only. The OFF half — the advertisement got through and the flow has to
+    # say so (#835) — is `note_alt_svc_kept`, and it deliberately runs LATER, after the rules.
+    # See the comment there for why the two halves sit at different points.
     #
     # gori does not intercept HTTP/3: QUIC is UDP and every listener here is a TCP socket. A
     # client that acts on `Alt-Svc: h3=":443"` therefore leaves for a transport gori has no
@@ -1868,6 +1879,49 @@ module Gori::Proxy
         ::Log.info { "alt-svc #{host}: #{note}" }
       end
       {stripped, Codec::Http1.parse_response_head(stripped), note}
+    end
+
+    # The advisory for the switch's OTHER position: this response advertised h3, gori did not
+    # remove it, and a client acting on it is about to leave for a transport gori cannot read
+    # (#835). Returns nil when nothing in the head advertises h3.
+    #
+    # NOTHING is touched but the advisory. `head` is the slice already on its way to the client
+    # and the return value is a string, so the origin's bytes reach it untouched (P7) — which is
+    # the point: with the switch off the operator asked for the advertisement to be delivered.
+    # What they were not getting is any record that it happened, and a gap in History that
+    # nothing explains is indistinguishable from a target that had nothing more to say.
+    #
+    # Asked AFTER Match&Replace rather than beside the strip. The two halves are not symmetric:
+    # over-stating a removal is harmless, but a "clients are leaving via this host" warning
+    # raised for a response whose `Alt-Svc` an operator's own rule already removed is a false
+    # alarm on the one host they had handled — and this file's own P4 note says a per-host rule
+    # outranks the global switch. A rule is a STANDING policy, which is what makes it worth
+    # asking after; an intercept edit that deletes the field by hand still gets the notice,
+    # because it happens past this point on a path that returns from four places, and an
+    # operator hand-editing that header is already looking straight at it.
+    #
+    # `AltSvc.strip_h3` and NOT `resp.headers`, discarding the bytes it builds. The parsed
+    # projection is a DIFFERENT VIEW of the same head: `parse_headers` keeps only the first line
+    # of an obs-folded field and drops the continuation, while `strip_header_lines` hands its
+    # block the JOINED value on purpose (see its comment — what a lenient recipient acts on, not
+    # what gori filed). Detecting on the projection therefore missed exactly what the strip
+    # removes: an origin sending `Alt-Svc: h2=":8443"` folded onto ` , h3=":443"` got stripped
+    # and reported with the switch ON, and passed in SILENCE with it off. Asking the strip's own
+    # function makes the two answers equal by construction rather than by an audit.
+    private def note_alt_svc_kept(head : Bytes, resp : Codec::RawResponse, host : String) : String?
+      # Same cheap gate the strip uses, and correct here despite the view difference: an
+      # obs-folded field still has its NAME on the first line, so the projection records the
+      # entry — only its value is short. The gate asks whether the field is present at all.
+      return nil unless resp.headers.has?(Gori::AltSvc::FIELD_NAME)
+      _, kept = Gori::AltSvc.strip_h3(head)
+      return nil if kept.empty?
+      note = Gori::AltSvc.kept_note(kept)
+      # Once per host per SESSION, not per connection: a browser opens several connections per
+      # origin and churns them, and this notice — unlike the strip's, which is opt-in — fires in
+      # the default configuration against origins that mostly advertise h3. See
+      # `Settings.first_alt_svc_h3_notice?`.
+      ::Log.info { "alt-svc #{host}: #{note}" } if Settings.first_alt_svc_h3_notice?(host)
+      note
     end
 
     # The advisory a RESPONSE record carries: what the body seam had to say, plus what the

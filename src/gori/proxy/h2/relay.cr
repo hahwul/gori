@@ -109,13 +109,28 @@ module Gori::Proxy::H2
     private def pump_plain(src : IO, dst : IO, conn_id : Int64, direction : String,
                            assembler : Assembler) : Nil
       rw = @rewriter
-      # The pipeline is also built with NO rewriter when the h3 `Alt-Svc` strip is on: that
-      # strip lives inside `HeadRewrite#finish` (it is the only point in the response path
-      # where the decoded fields exist and nothing has been written yet), so without this the
-      # switch would be silently h1-only wherever the relay was handed no rule engine. In the
-      # app that is never — `Session` always passes a live `Rules` — but "on both transports"
-      # must not be a claim that depends on an unrelated object being present.
-      heads = rw || Settings.strip_alt_svc? ? HeadRewrite.new(direction, rw, assembler, @host, @extractor) : nil
+      # The RESPONSE direction always gets the pipeline, rewriter or not. Everything gori has to
+      # say about `Alt-Svc` — the strip when the switch is on, the kept-notice when it is off
+      # (#835) — lives inside `HeadRewrite#finish`, the only point in the response path where
+      # the decoded fields exist and nothing has been written yet. Gating it on `@rewriter`
+      # would make "on both transports" a claim that depends on an unrelated object being
+      # present; gating it on `strip_alt_svc?` would read the switch ONCE per connection for a
+      # setting that is read live per response, so a switch thrown mid-connection would be
+      # honoured on h1 and silently ignored here.
+      #
+      # The REQUEST direction keeps its own two reasons, and `strip_alt_svc?` was never one of
+      # them: `Alt-Svc` is a response header. It needs the pipeline for a rule to run, and for
+      # `notice_unreachable` — the #536 warning that a session-binding extract descriptor targets
+      # a stream this relay cannot reach — which is why `@extractor` is asked here rather than
+      # being left to ride on an unrelated object being present.
+      #
+      # Costs the passthrough case nothing either way: the block is decoded exactly once (the
+      # assembler is handed `pre`), `head_text` is gated on having a consumer, and holding a
+      # header block until END_HEADERS delays the peer by zero (see `HeadRewrite`'s class
+      # comment).
+      heads = if rw || @extractor || direction == "in"
+                HeadRewrite.new(direction, rw, assembler, @host, @extractor)
+              end
       extract = direction == "in" ? extract_for(assembler) : nil
       begin
         loop do

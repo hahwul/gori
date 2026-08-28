@@ -362,7 +362,14 @@ module Gori::Proxy::H2
         fields = pruned
         alt_svc_stripped = true
       end
-      head = head_text(fields, first, request)
+      # `head_text` synthesizes the whole h1-equivalent head, and nothing reads it unless a rule
+      # seam, the intercept gate or `notice_unreachable` will: `Block#head` is the text a human
+      # edits. Gated because the response pipeline is now built even with no rewriter (see
+      # `Relay#pump_plain`), and a rules-less connection must not pay a synthesis per response
+      # for a value with no consumer.
+      head = if @rewriter || @deferrer || (request && @extractor)
+               head_text(fields, first, request)
+             end
       # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
       # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a session-binding
@@ -370,6 +377,12 @@ module Gori::Proxy::H2
       notice_unreachable(fields) if request && head
       rewritten = head ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
+      # The OFF half of the h3 `Alt-Svc` seam (#835), on the fields actually going out — see
+      # `note_alt_svc_kept`. Gated exactly as the strip is: a trailer block and a PUSH_PROMISE
+      # both arrive on this direction and neither is a head a client acts on an `Alt-Svc` in.
+      if !request && !Settings.strip_alt_svc? && message_head?(emit_fields, request)
+        note_alt_svc_kept(emit_fields, stream_id)
+      end
       # `alt_svc_stripped` forces the re-encode branch: the passthrough one forwards `snapshot`,
       # the frames exactly as they ARRIVED, which still carry the field this just removed.
       built = if rewritten.nil? && !alt_svc_stripped && !@engaged
@@ -458,8 +471,11 @@ module Gori::Proxy::H2
     end
 
     # The response fields with every h3-advertising `Alt-Svc` removed, or nil when there was
-    # nothing to remove — which is the common case and the one that has to stay free, so the
-    # switch is tested before the field walk and nil means "forward as you would have".
+    # nothing to remove — which is the common case and the one that has to stay free, so nil
+    # means "forward as you would have".
+    #
+    # The ON half only. The OFF half — the advertisement got through and the flow has to say so
+    # (#835) — is `note_alt_svc_kept`, which runs LATER, after the rules; see the comment there.
     #
     # THE COST IS THE LATCH, and it is the reason this is opt-in rather than a default. A
     # non-nil answer engages the re-encode (see the class comment): from this block on, every
@@ -500,6 +516,49 @@ module Gori::Proxy::H2
         "#{Gori::AltSvc.removal_note(removed)} This connection re-encodes its response heads " \
         "from here on, so the raw frame log holds gori's HPACK, not the origin's.")
       kept
+    end
+
+    # The advisory for the switch's OTHER position: this response advertised h3, gori did not
+    # remove it, and a client acting on it is about to leave for a transport gori cannot read
+    # (#835). The h2 half of `ClientConn#note_alt_svc_kept`, emitting the IDENTICAL sentence —
+    # an operator comparing an h1 flow with an h2 one is reading one fact, and two wordings
+    # read as two events, which is why `AltSvc` owns the words.
+    #
+    # NOTHING is returned and nothing is touched: `finish` still takes the byte-exact
+    # passthrough branch for these fields, the one-way latch stays open, and the origin's HPACK
+    # block reaches the client as it arrived (P7). Observing is free — the block was already
+    # decoded for the rules seam.
+    #
+    # Called with `emit_fields`, the fields the rules have finished with, for the reason the h1
+    # half runs after Match&Replace: a rule that removes `Alt-Svc` for one host is the documented
+    # per-host alternative to the global switch, and warning about a header that rule already
+    # dropped is a false alarm on the host the operator had handled. An intercept edit lands
+    # later still and is not reflected, the same as on h1.
+    #
+    # HPACK carries whole field values, so unlike h1 this can read the values directly: there is
+    # no obs-fold in h2 (RFC 9113 §8.2.1), and therefore no second view of the head to disagree
+    # with.
+    private def note_alt_svc_kept(fields : Array(HPACK::Field), stream_id : UInt32) : Nil
+      values = nil.as(Array(String)?)
+      fields.each do |f|
+        # Case-insensitive for the same reason the strip is: RFC 9113 §8.2.1 requires lowercase
+        # field names, but a peer's bytes are a peer's bytes and a non-conforming origin must
+        # not be able to opt itself out of being reported.
+        next unless f.name.compare(Gori::AltSvc::FIELD_NAME, case_insensitive: true) == 0
+        (values ||= [] of String) << f.value
+      end
+      return unless values
+      kept = Gori::AltSvc.h3_evidence_all(values)
+      return if kept.empty?
+      note = Gori::AltSvc.kept_note(kept)
+      # Once per host per SESSION, sharing the marker with the h1 half — this notice fires in
+      # the DEFAULT configuration against origins that mostly advertise h3, so the strip's
+      # per-connection latch beside it would be a log flood. `@host` is the CONNECT host, the
+      # same thing every other log line in this file names: a response block carries no
+      # `:authority` to read a coalesced stream's own host from, and gori's leaf carries a SAN
+      # of exactly the requested host, so a conformant client cannot coalesce onto one.
+      ::Log.info { "h2 #{@host}: #{note}" } if Settings.first_alt_svc_h3_notice?(@host)
+      @assembler.note_advisory(stream_id, note)
     end
 
     # A message head carries `:method` (request) / `:status` (response). Trailers carry

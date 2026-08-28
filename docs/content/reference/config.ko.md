@@ -105,6 +105,8 @@ gori는 HTTP/3을 가로채지 않습니다. QUIC은 UDP이고 gori의 리스너
 
 기본값이 꺼짐인 것은 의도한 것입니다. gori가 시키지도 않은 응답 편집을 하는 경우는, 편집하지 *않으면* 자기가 무엇을 캡처했는지에 대해 거짓말을 하게 되는 때뿐입니다. `Sec-WebSocket-Extensions` 제거가 바로 그 경우입니다 — `permessage-deflate`가 협상되면 저장된 모든 프레임이 페이로드인 척하는 deflate 스트림이 되어 버립니다. 반면 그대로 둔 `Alt-Svc`는 gori가 기록하는 어떤 것도 망가뜨리지 않고, 클라이언트가 떠날 수 있다는 뜻일 뿐입니다. 그것은 눈앞의 시험에 대한 판단이므로, 사람이 직접 올리는 스위치로 둡니다.
 
+**꺼 두면, 대신 그 사실을 알립니다.** h3를 광고하는 응답이 제거되지 않은 채 클라이언트에 도달하면, 이제 그 플로우에 증거와 설정을 함께 밝히는 안내가 남습니다 — *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy for a transport gori cannot see, and whatever it does there is missing from History rather than absent (settings network.strip_alt_svc is off)."* HTTP/1.1과 HTTP/2 양쪽에서, 제거 안내가 뜨던 바로 그 자리에 똑같이 뜹니다. 와이어 위의 바이트는 하나도 바뀌지 않습니다. 원 서버의 헤드는 그대로 클라이언트에 도달하고, 늘어나는 것은 플로우에 붙는 문장 하나뿐입니다. 호스트당 한 번씩 `gori.log`에도 한 줄이 남고, 패시브 프로브의 기존 `tech_http3` 핑거프린트가 여전히 호스트당 한 번 `Alt-Svc: <host> advertised HTTP/3` 이벤트를 올립니다(Probe 탭으로 바로 이동 가능). 즉 "어떤 호스트가 클라이언트를 데려가고 있나"라는 세션 단위 시야는 원래 있던 자리에 그대로 있습니다. 없던 것은 플로우 단위 기록이고, 이번에 채우는 것이 그것입니다 — 아무도 설명해 주지 않는 History의 구멍은 더 할 말이 없던 원 서버와 똑같이 읽히기 때문입니다.
+
 제거는 **필드 단위**이고, h3를 광고하는 필드에만 적용됩니다. `Alt-Svc: clear`는 절대 제거하지 않습니다. RFC 7838 §3에서 그것은 캐시된 대체 경로를 *잊으라는* 지시이며, 여기서 도움이 되는 유일한 표기입니다. 평범한 `h2=":8443"` 대체 경로도 제거하지 않습니다 — 그것은 또 다른 TCP 포트이고, 여전히 gori를 통해 터널링되기 때문입니다.
 
 제거는 Match & Replace보다 *먼저* 실행되므로, 헤더를 도로 넣는 응답 head 규칙이 이깁니다. 호스트 하나를 두고 운영자가 그렇게 말한 것이, 전체를 두고 올린 스위치보다 우선합니다.

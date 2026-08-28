@@ -46,6 +46,22 @@ private class ReAddRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# A response head rule that REMOVES `Alt-Svc` — the per-host alternative to the global switch,
+# and the reason the kept-notice is asked of the head that is actually sent.
+private class DropAltSvcRewriter < Gori::Proxy::HeadRewriter
+  def active? : Bool
+    true
+  end
+
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    String.new(head).gsub(/Alt-Svc:[^\r\n]*\r\n/, "").to_slice
+  end
+end
+
 # An origin that answers every connection with the given head lines plus `BODY`.
 private def start_origin(*extra : String) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
@@ -122,32 +138,79 @@ describe "proxy — the h3 Alt-Svc strip" do
     port = start_origin(%(Alt-Svc: h3=":443"; ma=86400))
     through_proxy(strip: false, origin_port: port) do |received, sink|
       received.should contain(%(Alt-Svc: h3=":443"; ma=86400))
+      # The head the CLIENT gets and the head gori STORED are both the origin's, byte for byte
+      # — the notice below is a sentence on the flow and never an edit (P7).
+      String.new(sink.responses.first.head.not_nil!).should contain(%(Alt-Svc: h3=":443"; ma=86400))
+    end
+  end
+
+  it "says so when the switch is off and the advertisement gets through (#835)" do
+    # The gap this closes: with the strip ON gori reported what it removed, and with it OFF —
+    # the one configuration where a client can actually leave for QUIC — it said nothing at all.
+    # A History that stops then reads exactly like a target with nothing more to say.
+    port = start_origin(%(Alt-Svc: h3=":443"; ma=86400))
+    through_proxy(strip: false, origin_port: port) do |_, sink|
+      advisory = sink.responses.first.advisory.to_s
+      advisory.should contain(%(h3=":443"; ma=86400))  # the evidence, named
+      advisory.should contain("network.strip_alt_svc") # and the setting to throw about it
+      advisory.should eq(Gori::AltSvc.kept_note([%(h3=":443"; ma=86400)]))
+    end
+  end
+
+  it "says nothing about an Alt-Svc that advertises no h3, switch off" do
+    # `clear` and a plain h2 alternative cost gori no visibility, so there is no blind spot to
+    # report. Same answer the strip gives them.
+    port = start_origin(%(Alt-Svc: h2=":8443"), "Alt-Svc: clear")
+    through_proxy(strip: false, origin_port: port) do |_, sink|
       sink.responses.first.advisory.should be_nil
     end
   end
 
-  it "removes it from the response the client receives" do
-    port = start_origin(%(Alt-Svc: h3=":443"; ma=86400), "X-Keep: 1")
-    through_proxy(strip: true, origin_port: port) do |received, _|
-      received.should_not contain("Alt-Svc")
-      received.should_not contain("h3")
-      # Every other byte of the head is the origin's, and the body is untouched.
-      received.should contain("X-Keep: 1")
-      received.should contain("BODY")
+  it "says nothing about a near-miss protocol-id, switch off" do
+    # `fooh3=` / `h32=` are not HTTP/3: the protocol-id is the WHOLE token before `=`. The
+    # notice reuses `AltSvc.h3_evidence`, so it inherits that — a second parse here is exactly
+    # the drift `Gori::AltSvc` exists to prevent.
+    port = start_origin(%(Alt-Svc: fooh3=":443"), %(Alt-Svc: h32=":443"))
+    through_proxy(strip: false, origin_port: port) do |_, sink|
+      sink.responses.first.advisory.should be_nil
     end
   end
 
-  it "stores the response it DELIVERED, and says on the flow what it removed" do
-    # The stored response is the message gori sent, exactly as it is for a Match&Replace head
-    # rewrite. The advisory is what keeps the origin's advertisement on the record — quoting
-    # the removed value, so the switch costs the operator the bypass and not the evidence.
-    port = start_origin(%(Alt-Svc: h3=":443"; ma=86400))
-    through_proxy(strip: true, origin_port: port) do |_, sink|
-      resp = sink.responses.first
-      String.new(resp.head).should_not contain("Alt-Svc")
-      advisory = resp.advisory.to_s
-      advisory.should contain(%(h3=":443"; ma=86400))
-      advisory.should contain("network.strip_alt_svc")
+  it "sees an obs-folded h3 advertisement the parsed projection drops, switch off" do
+    # THE gap that made `h3_evidence_all(resp.headers…)` wrong here. `parse_headers` keeps only
+    # the FIRST line of an obs-folded field, so the projection reports `h2=":8443"` and nothing
+    # else; `strip_header_lines` hands its block the JOINED value on purpose (what a lenient
+    # recipient acts on). Detecting on the projection meant this head was stripped and reported
+    # with the switch ON and passed in SILENCE with it off — the exact blind spot #835 closes.
+    port = start_origin(%(Alt-Svc: h2=":8443"\r\n , h3=":443"))
+    through_proxy(strip: false, origin_port: port) do |received, sink|
+      received.should contain(%(h3=":443")) # still byte-exact on the wire
+      sink.responses.first.advisory.to_s.should contain(%(h3=":443"))
+    end
+  end
+
+  it "says nothing when an operator's own rule already removed the advertisement" do
+    # A response rule removing `Alt-Svc` for one host is the documented per-host alternative to
+    # the global switch (P4). Warning "a client acting on it leaves the proxy" for a header that
+    # rule took off the wire is a false alarm on the one host the operator had handled — which
+    # is why the notice is asked of the head that is SENT, after Match&Replace.
+    port = start_origin(%(Alt-Svc: h3=":443"))
+    through_proxy(strip: false, origin_port: port, rewriter: DropAltSvcRewriter.new) do |received, sink|
+      received.should_not contain("Alt-Svc")
+      sink.responses.first.advisory.should be_nil
+    end
+  end
+
+  it "writes ONE notice for a response carrying several h3 fields, switch off" do
+    # One notice per FLOW, not per field. The operator is being told a transport may be
+    # leaving, once, not handed a list of header lines.
+    port = start_origin(%(Alt-Svc: h3=":443"), %(Alt-Svc: h3-29=":8443"))
+    through_proxy(strip: false, origin_port: port) do |_, sink|
+      advisory = sink.responses.first.advisory.to_s
+      advisory.lines.size.should eq(1)
+      advisory.should contain("kept 2 Alt-Svc HTTP/3 advertisements")
+      advisory.should contain(%(h3=":443"))
+      advisory.should contain(%(h3-29=":8443"))
     end
   end
 

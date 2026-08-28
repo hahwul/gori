@@ -343,6 +343,48 @@ describe Gori::Proxy::H2::HeadRewrite do
       end
     end
 
+    it "says so when the switch is off and the advertisement gets through (#835)" do
+      # The bytes still go out untouched and the latch stays open — this is a NOTICE, not an
+      # edit. What changes is that the flow now records the blind spot instead of leaving a gap
+      # in History that reads exactly like an origin with nothing more to say.
+      with_strip(%(h3=":443"; ma=86400), on: false) do |pipe, emitted, block, sink|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+        advisory = sink.responses.first.advisory.to_s
+        advisory.should contain(%(h3=":443"; ma=86400))
+        advisory.should contain("network.strip_alt_svc")
+      end
+    end
+
+    it "emits the IDENTICAL sentence h1 does" do
+      # Two wordings would read as two different events to an operator comparing an h1 flow
+      # with an h2 one, which is why `Gori::AltSvc` owns the words for both transports. The h1
+      # half asserts against the same constructor (spec/proxy/alt_svc_strip_spec.cr).
+      with_strip(%(h3=":443"), on: false) do |_, _, _, sink|
+        sink.responses.first.advisory.to_s.should eq(Gori::AltSvc.kept_note([%(h3=":443")]))
+      end
+    end
+
+    it "says nothing about clear / h2= / a near-miss protocol-id, switch off" do
+      {"clear", %(h2=":8443"), %(fooh3=":443"), %(h32=":443")}.each do |value|
+        with_strip(value, on: false) do |pipe, emitted, block, sink|
+          emitted.first.payload.should eq(block)
+          pipe.engaged?.should be_false
+          sink.responses.first.advisory.should be_nil
+        end
+      end
+    end
+
+    it "never notices a REQUEST head, switch off" do
+      # `Alt-Svc` is a response header; a request field by that name is the client's own bytes
+      # and none of gori's business — the same rule the strip follows.
+      with_strip(%(h3=":443"), on: false, direction: "out") do |pipe, emitted, block, sink|
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+        sink.requests.first?.try(&.advisory).should be_nil
+      end
+    end
+
     it "leaves an Alt-Svc that advertises no h3 alone, switch on, and stays unengaged" do
       # `clear` and a plain h2 alternative cost gori no visibility. Engaging the HPACK
       # re-encode for them would spend the connection's compression on nothing.
