@@ -228,13 +228,20 @@ module Gori
       # of them}. A rule shared by a Critical and a Low is a Critical in a dashboard's list,
       # which is the reading an operator triaging from that list needs.
       #
-      # ONE number per result, not a severity and a score raced against each other: an issue
-      # carrying a cvss contributes its real score, and one without contributes the FLOOR of
-      # its band (`security_severity`). Ranking the two separately and preferring "any score
-      # we found" is what breaks the rule this comment states — a rule holding a Critical with
-      # no cvss and a Low scored 3.0 would badge 3.0, i.e. report the Critical as a Low. With
-      # both folded to a number the Critical's 9.0 floor simply outranks it, and a 9.8 vector
-      # still outranks a bare Critical, which is the point of carrying the score at all.
+      # ONE number per result, not a severity and a score raced against each other: each
+      # result contributes `max(its cvss score, the floor of its severity band)`. Ranking the
+      # two separately and preferring "any score we found" is what breaks the rule this
+      # comment states — a rule holding a Critical with no cvss and a Low scored 3.0 would
+      # badge 3.0, i.e. report the Critical as a Low.
+      #
+      # The `max` per result, rather than the score alone, is the other half of the same rule.
+      # An issue may carry BOTH a cvss and a severity the operator raised above it — the issue
+      # form supports exactly that, and keeps the vector — so taking the score would badge a
+      # Critical triaged for business context at its 3.5 technical score, while the same
+      # result ships `level: error` and `rank: 100` beside it. GitHub reads this property for
+      # the alert's severity, so the two would contradict each other on one alert. A 9.8
+      # vector still outranks a bare Critical's 9.0 floor, which is the point of carrying the
+      # score at all.
       #
       # SUPPRESSED results are excluded from the live half, because GitHub applies this badge
       # PER ALERT, not just in the rules list: a Critical the operator triaged to false-positive
@@ -263,7 +270,8 @@ module Gori
           next unless rule_id
           sev = res.properties.try(&.get_string("gori/severity")).try { |l| Store::Severity.parse?(l) }
           next unless sev
-          num = res.properties.try(&.get_float("gori/cvssScore")) || Sarif.security_severity(sev).to_f
+          floor = Sarif.security_severity(sev).to_f
+          num = {res.properties.try(&.get_float("gori/cvssScore")) || floor, floor}.max
           live, any = out[rule_id]? || {nil.as(Float64?), nil.as(Float64?)}
           any = num if any.nil? || num > any.not_nil!
           unless res.suppressions.try { |sup| !sup.empty? }

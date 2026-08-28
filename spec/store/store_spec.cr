@@ -503,6 +503,43 @@ describe Gori::Store do
     end
   end
 
+  # Two operators filing the same finding must not leave two different byte strings in the
+  # column: every export prints it verbatim and anything downstream keyed on it would see two
+  # values for one vector. The store canonicalises at the WRITE, which is the one point no
+  # surface can go around — the three that validate one are three places to forget.
+  it "stores a cvss in its canonical form, whatever spelling it arrived in" do
+    with_store do |store|
+      canonical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      lower = store.insert_issue("a", Gori::Store::Severity::Critical, nil, nil,
+        cvss: "cvss:3.1/av:n/ac:l/pr:n/ui:n/s:u/c:h/i:h/a:h")
+      store.get_issue(lower).not_nil!.cvss.should eq(canonical)
+
+      # Metric order too — the same assessment written in a different order is one string.
+      shuffled = store.insert_issue("b", Gori::Store::Severity::Critical, nil, nil,
+        cvss: "CVSS:3.1/C:H/I:H/A:H/AV:N/AC:L/PR:N/UI:N/S:U")
+      store.get_issue(shuffled).not_nil!.cvss.should eq(canonical)
+
+      # Temporal metrics ride along — canonicalising must not quietly reduce a vector to base.
+      temporal = store.insert_issue("c", Gori::Store::Severity::Critical, nil, nil,
+        cvss: "#{canonical}/E:F/RL:O/RC:C")
+      store.get_issue(temporal).not_nil!.cvss.should eq("#{canonical}/E:F/RL:O/RC:C")
+
+      # A bare score is already canonical, and whitespace is trimmed rather than stored.
+      score = store.insert_issue("d", Gori::Store::Severity::High, nil, nil, cvss: "  8.8 ")
+      store.get_issue(score).not_nil!.cvss.should eq("8.8")
+
+      # A value that scores as nothing is kept VERBATIM: the surfaces refuse to write new
+      # ones, so anything unscorable arriving here is legacy or imported, and NULLing it
+      # would lose data this write was never asked to judge.
+      legacy = store.insert_issue("e", Gori::Store::Severity::Low, nil, nil, cvss: "CVSS:9.9/AV:N")
+      store.get_issue(legacy).not_nil!.cvss.should eq("CVSS:9.9/AV:N")
+
+      # …and the same rules on update.
+      store.update_issue(legacy, cvss: "cvss:3.1/av:n/ac:l/pr:n/ui:n/s:u/c:h/i:h/a:h").should be_true
+      store.get_issue(legacy).not_nil!.cvss.should eq(canonical)
+    end
+  end
+
   it "persists and updates cvss on issues" do
     with_store do |store|
       id = store.insert_issue("SQLi", Gori::Store::Severity::Critical, "acme.test", nil,
@@ -510,13 +547,15 @@ describe Gori::Store do
       issue = store.get_issue(id).not_nil!
       issue.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
       issue.cvss_score.should eq(9.8)
-      issue.cvss_vector.should_not be_nil
+      issue.cvss_vector?.should be_true
 
       # Update cvss to score string
       store.update_issue(id, cvss: "7.5").should be_true
       updated = store.get_issue(id).not_nil!
       updated.cvss.should eq("7.5")
       updated.cvss_score.should eq(7.5)
+
+      updated.cvss_vector?.should be_false # a bare score is not a vector
 
       # Clear cvss
       store.update_issue(id, clear_cvss: true).should be_true

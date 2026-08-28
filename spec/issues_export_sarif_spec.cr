@@ -567,6 +567,19 @@ describe Gori::Issues::Export do
       end
     end
 
+    # An issue can carry a cvss AND a severity the operator raised above it — the issue form
+    # supports exactly that and keeps the vector. Taking the score alone would badge the rule
+    # at the technical number while the result beside it ships level:error / rank 100, and
+    # GitHub reads THIS property for the alert's severity.
+    it "does not let a low cvss erase a severity the operator raised above it" do
+      with_store do |store|
+        store.insert_issue("business-critical bypass", Gori::Store::Severity::Critical, "a.test", nil, cvss: "3.5")
+        doc = JSON.parse(export(store))
+        doc["runs"][0]["tool"]["driver"]["rules"][0]["properties"]["security-severity"].as_s.should eq("9.0")
+        doc["runs"][0]["results"][0]["properties"]["gori/cvssScore"].as_f.should eq(3.5)
+      end
+    end
+
     # A log with no cvss anywhere must be byte-identical to what it was before the column
     # existed: the floors are the same numbers, printed the same way.
     it "keeps the band floors for a log with no cvss at all" do

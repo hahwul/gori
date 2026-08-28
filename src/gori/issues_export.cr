@@ -44,9 +44,8 @@ module Gori
         io << "- **Severity:** " << f.severity.label << "\n"
         if cvss = f.cvss
           score = f.cvss_score
-          vec = f.cvss_vector
-          io << "- **CVSS:** " << (score ? score.to_s : one_line(cvss))
-          io << " (" << one_line(cvss) << ")" if vec && score && cvss != score.to_s
+          io << "- **CVSS:** " << (score ? sprintf("%.1f", score) : one_line(cvss))
+          io << " (" << one_line(cvss) << ")" if f.cvss_vector? && score
           io << "\n"
         end
         io << "- **Status:** " << f.status.label << "\n"

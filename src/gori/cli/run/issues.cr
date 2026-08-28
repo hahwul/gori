@@ -271,7 +271,9 @@ module Gori
       private def self.issues_text(issues : Array(Store::Issue)) : String
         String.build do |io|
           issues.each do |f|
-            cvss_tag = f.cvss_score.try { |s| "  [CVSS #{s}]" } || ""
+            # sprintf, not Float64#to_s: `--cvss 8.85` is accepted, and the TUI, SARIF's
+            # security-severity and this listing must not print it three different ways.
+            cvss_tag = f.cvss_score.try { |sc| "  [CVSS #{sprintf("%.1f", sc)}]" } || ""
             io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Issues::Export.one_line(f.title)
             if h = f.host
               io << "  (" << Issues::Export.one_line(h) << ')'

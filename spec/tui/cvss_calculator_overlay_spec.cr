@@ -253,6 +253,139 @@ describe Gori::Tui::CvssCalculatorOverlay do
     calc.handle_click(area, box.x + 4, save_y).should eq(:commit)
   end
 
+  # Looking at a row is not an edit. Opening on a bare score and stepping onto the version row
+  # to see what is there used to replace the value with an all-least-severe vector.
+  it "does not destroy a value the rows do not describe when the version is cycled" do
+    h = calc_harness("8.8")
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    calc.current_severity.should eq(Gori::Store::Severity::High)
+
+    h.press(Termisu::Input::Key::Down) # version row
+    h.press(Termisu::Input::Key::Right)
+    calc.spec.label.should eq("4.0")
+    calc.value.should eq("8.8") # untouched
+    calc.current_score.should eq(8.8)
+
+    # …and the first metric edit still takes the vector back, which is the deliberate act.
+    h.press(Termisu::Input::Key::Down)
+    h.press(Termisu::Input::Key::Right)
+    calc.value.should start_with("CVSS:4.0/")
+  end
+
+  it "leaves a v2 vector alone across a version cycle" do
+    h = calc_harness("AV:N/AC:L/Au:N/C:C/I:C/A:C")
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    h.press(Termisu::Input::Key::Down)
+    h.press(Termisu::Input::Key::Right)
+    calc.value.should eq("AV:N/AC:L/Au:N/C:C/I:C/A:C")
+  end
+
+  # ← and → mean opposite things on every other cycler in gori; with two versions they happen
+  # to coincide, so nothing but this pins the direction before a third one is added.
+  it "steps the version backwards on ← and forwards on →" do
+    calc = CvssCalculatorOverlay.new
+    calc.cycle_version(1)
+    calc.version_idx.should eq(1)
+    calc.cycle_version(-1)
+    calc.version_idx.should eq(0)
+    calc.cycle_version(-1) # wraps
+    calc.version_idx.should eq(CvssCalculatorOverlay::VERSIONS.size - 1)
+  end
+
+  # `Rect#contains?` counts the borders and the blank interior lines as inside the card, so a
+  # click on chrome resolved to a real row index — up to and including the commit row, which
+  # made clicking empty padding SAVE.
+  it "ignores clicks on the card's own chrome" do
+    calc = CvssCalculatorOverlay.new
+    area = Rect.new(0, 0, 80, 24)
+    box = calc.overlay_box(area).not_nil!
+    calc.row_at(box, box.x + 4, box.y).should be_nil          # top border
+    calc.row_at(box, box.x + 4, box.y + 1).should be_nil      # blank above the rows
+    calc.row_at(box, box.x + 4, box.bottom - 1).should be_nil # bottom border
+    calc.row_at(box, box.x + 4, box.bottom - 2).should be_nil # blank below the rows
+    calc.handle_click(area, box.x + 4, box.bottom - 2).should eq(:stay)
+  end
+
+  it "does not commit from a click on the padding of a scrolled card" do
+    area = Rect.new(0, 0, 80, 16)
+    calc = CvssCalculatorOverlay.new
+    calc.cycle_version(1) # v4.0: fourteen rows, more than this card can draw
+    h = OverlayHarness.new(calc, area: area)
+    h.render
+    box = calc.overlay_box(area).not_nil!
+    calc.handle_click(area, box.x + 4, box.bottom - 2).should eq(:stay)
+    h.open?.should be_true
+  end
+
+  # `Frame.option_cycle` reserves four extra columns for the ` ‹/›` cue on the FOCUSED row and
+  # falls back to the lit value alone when the strip no longer fits. A hit-test that forgets
+  # the cue answers with pills the card never drew.
+  it "reports no option pill on a focused row too narrow to draw the strip" do
+    CvssCalculatorOverlay::VERSIONS.each do |version|
+      (40..80).each do |w|
+        area = Rect.new(0, 0, w, 30)
+        calc = CvssCalculatorOverlay.new
+        calc.cycle_version(1) if version.label == "4.0"
+        box = calc.overlay_box(area)
+        next unless box
+        av_row = box.y + 2 + CvssCalculatorOverlay::ROW_FIRST_M
+        calc.set_selected(CvssCalculatorOverlay::ROW_FIRST_M) # focused: the cue is drawn
+        before = calc.selections["AV"]
+        mb = OverlayHarness.new(calc, area: area).render
+        drew_strip = mb.row(av_row).includes?("physical")
+        calc.handle_click(area, box.x + 3 + calc.spec.indent + 1, av_row)
+        if drew_strip
+          calc.selections["AV"].should eq(0) # the first pill really is `network`
+        else
+          calc.selections["AV"].should eq(before) # nothing was drawn there to hit
+        end
+      end
+    end
+  end
+
+  it "picks the clicked version pill instead of stepping past it" do
+    calc = CvssCalculatorOverlay.new
+    area = Rect.new(0, 0, 80, 24)
+    box = calc.overlay_box(area).not_nil!
+    ver_row = box.y + 2 + CvssCalculatorOverlay::ROW_VERSION
+    x = box.x + 3 + calc.spec.indent
+    calc.set_selected(CvssCalculatorOverlay::ROW_VERSION)
+    # Clicking the pill already lit must be a no-op, not a step to the other one.
+    calc.handle_click(area, x + 1, ver_row).should eq(:stay)
+    calc.version_idx.should eq(0)
+    calc.handle_click(area, x + " 3.1 ".size + 1, ver_row).should eq(:stay)
+    calc.version_idx.should eq(1)
+  end
+
+  # A composition belongs to the row that was taking keys; left standing it keeps being
+  # spliced into what the vector row DISPLAYS while ←/→ edit metrics, so the card shows
+  # something other than what `value` commits.
+  it "drops an in-flight composition when the row cursor leaves the vector field" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    calc.set_preedit("가")
+    calc.text_fields.first.preedit.should eq("가")
+    h.press(Termisu::Input::Key::Down)
+    calc.text_fields.first.preedit.should eq("")
+  end
+
+  # A v4.0 base vector is wider than the field it is generated into, so the row needs the
+  # TextField's own horizontal window — `draw_field` has none, and past its edge it draws
+  # neither the tail nor the caret.
+  it "windows the vector field so the caret stays on screen for a long vector" do
+    area = Rect.new(0, 0, 80, 30)
+    calc = CvssCalculatorOverlay.new
+    calc.cycle_version(1)
+    calc.value.size.should be > 60
+    h = OverlayHarness.new(calc, area: area)
+    box = calc.overlay_box(area).not_nil!
+    mb = h.render
+    row = mb.row(box.y + 2)
+    row.should contain("SA:N") # the TAIL, which an unwindowed field clipped away
+    # …and the window scrolled rather than overflowing: nothing past the card's right border.
+    row[box.right..].strip.should be_empty
+  end
+
   it "cancels on a click outside the card" do
     calc = CvssCalculatorOverlay.new
     area = Rect.new(0, 0, 80, 24)

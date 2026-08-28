@@ -813,19 +813,34 @@ module Gori::Tui
         # punycode/IDNA, so `日本語.test` (8 chars / 11 columns) would start 3 columns too far
         # right — over the card's border — and hand the title 3 columns it doesn't have,
         # sliding it underneath the host so the two garble each other.
+        #
+        # The host is CAPPED at the columns left of the title, not just measured. `Screen#text`
+        # clips to the SCREEN, not to this pane, so a host longer than the row simply started
+        # left of `title_x` and painted straight over the status tag and the severity badge —
+        # at 40 columns this row's `▎CRIT open` was gone entirely. The title is drawn last with
+        # its width floored at 0, so it never repaints those cells and the damage stays. Cap,
+        # then ellipsize: an ellipsized host still tells you which host, a missing badge does
+        # not tell you anything. (Pre-existing; the score below inherited the same trap.)
         right = rect.right - 1
         if (host = f.host) && !host.empty?
-          hw = Screen.display_width(host)
-          screen.text(rect.right - hw - 1, y, host, Theme.muted, bg, width: hw)
-          right = rect.right - hw - 2
+          hw = {Screen.display_width(host), {rect.right - 1 - title_x, 0}.max}.min
+          if hw > 0
+            screen.text(rect.right - hw - 1, y, ellipsize(host, hw), Theme.muted, bg, width: hw)
+            right = rect.right - hw - 2
+          end
         end
         # The score reads as a severity, so it wears the severity's colour — the SEV badge on
         # the left and this number are the same claim, and a fixed accent made them look like
         # two unrelated facts.
-        if score = f.cvss_score
-          sc_str = sprintf("%.1f", score)
-          sc_w = sc_str.size
-          screen.text(right - sc_w, y, sc_str, severity_color(f.severity), bg, width: sc_w)
+        #
+        # Gated on clearing `title_x`, because `Screen#text` clips to the SCREEN, not to this
+        # pane: on a narrow list a long host walks `right` left past the title column, and an
+        # ungated draw then paints the score ON the status tag and the severity badge. The
+        # title is drawn afterwards with `tw` floored at 0, so it never repaints those cells
+        # and the damage stays. Dropping the score is the right loss — the SEV badge already
+        # carries the same claim.
+        if (score = f.cvss_score) && right - (sc_w = sprintf("%.1f", score).size) >= title_x
+          screen.text(right - sc_w, y, sprintf("%.1f", score), severity_color(f.severity), bg, width: sc_w)
           right = right - sc_w - 2
         end
         title_fg = selected || marked ? Theme.text_bright : Theme.text

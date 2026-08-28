@@ -285,9 +285,17 @@ module Gori::Tui
       # the value may use — every `text` here is width-clipped to that, because Screen#text
       # clips to the SCREEN and an unbounded draw would land on the card's own border.
       cy = box.y + CVSS_ROW
-      screen.text(box.x + 2, cy, CVSS_PREFIX, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
+      # EVERY draw on this row is width-clipped, the label and the affordance included. The
+      # card is admitted down to w = 12 while `CVSS_PREFIX` alone is 13 columns, so an
+      # unbounded label runs through the right border — and `Screen#text` clips to the SCREEN,
+      # so it lands outside the card entirely rather than being cut at it.
+      screen.text(box.x + 2, cy, CVSS_PREFIX, on_cvss ? Theme.accent : Theme.muted, Theme.panel,
+        width: {box.right - 1 - (box.x + 2), 0}.max)
       aff_x = box.right - Screen.draw_width(CVSS_HINT) - 2
-      screen.text(aff_x, cy, CVSS_HINT, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
+      if aff_x > box.x + 2
+        screen.text(aff_x, cy, CVSS_HINT, on_cvss ? Theme.accent : Theme.muted, Theme.panel,
+          width: {box.right - 1 - aff_x, 0}.max)
+      end
 
       vx = cvss_base(box)
       vw = {aff_x - vx - 1, 0}.max

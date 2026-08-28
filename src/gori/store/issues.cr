@@ -15,6 +15,7 @@ module Gori
     def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?, cvss : String? = nil) : Int64
       ts = now_us
       issue_id = 0_i64
+      cvss = canonical_cvss(cvss)
       ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes, cvss) VALUES (?,?,?,?,?,?,'',?)",
           ts, ts, title, severity.value, host, flow_id, cvss)
@@ -76,8 +77,8 @@ module Gori
       end
       if clear_cvss
         sets << "cvss = NULL"
-      elsif c = cvss
-        sets << "cvss = ?"; set_args << (c.empty? ? nil : c)
+      elsif cv = canonical_cvss(cvss)
+        sets << "cvss = ?"; set_args << cv
       end
       return true if sets.empty?
       sets << "updated_at = ?"; set_args << now_us
@@ -115,6 +116,21 @@ module Gori
     private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
       c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue' AND owner_id = ?", id)
       c.exec("DELETE FROM issues WHERE id = ?", id)
+    end
+
+    # The stored form of an operator-supplied CVSS: the standard's own canonical spelling
+    # where the value scores, the string as given where it does not.
+    #
+    # It normalises HERE, at the write, rather than in each of the three surfaces that
+    # validate one — that is three places to forget, and the column is read back by the
+    # Issues list, `cvss:` queries and every export, all of which print or key on the exact
+    # bytes. A value that scores as nothing is kept verbatim on purpose: the surfaces already
+    # refuse those at their boundary, so anything unscorable reaching here is legacy or
+    # imported, and silently NULLing it would lose data this method was never asked to judge.
+    private def canonical_cvss(cvss : String?) : String?
+      c = cvss.try(&.strip).presence
+      return nil unless c
+      Cvss.canonical(c) || c
     end
 
     def issues : Array(Issue)

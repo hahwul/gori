@@ -72,6 +72,32 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  # `Screen#text` clips to the SCREEN, not to this pane. On a narrow list a long host walks the
+  # right edge left past the title column, and an ungated score paints ON the status tag and
+  # the severity badge — the title is drawn afterwards with its width floored at 0, so it never
+  # repaints those cells and the damage stays.
+  it "drops the list score rather than painting it over the badges on a narrow pane" do
+    tmp_store do |store|
+      store.insert_issue("SQLi", Gori::Store::Severity::Critical,
+        "a-very-long-hostname-that-eats-the-row.example.test", nil, cvss: "9.8")
+      view = IssuesView.new
+      view.reload(store)
+
+      backend = MemoryBackend.new(40, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 40, 10))
+      narrow = (0...10).map { |y| backend.row(y) }
+      # The badges survive — pre-existing, the host had the same unbounded draw and at this
+      # width it had eaten `▎CRIT open` outright.
+      narrow.any?(&.includes?("CRIT open")).should be_true
+      narrow.any?(&.includes?("9.8")).should be_false
+
+      # …and it is still drawn when there is room for it.
+      wide = MemoryBackend.new(100, 10)
+      view.render(Screen.new(wide), Rect.new(0, 0, 100, 10))
+      (0...10).map { |y| wide.row(y) }.any?(&.includes?("9.8")).should be_true
+    end
+  end
+
   # The cvss chip is the one chip whose width is unbounded (a v4.0 vector runs 60-odd
   # columns), and Frame.tag_chip clips to the SCREEN, not to the pane — so a chip that no
   # longer fits must drop its vector half rather than paint over the panel border.

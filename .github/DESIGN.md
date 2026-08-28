@@ -1833,9 +1833,18 @@ because a marker moves no `data_version`.
 
 Refines: [P4](#p4), [P7](#p7). #575.
 
-An issue finding can record an optional CVSS vector string or numeric score. Wire bytes and canonical
-representations remain authoritative: storing the exact string the operator typed (either a full
-`CVSS:3.1/...` vector or a bare score `"9.8"`) preserves provenance (P7) without normalization loss.
+An issue finding can record an optional CVSS vector string or numeric score. This is NOT captured
+wire, so P7's "keep the bytes as they arrived" does not apply to it: an operator's typing is the
+input, and the standard already defines the canonical form of the thing they typed. `Store#insert_issue`
+/ `#update_issues` normalise on the way in — the shard's canonical vector (metrics in spec order,
+uppercase, every temporal/threat/environmental metric preserved) or a bare score unchanged — so two
+operators filing the same finding, one pasting a scanner's lowercase form, leave ONE string in the
+column. Every export prints it verbatim and anything downstream keys on it, so two spellings of one
+vector is two values. Normalising at the write rather than in each surface that validates one is the
+usual chokepoint argument: three validating surfaces are three places to forget.
+A value that scores as nothing is kept exactly as given — the surfaces refuse to write new ones, so
+anything unscorable reaching the store is legacy or imported, and NULLing it would lose data the write
+was never asked to judge.
 Verbatim is not the same as unchecked — every write path (TUI, `--cvss`, MCP `cvss`) REFUSES a string
 that scores as nothing, because the column is read back through a parser and a value only its own raw
 bytes can see is a field written on a command that reported success.

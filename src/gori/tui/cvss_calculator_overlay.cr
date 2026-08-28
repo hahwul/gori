@@ -300,10 +300,24 @@ module Gori::Tui
     # ←/→ on the version row. The field is rewritten from the version being switched TO, out
     # of its own remembered selections — the two versions never share a metric map, so this
     # neither loses the assessment you leave nor invents the one you arrive at.
+    #
+    # …but ONLY when the field is currently what the rows spell. A field holding a bare score
+    # (`8.8`) or a vector this card cannot build (v2) is already not tracked by the rows —
+    # the class note says so — and rewriting it here meant that opening Set CVSS on an issue
+    # scored 8.8, pressing ↓ once and ← to SEE what versions exist silently replaced the value
+    # with an all-least-severe vector and the severity with Info. Looking at a row is not an
+    # edit. Touching a metric still takes the vector back, which is the deliberate act.
     def cycle_version(d : Int32) : Nil
+      rebuild = field_matches_rows?
       @version_idx = (@version_idx + d) % VERSIONS.size
       clamp_sel
-      sync_to_field
+      sync_to_field if rebuild
+    end
+
+    # Whether the field currently holds exactly what the metric rows spell — i.e. whether the
+    # builder, rather than something pasted or typed, is what put the value there.
+    private def field_matches_rows? : Bool
+      value == vector_string
     end
 
     # ←/→ (and 1..n) on a metric row. Writes the field, so the two halves never disagree.
@@ -336,7 +350,14 @@ module Gori::Tui
         @vector.handle_edit_key(ev)
         sync_from_field
       elsif on_version_row?
-        cycle_version(1) if key.left? || key.right? || key.space?
+        # Direction matters even though two versions make ± identical today: the metric rows
+        # one line down step backwards on ←, and a third entry in VERSIONS would silently put
+        # this row out of step with them and with its own hint.
+        if key.left?
+          cycle_version(-1)
+        elsif key.right? || key.space?
+          cycle_version(1)
+        end
       elsif !on_save_row?
         metric_key(ev)
       end
@@ -353,6 +374,12 @@ module Gori::Tui
       else
         return false
       end
+      # A composition in flight belongs to the row that was taking keys. Left standing it
+      # keeps being spliced into what the vector row DISPLAYS (`draw_field`/`TextField#render`
+      # both do) while ←/→ edit metric rows — and `value`, which excludes preedit, then
+      # commits something other than what the card shows. IssueForm#move_row clears its own
+      # for the same reason.
+      @vector.set_preedit("") unless on_vector_row?
       true
     end
 
@@ -382,11 +409,22 @@ module Gori::Tui
       box = overlay_box(area)
       return :cancel if box.nil? || !box.contains?(mx, my)
       if row = row_at(box, mx, my)
+        # Captured BEFORE the row moves: the strip this click is inverting was drawn with the
+        # focus state of the LAST frame, and `Frame.option_cycle` only draws the `‹/›` cue —
+        # and only reserves room for it — on the focused row.
+        was_focused = row == @sel
         set_selected(row)
         return save_outcome if on_save_row?
-        cycle_version(1) if on_version_row?
+        if on_version_row?
+          # Pick the pill that was clicked, not "the next one": clicking the label already
+          # under the cursor must be a no-op, and it was switching away from it.
+          if idx = option_at(box, VERSIONS.map(&.label), was_focused, mx)
+            cycle_version(idx - @version_idx)
+          end
+          return :stay
+        end
         if m = metric_at(row)
-          if idx = option_at(box, m, mx)
+          if idx = option_at(box, m.names, was_focused, mx)
             pick(idx)
             return :stay
           end
@@ -399,21 +437,36 @@ module Gori::Tui
     # Inverts the window `render` last drew — `@scroll`, NOT a freshly computed offset. A
     # hit-test that re-derives the scroll can move it, and then the click lands on a row the
     # operator was never looking at (the pairing `Viewport`'s own note names).
+    #
+    # The BAND check is the other half, and `Rect#contains?` does not supply it: it counts the
+    # borders and the blank interior lines as inside, so without this a click on the card's
+    # bottom padding resolved to `@scroll + capacity` — one past the last row drawn — and on a
+    # clamped card that is a real index, up to and including the commit row. Clicking empty
+    # chrome would then SAVE. A click on the top border did the mirror of it, selecting
+    # `@scroll - 2`. Only the rows the render actually painted are hits.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = @scroll + (my - (box.y + 2))
+      first = box.y + 2
+      return nil unless first <= my < first + list_capacity(box)
+      i = @scroll + (my - first)
       (0 <= i < row_count) ? i : nil
     end
 
-    # Which option pill on `m`'s row column `mx` landed in. Measured off the SAME `" name "`
-    # cells `Frame.option_cycle` draws, walked in the same order — the standing hazard this
-    # repo names for every clickable row is a second copy of the geometry that drifts from
-    # the one the card actually drew. nil when the strip did not fit (the narrow-card
-    # fallback draws the lit value alone, which has nothing to hit).
-    private def option_at(box : Rect, m : Metric, mx : Int32) : Int32?
+    # Which option pill on a row column `mx` landed in. Measured off the SAME `" name "` cells
+    # `Frame.option_cycle` draws, walked in the same order — the standing hazard this repo
+    # names for every clickable row is a second copy of the geometry that drifts from the one
+    # the card actually drew. nil when the strip did not fit: the narrow-card fallback draws
+    # the lit value alone, which has nothing to hit.
+    #
+    # `focused` is load-bearing and was the drift: the fit test in `Frame.option_cycle` adds
+    # the four columns of the ` ‹/›` cue on the focused row, so there is a band of card widths
+    # where the strip is NOT drawn and this method still answered with pill indices. A click
+    # on the row then changed the operator's assessment to whatever the phantom geometry said
+    # was under the pointer, with nothing on screen to explain it.
+    private def option_at(box : Rect, names : Array(String), focused : Bool, mx : Int32) : Int32?
       x = value_x(box)
-      names = m.names
-      return nil if x + names.sum { |n| Screen.draw_width(n) + 2 } > box.right - 2
+      cue_w = focused ? Screen.draw_width(" ‹/›") : 0
+      return nil if x + names.sum { |n| Screen.draw_width(n) + 2 } + cue_w > box.right - 2
       names.each_with_index do |name, i|
         w = Screen.draw_width(name) + 2
         return i if mx >= x && mx < x + w
@@ -487,7 +540,16 @@ module Gori::Tui
 
       case
       when i == ROW_VECTOR
-        draw_field(screen, box, py, bg, invalid? ? Theme.red : fg, sel, "vector:", @vector)
+        # `TextField#render`, NOT the base class's `draw_field`: a v4.0 base vector is 63
+        # columns against the ~59 this field gets on an 80-column terminal, and `draw_field`
+        # has no horizontal window — it clips at the width and then declines to draw the block
+        # caret or sync the terminal cursor at all past the edge, so an operator editing the
+        # tail of the vector the card itself just generated is typing blind. `render` scrolls
+        # with the caret (and remembers its own geometry for `click_text_field`).
+        screen.text(x, py, "vector:", Theme.muted, bg)
+        vx = x + "vector:".size + 1
+        @vector.render(screen, vx, py, {box.right - 2 - vx, 1}.max, sel,
+          invalid? ? Theme.red : fg, bg)
       when i == ROW_VERSION
         Frame.option_cycle(screen, x, py, box.right - 2, bg, "version:",
           VERSIONS.map(&.label), @version_idx, sel, value_x: value_x(box))
