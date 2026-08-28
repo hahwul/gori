@@ -53,6 +53,7 @@ require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
 require "./issue_form"
+require "./cvss_calculator_overlay"
 require "./more_menu"
 require "./copy_picker"
 require "./send_picker"
@@ -1552,6 +1553,16 @@ module Gori::Tui
     # touches the Store), so the same card serves create, create-and-link, and re-title.
     def open_issue_form(form : IssueForm) : Nil
       form.on_commit = -> { create_issue_from_form(form) }
+      form.on_open_calc = -> {
+        calc = CvssCalculatorOverlay.new(form.cvss)
+        calc.on_apply = ->(vec : String) {
+          form.set_cvss_value(vec)
+        }
+        calc.on_close = -> {
+          open_overlay(form)
+        }
+        open_overlay(calc)
+      }
       open_overlay(form)
     end
 
@@ -1907,20 +1918,22 @@ module Gori::Tui
     private def create_issue_from_form(form : IssueForm) : Bool
       title = form.issue_title.strip
       title = "untitled issue" if title.empty?
+      cvss_raw = form.cvss.strip
+      cvss_val = cvss_raw.presence
       if id = form.edit_id
-        # editing an existing issue's title + severity (from its detail view)
+        # editing an existing issue's title + severity + cvss (from its detail view)
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issue on its OLD
         # title/severity, and `resync` re-reads exactly that — so "issue updated" was a
         # phantom, and returning true dropped the form with the retyped title inside it.
         # FALSE keeps the card up, which is the only place that text still exists.
-        unless @session.store.update_issue(id, title: title, severity: form.severity)
+        unless @session.store.update_issue(id, title: title, severity: form.severity, cvss: cvss_val, clear_cvss: cvss_val.nil?)
           @toast = "issue NOT updated — project busy; the form is still here, ↵ to retry"
           return false
         end
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
-        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
+        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id, cvss: cvss_val)
         # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
         # in Crystal: the same trap `Probe::Triage.promote` and `sequencer_promote` both name.
         # Everything below takes `new_id` as an owner id, so swallowing it filed entity_links

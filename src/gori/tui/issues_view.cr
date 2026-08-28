@@ -25,7 +25,7 @@ module Gori::Tui
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = %w[severity: status: host: title:]
+    QUERY_FIELDS = %w[severity: status: host: title: cvss:]
 
     def initialize
       @all = [] of Store::Issue    # the raw store list (severity-desc)
@@ -819,6 +819,12 @@ module Gori::Tui
           screen.text(rect.right - hw - 1, y, host, Theme.muted, bg, width: hw)
           right = rect.right - hw - 2
         end
+        if score = f.cvss_score
+          sc_str = sprintf("%.1f", score)
+          sc_w = sc_str.size
+          screen.text(right - sc_w, y, sc_str, Theme.accent, bg, width: sc_w)
+          right = right - sc_w - 2
+        end
         title_fg = selected || marked ? Theme.text_bright : Theme.text
         tw = {right - title_x, 0}.max
         screen.text(title_x, y, ellipsize(f.title, tw), title_fg, bg, width: tw)
@@ -879,7 +885,16 @@ module Gori::Tui
       lines = [] of {Color, String}
       lines << {Theme.text_bright, "#{severity_badge(f.severity)}  #{f.title}"}
       host = f.host.try(&.presence) || "—"
-      lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}"}
+      cvss_part = if cvss = f.cvss
+                    score = f.cvss_score
+                    score ? "  ·  CVSS #{score}" : "  ·  #{cvss}"
+                  else
+                    ""
+                  end
+      lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}#{cvss_part}"}
+      if cvss = f.cvss
+        lines << {Theme.muted, "cvss      #{cvss}"}
+      end
       if fid = f.flow_id
         lines << {Theme.muted, "evidence  flow ##{fid}"}
       else
@@ -953,11 +968,19 @@ module Gori::Tui
       # y1 — chips: a filled severity chip + a status chip.
       cx = rect.x + 1
       cx = Frame.tag_chip(screen, cx, rect.y + 1, " #{severity_badge(issue.severity)} ", severity_color(issue.severity))
-      Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      cx = Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      if cvss = issue.cvss
+        score = issue.cvss_score
+        cvss_chip = score ? " CVSS #{score} " : " #{cvss} "
+        Frame.tag_chip(screen, cx + 1, rect.y + 1, cvss_chip, Theme.accent)
+      end
 
       # y2 — timestamps.
       meta = "created #{fmt_ts(issue.created_at)}"
       meta += " · edited #{fmt_ts(issue.updated_at)}" if issue.updated_at > issue.created_at
+      if cvss = issue.cvss
+        meta += " · #{cvss}"
+      end
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
       # y3 — primary linked-flow evidence.

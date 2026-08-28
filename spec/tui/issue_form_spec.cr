@@ -77,18 +77,22 @@ describe Gori::Tui::IssueForm do
     h = OverlayHarness.new(IssueForm.new("keep"))
     form = h.overlay.as(IssueForm)
     h.press(Termisu::Input::Key::Tab)
+    form.sel.should eq(IssueForm::ROW_CVSS)
+    h.press(Termisu::Input::Key::Tab)
     form.sel.should eq(IssueForm::ROW_SEV)
+    h.press(Termisu::Input::Key::BackTab)
+    form.sel.should eq(IssueForm::ROW_CVSS)
     h.press(Termisu::Input::Key::BackTab)
     form.sel.should eq(IssueForm::ROW_TITLE)
     form.severity.should eq(Gori::Store::Severity::Medium) # ⇥ alone changes nothing now
     form.issue_title.should eq("keep")
   end
 
-  # Two rows, so the cursor wraps: ⇥ off the severity row lands back on the title rather than
-  # sticking at the end of a form this small.
   it "wraps the row cursor and also moves it with ↑/↓" do
     h = OverlayHarness.new(IssueForm.new)
     form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Down)
+    form.sel.should eq(IssueForm::ROW_CVSS)
     h.press(Termisu::Input::Key::Down)
     form.sel.should eq(IssueForm::ROW_SEV)
     h.press(Termisu::Input::Key::Tab) # wraps
@@ -100,7 +104,7 @@ describe Gori::Tui::IssueForm do
   it "steps severity with ←/→ once the row cursor is on it" do
     h = OverlayHarness.new(IssueForm.new("keep"))
     form = h.overlay.as(IssueForm)
-    h.press(Termisu::Input::Key::Tab)
+    2.times { h.press(Termisu::Input::Key::Tab) }
     h.press(Termisu::Input::Key::Right)
     form.severity.should eq(Gori::Store::Severity::High)
     h.press(Termisu::Input::Key::Left)
@@ -114,7 +118,7 @@ describe Gori::Tui::IssueForm do
   it "clamps the severity step at both ends" do
     h = OverlayHarness.new(IssueForm.new)
     form = h.overlay.as(IssueForm)
-    h.press(Termisu::Input::Key::Tab)
+    2.times { h.press(Termisu::Input::Key::Tab) }
     5.times { h.press(Termisu::Input::Key::Right) }
     form.severity.should eq(Gori::Store::Severity::Critical)
     9.times { h.press(Termisu::Input::Key::Left) }
@@ -126,7 +130,7 @@ describe Gori::Tui::IssueForm do
   it "pulls the row cursor back to the title when a character is typed on the severity row" do
     h = OverlayHarness.new(IssueForm.new)
     form = h.overlay.as(IssueForm)
-    h.press(Termisu::Input::Key::Tab)
+    2.times { h.press(Termisu::Input::Key::Tab) }
     h.type("hi")
     form.issue_title.should eq("hi")
     form.sel.should eq(IssueForm::ROW_TITLE)
@@ -139,7 +143,27 @@ describe Gori::Tui::IssueForm do
     h = OverlayHarness.new(IssueForm.new)
     h.overlay.hint.should contain("←/→ caret")
     h.press(Termisu::Input::Key::Tab)
+    h.overlay.hint.should contain("type cvss")
+    h.press(Termisu::Input::Key::Tab)
     h.overlay.hint.should contain("←/→ severity")
+  end
+
+  it "types into the CVSS field and auto-calculates severity from score or vector" do
+    h = OverlayHarness.new(IssueForm.new)
+    form = h.overlay.as(IssueForm)
+    h.press(Termisu::Input::Key::Tab) # focus CVSS
+    h.type("9.8")
+    form.cvss.should eq("9.8")
+    form.severity.should eq(Gori::Store::Severity::Critical)
+
+    3.times { h.press(Termisu::Input::Key::Backspace) }
+    h.type("3.5")
+    form.cvss.should eq("3.5")
+    form.severity.should eq(Gori::Store::Severity::Low)
+
+    3.times { h.press(Termisu::Input::Key::Backspace) }
+    h.type("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    form.severity.should eq(Gori::Store::Severity::Critical)
   end
 
   it "commits on ↵ and cancels on esc" do
@@ -180,8 +204,8 @@ describe Gori::Tui::IssueForm do
   it "swallows a click on the card's inert rows rather than leaking it underneath" do
     h = OverlayHarness.new(IssueForm.new)
     box = h.box.not_nil!
-    h.overlay.handle_click(h.area, box.x + 2, box.y + 2).should eq(:stay) # blank row under the title
-    h.click_in_box(2, 2).should eq(:open)
+    h.overlay.handle_click(h.area, box.x + 2, box.y + 3).should eq(:stay) # blank row between cvss and severity
+    h.click_in_box(2, 3).should eq(:open)
   end
 
   # The card draws `title › <text>` on its second row and nothing inverted that column, so
@@ -203,6 +227,13 @@ describe Gori::Tui::IssueForm do
     h.overlay.as(IssueForm).issue_title.should eq("ab!")
   end
 
+  it "places the caret on the cvss row and focuses it when clicked" do
+    h = OverlayHarness.new(IssueForm.new(cvss: "9.8"))
+    form = h.overlay.as(IssueForm)
+    h.click_in_box(10, IssueForm::CVSS_ROW)
+    form.sel.should eq(IssueForm::ROW_CVSS)
+  end
+
   # The severity row draws `severity ‹ MEDIUM ›  (←/→ to change)`. The chevrons and the hint
   # both promise a step; before this the row was drawn and dead.
   it "steps severity from the row's own chevrons" do
@@ -220,7 +251,7 @@ describe Gori::Tui::IssueForm do
   it "returns the row cursor to the title when the title row is clicked" do
     h = OverlayHarness.new(IssueForm.new("abcdef"))
     form = h.overlay.as(IssueForm)
-    h.press(Termisu::Input::Key::Tab)
+    2.times { h.press(Termisu::Input::Key::Tab) }
     h.click_in_box(13, IssueForm::TITLE_ROW)
     form.sel.should eq(IssueForm::ROW_TITLE)
     h.press(Termisu::Input::Key::Left)
@@ -274,5 +305,53 @@ describe Gori::Tui::IssueForm do
     ref = {Gori::Store::LinkRefKind::Repeater, 9_i64}
     IssueForm.new(link_ref: ref).link_ref.should eq(ref)
     IssueForm.new.link_ref.should be_nil # a standalone create never inherits one
+  end
+
+  it "routes preedit according to the focused row" do
+    form = IssueForm.new
+    form.set_preedit("가")
+    form.preedit.should eq("가")
+    form.cvss_preedit.should eq("")
+
+    form.move_row(1) # focus ROW_CVSS
+    form.sel.should eq(IssueForm::ROW_CVSS)
+    form.set_preedit("9")
+    form.cvss_preedit.should eq("9")
+    form.preedit.should eq("")
+  end
+
+  it "triggers on_open_calc via ^C or clicking [ ⚡ Calc ]" do
+    form = IssueForm.new
+    calc_opened = false
+    form.on_open_calc = -> { calc_opened = true }
+
+    # On ROW_CVSS, ^C triggers calculator
+    form.move_row(1) # focus ROW_CVSS
+    h = OverlayHarness.new(form)
+    h.press(Termisu::Input::Key::LowerC, ctrl: true)
+    calc_opened.should be_true
+
+    # Click [ ⚡ Calc ] button
+    calc_opened = false
+    area = Rect.new(0, 0, 80, 24)
+    box = form.overlay_box(area).not_nil!
+    btn_w = Screen.draw_width(IssueForm::CVSS_CALC_BTN)
+    btn_x = box.right - btn_w - 2
+    form.handle_click(area, btn_x + 1, box.y + IssueForm::CVSS_ROW).should eq(:stay)
+    calc_opened.should be_true
+  end
+
+  it "updates cvss and severity via set_cvss_value" do
+    form = IssueForm.new
+    form.set_cvss_value("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    form.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    form.severity.should eq(Gori::Store::Severity::Critical)
+  end
+
+  it "renders optional label and calc button" do
+    h = OverlayHarness.new(IssueForm.new, area: Rect.new(0, 0, 80, 24))
+    h.render
+    h.rendered?("cvss (opt)").should be_true
+    h.rendered?(IssueForm::CVSS_CALC_BTN).should be_true
   end
 end

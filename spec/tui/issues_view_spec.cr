@@ -50,6 +50,26 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  it "renders CVSS score in list row and CVSS chip in detail" do
+    tmp_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
+        cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+
+      view = IssuesView.new
+      view.reload(store)
+      backend = MemoryBackend.new(80, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
+
+      backend.contains?("9.8").should be_true
+      backend.contains?("acme.test").should be_true
+
+      view.open_detail(store).should be_true
+      detail_backend = MemoryBackend.new(80, 16)
+      view.render(Screen.new(detail_backend), Rect.new(0, 0, 80, 16))
+      detail_backend.contains?("CVSS 9.8").should be_true
+    end
+  end
+
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
     tmp_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)

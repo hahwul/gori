@@ -148,7 +148,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Stays in the shell: it opens the issue-form OVERLAY (shell-owned).
   def issue_edit_title : Nil
     return unless f = issues_controller.view.detail_issue
-    open_issue_form(IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE"))
+    open_issue_form(IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE", cvss: f.cvss || ""))
   end
 
   # Jump from an issue to its linked flow's request/response in History. CROSS-TAB
