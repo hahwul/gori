@@ -80,6 +80,9 @@ private class PaneFindHost
   def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
   end
 
+  def open_rewriter_preset_picker : Nil
+  end
+
   def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
   end
 

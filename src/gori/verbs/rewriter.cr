@@ -28,6 +28,12 @@ module Gori
       r.register Verb::Definition.new(
         "rewriter.add", "Add rule", "Open the editor to add a Match & Replace rule",
         Verb::Scope::Rewriter, [Verb::Chord.new("a")], available: in_rw, mnemonic: 'a', section: :rules) { |ctx| ctx.rewriter_add; nil }
+      # Install a response-modification preset (#821) — unhide hidden fields, strip validation,
+      # drop CSP, etc. — as ordinary editable rules. `p` is free in this scope (the preview
+      # pane's read verbs spend x/v/S/y; the rule list spends a/e/d/c/r/s and the two moves).
+      r.register Verb::Definition.new(
+        "rewriter.preset", "Add from preset…", "Install a response-modification preset as ordinary rules",
+        Verb::Scope::Rewriter, [Verb::Chord.new("p")], available: in_rw, mnemonic: 'p', section: :rules) { |ctx| ctx.rewriter_preset; nil }
       r.register Verb::Definition.new(
         "rewriter.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Rewriter, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: has_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.rewriter_edit; nil }

@@ -1304,6 +1304,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:rewriter_add)
   end
 
+  def rewriter_preset : Nil
+    rec(:rewriter_preset)
+  end
+
   def rewriter_edit : Nil
     rec(:rewriter_edit)
   end

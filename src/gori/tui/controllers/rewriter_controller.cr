@@ -697,6 +697,26 @@ module Gori::Tui
       @host.open_rewriter_rule_editor(nil)
     end
 
+    # Open the response-modification preset picker (#821). The runner builds the modal and
+    # calls `install_preset` back — this side only owns the request, like `rewriter_add`.
+    def rewriter_preset : Nil
+      @host.open_rewriter_preset_picker
+    end
+
+    # Install a preset's rules into THIS project through the shared `add` path (P1), enabled,
+    # then land the selection on the last rule added so the operator sees what appeared. A
+    # preset installed a second time duplicates visibly (each row carries the preset's name)
+    # rather than silently — the rules are deletable like any other.
+    def install_preset(preset : RulePresets::Preset) : Nil
+      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true)
+      if n == 0
+        return @host.status("preset NOT installed (project busy or unwritable)")
+      end
+      @sub = :rules
+      @sel = last_index_of_scope(Store::RuleScope::Project)
+      @host.status("installed \"#{preset.name}\" — #{n} rule#{n == 1 ? "" : "s"} added (editable, deletable like any other)")
+    end
+
     def rewriter_edit : Nil
       if rule = selected_rule
         @host.open_rewriter_rule_editor(rule)

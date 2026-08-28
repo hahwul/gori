@@ -5,6 +5,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rewriter_controller.rewriter_add
   end
 
+  def rewriter_preset : Nil
+    rewriter_controller.rewriter_preset
+  end
+
   def rewriter_edit : Nil
     rewriter_controller.rewriter_edit
   end

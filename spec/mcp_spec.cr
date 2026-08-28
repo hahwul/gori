@@ -1519,6 +1519,46 @@ describe Gori::MCP::Server do
       end
     end
 
+    # Presets (#821): list_rule_presets is read-only; create_rule_from_preset installs the
+    # catalog's rules through the same insert path create_rule uses, so they are ordinary rows.
+    it "lists presets and installs one as ordinary Match & Replace rules" do
+      with_store do |store|
+        presets = tool_payload(drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rule_presets"}}))[0])
+        presets.as_a.map { |p| p["key"].as_s }.should contain("remove-csp")
+
+        add = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_rule_from_preset","arguments":{"preset":"remove-csp"}}})
+        res = tool_payload(drive(store, add)[0])
+        res["created"].as_i64.should eq(2)
+        res["ids"].as_a.size.should eq(2)
+        store.match_rules.size.should eq(2)
+        store.match_rules.all?(&.op.remove_header?).should be_true
+        # And it shows up in list_rules like any hand-authored rule.
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_rules"}}))[0])
+        listed["count"].as_i64.should eq(2)
+      end
+    end
+
+    it "refuses an unknown preset key without persisting anything" do
+      with_store do |store|
+        bad = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule_from_preset","arguments":{"preset":"nope"}}})
+        resp = drive(store, bad)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        resp["structuredContent"]["field"].as_s.should eq("preset")
+        store.match_rules.should be_empty
+      end
+    end
+
+    it "gates create_rule_from_preset in read-only mode but keeps list_rule_presets" do
+      with_store do |store|
+        list = drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rule_presets"}}), allow_actions: false)[0]
+        list["result"]["isError"]?.try(&.as_bool).should_not be_true
+        add = drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_rule_from_preset","arguments":{"preset":"remove-csp"}}}), allow_actions: false)[0]
+        add["result"]["isError"].as_bool.should be_true
+        store.match_rules.should be_empty
+      end
+    end
+
     # The scope half: a global rule lives in settings.json and applies in EVERY project, so
     # every by-id tool takes a `scope` alongside the id — the two stores number independently.
     it "creates a GLOBAL rule, overrides it per project, and refuses an unknown scope" do
