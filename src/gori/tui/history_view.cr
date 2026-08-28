@@ -56,6 +56,10 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
+    # Styled body lines retained across preview renders. The preview body itself is capped,
+    # but a newline-heavy body can still hold tens of thousands of lines; keep a useful
+    # scrolling window without turning syntax highlighting into an unbounded second copy.
+    PREVIEW_STYLED_CACHE_CAP = 512
     # Tab-completion offers exactly what `QL.field_cond` implements — no more, no less. It used
     # to say that by keeping a hand-written copy, which is how `flag:` (a field with no store
     # behind it — Store#flags_for is a stub) came to head the list while `url:` (real and
@@ -254,6 +258,14 @@ module Gori::Tui
       # selected flow is unchanged (which is every captured flow under live capture).
       @preview_req_lines = nil.as(Array(String)?)
       @preview_res_lines = nil.as(Array(String)?)
+      # Syntax overlays mirror the full History detail while leaving the plain lines above as
+      # the scroll/content authority. Heads are styled once; body lines are styled lazily and
+      # memoized below so a long or minified body is not tokenized on every render tick.
+      @preview_req_styled = nil.as(Highlight::Windowed?)
+      @preview_res_styled = nil.as(Highlight::Windowed?)
+      @preview_req_styled_cache = {} of Int32 => Highlight::Line
+      @preview_res_styled_cache = {} of Int32 => Highlight::Line
+      @preview_styled_rev = Theme.revision
       @preview_scroll_req = 0
       @preview_scroll_res = 0
       @preview_focus = :list # :list | :req | :res
@@ -294,6 +306,7 @@ module Gori::Tui
         @preview_req_lines = nil
         @preview_res_lines = nil
       end
+      rebuild_preview_highlight
     end
 
     def clear_preview : Nil
@@ -301,8 +314,33 @@ module Gori::Tui
       @preview_id = nil
       @preview_req_lines = nil
       @preview_res_lines = nil
+      @preview_req_styled = nil
+      @preview_res_styled = nil
+      @preview_req_styled_cache.clear
+      @preview_res_styled_cache.clear
+      @preview_styled_rev = Theme.revision
       @preview_scroll_req = 0
       @preview_scroll_res = 0
+    end
+
+    # Build the HTTP head overlays while retaining lazy body styling. `env_tokens` stays off:
+    # this is captured evidence, not a request editor where `$NAME` will be substituted.
+    private def rebuild_preview_highlight : Nil
+      @preview_req_styled = @preview_req_lines.try do |lines|
+        Highlight.from_lines_windowed(lines, request: true)
+      end
+      @preview_res_styled = @preview_res_lines.try do |lines|
+        Highlight.from_lines_windowed(lines, request: false)
+      end
+      @preview_req_styled_cache.clear
+      @preview_res_styled_cache.clear
+      @preview_styled_rev = Theme.revision
+    end
+
+    # Highlight spans bake theme colours. A live theme change must recolour the already-cached
+    # selected flow without requiring another SQLite fetch or cursor move.
+    private def ensure_preview_highlight : Nil
+      rebuild_preview_highlight if @preview_styled_rev != Theme.revision
     end
 
     # Tab cycles list → request → response → list (only when preview is on).
@@ -2524,6 +2562,7 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y + 1, "preview — select a flow", Theme.muted, width: {rect.w - 2, 0}.max)
         return
       end
+      ensure_preview_highlight
       body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
       return if body.h < 1
       if body.w >= 60
@@ -2533,9 +2572,11 @@ module Gori::Tui
         # Vertical hairline between Req and Res; top cell sits on the horizontal seam as ┬.
         screen.cell(body.x + half, rect.y, '┬', border)
         (0...body.h).each { |i| screen.cell(body.x + half, body.y + i, '│', border) }
-        render_preview_side(screen, left, "REQUEST", @preview_req_lines,
+        render_preview_side(screen, left, "REQUEST", @preview_req_lines, @preview_req_styled,
+          @preview_req_styled_cache,
           @preview_scroll_req, active: focused && @preview_focus == :req)
-        render_preview_side(screen, right, "RESPONSE", @preview_res_lines,
+        render_preview_side(screen, right, "RESPONSE", @preview_res_lines, @preview_res_styled,
+          @preview_res_styled_cache,
           @preview_scroll_res, active: focused && @preview_focus == :res)
       else
         # Stack Req above Res; reserve one row for a tee-joined mid seam when height allows.
@@ -2545,19 +2586,24 @@ module Gori::Tui
           top = Rect.new(body.x, body.y, body.w, half_h)
           bot = Rect.new(body.x, mid_y + 1, body.w, body.h - half_h - 1)
           Frame.inner_divider(screen, rect, mid_y, border: border)
-          render_preview_side(screen, top, "REQUEST", @preview_req_lines,
+          render_preview_side(screen, top, "REQUEST", @preview_req_lines, @preview_req_styled,
+            @preview_req_styled_cache,
             @preview_scroll_req, active: focused && @preview_focus == :req)
-          render_preview_side(screen, bot, "RESPONSE", @preview_res_lines,
+          render_preview_side(screen, bot, "RESPONSE", @preview_res_lines, @preview_res_styled,
+            @preview_res_styled_cache,
             @preview_scroll_res, active: focused && @preview_focus == :res) if bot.h > 0
         else
-          render_preview_side(screen, body, "REQUEST", @preview_req_lines,
+          render_preview_side(screen, body, "REQUEST", @preview_req_lines, @preview_req_styled,
+            @preview_req_styled_cache,
             @preview_scroll_req, active: focused && @preview_focus == :req)
         end
       end
     end
 
     private def render_preview_side(screen : Screen, rect : Rect, title : String,
-                                    lines : Array(String)?, scroll : Int32, *, active : Bool) : Nil
+                                    lines : Array(String)?, styled : Highlight::Windowed?,
+                                    styled_cache : Hash(Int32, Highlight::Line), scroll : Int32, *,
+                                    active : Bool) : Nil
       return if rect.empty?
       bg = active ? Theme.selection_dim : Theme.bg
       screen.fill(rect, bg) if active
@@ -2575,7 +2621,12 @@ module Gori::Tui
       (0...content_h).each do |i|
         li = sc + i
         break if li >= lines.size
-        screen.text(rect.x + 1, content_y + i, lines[li], Theme.text, bg, width: w)
+        if styled && li < styled.total
+          Highlight.draw(screen, rect.x + 1, content_y + i,
+            preview_styled_line(styled, li, styled_cache), bg: bg, width: w)
+        else
+          screen.text(rect.x + 1, content_y + i, lines[li], Theme.text, bg, width: w)
+        end
       end
       # Both preview halves scroll independently and neither said so. `rect.right` is the
       # frame's hairline for the stacked layout and the RIGHT half of the split one; for the
@@ -2583,6 +2634,18 @@ module Gori::Tui
       # replaces in place — a vertical rule either way, now one that also says where you are.
       Frame.scroll_gauge(screen, Rect.new(rect.x, content_y, rect.w, content_h),
         lines.size, sc, active, bg)
+    end
+
+    # Heads are already eager in Highlight::Windowed. Cache only body lines, whose tokenizers
+    # may otherwise walk the same long JSON/markup line on every terminal refresh.
+    private def preview_styled_line(styled : Highlight::Windowed, li : Int32,
+                                    cache : Hash(Int32, Highlight::Line)) : Highlight::Line
+      return styled.line_at(li) if li < styled.head.size
+      if cached = cache[li]?
+        return cached
+      end
+      cache.clear if cache.size >= PREVIEW_STYLED_CACHE_CAP
+      cache[li] = styled.line_at(li)
     end
 
     private def preview_text_lines(head : Bytes?, body : Bytes?) : Array(String)

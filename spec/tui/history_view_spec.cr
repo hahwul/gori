@@ -246,6 +246,58 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "syntax-highlights both sides of the Req/Res preview and follows theme changes" do
+    prev = Gori::Settings.history_preview
+    saved_theme = Theme.active_name
+    begin
+      Gori::Settings.history_preview = true
+      Theme.apply("goridark")
+      tmp_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/preview", http_version: "HTTP/1.1",
+          head: "POST /preview HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n".to_slice,
+          body: %({"request_key": 1}).to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 201,
+          head: "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n".to_slice,
+          body: %({"response_key": true}).to_slice, content_type: "application/json"))
+
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+
+        render_preview = -> do
+          backend = MemoryBackend.new(100, 30)
+          view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 30))
+          backend
+        end
+        backend = render_preview.call
+        start_y = (0...30).find { |y| backend.row(y).includes?("POST /preview HTTP") }.not_nil!
+        req_x = backend.row(start_y).index("POST /preview HTTP").not_nil!
+        res_x = backend.row(start_y).index("HTTP/1.1 201 Created").not_nil!
+        backend.fg_at(req_x, start_y).should eq(Theme.method_color("POST"))
+        backend.fg_at(res_x + 9, start_y).should eq(Theme.green)
+
+        req_body_y = (0...30).find { |y| backend.row(y).includes?("request_key") }.not_nil!
+        req_key_x = backend.row(req_body_y).index(%("request_key")).not_nil!
+        res_body_y = (0...30).find { |y| backend.row(y).includes?("response_key") }.not_nil!
+        res_key_x = backend.row(res_body_y).index(%("response_key")).not_nil!
+        backend.fg_at(req_key_x, req_body_y).should eq(Theme.syn_header)
+        backend.fg_at(res_key_x, res_body_y).should eq(Theme.syn_header)
+
+        old_method = Theme.method_color("POST")
+        Theme.apply("goriday")
+        Theme.method_color("POST").should_not eq(old_method)
+        recolored = render_preview.call # no refresh_preview: the render cache must invalidate
+        recolored.fg_at(req_x, start_y).should eq(Theme.method_color("POST"))
+      end
+    ensure
+      Theme.apply(saved_theme)
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "re-fetches the preview of a still-pending flow after its response lands" do
     # The refresh_preview cache guard skips the per-frame get_flow ONLY for a Complete,
     # non-streaming flow (whose bytes are immutable). A pending flow must keep refreshing
