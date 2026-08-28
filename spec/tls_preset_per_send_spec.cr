@@ -107,6 +107,25 @@ describe "per-send TLS fingerprint — fuzz plan" do
   end
 end
 
+# A minimize is a SEND path — up to `SEND_CAP` probes at the origin — so it has to dial the
+# handshake the tab dials. Judging candidates by an answer the tab will never get is how a
+# bisection concludes "every header is removable" from a WAF's uniform refusal.
+describe "per-send TLS fingerprint — minimize backend" do
+  it "presents the session's fingerprint on its probe sends" do
+    origin = Gori::Fuzz::Origin.new("https", "t.test", 443)
+    sender = Gori::Fuzz::Sender.new(origin, ungated, false, true, tls_preset: "chrome")
+    sender.tls_preset.should eq("chrome")
+    # …and the pool it dials through carries it too, or a parked socket would serve the
+    # sweep over a handshake nobody asked for.
+    pooled = Gori::Fuzz::Sender.new(origin, ungated, false, true,
+      keep_alive: true, idle_conns: 1, tls_preset: "curl")
+    pooled.tls_preset.should eq("curl")
+    pooled.pool.should_not be_nil
+  ensure
+    pooled.try(&.pool.try(&.close_all))
+  end
+end
+
 # "A reopened Repeater tab sends the fingerprint it was saved with" — the acceptance
 # criterion, exercised through the column rather than asserted about it.
 describe "per-send TLS fingerprint — persistence (Schema V22)" do
@@ -199,6 +218,27 @@ describe "per-send TLS fingerprint — Repeater tab" do
     https = RepeaterView.new
     https.restore("https://t.test", RAW, false, true, tls_preset: "chrome")
     https.tls_preset_live?.should be_true
+  end
+
+  # The review-round fix: `@tls_preset` is stored NORMALISED, so comparing it against a raw
+  # row value made a non-canonical spelling unequal forever — `reconcile` would see the row as
+  # changed on every poll and re-apply it, slamming the caret each time.
+  it "treats a non-canonical stored spelling as the same policy on the reconcile poll" do
+    view = RepeaterView.new
+    view.restore("https://t.test", RAW, false, true, tls_preset: "chrome")
+    view.request_side_matches?("https://t.test", RAW, false, true, nil,
+      tls_preset: "  CHROME ").should be_true
+  end
+
+  # `parse_target` (an `Env.expand` plus a `URI.parse`) is not on the render path any more, so
+  # this pins the cheap prefix test against the cases that actually reach it.
+  it "reads the scheme without parsing the target" do
+    {"https://t.test/a" => true, "HTTPS://t.test" => true, "  https://t.test" => true,
+     "http://t.test" => false, "t.test" => false, "$BASE/path" => false}.each do |target, live|
+      v = RepeaterView.new
+      v.restore(target, RAW, false, true, tls_preset: "chrome")
+      v.tls_preset_live?.should eq(live)
+    end
   end
 
   it "carries the fingerprint into a duplicated tab" do

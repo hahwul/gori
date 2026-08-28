@@ -271,16 +271,24 @@ module Gori
         str(h, "sni").presence || stored
       end
 
-      # The PER-SEND TLS fingerprint override (#844), with the same precedence `send_sni` uses:
-      # the argument wins, else what the stored source (a repeater tab) was saved with, else
-      # none. `.presence` so `""` means "no override for this send" rather than an empty preset
-      # name — that is the only way an agent can drop a stored tab's fingerprint for one call.
+      # The PER-SEND TLS fingerprint override (#844): the argument wins, else what the stored
+      # source (a repeater tab) was saved with, else none.
+      #
+      # `present?`, NOT `.presence ||` — and that is the whole reason this is not spelled like
+      # `send_sni` above. The schema documents `""` as "drop the tab's fingerprint for this
+      # send", which is how an agent takes the BASELINE half of a fingerprint A/B against a tab
+      # that carries an override. `.presence` folds `""` to nil, so the fallback fired and the
+      # baseline send went out as `chrome` too — two identical handshakes, a result set that
+      # named `chrome` on both, and an agent concluding the origin is fingerprint-insensitive
+      # from an experiment that never happened. `send_sni` keeps `.presence` because its schema
+      # promises nothing of the kind (it says "omit to keep the stored one" and no more).
       #
       # An unknown name is NOT normalised away here. `Repeater::Plan.build` refuses it, so the
       # agent gets an INVALID_ARGUMENT naming the presets rather than a send that silently went
       # out with gori's bare hello under a tool result claiming Chrome's.
       private def send_tls_preset(h, stored : String? = nil) : String?
-        str(h, "tls_preset").presence || stored
+        return str(h, "tls_preset").try(&.strip.presence) if present?(h, "tls_preset")
+        stored
       end
 
       # Per-operation (connect + idle read/write) timeout for a one-shot send, from
@@ -523,6 +531,12 @@ module Gori
           # Same rule for the fingerprint (#844), and the same reason: a tab saved from a send
           # that presented Chrome's shape has to present it again when it is replayed, or the
           # saved row is a different request from the one that produced the response beside it.
+          #
+          # UNGUARDED by scheme, deliberately, where the reply below is guarded. The two answer
+          # different questions: the reply says what THIS SEND did (and a plaintext send made no
+          # ClientHello, so naming one would be a lie), while the row says what this TAB is set
+          # to — which the operator chose, survives a retarget to https://, and is exactly what
+          # the TUI's muted `␣T:` chip reports as "set, and currently doing nothing" (P4).
           tls_preset: tls_preset
         )
         return nil unless repeater_id > 0

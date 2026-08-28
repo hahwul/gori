@@ -1304,8 +1304,13 @@ module Gori::Tui
     private def persist_repeater_tab(tab : RepeaterTab) : Nil
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
+      # Every column `update_repeater` writes, off the view — see the note on the sibling in
+      # `save_current_repeater`. Minimize is gated off WS tabs, so the two WS flags are
+      # normally false here; passing them keeps this call from being the one that clears a
+      # flag the OTHER surfaces preserve.
       @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-        v.sni_override, tls_preset: v.tls_preset)
+        v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+        tls_preset: v.tls_preset)
       v.clear_dirty
     end
 
@@ -1643,7 +1648,13 @@ module Gori::Tui
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_repeater(view.target, view.request_text.to_slice, view.http2?,
         view.auto_content_length?, flow_id, @repeaters.size, view.sni_override,
-        ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?)
+        ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?,
+        # …and the fingerprint (#844). `duplicate_from` deliberately copies it ("a send knob,
+        # so the clone sends the handshake its source would"), and leaving it out of the INSERT
+        # meant the row said "no override" until some later save-on-leave committed: a peer
+        # session reconciling the project, `repeater list` and MCP all read nil off the row
+        # while the chip on screen read `␣T:chrome`, and a crash before that save lost it.
+        tls_preset: view.tls_preset)
       id == 0 ? nil : id
     end
 
@@ -1937,6 +1948,13 @@ module Gori::Tui
           !@host.session.config.insecure_upstream?,
           view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
           overrides: @host.session.host_overrides, evidence: evidence,
+          # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
+          # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
+          # every candidate is judged by an answer the tab will never get: an origin that
+          # 403s a bare OpenSSL hello (which is the reason to set a preset at all) refuses
+          # them uniformly, the bisection reads that as "every header is removable", and
+          # `--apply` then rewrites the stored request from responses no real send produced.
+          tls_preset: view.tls_preset,
           keep_alive: true, idle_conns: 1),
         Repeater::Minimize::SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
@@ -2245,8 +2263,18 @@ module Gori::Tui
         end
         v.ws_out_persisted
       else
+        # `ws_keep_key` is passed on the NON-WebSocket branch too, and that is not belt and
+        # braces: `update_repeater` writes every column unconditionally with a `false` default,
+        # while `apply_request_fields` sets `@ws_keep_key` WITHOUT gating it on `is_ws` — so a
+        # session created as `repeater create --ws-keep-key -f plain.txt` (a non-upgrade request
+        # carrying the flag) reopened here, was edited, and had the flag silently written back
+        # as 0. Pre-existing; caught while threading `tls_preset` through the same call, which
+        # is the third column this hazard now covers. (`ws_http_only` is genuinely false on this
+        # branch — the view forces it false for a non-upgrade request — so it is passed for
+        # symmetry with the branch above rather than to preserve anything.)
         @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override, tls_preset: v.tls_preset)
+          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+          tls_preset: v.tls_preset)
       end
       v.clear_dirty
     end

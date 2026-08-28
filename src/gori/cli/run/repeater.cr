@@ -106,7 +106,7 @@ module Gori
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
-        emit_repeater_result(result, new_body, nil, format, tls_preset: plan.tls_preset)
+        emit_repeater_result(result, new_body, nil, format, tls_preset: sent_tls_preset(plan))
         exit 1 unless result.ok?
       end
 
@@ -184,6 +184,9 @@ module Gori
                     j.field "auto_content_length", r.auto_content_length?
                     j.field "flow_id", r.flow_id
                     j.field "sni", r.sni
+                    # The session's TLS fingerprint (#844) — null for a session with no
+                    # override, which is what every session meant before it existed.
+                    j.field "tls_preset", r.tls_preset
                     j.field "last_error", r.response_error
                     j.field "last_duration_us", r.response_duration_us
                   end
@@ -197,7 +200,13 @@ module Gori
               repeaters.each do |r|
                 name = r.name || "Untitled"
                 h2 = r.http2? ? "H2" : "H1"
-                puts "##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}"
+                # The fingerprint is APPENDED, and only when set, so a workbench with no
+                # overrides prints exactly the line it always did. It has to be here at all
+                # because `repeater create --tls-preset`'s refusal of an unknown name argues
+                # that a stored preset is visible ("`repeater list` and the TUI chip both name
+                # a browser") — a claim that was not true of this listing.
+                tls = r.tls_preset.try { |t| "  tls:#{t}" } || ""
+                puts "##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}#{tls}"
               end
             end
           end
@@ -662,7 +671,7 @@ module Gori
         # send_request, which records the attempt).
         recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project_name, db_path) : nil
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
-          tls_preset: plan.tls_preset)
+          tls_preset: sent_tls_preset(plan))
         # The session slot's `$NAME` that went out LITERALLY, after the response and before the
         # exit code. A Repeater send under a slot is how an operator MINTS a binding, so this is
         # also the surface that has to say when the mint never happened: the origin answers 401
@@ -939,6 +948,19 @@ module Gori
       # replay and the session-send paths so the two render identically. Caller has
       # already decoded `new_body` and built `diff` (the diff baseline differs per
       # path); caller owns the exit code.
+      # The fingerprint this send ACTUALLY presented, for the surfaces that report it — nil on
+      # a plaintext leg even when `--tls-preset` was passed, because an `http://` send makes no
+      # ClientHello and naming one would report a handshake that did not happen. The MCP twin
+      # (`send.cr`) and the fuzz banner guard the same way and for the same reason; the doc
+      # says so out loud ("gori will not report one it did not send").
+      #
+      # Only the REPORT is guarded. What the plan carries, and what a `repeater create` row
+      # stores, stay as the operator set them — an override on an http:// target is inert, not
+      # withdrawn (P4).
+      private def self.sent_tls_preset(plan : Repeater::Plan) : String?
+        plan.scheme == "https" ? plan.tls_preset : nil
+      end
+
       private def self.emit_repeater_result(result : Repeater::Result, new_body : Bytes?,
                                             diff : Array(Repeater::DiffLine)?, format : Symbol,
                                             diff_capped : Bool = false,
@@ -1485,7 +1507,7 @@ module Gori
           diff = Repeater::Diff.lines(orig, fresh)
         end
 
-        emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: plan.tls_preset)
+        emit_repeater_result(result, new_body, diff, format, diff_capped, tls_preset: sent_tls_preset(plan))
         # `--slot NAME` on a single-flow replay: the same drain the session-send path takes,
         # because it is the same overlay seam and a notice fixed on one of the two would drift.
         report_unbound_slot_overlay("gori run repeater")

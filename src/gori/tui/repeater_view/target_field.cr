@@ -141,13 +141,23 @@ class Gori::Tui::RepeaterView
   # discarding the choice or claiming it applies.
   def tls_preset_live? : Bool
     return false if @tls_preset.nil?
-    # Parses the target, so it is asked ONLY when an override is set — the chip's label does
-    # not consult it (see `tls_chip_label`), which keeps a `URI.parse` off the ordinary frame.
-    begin
-      parse_target[0] == "https"
-    rescue
-      false
-    end
+    https_target?
+  end
+
+  # Is the target field an `https://` URL? A PREFIX test, not `parse_target` — this is called
+  # from `render_target` on every drawn frame, and `parse_target` is `Env.expand` plus a
+  # `URI.parse`, i.e. an env scan and a URL parse per frame to pick one chip's colour. The
+  # chip's LABEL was already kept off that path (see `tls_chip_label`); routing the colour
+  # through the full parse put it straight back.
+  #
+  # The one case the two answers differ on is a target whose scheme comes from a variable
+  # (`$BASE/path`), where this says "not https" and the parse would too — `parse_target`
+  # prepends `http://` to anything with no `://`, and `$BASE` has none. A target written
+  # `$SCHEME://host` is the genuine gap, and it fails SAFE: the chip goes muted, which
+  # understates rather than overstates what the handshake will carry.
+  private def https_target? : Bool
+    t = @target.lstrip
+    t.size >= 8 && t[0, 8].compare("https://", case_insensitive: true) == 0
   end
 
   # `␣T`: advance to the next fingerprint. Cycles nil → chrome → firefox → safari → curl → nil,

@@ -20,7 +20,11 @@ module Gori
         sni : String?,
         # The session's outbound frames, or nil when the seed is not a WebSocket. Non-nil is
         # what makes this a WS run — see `Fuzz::PlanOptions#ws_messages`.
-        ws : Array(Fuzz::WsMessageSource)? = nil
+        ws : Array(Fuzz::WsMessageSource)? = nil,
+        # The seeding SESSION's TLS fingerprint (#844), or nil. Carried for the same reason
+        # `sni` is: a sweep seeded from a tab has to dial the handshake that tab dials, or
+        # every result is about a ClientHello the tab never sends. `--tls-preset` overrides it.
+        tls_preset : String? = nil
 
       private def self.cmd_fuzz(args : Array(String)) : Nil
         db_path : String? = nil
@@ -207,6 +211,10 @@ module Gori
         evidence = seed.evidence
         # An explicit --sni wins; otherwise the source's own (a repeater session's stored SNI).
         sni ||= seed.sni
+        # …and the same precedence for the fingerprint. `||=` rather than a `presence` fold, so
+        # an explicit `--tls-preset ""` still means "no override for this run" and can take the
+        # baseline half of an A/B against a tab that carries one.
+        tls_preset = seed.tls_preset if tls_preset.nil?
         http2 = force_h2 || seed.http2
 
         # ── the WebSocket decision, taken once ────────────────────────────────────────────
@@ -611,8 +619,11 @@ module Gori
         # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
         # origin) must be swept against THAT name, or `fuzz --repeater N` reaches a different
         # vhost — or fails the handshake — where `repeater send N` succeeds.
+        # …and `rec.tls_preset` for the same reason `rec.sni` does, one layer up: an origin
+        # that answers a bare OpenSSL hello with a challenge is exactly why the tab carries a
+        # preset, and a sweep that drops it measures the challenge, not the endpoint.
         FuzzSeed.new(String.new(Fuzz::Template.escape_literal_markers(rec.request)),
-          rec.target, rec.http2?, false, rec.sni, ws)
+          rec.target, rec.http2?, false, rec.sni, ws, rec.tls_preset)
       end
 
       # A captured flow's outbound frames, as a fuzz seed. `evidence: true` throughout — every

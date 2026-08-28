@@ -86,6 +86,13 @@ module Gori
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
             !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
             overrides: host_overrides, evidence: verbatim,
+            # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
+            # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
+            # every candidate is judged by an answer the tab will never get: an origin that
+            # 403s a bare OpenSSL hello (which is the reason to set a preset at all) refuses
+            # them uniformly, the bisection reads that as "every header is removable", and
+            # `--apply` then rewrites the stored request from responses no real send produced.
+            tls_preset: rec.tls_preset,
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 

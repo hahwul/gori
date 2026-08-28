@@ -1357,8 +1357,10 @@ module Gori::Tui
       in Fuzz::PlanError::Reason::BadRaceCount
         "race needs at least 2 connections — set Race to 2 or more (^O config)"
       in Fuzz::PlanError::Reason::TlsPreset
-        # Unreachable from the config pane, which only ever cycles the known presets — but a
-        # session restored from a project another version wrote can carry any string.
+        # The ORDINARY path here, unlike the Repeater's `␣T` (which cycles known names and so
+        # cannot produce one): the advanced card's TLS fingerprint row is a TEXT field, so a
+        # typo reaches this branch on the operator's first run. `ex.message` already names
+        # every preset that does exist.
         ex.message || "unknown TLS fingerprint preset"
       end
     end

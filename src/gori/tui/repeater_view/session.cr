@@ -249,17 +249,20 @@ class Gori::Tui::RepeaterView
   # cross-session request-side field, so a peer's `^V` has to converge here. Leaving it out
   # meant the poll saw the row as unchanged and the override never crossed sessions.
   #
-  # `tls_preset` is compared for the same reason, and normalised the same way SNI is: a row
-  # may hold "" (a peer, an older writer, an MCP clear) where the view holds nil, and without
-  # folding the two together every poll would see the row as changed and re-apply it — which
-  # on this field also means slamming the caret through `apply_request_fields`.
+  # `tls_preset` is compared for the same reason, and NORMALISED on both sides. `@tls_preset`
+  # was already put through `tls_preset_normalize` by `apply_request_fields`, so comparing it
+  # against a raw row value is comparing two different spellings of one policy: a row holding
+  # `"Chrome "` (a hand edit, another writer, a future version) could never equal the view's
+  # `"chrome"`, `reconcile` would see it as changed on EVERY poll, and `apply_peer_request`
+  # would slam the caret forever — the exact failure this comparison exists to prevent. `""`
+  # and nil fold together for the same reason they do for SNI.
   def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
                             sni : String?, ws_keep_key : Bool = false,
                             ws_http_only : Bool = false, tls_preset : String? = nil) : Bool
     @target == target && request_text == request &&
       @http2 == http2 && @auto_content_length == auto_cl &&
       @ws_keep_key == ws_keep_key && @ws_http_only == ws_http_only &&
-      (@tls_preset || "") == (tls_preset || "") &&
+      @tls_preset == Settings.tls_preset_normalize(tls_preset) &&
       (sni_override || "") == (sni || "")
   end
 

@@ -417,7 +417,7 @@ module Gori
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
       private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?}
-        text, default_target, src_h2, evidence, src_sni = fuzz_template_source(h)
+        text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
         # The WebSocket decision, by the SEED rather than by a flag — the same rule
@@ -460,7 +460,7 @@ module Gori
           # two: `auto:true` finds the position, and an agent that then sends `<script>` was
           # producing a corrupt request line, not a test. `no_encode:true` is the way out.
           auto_encode: !bool_arg(h, "no_encode", false),
-          config: fuzz_config(h, mode), matcher: fuzz_matcher(h),
+          config: fuzz_config(h, mode, src_tls_preset), matcher: fuzz_matcher(h),
           # Defense-in-depth alongside the job-start Layer-1 check: that check only covers
           # the origin once, not a path a template mutates per-request. The Outbound re-reads
           # the scope periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
@@ -560,7 +560,11 @@ module Gori
       # an OData capture (`$filter`, `$top`) had the run REFUSED for an unbound variable
       # nobody typed, and a captured bare-LF head was silently promoted to CRLF — the one
       # thing that makes every desync result from the sweep unreadable.
-      private def fuzz_template_source(h) : {String, String?, Bool, Bool, String?}
+      # The last tuple element is the SEEDING SESSION's TLS fingerprint (#844), nil for every
+      # other source. Carried for the same reason `sni` (the one before it) is: a sweep seeded
+      # from a tab has to dial the handshake that tab dials, or every result is about a
+      # ClientHello the tab never sends. An explicit `tls_preset` argument still wins.
+      private def fuzz_template_source(h) : {String, String?, Bool, Bool, String?, String?}
         # One seed only. This used to return on the FIRST of template → flow_id → repeater_id,
         # so `{flow_id: 10, repeater_id: 3}` swept flow 10 and never said the repeater seed was
         # dropped. The CLI refuses every such pair for exactly that reason; so does this.
@@ -572,7 +576,7 @@ module Gori
           raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be swept")
         end
         if t = str(h, "template")
-          return {t, nil, false, false, nil} unless t.strip.empty?
+          return {t, nil, false, false, nil, nil} unless t.strip.empty?
         end
         if id = optional_int_arg(h, "flow_id")
           detail = store.get_flow(id)
@@ -586,7 +590,7 @@ module Gori
           # capture that is legitimately not valid UTF-8 had every such byte rewritten to
           # U+FFFD, with Content-Length resynced to the corruption, before the sweep ran.
           # `render` puts the single `§` back, so the request still replays byte-exact.
-          return {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true, nil}
+          return {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true, nil, nil}
         end
         if rid = optional_int_arg(h, "repeater_id")
           rec = store.get_repeater(rid)
@@ -596,8 +600,11 @@ module Gori
           # `$NAME` bindings expand, the same as send_request from a repeater.
           # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
           # origin) must be swept against THAT name, or this reaches a different vhost — or fails
-          # the handshake — where `send_request{repeater_id}` succeeds.
-          return {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni}
+          # the handshake — where `send_request{repeater_id}` succeeds. `rec.tls_preset` rides
+          # along for the same reason one layer down the stack: an origin that answers a bare
+          # OpenSSL hello with a challenge is exactly why the tab carries a preset, and a sweep
+          # that dropped it would measure the challenge rather than the endpoint.
+          return {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni, rec.tls_preset}
         end
         raise FuzzArgError.new("provide a 'template' (raw request with §…§), a 'flow_id', or a 'repeater_id'")
       end
@@ -1074,7 +1081,10 @@ module Gori
         raise FuzzArgError.new("invalid #{which} regex '#{s}': #{ex.message}")
       end
 
-      private def fuzz_config(h, mode : Fuzz::Mode) : Fuzz::Config
+      # `seed_tls_preset` is the fingerprint the SEEDING repeater session carries, if any —
+      # threaded in rather than re-read here, because only `fuzz_template_source` knows which
+      # of the three seed shapes was used.
+      private def fuzz_config(h, mode : Fuzz::Mode, seed_tls_preset : String? = nil) : Fuzz::Config
         rate = optional_float_arg(h, "rate")
         # Ignore a non-positive caller cap (it would otherwise become a negative cap
         # that halts the dispatcher at request 0); fall back to the hard ceiling.
@@ -1116,10 +1126,13 @@ module Gori
         # false, i.e. the P7 behaviour the `grpc_stale_prefix` field reports — see
         # `Fuzz::Config#reframe_grpc?`.
         cfg.reframe_grpc = bool_arg(h, "reframe_grpc", cfg.reframe_grpc?)
-        # The run's TLS fingerprint override (#844). `.presence` so `""` is "no override";
-        # an unknown NAME is not folded away here — `Fuzz::Plan.build` refuses it, so the
-        # agent is told rather than left with a sweep that silently used gori's bare hello.
-        cfg.tls_preset = str(h, "tls_preset").presence
+        # The run's TLS fingerprint override (#844). An explicit argument wins; otherwise the
+        # SEEDING SESSION's, so `fuzz_start{repeater_id}` sweeps the handshake that tab sends.
+        # `present?` rather than `.presence ||`, so an explicit `""` really is "no override for
+        # this run" and can take the baseline half of an A/B against a tab that carries one.
+        # An unknown NAME is not folded away — `Fuzz::Plan.build` refuses it, so the agent is
+        # told rather than left with a sweep that silently used gori's bare hello.
+        cfg.tls_preset = present?(h, "tls_preset") ? str(h, "tls_preset").try(&.strip.presence) : seed_tls_preset
         # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
         # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).

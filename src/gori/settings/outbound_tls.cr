@@ -278,10 +278,13 @@ module Gori::Settings
   # applies nothing, so gori would dial with its bare OpenSSL hello while the operator
   # believed Chrome's was going out — and unlike the destination table, a per-send override
   # has no startup warning to catch it. A blank/absent name is "no override" and passes.
+  # Through `tls_preset_normalize` for the reason `outbound_tls_for` gives right above it: a
+  # second `strip.downcase` here is a second answer to "which spellings are ONE name", and the
+  # day that answer changes, validation and the cache key would disagree about which names are
+  # even valid.
   def self.tls_preset_error(name : String?) : String?
-    n = name.try(&.strip.downcase)
-    return nil if n.nil? || n.empty?
-    return nil if TLS_PRESETS.has_key?(n)
+    n = tls_preset_normalize(name)
+    return nil if n.nil? || TLS_PRESETS.has_key?(n)
     "unknown TLS fingerprint preset #{name.inspect} — expected one of #{TLS_PRESET_NAMES.join(", ")}"
   end
 
