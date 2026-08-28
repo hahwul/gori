@@ -721,6 +721,8 @@ module Gori
           j.field "title", Issues::Export.one_line(f.title)
           j.field "severity", f.severity.label
           j.field "status", f.status.label
+          j.field "cvss", f.cvss.try { |c| Issues::Export.one_line(c) }
+          j.field "cvss_score", f.cvss_score
           j.field "host", f.host.try { |h| Issues::Export.one_line(h) }
           j.field "flow_id", f.flow_id
           # notes is multi-line by design — scrub only, don't collapse (mirrors Export.json).

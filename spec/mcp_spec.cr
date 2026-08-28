@@ -863,6 +863,41 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "creates and updates an issue with cvss auto-calculating severity" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"CVSS issue","cvss":"9.8"}}})
+        new_id = tool_payload(drive(store, create)[0])["id"].as_i64
+        issue = store.get_issue(new_id).not_nil!
+        issue.severity.should eq(Gori::Store::Severity::Critical)
+        issue.cvss.should eq("9.8")
+
+        get_res = drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_issue","arguments":{"id":#{new_id}}}}))[0]
+        get_payload = tool_payload(get_res)
+        get_payload["cvss"].as_s.should eq("9.8")
+        get_payload["cvss_score"].as_f.should eq(9.8)
+
+        update = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{new_id},"cvss":"3.5"}}})
+        drive(store, update)[0]["result"]["isError"].as_bool.should be_false
+        reloaded = store.get_issue(new_id).not_nil!
+        reloaded.severity.should eq(Gori::Store::Severity::Low)
+        reloaded.cvss.should eq("3.5")
+
+        clear = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{new_id},"cvss":""}}})
+        drive(store, clear)[0]["result"]["isError"].as_bool.should be_false
+        cleared = store.get_issue(new_id).not_nil!
+        cleared.cvss.should be_nil
+
+        # Can also set and clear via null
+        reset_cvss = %({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{new_id},"cvss":"5.0"}}})
+        drive(store, reset_cvss)[0]["result"]["isError"].as_bool.should be_false
+        store.get_issue(new_id).not_nil!.cvss.should eq("5.0")
+
+        clear_null = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{new_id},"cvss":null}}})
+        drive(store, clear_null)[0]["result"]["isError"].as_bool.should be_false
+        store.get_issue(new_id).not_nil!.cvss.should be_nil
+      end
+    end
+
     it "links a repeater on create and on a link-only update" do
       with_store do |store|
         repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
