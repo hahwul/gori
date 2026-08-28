@@ -719,7 +719,7 @@ gori run notes --all
 Write issues from scripts with `create` / `update`:
 
 ```bash
-gori run issues create --title "Reflected XSS on /search" --severity high --host app.example.com --flow 42
+gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
 ```
 
@@ -727,8 +727,8 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 |--------|-------------|
 | `--format` | `text` (default) \| `json` \| `markdown` \| `sarif` — the same reports the TUI's Export writes |
 | `--export=PATH` | Write to `PATH` instead of STDOUT (bytes verbatim; STDOUT is escape-scrubbed) |
-| `create` | `-t`/`--title` (required), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
-| `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+| `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
+| `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log — the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
 

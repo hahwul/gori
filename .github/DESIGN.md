@@ -1828,3 +1828,15 @@ watching TUI reload rules/scope/bindings on each beat. So presence is a per-proc
 SIGKILL, where no `ensure` runs) and the JSON body is decoration. Readers sweep any marker whose
 lock they can take. The TUI polls the directory on the DV tick OUTSIDE `apply_external_change`,
 because a marker moves no `data_version`.
+
+### 2026-08-28: CVSS in issues — optional wire representation with live derivation
+
+Refines: [P4](#p4), [P7](#p7). #575.
+
+An issue finding can record an optional CVSS vector string or numeric score. Wire bytes and canonical
+representations remain authoritative: storing the exact string the operator typed (either a full
+`CVSS:3.1/...` vector or a bare score `"9.8"`) preserves provenance (P7) without normalization loss.
+Severity (Info..Critical) is automatically derived from the score band whenever a valid CVSS vector or
+score is supplied without an explicit override, across TUI, CLI (`--cvss`), and MCP (`cvss`).
+Query filtering (`cvss:>=7.0`, `cvss:3.1`) resolves both numeric comparisons and vector substrings,
+and SARIF rule exports reflect the highest live CVSS score in `security-severity`.

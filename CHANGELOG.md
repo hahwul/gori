@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Issues: record CVSS vector strings or scores on confirmed findings with automatic severity calculation across TUI, CLI (`--cvss`), and MCP (`cvss`), plus `cvss:` query filtering and CVSS-aware exports (#575)
+
 - Retest: diff two projects at endpoint scale — what is new, gone, or answering differently since the last engagement. A Diff sub-tab under Target, `gori run diff` (text/json/md), and the MCP `diff_projects` tool; endpoints are keyed by the Sitemap's folded template, and an endpoint the newer capture never requested is reported as a coverage gap rather than as removed (#824)
 - Proxy: per-destination outbound TLS fingerprint control — `groups`, `sigalgs`, TLS 1.3 `ciphersuites` and an ordered `alpn` list on `outbound_tls`, plus `chrome`/`firefox`/`safari`/`curl` presets, so an origin's anti-bot layer sees a browser-shaped ClientHello instead of gori's OpenSSL one. `gori settings tls-fingerprint` prints the JA3/JA4 that actually goes out; presets are approximations, not byte-exact matches (#822)
 - gRPC: point a project at a `protoc` descriptor set (`Project → Project settings → Proto schema`, or drop one in `~/.gori/protos/`) and captured protobuf renders as named, typed fields — the request path `/package.Service/Method` is the binding. Undeclared field numbers and wire/schema disagreements are still shown, the raw wire tree stays beside the lens on every surface, and with no descriptor set loaded nothing changes (#823)
