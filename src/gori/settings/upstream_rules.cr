@@ -223,7 +223,8 @@ module Gori::Settings
     kind, default_port = route_kind
     if uri.user || uri.password
       return invalid_upstream_route(
-        "settings: upstream proxy URI credentials are not stored here; use an upstream rule with username + password_env"
+        "settings: upstream proxy URI credentials are not stored here; use Project settings proxy auth, " \
+        "or an upstream rule with username + password_env"
       )
     end
     unless uri.query.nil? && uri.fragment.nil? && (uri.path.empty? || uri.path == "/")
@@ -288,9 +289,14 @@ module Gori::Settings
     {false, nil}
   end
 
+  # `_` is accepted even though DNS hostnames disallow it. This grammar is applied to EXISTING
+  # `upstream_rules` at load, and one rejected rule refuses every route (apply_upstream_rules);
+  # the scope editor this dialect is shared with has always taken underscore names, which
+  # internal networks and `_service._tcp` labels do use. Rejecting them here would brick egress
+  # on upgrade for a pattern gori itself taught the operator to write.
   private def self.upstream_destination_pattern?(pattern : String) : Bool
     pattern.split('.').all? do |label|
-      !label.empty? && label.matches?(/\A[A-Za-z0-9*](?:[A-Za-z0-9*\-]*[A-Za-z0-9*])?\z/)
+      !label.empty? && label.matches?(/\A[A-Za-z0-9*_](?:[A-Za-z0-9*_\-]*[A-Za-z0-9*_])?\z/)
     end
   end
 
@@ -353,8 +359,7 @@ module Gori::Settings
   protected def self.apply_upstream_proxy(node : JSON::Any?) : Nil
     return unless node
     if value = node.as_s?
-      self.upstream_proxy = value
-      @@upstream_proxy_load_error = nil
+      self.upstream_proxy = value # the setter retires any error a previous load retained
     else
       @@upstream_proxy_load_error = "settings: network.upstream_proxy must be a string"
     end

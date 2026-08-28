@@ -462,6 +462,34 @@ describe "ProjectView PROJECT SETTINGS pane" do
     end
   end
 
+  # The credential rows only draw a marker once auth is ON (before that they render "—"), and
+  # settings.json has no proxy username/password to inherit — so "· global" there would name a
+  # source that cannot exist and send the operator to the wrong editor looking for it.
+  it "marks the project-only credential rows · default rather than · global" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.focus_pane(:settings)
+      view.select_setting(ProjectView::SETTINGS_AUTH_ROW)
+      view.toggle_settings_auth
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+
+      username = (0...30).map { |y| b.row(y) }.find(&.includes?("Username")).to_s
+      password = (0...30).map { |y| b.row(y) }.find(&.includes?("Password")).to_s
+      username.should contain("· default")
+      username.should_not contain("· global")
+      password.should contain("· default")
+      password.should_not contain("· global")
+      # The proxy host beside them DOES inherit settings.json, so it keeps naming that source.
+      (0...30).map { |y| b.row(y) }.find(&.includes?("Proxy host")).to_s.should contain("· global")
+    ensure
+      reset_projnet
+    end
+  end
+
   it "hit-tests a settings row and edits a text field (dirty-tracked)" do
     tmp_store do |store|
       reset_projnet

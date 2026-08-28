@@ -198,7 +198,7 @@ module Gori::Tui
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
     # override when pinned, else the global default (Session.open populated Settings.project_*
     # from this project's DB on open). @set_overridden drives the "· project/global" marker
-    # (Destination host uses "· default" because it has no global counterpart).
+    # (the project-only fields use "· default" — see SETTINGS_PROJECT_ONLY_INDICES).
     #
     # The bind pair uses `configured_bind_*`, NOT `effective_bind_*`: those two differ only by
     # the process-only `-l`/`-p` layer, which is neither a project pin nor the global — so it
@@ -442,10 +442,15 @@ module Gori::Tui
     SETTINGS_PROXY_PORT_INDEX  = SETTINGS_PROXY_PORT_ROW - SETTINGS_FIELD_BASE
     SETTINGS_DESTINATION_INDEX = SETTINGS_DESTINATION_ROW - SETTINGS_FIELD_BASE
     SETTINGS_AUTH_INDEX        = SETTINGS_AUTH_ROW - SETTINGS_FIELD_BASE
+    SETTINGS_USERNAME_INDEX    = SETTINGS_USERNAME_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PASSWORD_INDEX    = SETTINGS_PASSWORD_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PROTOS_FIELD      = 12
     SETTINGS_LABEL_W           = 16 # value column starts past the widest label ("Connect timeout")
     SETTINGS_PROTOCOL_CHOICES  = ["None", "HTTP", "SOCKS5", "SOCKS5H"]
+    # Fields with no global counterpart to inherit — their unset marker is "· default", not
+    # "· global" (see render_settings_field).
+    SETTINGS_PROJECT_ONLY_INDICES = [SETTINGS_DESTINATION_INDEX, SETTINGS_USERNAME_INDEX,
+                                     SETTINGS_PASSWORD_INDEX]
 
     # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
     # either list).
@@ -2145,7 +2150,11 @@ module Gori::Tui
                                       fi : Int32, selected : Bool, bg : Color) : Nil
       return render_protos_field(screen, inner, y, vx, selected, bg) if fi == SETTINGS_PROTOS_FIELD
       overridden = @set_overridden[fi]
-      marker = if fi == SETTINGS_DESTINATION_INDEX
+      # "· global" claims settings.json supplied the inherited value. The destination gate and
+      # the two credentials have no global counterpart at all — a project-only field that is
+      # unset is at its DEFAULT, and naming a source that cannot exist would send an operator
+      # looking for the credential in the global editor.
+      marker = if SETTINGS_PROJECT_ONLY_INDICES.includes?(fi)
                  overridden ? "· project" : "· default"
                else
                  overridden ? "· project" : "· global"

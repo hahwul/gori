@@ -87,7 +87,19 @@ module Gori::Settings
 
   class_property bind_host : String = DEFAULT_BIND_HOST
   class_property bind_port : Int32 = DEFAULT_BIND_PORT
-  class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # HTTP/SOCKS URI or legacy host:port; "" = direct
+  class_getter upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # HTTP/SOCKS URI or legacy host:port; "" = direct
+
+  # Assigning the scalar RETIRES the retained load error. A non-string `network.upstream_proxy`
+  # makes every route fail closed (apply_upstream_proxy), and the settings editor corrects it by
+  # assigning here and saving — it does not reload. A setter that only wrote the value therefore
+  # left the refusal standing until restart: the operator saw the fix applied and still could
+  # not dial. The value now in memory is the one upstream_route must judge.
+  def self.upstream_proxy=(value : String) : String
+    @@upstream_proxy = value
+    @@upstream_proxy_load_error = nil
+    value
+  end
+
   # Whether the proxy/probe/repeater verify the UPSTREAM TLS certificate. The launch
   # flag --insecure-upstream seeds this false for the session (see CLI.run_tui); the
   # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
@@ -456,27 +468,26 @@ module Gori::Settings
   # or follow a later global edit. `*` is represented by an absent destination row so every
   # pre-feature project keeps the same proxy-all behaviour without migration. Each Store call
   # reports commit success; all are attempted so an independently busy row cannot leave the
-  # rest of the live edit unapplied.
+  # rest of the live edit unapplied — except the three ROUTING rows, which go in one task
+  # (below) because they are only meaningful together.
   def self.save_project_network(store : Store, config : ProjectNetworkConfig) : Bool
     auth = config.auth
-    upstream_saved = if auth
-                       store.set_setting(PROJECT_UPSTREAM_KEY, config.upstream)
-                     else
-                       set_or_clear_project(store, PROJECT_UPSTREAM_KEY, config.upstream, upstream_proxy)
-                     end
-    auth_saved = auth ? store.set_setting(PROJECT_UPSTREAM_AUTH_KEY, auth.to_json) : store.delete_setting(PROJECT_UPSTREAM_AUTH_KEY)
     destination = config.destination_host.strip
-    destination_saved = if destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION
-                          store.delete_setting(PROJECT_UPSTREAM_DESTINATION_KEY)
-                        else
-                          store.set_setting(PROJECT_UPSTREAM_DESTINATION_KEY, destination)
-                        end
+    # The pin, its credentials and the destination gate are ONE decision about where this
+    # project's traffic goes. Written as three tasks, a busy row could commit the credentials
+    # beside the address the project used to have — and the next open would send the secret
+    # there. Auth pins the upstream unconditionally; without it the pin follows the
+    # equals-global-means-inherit rule the other rows use.
+    routing_saved = store.set_settings([
+      {PROJECT_UPSTREAM_KEY, auth ? config.upstream : project_row(config.upstream, upstream_proxy)},
+      {PROJECT_UPSTREAM_AUTH_KEY, auth.try(&.to_json)},
+      {PROJECT_UPSTREAM_DESTINATION_KEY,
+       destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination},
+    ] of {String, String?})
     persisted = [
       set_or_clear_project(store, PROJECT_BIND_HOST_KEY, config.bind_host, bind_host),
       set_or_clear_project(store, PROJECT_BIND_PORT_KEY, config.bind_port.to_s, bind_port.to_s),
-      upstream_saved,
-      auth_saved,
-      destination_saved,
+      routing_saved,
       set_or_clear_project(store, PROJECT_CONNECT_TIMEOUT_KEY, config.connect_secs.to_s, connect_timeout_secs.to_s),
       set_or_clear_project(store, PROJECT_IO_TIMEOUT_KEY, config.io_secs.to_s, io_timeout_secs.to_s),
       set_or_clear_project(store, PROJECT_CAPTURE_MAX_KEY, config.capture_mib.to_s, capture_max_mib.to_s),
@@ -497,6 +508,12 @@ module Gori::Settings
   private def self.set_or_clear_project(store : Store, key : String,
                                         value : String, global : String) : Bool
     value == global ? store.delete_setting(key) : store.set_setting(key, value)
+  end
+
+  # `set_or_clear_project`'s decision as a VALUE, for rows batched into one write task:
+  # nil means "drop the key so the project inherits the global".
+  private def self.project_row(value : String, global : String) : String?
+    value == global ? nil : value
   end
 
   private def self.load_project_upstream_auth(raw : String?) : Nil

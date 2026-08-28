@@ -167,6 +167,14 @@ describe Gori::Settings do
     ensure
       Gori::Settings.upstream_proxy = ""
     end
+
+    # Both credential homes, because this same parse backs the PROJECT pin — a user who typed
+    # URI credentials there was being sent to the one place that could not hold them.
+    it "names both credential homes when a proxy URI carries them" do
+      message = Gori::Settings.upstream_proxy_error("http://alice:secret@proxy.test:8080").to_s
+      message.should contain("Project settings proxy auth")
+      message.should contain("password_env")
+    end
   end
 
   it "retains a malformed persisted upstream-rule host as a fail-closed load error" do
@@ -187,6 +195,33 @@ describe Gori::Settings do
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+      Gori::Settings.upstream_proxy = ""
+    end
+  end
+
+  # The load error is retained OUTSIDE the scalar, so the editor that corrects the value has to
+  # retire it too: settings:network assigns and SAVES, it never reloads. A setter that only
+  # wrote the string left every dial failing closed on the old complaint until restart.
+  it "retires a retained upstream_proxy load error when the scalar is reassigned" do
+    dir = File.tempname("gori-settings-upstream-scalar")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"network":{"upstream_proxy":8080}}))
+      Gori::Settings.load
+
+      route = Gori::Settings.upstream_route("origin.test")
+      route.invalid?.should be_true
+      route.configuration_error.to_s.should contain("must be a string")
+
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      fixed = Gori::Settings.upstream_route("origin.test")
+      fixed.invalid?.should be_false
+      {fixed.kind, fixed.host, fixed.port}.should eq({"http", "proxy.test", 8080})
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
       Gori::Settings.upstream_proxy = ""
     end
   end
@@ -2175,6 +2210,18 @@ describe Gori::Settings do
       end
     end
 
+    # Underscore names are not legal DNS, but the scope editor this dialect is shared with has
+    # always taken them and internal networks use them. Since the same validator runs over
+    # EXISTING upstream_rules at load — where one rejected rule refuses every route — rejecting
+    # them would brick egress on upgrade for a pattern gori itself accepted.
+    it "accepts underscore labels the shared scope dialect already matches" do
+      ["internal_api.corp", "_service._tcp.corp.test", "*_staging.test"].each do |value|
+        Gori::Settings.upstream_destination_error(value).should be_nil
+      end
+      rule = Gori::Settings::UpstreamRule.new("internal_api.corp", "http", "proxy.test:8080")
+      Gori::Settings.upstream_rule_error(rule).should be_nil
+    end
+
     it "rejects values that cannot match a bare destination host" do
       ["", "https://example.com", "example.com/path", "example.com:443", "bad host", "[::1]:443"].each do |value|
         Gori::Settings.upstream_destination_error(value).should_not be_nil
@@ -2211,6 +2258,31 @@ describe Gori::Settings do
         Gori::Settings.project_upstream_proxy.should be_nil
         Gori::Settings.project_upstream_destination.should be_nil
         Gori::Settings.project_upstream_auth.should be_nil
+      ensure
+        reset_net
+      end
+    end
+
+    # The pin, the credential and the destination gate are one decision about where this
+    # project's traffic goes. Written as three tasks, a busy row could commit the credential
+    # beside the address the project used to have — and the next open would send the secret
+    # there — so they share one writer task, sets and deletes together.
+    it "writes the pin, its credential and the destination gate in one store task" do
+      with_net_store do |store|
+        reset_net
+        store.set_settings([
+          {Gori::Settings::PROJECT_UPSTREAM_KEY, "http://old.test:8080".as(String?)},
+          {Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, %({"method":"basic","username":"a","password":"b"}).as(String?)},
+        ] of {String, String?}).should be_true
+
+        store.set_settings([
+          {Gori::Settings::PROJECT_UPSTREAM_KEY, "http://new.test:8080".as(String?)},
+          {Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, nil.as(String?)},
+          {Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*.example.test".as(String?)},
+        ] of {String, String?}).should be_true
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should eq("http://new.test:8080")
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).should be_nil
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY).should eq("*.example.test")
       ensure
         reset_net
       end
