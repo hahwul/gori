@@ -106,12 +106,66 @@ module Gori
     # spelling, because an operator comparing an h1 flow with an h2 one is reading the same
     # fact and two wordings would read as two different events.
     def self.removal_note(removed : Array(String)) : String
-      quoted = removed.first(NOTE_MAX_QUOTED).join(", ")
-      quoted += ", and #{removed.size - NOTE_MAX_QUOTED} more" if removed.size > NOTE_MAX_QUOTED
       "removed #{removed.size} Alt-Svc HTTP/3 advertisement#{removed.size == 1 ? "" : "s"} " \
-      "(#{quoted}) from this response — gori does not intercept HTTP/3, so a client acting on " \
-      "it would have left the proxy for a transport gori cannot see " \
+      "(#{quote_evidence(removed)}) from this response — gori does not intercept HTTP/3, so a " \
+      "client acting on it would have left the proxy for a transport gori cannot see " \
       "(settings network.strip_alt_svc)."
+    end
+
+    # The MIRROR of `removal_note`, for the switch's other position: what was KEPT, quoted, and
+    # what keeping it means. Same one-spelling rule and the same reason — an operator comparing
+    # an h1 flow with an h2 one is reading one fact, and two wordings read as two events.
+    #
+    # This exists because the honest reporting used to live only on the side where nothing is
+    # lost. With the strip ON gori says what it took off the wire; with it OFF the advertisement
+    # reached the client and gori said NOTHING — in the one configuration where traffic can
+    # actually leave the proxy. The operator was then holding a History that stops, and "the
+    # target had nothing more to say" and "a chunk of this session went out over QUIC" read
+    # identically in it (#835, and `memory: absence-of-finding-reads-as-clean`).
+    #
+    # A NOTICE and not an edit: with the switch off the origin's head reaches the client
+    # byte-identical (P7). Nothing here is on the response path except this sentence.
+    #
+    # KEPT SHORT, shorter than its mirror. `NOTE_MAX_QUOTED` above records why the quoting is
+    # capped — this string is written to `flows.advisory` on every response that carries one,
+    # a column `capture_max_mib` does not cover and retention counts rows rather than bytes for.
+    # That reasoning applied to the opt-in strip; this half fires in the DEFAULT configuration,
+    # where CDN-fronted browsing means most captured flows get one. Every word here is load-
+    # bearing: what was kept, the evidence, what a client will do about it, and the switch.
+    def self.kept_note(kept : Array(String)) : String
+      "kept #{kept.size} Alt-Svc HTTP/3 advertisement#{kept.size == 1 ? "" : "s"} " \
+      "(#{quote_evidence(kept)}) in this response — gori does not intercept HTTP/3, so a client " \
+      "acting on it leaves the proxy and what it does there is missing from History " \
+      "(settings network.strip_alt_svc is off)."
+    end
+
+    # The evidence list as one quoted clause, capped at `NOTE_MAX_QUOTED` with an exact count of
+    # the remainder. Shared by both sentences so the cap cannot drift to one of them.
+    private def self.quote_evidence(evidence : Array(String)) : String
+      quoted = evidence.first(NOTE_MAX_QUOTED).join(", ")
+      quoted += ", and #{evidence.size - NOTE_MAX_QUOTED} more" if evidence.size > NOTE_MAX_QUOTED
+      quoted
+    end
+
+    # Every h3 alternative advertised by `values` (one entry per `Alt-Svc` FIELD that carries
+    # one), or an empty array. Per FIELD like `strip_h3`, and for the same reason the notice is
+    # one sentence per flow rather than one per field — an operator is being told a transport
+    # may be leaving, once, not handed a list of header lines.
+    #
+    # FOR A CALLER THAT ALREADY HOLDS WHOLE VALUES — h2, whose HPACK fields carry them, and any
+    # projection-based reader that has accepted what that view drops. It is NOT the read-only
+    # twin of `strip_h3` and must not be used as one on an h1 head: `parse_headers` keeps only
+    # the first line of an obs-folded field, while `strip_header_lines` deliberately hands its
+    # block the JOINED value, so the two views disagree on exactly the head the strip removes.
+    # An h1 caller asks `strip_h3` and discards the bytes (`ClientConn#note_alt_svc_kept`).
+    def self.h3_evidence_all(values : Array(String)) : Array(String)
+      found = [] of String
+      values.each do |value|
+        if ev = h3_evidence(value)
+          found << ev
+        end
+      end
+      found
     end
 
     # `head` with every `Alt-Svc` line that advertises h3 removed, and the evidence for each
