@@ -1850,7 +1850,14 @@ sibling, which inverts the badge's whole promise ("the worst under this rule").
 
 The operator-facing half is one input, not two. The issue form's `cvss` row is a LAUNCHER (`↵` opens
 the calculator); the calculator holds the only editable copy of the value, as a `vector:` text field
-above the eight metric rows that build one. Two editable copies of one value on two cards is how they
+above the metric rows that build one. Two editable copies of one value on two cards is how they
 drift, and a form whose `↵` means "create" cannot also mean "open the builder". The calculator opens
 on the LEAST severe vector it can spell, not the worst: a default that files a 9.8 Critical on a bare
 `↵` puts a number in someone's report that nobody chose.
+
+The builder writes v3.1 and v4.0, and treats them as SEPARATE ASSESSMENTS rather than two spellings of
+one. v4.0 asks questions v3.1 does not (`AT`, and the Vulnerable/Subsequent impact split that replaces
+`S`) and FIRST's own guidance is that the two do not convert, so the `version:` row translates nothing:
+each version keeps its own selections while the card is open. A translated vector would put a score in
+someone's report that nobody assessed. Any version the parser knows is still stored and scored as
+typed — the builder is what is limited to two, not the field.

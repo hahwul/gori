@@ -8,9 +8,14 @@ private def calc_harness(initial : String = "", area : Rect = Rect.new(0, 0, 80,
   OverlayHarness.new(CvssCalculatorOverlay.new(initial), area: area)
 end
 
-# The vector row is row 0, so this is how many ↓ presses reach metric `i` (0-based).
+# Rows 0 and 1 are the vector field and the version cycler, so this is how many ↓ presses
+# reach metric `i` (0-based).
 private def to_metric(h : OverlayHarness, i : Int32)
-  (i + 1).times { h.press(Termisu::Input::Key::Down) }
+  (i + 2).times { h.press(Termisu::Input::Key::Down) }
+end
+
+private def clear_field(h : OverlayHarness)
+  70.times { h.press(Termisu::Input::Key::Backspace) }
 end
 
 describe Gori::Tui::CvssCalculatorOverlay do
@@ -41,13 +46,79 @@ describe Gori::Tui::CvssCalculatorOverlay do
     calc.selections["C"].should eq(2)
   end
 
-  # A v2/v4 vector names metrics these eight rows cannot spell (v2 has Au, v4 has AT/VC/VI/VA).
-  # Half-adopting it would leave the rows spelling a DIFFERENT vector than the field holds.
-  it "keeps a non-v3 vector verbatim without half-adopting it into the rows" do
+  # A v4.0 vector opens the v4 table — that is what the version row is for.
+  it "adopts a v4.0 vector into the v4 rows and moves the version row with it" do
     calc = CvssCalculatorOverlay.new("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N")
     calc.value.should eq("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N")
     calc.current_score.should eq(9.3)
+    calc.spec.label.should eq("4.0")
+    calc.selections["VC"].should eq(2) # high
+    calc.selections["SC"].should eq(0) # none
+    calc.selections["AT"].should eq(0) # none
+  end
+
+  # v3.0 shares v3.1's eight metrics exactly, so it builds here — and re-emits as 3.1 once a
+  # metric is touched, which is the honest reading of "you edited it with the 3.1 table".
+  it "builds a pasted v3.0 vector on the 3.1 table" do
+    calc = CvssCalculatorOverlay.new("CVSS:3.0/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    calc.spec.label.should eq("3.1")
+    calc.selections["AV"].should eq(2) # local
+    calc.selections["C"].should eq(2)  # high
+  end
+
+  # A v2 vector names metrics NEITHER table can spell (`Au`, and no Scope). Half-adopting it
+  # would leave the rows spelling a DIFFERENT vector than the field holds.
+  it "keeps a v2 vector verbatim without half-adopting it into any row" do
+    calc = CvssCalculatorOverlay.new("AV:N/AC:L/Au:N/C:C/I:C/A:C")
+    calc.value.should eq("AV:N/AC:L/Au:N/C:C/I:C/A:C")
+    calc.current_score.should eq(10.0)
+    calc.spec.label.should eq("3.1")  # the row did not move
     calc.selections["C"].should eq(0) # untouched
+  end
+
+  it "builds a v4.0 vector the scorer agrees with" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    h.press(Termisu::Input::Key::Down) # version row
+    h.press(Termisu::Input::Key::Right)
+    calc.spec.label.should eq("4.0")
+    # An untouched v4 card scores 0.0 for the same reason the v3.1 one does: no impact.
+    calc.value.should eq("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N")
+    calc.current_score.should eq(0.0)
+
+    CvssCalculatorOverlay::V40.metrics.map(&.code).each { |c| calc.selections[c].should eq(0) }
+    # The cursor is on the version row; VC is the sixth metric, so six rows down.
+    6.times { h.press(Termisu::Input::Key::Down) }
+    h.press(Termisu::Input::Key::Right)
+    h.press(Termisu::Input::Key::Right)
+    calc.selections["VC"].should eq(2) # high
+    calc.current_score.should be > 0.0
+    Gori::Cvss.resolve(calc.value).should_not be_nil
+  end
+
+  # The two versions ask different questions (v4 adds AT and splits the impact into
+  # Vulnerable/Subsequent), and FIRST's guidance is that they are not convertible. So each
+  # keeps its OWN selections: toggling back restores exactly what was there, and toggling
+  # away invents nothing.
+  it "remembers each version's own selections across a toggle" do
+    h = calc_harness
+    calc = h.overlay.as(CvssCalculatorOverlay)
+    to_metric(h, 0) # attack vector, in 3.1
+    h.press(Termisu::Input::Key::Right)
+    h.press(Termisu::Input::Key::Right)
+    calc.selections["AV"].should eq(2) # local
+    v31 = calc.value
+
+    h.press(Termisu::Input::Key::Up) # back to the version row
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_VERSION)
+    h.press(Termisu::Input::Key::Right)
+    calc.spec.label.should eq("4.0")
+    calc.selections["AV"].should eq(0) # v4 has its own map, untouched
+
+    h.press(Termisu::Input::Key::Left)
+    calc.spec.label.should eq("3.1")
+    calc.selections["AV"].should eq(2) # …and 3.1 kept what it had
+    calc.value.should eq(v31)
   end
 
   it "takes a bare numeric score" do
@@ -57,13 +128,13 @@ describe Gori::Tui::CvssCalculatorOverlay do
     calc.invalid?.should be_false
   end
 
-  it "moves the row cursor over the vector field, the metrics and the save row" do
+  it "moves the row cursor over the vector field, the version row, the metrics and save" do
     h = calc_harness
     calc = h.overlay.as(CvssCalculatorOverlay)
     calc.sel.should eq(CvssCalculatorOverlay::ROW_VECTOR)
 
     h.press(Termisu::Input::Key::Down)
-    calc.sel.should eq(1)
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_VERSION)
 
     h.press(Termisu::Input::Key::Up)
     calc.sel.should eq(CvssCalculatorOverlay::ROW_VECTOR)
@@ -71,8 +142,8 @@ describe Gori::Tui::CvssCalculatorOverlay do
     # Clamped at both ends — no wrap, matching every other rule form.
     h.press(Termisu::Input::Key::Up)
     calc.sel.should eq(CvssCalculatorOverlay::ROW_VECTOR)
-    20.times { h.press(Termisu::Input::Key::Down) }
-    calc.sel.should eq(CvssCalculatorOverlay::ROW_SAVE)
+    30.times { h.press(Termisu::Input::Key::Down) }
+    calc.sel.should eq(calc.row_save)
   end
 
   it "cycles a metric with ←/→ and rewrites the vector field with it" do
@@ -107,7 +178,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
     h = calc_harness
     calc = h.overlay.as(CvssCalculatorOverlay)
     calc.sel.should eq(CvssCalculatorOverlay::ROW_VECTOR)
-    45.times { h.press(Termisu::Input::Key::Backspace) }
+    clear_field(h)
     calc.value.should eq("")
     h.type("CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
     calc.selections["AV"].should eq(3) # physical
@@ -137,7 +208,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
   it "commits an empty value as a clear" do
     h = calc_harness
     calc = h.overlay.as(CvssCalculatorOverlay)
-    45.times { h.press(Termisu::Input::Key::Backspace) }
+    clear_field(h)
     calc.value.should eq("")
     calc.invalid?.should be_false
     h.press(Termisu::Input::Key::Enter).should eq(:closed)
@@ -148,7 +219,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
   it "refuses to commit a value that scores as nothing" do
     h = calc_harness
     calc = h.overlay.as(CvssCalculatorOverlay)
-    45.times { h.press(Termisu::Input::Key::Backspace) }
+    clear_field(h)
     h.type("not a vector")
     calc.invalid?.should be_true
     h.press(Termisu::Input::Key::Enter).should eq(:open)
@@ -159,12 +230,13 @@ describe Gori::Tui::CvssCalculatorOverlay do
     calc = CvssCalculatorOverlay.new
     area = Rect.new(0, 0, 80, 24)
     box = calc.overlay_box(area).not_nil!
-    av_row = box.y + 2 + 1 # rows start at box.y + 2; row 0 is the vector field
+    # Rows start at box.y + 2; row 0 is the vector field and row 1 the version cycler.
+    av_row = box.y + 2 + CvssCalculatorOverlay::ROW_FIRST_M
 
     # `network` is the first pill on the strip — one cell in from where it starts.
-    x = box.x + 3 + CvssCalculatorOverlay::VALUE_INDENT
+    x = box.x + 3 + calc.spec.indent
     calc.handle_click(area, x + 1, av_row).should eq(:stay)
-    calc.sel.should eq(1)
+    calc.sel.should eq(CvssCalculatorOverlay::ROW_FIRST_M)
     calc.selections["AV"].should eq(0)
 
     # `adjacent` is the second: past " network ".
@@ -177,7 +249,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
     calc = CvssCalculatorOverlay.new("9.8")
     area = Rect.new(0, 0, 80, 24)
     box = calc.overlay_box(area).not_nil!
-    save_y = box.y + 2 + CvssCalculatorOverlay::ROW_SAVE
+    save_y = box.y + 2 + calc.row_save
     calc.handle_click(area, box.x + 4, save_y).should eq(:commit)
   end
 
@@ -192,6 +264,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
     h.render
     h.rendered?("CVSS v3.1").should be_true
     h.rendered?("vector:").should be_true
+    h.rendered?("version:").should be_true
     h.rendered?("attack vector (AV):").should be_true
     h.rendered?("network").should be_true
     h.rendered?("[ use ").should be_true
@@ -208,7 +281,7 @@ describe Gori::Tui::CvssCalculatorOverlay do
   it "offers to clear when the field is empty" do
     h = calc_harness
     calc = h.overlay.as(CvssCalculatorOverlay)
-    45.times { h.press(Termisu::Input::Key::Backspace) }
+    clear_field(h)
     h.render
     h.rendered?("[ clear cvss ]").should be_true
     calc.value.should eq("")
@@ -217,18 +290,59 @@ describe Gori::Tui::CvssCalculatorOverlay do
   # The whole reason this modal was rewritten onto the shared rule-form geometry: at 76
   # columns the hand-rolled card drew its option pills, its buttons and a second copy of the
   # key hint straight through its own border, and Screen#text clips to the SCREEN, not the box.
+  # v4.0 is fourteen rows — a natural card height of 18 against the 16 a classic 80x24
+  # terminal leaves. Without a window the bottom rows, the commit row among them, would
+  # simply not be drawn, and ↑/↓ would walk the cursor off the visible card.
+  it "scrolls the rows so the focused one stays on the card when the card is too short" do
+    area = Rect.new(0, 0, 80, 16) # a card shorter than v4.0's fourteen rows need
+    calc = CvssCalculatorOverlay.new
+    calc.cycle_version(1)
+    calc.spec.label.should eq("4.0")
+    h = OverlayHarness.new(calc, area: area)
+    box = calc.overlay_box(area).not_nil!
+    box.h.should be < calc.row_count + 4 # the card really is clamped
+
+    # Walk to the commit row and it is on screen, at the bottom of the window.
+    (calc.row_count - 1).times { h.press(Termisu::Input::Key::Down) }
+    calc.sel.should eq(calc.row_save)
+    mb = h.render
+    rows = (box.y...box.bottom).map { |y| mb.row(y) }
+    rows.any?(&.includes?("[ use ")).should be_true
+
+    # …and the click hit-test inverts the SAME window: the last drawn row is the save row.
+    save_y = box.y + 2 + (box.h - 4) - 1
+    calc.row_at(box, box.x + 4, save_y).should eq(calc.row_save)
+
+    # Back at the top, the vector field is on screen again and the save row has scrolled off.
+    (calc.row_count - 1).times { h.press(Termisu::Input::Key::Up) }
+    mb2 = h.render
+    rows2 = (box.y...box.bottom).map { |y| mb2.row(y) }
+    rows2.any?(&.includes?("vector:")).should be_true
+    rows2.any?(&.includes?("[ use ")).should be_false
+    # The score readout rides the card's TOP BORDER for exactly this reason — it is the one
+    # fact you must see before ↵, and the commit row is not always drawn.
+    calc.set_selected(CvssCalculatorOverlay::ROW_FIRST_M + 5)
+    calc.adjust(2) # vulnerable C → high
+    mb3 = h.render
+    mb3.row(box.y).should contain("high")
+  end
+
   it "keeps every cell inside the card at a narrow terminal width" do
+    seeds = ["CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+             "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"]
     [76, 60, 46].each do |w|
-      area = Rect.new(0, 0, w, 24)
-      calc = CvssCalculatorOverlay.new("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
-      box = calc.overlay_box(area)
-      next unless box
-      mb = OverlayHarness.new(calc, area: area).render
-      (box.y...box.bottom).each do |y|
-        row = mb.row(y)
-        outside = row.each_char.with_index.reject { |(_, x)| x >= box.x && x < box.right }
-        outside.each do |(ch, x)|
-          fail "row #{y} col #{x} painted #{ch.inspect} outside the card at width #{w}" unless ch == ' '
+      seeds.each do |seed|
+        area = Rect.new(0, 0, w, 30)
+        calc = CvssCalculatorOverlay.new(seed)
+        box = calc.overlay_box(area)
+        next unless box
+        mb = OverlayHarness.new(calc, area: area).render
+        (box.y...box.bottom).each do |y|
+          row = mb.row(y)
+          outside = row.each_char.with_index.reject { |(_, x)| x >= box.x && x < box.right }
+          outside.each do |(ch, x)|
+            fail "row #{y} col #{x} painted #{ch.inspect} outside the card at width #{w}" unless ch == ' '
+          end
         end
       end
     end
