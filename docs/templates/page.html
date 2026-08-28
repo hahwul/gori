@@ -9,7 +9,6 @@
 </script>
 <link rel="preload" as="image" type="image/webp" href="{{ base_url }}/images/hero-orbits.webp" fetchpriority="high">
 <main id="main" class="home-main">
-  <div class="hero-glint" aria-hidden="true"><span></span></div>
   <section class="home-hero" aria-labelledby="home-title">
     <div class="hero-copy">
       <p class="home-kicker">{{ "home.kicker" | t }}</p>
@@ -46,18 +45,18 @@
   </section>
 
   <section class="home-paths rv" aria-label="Documentation paths">
-    <div class="path-chain">
-      <a class="path-ring path-ring-lead" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
+    <div class="path-grid">
+      <a class="path-link path-link-lead" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
         <span>{{ "home.path_start_kicker" | t }}</span>
         <h2>{{ "home.path_start_title" | t }}</h2>
         <p>{{ "home.path_start_desc" | t }}</p>
       </a>
-      <a class="path-ring path-ring-mid" href="{{ base_url }}{{ lang_prefix }}/guide/">
+      <a class="path-link" href="{{ base_url }}{{ lang_prefix }}/guide/">
         <span>{{ "home.path_guide_kicker" | t }}</span>
         <h2>{{ "home.path_guide_title" | t }}</h2>
         <p>{{ "home.path_guide_desc" | t }}</p>
       </a>
-      <a class="path-ring path-ring-tail" href="{{ base_url }}{{ lang_prefix }}/reference/">
+      <a class="path-link" href="{{ base_url }}{{ lang_prefix }}/reference/">
         <span>{{ "home.path_ref_kicker" | t }}</span>
         <h2>{{ "home.path_ref_title" | t }}</h2>
         <p>{{ "home.path_ref_desc" | t }}</p>
