@@ -64,7 +64,7 @@ module Gori::Fuzz
   # defined over the payload-VALUE vector, not over a buffer — the only buffer-level operation
   # in `Generator#emit` is the splice itself. So a composite that concatenates its parts'
   # position lists into one vector, and fans a rendered value vector back out to the parts,
-  # leaves `Mode`, `Generator#sniper/battering/pitchfork/cluster`, `Plan.refuse_unusable_chains`
+  # leaves `Mode`, `Generator#sniper/battering/pitchfork/cluster`, `Plan.refuse_unrunnable_chains`
   # and the payload layer working unchanged. `WsScript` made that argument first; this is the
   # same trick with a different splice, so a Pitchfork can lock a header to a typed field.
   #
@@ -134,7 +134,7 @@ module Gori::Fuzz
 
     # Payloads of one field position's set checked against the declaration BEFORE the first
     # dial. A sweep of ten thousand requests needs its refusals up front — the argument
-    # `Plan.refuse_unusable_chains` already makes — and unlike a `¦chain`, "can this type hold
+    # `Plan.refuse_unrunnable_chains` already makes — and unlike a `¦chain`, "can this type hold
     # this text" is answerable with no side effect and no target.
     #
     # Bounded because a payload SET is not: `--brute 'abc:1-8'` is 200 billion values and
@@ -600,7 +600,7 @@ module Gori::Fuzz
 
     # Refuse a run whose payloads the declared type cannot hold, BEFORE the first dial.
     #
-    # `Plan.refuse_unusable_chains` argues the general case one screen away and explains why it
+    # `Plan.refuse_unrunnable_chains` argues the general case one screen away and explains why it
     # does NOT dry-run a chain over a payload: a raise there cannot tell "this converter is
     # broken" from "this converter is fine and this value is not valid input for it". A typed
     # field has no such ambiguity — an `int32` declaration can never hold `abc`, whatever else

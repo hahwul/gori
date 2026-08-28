@@ -114,7 +114,7 @@ module Gori
     # `chain_error` is set when a marked position's inline `¦chain` (a Decoder chain) could
     # not run on THIS payload's bytes — e.g. `shell-escape` on a non-UTF-8 payload, or a
     # `*-decode` on non-alphabet text. The chain resolved fine at template time (an
-    # un-resolvable chain is refused up front by `Plan.refuse_unusable_chains`), but raised
+    # un-resolvable chain is refused up front by `Plan.refuse_unrunnable_chains`), but raised
     # on these specific bytes, so `Template#apply_chains` sent the payload UNTRANSFORMED. That
     # is a different request than the operator declared; the reason rides to the row here so no
     # surface reports it under `0 errors` / `"error":null`. nil = every chain ran (or none).

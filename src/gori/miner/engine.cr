@@ -19,6 +19,7 @@ module Gori::Miner
   # `spec/outbound_spec.cr`'s executable one-home guard reads `src/gori/<tool>/engine.cr` for
   # the call. Both loops ask this; neither names a refusal constant of its own.
   def self.permanent_refusal?(err : String?) : Bool
+    return true if err.try(&.starts_with?(HookBackend::HOOK_ERROR_PREFIX))
     err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
   end
 

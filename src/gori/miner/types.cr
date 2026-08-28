@@ -197,6 +197,16 @@ module Gori
       property max_requests : Int64?    # hard cap on total sends
       property? add_content_length_when_missing : Bool
       property user_wordlist : String?
+      # The operator's per-request transform HOOK (#818/#846): an argv command that receives
+      # the assembled request on stdin and returns the request to actually send on stdout. nil
+      # = no hook, the default. This is the miner's answer to a signed API — an app that
+      # requires every parameter to carry an HMAC, a signed envelope or a per-request nonce
+      # rejects every raw candidate before the miner learns anything, so without a hook it
+      # cannot be mined at all. The command is `ProcessHook`-run (no shell, argv exec'd
+      # directly), the same primitive the Rewriter/Decoder/Probe seams use (P1). Validated at
+      # `Plan.build` so a bad argv is a `PlanError` before the run starts, not a per-worker
+      # surprise. See `Miner::HookBackend` for the timeout unit and where the cost lands.
+      property hook : String?
       property notify : NotifyMode
       # Reuse one HTTP/1.1 connection across the run's sends (`Repeater::ConnPool`, wired in
       # `Plan.build`) instead of dialing a fresh one per probe. ON by default, as it is for the
@@ -227,6 +237,7 @@ module Gori
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds,
                      @stability_rounds = 4, @confirm_rounds = 2, @max_requests = nil,
                      @add_content_length_when_missing = false, @user_wordlist = nil,
+                     @hook = nil,
                      @notify = NotifyMode::WhenFound, @keep_alive = true)
       end
 

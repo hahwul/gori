@@ -5,6 +5,7 @@
 require "./miner/types"
 require "./miner/wordlist"
 require "./miner/inject"
+require "./miner/hook_backend"
 require "./miner/detect"
 require "./miner/fingerprint"
 require "./miner/baseline"

@@ -55,7 +55,7 @@ module Gori::Decoder
   end
 
   # Why this exec step cannot run, or nil when it can. The shared validator behind every
-  # pre-send refusal — see `Fuzz::Plan.refuse_unusable_chains`.
+  # pre-send refusal — see `Fuzz::Plan.refuse_unrunnable_chains`.
   def self.exec_step_error(token : String) : String?
     spec = exec_spec(token)
     return nil if spec.nil?

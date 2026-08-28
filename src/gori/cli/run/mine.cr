@@ -23,6 +23,7 @@ module Gori
         timeout : Time::Span? = nil
         retries = 1
         max_requests : Int64? = nil
+        hook : String? = nil
         keep_alive = true
         format = :text
         allow_unscoped = false
@@ -49,6 +50,7 @@ module Gori
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
+          p.on("--hook=ARGV", "Transform each assembled request through an external command (argv, no shell) before it is sent — for signed/HMAC'd APIs") { |v| hook = v }
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($NAME)") { |v| bind_from = parse_flow_id(v, "gori run mine") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
@@ -81,6 +83,7 @@ module Gori
         config.retries = retries
         config.max_requests = max_requests
         config.user_wordlist = wordlist
+        config.hook = hook
         config.keep_alive = keep_alive
         # `--locations=` with no usable value (empty, or only blanks/commas) is an operator
         # mistake, not a request to auto-detect — abort instead of silently mining defaults.
@@ -148,6 +151,8 @@ module Gori
           "no candidate parameter names to mine"
         in Miner::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
+        in Miner::PlanError::Reason::HookArgv
+          "--hook command does not parse: #{ex.detail}"
         end
       end
 

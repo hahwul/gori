@@ -735,8 +735,8 @@ describe Gori::Tui::RepeaterView do
   end
 
   # A §…§ marker whose `¦chain` cannot run must REFUSE the send with a named ChainError
-  # (mirroring Fuzz::Plan#refuse_unusable_chains) — never drop the raw, untransformed value
-  # onto the wire. See RepeaterView#refuse_unrunnable_chains.
+  # (mirroring Fuzz::Plan#refuse_unrunnable_chains) — never drop the raw, untransformed value
+  # onto the wire. See RepeaterView#refuse_chains → Fuzz::Plan.refuse_unrunnable_chains.
   it "refuses a §…§ send whose ¦chain names a MISSING converter (no bytes on the wire)" do
     view = RepeaterView.new
     view.restore("https://a.test",

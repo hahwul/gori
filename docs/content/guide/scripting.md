@@ -104,6 +104,7 @@ whole extension surface, and it is the same primitive at three seams.
 | Rewriter `pipe` op | Rewriter tab, `gori run rewriter add --op=pipe`, MCP `create_rule` | The matched region goes to the command; its stdout replaces it, live in the proxy |
 | Decoder `exec:` step | Decoder tab chain, `gori run decoder`, `§value¦chain§` markers | One chain step is a command instead of a converter |
 | Probe `exec` rule | Probe rules, `gori run probe rules add --exec` | The region goes to the command; exit 0 raises a finding, stdout is the evidence |
+| Miner `--hook` | `gori run mine --hook`, MCP `mine_start` `hook` | The whole assembled request goes to the command; its stdout is the request that ships — one hook per probe |
 
 ```bash
 # Re-sign every JWT leaving the browser, with your own signer.
@@ -115,6 +116,9 @@ gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$
 
 # Let a real detector decide, instead of a regex.
 gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
+
+# Mine hidden parameters on a signed API: sign every probe before it ships.
+gori run mine 42 --locations=query --hook './sign.sh'
 ```
 
 **The command is exec'd directly. There is no shell.** `argv` is tokenized with quote and
@@ -132,6 +136,17 @@ never cost you a flow. In the Rewriter the timeout is a *budget* shared by every
 every match in one rewrite, so a pattern matching four hundred times — or four pipe rules on one
 head — still costs that rewrite one timeout. A message is rewritten twice (its head and its
 body), so that is the bound it sees.
+
+**The Miner's hook runs once per probe, and pays for a signed API.** An app that requires every
+parameter to carry an HMAC, a signed envelope or a per-request nonce rejects a raw candidate
+before it can react to it, so without a hook there is nothing to mine — every probe looks the
+same. `--hook` hands each assembled request (candidate injected, session bindings already
+resolved) to your command, and its stdout is what ships; a hook that cannot run **skips that
+probe with a reason** rather than sending an unsigned request that the app would reject and the
+miner would then read as a clean negative. The timeout is the same `hooks.timeout_secs` budget,
+**per outbound request** — and a mine's request count is bounded by `--max-requests` and its own
+bucket/bisection/confirm tree, so the total hook cost is bounded with it. The miner is
+latency-bound (it counts round-trips), so a hook adds one fork-and-wait to each of them.
 
 **Two things hooks are deliberately not wired into.** The MCP `decode` tool refuses an `exec:`
 step (saved chains included) — it is exposed read-only and unbound, and stays pure compute; an

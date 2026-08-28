@@ -830,7 +830,7 @@ describe "MCP fuzz_results — a failed row is stored, not silently dropped" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       # `gzip-decompress` over a payload that is not gzip: the chain resolves fine at template
-      # time (so `refuse_unusable_chains` lets the run start) and raises on THESE bytes, which
+      # time (so `refuse_unrunnable_chains` lets the run start) and raises on THESE bytes, which
       # is exactly the per-payload case `chain_error` exists for. `filter: {status: "200"}`
       # makes every row unmatched, which is what used to erase them.
       start = call_json(tools, "fuzz_start",

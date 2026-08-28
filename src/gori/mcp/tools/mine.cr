@@ -208,6 +208,7 @@ module Gori
         cap = optional_int_arg(h, "max_requests")
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
+        config.hook = str(h, "hook").presence
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         config.keep_alive = bool_arg(h, "keep_alive", true)
         options = Miner::PlanOptions.new(text,
@@ -249,6 +250,8 @@ module Gori
           "no candidate parameter names to mine"
         in Miner::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
+        in Miner::PlanError::Reason::HookArgv
+          "hook command does not parse: #{ex.detail}"
         end
       end
 
@@ -316,6 +319,7 @@ module Gori
           s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
           s.field "max_requests", intprop("caller cap on total requests")
+          s.field "hook", strprop("transform each assembled request through an external command (argv, no shell — e.g. \"./sign.sh\") before it is sent; its stdout is the request that ships. For a signed/HMAC'd/nonce API where a raw candidate is rejected before the miner learns anything. A hook that fails to run SKIPS the candidate with a reported reason (never a clean negative). One #{Gori::Settings.hook_timeout_secs}s (settings.hooks.timeout_secs) budget PER request; a mine's request count is bounded by max_requests, so the total hook cost is too.")
           s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection across the mine's probes (default true) — one TCP/TLS handshake per worker instead of per probe, which is most of a mine's wall clock. Set false to dial a fresh connection per probe, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection).")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
         end

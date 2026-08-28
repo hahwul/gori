@@ -73,7 +73,7 @@ module Gori::Decoder
     #
     # A token that is neither a built-in nor a saved name makes the chain unusable: leaving
     # it "as typed" registered the entry with `unusable: nil`, so `Fuzz::Plan`'s up-front
-    # `refuse_unusable_chains` never fired and `Template#apply_chains` sent the payload
+    # `refuse_unrunnable_chains` never fired and `Template#apply_chains` sent the payload
     # untransformed (a typo'd `url-encode > nosuchthing` put a raw space on the wire).
     # Marking it here surfaces the same "unknown converter" answer the plan gate already
     # knows how to report — before the first dial.

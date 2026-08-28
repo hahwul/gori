@@ -3,6 +3,7 @@ require "json"
 require "mime/multipart"
 require "./types" # Location, which apply's own signature names
 require "../fuzz/content_length"
+require "../process_hook"
 
 module Gori::Miner
   # Adds candidate parameters to a request at a chosen location, keeping everything
@@ -25,6 +26,36 @@ module Gori::Miner
       "host", "content-length", "connection", "transfer-encoding",
       "te", "upgrade", "keep-alive", "expect",
     }
+
+    # The injection seam's LAST step (#818/#846): run the operator's per-request transform hook
+    # over an ASSEMBLED request — candidate already injected, session bindings already resolved
+    # — and return the bytes to actually send, or a failure reason when the hook could not run.
+    #
+    # This is what lets a signed API be mined at all: an app that requires every parameter to
+    # carry an HMAC or a signed envelope rejects every raw candidate before the miner learns
+    # anything, so the hook is the operator's chance to sign/wrap each probe as their engagement
+    # requires. `ProcessHook.run` is the same primitive the Rewriter `pipe`, the Decoder `exec:`
+    # step and the Probe `exec` rule use — no shell, argv exec'd directly (P1).
+    #
+    # FAILURE IS A SKIP, NEVER A CLEAN NEGATIVE. On a spawn failure, timeout, non-zero exit or
+    # oversized output this returns `{nil, reason}` and the caller SKIPS the candidate with that
+    # reason (`Miner::HookBackend` turns it into an errored send `Result`, which every miner send
+    # site already refuses to read as a clean miss — #818 made this argument for Probe's `exec`
+    # rule and it holds identically here: a hook that never ran must not make a candidate look
+    # like a confirmed absence). A successful run returns `{stdout, nil}`.
+    #
+    # Note `ok?` excludes an `output_lost` result, so an empty `stdout` here is a hook that
+    # deliberately produced an empty request, not a dropped one — the same guarantee the
+    # Rewriter relies on to never splice "" onto the wire.
+    def self.hook(request : Bytes, argv : Array(String), timeout : Time::Span,
+                  env : Hash(String, String)? = nil) : {Bytes?, String?}
+      res = ProcessHook.run(argv, request, timeout, env)
+      if res.ok?
+        {res.stdout, nil}
+      else
+        {nil, res.failure}
+      end
+    end
 
     # Add `params` ({name, value}) to `request` at `location`, byte-exact otherwise.
     def self.apply(request : Bytes, location : Location,
