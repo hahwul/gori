@@ -89,7 +89,12 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
-      @diff.ready? ? "a/b pick · s swap · r run · v lens · ↵ to Comparer" : "a pick the baseline project"
+      return "a pick the baseline project" unless @diff.ready?
+      base = "a/b pick · s swap · r run · v lens"
+      # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
+      # lens can empty the list. Naming a key that would do nothing is the hint lying about
+      # what the tab can do — which it already did for `↵` before these two joined it.
+      @diff.selected_row ? "#{base} · ↵ Comparer · ⇧F issue · n note" : base
     end
 
     # --- verbs ---------------------------------------------------------------
@@ -184,6 +189,62 @@ module Gori::Tui
       ensure
         store.close if owned
       end
+    end
+
+    # --- record: a row leaves the tab as an Issue or a Note --------------------
+
+    # {the flow id a record from this row may link to, a builder for the record itself}.
+    #
+    # A record is written to the project that is OPEN — the only store this TUI holds a
+    # writer on — and `entity_links.ref_id` is a bare rowid with no project column. So the
+    # linkable side is whichever slot names the open project (B by default, A after `s`),
+    # and the other side's capture is NAMED in the body rather than linked to a rowid that
+    # means a different flow here. nil when there is no row under the cursor, or a slot is
+    # empty (both of which the caller reports rather than filing an unanchored record).
+    #
+    # A BUILDER rather than a finished draft, because the body prints "linked to this
+    # record" and that is an evidence claim: only the caller knows whether the link write
+    # actually landed, and it cannot know until after it has run (a note has to exist before
+    # anything can be linked to it). One nil check, one gate, and the text is built from what
+    # happened rather than from what was intended.
+    def selected_record : {Int64?, Proc(Bool, Gori::Diff::Record::Draft)}?
+      row = @diff.selected_row || return nil
+      a = @diff.slot(:a) || return nil
+      b = @diff.slot(:b) || return nil
+      home, flow_id = home_side(row, a, b)
+      build = ->(linked : Bool) {
+        Gori::Diff::Record.draft(row, Gori::Diff::Record::Context.new(a.name, b.name, home,
+          linked: linked, a_path: a.db_path, b_path: b.db_path))
+      }
+      {flow_id, build}
+    end
+
+    # {the side that names the OPEN project, the flow id a record may link to}. The side is
+    # reported even when the flow is not linkable, because "the capture was pruned" and "the
+    # capture is in the other engagement's database" are two different things to tell the
+    # reader of the record (see `Diff::Record::Context`).
+    #
+    # The flow is re-checked against the store rather than trusted: the report is a SNAPSHOT
+    # taken at `r`, and a capture deleted since (a retention prune, a `history delete`, a
+    # peer session) must not become a link row pointing at a rowid SQLite will later hand to
+    # an unrelated flow. Same guard `create_issue_from_form` puts on its extra flow ids.
+    private def home_side(row : Gori::Diff::Row, a : Project,
+                          b : Project) : {Gori::Diff::Record::Side?, Int64?}
+      session_path = @host.session.project.db_path
+      # B first: it is the open project by default, and after `s` moves it to A the check
+      # below catches that. Both slots naming it is impossible — `run` refuses that pair.
+      if b.db_path == session_path
+        return {Gori::Diff::Record::Side::B, linkable_flow(row.b)}
+      elsif a.db_path == session_path
+        return {Gori::Diff::Record::Side::A, linkable_flow(row.a)}
+      end
+      {nil, nil}
+    end
+
+    private def linkable_flow(facts : Gori::Diff::Facts?) : Int64?
+      return nil unless facts
+      id = facts.sample_flow_id
+      @host.session.store.flow_row(id) ? id : nil
     end
 
     # A read-only, non-indexing open of a project this TUI is not capturing into. Retention

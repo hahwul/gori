@@ -3,6 +3,7 @@ require "./diff/snapshot"
 require "./diff/compare"
 require "./diff/report"
 require "./diff/render"
+require "./diff/record"
 
 module Gori
   # The retest axis: diff two SNAPSHOTS at endpoint scale — "what changed since the last

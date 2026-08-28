@@ -1117,6 +1117,14 @@ private class FakeContext < ExecContext
     @calls << :diff_to_comparer
   end
 
+  def diff_issue : Nil
+    @calls << :diff_issue
+  end
+
+  def diff_note : Nil
+    @calls << :diff_note
+  end
+
   def diff_rows_shown? : Bool
     true
   end

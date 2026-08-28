@@ -381,6 +381,15 @@ module Gori::Tui
       @dirty = true
     end
 
+    # Replace the ACTIVE note's text. For a record written from another tab (the retest
+    # Diff's `n`), which arrives whole rather than being typed — and which is written AFTER
+    # its evidence link, so the body cannot claim a link the store refused. Marks dirty, so
+    # the caller's `save` is what persists it.
+    def set_current_text(text : String) : Nil
+      current.area.set_text(text)
+      @dirty = true
+    end
+
     # Content-only clone of the active note into a new sibling (new id; no entity_links).
     def duplicate_current : Nil
       text = current.area.text

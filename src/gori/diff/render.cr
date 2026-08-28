@@ -1,4 +1,5 @@
 require "json"
+require "./record"
 require "./report"
 
 module Gori::Diff
@@ -67,7 +68,10 @@ module Gori::Diff
       end
     end
 
-    private def self.facts_line(f : Facts) : String
+    # PUBLIC because `Diff::Record` prints the same line into an Issue/Note body. A second
+    # spelling of "what did this side answer with" is how one report's summary and the
+    # deliverable filed from it come to describe different responses.
+    def self.facts_line(f : Facts) : String
       parts = [] of String
       parts << Compare.status_label(f)
       cts = f.sorted_content_types
@@ -163,7 +167,10 @@ module Gori::Diff
       row.changes.each { |c| io << "  - " << c << '\n' }
     end
 
-    private def self.endpoint_label(key : Key) : String
+    # PUBLIC for `Render.facts_line`'s reason: `Diff::Record` names the same endpoint in an
+    # Issue title, and one spelling is what keeps the pasted report and the filed issue
+    # pointing at the same row.
+    def self.endpoint_label(key : Key) : String
       "#{key.method} #{key.host}#{key.path}"
     end
 
@@ -225,10 +232,14 @@ module Gori::Diff
         end
         j.field("caveats") { j.array { r.caveats.each { |c| j.string c } } }
         j.field("scope_mismatch", r.scope_mismatch?)
+        # ONE context for the whole array. `Record::Context` scrubs its labels on
+        # construction (a regex per label), and building it per row costs that twice over
+        # every endpoint in a report that can carry ten thousand of them.
+        ctx = Record::Context.new(r.a.label, r.b.label)
         j.field("endpoints") do
           j.array do
             r.rows.each do |row|
-              row_json(j, row) if verdicts.includes?(row.verdict)
+              row_json(j, row, ctx) if verdicts.includes?(row.verdict)
             end
           end
         end
@@ -257,9 +268,14 @@ module Gori::Diff
       end
     end
 
-    private def self.row_json(j : JSON::Builder, row : Row) : Nil
+    private def self.row_json(j : JSON::Builder, row : Row, ctx : Record::Context) : Nil
       j.object do
         j.field "verdict", row.verdict.label
+        # The one sentence saying what this row is evidence OF — verbatim the sentence a TUI
+        # operator's Issue/Note carries (`Diff::Record.observation`). An agent reading this
+        # array and calling `create_issue` off it has the coverage-gap caveat AT THE ROW, not
+        # only in the report-level `caveats`, which is the level a per-row loop never reads.
+        j.field "observation", Record.observation(row, ctx)
         j.field "host", row.key.host
         j.field "method", row.key.method
         j.field "path", row.key.path

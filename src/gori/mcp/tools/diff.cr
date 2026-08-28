@@ -170,10 +170,13 @@ module Gori
           "equality, so a dynamic page is not a finding. " \
           "Returns {a,b:{label,flows,endpoints,hosts,first_seen,last_seen,scope_rules,truncated}, " \
           "counts:{added,gone,changed,unchanged,removed}, caveats[], scope_mismatch, " \
-          "endpoints:[{verdict,host,method,path,a,b,changes[]}], issues:[…]}. " \
+          "endpoints:[{verdict,observation,host,method,path,a,b,changes[]}], issues:[…]}. " \
           "READ THE VERDICTS EXACTLY: 'removed' means the newer project captured NO request " \
           "to that endpoint — a coverage gap, NOT evidence it was deleted; 'gone' is the " \
-          "confirmed case (the newer capture asked and got 404/410). Each side carries a " \
+          "confirmed case (the newer capture asked and got 404/410). Every row carries an " \
+          "'observation': one sentence naming what that row IS and IS NOT evidence of, worded " \
+          "for a report — quote or paraphrase it when filing an issue from a row rather than " \
+          "restating the verdict yourself. Each side carries a " \
           "sample_flow_id, which compare_flows/get_flow take for the byte-level detail. " \
           "Pure read: no network, nothing written — re-confirming a finding is a send_request " \
           "you make deliberately." do |s|
