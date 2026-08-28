@@ -182,6 +182,10 @@ A descriptor set is itself protobuf, so gori parses one with its own decoder and
 
 A gap in the schema is distinguished from a conflict with it: an enum value with no name, or a message type the set does not carry, is a note saying the schema is short — not a claim that the bytes are wrong. With no descriptor set loaded, every surface renders exactly what it did before.
 
+**Editing a field, not a byte.** With the schema loaded, the Repeater's gRPC tab grows a second editor over the same payload. `␣E` — the `␣E:FIELDS` chip on the request card — lists the message as named, typed rows; `↵` on one opens a value field. Type a value, apply, and gori re-encodes **that field** and copies every other byte of the message straight from the capture. The declaration is what makes that possible: the wire says a field is a varint, not whether it is an `int32` (sign-extended), a `bool`, an `enum` or a zigzag `sint32`, and `-3` is a different set of octets in each. `bytes` is edited as hex, an enum takes its own value name, and a packed run is a comma-separated list. Applying an unchanged value gives the capture back byte for byte. Unary calls only, for the reason `^X` is one: a 0- or multi-message body has no single payload to edit. A nested message is editable field by field; the row for the message itself is not.
+
+**A row you cannot type into says why.** An `(undeclared)` field number and a wire type the schema contradicts both stay read-only and keep their raw reading — there is nothing to type them *as*, and offering a typed editor there would be the guess the lens exists to avoid. `^X` is still how you change those octets, and still the way to send something the schema calls impossible. The `␣F:FRAME` toggle governs the 5-byte length prefix in front of an edited message exactly as it does after a hex edit.
+
 gRPC **server reflection** — fetching the descriptors from the target instead of a file — is not implemented yet. It is an outbound request, so when it lands it will be operator-initiated and gated by project scope like every other active send.
 
 ### MessagePack and CBOR {#binary-documents}

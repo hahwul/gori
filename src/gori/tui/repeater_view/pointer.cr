@@ -76,6 +76,9 @@ class Gori::Tui::RepeaterView
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
                  # the captured one in front of it (DESIGN.md §7).
                  b << {:grpc_reframe, "␣F", "FRAME"} if @grpc_reframable
+                 # Same condition `render_request` draws it under, so the live cells are
+                 # exactly the painted ones — the rule this list already keeps for FRAME.
+                 b << {:grpc_fields, "␣E", "FIELDS"} if grpc_fields_available?
                  b
                elsif ws_mode?
                  WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from
@@ -91,7 +94,11 @@ class Gori::Tui::RepeaterView
       # gRPC head are all mode-switched text editors. Hex is the exception and draws none (a
       # nibble cursor has no READ/INS), so hit-testing one there would invent a live cell over
       # a badge that was never painted — the inverse of the dead `␣K:KEY` this pass fixed.
-      unless @req_hex_edit
+      # …and none while the FIELDS form is up, for the same reason: `render_request`'s
+      # `elsif @grpc_fields` branch draws the three gRPC chips and then the form, never
+      # `Frame.mode_badge` — so hit-testing one here would answer clicks on cells nothing
+      # painted, and drop the hidden head editor into INSERT.
+      unless @req_hex_edit || @grpc_fields
         mode_edge = Frame.right_badge_edge(right_edge, min_x, badges)
         if Frame.mode_badge_hit(mx, my, req_card.y, mode_edge, min_x, request_insert?)
           return :mode
@@ -180,7 +187,10 @@ class Gori::Tui::RepeaterView
   # direction was ever wrong.) Inverting against the new rect selected a token about a third of
   # a column below the pointer; spreading from the caret inherits press 1's correct inverse.
   def request_select_word : Bool
-    return false unless @loaded && !@req_hex_edit
+    # `@grpc_fields` alongside `@req_hex_edit`: neither pane is showing the head editor, so a
+    # double-click would build a READ selection nothing paints, nothing can copy, and that
+    # outlives the form — the same invisible no-op `place_request_caret` returns early for.
+    return false unless @loaded && !@req_hex_edit && !@grpc_fields
     ed = req_editor
     request_insert? ? ed.select_word_at_cursor : @req_read.select_word_at_cursor(ed)
   end
@@ -192,6 +202,14 @@ class Gori::Tui::RepeaterView
     if h = @req_hex_edit
       return if selecting # a nibble cursor has no selection to drag
       h.click_to_nibble(inner, mx, my, @scroll_req)
+      return
+    end
+    if @grpc_fields
+      # A click picks the ROW under the pointer. The form has no text caret to place, and
+      # placing one in the hidden head editor is the invisible no-op this branch exists to
+      # avoid — the same reason the hex branch above answers for itself.
+      return if selecting
+      grpc_field_click(inner, my)
       return
     end
     ed = req_editor

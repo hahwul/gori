@@ -17,7 +17,9 @@ class Gori::Tui::RepeaterView
 
   def pane_insert?(pane : Symbol) : Bool
     case pane
-    when :request then request_insert? || request_hex? || chain_pane_active?
+    # `grpc_fields_editing?` — a value being TYPED into the FIELDS form is the same kind of
+    # state as INS in the editor: a keystroke belongs to it, not to the tab ring.
+    when :request then request_insert? || request_hex? || chain_pane_active? || grpc_fields_editing?
     when :target  then target_insert? || editing_sni?
     else               false
     end
@@ -112,6 +114,11 @@ class Gori::Tui::RepeaterView
     when :request
       if h = @req_hex_edit
         h.at_top?
+      elsif @grpc_fields
+        # The FIELDS form's own caret, not the head editor's. Reading `@editor.at_top?` here
+        # meant ↑ ejected to the TARGET band on the very first press — the head's caret sits
+        # at line 0 the whole time the form is up, so the selection could never move upward.
+        @grpc_field_sel <= 0
       elsif req_split? && @req_pane == :decoded
         false
       else

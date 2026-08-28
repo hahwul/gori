@@ -377,6 +377,14 @@ module Gori
         "repeater.toggle-grpc-reframe", "Toggle gRPC reframe",
         "gRPC: recompute the 5-byte length prefix over the payload actually being sent (ON by default in this tab, so a ^X hex edit produces a well-formed unary message; turn it OFF to send the captured prefix, which is the `gori run repeater send` default and a standard parser test). Unary only — a 0-/multi-message body is sent verbatim either way",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'F', section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
+      # gRPC tab only, and no chord for the same reason `␣F` and `␣K` have none: the ctrl-
+      # space in Repeater is dense, this is a per-payload decision rather than a mid-edit key,
+      # and the GRPC REQUEST pane carries a `␣E:FIELDS` badge wherever the form is available —
+      # so the state is on screen (and clickable) without opening the menu.
+      r.register Verb::Definition.new(
+        "repeater.toggle-grpc-fields", "Toggle gRPC field editor",
+        "gRPC: edit the request message BY FIELD through the loaded .proto — pick a schema-known field, type a value, and the message is re-encoded with every other byte copied from the capture. Needs a descriptor set that declares this rpc (Project → Proto schema) and a unary call; a field the schema does not declare, or one whose wire type it contradicts, stays read-only and is edited with ^X",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'E', section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
       r.register Verb::Definition.new(
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
