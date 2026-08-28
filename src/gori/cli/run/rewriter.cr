@@ -9,6 +9,7 @@ module Gori
         when "enable"       then cmd_rewriter_set_enabled(true, args[1..])
         when "disable"      then cmd_rewriter_set_enabled(false, args[1..])
         when "preview"      then cmd_rewriter_preview(args[1..])
+        when "preset"       then cmd_rewriter_preset(args[1..])
         when "list"         then cmd_rewriter_list(args[1..])
         when "extract"      then cmd_rewriter_extract(args[1..])
         when "bindings"     then cmd_rewriter_bindings(args[1..])
@@ -19,9 +20,123 @@ module Gori
           else
             STDERR.puts "gori run rewriter: unknown subcommand '#{sub}'"
             STDERR.puts "Usage: gori run rewriter [list options] | add | rm|delete <id> | enable <id> | disable <id> | preview"
+            STDERR.puts "       gori run rewriter preset [list | add <name>]"
             STDERR.puts "       gori run rewriter extract [list|add|rm|enable|disable] | bindings"
             exit 1
           end
+        end
+      end
+
+      # --- response-modification presets (#821) --------------------------------
+      #
+      # `gori run rewriter preset list` / `preset add <name>` mirror the Rewriter tab's
+      # preset picker and the MCP `create_rule_from_preset` tool over the ONE catalog
+      # (`Gori::RulePresets`), so a preset means the identical rule set on every surface. A
+      # preset installs ordinary editable rules — nothing the CLI writes here is different
+      # from a hand-authored `rewriter add`, which is the point (P1/P4).
+
+      private def self.cmd_rewriter_preset(args : Array(String)) : Nil
+        case sub = args.first?
+        when "list", nil then cmd_rewriter_preset_list(args[1..]? || [] of String)
+        when "add"       then cmd_rewriter_preset_add(args[1..])
+        else
+          if (s = sub) && s.starts_with?('-')
+            cmd_rewriter_preset_list(args)
+          else
+            STDERR.puts "gori run rewriter preset: unknown subcommand '#{sub}'"
+            STDERR.puts "Usage: gori run rewriter preset [list] | add <name>"
+            exit 1
+          end
+        end
+      end
+
+      private def self.cmd_rewriter_preset_list(args : Array(String)) : Nil
+        format = :text
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter preset list\n\n" \
+                     "Lists the response-modification presets. Install one with\n" \
+                     "  gori run rewriter preset add <name>"
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run rewriter preset list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter preset list: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        presets = Gori::RulePresets.all
+        if format == :json
+          puts(JSON.build do |j|
+            j.array do
+              presets.each do |ps|
+                j.object do
+                  j.field "key", ps.key
+                  j.field "name", ps.name
+                  j.field "description", ps.description
+                  j.field "rules", ps.rules.size
+                end
+              end
+            end
+          end)
+        else
+          presets.each do |ps|
+            puts "#{ps.key}  (#{ps.summary})"
+            puts "  #{ps.name} — #{ps.description}"
+          end
+        end
+      end
+
+      private def self.cmd_rewriter_preset_add(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        disabled = false
+        scope = Store::RuleScope::Project
+        leftover = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run rewriter preset add <name> [options]\n\n" \
+                     "Installs a preset's rules as ordinary Match & Replace rules — visible,\n" \
+                     "editable and disable-able like any other. Run `preset list` for names."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
+          p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| leftover = before + after }
+          p.invalid_option { |f| abort "gori run rewriter preset add: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run rewriter preset add: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        name = leftover.first?
+        abort "gori run rewriter preset add: a preset name is required (see `preset list`)" if name.nil? || name.empty?
+        preset = Gori::RulePresets.find(name) ||
+                 abort("gori run rewriter preset add: unknown preset '#{name}' (available: #{Gori::RulePresets.keys.join(", ")})")
+
+        if scope.global?
+          committed = 0
+          preset.rules.each do |spec|
+            id = Settings.add_rewriter_rule(spec.target.label, spec.part.label, spec.pattern,
+              spec.replacement, spec.op.label, spec.match_kind.label, spec.name, "", "", !disabled)
+            committed += 1 unless id == 0
+          end
+          abort "gori run rewriter preset add: failed to persist rules (settings not writable)" if committed == 0
+          puts "Installed preset \"#{preset.name}\": #{committed} global rule#{committed == 1 ? "" : "s"}#{disabled ? " (disabled)" : ""} — they apply in every project."
+          return
+        end
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          committed = 0
+          preset.rules.each do |spec|
+            id = store.insert_rule(spec.target, spec.part, spec.pattern, spec.replacement,
+              spec.op, spec.match_kind, spec.name, "", !disabled)
+            committed += 1 unless id == 0
+          end
+          abort "gori run rewriter preset add: failed to persist rules (store busy or unwritable)" if committed == 0
+          puts "Installed preset \"#{preset.name}\": #{committed} rule#{committed == 1 ? "" : "s"}#{disabled ? " (disabled)" : ""} added."
+        ensure
+          store.close
         end
       end
 

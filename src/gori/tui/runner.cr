@@ -4236,6 +4236,26 @@ module Gori::Tui
       open_overlay(ov)
     end
 
+    # Host: open the response-modification preset picker (#821). A `LibraryPicker` for the same
+    # reason the chain-load and session-slot pickers are — a filterable name+detail list — over
+    # the static `RulePresets` catalog. The detail column is the preset's description, so the
+    # card explains each option the way the LOAD CHAIN card shows a saved chain's spec. Read
+    # only: picking one hands the preset to the controller, which installs it as ordinary rules.
+    def open_rewriter_preset_picker : Nil
+      presets = Gori::RulePresets.all
+      rows = presets.map_with_index do |ps, i|
+        LibraryPicker::Row.new(i, ps.name, "#{ps.summary} · #{ps.description}")
+      end
+      lp = LibraryPicker.new("ADD FROM PRESET", rows, "preset", "install")
+      lp.on_commit = -> {
+        if (i = lp.selected_index) && (ps = presets[i]?)
+          rewriter_controller.install_preset(ps)
+        end
+        true
+      }
+      open_overlay(lp)
+    end
+
     # Host: open the Colormarker (row-colour) rule popup (nil rule = add; else edit).
     # Two couplings injected for the same reason the Rewriter's one is: the form stays
     # store-free. `on_preview` scans recent flows for the match count, and `on_hosts` supplies

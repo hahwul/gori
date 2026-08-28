@@ -149,6 +149,80 @@ module Gori
         err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
       end
 
+      # The response-modification preset catalog (#821), read-only, so it sits with the other
+      # list tools rather than behind the action gate. `create_rule_from_preset` installs one.
+      private def list_rule_presets : Result
+        Result.new(JSON.build do |j|
+          j.array do
+            Gori::RulePresets.all.each do |ps|
+              j.object do
+                j.field "key", ps.key
+                j.field "name", ps.name
+                j.field "description", ps.description
+                j.field "rules" do
+                  j.array do
+                    ps.rules.each do |spec|
+                      j.object do
+                        j.field "target", spec.target.label
+                        j.field "part", spec.part.label
+                        j.field "op", spec.op.label
+                        j.field "match", spec.match_kind.label
+                        j.field "pattern", spec.pattern
+                        j.field "replacement", spec.replacement
+                        j.field "name", spec.name
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
+
+      # Install a preset's rules as ordinary Match & Replace rules, through the SAME
+      # `insert_rule` / `Settings.add_rewriter_rule` path `create_rule` uses (P1) — an installed
+      # rule is indistinguishable from a hand-authored one and is editable/disable-able/
+      # deletable (P4). Returns the ids created; a partial write (some rows committed, one
+      # refused) reports what landed rather than pretending it was all-or-nothing.
+      private def create_rule_from_preset(h) : Result
+        key = str(h, "preset")
+        return err("missing required 'preset' (see list_rule_presets)", "INVALID_ARGUMENT", field: "preset") if key.nil? || key.empty?
+        preset = Gori::RulePresets.find(key)
+        return err("unknown preset '#{key}' (available: #{Gori::RulePresets.keys.join(", ")})", "INVALID_ARGUMENT", field: "preset") unless preset
+        scope = rule_scope(h)
+        return scope if scope.is_a?(Result)
+        enabled = bool_arg(h, "enabled", true)
+
+        ids = [] of Int64
+        preset.rules.each do |spec|
+          id =
+            if scope.global?
+              Settings.add_rewriter_rule(spec.target.label, spec.part.label, spec.pattern,
+                spec.replacement, spec.op.label, spec.match_kind.label, spec.name, "", "", enabled)
+            else
+              store.insert_rule(spec.target, spec.part, spec.pattern, spec.replacement,
+                spec.op, spec.match_kind, spec.name, "", enabled)
+            end
+          ids << id unless id == 0
+        end
+        if ids.empty?
+          return busy(scope.global? ? "failed to persist preset rules (settings not writable)" : "failed to persist preset rules (store busy or unwritable)")
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "preset", preset.key
+            j.field "name", preset.name
+            j.field "scope", scope.label
+            j.field "enabled", enabled
+            j.field "created", ids.size
+            j.field "ids" { j.array { ids.each { |id| j.number id } } }
+          end
+        end)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid preset arguments", "INVALID_ARGUMENT")
+      end
+
       private def update_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -629,6 +703,13 @@ module Gori
           s.field "scope", strprop("show only project | global rules (default: both)")
         end
 
+        tool j, "list_rule_presets",
+          "List the response-modification PRESETS (#821): named starting points that install " \
+          "ordinary Match & Replace rules — unhide hidden form fields, enable disabled/readonly " \
+          "controls, remove maxlength, strip client-side validation, drop CSP / security headers, " \
+          "disable SRI. Each entry lists the exact rules it would install. Install one with " \
+          "create_rule_from_preset; the result is plain editable rules, nothing hidden." { }
+
         tool j, "list_extract_rules",
           "List the project's EXTRACT rules — the read half of a session binding. Each one " \
           "observes a response and binds one named value ($SESSION) in memory, which a Match & " \
@@ -654,6 +735,16 @@ module Gori
           s.field "name", strprop("optional label for the rule")
           s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts)")
           s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
+        end
+
+        tool j, "create_rule_from_preset",
+          "Install a response-modification preset (see list_rule_presets) as ordinary Match & " \
+          "Replace rules — the same result as create_rule called once per rule, so they are " \
+          "visible, editable and disable-able afterwards. Returns the ids created. Note: a gori " \
+          "TUI already running applies them only after its rules reload." do |s|
+          s.field "preset", strprop("the preset key from list_rule_presets (e.g. 'unhide-hidden-fields', 'remove-csp')"), required: true
+          s.field "scope", strprop("project (default) | global — global rules live in settings.json and apply in EVERY project")
+          s.field "enabled", boolprop("install the rules already enabled (default true); pass false to install them disabled for review before they touch traffic")
         end
 
         tool j, "update_rule",

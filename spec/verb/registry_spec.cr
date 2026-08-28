@@ -1273,6 +1273,10 @@ private class FakeContext < ExecContext
     @calls << :rewriter_add
   end
 
+  def rewriter_preset : Nil
+    @calls << :rewriter_preset
+  end
+
   def rewriter_edit : Nil
     @calls << :rewriter_edit
   end

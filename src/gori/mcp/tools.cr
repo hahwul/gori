@@ -123,7 +123,7 @@ module Gori
         "add_link", "remove_link",
         "create_oast_provider", "update_oast_provider", "set_oast_provider_enabled", "delete_oast_provider",
         "minimize_repeater",
-        "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
+        "create_rule", "create_rule_from_preset", "update_rule", "delete_rule", "set_rule_enabled",
         "create_color_rule", "update_color_rule", "delete_color_rule", "set_color_rule_enabled", "move_color_rule",
         "create_view", "update_view", "delete_view",
         "create_custom_color", "update_custom_color", "delete_custom_color",
@@ -960,6 +960,7 @@ module Gori
         when "cookie_forge"            then cookie_forge_tool(h)
         when "sequence_analyze"        then sequence_analyze(h)
         when "list_rules"              then list_rules(h)
+        when "list_rule_presets"       then list_rule_presets
         when "list_color_rules"        then list_color_rules(h)
         when "list_views"              then list_views(h)
         when "preview_color_rule"      then preview_color_rule(h)
@@ -1053,6 +1054,7 @@ module Gori
         when "update_note"               then gated { update_note(h) }
         when "delete_note"               then gated { delete_note(h) }
         when "create_rule"               then gated { create_rule(h) }
+        when "create_rule_from_preset"   then gated { create_rule_from_preset(h) }
         when "update_rule"               then gated { update_rule(h) }
         when "preview_rule"              then gated { preview_rule(h) }
         when "set_rule_enabled"          then gated { set_rule_enabled(h) }

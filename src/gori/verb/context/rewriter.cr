@@ -4,6 +4,7 @@ abstract class Gori::Verb::ExecContext
   # rewriter: the Match & Replace rule list (the Rewriter tab). The body is a
   # navigable list, so these back both the space menu/palette AND the list's keys.
   abstract def rewriter_add : Nil                 # open the editor to add a rule
+  abstract def rewriter_preset : Nil              # open the response-modification preset picker (#821)
   abstract def rewriter_edit : Nil                # edit the selected rule
   abstract def rewriter_toggle : Nil              # enable/disable the selected rule
   abstract def rewriter_delete : Nil              # delete the selected rule (confirms)
