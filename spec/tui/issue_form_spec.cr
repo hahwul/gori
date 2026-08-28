@@ -143,27 +143,72 @@ describe Gori::Tui::IssueForm do
     h = OverlayHarness.new(IssueForm.new)
     h.overlay.hint.should contain("←/→ caret")
     h.press(Termisu::Input::Key::Tab)
-    h.overlay.hint.should contain("type cvss")
+    h.overlay.hint.should contain("↵ calculator")
     h.press(Termisu::Input::Key::Tab)
     h.overlay.hint.should contain("←/→ severity")
   end
 
-  it "types into the CVSS field and auto-calculates severity from score or vector" do
-    h = OverlayHarness.new(IssueForm.new)
+  # The cvss row is a LAUNCHER, not a text field: ↵ opens the calculator instead of creating
+  # the issue, and that is the ONLY row where the form's ↵ means anything but commit.
+  it "opens the calculator with ↵ on the cvss row instead of committing" do
+    form = IssueForm.new
+    opened = 0
+    form.on_open_calc = -> { opened += 1; nil }
+    h = OverlayHarness.new(form)
+
+    h.press(Termisu::Input::Key::Enter).should eq(:closed) # title row still creates
+    h.commits.should eq(1)
+
+    form2 = IssueForm.new
+    opened2 = 0
+    form2.on_open_calc = -> { opened2 += 1; nil }
+    h2 = OverlayHarness.new(form2)
+    h2.press(Termisu::Input::Key::Tab)
+    h2.press(Termisu::Input::Key::Enter).should eq(:open) # stayed up
+    opened2.should eq(1)
+    h2.commits.should eq(0)
+  end
+
+  # Typing on that row must NOT fall through to the title the way the severity row's does —
+  # a vector someone starts spelling would land in the issue's name.
+  it "leaves typing inert on the cvss row and clears the value with ⌫" do
+    h = OverlayHarness.new(IssueForm.new(cvss: "9.8"))
     form = h.overlay.as(IssueForm)
-    h.press(Termisu::Input::Key::Tab) # focus CVSS
-    h.type("9.8")
+    form.severity.should eq(Gori::Store::Severity::Medium)
+    h.press(Termisu::Input::Key::Tab)
+    h.type("xyz")
+    form.issue_title.should eq("")
+    form.cvss.should eq("9.8")
+    form.sel.should eq(IssueForm::ROW_CVSS)
+
+    h.press(Termisu::Input::Key::Backspace)
+    form.cvss.should eq("")
+  end
+
+  it "derives severity from a score or a vector, and marks it as derived" do
+    form = IssueForm.new
+    form.severity_from_cvss?.should be_false
+
+    form.set_cvss_value("9.8")
     form.cvss.should eq("9.8")
     form.severity.should eq(Gori::Store::Severity::Critical)
+    form.severity_from_cvss?.should be_true
 
-    3.times { h.press(Termisu::Input::Key::Backspace) }
-    h.type("3.5")
-    form.cvss.should eq("3.5")
+    form.set_cvss_value("CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N")
     form.severity.should eq(Gori::Store::Severity::Low)
 
-    3.times { h.press(Termisu::Input::Key::Backspace) }
-    h.type("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
-    form.severity.should eq(Gori::Store::Severity::Critical)
+    # A hand-picked severity is an override, and the row stops claiming it came from the score.
+    form.severity_cycle(1)
+    form.severity.should eq(Gori::Store::Severity::Medium)
+    form.severity_from_cvss?.should be_false
+
+    # Clearing drops the derivation with it (the old per-keystroke derive could never
+    # un-derive: a blank field simply stopped parsing and left the last severity standing).
+    form.set_cvss_value("9.8")
+    form.severity_from_cvss?.should be_true
+    form.set_cvss_value("")
+    form.cvss.should eq("")
+    form.severity_from_cvss?.should be_false
   end
 
   it "commits on ↵ and cancels on esc" do
@@ -227,11 +272,16 @@ describe Gori::Tui::IssueForm do
     h.overlay.as(IssueForm).issue_title.should eq("ab!")
   end
 
-  it "places the caret on the cvss row and focuses it when clicked" do
-    h = OverlayHarness.new(IssueForm.new(cvss: "9.8"))
-    form = h.overlay.as(IssueForm)
+  # The whole row is the button — a hit box narrower than what was drawn is this file's
+  # standing hazard, so there is nothing else on the row to land on.
+  it "focuses the cvss row and opens the calculator when the row is clicked" do
+    form = IssueForm.new(cvss: "9.8")
+    opened = 0
+    form.on_open_calc = -> { opened += 1; nil }
+    h = OverlayHarness.new(form)
     h.click_in_box(10, IssueForm::CVSS_ROW)
     form.sel.should eq(IssueForm::ROW_CVSS)
+    opened.should eq(1)
   end
 
   # The severity row draws `severity ‹ MEDIUM ›  (←/→ to change)`. The chevrons and the hint
@@ -307,51 +357,49 @@ describe Gori::Tui::IssueForm do
     IssueForm.new.link_ref.should be_nil # a standalone create never inherits one
   end
 
-  it "routes preedit according to the focused row" do
+  # There is no field on the cvss row to compose into, so IME text must not be routed there —
+  # and must not silently jump to the title either.
+  it "routes preedit to the title and drops it on the cvss row" do
     form = IssueForm.new
     form.set_preedit("가")
     form.preedit.should eq("가")
-    form.cvss_preedit.should eq("")
 
+    # Leaving the title row already drops a composition in progress (nothing off it can hold
+    # one); what matters here is that the cvss row refuses the NEXT one rather than routing it.
     form.move_row(1) # focus ROW_CVSS
     form.sel.should eq(IssueForm::ROW_CVSS)
     form.set_preedit("9")
-    form.cvss_preedit.should eq("9")
     form.preedit.should eq("")
+    form.sel.should eq(IssueForm::ROW_CVSS)
   end
 
-  it "triggers on_open_calc via ^C or clicking [ ⚡ Calc ]" do
-    form = IssueForm.new
-    calc_opened = false
-    form.on_open_calc = -> { calc_opened = true }
-
-    # On ROW_CVSS, ^C triggers calculator
-    form.move_row(1) # focus ROW_CVSS
-    h = OverlayHarness.new(form)
-    h.press(Termisu::Input::Key::LowerC, ctrl: true)
-    calc_opened.should be_true
-
-    # Click [ ⚡ Calc ] button
-    calc_opened = false
-    area = Rect.new(0, 0, 80, 24)
-    box = form.overlay_box(area).not_nil!
-    btn_w = Screen.draw_width(IssueForm::CVSS_CALC_BTN)
-    btn_x = box.right - btn_w - 2
-    form.handle_click(area, btn_x + 1, box.y + IssueForm::CVSS_ROW).should eq(:stay)
-    calc_opened.should be_true
-  end
-
-  it "updates cvss and severity via set_cvss_value" do
-    form = IssueForm.new
-    form.set_cvss_value("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
-    form.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
-    form.severity.should eq(Gori::Store::Severity::Critical)
-  end
-
-  it "renders optional label and calc button" do
+  it "renders the cvss row as a launcher, with the score in front of the vector" do
     h = OverlayHarness.new(IssueForm.new, area: Rect.new(0, 0, 80, 24))
     h.render
     h.rendered?("cvss (opt)").should be_true
-    h.rendered?(IssueForm::CVSS_CALC_BTN).should be_true
+    h.rendered?(IssueForm::CVSS_EMPTY).should be_true
+    h.rendered?(IssueForm::CVSS_HINT).should be_true
+
+    scored = IssueForm.new(severity: Gori::Store::Severity::Critical,
+      cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    h2 = OverlayHarness.new(scored, area: Rect.new(0, 0, 100, 24))
+    h2.render
+    # The card is wide enough for the whole vector — no ellipsis on the common case.
+    h2.rendered?("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H").should be_true
+    h2.rendered?(IssueForm::CVSS_HINT).should be_true
+    # Re-opening an issue whose stored pair already agrees says so, rather than reading as a
+    # hand-picked severity that happens to match.
+    scored.severity_from_cvss?.should be_true
+  end
+
+  # The severity row says WHERE its value came from: a score the operator entered, or a pick.
+  it "labels a derived severity on the severity row" do
+    h = OverlayHarness.new(IssueForm.new, area: Rect.new(0, 0, 80, 24))
+    form = h.overlay.as(IssueForm)
+    form.set_cvss_value("9.8")
+    h.rendered?("(cvss 9.8)").should be_true
+
+    form.severity_cycle(-1)
+    h.rendered?(IssueForm::SEV_SUFFIX_BLUR).should be_true
   end
 end

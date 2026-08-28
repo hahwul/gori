@@ -118,6 +118,15 @@ module Gori
 
         abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
 
+        # Refuse a cvss nothing can score, BEFORE the insert. Stored as-is it would sit in a
+        # column the Issues list, `cvss:` queries and every export read through a parser that
+        # answers nil for it — a field only its own raw string can see, written on a command
+        # that reported success. Same rule --severity and --flow already follow.
+        cvss = cvss.try(&.strip).presence
+        cvss.try do |c|
+          abort "gori run issues create: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
+        end
+
         severity = if s = sev_s
                      Store::Severity.parse?(s.strip) || abort("gori run issues create: invalid severity '#{s}' (info|low|medium|high|critical)")
                    elsif c = cvss
@@ -211,6 +220,10 @@ module Gori
         abort "gori run issues update: missing <issue-id>" if positional.empty?
         abort "gori run issues update: too many arguments (expected one <issue-id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run issues update: invalid issue id '#{positional[0]}'")
+
+        cvss.try do |c|
+          abort "gori run issues update: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
+        end
 
         severity = sev_s.try { |s| Store::Severity.parse?(s.strip) || abort("gori run issues update: invalid severity '#{s}'") }
         if severity.nil? && (c = cvss)

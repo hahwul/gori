@@ -217,22 +217,24 @@ module Gori
         # severity if that ever stopped holding.
         descriptors.each do |d|
           bag = ::Sarif::PropertyBag.new(tags: ["security", "gori"])
-          live, any, live_score, any_score = worst[d.id]? || {nil, nil, nil, nil}
-          score = live_score || any_score
-          sec_sev = if score
-                      sprintf("%.1f", score)
-                    else
-                      Sarif.security_severity(live || any || Store::Severity::Info)
-                    end
-          bag["security-severity"] = JSON::Any.new(sec_sev)
+          live, any = worst[d.id]? || {nil, nil}
+          score = live || any || Sarif.security_severity(Store::Severity::Info).to_f
+          bag["security-severity"] = JSON::Any.new(sprintf("%.1f", score))
           d.properties = bag
         end
       end
 
-      # Per rule id, the severity its badge should show: {the worst among its LIVE results, the
-      # worst among all of them, and the highest CVSS score among live results / any results}.
-      # A rule shared by a Critical and a Low is a Critical in a dashboard's list, which is the
-      # reading an operator triaging from that list needs.
+      # Per rule id, the badge number: {the worst among its LIVE results, the worst among all
+      # of them}. A rule shared by a Critical and a Low is a Critical in a dashboard's list,
+      # which is the reading an operator triaging from that list needs.
+      #
+      # ONE number per result, not a severity and a score raced against each other: an issue
+      # carrying a cvss contributes its real score, and one without contributes the FLOOR of
+      # its band (`security_severity`). Ranking the two separately and preferring "any score
+      # we found" is what breaks the rule this comment states — a rule holding a Critical with
+      # no cvss and a Low scored 3.0 would badge 3.0, i.e. report the Critical as a Low. With
+      # both folded to a number the Critical's 9.0 floor simply outranks it, and a 9.8 vector
+      # still outranks a bare Critical, which is the point of carrying the score at all.
       #
       # SUPPRESSED results are excluded from the live half, because GitHub applies this badge
       # PER ALERT, not just in the rules list: a Critical the operator triaged to false-positive
@@ -254,26 +256,20 @@ module Gori
       #
       # It runs SYNCHRONOUSLY on the TUI's UI fiber (`IssuesController`), which is the same fiber
       # the `flows`/`links` pre-reads at the top of `sarif` were introduced to stop stalling.
-      private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Store::Severity?, Store::Severity?, Float64?, Float64?})
-        out = {} of String => {Store::Severity?, Store::Severity?, Float64?, Float64?}
+      private def self.worst_severities(run : ::Sarif::Run) : Hash(String, {Float64?, Float64?})
+        out = {} of String => {Float64?, Float64?}
         run.results.try &.each do |res|
           rule_id = res.rule_id
           next unless rule_id
           sev = res.properties.try(&.get_string("gori/severity")).try { |l| Store::Severity.parse?(l) }
           next unless sev
-          score = res.properties.try(&.get_float("gori/cvssScore"))
-          live, any, live_score, any_score = out[rule_id]? || {nil.as(Store::Severity?), nil.as(Store::Severity?), nil.as(Float64?), nil.as(Float64?)}
-          any = sev if any.nil? || sev.value > any.not_nil!.value
-          if score
-            any_score = score if any_score.nil? || score > any_score.not_nil!
-          end
+          num = res.properties.try(&.get_float("gori/cvssScore")) || Sarif.security_severity(sev).to_f
+          live, any = out[rule_id]? || {nil.as(Float64?), nil.as(Float64?)}
+          any = num if any.nil? || num > any.not_nil!
           unless res.suppressions.try { |sup| !sup.empty? }
-            live = sev if live.nil? || sev.value > live.not_nil!.value
-            if score
-              live_score = score if live_score.nil? || score > live_score.not_nil!
-            end
+            live = num if live.nil? || num > live.not_nil!
           end
-          out[rule_id] = {live, any, live_score, any_score}
+          out[rule_id] = {live, any}
         end
         out
       end

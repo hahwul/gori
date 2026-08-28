@@ -1836,7 +1836,21 @@ Refines: [P4](#p4), [P7](#p7). #575.
 An issue finding can record an optional CVSS vector string or numeric score. Wire bytes and canonical
 representations remain authoritative: storing the exact string the operator typed (either a full
 `CVSS:3.1/...` vector or a bare score `"9.8"`) preserves provenance (P7) without normalization loss.
+Verbatim is not the same as unchecked — every write path (TUI, `--cvss`, MCP `cvss`) REFUSES a string
+that scores as nothing, because the column is read back through a parser and a value only its own raw
+bytes can see is a field written on a command that reported success.
 Severity (Info..Critical) is automatically derived from the score band whenever a valid CVSS vector or
 score is supplied without an explicit override, across TUI, CLI (`--cvss`), and MCP (`cvss`).
-Query filtering (`cvss:>=7.0`, `cvss:3.1`) resolves both numeric comparisons and vector substrings,
-and SARIF rule exports reflect the highest live CVSS score in `security-severity`.
+Query filtering (`cvss:>=7.0`, `cvss:3.1`) resolves both numeric comparisons and vector substrings.
+
+SARIF's per-rule `security-severity` folds each result to ONE number — a real CVSS score where the
+issue carries one, its severity band's floor where it does not — and takes the maximum. Ranking the
+score and the severity as two separate axes lets an unscored Critical be badged as its scored Low
+sibling, which inverts the badge's whole promise ("the worst under this rule").
+
+The operator-facing half is one input, not two. The issue form's `cvss` row is a LAUNCHER (`↵` opens
+the calculator); the calculator holds the only editable copy of the value, as a `vector:` text field
+above the eight metric rows that build one. Two editable copies of one value on two cards is how they
+drift, and a form whose `↵` means "create" cannot also mean "open the builder". The calculator opens
+on the LEAST severe vector it can spell, not the worst: a default that files a 9.8 Critical on a bare
+`↵` puts a number in someone's report that nobody chose.

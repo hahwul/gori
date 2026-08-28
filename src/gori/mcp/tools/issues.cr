@@ -47,12 +47,10 @@ module Gori
         if err = bad_severity(sev_s)
           return err
         end
-        cvss : String? = nil
-        if cvss_node = h["cvss"]?
-          unless cvss_node.raw.nil?
-            s = (cvss_node.as_s? || cvss_node.to_s).strip
-            cvss = s unless s.empty?
-          end
+        # `clear` has nothing to clear on a create, so only the value half is read here.
+        cvss, _ = cvss_arg(h)
+        if err = bad_cvss(cvss)
+          return err
         end
         severity = severity_from(sev_s) || cvss.try { |c| Gori::Cvss.severity_for(c) } || Store::Severity::Info
         # A present-but-invalid flow_id (1.9 / "oops") would otherwise be
@@ -106,19 +104,9 @@ module Gori
           return err
         end
 
-        clear_cvss = false
-        cvss : String? = nil
-        if cvss_node = h["cvss"]?
-          if cvss_node.raw.nil?
-            clear_cvss = true
-          else
-            s = (cvss_node.as_s? || cvss_node.to_s).strip
-            if s.empty?
-              clear_cvss = true
-            else
-              cvss = s
-            end
-          end
+        cvss, clear_cvss = cvss_arg(h)
+        if err = bad_cvss(cvss)
+          return err
         end
 
         title = str(h, "title").try { |t| Env.mask_secrets(t) }

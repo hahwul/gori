@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Issues: record CVSS vector strings or scores on confirmed findings with automatic severity calculation across TUI, CLI (`--cvss`), and MCP (`cvss`), plus `cvss:` query filtering and CVSS-aware exports (#575)
+- Issues: score a finding with CVSS and let the severity follow. `Space` → **Set CVSS** (or `↵` on the issue form's `cvss` row) opens a calculator you can either type a vector into or build one in; headless it is `gori run issues --cvss` and the MCP `cvss` argument, all of which refuse a string they cannot score. Adds `cvss:>=7` filtering, CVSS-aware Markdown/JSON exports, and real CVSS scores in SARIF's `security-severity` (#575)
 
 - Retest: diff two projects at endpoint scale — what is new, gone, or answering differently since the last engagement. A Diff sub-tab under Target, `gori run diff` (text/json/md), and the MCP `diff_projects` tool; endpoints are keyed by the Sitemap's folded template, and an endpoint the newer capture never requested is reported as a coverage gap rather than as removed (#824)
 - Proxy: per-destination outbound TLS fingerprint control — `groups`, `sigalgs`, TLS 1.3 `ciphersuites` and an ordered `alpn` list on `outbound_tls`, plus `chrome`/`firefox`/`safari`/`curl` presets, so an origin's anti-bot layer sees a browser-shaped ClientHello instead of gori's OpenSSL one. `gori settings tls-fingerprint` prints the JA3/JA4 that actually goes out; presets are approximations, not byte-exact matches (#822)

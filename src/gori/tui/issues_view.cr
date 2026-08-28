@@ -819,10 +819,13 @@ module Gori::Tui
           screen.text(rect.right - hw - 1, y, host, Theme.muted, bg, width: hw)
           right = rect.right - hw - 2
         end
+        # The score reads as a severity, so it wears the severity's colour — the SEV badge on
+        # the left and this number are the same claim, and a fixed accent made them look like
+        # two unrelated facts.
         if score = f.cvss_score
           sc_str = sprintf("%.1f", score)
           sc_w = sc_str.size
-          screen.text(right - sc_w, y, sc_str, Theme.accent, bg, width: sc_w)
+          screen.text(right - sc_w, y, sc_str, severity_color(f.severity), bg, width: sc_w)
           right = right - sc_w - 2
         end
         title_fg = selected || marked ? Theme.text_bright : Theme.text
@@ -885,15 +888,13 @@ module Gori::Tui
       lines = [] of {Color, String}
       lines << {Theme.text_bright, "#{severity_badge(f.severity)}  #{f.title}"}
       host = f.host.try(&.presence) || "—"
-      cvss_part = if cvss = f.cvss
-                    score = f.cvss_score
-                    score ? "  ·  CVSS #{score}" : "  ·  #{cvss}"
-                  else
-                    ""
-                  end
-      lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}#{cvss_part}"}
+      lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}"}
+      # ONE cvss line: the score is the reading and the vector behind it is the provenance,
+      # so they belong on the same row rather than as a summary chip plus a repeat of the
+      # string two lines apart.
       if cvss = f.cvss
-        lines << {Theme.muted, "cvss      #{cvss}"}
+        score = f.cvss_score
+        lines << {Theme.muted, score ? "cvss      #{sprintf("%.1f", score)}  ·  #{cvss}" : "cvss      #{cvss}"}
       end
       if fid = f.flow_id
         lines << {Theme.muted, "evidence  flow ##{fid}"}
@@ -936,7 +937,7 @@ module Gori::Tui
         screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  cvss:>=7  status:open  status:closed  host:", Theme.muted, width: left_w)
       end
     end
 
@@ -969,18 +970,26 @@ module Gori::Tui
       cx = rect.x + 1
       cx = Frame.tag_chip(screen, cx, rect.y + 1, " #{severity_badge(issue.severity)} ", severity_color(issue.severity))
       cx = Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      # The cvss chip is the ONE chip whose width is unbounded — a v4.0 vector is 60-odd
+      # columns — and `Frame.tag_chip` clips to the SCREEN, not to this pane. So the vector
+      # half is appended only when it fits: the score alone still reads, and a chip that ran
+      # off the panel would paint over the border.
       if cvss = issue.cvss
-        score = issue.cvss_score
-        cvss_chip = score ? " CVSS #{score} " : " #{cvss} "
-        Frame.tag_chip(screen, cx + 1, rect.y + 1, cvss_chip, Theme.accent)
+        room = {rect.right - 1 - (cx + 1), 0}.max
+        chip = if score = issue.cvss_score
+                 long = " CVSS #{sprintf("%.1f", score)} · #{cvss} "
+                 Screen.draw_width(long) <= room ? long : " CVSS #{sprintf("%.1f", score)} "
+               else
+                 " CVSS #{cvss} "
+               end
+        Frame.tag_chip(screen, cx + 1, rect.y + 1, chip, severity_color(issue.severity)) if Screen.draw_width(chip) <= room
       end
 
       # y2 — timestamps.
       meta = "created #{fmt_ts(issue.created_at)}"
       meta += " · edited #{fmt_ts(issue.updated_at)}" if issue.updated_at > issue.created_at
-      if cvss = issue.cvss
-        meta += " · #{cvss}"
-      end
+      # The vector itself rides the chip row above, not this one — a timestamp line is where
+      # you look for WHEN, and a third copy of the same string is not a third fact.
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
       # y3 — primary linked-flow evidence.

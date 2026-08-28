@@ -15,6 +15,15 @@ module Gori::Tui
   # rather than read off the shell at commit time so that dropping the form drops the
   # pending link with it: a cancelled create-and-link can no longer leave a stale ref
   # behind for a later standalone create to silently attach.
+  #
+  # The `cvss` row is a LAUNCHER, not a third text field: it shows what the issue will carry
+  # and `↵` opens the calculator (CvssCalculatorOverlay), which is where a vector is both
+  # typed and built. It began as a text field with a `^C` chord next to it, and both halves
+  # of that were wrong. `^C` is the quit chord everywhere else in gori — the modal seam is
+  # the ONE place it is free, so binding it here taught the reflex "^C leaves" a silent
+  # exception. And a form whose ↵ means "create" cannot also mean "open the thing", so the
+  # typing row and the builder were two editable copies of one value a row apart. One value,
+  # one place to edit it, and `↵` keeps meaning "go on" rather than a chord you have to know.
   class IssueForm < Overlay
     # Card geometry + the two labels the draw lays down, in one place because `render` and the
     # click hit-tests below both measure off them. A second copy of `"severity ‹ "` next to the
@@ -22,7 +31,8 @@ module Gori::Tui
     # cell the card never drew there.
     TITLE_PREFIX    = "title › "
     CVSS_PREFIX     = "cvss (opt) › "
-    CVSS_CALC_BTN   = "[ ⚡ Calc ]"
+    CVSS_EMPTY      = "none"
+    CVSS_HINT       = "(↵ calc)"
     SEV_PREFIX      = "severity ‹ "
     SEV_SUFFIX      = " ›  (←/→ to change)"
     SEV_SUFFIX_BLUR = " ›  (⇥ to focus)"
@@ -30,6 +40,12 @@ module Gori::Tui
     CVSS_ROW        = 2
     SEV_ROW         = 4
     CARD_H          = 7
+
+    # 72 is the width every rule form in gori settled on (Overlay::RULE_FORM_W, and the
+    # argument for it is written there). This card was 66 for no recorded reason, and the six
+    # columns are exactly what a full `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H` needs to
+    # sit on its row without an ellipsis.
+    CARD_W = Overlay::RULE_FORM_W
 
     # Row cursor. Three rows: Title, CVSS, and Severity.
     ROW_TITLE = 0
@@ -46,9 +62,13 @@ module Gori::Tui
     getter link_ref : {Store::LinkRefKind, Int64}?
     getter sel : Int32
     getter preedit : String
-    getter cvss_preedit : String
     getter extra_flow_ids : Array(Int64)
     getter notes : String
+
+    # Whether the severity showing was DERIVED from the cvss rather than picked. Only the
+    # label reads it — an operator who cycles severity by hand after scoring one has made a
+    # deliberate override, and the row says which of the two it is looking at.
+    getter? severity_from_cvss : Bool = false
     property on_open_calc : Proc(Nil)?
 
     def initialize(@issue_title : String = "", @host : String? = nil, @flow_id : Int64? = nil,
@@ -59,10 +79,12 @@ module Gori::Tui
                    @notes : String = "",
                    @cvss : String = "")
       @cx = @issue_title.size
-      @cvss_cx = @cvss.size
       @preedit = ""
-      @cvss_preedit = ""
       @sel = ROW_TITLE
+      # An EDIT opens on the stored pair. The severity the store holds wins — an operator who
+      # overrode it once must not have that overridden back by the mere act of re-opening the
+      # form — so this only decides which of the two labels the severity row wears.
+      @severity_from_cvss = !@cvss.empty? && Gori::Cvss.severity_for(@cvss) == @severity
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -79,17 +101,25 @@ module Gori::Tui
       when ROW_SEV
         "←/→ severity · ⇥ title · ↵ create · esc cancel"
       when ROW_CVSS
-        "^C calc · type cvss · ←/→ caret · ⇥ severity · ↵ create · esc cancel"
+        "↵ calculator · ⌫ clear · ⇥ severity · esc cancel"
       else
         "type title · ←/→ caret · ⇥ cvss · ↵ create · esc cancel"
       end
     end
 
+    # What the calculator applies (and what ⌫ clears, with ""). Deriving severity here rather
+    # than on every keystroke is the whole reason the row stopped being a text field: a
+    # half-typed vector scores as nothing, so the old per-character derive only ever fired on
+    # the last character anyway — and it could never LOWER a severity back once a cleared
+    # field stopped parsing. Clearing now clears the derivation with it.
     def set_cvss_value(val : String) : Nil
-      @cvss = val
-      @cvss_cx = val.size
-      @cvss_preedit = ""
-      update_severity_from_cvss
+      @cvss = val.strip
+      if s = Gori::Cvss.severity_for(@cvss)
+        @severity = s
+        @severity_from_cvss = true
+      else
+        @severity_from_cvss = false
+      end
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -97,37 +127,38 @@ module Gori::Tui
       c = ev.char
       case
       when key.escape?            then return :cancel
-      when key.enter?             then return :commit
+      when key.enter?             then return enter
       when key.tab?, key.down?    then move_row(1)
       when key.back_tab?, key.up? then move_row(-1)
       when key.left?              then step(-1)
       when key.right?             then step(1)
-      when @sel == ROW_CVSS && ev.ctrl? && (key.lower_c? || key.lower_b?)
-        @on_open_calc.try(&.call)
-        return :stay
       when key.backspace?
-        case @sel
-        when ROW_TITLE
-          backspace_title
-        when ROW_CVSS
-          backspace_cvss
+        if @sel == ROW_CVSS
+          set_cvss_value("")
         else
           focus_title
           backspace_title
         end
       else
-        if c && !ev.ctrl? && !ev.alt?
-          case @sel
-          when ROW_CVSS
-            insert_cvss(c)
-            set_preedit("")
-          else
-            focus_title
-            insert_title(c)
-            set_preedit("")
-          end
+        # A printable on the cvss row is deliberately inert: the row holds no caret, and
+        # jumping focus to the title (what the severity row does) would throw a vector
+        # someone started typing into the title of their issue. The row's own `(↵ calc)`
+        # label and this form's `hint` both name the key that does work here.
+        if c && !ev.ctrl? && !ev.alt? && @sel != ROW_CVSS
+          focus_title
+          insert_title(c)
+          set_preedit("")
         end
       end
+      :stay
+    end
+
+    # ↵ still means "go on" — on the cvss row the next step is the calculator, not the create.
+    # That row is the only launcher on the card, so this is the only place the form's ↵
+    # resolves to anything but commit.
+    private def enter : Symbol
+      return :commit unless @sel == ROW_CVSS
+      @on_open_calc.try(&.call)
       :stay
     end
 
@@ -139,15 +170,11 @@ module Gori::Tui
         @cx = Screen.column_for_click(@issue_title, mx - title_base(box))
         @preedit = ""
       elsif my == box.y + CVSS_ROW
-        btn_w = Screen.draw_width(CVSS_CALC_BTN)
-        btn_x = box.right - btn_w - 2
-        if mx >= btn_x && mx < btn_x + btn_w
-          @on_open_calc.try(&.call)
-          return :stay
-        end
+        # The whole row is the button — there is nothing else on it to hit, and a hit box
+        # narrower than what was drawn is this file's standing hazard (see the note above
+        # the constants).
         focus_cvss
-        @cvss_cx = Screen.column_for_click(@cvss, mx - cvss_base(box))
-        @cvss_preedit = ""
+        @on_open_calc.try(&.call)
       elsif my == box.y + SEV_ROW && (lo = sev_back_x(box)) && mx >= lo && mx <= sev_forward_end(box)
         @sel = ROW_SEV
         severity_cycle(mx == lo ? -1 : 1)
@@ -161,7 +188,7 @@ module Gori::Tui
     def step(delta : Int32) : Nil
       case @sel
       when ROW_TITLE then move_title(delta)
-      when ROW_CVSS  then move_cvss(delta)
+      when ROW_CVSS  then nil # no caret on a launcher row
       else                severity_cycle(delta)
       end
     end
@@ -169,11 +196,11 @@ module Gori::Tui
     def move_row(delta : Int32) : Nil
       @sel = (@sel + delta) % ROW_COUNT
       @preedit = "" unless @sel == ROW_TITLE
-      @cvss_preedit = "" unless @sel == ROW_CVSS
     end
 
     def severity_cycle(delta : Int32) : Nil
       @severity = Store::Severity.new((@severity.value + delta).clamp(0, 4))
+      @severity_from_cvss = false
     end
 
     def insert(ch : Char) : Nil
@@ -204,37 +231,10 @@ module Gori::Tui
       @cx = (@cx + d).clamp(0, @issue_title.size)
     end
 
-    def insert_cvss(ch : Char) : Nil
-      @cvss = "#{@cvss[0, @cvss_cx]}#{ch}#{@cvss[@cvss_cx..]}"
-      @cvss_cx += 1
-      @cvss_preedit = ""
-      update_severity_from_cvss
-    end
-
-    def backspace_cvss : Nil
-      return if @cvss_cx == 0
-      @cvss = "#{@cvss[0, @cvss_cx - 1]}#{@cvss[@cvss_cx..]}"
-      @cvss_cx -= 1
-      update_severity_from_cvss
-    end
-
-    def move_cvss(d : Int32) : Nil
-      @cvss_cx = (@cvss_cx + d).clamp(0, @cvss.size)
-    end
-
-    private def update_severity_from_cvss : Nil
-      if s = Gori::Cvss.severity_for(@cvss)
-        @severity = s
-      end
-    end
-
     def set_preedit(text : String) : Nil
-      if @sel == ROW_CVSS
-        @cvss_preedit = text
-      else
-        focus_title unless text.empty?
-        @preedit = text
-      end
+      return if @sel == ROW_CVSS # nothing to compose into on a launcher row
+      focus_title unless text.empty?
+      @preedit = text
     end
 
     def focus_title : Nil
@@ -250,7 +250,7 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 66}.min
+      w = {area.w - 4, CARD_W}.min
       return nil if w < 12 || area.h < CARD_H
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - CARD_H) // 2, w, CARD_H)
     end
@@ -281,38 +281,35 @@ module Gori::Tui
         screen.text(title_base(box), box.y + TITLE_ROW, @issue_title, Theme.text, Theme.panel, width: {tw, 0}.max)
       end
 
-      # CVSS row
-      screen.text(box.x + 2, box.y + CVSS_ROW, CVSS_PREFIX, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
-      btn_w = Screen.draw_width(CVSS_CALC_BTN)
-      btn_x = box.right - btn_w - 2
-      screen.text(btn_x, box.y + CVSS_ROW, CVSS_CALC_BTN, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
+      # CVSS row. Right-anchored key affordance first, so what is left of it is the width
+      # the value may use — every `text` here is width-clipped to that, because Screen#text
+      # clips to the SCREEN and an unbounded draw would land on the card's own border.
+      cy = box.y + CVSS_ROW
+      screen.text(box.x + 2, cy, CVSS_PREFIX, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
+      aff_x = box.right - Screen.draw_width(CVSS_HINT) - 2
+      screen.text(aff_x, cy, CVSS_HINT, on_cvss ? Theme.accent : Theme.muted, Theme.panel)
 
-      cw = btn_x - cvss_base(box) - 1
-      if on_cvss
-        if @cvss.empty? && @cvss_preedit.empty?
-          screen.text(cvss_base(box), box.y + CVSS_ROW, "optional (or ^C)", Theme.muted, Theme.panel)
-        end
-        screen.input_line(cvss_base(box), box.y + CVSS_ROW, @cvss, @cvss_cx, @cvss_preedit,
-          Theme.text_bright, Theme.panel, width: cw)
+      vx = cvss_base(box)
+      vw = {aff_x - vx - 1, 0}.max
+      if @cvss.empty?
+        screen.text(vx, cy, CVSS_EMPTY, Theme.muted, Theme.panel, width: vw)
       else
-        if @cvss.empty?
-          screen.text(cvss_base(box), box.y + CVSS_ROW, "(optional)", Theme.muted, Theme.panel)
-        else
-          screen.text(cvss_base(box), box.y + CVSS_ROW, @cvss, Theme.text, Theme.panel, width: {cw, 0}.max)
-        end
-      end
-      if !@cvss.empty? && (score = Gori::Cvss.score_for(@cvss))
-        tag = "(#{score} #{@severity.label.capitalize})"
-        tag_x = btn_x - tag.size - 2
-        if tag_x > cvss_base(box) + @cvss.size + 1
-          screen.text(tag_x, box.y + CVSS_ROW, tag, sev_color(@severity), Theme.panel)
-        end
+        screen.text(vx, cy, @cvss, sev_color(@severity), Theme.panel, width: vw)
       end
 
       # Severity row
       sx = screen.text(box.x + 2, box.y + SEV_ROW, SEV_PREFIX, on_sev ? Theme.accent : Theme.muted, Theme.panel)
       sx = screen.text(sx, box.y + SEV_ROW, @severity.label.upcase, sev_color(@severity), Theme.panel, Attribute::Bold)
-      screen.text(sx, box.y + SEV_ROW, on_sev ? SEV_SUFFIX : SEV_SUFFIX_BLUR, Theme.muted, Theme.panel,
+      # The severity row is where the qualitative reading lives, so the SCORE that produced it
+      # is named here rather than crowding the vector off its own row one line up.
+      suffix = if on_sev
+                 SEV_SUFFIX
+               elsif severity_from_cvss? && (score = Gori::Cvss.score_for(@cvss))
+                 " ›  (cvss #{sprintf("%.1f", score)})"
+               else
+                 SEV_SUFFIX_BLUR
+               end
+      screen.text(sx, box.y + SEV_ROW, suffix, Theme.muted, Theme.panel,
         width: {box.right - 1 - sx, 0}.max)
     end
 

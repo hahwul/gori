@@ -898,6 +898,28 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A cvss nothing can score would land in a column the Issues list, `cvss:` queries and
+    # every export read through a parser that answers nil for it — a written field the tool
+    # reported success on. Refuse it at the boundary, like severity and status.
+    it "refuses a cvss it cannot score, on create and on update" do
+      with_store do |store|
+        bad = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"nope","cvss":"very bad"}}})
+        res = drive(store, bad)[0]["result"]
+        res["isError"].as_bool.should be_true
+        res["content"][0]["text"].as_s.should contain("invalid cvss")
+        store.issues.should be_empty
+
+        ok = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"real","cvss":9.8}}})
+        id = tool_payload(drive(store, ok)[0])["id"].as_i64
+        store.get_issue(id).not_nil!.cvss.should eq("9.8") # a JSON number is a score too
+
+        worse = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id},"cvss":"11"}}})
+        upd = drive(store, worse)[0]["result"]
+        upd["isError"].as_bool.should be_true
+        store.get_issue(id).not_nil!.cvss.should eq("9.8") # untouched
+      end
+    end
+
     it "links a repeater on create and on a link-only update" do
       with_store do |store|
         repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)

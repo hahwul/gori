@@ -2,283 +2,375 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./text_field"
 require "../cvss"
 
 module Gori::Tui
-  # Interactive CVSS v3.1 base metrics calculator modal (#575).
-  # Lets operators visually toggle and select metric values (AV, AC, PR, UI, S, C, I, A)
-  # with live calculation of score, qualitative severity, and canonical vector string.
+  # The CVSS v3.1 base-metric builder behind an issue's `cvss` field (#575).
+  #
+  # TWO ways in, one value out. The `vector:` row is an ordinary text field — paste a
+  # `CVSS:3.1/…` string, or type the bare score (`8.8`) you were handed — and the eight
+  # metric rows under it are the builder for everyone who would rather pick than spell.
+  # They stay in step both ways: editing the field re-selects the metrics whenever what is
+  # in it parses as v3.x, and touching any metric rewrites the field. A bare score has no
+  # metrics to mirror, so the rows simply stop tracking it until the next metric edit takes
+  # the vector back — which is the honest reading, not a sync bug.
+  #
+  # That field is why the form's own cvss row is a LAUNCHER rather than a second text box:
+  # one place to type a vector, one place to build one, and `↵` on the row opens this. Two
+  # editable copies of the same value on two cards is how they drift.
+  #
+  # Geometry and controls are the SHARED rule-form ones — `Overlay.rule_form_box`,
+  # `Frame.option_cycle`, `Overlay#draw_field` — so this modal has the hands every other
+  # form in gori has: ↑/↓ row, ←/→ option, ↵ save, esc cancel. The first cut drew its own
+  # 72×14 card with option pills pinned to `box.x + 28`, its own Apply/Cancel buttons and a
+  # second copy of the key hint the shell already prints for `hint`. All three ran past the
+  # card's own border below ~76 columns, and `Screen#text` clips to the SCREEN, not to the
+  # box — so the overflow landed ON the frame, and the in-card hint overwrote the Cancel
+  # button even at full width. `option_cycle` is the fix that generalises: it measures the
+  # strip and falls back to the lit value alone when the card is too narrow for it.
   class CvssCalculatorOverlay < Overlay
+    # One base metric: the row label, the vector key it writes, and its choices as
+    # {vector value, display}. v3.1 base only — temporal/environmental are not a thing an
+    # issue's single `cvss` field carries, and the field takes any vector version anyway
+    # (this card just cannot BUILD one).
     struct Metric
-      getter name : String
+      getter label : String
       getter code : String
       getter options : Array({String, String})
 
-      def initialize(@name, @code, @options)
+      def initialize(@label, @code, @options)
+      end
+
+      def names : Array(String)
+        @options.map { |o| o[1] }
       end
     end
 
     METRICS = [
-      Metric.new("Attack Vector (AV)", "AV", [
-        {"N", "Network"},
-        {"A", "Adjacent"},
-        {"L", "Local"},
-        {"P", "Physical"},
+      Metric.new("attack vector (AV):", "AV", [
+        {"N", "network"}, {"A", "adjacent"}, {"L", "local"}, {"P", "physical"},
       ]),
-      Metric.new("Attack Complexity (AC)", "AC", [
-        {"L", "Low"},
-        {"H", "High"},
+      Metric.new("complexity (AC):", "AC", [
+        {"L", "low"}, {"H", "high"},
       ]),
-      Metric.new("Privileges Required (PR)", "PR", [
-        {"N", "None"},
-        {"L", "Low"},
-        {"H", "High"},
+      Metric.new("privileges (PR):", "PR", [
+        {"N", "none"}, {"L", "low"}, {"H", "high"},
       ]),
-      Metric.new("User Interaction (UI)", "UI", [
-        {"N", "None"},
-        {"R", "Required"},
+      Metric.new("interaction (UI):", "UI", [
+        {"N", "none"}, {"R", "required"},
       ]),
-      Metric.new("Scope (S)", "S", [
-        {"U", "Unchanged"},
-        {"C", "Changed"},
+      Metric.new("scope (S):", "S", [
+        {"U", "unchanged"}, {"C", "changed"},
       ]),
-      Metric.new("Confidentiality (C)", "C", [
-        {"N", "None"},
-        {"L", "Low"},
-        {"H", "High"},
+      Metric.new("confidentiality (C):", "C", [
+        {"N", "none"}, {"L", "low"}, {"H", "high"},
       ]),
-      Metric.new("Integrity (I)", "I", [
-        {"N", "None"},
-        {"L", "Low"},
-        {"H", "High"},
+      Metric.new("integrity (I):", "I", [
+        {"N", "none"}, {"L", "low"}, {"H", "high"},
       ]),
-      Metric.new("Availability (A)", "A", [
-        {"N", "None"},
-        {"L", "Low"},
-        {"H", "High"},
+      Metric.new("availability (A):", "A", [
+        {"N", "none"}, {"L", "low"}, {"H", "high"},
       ]),
     ]
 
-    CARD_W = 72
-    CARD_H = 14
+    # Row 0 is the vector field, rows 1..8 the metrics, the last row commits.
+    ROW_VECTOR = 0
+    ROW_SAVE   = METRICS.size + 1
+    ROW_COUNT  = METRICS.size + 2
 
-    getter selected_metric : Int32 = 0
+    # Where every metric row's option strip starts, measured from the label column so the
+    # eight rows line up under each other. One past the longest label.
+    VALUE_INDENT = METRICS.max_of(&.label.size) + 1
+
     getter selections : Hash(String, Int32)
-    property on_apply : Proc(String, Nil)?
+    getter sel : Int32 = ROW_VECTOR
 
     def initialize(initial : String = "")
       @selections = Hash(String, Int32).new
-      METRICS.each do |m|
-        @selections[m.code] = 0
-      end
-      # Default CIA to High so baseline starts at High/Critical
-      @selections["C"] = 2
-      @selections["I"] = 2
-      @selections["A"] = 2
+      METRICS.each { |m| @selections[m.code] = 0 }
+      @vector = TextField.new("")
 
-      parse_initial(initial) unless initial.strip.empty?
-    end
-
-    private def parse_initial(vec_str : String) : Nil
-      if vec = ::CVSS.parse?(vec_str) || ::CVSS.parse?(vec_str.upcase)
-        canonical = vec.to_s
-        canonical.split('/')[1..].each do |part|
-          next unless part.includes?(':')
-          k, v = part.split(':', 2)
-          if m = METRICS.find { |metric| metric.code == k }
-            idx = m.options.index { |opt| opt[0] == v }
-            @selections[k] = idx if idx
-          end
-        end
+      # An empty start is deliberately the LEAST severe vector this card can build
+      # (AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N → 0.0), not the worst. The first cut defaulted
+      # C/I/A to High "so the baseline starts at High/Critical", which meant opening the
+      # calculator and pressing ↵ filed a 9.8 Critical the operator never chose — and an
+      # issue's severity is a number that ends up in someone's report. Every metric here
+      # starts at its first (least severe) option; raising one is the operator's move.
+      if initial.strip.empty?
+        sync_to_field
+      else
+        @vector.set(initial.strip)
+        sync_from_field
       end
     end
+
+    # --- value ---------------------------------------------------------------
+
+    # What committing applies: the text in the field, trimmed. Empty means "clear the
+    # issue's cvss", which is a real intent (the detail-scope verb opens this on an issue
+    # that already has one), so it is not the same thing as an unparseable string.
+    def value : String
+      @vector.value.strip
+    end
+
+    def resolved : {Float64, Store::Severity, String}?
+      Gori::Cvss.resolve(value)
+    end
+
+    # A value the card refuses to commit: something is typed, and it scores as nothing.
+    def invalid? : Bool
+      !value.empty? && resolved.nil?
+    end
+
+    # The vector the eight metric rows currently spell.
+    def vector_string : String
+      parts = METRICS.map { |m| "#{m.code}:#{m.options[@selections[m.code]][0]}" }
+      "CVSS:3.1/#{parts.join('/')}"
+    end
+
+    def current_score : Float64
+      resolved.try(&.[0]) || 0.0
+    end
+
+    def current_severity : Store::Severity
+      resolved.try(&.[1]) || Store::Severity::Info
+    end
+
+    # --- sync ----------------------------------------------------------------
+
+    private def sync_to_field : Nil
+      @vector.set(vector_string)
+    end
+
+    # Adopt the field's text into the metric rows — but ONLY for a v3.x vector, the one
+    # version this card's eight rows can actually spell. A v2 vector names `Au` where v3
+    # names PR/UI and a v4 one names `AT`/`VC`/`VI`/`VA`; walking either into this table
+    # would leave some rows on the pasted value and the rest on a default, i.e. a set of
+    # selections that spells a DIFFERENT vector than the one in the field. Leave the rows
+    # alone instead: the field still holds (and still commits) the vector verbatim.
+    private def sync_from_field : Nil
+      vec = Gori::Cvss.parse(value)
+      return unless vec && vec.version.starts_with?("3.")
+      vec.to_s.split('/').skip(1).each do |part|
+        k, _, v = part.partition(':')
+        next if v.empty?
+        m = METRICS.find { |metric| metric.code == k }
+        next unless m
+        idx = m.options.index { |opt| opt[0] == v }
+        @selections[k] = idx if idx
+      end
+    end
+
+    # --- Overlay contract (see overlay.cr) ---
 
     def key : OverlayKind
       OverlayKind::CvssCalculator
     end
 
     def title : String
-      "CVSS v3.1 CALCULATOR"
+      "CVSS"
     end
 
     def hint : String
-      "↑/↓ metric · ←/→ cycle · 1..4 pick · ↵ apply · esc cancel"
-    end
-
-    def vector_string : String
-      parts = METRICS.map do |m|
-        val = m.options[@selections[m.code]][0]
-        "#{m.code}:#{val}"
+      case @sel
+      when ROW_VECTOR then "type/paste a vector or score · ↑/↓ row · ↵ save · esc cancel"
+      when ROW_SAVE   then "↵ save · ↑/↓ row · esc cancel"
+      else                 "←/→ option · 1..4 pick · ↑/↓ row · ↵ save · esc cancel"
       end
-      "CVSS:3.1/#{parts.join('/')}"
     end
 
-    def current_score : Float64
-      Gori::Cvss.score_for(vector_string) || 0.0
+    def text_fields : Array(TextField)
+      [@vector]
     end
 
-    def current_severity : Store::Severity
-      Gori::Cvss.severity_for(vector_string) || Store::Severity::Info
+    def on_vector_row? : Bool
+      @sel == ROW_VECTOR
+    end
+
+    def on_save_row? : Bool
+      @sel == ROW_SAVE
+    end
+
+    def move(d : Int32) : Nil
+      @sel = (@sel + d).clamp(0, ROW_COUNT - 1)
+    end
+
+    def set_selected(idx : Int32) : Nil
+      @sel = idx.clamp(0, ROW_COUNT - 1)
+    end
+
+    # ←/→ (and 1..4) on a metric row. Writes the field, so the two halves never disagree.
+    def adjust(d : Int32) : Nil
+      return unless m = metric_at(@sel)
+      @selections[m.code] = (@selections[m.code] + d) % m.options.size
+      sync_to_field
+    end
+
+    def pick(idx : Int32) : Nil
+      return unless m = metric_at(@sel)
+      return unless 0 <= idx < m.options.size
+      @selections[m.code] = idx
+      sync_to_field
+    end
+
+    private def metric_at(row : Int32) : Metric?
+      (1 <= row <= METRICS.size) ? METRICS[row - 1] : nil
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      c = ev.char
-      case
-      when key.escape?
-        :cancel
-      when key.enter?
-        apply
-        :commit
-      when key.up?, key.lower_k?, c == 'k'
-        @selected_metric = (@selected_metric - 1) % METRICS.size
-        :stay
-      when key.down?, key.lower_j?, c == 'j'
-        @selected_metric = (@selected_metric + 1) % METRICS.size
-        :stay
-      when key.left?, key.lower_h?, c == 'h'
-        cycle_option(-1)
-        :stay
-      when key.right?, key.lower_l?, key.space?, c == 'l'
-        cycle_option(1)
-        :stay
-      when c && '1' <= c <= '4'
-        idx = c - '1'
-        m = METRICS[@selected_metric]
-        if idx < m.options.size
-          @selections[m.code] = idx
-        end
-        :stay
+      return :cancel if key.escape?
+      return :stay if move_row(ev)
+      return save_outcome if key.enter?
+
+      if on_vector_row?
+        @vector.handle_edit_key(ev)
+        sync_from_field
+      elsif !on_save_row?
+        metric_key(ev)
+      end
+      :stay
+    end
+
+    # ↑/↓ and ⇥/⇧⇥ walk the rows on EVERY row, the text field included — the field owns the
+    # horizontal keys, not the vertical ones. Answers whether it took the key.
+    private def move_row(ev : Termisu::Event::Key) : Bool
+      if ev.key.up? || ev.key.back_tab?
+        move(-1)
+      elsif ev.key.down? || ev.key.tab?
+        move(1)
       else
-        :stay
+        return false
+      end
+      true
+    end
+
+    private def metric_key(ev : Termisu::Event::Key) : Nil
+      if ev.key.left?
+        adjust(-1)
+      elsif ev.key.right? || ev.key.space?
+        adjust(1)
+      elsif (c = ev.char) && !ev.ctrl? && !ev.alt? && '1' <= c <= '9'
+        pick(c - '1')
       end
     end
 
-    private def cycle_option(delta : Int32) : Nil
-      m = METRICS[@selected_metric]
-      curr = @selections[m.code]
-      @selections[m.code] = (curr + delta) % m.options.size
+    # ↵ on a value that scores as nothing keeps the card up — the save row already says so,
+    # and dropping the modal would throw the typed text away with it. Same rule the base
+    # class states for a commit closure that returns false, decided here because the card,
+    # not the open-site, is what knows the value is unreadable.
+    private def save_outcome : Symbol
+      invalid? ? :stay : :commit
     end
 
-    private def apply : Nil
-      @on_apply.try &.call(vector_string)
+    def set_preedit(text : String) : Nil
+      @vector.set_preedit(text) if on_vector_row?
+    end
+
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if row = row_at(box, mx, my)
+        set_selected(row)
+        return save_outcome if on_save_row?
+        if m = metric_at(row)
+          if idx = option_at(box, m, mx)
+            pick(idx)
+            return :stay
+          end
+        end
+      end
+      click_text_field(mx, my)
+      :stay
+    end
+
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      i = my - (box.y + 2)
+      (0 <= i < ROW_COUNT) ? i : nil
+    end
+
+    # Which option pill on `m`'s row column `mx` landed in. Measured off the SAME
+    # `" name "` cells `Frame.option_cycle` draws, walked in the same order — the standing
+    # hazard this repo names for every clickable row is a second copy of the geometry that
+    # drifts from the one the card actually drew. nil when the strip did not fit (the
+    # narrow-card fallback draws the lit value alone, which has nothing to hit).
+    private def option_at(box : Rect, m : Metric, mx : Int32) : Int32?
+      x = value_x(box)
+      names = m.names
+      return nil if x + names.sum { |n| Screen.draw_width(n) + 2 } > box.right - 2
+      names.each_with_index do |name, i|
+        w = Screen.draw_width(name) + 2
+        return i if mx >= x && mx < x + w
+        x += w
+      end
+      nil
+    end
+
+    private def value_x(box : Rect) : Int32
+      box.x + 3 + VALUE_INDENT
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, CARD_W}.min
-      return nil if w < 40 || area.h < CARD_H
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - CARD_H) // 2, w, CARD_H)
-    end
-
-    def handle_wheel(step : Int32) : Nil
-      @selected_metric = (@selected_metric + step).clamp(0, METRICS.size - 1)
-    end
-
-    def handle_click(area : Rect, x : Int32, y : Int32) : Symbol
-      box = overlay_box(area)
-      return :stay unless box
-      return :cancel unless box.contains?(x, y)
-
-      # Check metric rows
-      METRICS.each_with_index do |m, i|
-        row_y = box.y + 1 + i
-        if y == row_y
-          @selected_metric = i
-          # Check which option pill was clicked
-          curr_x = box.x + 28
-          m.options.each_with_index do |opt, opt_idx|
-            opt_w = opt[1].size + 2 # "[Name]"
-            if x >= curr_x && x < curr_x + opt_w
-              @selections[m.code] = opt_idx
-              return :stay
-            end
-            curr_x += opt_w + 1
-          end
-          return :stay
-        end
-      end
-
-      # Check action buttons on row 11
-      btn_y = box.y + 11
-      if y == btn_y
-        apply_w = 11  # "[ Apply (↵) ]"
-        cancel_w = 16 # "[ Cancel (Esc) ]"
-        if x >= box.x + 2 && x < box.x + 2 + apply_w
-          apply
-          return :commit
-        elsif x >= box.x + 16 && x < box.x + 16 + cancel_w
-          return :cancel
-        end
-      end
-
-      :stay
+      Overlay.rule_form_box(area, ROW_COUNT)
     end
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
-
-      Frame.card(screen, box, title, border: Theme.border_focus)
-
-      # Render each metric row
-      METRICS.each_with_index do |m, i|
-        row_y = box.y + 1 + i
-        is_focused = @selected_metric == i
-
-        if is_focused
-          screen.cell(box.x + 1, row_y, '▎', Theme.accent, Theme.panel)
-        end
-
-        label_color = is_focused ? Theme.accent : Theme.text
-        screen.text(box.x + 2, row_y, m.name.ljust(25), label_color, Theme.panel)
-
-        curr_x = box.x + 28
-        selected_idx = @selections[m.code]
-        m.options.each_with_index do |opt, opt_idx|
-          is_opt_selected = opt_idx == selected_idx
-          opt_label = is_opt_selected ? "[#{opt[1]}]" : " #{opt[1]} "
-
-          fg = if is_opt_selected
-                 Theme.accent
-               elsif is_focused
-                 Theme.text
-               else
-                 Theme.muted
-               end
-
-          screen.text(curr_x, row_y, opt_label, fg, Theme.panel)
-          curr_x += opt_label.size + 1
-        end
+      unless box
+        screen.text(area.x + 1, area.y, "cvss form needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
       end
-
-      # Divider
-      div_y = box.y + 9
-      (box.x + 1...box.x + box.w - 1).each do |x|
-        screen.cell(x, div_y, '─', Theme.muted, Theme.panel)
+      Frame.card(screen, box, "CVSS v3.1", border: Theme.border_focus)
+      first = box.y + 2
+      ROW_COUNT.times do |i|
+        py = first + i
+        break if py >= box.bottom - 1
+        draw_row(screen, box, i, py)
       end
+      # No key hint on the bottom border — the shell draws `hint` in the status strip for
+      # the open modal (Runner#key_hints). See ScopeRuleOverlay#render.
+    end
 
-      # Summary row (score + severity + vector)
-      summary_y = box.y + 10
-      score = current_score
-      sev = current_severity
-      sev_col = sev_color(sev)
+    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
+      sel = i == @sel
+      bg = sel ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      fg = sel ? Theme.text_bright : Theme.text
+      x = box.x + 3
 
-      screen.text(box.x + 2, summary_y, "Score: ", Theme.muted, Theme.panel)
-      score_str = sprintf("%.1f", score)
-      screen.text(box.x + 9, summary_y, "#{score_str} #{sev.label.upcase}", sev_col, Theme.panel)
+      if i == ROW_VECTOR
+        draw_field(screen, box, py, bg, invalid? ? Theme.red : fg, sel, "vector:", @vector)
+      elsif m = metric_at(i)
+        Frame.option_cycle(screen, x, py, box.right - 2, bg, m.label, m.names,
+          @selections[m.code], sel, value_x: value_x(box))
+      else
+        draw_save(screen, box, py, bg)
+      end
+    end
 
-      v_label = vector_string
-      max_v_w = box.w - 30
-      disp_v = v_label.size > max_v_w ? "#{v_label[0, max_v_w - 3]}..." : v_label
-      screen.text(box.x + 26, summary_y, disp_v, Theme.text_bright, Theme.panel)
-
-      # Buttons & hint
-      btn_y = box.y + 11
-      screen.text(box.x + 2, btn_y, "[ Apply (↵) ]", Theme.accent, Theme.panel)
-      screen.text(box.x + 16, btn_y, "[ Cancel (Esc) ]", Theme.muted, Theme.panel)
-
-      hint = "↑/↓: metric · ←/→: option · 1..4: pick · ↵: apply"
-      screen.text(box.x + box.w - hint.size - 2, btn_y, hint, Theme.muted, Theme.panel)
+    # The commit row doubles as the readout: what the field currently scores AS is the one
+    # thing to check before applying it, so it is written where the eye already is at ↵
+    # rather than on a summary line of its own.
+    private def draw_save(screen : Screen, box : Rect, py : Int32, bg : Color) : Nil
+      x = box.x + 3
+      w = {box.right - 2 - x, 0}.max
+      if value.empty?
+        screen.text(x, py, "[ clear cvss ]", Theme.accent, bg, Attribute::Bold, width: w)
+      elsif r = resolved
+        score, sev, _ = r
+        lx = screen.text(x, py, "[ use ", Theme.accent, bg, Attribute::Bold, width: w)
+        lx = screen.text(lx, py, sprintf("%.1f", score), sev_color(sev), bg, Attribute::Bold,
+          width: {box.right - 2 - lx, 0}.max)
+        lx = screen.text(lx, py, " · ", Theme.muted, bg, width: {box.right - 2 - lx, 0}.max)
+        lx = screen.text(lx, py, sev.label, sev_color(sev), bg, Attribute::Bold,
+          width: {box.right - 2 - lx, 0}.max)
+        screen.text(lx, py, " ]", Theme.accent, bg, Attribute::Bold, width: {box.right - 2 - lx, 0}.max)
+      else
+        screen.text(x, py, "[ not a cvss vector or score ]", Theme.red, bg, Attribute::Bold, width: w)
+      end
     end
 
     private def sev_color(s : Store::Severity) : Color

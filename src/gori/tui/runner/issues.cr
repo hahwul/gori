@@ -116,6 +116,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_choice_picker(ChoicePicker.for_status(seed.status.value)) { |p| apply_issue_choice(p, ids) }
   end
 
+  # Score the target set. Same target rule as the two pickers above, and the same reason the
+  # ids are captured here: a cvss write re-sorts the list under the modal (it moves severity
+  # with it), so re-reading the marks at commit would read a list this edit just moved.
+  def issue_set_cvss : Nil
+    ids = issues_target_ids
+    return if ids.empty?
+    seed = issues_picker_seed(ids)
+    return (@toast = "no issues left to update") unless seed
+    calc = CvssCalculatorOverlay.new(seed.cvss || "")
+    calc.on_commit = -> { apply_issue_cvss(calc, ids) }
+    open_overlay(calc)
+  end
+
   # Which target's current value the picker opens on: the privileged one (the cursor row when
   # it is itself a target, else the oldest — NOT the display-order first, which the severity
   # sort would reshuffle on every edit), falling through to the next id that still resolves

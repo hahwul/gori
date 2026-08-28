@@ -1553,14 +1553,14 @@ module Gori::Tui
     # touches the Store), so the same card serves create, create-and-link, and re-title.
     def open_issue_form(form : IssueForm) : Nil
       form.on_commit = -> { create_issue_from_form(form) }
+      # The nested-modal seam (see Overlay#on_close): the calculator writes back through the
+      # ordinary `on_commit` contract rather than a second outcome channel of its own, and
+      # pops back into this same form object — cancel or apply — so the title typed above it
+      # survives the trip.
       form.on_open_calc = -> {
         calc = CvssCalculatorOverlay.new(form.cvss)
-        calc.on_apply = ->(vec : String) {
-          form.set_cvss_value(vec)
-        }
-        calc.on_close = -> {
-          open_overlay(form)
-        }
+        calc.on_commit = -> { form.set_cvss_value(calc.value); true }
+        calc.on_close = -> { open_overlay(form) }
         open_overlay(calc)
       }
       open_overlay(form)
@@ -1670,6 +1670,32 @@ module Gori::Tui
       end
       issues_controller.view.resync(store)
       @toast = "#{plural(ids.size, "issue")} updated" if ids.size > 1
+    end
+
+    # Score the target issues, straight from the Space menu. The same calculator the create
+    # form launches, opened on the seed's current value and applying to every target — which
+    # is why it writes SEVERITY too: a cvss the store keeps while the badge next to it says
+    # something else is the drift this feature exists to remove. An empty commit clears both
+    # the vector and the derivation (the severity then stays whatever it was).
+    private def apply_issue_cvss(calc : CvssCalculatorOverlay, ids : Array(Int64)) : Bool
+      return true if ids.empty?
+      store = @session.store
+      raw = calc.value
+      ok = if raw.empty?
+             store.update_issues(ids, cvss: nil, clear_cvss: true)
+           else
+             store.update_issues(ids, cvss: raw, severity: Gori::Cvss.severity_for(raw))
+           end
+      unless ok
+        @toast = "cvss NOT saved — project busy; try again"
+        return false
+      end
+      issues_controller.view.resync(store)
+      # Only a BATCH needs saying — a single issue's chip and severity badge both change under
+      # the operator's eyes, and echoing a 44-character vector into the status strip just
+      # truncates it. Same rule apply_issue_choice follows.
+      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{plural(ids.size, "issue")}" if ids.size > 1
+      true
     end
 
     # Apply the picked Probe scan MODE to the analyzer and re-read the findings list.

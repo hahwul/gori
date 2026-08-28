@@ -66,7 +66,32 @@ describe Gori::Tui::IssuesView do
       view.open_detail(store).should be_true
       detail_backend = MemoryBackend.new(80, 16)
       view.render(Screen.new(detail_backend), Rect.new(0, 0, 80, 16))
-      detail_backend.contains?("CVSS 9.8").should be_true
+      # Score AND the vector behind it, on the one chip row — this is the only place the
+      # vector is printed in the detail.
+      detail_backend.contains?("CVSS 9.8 · CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H").should be_true
+    end
+  end
+
+  # The cvss chip is the one chip whose width is unbounded (a v4.0 vector runs 60-odd
+  # columns), and Frame.tag_chip clips to the SCREEN, not to the pane — so a chip that no
+  # longer fits must drop its vector half rather than paint over the panel border.
+  it "drops the vector half of the CVSS chip when the pane is too narrow for it" do
+    tmp_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
+        cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(46, 16)
+      rect = Rect.new(0, 0, 46, 16)
+      view.render(Screen.new(backend), rect)
+      backend.contains?("CVSS 9.8").should be_true
+      backend.contains?("CVSS 9.8 · CVSS:3.1/").should be_false
+      # …and nothing crossed the pane's right border.
+      (rect.y...rect.bottom).each do |y|
+        backend.row(y).size.should be <= rect.w
+      end
     end
   end
 
