@@ -255,8 +255,17 @@ module Gori::Tui
     private def sync_preview_out(target : Store::RuleTarget = preview_target) : Nil
       text = @preview_input.text
       @preview_host = host_from_sample(text)
-      transformed = rules_engine.transform_message(text, target, @preview_host)
-      @out.source(transformed.empty? ? ["(empty)"] : transformed.split('\n'))
+      # `run_hooks: false`: this runs per FRAME, and a `pipe` rule would fork the operator's
+      # command sixty times a second over a sample they are only looking at (#818). The pane
+      # says which rules it left out rather than showing a transform that quietly is not the
+      # one the proxy applies — the rule editor's own "affects N of M flows" line is where a
+      # pipe rule's reach is answered.
+      transformed = rules_engine.transform_message(text, target, @preview_host, run_hooks: false)
+      lines = transformed.empty? ? ["(empty)"] : transformed.split('\n')
+      if rules_engine.pipes_for?(target, @preview_host)
+        lines << "" << "(pipe rules are not run here — they run a command, and this pane redraws)"
+      end
+      @out.source(lines)
     end
 
     # WHICH SIDE the sample is, read off the sample itself: a message whose first line is a

@@ -465,7 +465,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `dismiss <id>` | 또는 `--code=CODE` / `--host=HOST`로 일괄 |
 | `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격 |
 | `delete <id>` | 또는 `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다. `add`는 `-t`/`--title`, `-p`/`--pattern`, `--description`, `--side`(`request`\|`response`), `--region`(`whole`\|`header`\|`body`), `--regex`, `-s`/`--severity` |
+| `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다. `add`는 `-t`/`--title`, `-p`/`--pattern`, `--description`, `--side`(`request`\|`response`), `--region`(`whole`\|`header`\|`body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#프로세스-훅)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity` |
 | `mode [off\|passive\|active\|aggressive]` | 프로젝트의 스캔 모드를 출력하거나 설정 |
 
 ### run discover {#run-discover}
@@ -663,9 +663,14 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 
 값에 대해 [Decoder](/ko/guide/decoder/) 체인을 실행합니다. 단계는 `|`, `>`, `,`로 구분합니다.
 
+`exec:COMMAND`로 쓴 단계는 컨버터가 아니라 [외부 프로세스 훅](/ko/guide/scripting/#프로세스-훅)입니다.
+현재 값이 `COMMAND`의 stdin으로 가고 그 stdout이 단계의 출력이 됩니다. 셸 없이 exec되므로 세 구분자는
+인자 안에 넣을 수 없습니다.
+
 ```bash
 gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
 echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder 'base64-decode > exec:./parse-envelope --json' "$BLOB"
 gori run decoder list                           # every converter (name, category, direction)
 ```
 
@@ -756,14 +761,14 @@ gori run rewriter rm 3
 
 | Option | Description |
 |--------|-------------|
-| `--op=OP` | `replace`(기본값), `add_header`, `set_header`, `remove_header`, `short_circuit` |
+| `--op=OP` | `replace`(기본값), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
 | `--target=SIDE` | `request`(기본값) 또는 `response` |
-| `--part=PART` | `head`(기본값), `body`, 또는 `ws`(WebSocket 메시지). `replace`에서만 의미가 있음 |
-| `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`와 `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
+| `--part=PART` | `head`(기본값), `body`, 또는 `ws`(WebSocket 메시지). `replace`와 `pipe`에서만 의미가 있음 |
+| `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`, `pipe`, `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
 | `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin) |
 | `--body-file=PATH` | `short_circuit`: PATH를 응답 본문으로 제공하며, 파일이 바뀌면 다시 읽음 |
 | `-f`, `--find=FIND` | 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
-| `-v`, `--value=VALUE` | 치환할 텍스트 또는 헤더 값 |
+| `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `--host=GLOB` | 매칭되는 호스트로 규칙을 한정(부분 문자열, `*` 와일드카드). 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |

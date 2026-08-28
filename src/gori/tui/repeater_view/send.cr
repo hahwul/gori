@@ -205,6 +205,15 @@ class Gori::Tui::RepeaterView
       # The template-level failures, worded exactly as Fuzz::Plan#refuse_unusable_chains.
       resolvable = true
       Decoder.parse_spec(pos.chain).each do |tok|
+        # See `Fuzz::Plan.refuse_unusable_chains`: an `exec:` step is checked for a tokenizable
+        # argv, not looked up in the registry.
+        if Decoder.exec_step?(tok)
+          if reason = Decoder.exec_step_error(tok)
+            bad << reason
+            resolvable = false
+          end
+          next
+        end
         conv = registry[tok]?
         if conv.nil?
           bad << "#{tok}: unknown converter"

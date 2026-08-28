@@ -497,7 +497,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `dismiss <id>` | Or bulk with `--code=CODE` / `--host=HOST` |
 | `promote <id>` | Promote a finding to a human-confirmed Issue |
 | `delete <id>` | Or `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list; `add` takes `-t`/`--title`, `-p`/`--pattern`, `--description`, `--side` (`request`\|`response`), `--region` (`whole`\|`header`\|`body`), `--regex`, `-s`/`--severity` |
+| `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list; `add` takes `-t`/`--title`, `-p`/`--pattern`, `--description`, `--side` (`request`\|`response`), `--region` (`whole`\|`header`\|`body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` |
 | `mode [off\|passive\|active\|aggressive]` | Print the project's scan mode, or set it |
 
 ### run discover
@@ -696,9 +696,14 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 
 Run a [Decoder](/guide/decoder/) chain over a value. Steps are separated by `|`, `>`, or `,`.
 
+A step written `exec:COMMAND` is an [external process hook](/guide/scripting/#process-hooks)
+instead of a converter: the running value goes to `COMMAND` on stdin and its stdout becomes the
+step's output. It is exec'd with no shell, so the three separators cannot appear in its arguments.
+
 ```bash
 gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
 echo -n secret | gori run decoder 'sha256 | hex-encode'
+gori run decoder 'base64-decode > exec:./parse-envelope --json' "$BLOB"
 gori run decoder list                           # every converter (name, category, direction)
 ```
 
@@ -789,14 +794,14 @@ gori run rewriter rm 3
 
 | Option | Description |
 |--------|-------------|
-| `--op=OP` | `replace` (default), `add_header`, `set_header`, `remove_header`, `short_circuit` |
+| `--op=OP` | `replace` (default), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
 | `--target=SIDE` | `request` (default) or `response` |
-| `--part=PART` | `head` (default), `body`, or `ws` (a WebSocket message). Only meaningful for `replace` |
-| `--match=MODE` | `literal` (default) or `regex`, for `replace` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
+| `--part=PART` | `head` (default), `body`, or `ws` (a WebSocket message). Only meaningful for `replace` and `pipe` |
+| `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
 | `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
 | `-f`, `--find=FIND` | Required. The literal, pattern, or header name to act on |
-| `-v`, `--value=VALUE` | Replacement text or header value |
+| `-v`, `--value=VALUE` | Replacement text, header value, or — with `--op=pipe` — the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
 | `--host=GLOB` | Limit the rule to matching hosts (substring, `*` wildcard). Omit to apply everywhere |
 | `--name=NAME` | Label shown in the rule list |
 | `--disabled` | Create the rule without arming it |

@@ -616,6 +616,17 @@ module Gori::Fuzz
       positions.each do |pos|
         next if pos.chain.empty?
         Decoder.parse_spec(pos.chain).each do |tok|
+          # An `exec:` step resolves to no converter by construction (#818). What CAN be asked
+          # of it before the first dial is whether its argv tokenizes; whether the command
+          # exists is a run-time answer, and one that is allowed to change between now and the
+          # send. Asking the registry about it would report "unknown converter" for a chain
+          # that is perfectly well formed.
+          if Decoder.exec_step?(tok)
+            if reason = Decoder.exec_step_error(tok)
+              bad << reason
+            end
+            next
+          end
           conv = registry[tok]?
           if conv.nil?
             bad << "#{tok}: unknown converter"

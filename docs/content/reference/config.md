@@ -640,8 +640,8 @@ Your own Probe match rules, global across every project. Project-scoped rules li
 | `description` | string | Shown in the finding detail |
 | `side` | string | `request` or `response` |
 | `region` | string | `whole`, `header`, or `body` |
-| `kind` | string | `string` or `regex` |
-| `pattern` | string | Literal or regex to match |
+| `kind` | string | `string`, `regex`, or `exec` (an argv — see [Process hooks](/guide/scripting/#process-hooks)) |
+| `pattern` | string | Literal or regex to match, or the command to run when `kind` is `exec` |
 | `severity` | string | `info`, `low`, `medium`, `high`, or `critical` |
 | `enabled` | bool | Whether the rule runs |
 
@@ -757,6 +757,7 @@ Omitted until you apply or star a wordlist.
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
+| `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
 | `rewriter` | GLOBAL Match & Replace rules — applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules) |
 | `colormarker` | GLOBAL History row-colour rules — the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |

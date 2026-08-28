@@ -14,7 +14,7 @@ module Gori::Settings
     description : String,
     side : String,   # "request" | "response"
     region : String, # "whole" | "header" | "body"
-    kind : String,   # "string" | "regex"
+    kind : String,   # "string" | "regex" | "exec" (an argv — see Probe::CustomRule)
     pattern : String,
     severity : String, # lowercase Store::Severity label
     enabled : Bool
@@ -22,7 +22,7 @@ module Gori::Settings
 
   SCAN_RULE_SIDES      = %w[request response]
   SCAN_RULE_REGIONS    = %w[whole header body]
-  SCAN_RULE_KINDS      = %w[string regex]
+  SCAN_RULE_KINDS      = %w[string regex exec]
   SCAN_RULE_SEVERITIES = %w[info low medium high critical]
 
   # Tolerant global-scan-rule parse: a non-array (or absent) node keeps the current value;

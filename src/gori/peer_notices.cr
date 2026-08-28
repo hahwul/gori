@@ -124,6 +124,16 @@ module Gori
     end
 
     private def rule_notice(rules : RuleSetChange?, extract : RuleSetChange?, by_agent : Bool) : Notice?
+      # A peer's rule that RUNS A COMMAND pre-empts every other wording, because it is the one
+      # change here whose consequence is not "different bytes" (#818). See `RuleSetChange#executes`
+      # for why it earns its own line; the short version is that the byte-level sentence is true
+      # and would not have told the operator that this process is now forking a program off local
+      # disk on their behalf. Always `:warn` — there is no version of this that is a quiet
+      # `:info` line, and by construction it cannot be one anyway (the count only includes
+      # ENABLED rules, so `enabled` is non-zero whenever it fires).
+      if (change = rules) && change.executes > 0
+        return executes_notice(change, extract, by_agent)
+      end
       # ONE level for the whole line. A change that leaves nothing enabled cannot move a byte on
       # the wire, whatever just happened to the list — and the operator must not get a bell or no
       # bell depending only on whether the peer happened to touch one list or two.
@@ -143,6 +153,22 @@ module Gori
           return nil
         end
       Notice.new(quiet ? :info : :warn, message, :rewriter, by_agent)
+    end
+
+    # The pipe-rule line. Split out of `rule_notice` so that method keeps one shape per case.
+    private def executes_notice(change : RuleSetChange, extract : RuleSetChange?,
+                                by_agent : Bool) : Notice
+      one = change.executes == 1
+      # `flush` has already taken and cleared BOTH held changes, so an extract change that
+      # arrived in the same burst cannot be re-announced later — returning here without it
+      # would drop the "$KEY may expand to a different value" warning outright. It rides on
+      # the end of this line instead: the pipe fact leads because it is the bigger one.
+      also = extract ? " (the extract rules moved too — $KEY may expand to a different value here)" : ""
+      Notice.new(:warn,
+        "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
+        "#{author(by_agent)} — #{one ? "it runs" : "they run"} a local command " \
+        "here, with your privileges, on every message #{one ? "it matches" : "they match"}#{also}",
+        :rewriter, by_agent)
     end
 
     # What moved. A change that added, removed and edited NOTHING can only have moved in ORDER, and

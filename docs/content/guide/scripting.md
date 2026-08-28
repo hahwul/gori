@@ -92,6 +92,60 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 
 See [Session bindings](/guide/proxy/#session-bindings) for how extract rules define them.
 
+## Process Hooks
+
+gori has no plugin SDK and is not getting one. When a transform has to be *computed* — re-sign a
+JWT, recompress a body, decrypt a proprietary envelope, run a real detector — you hand the bytes
+to a program you already own. Bytes in on stdin, replacement bytes out on stdout. That is the
+whole extension surface, and it is the same primitive at three seams.
+
+| Seam | Where | What it does |
+|------|-------|--------------|
+| Rewriter `pipe` op | Rewriter tab, `gori run rewriter add --op=pipe`, MCP `create_rule` | The matched region goes to the command; its stdout replaces it, live in the proxy |
+| Decoder `exec:` step | Decoder tab chain, `gori run decoder`, `§value¦chain§` markers | One chain step is a command instead of a converter |
+| Probe `exec` rule | Probe rules, `gori run probe rules add --exec` | The region goes to the command; exit 0 raises a finding, stdout is the evidence |
+
+```bash
+# Re-sign every JWT leaving the browser, with your own signer.
+gori run rewriter add --op=pipe --match=regex --part=body \
+  --find='eyJ[A-Za-z0-9._-]+' --value='./resign.sh --key dev.pem'
+
+# Decode a base64 body, run it through your own parser, pretty-print the result.
+gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$BLOB"
+
+# Let a real detector decide, instead of a regex.
+gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
+```
+
+**The command is exec'd directly. There is no shell.** `argv` is tokenized with quote and
+backslash rules (`'a b'`, `"a b"`, `a\ b`) and handed to `execvp` as data — `$FOO`, `*`, `` ` ``,
+`;`, `&&`, `|` and `>` are ordinary characters in an argument, never operators. Captured bytes
+that flow through a hook can therefore never be shell-interpreted. In a Decoder chain the three
+step separators (`>`, `|`, `,`) are consumed before the step is read, so they cannot appear
+inside an `exec:` step's arguments.
+
+**A hook never stalls the proxy.** Every run has a hard wall-clock timeout (`hooks.timeout_secs`
+in settings.json, 5s by default, 60s ceiling) and a 32 MiB stdout cap. If the command times out,
+exits non-zero, cannot be spawned, or floods stdout, the **original bytes pass through
+unchanged** and the failure is written to the project event feed as a notice. A wedged hook can
+never cost you a flow. In the Rewriter the timeout is a *budget* shared by every pipe rule and
+every match in one rewrite, so a pattern matching four hundred times — or four pipe rules on one
+head — still costs that rewrite one timeout. A message is rewritten twice (its head and its
+body), so that is the bound it sees.
+
+**Two things hooks are deliberately not wired into.** The MCP `decode` tool refuses an `exec:`
+step (saved chains included) — it is exposed read-only and unbound, and stays pure compute; an
+agent that needs a hook configures a `pipe` rewriter rule or an `exec` probe rule, both gated
+writes the operator can see. And a Probe `exec` rule runs **once per flow** on the passive
+analyzer, so a slow detector is the whole rule set's bottleneck under live capture — keep its
+command fast.
+
+**A hook runs as you.** It is not sandboxed, jailed or confined — same trust level as a
+`--config` file or any other Rewriter rule. gori never invents a hook: every one of them is
+configuration a human wrote, and each is listed plainly in the rule list it belongs to. When
+another session (an agent, a second TUI) adds a `pipe` rule to a project you have open, this one
+tells you in as many words that it is now running a local command on your behalf.
+
 ## What to Reach For
 
 | Task | Subcommand |

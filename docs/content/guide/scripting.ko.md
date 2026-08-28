@@ -92,6 +92,57 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 
 바인딩을 정의하는 추출 규칙은 [세션 바인딩](/ko/guide/proxy/#session-bindings)을 참고하세요.
 
+## 프로세스 훅
+
+gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계산*해야 할 때 — JWT 재서명, 바디
+재압축, 독자 포맷 봉투 복호화, 진짜 탐지기 실행 — 이미 가지고 있는 프로그램에 바이트를 넘기면
+됩니다. stdin으로 바이트를 주고 stdout으로 교체 바이트를 받습니다. 확장 표면은 이게 전부이고,
+같은 원시 도구가 세 군데에 붙어 있습니다.
+
+| 이음매 | 위치 | 하는 일 |
+|--------|------|---------|
+| Rewriter `pipe` 액션 | Rewriter 탭, `gori run rewriter add --op=pipe`, MCP `create_rule` | 매치된 구간을 명령에 넘기고 stdout으로 교체 — 프록시에서 실시간으로 |
+| Decoder `exec:` 스텝 | Decoder 탭 체인, `gori run decoder`, `§value¦chain§` 마커 | 체인의 한 스텝이 컨버터가 아니라 명령 |
+| Probe `exec` 룰 | Probe 룰, `gori run probe rules add --exec` | 구간을 명령에 넘겨 exit 0이면 발견, stdout이 근거 |
+
+```bash
+# 브라우저에서 나가는 모든 JWT를 내 서명기로 재서명한다.
+gori run rewriter add --op=pipe --match=regex --part=body \
+  --find='eyJ[A-Za-z0-9._-]+' --value='./resign.sh --key dev.pem'
+
+# base64 바디를 디코드해 내 파서에 통과시키고 예쁘게 출력한다.
+gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$BLOB"
+
+# 정규식 대신 진짜 탐지기가 판정하게 한다.
+gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
+```
+
+**명령은 직접 exec됩니다. 셸이 없습니다.** `argv`는 따옴표와 백슬래시 규칙(`'a b'`, `"a b"`,
+`a\ b`)으로만 토큰화되어 `execvp`에 데이터로 전달됩니다 — `$FOO`, `*`, `` ` ``, `;`, `&&`, `|`,
+`>`는 인자 안의 평범한 문자일 뿐 연산자가 아닙니다. 훅을 통과하는 캡처 바이트가 셸에 해석될
+길은 없습니다. Decoder 체인에서는 세 구분자(`>`, `|`, `,`)가 스텝을 읽기 전에 소비되므로
+`exec:` 스텝의 인자 안에는 들어갈 수 없습니다.
+
+**훅은 프록시를 멈추지 못합니다.** 모든 실행에 하드 벽시계 타임아웃(settings.json의
+`hooks.timeout_secs`, 기본 5초, 상한 60초)과 32 MiB stdout 상한이 걸립니다. 명령이 타임아웃되거나,
+0이 아닌 코드로 종료되거나, 실행 자체에 실패하거나, stdout을 넘치게 쏟으면 **원본 바이트가 그대로
+통과**하고 실패는 프로젝트 이벤트 피드에 알림으로 기록됩니다. 멈춘 훅 때문에 플로우를 잃는 일은
+없습니다. Rewriter에서 타임아웃은 한 번의 재작성에 걸린 모든 pipe 룰과 모든 매치가 나눠 쓰는
+*예산*입니다. 400번 매치되는 패턴도, 한 헤드에 걸린 pipe 룰 4개도 예산 한 번만큼만 듭니다. 메시지
+하나는 헤드와 바디로 두 번 재작성되므로 메시지가 보는 한계는 그 두 배입니다.
+
+**의도적으로 연결하지 않은 두 곳.** MCP `decode` 툴은 `exec:` 스텝을 거부합니다(저장된 체인
+포함) — read-only·unbound로 노출되는 툴이라 순수 계산으로 남깁니다. 훅이 필요한 에이전트는 `pipe`
+rewriter 룰이나 `exec` probe 룰을 만들면 되고, 둘 다 운영자가 볼 수 있는 게이트된 쓰기입니다. 그리고
+Probe `exec` 룰은 패시브 분석기에서 **플로우당 한 번** 실행되므로, 느린 탐지기는 라이브 캡처 중 룰
+셋 전체의 병목이 됩니다. 명령을 빠르게 유지하세요.
+
+**훅은 당신 권한으로 실행됩니다.** 샌드박스도, 감옥도, 격리도 없습니다 — `--config` 파일이나 다른
+Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들어내는 일은 없습니다. 전부 사람이 쓴
+설정이고, 각각은 자기가 속한 룰 목록에 그대로 보입니다. 열어둔 프로젝트에 다른 세션(에이전트,
+두 번째 TUI)이 `pipe` 룰을 추가하면, 이 세션은 지금부터 당신을 대신해 로컬 명령을 실행하게
+되었다고 그대로 말해줍니다.
+
 ## 무엇을 쓸까
 
 | 할 일 | 서브커맨드 |
