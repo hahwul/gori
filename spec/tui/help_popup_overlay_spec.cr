@@ -23,6 +23,10 @@ private def ev(char : Char, ctrl = false, alt = false) : Termisu::Event::Key
   Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: char, modifiers: mods)
 end
 
+private def begin_search(h : OverlayHarness) : Nil
+  h.press(Termisu::Input::Key::Slash, '/')
+end
+
 # The FIELDS section of a query page, as {name => help}. Lets an example assert the vocabulary
 # a surface teaches without depending on row order or on the sections around it.
 private def field_rows(rows : Array(Gori::Tui::HelpView::Row)) : Hash(String, String)
@@ -149,11 +153,13 @@ describe Gori::Tui::HelpPopupOverlay do
     end
   end
 
-  describe "the filter" do
+  describe "the explicit / search" do
     it "narrows to matching rows and keeps each survivor's section head" do
       ov = shortcuts
       before = ov.rows.size
-      OverlayHarness.new(ov).type("hex")
+      h = OverlayHarness.new(ov)
+      begin_search(h)
+      h.type("hex")
       ov.rows.size.should be < before
       ov.rows.none? { |r| r.kind == :gap }.should be_true
       items = ov.rows.select { |r| r.kind == :item }
@@ -167,6 +173,7 @@ describe Gori::Tui::HelpPopupOverlay do
       ov = shortcuts
       all = ov.rows.size
       h = OverlayHarness.new(ov)
+      begin_search(h)
       h.type("hex")
       3.times { h.press(Termisu::Input::Key::Backspace) }
       ov.rows.size.should eq(all)
@@ -180,27 +187,38 @@ describe Gori::Tui::HelpPopupOverlay do
       OverlayHarness.new(shortcuts).rendered?("#{total} rows").should be_true
 
       ov = shortcuts
-      OverlayHarness.new(ov).type("hex")
+      h = OverlayHarness.new(ov)
+      begin_search(h)
+      h.type("hex")
       matched = ov.rows.count { |r| r.kind == :item }
       OverlayHarness.new(ov).rendered?("#{matched} of #{total}").should be_true
     end
 
-    it "parks the caret on its own card, not the filter bar it was opened from" do
+    it "owns the caret only while search is active, including IME preedit" do
       # `Screen#desired_cursor` is last-writer-wins per frame and the tab body draws first, so
-      # an overlay that sets no cursor leaves the caret blinking in the bar underneath — and
-      # this is the one overlay reachable straight from an editing text bar (`?`).
+      # browse must CLEAR an editor caret underneath; `/` then places it on this card.
       area = OverlayHarness::DEFAULT_AREA
       ov = shortcuts
       screen = Screen.new(MemoryBackend.new(area.w, area.h))
       screen.cursor(0, 0) # stand in for the filter bar drawn underneath this frame
       ov.render(screen, area)
+      screen.desired_cursor.should be_nil
+
+      h = OverlayHarness.new(ov)
+      begin_search(h)
+      h.preedit("한")
+      screen = Screen.new(MemoryBackend.new(area.w, area.h))
+      screen.cursor(0, 0)
+      ov.render(screen, area)
       box = ov.overlay_box(area).not_nil!
-      screen.desired_cursor.should eq({box.x + 2, box.y + 1})
+      screen.desired_cursor.should eq({box.x + 2 + "search: ".size + Screen.draw_width("한"), box.y + 1})
     end
 
     it "says so when nothing matches, instead of drawing an empty card" do
       ov = shortcuts
-      OverlayHarness.new(ov).type("zzzznotathing")
+      h = OverlayHarness.new(ov)
+      begin_search(h)
+      h.type("zzzznotathing")
       ov.rows.should be_empty
       OverlayHarness.new(ov).rendered?("no rows match").should be_true
     end
@@ -216,7 +234,7 @@ describe Gori::Tui::HelpPopupOverlay do
       ov.query.should be_empty
     end
 
-    it "drops every OTHER ctrl chord instead of typing its letter into the filter" do
+    it "drops every OTHER ctrl chord instead of typing its letter into search" do
       # This is what `!ev.ctrl? && !ev.alt?` on the printable arm buys, and it is NOT what the
       # ^P example above proves: ^P is claimed by an earlier arm, so that one passes with or
       # without the guard. The real hazard is the rest of the alphabet — `Event::Key#char`
@@ -225,6 +243,7 @@ describe Gori::Tui::HelpPopupOverlay do
       # as filter text.
       ov = shortcuts
       h = OverlayHarness.new(ov)
+      begin_search(h)
       h.press(Termisu::Input::Key::LowerK, 'k', ctrl: true)
       h.press(Termisu::Input::Key::LowerX, 'x', ctrl: true)
       h.press(Termisu::Input::Key::LowerR, 'r', alt: true)
@@ -232,27 +251,51 @@ describe Gori::Tui::HelpPopupOverlay do
       ov.rows.size.should eq(HelpView.shortcut_rows(registry).size)
     end
 
-    it "types a bare p into the filter" do
+    it "ignores direct typing in browse, then types it after /" do
       ov = shortcuts
-      OverlayHarness.new(ov).press(Termisu::Input::Key::LowerP, 'p')
+      h = OverlayHarness.new(ov)
+      h.press(Termisu::Input::Key::LowerA, '/', ctrl: true)
+      h.press(Termisu::Input::Key::LowerA, '/', alt: true)
+      ov.searching?.should be_false
+      ov.query.should be_empty
+      h.press(Termisu::Input::Key::LowerP, 'p')
+      ov.query.should be_empty
+      begin_search(h)
+      h.press(Termisu::Input::Key::LowerP, 'p')
       ov.query.should eq("p")
     end
 
-    it "does NOT bind j/k/g/G to motion — they are filter input" do
-      # With a filter bar, a letter arm above the printable arm eats that letter out of every
-      # query someone types (`g` is in "graphql", `k` in "key"). ProjectPicker learned the
-      # same rule from the other side.
+    it "treats j/k/g/G as text while search is active" do
       ov = shortcuts
-      OverlayHarness.new(ov).type("gjkG")
+      h = OverlayHarness.new(ov)
+      begin_search(h)
+      h.type("gjkG")
       ov.query.should eq("gjkG")
     end
 
-    it "closes on esc and stays open on ↵" do
+    it "cancels search to its original scroll before a later esc closes" do
+      ov = shortcuts(:help)
+      h = OverlayHarness.new(ov)
+      h.wheel(3)
+      ov.scroll.should eq(3)
+      begin_search(h)
+      h.type("hex")
+      h.press(Termisu::Input::Key::Escape).should eq(:open)
+      ov.searching?.should be_false
+      ov.query.should be_empty
+      ov.scroll.should eq(3)
+      h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    end
+
+    it "stays open on enter in browse and search" do
       OverlayHarness.new(shortcuts).press(Termisu::Input::Key::Escape).should eq(:closed)
       # Read-only: there is nothing to commit, and a :commit here would let a stray Enter
       # close a card the operator is still reading.
       h = OverlayHarness.new(shortcuts)
       h.press(Termisu::Input::Key::Enter).should eq(:open)
+      begin_search(h)
+      h.press(Termisu::Input::Key::Enter).should eq(:open)
+      h.overlay.as(HelpPopupOverlay).searching?.should be_true
       h.commits.should eq(0)
     end
 

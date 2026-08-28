@@ -51,6 +51,10 @@ module Gori::Tui
 
     getter query : String
 
+    def searching? : Bool
+      @searching
+    end
+
     def self.shortcuts(registry : Verb::Registry, tab : Symbol) : self
       rows = HelpView.shortcut_rows(registry)
       new("SHORTCUTS", rows, HelpView::KEY_W, landing_scroll(rows, tab))
@@ -81,6 +85,8 @@ module Gori::Tui
       @rows = @all
       @query = ""
       @preedit = "" # live IME composition on the filter (e.g. Hangul jamo)
+      @searching = false
+      @search_origin_scroll = @scroll
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -93,14 +99,15 @@ module Gori::Tui
     end
 
     def hint : String
-      "type to filter · ↑/↓ scroll · ⇞/⇟ page · esc close"
+      return "type to search · ↑/↓ scroll · ⇞/⇟ page · esc clear" if @searching
+      "/ search · ↑/↓ scroll · ⇞/⇟ page · esc close"
     end
 
-    # Read-only: never :commit. esc closes, ⌫ edits the filter, and every other printable key
-    # goes INTO the filter.
+    # Read-only: never :commit. `/` enters the explicit search mode; esc there clears the
+    # search and returns to the landing scroll, while esc in browse closes the card.
     #
     # There is deliberately no j/k/g/G arm. Those are the motions this app uses everywhere
-    # else, and that is exactly why they cannot be here: with a filter bar, a letter arm above
+    # else, and that is exactly why they cannot be here: in search mode, a letter arm above
     # the printable arm eats that letter out of every query an operator types (`g` and `k` are
     # in "graphql" and "key"). ProjectPicker learned the same rule from the other side — its
     # `t`/⇧T marks had to become Tab/⇧Tab because the search box claims printables first.
@@ -111,31 +118,70 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       case
-      when ev.ctrl? && k.lower_p? then on_palette.try(&.call)
-      when k.escape?              then return :cancel
-      when k.up?                  then move(-1)
-      when k.down?                then move(1)
-      when k.page_up?             then move(-page_step)
-      when k.page_down?           then move(page_step)
-      when k.home?                then @scroll = 0
-      when k.end?                 then @scroll = @rows.size
-      when k.backspace?           then backspace
-      when k.enter?               then nil # nothing to commit; must not close the card
+      when ev.ctrl? && k.lower_p?
+        on_palette.try(&.call)
+      when k.escape?
+        return :cancel unless @searching
+        cancel_search
+      when handle_navigation_key(k)
+      when k.backspace?
+        backspace if @searching
       else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          query_char(c)
-        end
+        handle_printable_key(ev)
       end
       :stay
+    end
+
+    private def handle_navigation_key(key) : Bool
+      case
+      when key.up?        then move(-1)
+      when key.down?      then move(1)
+      when key.page_up?   then move(-page_step)
+      when key.page_down? then move(page_step)
+      when key.home?      then @scroll = 0
+      when key.end?       then @scroll = @rows.size
+      when key.enter?     then nil # read-only: nothing to commit in either mode
+      else                     return false
+      end
+      true
+    end
+
+    private def handle_printable_key(ev : Termisu::Event::Key) : Nil
+      return unless c = bare_char(ev)
+      return query_char(c) if @searching
+      begin_search if c == '/'
+    end
+
+    private def bare_char(ev : Termisu::Event::Key) : Char?
+      return nil if ev.ctrl? || ev.alt?
+      ev.char
+    end
+
+    private def begin_search : Nil
+      @search_origin_scroll = @scroll
+      @searching = true
+      @query = ""
+      @preedit = ""
+      @rows = @all
+    end
+
+    private def cancel_search : Nil
+      @searching = false
+      @query = ""
+      @preedit = ""
+      @rows = @all
+      @scroll = @search_origin_scroll
     end
 
     # Live IME composition, shown under the filter caret without touching the committed query
     # — the same model TextField and the palette use.
     def set_preedit(text : String) : Nil
+      return unless @searching
       @preedit = text
     end
 
     def query_char(ch : Char) : Nil
+      return unless @searching
       return if ch.control?
       @preedit = "" # a committed char ends any in-progress composition
       @query += ch
@@ -143,6 +189,7 @@ module Gori::Tui
     end
 
     def backspace : Nil
+      return unless @searching
       return if @query.empty?
       @preedit = ""
       @query = @query[0, @query.size - 1]
@@ -161,26 +208,10 @@ module Gori::Tui
     private def refilter : Nil
       if @query.empty?
         @rows = @all
-        @scroll = 0
+        @scroll = @search_origin_scroll
         return
       end
-      needle = @query.downcase
-      out = [] of HelpView::Row
-      head = nil.as(HelpView::Row?)
-      @all.each do |row|
-        case row.kind
-        when :head
-          head = row
-        when :item
-          next unless "#{row.a} #{row.b}".downcase.includes?(needle)
-          if h = head
-            out << h
-            head = nil # only once per surviving section
-          end
-          out << row
-        end
-      end
-      @rows = out
+      @rows = HelpView.search_rows(@all, @query)
       @scroll = 0
     end
 
@@ -274,21 +305,16 @@ module Gori::Tui
       "#{@rows.count { |r| r.kind == :item }} of #{total}"
     end
 
-    # The filter bar, mirroring FilterPickerOverlay#render_filter: an idle hint until something
-    # is typed, then the committed query plus any IME composition under a caret.
+    # The search row is idle until `/` claims it. Only active search owns a terminal cursor;
+    # otherwise the popup is a navigable read-only card, not an editor.
     private def render_filter(screen : Screen, box : Rect) : Nil
-      if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter", Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
-        # Park the caret on this card even with nothing typed. `Screen#desired_cursor` is
-        # last-writer-wins per frame and the tab body draws BEFORE any overlay, so leaving it
-        # unset lets the caret keep blinking in the filter bar UNDERNEATH — and this is the one
-        # overlay reachable straight from an editing text bar (`?`), where an IME composition
-        # popup would anchor to that stale position too.
-        screen.cursor(box.x + 2, box.y + 1)
-      else
-        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
+      if @searching
+        px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
         screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
           Theme.panel, width: {box.right - 2 - px, 1}.max)
+      else
+        screen.text(box.x + 2, box.y + 1, "/ search", Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
+        screen.desired_cursor = nil # clear any editor caret drawn by the pane underneath
       end
     end
 

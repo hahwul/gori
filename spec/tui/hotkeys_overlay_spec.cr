@@ -10,6 +10,10 @@ private def fresh_overlay : HotkeysOverlay
   HotkeysOverlay.new(Gori::Verbs.registry)
 end
 
+private def start_hotkey_search(h : OverlayHarness) : Nil
+  h.press(Termisu::Input::Key::Slash, '/')
+end
+
 # The settings:hotkeys overlay edits a working copy; its windowed draw + click hit-test
 # stay in sync and the browse/capture state machine validates rebinds inline.
 describe HotkeysOverlay do
@@ -41,12 +45,110 @@ describe HotkeysOverlay do
   it "selects only binding rows (headers are skipped) and row_at ignores headers" do
     o = fresh_overlay
     box = o.overlay_box(Rect.new(0, 0, 80, 50)).not_nil!
-    # the first interior row is the first scope HEADER → not a click target
-    o.row_at(box, box.x + 5, box.y + 2).should be_nil
+    # The search row + divider precede the list; its first row is the first scope HEADER.
+    o.row_at(box, box.x + 5, box.y + 3).should be_nil
     # a row further down lands on a binding (non-nil index)
-    o.row_at(box, box.x + 5, box.y + 3).should_not be_nil
+    o.row_at(box, box.x + 5, box.y + 4).should_not be_nil
   ensure
     reset_settings
+  end
+
+  describe "explicit / search" do
+    after_each do
+      reset_settings
+    end
+
+    it "matches visible title and binding text while retaining the scope header" do
+      by_title = fresh_overlay
+      ht = OverlayHarness.new(by_title)
+      start_hotkey_search(ht)
+      ht.type("toggle capture")
+      by_title.searching?.should be_true
+      ht.rendered?("GLOBAL").should be_true
+      ht.rendered?("Toggle capture").should be_true
+
+      by_binding = fresh_overlay
+      hb = OverlayHarness.new(by_binding)
+      start_hotkey_search(hb)
+      hb.type("shift-s")
+      hb.rendered?("Toggle scope lens").should be_true
+    end
+
+    it "shows IME preedit only after / activates search" do
+      o = fresh_overlay
+      h = OverlayHarness.new(o)
+      h.preedit("한")
+      h.rendered?("한").should be_false
+      start_hotkey_search(h)
+      h.preedit("한")
+      h.rendered?("한").should be_true
+      o.hint.should contain("type to search")
+    end
+
+    it "accepts a match with enter and returns to the full editor at that binding" do
+      o = fresh_overlay
+      h = OverlayHarness.new(o)
+      start_hotkey_search(h)
+      h.type("toggle capture")
+      h.press(Termisu::Input::Key::Enter).should eq(:open)
+      o.searching?.should be_false
+
+      h.press(Termisu::Input::Key::LowerE, 'e')
+      o.capturing?.should be_true
+      h.press(Termisu::Input::Key::LowerY, 'y', alt: true)
+      o.to_working[0]["capture.toggle"].should eq(Gori::Verb::Chord.new("y", alt: true))
+    end
+
+    it "cancels to the row focused before search, then a second esc closes" do
+      control = fresh_overlay
+      control.select_move(1)
+      control.unbind_selected
+      expected = control.to_working[0].keys.first
+
+      o = fresh_overlay
+      o.select_move(1)
+      h = OverlayHarness.new(o)
+      start_hotkey_search(h)
+      h.type("toggle capture")
+      h.press(Termisu::Input::Key::Escape).should eq(:open)
+      o.searching?.should be_false
+      o.unbind_selected
+      o.to_working[0].keys.first.should eq(expected)
+      h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    end
+
+    it "keeps search open and safe when nothing matches" do
+      o = fresh_overlay
+      h = OverlayHarness.new(o)
+      start_hotkey_search(h)
+      h.type("zzzznotahotkey")
+      h.rendered?("no hotkeys match").should be_true
+      h.press(Termisu::Input::Key::Enter).should eq(:open)
+      o.searching?.should be_true
+      o.to_working[0].should be_empty
+    end
+
+    it "treats browse mnemonics as query text and ignores modified chords" do
+      o = fresh_overlay
+      h = OverlayHarness.new(o)
+      start_hotkey_search(h)
+      h.type("exrRjk")
+      h.press(Termisu::Input::Key::LowerX, 'x', ctrl: true)
+      h.press(Termisu::Input::Key::LowerR, 'r', alt: true)
+      o.searching?.should be_true
+      o.capturing?.should be_false
+      o.to_working[0].should be_empty
+      o.to_working[1].should eq("auto")
+    end
+
+    it "keeps slash bindable while raw capture has precedence" do
+      o = fresh_overlay
+      o.begin_capture
+      o.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Slash, char: '/')).should eq(:stay)
+      o.searching?.should be_false
+      o.capturing?.should be_false
+      o.to_working[0].values.first.should eq(Gori::Verb::Chord.new("/"))
+    end
   end
 
   it "captures a valid chord into the working copy and leaves capture mode" do

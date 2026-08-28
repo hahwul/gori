@@ -69,6 +69,12 @@ module Gori::Tui
       Verb::Scope::Body
     end
 
+    # Search is a single-line editor: bracketed paste must type into it rather than being
+    # refused as a command-bearing paste by the shell's safety gate.
+    def body_badge : Symbol
+      @help.searching? ? :editor : :body
+    end
+
     # PageUp/PageDown/Home/End over the (long) Help cheat-sheet. move() clamps the top;
     # the bottom is clamped at render (clamp_scroll), so the large Home/End magnitude is
     # safe and lands on the last page.
@@ -87,11 +93,14 @@ module Gori::Tui
     end
 
     def move_subtab(dir : Int32) : Nil
+      @help.cancel_search
       @current = (@current + dir).clamp(0, PAGE_LABELS.size - 1)
     end
 
     def jump_subtab(idx : Int32) : Nil
-      @current = idx if 0 <= idx < PAGE_LABELS.size
+      return unless 0 <= idx < PAGE_LABELS.size
+      @help.cancel_search
+      @current = idx
     end
 
     def subtabs_fixed? : Bool # constant set, read-only body — no ^N/^W, no editing
@@ -119,6 +128,8 @@ module Gori::Tui
     # strip. esc pops to the tab bar. EVERY other key falls through (return false)
     # so the space menu and the global keymap still see it.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
+      search_page = scrollable_page? ? (query_page? ? :query : :shortcuts) : nil
+      return true if @help.handle_search_key(ev, search_page)
       key = ev.key
       case
       when key.escape?              then @host.request_focus(:menu)
@@ -134,6 +145,10 @@ module Gori::Tui
       true
     end
 
+    def set_preedit(text : String) : Bool
+      @help.set_search_preedit(text)
+    end
+
     def handle_wheel(step : Int32) : Bool
       page_move(step) # About is static; the other two scroll
       true
@@ -142,7 +157,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       # No "q projects": q (back to the picker) is tab-bar-only by design, so the
       # body must not advertise it as a key (esc/↹ to the bar first, then q).
-      "↑/↓ scroll · ←/→ pages · ↹/esc tabs · ^P cmds"
+      return "type to search · ↑/↓ scroll · esc clear" if @help.searching?
+      return "←/→ pages · ↹/esc tabs · ^P cmds" if about_page?
+      "↑/↓ scroll · ←/→ pages · / search · ↹/esc tabs · ^P cmds"
     end
   end
 end
