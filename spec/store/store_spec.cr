@@ -503,6 +503,29 @@ describe Gori::Store do
     end
   end
 
+  it "persists and updates cvss on issues" do
+    with_store do |store|
+      id = store.insert_issue("SQLi", Gori::Store::Severity::Critical, "acme.test", nil,
+        cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+      issue = store.get_issue(id).not_nil!
+      issue.cvss.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+      issue.cvss_score.should eq(9.8)
+      issue.cvss_vector.should_not be_nil
+
+      # Update cvss to score string
+      store.update_issue(id, cvss: "7.5").should be_true
+      updated = store.get_issue(id).not_nil!
+      updated.cvss.should eq("7.5")
+      updated.cvss_score.should eq(7.5)
+
+      # Clear cvss
+      store.update_issue(id, clear_cvss: true).should be_true
+      cleared = store.get_issue(id).not_nil!
+      cleared.cvss.should be_nil
+      cleared.cvss_score.should be_nil
+    end
+  end
+
   # A set larger than ID_CHUNK is bound across several statements, because SQLite caps bound
   # parameters (999 on a build older than 3.32) and ⇧T marks as many issues as the filter
   # shows. What this pins is that chunking is COMPLETE — an off-by-one in the slicing would

@@ -12,12 +12,12 @@ module Gori
     # id there handed out the rowid of an issue that does not exist, and because
     # `issues.id` is INTEGER PRIMARY KEY without AUTOINCREMENT the next issue created is
     # handed that same id and silently adopts any entity_links written against it.
-    def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?) : Int64
+    def insert_issue(title : String, severity : Severity, host : String?, flow_id : Int64?, cvss : String? = nil) : Int64
       ts = now_us
       issue_id = 0_i64
       ok = exec_task_ok ->(c : DB::Connection) {
-        c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes) VALUES (?,?,?,?,?,?,'')",
-          ts, ts, title, severity.value, host, flow_id)
+        c.exec("INSERT INTO issues (created_at, updated_at, title, severity, host, flow_id, notes, cvss) VALUES (?,?,?,?,?,?,'',?)",
+          ts, ts, title, severity.value, host, flow_id, cvss)
         # Capture the issue's own id BEFORE the entity_links insert below overwrites
         # last_insert_rowid: exec_task's generic reply reads it AFTER the closure, so with
         # a flow_id it would otherwise return the link row's id, not the issue's.
@@ -35,8 +35,10 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing). An empty
     # update (no fields supplied) is a no-op → true (nothing to persist, nothing failed).
     def update_issue(id : Int64, *, title : String? = nil, severity : Severity? = nil,
-                     notes : String? = nil, status : Status? = nil) : Bool
-      update_issues([id], title: title, severity: severity, notes: notes, status: status)
+                     notes : String? = nil, status : Status? = nil,
+                     cvss : String? = nil, clear_cvss : Bool = false) : Bool
+      update_issues([id], title: title, severity: severity, notes: notes, status: status,
+        cvss: cvss, clear_cvss: clear_cvss)
     end
 
     # Batch form of update_issue — the Issues list's multi-select severity/status set. ONE
@@ -55,7 +57,8 @@ module Gori
     # write, and re-triaging a large set simply never works. Every chunk runs inside the ONE
     # exec_task_ok, so the batch is still a single transaction and a single fsync.
     def update_issues(ids : Array(Int64), *, title : String? = nil, severity : Severity? = nil,
-                      notes : String? = nil, status : Status? = nil) : Bool
+                      notes : String? = nil, status : Status? = nil,
+                      cvss : String? = nil, clear_cvss : Bool = false) : Bool
       return true if ids.empty?
       sets = [] of String
       set_args = [] of DB::Any
@@ -70,6 +73,11 @@ module Gori
       end
       if st = status
         sets << "status = ?"; set_args << st.value
+      end
+      if clear_cvss
+        sets << "cvss = NULL"
+      elsif c = cvss
+        sets << "cvss = ?"; set_args << (c.empty? ? nil : c)
       end
       return true if sets.empty?
       sets << "updated_at = ?"; set_args << now_us
@@ -112,7 +120,7 @@ module Gori
     def issues : Array(Issue)
       list = [] of Issue
       @db.query(<<-SQL) do |rs|
-        SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status
+        SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status, cvss
         FROM issues ORDER BY severity DESC, created_at DESC
         SQL
         rs.each { list << read_issue(rs) }
@@ -121,7 +129,7 @@ module Gori
     end
 
     def get_issue(id : Int64) : Issue?
-      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status FROM issues WHERE id = ?", id) do |rs|
+      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status, cvss FROM issues WHERE id = ?", id) do |rs|
         return read_issue(rs) if rs.move_next
       end
       nil

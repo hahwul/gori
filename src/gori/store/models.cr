@@ -662,9 +662,18 @@ module Gori
       getter flow_id : Int64?
       getter notes : String
       getter status : Status
+      getter cvss : String?
 
       def initialize(@id, @created_at, @updated_at, @title, @severity, @host, @flow_id, @notes,
-                     @status = Status::Open)
+                     @status = Status::Open, @cvss : String? = nil)
+      end
+
+      def cvss_score : Float64?
+        @cvss.try { |c| Cvss.score_for(c) }
+      end
+
+      def cvss_vector : ::CVSS::Vector?
+        @cvss.try { |c| ::CVSS.parse?(c) || ::CVSS.parse?(c.upcase) }
       end
     end
 
