@@ -1899,7 +1899,7 @@ module Gori
       Issue.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
         Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String),
-        Status.new(rs.read(Int32)))
+        Status.new(rs.read(Int32)), rs.read(String?))
     end
 
     private def try_read_entity_link(rs : DB::ResultSet) : EntityLink?

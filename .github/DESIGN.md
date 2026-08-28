@@ -1828,3 +1828,45 @@ watching TUI reload rules/scope/bindings on each beat. So presence is a per-proc
 SIGKILL, where no `ensure` runs) and the JSON body is decoration. Readers sweep any marker whose
 lock they can take. The TUI polls the directory on the DV tick OUTSIDE `apply_external_change`,
 because a marker moves no `data_version`.
+
+### 2026-08-28: CVSS in issues — optional wire representation with live derivation
+
+Refines: [P4](#p4), [P7](#p7). #575.
+
+An issue finding can record an optional CVSS vector string or numeric score. This is NOT captured
+wire, so P7's "keep the bytes as they arrived" does not apply to it: an operator's typing is the
+input, and the standard already defines the canonical form of the thing they typed. `Store#insert_issue`
+/ `#update_issues` normalise on the way in — the shard's canonical vector (metrics in spec order,
+uppercase, every temporal/threat/environmental metric preserved) or a bare score unchanged — so two
+operators filing the same finding, one pasting a scanner's lowercase form, leave ONE string in the
+column. Every export prints it verbatim and anything downstream keys on it, so two spellings of one
+vector is two values. Normalising at the write rather than in each surface that validates one is the
+usual chokepoint argument: three validating surfaces are three places to forget.
+A value that scores as nothing is kept exactly as given — the surfaces refuse to write new ones, so
+anything unscorable reaching the store is legacy or imported, and NULLing it would lose data the write
+was never asked to judge.
+Verbatim is not the same as unchecked — every write path (TUI, `--cvss`, MCP `cvss`) REFUSES a string
+that scores as nothing, because the column is read back through a parser and a value only its own raw
+bytes can see is a field written on a command that reported success.
+Severity (Info..Critical) is automatically derived from the score band whenever a valid CVSS vector or
+score is supplied without an explicit override, across TUI, CLI (`--cvss`), and MCP (`cvss`).
+Query filtering (`cvss:>=7.0`, `cvss:3.1`) resolves both numeric comparisons and vector substrings.
+
+SARIF's per-rule `security-severity` folds each result to ONE number — a real CVSS score where the
+issue carries one, its severity band's floor where it does not — and takes the maximum. Ranking the
+score and the severity as two separate axes lets an unscored Critical be badged as its scored Low
+sibling, which inverts the badge's whole promise ("the worst under this rule").
+
+The operator-facing half is one input, not two. The issue form's `cvss` row is a LAUNCHER (`↵` opens
+the calculator); the calculator holds the only editable copy of the value, as a `vector:` text field
+above the metric rows that build one. Two editable copies of one value on two cards is how they
+drift, and a form whose `↵` means "create" cannot also mean "open the builder". The calculator opens
+on the LEAST severe vector it can spell, not the worst: a default that files a 9.8 Critical on a bare
+`↵` puts a number in someone's report that nobody chose.
+
+The builder writes v3.1 and v4.0, and treats them as SEPARATE ASSESSMENTS rather than two spellings of
+one. v4.0 asks questions v3.1 does not (`AT`, and the Vulnerable/Subsequent impact split that replaces
+`S`) and FIRST's own guidance is that the two do not convert, so the `version:` row translates nothing:
+each version keeps its own selections while the card is open. A translated vector would put a score in
+someone's report that nobody assessed. Any version the parser knows is still stored and scored as
+typed — the builder is what is limited to two, not the field.

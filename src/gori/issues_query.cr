@@ -63,6 +63,9 @@ module Gori
           when "severity", "sev"
             op, text = split_op(value)
             return Term.new(:severity, op, text.downcase, negate)
+          when "cvss"
+            op, text = split_op(value)
+            return Term.new(:cvss, op, text.downcase, negate)
           when "status", "st"
             return Term.new(:status, :eq, value.downcase, negate)
           when "host"
@@ -95,12 +98,46 @@ module Gori
         return !t.negate if t.text.empty?
         hit = case t.kind
               when :severity then match_severity(t, f.severity)
+              when :cvss     then match_cvss(t, f)
               when :status   then match_status(t.text, f.status)
               when :host     then (f.host || "").downcase.includes?(t.text)
               when :title    then f.title.downcase.includes?(t.text)
               else                free_text(t.text, f)
               end
         t.negate ? !hit : hit
+      end
+
+      # `cvss:` reads two ways, and WHICH one is decided by the OPERATOR, not by whether the
+      # operand happens to look like a number.
+      #
+      #   cvss:>=7.0   a comparison: numeric, and only issues that actually score
+      #   cvss:3.1     bare: the score if the operand is one, else a substring of the vector
+      #
+      # Branching on the operand instead let `cvss:>=high` — the obvious transfer from the
+      # documented `sev:>=high` — quietly become a substring search and report matches as if
+      # the comparison had been honoured. It also dropped an issue whose stored string is not
+      # scorable (a legacy or imported value) from `cvss:3.1`, even though the substring path
+      # would have matched it: the numeric branch bailed on the missing score before ever
+      # trying the text.
+      private def match_cvss(t : Term, f : Store::Issue) : Bool
+        cvss_str = f.cvss
+        return false unless cvss_str
+        target = t.text.to_f?
+        if t.op != :eq
+          return false unless target && (score = f.cvss_score)
+          cmp = score <=> target
+          return false unless cmp
+          case t.op
+          when :ge then cmp >= 0
+          when :gt then cmp > 0
+          when :le then cmp <= 0
+          when :lt then cmp < 0
+          else          false
+          end
+        else
+          return true if target && (score = f.cvss_score) && score == target
+          cvss_str.downcase.includes?(t.text)
+        end
       end
 
       private def free_text(text : String, f : Store::Issue) : Bool

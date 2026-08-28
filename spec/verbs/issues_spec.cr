@@ -47,7 +47,7 @@ describe "Gori::Verbs.register_issues" do
     it "gates delete + the list pickers on the effective target set, not the cursor alone" do
       # The BATCH gate: marks if any, else the cursor row. Equivalent to "a row is selected"
       # with nothing marked; the case it adds is a mark that the filter scrolled out of view.
-      %w[issues.delete issues.set-severity issues.set-status].each do |id|
+      %w[issues.delete issues.set-severity issues.set-status issues.set-cvss].each do |id|
         ctx = FakeExecContext.new
         r[id].available?(ctx).should be_false
         ctx.selected_issue = 7_i64
@@ -60,8 +60,10 @@ describe "Gori::Verbs.register_issues" do
       # through selected_issue_ids, so there is no issues.batch-* twin.
       verb_intents(r, "issues.set-severity").should eq([:issue_set_severity])
       verb_intents(r, "issues.set-status").should eq([:issue_set_status])
+      verb_intents(r, "issues.set-cvss").should eq([:issue_set_cvss])
       r["issues.set-severity"].chords.should be_empty # arrows must never re-triage by accident
       r["issues.set-status"].chords.should be_empty
+      r["issues.set-cvss"].chords.should be_empty
     end
 
     it "marks with t / ⇧T / ⇧arrows and clears only when something is marked" do
@@ -143,6 +145,17 @@ describe "Gori::Verbs.register_issues" do
       r["issue.set-status"].menu_key.should eq('c')
       verb_intents(r, "issue.set-severity").should eq([:issue_set_severity])
       verb_intents(r, "issue.set-status").should eq([:issue_set_status])
+    end
+
+    # Scoring sits on the SAME menu as severity — a cvss is what decides one — and wears the
+    # SAME key in both scopes, like the severity/status pair. `V`, not `v`: lowercase `v` is
+    # the notes pane's clear-selection in IssuesDetail (verbs/read_edit.cr), and the registry's
+    # menu-key validator is what catches that collision at boot.
+    it "puts the CVSS calculator on both space menus under one key" do
+      r["issue.set-cvss"].chords.should be_empty
+      r["issue.set-cvss"].menu_key.should eq('V')
+      r["issues.set-cvss"].menu_key.should eq('V')
+      verb_intents(r, "issue.set-cvss").should eq([:issue_set_cvss])
     end
 
     it "gates Copy on the notes pane being in read mode" do

@@ -61,6 +61,16 @@ module Gori
         Verb::Scope::Issues, [] of Verb::Chord,
         available: issues_targets, mnemonic: 'c') { |ctx| ctx.issue_set_status; nil }
 
+      # Scoring belongs on the SAME menu as severity, not three keys down inside the title
+      # form: severity is what a cvss decides, so an operator reaching for one is reaching
+      # for the other. `V` in BOTH scopes, like the pair above — lowercase `v` is the notes
+      # pane's clear-selection in IssuesDetail (verbs/read_edit.cr), and a key that means one
+      # thing in the list and another in the detail is worse than a shifted one.
+      r.register Verb::Definition.new(
+        "issues.set-cvss", "Set CVSS", "Score the selected/marked issues (severity follows)",
+        Verb::Scope::Issues, [] of Verb::Chord,
+        available: issues_targets, mnemonic: 'V') { |ctx| ctx.issue_set_cvss; nil }
+
       # --- multi-select marks (the History list's gestures, #442) ---
       # Marks make the EXISTING space menu act on N issues — every batch verb above reads
       # ctx.selected_issue_ids ("marks if any, else the cursor row"). Scope::Issues belongs to
@@ -131,6 +141,10 @@ module Gori
         Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 'c') { |ctx| ctx.issue_set_status; nil }
 
       r.register Verb::Definition.new(
+        "issue.set-cvss", "Set CVSS", "Score this issue with the CVSS calculator (severity follows)",
+        Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 'V') { |ctx| ctx.issue_set_cvss; nil }
+
+      r.register Verb::Definition.new(
         "issue.severity-up", "Raise severity", "Increase severity", Verb::Scope::IssuesDetail,
         [Verb::Chord.new("]")], hidden: true) { |ctx| ctx.issue_severity(1); nil }
 
@@ -175,7 +189,7 @@ module Gori
         [Verb::Chord.new("{")], hidden: true) { |ctx| ctx.issue_status(-1); nil }
 
       r.register Verb::Definition.new(
-        "issue.edit-title", "Edit title/severity", "Rename the issue and set its severity",
+        "issue.edit-title", "Edit title/severity", "Rename the issue, score it, and set its severity",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("t")]) { |ctx| ctx.issue_edit_title; nil }
 
       r.register Verb::Definition.new(

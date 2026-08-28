@@ -50,6 +50,77 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  it "renders CVSS score in list row and CVSS chip in detail" do
+    tmp_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
+        cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+
+      view = IssuesView.new
+      view.reload(store)
+      backend = MemoryBackend.new(80, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
+
+      backend.contains?("9.8").should be_true
+      backend.contains?("acme.test").should be_true
+
+      view.open_detail(store).should be_true
+      detail_backend = MemoryBackend.new(80, 16)
+      view.render(Screen.new(detail_backend), Rect.new(0, 0, 80, 16))
+      # Score AND the vector behind it, on the one chip row — this is the only place the
+      # vector is printed in the detail.
+      detail_backend.contains?("CVSS 9.8 · CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H").should be_true
+    end
+  end
+
+  # `Screen#text` clips to the SCREEN, not to this pane. On a narrow list a long host walks the
+  # right edge left past the title column, and an ungated score paints ON the status tag and
+  # the severity badge — the title is drawn afterwards with its width floored at 0, so it never
+  # repaints those cells and the damage stays.
+  it "drops the list score rather than painting it over the badges on a narrow pane" do
+    tmp_store do |store|
+      store.insert_issue("SQLi", Gori::Store::Severity::Critical,
+        "a-very-long-hostname-that-eats-the-row.example.test", nil, cvss: "9.8")
+      view = IssuesView.new
+      view.reload(store)
+
+      backend = MemoryBackend.new(40, 10)
+      view.render(Screen.new(backend), Rect.new(0, 0, 40, 10))
+      narrow = (0...10).map { |y| backend.row(y) }
+      # The badges survive — pre-existing, the host had the same unbounded draw and at this
+      # width it had eaten `▎CRIT open` outright.
+      narrow.any?(&.includes?("CRIT open")).should be_true
+      narrow.any?(&.includes?("9.8")).should be_false
+
+      # …and it is still drawn when there is room for it.
+      wide = MemoryBackend.new(100, 10)
+      view.render(Screen.new(wide), Rect.new(0, 0, 100, 10))
+      (0...10).map { |y| wide.row(y) }.any?(&.includes?("9.8")).should be_true
+    end
+  end
+
+  # The cvss chip is the one chip whose width is unbounded (a v4.0 vector runs 60-odd
+  # columns), and Frame.tag_chip clips to the SCREEN, not to the pane — so a chip that no
+  # longer fits must drop its vector half rather than paint over the panel border.
+  it "drops the vector half of the CVSS chip when the pane is too narrow for it" do
+    tmp_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil,
+        cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(46, 16)
+      rect = Rect.new(0, 0, 46, 16)
+      view.render(Screen.new(backend), rect)
+      backend.contains?("CVSS 9.8").should be_true
+      backend.contains?("CVSS 9.8 · CVSS:3.1/").should be_false
+      # …and nothing crossed the pane's right border.
+      (rect.y...rect.bottom).each do |y|
+        backend.row(y).size.should be <= rect.w
+      end
+    end
+  end
+
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
     tmp_store do |store|
       store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)

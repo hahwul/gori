@@ -70,4 +70,67 @@ describe Gori::Issues::Filter do
     filtered("host:", list).size.should eq(4)
     filtered("-status:", list).size.should eq(0) # negated empty → match none
   end
+
+  cvss_list = [
+    Store::Issue.new(1_i64, 0_i64, 0_i64, "Crit Issue", Store::Severity::Critical, "api.test", nil, "", Store::Status::Open, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+    Store::Issue.new(2_i64, 0_i64, 0_i64, "High Issue", Store::Severity::High, "app.test", nil, "", Store::Status::Open, "7.5"),
+    Store::Issue.new(3_i64, 0_i64, 0_i64, "Med Issue", Store::Severity::Medium, "app.test", nil, "", Store::Status::Open, "5.0"),
+    Store::Issue.new(4_i64, 0_i64, 0_i64, "No CVSS", Store::Severity::Low, "cdn.test", nil, "", Store::Status::Open, nil),
+  ]
+
+  it "filters by CVSS numeric comparisons" do
+    filtered("cvss:>=7.0", cvss_list).map(&.title).should eq(["Crit Issue", "High Issue"])
+    filtered("cvss:>9.0", cvss_list).map(&.title).should eq(["Crit Issue"])
+    filtered("cvss:<=5.0", cvss_list).map(&.title).should eq(["Med Issue"])
+    filtered("cvss:<5.0", cvss_list).should be_empty
+  end
+
+  it "matches CVSS vector substring or exact score" do
+    filtered("cvss:3.1", cvss_list).map(&.title).should eq(["Crit Issue"])
+    filtered("cvss:7.5", cvss_list).map(&.title).should eq(["High Issue"])
+  end
+
+  it "supports negative CVSS filters" do
+    filtered("-cvss:>=7.0", cvss_list).map(&.title).should eq(["Med Issue", "No CVSS"])
+  end
+end
+
+private def with_cvss(id : Int64, severity : Store::Severity, cvss : String?) : Store::Issue
+  Store::Issue.new(id, 0_i64, 0_i64, "t#{id}", severity, nil, nil, "", Store::Status::Open, cvss)
+end
+
+describe "Issues::Filter — cvss:" do
+  scored = with_cvss(1_i64, Store::Severity::High, "7.5")
+  vector = with_cvss(2_i64, Store::Severity::Critical, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+  none = with_cvss(3_i64, Store::Severity::Low, nil)
+  # An unscorable string: legacy or imported, and the surfaces refuse to write new ones.
+  legacy = with_cvss(4_i64, Store::Severity::Low, "CVSS:9.9/AV:N")
+  all = [scored, vector, none, legacy]
+
+  # WHICH reading `cvss:` takes is decided by the OPERATOR, not by whether the operand happens
+  # to look like a number. Branching on the operand let `cvss:>=high` — the obvious transfer
+  # from the documented `sev:>=high` — quietly become a substring search and report matches as
+  # if the comparison had been honoured.
+  it "answers a comparison numerically or not at all" do
+    filtered("cvss:>=7.0", all).map(&.id).should eq([1_i64, 2_i64])
+    filtered("cvss:<4.0", all).should be_empty
+    filtered("cvss:>3.1", all).map(&.id).should eq([1_i64, 2_i64])
+    filtered("cvss:>=high", all).should be_empty # not a number: no comparison to make
+  end
+
+  # Bare `cvss:` still reads both ways — the score when the operand is one, else a substring of
+  # the stored vector. An unscorable value is reachable through the substring half; the old
+  # code bailed on the missing score before ever trying the text.
+  it "matches a bare term by score or by vector substring" do
+    filtered("cvss:9.8", all).map(&.id).should eq([2_i64])
+    filtered("cvss:3.1", all).map(&.id).should eq([2_i64]) # the version, as a substring
+    legacy.cvss_score.should be_nil
+    filtered("cvss:9.9", all).map(&.id).should eq([4_i64])
+    filtered("cvss:4.0", all).should be_empty
+  end
+
+  it "leaves an issue with no cvss out of every positive term" do
+    filtered("cvss:7.5", all).map(&.id).should eq([1_i64])
+    filtered("-cvss:>=7.0", all).map(&.id).should eq([3_i64, 4_i64])
+  end
 end

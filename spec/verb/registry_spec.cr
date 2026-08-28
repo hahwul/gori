@@ -813,6 +813,10 @@ private class FakeContext < ExecContext
     @calls << :issue_status
   end
 
+  def issue_set_cvss : Nil
+    @calls << :issue_set_cvss
+  end
+
   def issue_set_severity : Nil
     @calls << :issue_set_severity
   end

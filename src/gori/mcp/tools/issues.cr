@@ -47,7 +47,12 @@ module Gori
         if err = bad_severity(sev_s)
           return err
         end
-        severity = severity_from(sev_s) || Store::Severity::Info
+        # `clear` has nothing to clear on a create, so only the value half is read here.
+        cvss, _ = cvss_arg(h)
+        if err = bad_cvss(cvss)
+          return err
+        end
+        severity = severity_from(sev_s) || cvss.try { |c| Gori::Cvss.severity_for(c) } || Store::Severity::Info
         # A present-but-invalid flow_id (1.9 / "oops") would otherwise be
         # silently nulled, creating an UNLINKED issue while reporting success —
         # reject it, consistent with how get_flow rejects a non-integer id.
@@ -67,7 +72,7 @@ module Gori
         end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
-        id = store.insert_issue(masked_title, severity, host, flow_id)
+        id = store.insert_issue(masked_title, severity, host, flow_id, cvss: cvss)
         # insert_issue returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
@@ -99,10 +104,15 @@ module Gori
           return err
         end
 
+        cvss, clear_cvss = cvss_arg(h)
+        if err = bad_cvss(cvss)
+          return err
+        end
+
         title = str(h, "title").try { |t| Env.mask_secrets(t) }
         return Result.new("title must not be empty", is_error: true) if title && title.empty?
         notes = str(h, "notes").try { |n| Env.mask_secrets(n) }
-        severity = severity_from(sev_s)
+        severity = severity_from(sev_s) || (cvss ? Gori::Cvss.severity_for(cvss) : nil)
         status = status_from(stat_s)
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
@@ -113,12 +123,12 @@ module Gori
         # Don't claim updated:true on a no-op. With no resolvable field the store
         # write is a silent no-op, so returning success would mislead the caller
         # (e.g. it'd think a typo'd field name took effect).
-        if title.nil? && severity.nil? && notes.nil? && status.nil? && repeater_id.nil?
-          return Result.new("no fields to update (provide at least one of title/severity/notes/status)", is_error: true)
+        if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss && repeater_id.nil?
+          return Result.new("no fields to update (provide at least one of title/severity/notes/status/cvss)", is_error: true)
         end
 
-        unless title.nil? && severity.nil? && notes.nil? && status.nil?
-          return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
+        unless title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
+          return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status, cvss: cvss, clear_cvss: clear_cvss)
         end
         if repeater_id
           store.add_link(Store::LinkOwnerKind::Issue, id,
@@ -164,7 +174,8 @@ module Gori
 
         tool j, "create_issue", "Record a new issue in the project." do |s|
           s.field "title", strprop("issue title"), required: true
-          s.field "severity", strprop("info|low|medium|high|critical (default info)")
+          s.field "severity", strprop("info|low|medium|high|critical (default auto from cvss, else info)")
+          s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
           s.field "host", strprop("optional host the issue concerns")
           s.field "flow_id", intprop("optional flow id this issue links to")
           s.field "repeater_id", intprop("optional repeater id this issue links to")
@@ -174,6 +185,7 @@ module Gori
           s.field "id", intprop("issue id"), required: true
           s.field "title", strprop("new title")
           s.field "severity", strprop("info|low|medium|high|critical")
+          s.field "cvss", strprop("optional CVSS vector or score (empty to clear)")
           s.field "notes", strprop("free-form notes (replaces existing)")
           s.field "status", strprop("open|confirmed|false-positive|resolved")
           s.field "repeater_id", intprop("optional repeater id to link to the issue")

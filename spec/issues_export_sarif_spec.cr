@@ -523,5 +523,71 @@ describe Gori::Issues::Export do
         Time.parse_rfc3339(props["gori/updatedAt"].as_s).should be_a(Time)
       end
     end
+
+    it "carries CVSS in result properties and uses CVSS score for rule security-severity" do
+      with_store do |store|
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Critical, "h.test", nil,
+          cvss: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+
+        doc = JSON.parse(export(store))
+        res = doc["runs"][0]["results"][0]
+        res["properties"]["gori/cvss"].as_s.should eq("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+        res["properties"]["gori/cvssScore"].as_f.should eq(9.8)
+
+        rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
+        rule["properties"]["security-severity"].as_s.should eq("9.8")
+      end
+    end
+
+    # The badge is per RULE, and the rule's promise is "the worst under it". Ranking a CVSS
+    # score against a bare severity meant an unscored Critical could be badged as its scored
+    # Low sibling — the exact reading this property exists to prevent. Both halves fold to a
+    # number first (an unscored issue contributes its band floor), so the worst still wins.
+    it "does not let a scored Low outrank an unscored Critical on the same rule" do
+      with_store do |store|
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Critical, "a.test", nil)
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Low, "b.test", nil, cvss: "3.0")
+
+        doc = JSON.parse(export(store))
+        rules = doc["runs"][0]["tool"]["driver"]["rules"].as_a
+        rules.size.should eq(1) # one title, one rule
+        rules[0]["properties"]["security-severity"].as_s.should eq("9.0")
+      end
+    end
+
+    # …and the score still beats the floor when it belongs to the worst one, which is the
+    # whole reason for carrying it.
+    it "prefers a real score over the band floor when it is the highest" do
+      with_store do |store|
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Critical, "a.test", nil, cvss: "9.8")
+        store.insert_issue("SQLi in login", Gori::Store::Severity::Medium, "b.test", nil)
+
+        doc = JSON.parse(export(store))
+        doc["runs"][0]["tool"]["driver"]["rules"][0]["properties"]["security-severity"].as_s.should eq("9.8")
+      end
+    end
+
+    # An issue can carry a cvss AND a severity the operator raised above it — the issue form
+    # supports exactly that and keeps the vector. Taking the score alone would badge the rule
+    # at the technical number while the result beside it ships level:error / rank 100, and
+    # GitHub reads THIS property for the alert's severity.
+    it "does not let a low cvss erase a severity the operator raised above it" do
+      with_store do |store|
+        store.insert_issue("business-critical bypass", Gori::Store::Severity::Critical, "a.test", nil, cvss: "3.5")
+        doc = JSON.parse(export(store))
+        doc["runs"][0]["tool"]["driver"]["rules"][0]["properties"]["security-severity"].as_s.should eq("9.0")
+        doc["runs"][0]["results"][0]["properties"]["gori/cvssScore"].as_f.should eq(3.5)
+      end
+    end
+
+    # A log with no cvss anywhere must be byte-identical to what it was before the column
+    # existed: the floors are the same numbers, printed the same way.
+    it "keeps the band floors for a log with no cvss at all" do
+      with_store do |store|
+        store.insert_issue("no score here", Gori::Store::Severity::Medium, "h.test", nil)
+        doc = JSON.parse(export(store))
+        doc["runs"][0]["tool"]["driver"]["rules"][0]["properties"]["security-severity"].as_s.should eq("5.0")
+      end
+    end
   end
 end
