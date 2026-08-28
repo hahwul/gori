@@ -46,6 +46,28 @@ module Gori::Settings
         name, host, body_file,
         scope: Store::RuleScope::Global, overridden: overridden)
     end
+
+    # Does this rule RUN AN EXTERNAL COMMAND when it fires? The question a profile's two ends
+    # have to be able to ask of a rule that is still just JSON (#842).
+    #
+    # Through `Store::RuleOp` rather than `op == "pipe"`, deliberately: the enum is the source
+    # of truth for what an op DOES, and `RuleOp#executes?` is where the trust boundary is
+    # already named and where a fourth command-carrying op would be added. A label comparison
+    # here would be a second answer to that question, free to stay behind — which is exactly
+    # how the export contract came to be written for `pipe`'s predecessors and never revisited.
+    #
+    # `from_label` is total (an unrecognised label reads as `replace`), and `op` is clamped to
+    # RULE_OPS by every parse below, so this cannot raise on a hand-edited file.
+    def executes? : Bool
+      Store::RuleOp.from_label(op).executes?
+    end
+
+    # A pipe rule's ARGV, or nil when it does not run one. It lives in `replacement` — see
+    # `Rules#pipe_argv`, which tokenizes exactly this string. Named so the profile surfaces
+    # do not have to know which field a given op keeps its command in.
+    def command : String?
+      executes? ? replacement : nil
+    end
   end
 
   class_property rewriter_rules : Array(RewriterRule) = [] of RewriterRule

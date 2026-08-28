@@ -57,6 +57,21 @@ module Gori::CLI
   def self.same_file_for_spec(a : String, b : String) : Bool
     same_file?(a, b)
   end
+
+  # The profile execution report (#842). Both wordings are pure by design — the guards around
+  # them end in `abort`, which is not catchable — so what a spec can reach is the sentence
+  # itself, which is the part that has to be right.
+  def self.command_report_for_spec(rules : Array(Settings::CommandRule), dry : Bool) : Array(String)
+    command_report(rules, dry)
+  end
+
+  def self.exported_commands_note_for_spec(rules : Array(Settings::CommandRule)) : String
+    exported_commands_note(rules)
+  end
+
+  def self.printable_for_spec(s : String) : String
+    printable(s)
+  end
 end
 
 describe "gori — global version flag" do
@@ -360,5 +375,120 @@ describe "gori run — the `--` half of unknown_args" do
       end
     end
     offenders.should be_empty
+  end
+end
+
+# `gori settings export|import` — the sentence a profile's two ends say about the commands it
+# carries (#842). Since #818 an exported section can hold an ARGV (`rewriter.rules` with
+# `op: pipe`, `scan_rules` with `kind: exec`, a `decoder` chain step), and importing one arms
+# it on the proxy data path for every project.
+private def cmd_rule(section : String, kind : String, name : String, command : String,
+                     enabled : Bool = true) : Gori::Settings::CommandRule
+  Gori::Settings::CommandRule.new(section, kind, name, command, enabled)
+end
+
+describe "gori settings export — the note about what the profile will run" do
+  it "counts the rules and breaks them down by section and kind" do
+    note = Gori::CLI.exported_commands_note_for_spec([
+      cmd_rule("rewriter", "pipe", "resign", "./resign.sh"),
+      cmd_rule("rewriter", "pipe", "hmac", "/usr/local/bin/hmac"),
+      cmd_rule("scan_rules", "exec", "leak", "./detect.py"),
+    ])
+    note.should contain("3 rules in this profile run a local command")
+    note.should contain("2 rewriter pipe, 1 scan_rules exec")
+    # "their own", not `PeerNotices`' "your": the file is leaving this machine, and whose
+    # privileges are at stake is the one thing that differs between the two ends of a profile.
+    note.should contain("whoever imports it runs them with their own privileges")
+  end
+
+  it "reads as one rule in the singular" do
+    note = Gori::CLI.exported_commands_note_for_spec([cmd_rule("decoder", "exec", "d", "./d.sh")])
+    note.should contain("1 rule in this profile runs a local command")
+    note.should contain("1 decoder exec")
+    note.should contain("runs it with their own privileges")
+  end
+end
+
+describe "gori settings import — the per-rule listing" do
+  it "names each rule individually, with its argv" do
+    # Section granularity cannot say this: "would apply 1 section(s): rewriter" is equally true
+    # of a profile that restyles header rewrites and of one that installs a hook.
+    lines = Gori::CLI.command_report_for_spec([
+      cmd_rule("rewriter", "pipe", "resign", "./resign.sh --key $TOKEN"),
+      cmd_rule("scan_rules", "exec", "leak", "./detect.py"),
+    ], dry: false)
+    # The headline is PeerNotices' sentence, verbatim in the part that carries the weight.
+    lines[0].should contain("2 rules in this profile run a local command here, with your privileges:")
+    lines[1].should contain("rewriter pipe")
+    lines[1].should contain("resign")
+    lines[1].should contain("./resign.sh --key $TOKEN")
+    lines[2].should contain("scan_rules exec")
+    lines[2].should contain("./detect.py")
+    lines.last.should contain("the same trust decision as running the author's script")
+  end
+
+  it "marks a rule the profile carries but does not arm" do
+    lines = Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "off", "/bin/echo", false)], dry: false)
+    lines[1].should contain("[disabled]")
+    Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "on", "/bin/echo")], dry: false)[1]
+      .should_not contain("[disabled]")
+  end
+
+  it "names the flag that answers it, and only on the dry run says nothing was written" do
+    dry = Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "r", "./r.sh")], dry: true)
+    dry.last.should contain("--dry-run writes nothing")
+    dry.last.should contain("--allow-commands")
+  end
+
+  it "fills in a rule with no name and a step with no command" do
+    lines = Gori::CLI.command_report_for_spec([cmd_rule("decoder", "exec", "", "")], dry: false)
+    lines[1].should contain("(unnamed)")
+    lines[1].should contain("(no command)")
+  end
+
+  it "says nothing at all for a profile that carries no command" do
+    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandRule, dry: false).should be_empty
+    Gori::CLI.command_report_for_spec([] of Gori::Settings::CommandRule, dry: true).should be_empty
+  end
+end
+
+# The listing exists to be READ before a trust decision, and both columns it prints are text
+# out of a file someone else wrote.
+describe "gori settings import — a hostile name or argv cannot rewrite the listing" do
+  it "escapes control characters instead of emitting them" do
+    # `\e[1A\e[2K` would erase the line above — which is the count of how many commands are in
+    # the profile, i.e. the one number the operator is deciding on.
+    out = Gori::CLI.printable_for_spec("evil\e[1A\e[2Kharmless")
+    out.should_not contain('\e')
+    out.should contain("\\u{1b}")
+    Gori::CLI.printable_for_spec("a\nb").should_not contain('\n')
+    Gori::CLI.printable_for_spec("a\rb").should_not contain('\r')
+  end
+
+  it "escapes a bidi override, which Char#control? does not see" do
+    # Trojan Source: `U+202E` renders the argv as something other than what runs, without
+    # changing a byte of it — and it is category Cf, so the control-character test alone
+    # misses it. A listing whose whole job is to show an argv before it is armed is exactly
+    # what the trick is for.
+    out = Gori::CLI.printable_for_spec("./evil.sh \u{202E} --quiet")
+    out.should contain("\\u{202e}")
+    out.should_not contain('\u{202E}')
+    Gori::CLI.printable_for_spec("a\u{2066}b").should contain("\\u{2066}")
+    # U+2028 is a newline to some terminals, and would break the listing into two lines.
+    Gori::CLI.printable_for_spec("a\u{2028}b").should contain("\\u{2028}")
+  end
+
+  it "leaves ordinary text, including non-ASCII, alone" do
+    # Escaping by codepoint rather than by byte: a path with a non-ASCII component stays
+    # readable instead of turning into a run of `\xNN`.
+    Gori::CLI.printable_for_spec("./재서명.sh --key $TOKEN").should eq("./재서명.sh --key $TOKEN")
+    Gori::CLI.printable_for_spec("").should eq("")
+  end
+
+  it "reaches the rendered listing, not just the helper" do
+    lines = Gori::CLI.command_report_for_spec([
+      cmd_rule("rewriter", "pipe", "n\e[2Kame", "./r.sh\e[2K"),
+    ], dry: false)
+    lines[1].should_not contain('\e')
   end
 end
