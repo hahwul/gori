@@ -67,6 +67,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "probe": { "active_notify": "always" },
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
+    "hooks": { "timeout_secs": 30 },
     "rewriter": { "next_rule_id": 2, "rules": [] },
     "colormarker": { "next_rule_id": 2, "rules": [] },
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] }
@@ -105,6 +106,7 @@ private def with_every_section_populated(&)
   containment = Gori::Settings.discover_containment
   depth = Gori::Settings.discover_max_depth
   chains = Gori::Settings.decoder_chains
+  hook_timeout = Gori::Settings.hook_timeout_secs
   rules = Gori::Settings.rewriter_rules
   next_id = Gori::Settings.rewriter_next_rule_id
   color_rules = Gori::Settings.colormarker_rules
@@ -146,6 +148,7 @@ private def with_every_section_populated(&)
     Gori::Settings.discover_containment = containment
     Gori::Settings.discover_max_depth = depth
     Gori::Settings.decoder_chains = chains
+    Gori::Settings.hook_timeout_secs = hook_timeout
     Gori::Settings.rewriter_rules = rules
     Gori::Settings.rewriter_next_rule_id = next_id
     Gori::Settings.colormarker_rules = color_rules
@@ -580,6 +583,32 @@ describe "Settings.save — merging against a concurrent writer" do
       on_disk["env"].to_json.should contain("ours")
       on_disk["theme"].as_s.should eq("goriday")
     end
+  end
+end
+
+# The leg the fixture above CANNOT provide, and the reason `hooks` went missing for a release.
+#
+# Both assertions up there run through `import_document`, which filters `selected` on
+# SECTION_KEYS — so a section absent from BOTH the key list and the fixture's effect is
+# trivially consistent with itself. `serialize_hooks` wrote a `hooks` block that
+# `gori settings import` then reported as "unrecognised … ignored", silently dropping the very
+# timeout that bounds every command a profile can carry (#818/#842), and nothing failed.
+#
+# Asking the DISPATCHER instead closes it: every `serialize_*` it calls is a section, and every
+# section needs a key.
+describe "Settings::SECTION_KEYS vs the serialize dispatcher" do
+  it "has a key for every serializer `serialize` calls" do
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "settings.cr"))
+    # No `^` anchor: Crystal's PCRE2 is not in multiline mode by default, so one would only
+    # ever match at the start of the whole file. `\(j\)` alone is enough to hit the dispatcher
+    # call sites and miss every `def self.serialize_x(j : JSON::Builder)`.
+    serializers = src.scan(/serialize_(\w+)\(j\)/).map(&.[1]).uniq
+    # The grep still finds the dispatcher at all — a rename that made this empty would turn
+    # the assertion below into a tautology, which is the failure mode of every source-grep spec.
+    serializers.size.should be > 25
+    # `serialize_appearance` is the one helper that is not a section: it emits three top-level
+    # scalars (theme, mouse, pretty_bodies), each its own SECTION_KEYS entry.
+    (serializers - ["appearance"] - Gori::Settings::SECTION_KEYS).should be_empty
   end
 end
 

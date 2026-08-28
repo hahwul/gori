@@ -865,7 +865,38 @@ module Gori
     # that it can be committed or shared, so it stays opt-in.
     # Note `upstream_rules` is deliberately NOT here — it stores only a username and an
     # environment-variable NAME, never a password (see settings/upstream_rules.cr).
+    #
+    # THIS LIST IS ONE AXIS, AND THERE ARE TWO. Every sentence above reasons about SECRECY —
+    # what a profile would leak outward if it were committed or shared. Since #818 a section
+    # can also carry an ARGV, and what that leaks is inward: importing it arms a command gori
+    # forks with the receiving operator's privileges. `decoder` is on both axes and is here for
+    # the first one only; `rewriter` and `scan_rules` are on the second and are deliberately
+    # NOT here. The execution axis is `COMMAND_SECTIONS` below, and it is handled by REPORTING
+    # rather than by exclusion — see `command_rules` for that argument in full. Adding an
+    # exportable section means asking both questions, not this one.
     SECRET_SECTIONS = ["env", "decoder"]
+
+    # Sections that can carry a COMMAND — the second axis. Every settings value gori hands to
+    # `Process.new`/`Process.run` lives in one of these, and the list is what both ends of a
+    # profile report from. `spec/settings/profile_commands_spec.cr` walks the tree's spawn
+    # sites and fails when one is reachable from a section that is not here.
+    #
+    #   rewriter    a rule with `op: "pipe"`      — argv, no shell (`Gori::ProcessHook`, #818)
+    #   scan_rules  an entry with `kind: "exec"`  — argv, no shell
+    #   decoder     a `chains` spec with `exec:`  — argv, no shell
+    #   statusline  `command`                     — /bin/sh -c, on a TIMER (see below)
+    #   editor      `command`                     — argv, on `--edit` / the TUI's ^E
+    #
+    # The last two were the hole this list was nearly shipped with, and `statusline` is the
+    # sharpest thing on it: it is a FULL SHELL rather than ProcessHook's no-shell exec, it
+    # carries its own `enabled` in the same section so it self-arms, and it fires on an
+    # interval with no proxied traffic needed. Scoping this to "the #818 hook seams" would
+    # have gated the three guarded shapes and waved through the unguarded one.
+    #
+    # NOT an exclusion list: `gori settings sections` marks these, `gori settings export`
+    # counts what it wrote, and `gori settings import` lists them and refuses without
+    # `--allow-commands`.
+    COMMAND_SECTIONS = ["rewriter", "scan_rules", "decoder", "statusline", "editor"]
 
     # Every top-level key gori KNOWS, whether or not this install currently has a value for one.
     #
@@ -889,7 +920,7 @@ module Gori
       theme mouse pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
-      colormarker saved_views
+      hooks colormarker saved_views
     ]
 
     # Every top-level key the current settings would write — i.e. which sections this install
@@ -923,6 +954,172 @@ module Gori
           doc.each { |k, v| j.field k, v if keep.includes?(k) }
         end
       end
+    end
+
+    # One thing inside a PROFILE that runs an external command (#842).
+    #
+    # Flat and section-agnostic on purpose. Five shapes can carry a command — a Match&Replace
+    # `pipe` op, a Probe `exec` scan rule, a Decoder `exec:` chain step, the statusline's
+    # `command`, the editor's `command` — and the operator at the receiving end needs the same
+    # four facts about each: where it lands, how it runs, what it is called, and the command
+    # itself. The surfaces render this; they do not each re-derive it.
+    record CommandEntry,
+      section : String, # the top-level key it lands under — also what `--sections` selects on
+      kind : String,    # HOW it runs: "pipe" | "exec" (argv, no shell) | "sh -c" (a shell)
+      name : String,    # the rule's label, or the field name for a scalar section
+      command : String, # the command, VERBATIM as the profile spells it (`$KEY` unexpanded)
+      enabled : Bool    # false = carried, but inert until someone arms it
+
+    # Every command-carrying entry in `root`, over the sections `only` selects (nil = every one
+    # present in the document).
+    #
+    # ONE reader for both doors. `export` runs it over the document it is about to write and
+    # `import` over the document it is about to apply, so the count an operator sees when they
+    # ship a profile is the count the next operator sees when they receive it. #818 built this
+    # alarm and wired it to one door — a PEER's `pipe` rule (`PeerNotices`, `RuleSetChange`) —
+    # on the argument that adopting one means this process will fork and exec a command with
+    # the operator's privileges and none of that is visible in any pane. Every word of that
+    # applies to an imported profile; this is the second door.
+    #
+    # Built on the SAME tolerant parsers `apply_sections` uses, never on a walk of the raw
+    # JSON. An entry those parsers DROP (a rewriter rule with no pattern, a header op on a body
+    # part, a scan rule with no title) never reaches the settings and must not be reported as
+    # armed; an entry they CLAMP (`"op": "PIPE"`, `"op": "nonsense"`) has to be reported the
+    # way the import will read it rather than the way the file spells it. A hand-rolled walk
+    # would be a second description of the parse, free to drift from it — and the drift would
+    # be silent in the direction that matters.
+    #
+    # A command that could never RUN is not reported: an empty argv is refused by
+    # `Rules.pipe_argv_error` and fails a Decoder step with "no command", so counting one
+    # toward the import refusal would block an import over an entry that arms nothing.
+    #
+    # WHY THIS REPORTS RATHER THAN EXCLUDES, i.e. why these sections are not in
+    # SECRET_SECTIONS. Secrecy is a property of a SECTION: `env` holds token values however it
+    # is filled in, so a section-granular default-off is the right shape for it. Execution is a
+    # property of a VALUE. A `rewriter` section is usually a handful of ordinary header
+    # rewrites and an `editor` is usually `nvim`, so excluding those sections would drop them
+    # from every profile that has no hook in it at all in order to catch the one that does —
+    # and drop them with no message, since `export_document` says nothing about what it omits.
+    # A profile that quietly loses what it was made to carry is its own failure. So the section
+    # ships whole, and both ends say what is in it.
+    def self.command_entries(root : JSON::Any, only : Array(String)? = nil) : Array(CommandEntry)
+      acc = [] of CommandEntry
+      if doc = root.as_h?
+        COMMAND_SECTIONS.each do |section|
+          next unless only.nil? || only.includes?(section)
+          next unless node = doc[section]?
+          case section
+          when "rewriter"   then rewriter_command_entries(node, acc)
+          when "scan_rules" then scan_command_entries(node, acc)
+          when "decoder"    then decoder_command_entries(node, acc)
+          when "statusline" then statusline_command_entries(node, acc)
+          when "editor"     then editor_command_entries(node, acc)
+          end
+        end
+      end
+      acc
+    end
+
+    # `rewriter`: the same `rules`-else-legacy-`presets` branch `parse_rewriter` takes, so a
+    # profile carrying a pre-upgrade preset block is read the way the import will read it.
+    #
+    # A node of the wrong SHAPE is skipped rather than parsed, and that is not pedantry:
+    # `parse_rewriter_rules` answers a non-array with THIS INSTALL'S current global rules, so
+    # handing it one would report the operator's own hooks as though the profile carried them —
+    # and, at the import gate, refuse an import over rules that are already on disk.
+    private def self.rewriter_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless node.as_h?
+      rules =
+        if raw = node["rules"]?
+          return unless raw.as_a?
+          parse_rewriter_rules(raw)
+        else
+          legacy = node["presets"]?
+          return unless legacy && legacy.as_a?
+          # Adopted DISABLED by `parse_legacy_presets`, and reported anyway: the profile is
+          # still carrying the command, and `enabled` says which of the two it is.
+          parse_legacy_presets(legacy)
+        end
+      rules.each do |r|
+        cmd = r.command.presence
+        acc << CommandEntry.new("rewriter", r.op, r.name, cmd, r.enabled) if cmd
+      end
+    end
+
+    # `scan_rules`: the section IS the array — there is no wrapper object.
+    private def self.scan_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless node.as_a?
+      parse_scan_rules(node).each do |r|
+        cmd = r.command.presence
+        acc << CommandEntry.new("scan_rules", r.kind, r.title, cmd, r.enabled) if cmd
+      end
+    end
+
+    # `decoder`: one entry per `exec:` STEP, named by the chain that holds it.
+    #
+    # Only the steps a spec spells out directly. A chain that reaches a command through ANOTHER
+    # saved chain (`myenc > url-encode`) adds no command this listing does not already carry —
+    # `decoder.chains` replaces the library wholesale, so the chain it calls is in this same
+    # profile and is reported on its own line. `Decoder.chain_runs_commands?` is the predicate
+    # for the other question ("may I run this spec at all"), which does need the registry.
+    #
+    # `enabled: true` for every one: a saved chain has no enabled flag — it is callable by name
+    # the moment it lands.
+    private def self.decoder_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless node.as_h?
+      chains = node["chains"]?
+      return unless chains && chains.as_a?
+      parse_decoder_chains(chains).each do |(name, spec)|
+        # `.scrub` BEFORE the split, because the split is a PCRE2 regex and this string came
+        # out of someone else's file. Crystal's JSON parser rejects a lone surrogate but passes
+        # a raw `0xff` through untouched, so an otherwise-valid profile could put a byte in a
+        # chain spec that made `parse_spec` raise `ArgumentError` — out of a CLI that rescues
+        # only `Gori::Error`, i.e. a Crystal backtrace at the operator instead of the listing
+        # they ran the command for, and no gate at all. The other sections are safe by
+        # construction (their parses run no regex); this is the only one that does.
+        Decoder.parse_spec(spec.scrub).each do |token|
+          argv = Decoder.exec_spec(token).try(&.presence)
+          # "exec", i.e. `Decoder::EXEC_PREFIX` without the colon that makes it a marker: the
+          # `kind` column is a vocabulary the operator reads, and within `decoder` there is
+          # only one thing it can mean.
+          acc << CommandEntry.new("decoder", "exec", name, argv, true) if argv
+        end
+      end
+    end
+
+    # `statusline`: the sharpest entry on the list, and the reason `kind` names the mechanism
+    # rather than the section.
+    #
+    # `Tui::Statusline.run` spawns `/bin/sh -c <command>` — a FULL SHELL, not `ProcessHook`'s
+    # argv exec — every `interval` seconds, with no proxied traffic needed to trigger it. The
+    # section carries its own `enabled`, so a profile arms it without touching anything else.
+    #
+    # ENABLED is only false when the profile SAYS so. `parse_statusline` reads an absent
+    # `enabled` as "keep the current value", so whether a hand-written profile that omits it
+    # ends up live depends on the receiving install — and for a shell on a timer the honest
+    # default is to leave the row unmarked rather than to promise it is inert. An export always
+    # writes the key (`serialize_statusline`), so this only bites on a hand-written profile.
+    private def self.statusline_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless o = node.as_h?
+      cmd = o["command"]?.try(&.as_s?).try(&.presence)
+      return unless cmd
+      acc << CommandEntry.new("statusline", "sh -c", "command", cmd,
+        o["enabled"]?.try(&.as_bool?) != false)
+    end
+
+    # `editor`: `Settings.editor_command` whitespace-splits this and `Process.run`s it — from
+    # `gori settings --edit` and from the TUI's ^E — so an imported value silently redefines
+    # what "my editor" means.
+    #
+    # Only a NON-EMPTY one. `serialize_editor` writes the section unconditionally, so every
+    # profile ever exported carries an `editor` block; reporting the empty default would put a
+    # note on every export and a flag on every import, which is how a loud line stops being
+    # read. Empty means gori falls through to `$VISUAL`/`$EDITOR`/`vi` — the receiving
+    # operator's own environment, not the profile's.
+    private def self.editor_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      return unless o = node.as_h?
+      cmd = o["command"]?.try(&.as_s?).try(&.presence)
+      acc << CommandEntry.new("editor", "exec", "command", cmd, true) if cmd
     end
 
     # What `import_document` would do with `raw`, as three lists: the sections it would APPLY

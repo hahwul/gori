@@ -1119,9 +1119,13 @@ gori settings import team-profile.json --sections network
 `gori settings sections`는 gori가 아는 모든 섹션을 나열하고, 이 설치본에 아직 값이 없는 것을 표시합니다:
 
 ```
+statusline  (can carry commands)
 network
-scan_rules  (not set — at its default)
+editor  (can carry commands)
 env  (holds secrets — excluded unless named; not set — at its default)
+scan_rules  (can carry commands; not set — at its default)
+decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
+rewriter  (can carry commands)
 ```
 
 *not set*으로 표시된 섹션도 `--sections`에 쓸 수 있는 정상적인 이름입니다. export하면 담을 값이 없을 뿐이고(그 사실을 stderr로 알려줍니다), import하면 그 섹션이 처음으로 기록됩니다.
@@ -1131,6 +1135,7 @@ env  (holds secrets — excluded unless named; not set — at its default)
 | `--sections a,b` | 공통 | 쉼표로 구분한 섹션 이름, 최소 하나. export 기본값은 비밀을 담은 섹션을 제외한 전부, import 기본값은 파일에 있는 전부 |
 | `-o`, `--out FILE` | export | stdout 대신 파일로 기록 |
 | `--dry-run` | import | 적용될 섹션만 출력하고 아무것도 쓰지 않고 종료 |
+| `--allow-commands` | import | 외부 명령을 실행하는 룰을 적용합니다. 프로필이 그런 룰을 담고 있으면 필수 — 없으면 import는 거부되고 아무것도 쓰이지 않습니다 |
 | `--json` | tls-fingerprint | 리포트를 JSON으로 출력. 분해된 JA3 문자열과 `ja4_r`가 항상 포함됩니다 |
 
 선택하지 않았거나 프로필에 없는 섹션은 **그대로 남습니다**. `--sections`가 고르는 것이 바로 이 경계입니다. 프로필이 실제로 담고 있는 섹션 안에서는:
@@ -1149,6 +1154,42 @@ gori가 `settings.json`을 읽지 못하는 상태 — 파싱 실패, 권한 문
 `-o`가 실제 사용 중인 `settings.json`을 가리키면 거부됩니다. export는 스냅샷이 아니라 — 기본값 상태인 섹션은 모두 빠지고, `env`와 `decoder`는 이름을 지정하지 않는 한 빠집니다 — 그것을 원본 파일에 되쓰면 해당 섹션이 갱신되는 게 아니라 삭제됩니다.
 
 export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생성되고, gori가 파일에 무엇이 들어 있는지 이름을 대며 알려줍니다. 자격증명을 export하는 데 동의한 것이 그것을 누구나 읽을 수 있게 두는 데 동의한 것은 아닙니다. 일반 export는 `0644`로 남고, env 변수가 하나도 없는 설치에서 `env`를 지정한 export도 일반 export입니다 — 권한은 타이핑한 내용이 아니라 문서에 실제로 담긴 것을 따릅니다.
+
+### 명령을 담은 프로필 {#profiles-that-carry-commands}
+
+다섯 섹션은 데이터가 아니라 **명령**을 담을 수 있습니다. 다른 설정과 똑같이 export됩니다 — 팀이 같은 재서명 훅을 표준으로 쓰는 것이야말로 훅이 존재하는 이유니까요. 대신 양쪽 끝에서 파일에 무엇이 들었는지 말해줍니다.
+
+| 섹션 | 무엇이 담나 | 어떻게 실행되나 |
+|------|------------|----------------|
+| `rewriter` | `op: pipe`인 룰 | argv, 셸 없음 — 매치되는 프록시 트래픽마다 |
+| `scan_rules` | `kind: exec`인 항목 | argv, 셸 없음 — 분석되는 플로우마다 |
+| `decoder` | `exec:…`로 쓴 `chains` 스텝 | argv, 셸 없음 — 체인을 실행할 때 |
+| `statusline` | `command` | **`/bin/sh -c`** — `interval`초마다 |
+| `editor` | `command` | argv — `gori settings --edit`와 TUI의 `^E`에서 |
+
+앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 가장 날카로운 건 `statusline`입니다 — argv exec이 아니라 완전한 셸이고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다 — 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
+
+`export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
+
+```
+note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec) — whoever imports it runs them with their own privileges
+```
+
+`import`는 argv까지 한 줄씩 나열하고, 확인을 받기 전까지 쓰지 않습니다. `--dry-run`도 같은 목록을 출력하며 어느 쪽이든 아무것도 쓰지 않습니다:
+
+```
+$ gori settings import team-profile.json
+5 entries in this profile run a local command here, with your privileges:
+  rewriter pipe     resign body    ./resign.sh --key $TOKEN
+  rewriter pipe     (unnamed)      /usr/local/bin/hmac  [disabled]
+  scan_rules exec   leak detector  ./detect.py
+  statusline sh -c  command        gori-status --project
+  editor exec       command        nvim
+importing them is the same trust decision as running the author's script
+gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
+```
+
+명령을 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트가 없으므로 스크립트에서 실행하는 import는 그대로 스크립트로 남습니다 — 그 플래그 자체가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 항목은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다 — `network`만 적용하는 import는 아무것도 무장시키지 않으므로 항목을 나열하지도, 플래그를 요구하지도 않습니다.
 
 ### `gori settings tls-fingerprint` {#gori-settings-tls-fingerprint}
 
