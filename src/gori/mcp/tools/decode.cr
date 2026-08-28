@@ -9,6 +9,29 @@ module Gori
       # Run a Decoder chain over caller-supplied bytes. Pure: no store, no network,
       # so it's a read tool (always exposed). A failed/unknown step is a tool-level
       # error; an unknown token also enumerates the registry so the model can retry.
+      #
+      # "Pure" is a CONTRACT this method has to enforce, not a property it inherits. `decode` is
+      # in `UNBOUND_SAFE`, is not in `AGENT_ACTION_TOOLS`, and is never checked against
+      # `@allow_actions` — it is reachable from `gori mcp --read-only` with no project bound.
+      # The Decoder chain grammar now has an `exec:` step (#818), so without the refusal below
+      # an agent could pass `exec:/bin/sh -c …` (no shell needed — `/bin/sh` IS the argv) and
+      # get local code execution with the operator's privileges through the one tool documented
+      # as running nothing. The other two hook seams are gated write tools that log an agent
+      # action; this one stays pure instead.
+      # Refuse a spec that would run an external command, or nil when it would not. Asked of the
+      # REGISTRY, not scanned for the marker: a saved chain is callable by NAME, so `myenc` can
+      # carry an `exec:` step with nothing in the token to say so. See `decoder`'s own comment
+      # for why this tool is the one that has to refuse.
+      private def exec_step_refusal(spec : String) : Result?
+        return nil unless Decoder.chain_runs_commands?(Decoder.shared_registry, spec)
+        Result.new(
+          "this spec runs an external command ('exec:' step, possibly inside a saved chain) " \
+          "and the decode tool never does — it is pure compute, exposed read-only. Run it " \
+          "from the Decoder tab or `gori run decoder`, or configure it as a rewriter rule " \
+          "(create_rule op=pipe) or a probe rule (create_probe_rule match_kind=exec), which " \
+          "are gated writes the operator can see.", is_error: true)
+      end
+
       private def decoder(h) : Result
         spec = str(h, "spec")
         return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
@@ -16,6 +39,9 @@ module Gori
         # Chain.run treats as identity — reject it rather than reporting a phantom
         # "success" that echoes the input back unchanged.
         return Result.new("'spec' has no converter tokens (e.g. 'base64-decode > gunzip')", is_error: true) if Decoder.parse_spec(spec).empty?
+        if bad = exec_step_refusal(spec)
+          return bad
+        end
         raw = str(h, "input")
         return Result.new("missing required 'input'", is_error: true) if raw.nil?
 
@@ -142,7 +168,7 @@ module Gori
           "base62, xml-escape, shell-escape, powershell-escape, c-string-escape, homoglyph, typo. " \
           "An unknown token returns the full list." do |s|
           s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
-          s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'"), required: true
+          s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'. 'exec:' steps (external commands) are refused here — this tool is pure compute"), required: true
           s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")
         end
 

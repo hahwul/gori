@@ -127,10 +127,18 @@ inside an `exec:` step's arguments.
 **A hook never stalls the proxy.** Every run has a hard wall-clock timeout (`hooks.timeout_secs`
 in settings.json, 5s by default, 60s ceiling) and a 32 MiB stdout cap. If the command times out,
 exits non-zero, cannot be spawned, or floods stdout, the **original bytes pass through
-unchanged** and the failure is written to the project event feed as a notice. A wedged hook costs
-one message one timeout; it can never cost you a flow. In the Rewriter the timeout is a *budget*
-shared by every match in one message, so a pattern that matches four hundred times still costs
-that message one timeout, not four hundred.
+unchanged** and the failure is written to the project event feed as a notice. A wedged hook can
+never cost you a flow. In the Rewriter the timeout is a *budget* shared by every pipe rule and
+every match in one rewrite, so a pattern matching four hundred times — or four pipe rules on one
+head — still costs that rewrite one timeout. A message is rewritten twice (its head and its
+body), so that is the bound it sees.
+
+**Two things hooks are deliberately not wired into.** The MCP `decode` tool refuses an `exec:`
+step (saved chains included) — it is exposed read-only and unbound, and stays pure compute; an
+agent that needs a hook configures a `pipe` rewriter rule or an `exec` probe rule, both gated
+writes the operator can see. And a Probe `exec` rule runs **once per flow** on the passive
+analyzer, so a slow detector is the whole rule set's bottleneck under live capture — keep its
+command fast.
 
 **A hook runs as you.** It is not sandboxed, jailed or confined — same trust level as a
 `--config` file or any other Rewriter rule. gori never invents a hook: every one of them is

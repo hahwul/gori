@@ -18,7 +18,8 @@ module Gori
   #
   #   1. P6 — NEVER STALL THE DATA PATH. A hard wall-clock timeout is mandatory and is
   #      enforced HERE, not by the caller's good intentions. `run` returns within
-  #      `timeout + KILL_GRACE + COLLECT_GRACE` no matter what the child does: it SIGKILLs a
+  #      `timeout + KILL_GRACE + 2 × COLLECT_GRACE` no matter what the child does (the two
+  #      graces are the stdout and stderr hand-overs, taken in sequence): it SIGKILLs a
   #      child that overruns, and abandons a pipe that will not close rather than waiting on
   #      it. On timeout, non-zero exit, oversized output or spawn failure the result is NOT
   #      ok?, and every proxy-path caller is contractually required to pass the ORIGINAL bytes
@@ -79,30 +80,57 @@ module Gori
       stderr : String,
       timed_out : Bool,
       truncated : Bool,
-      spawn_error : String? do
+      spawn_error : String?,
+      output_lost : Bool = false do
       # Whether `stdout` may be used. Every other answer means the caller passes the ORIGINAL
       # bytes through — see invariant 1. Note that a non-zero exit is NOT ok? here; the Probe
       # `exec` rule reads the exit code as a verdict and therefore looks at `status` directly
       # rather than at this.
       def ok? : Bool
-        @spawn_error.nil? && !@timed_out && !@truncated && @status == 0
+        @spawn_error.nil? && !@timed_out && !@truncated && !@output_lost && @status == 0
+      end
+
+      # Why it is not ok?, WITHOUT the child's own words — or nil when it is.
+      #
+      # Split from `failure` because a repeat-suppression key has to be built from this and not
+      # from that: `stderr` is arbitrary text the hook chooses per run, so a hook that prints a
+      # timestamp or a request id before failing makes every sentence unique, and a notice
+      # de-duplicated on the sentence then writes one row per proxied message.
+      def reason : String?
+        return nil if ok?
+        if e = @spawn_error
+          e
+        elsif @timed_out
+          "timed out"
+        elsif @truncated
+          "wrote more than #{MAX_OUTPUT} bytes to stdout"
+        elsif @output_lost
+          # The child is gone but its stdout pipe was still open, which only something IT
+          # started and left running can cause. Whatever it wrote is not all here, and half an
+          # answer spliced into a message is corruption. This is the worst mistake this type
+          # could make: `ok?` with an empty `stdout` would DELETE the matched bytes on the wire.
+          "exited, but its stdout was still held open by something it started"
+        else
+          "exited #{@status}"
+        end
+      end
+
+      # The suppression key: the command and why, never the child's words. See `reason`.
+      def failure_key : String
+        "#{@command}: #{reason}"
       end
 
       # Why it is not ok?, as the one sentence every surface shows — or nil when it is.
+      #
+      # The stderr tail rides along because it is the only part that makes a notice actionable;
+      # "exited 4" alone sends the operator to their own logs. It is the operator's own script
+      # on the operator's own machine, and the row it lands in lives in a database that already
+      # holds the full captured traffic — but it IS the child's choice of words. `command_label`
+      # bounds what gori puts in the row; it cannot bound what the hook puts there.
       def failure : String?
-        return nil if ok?
-        reason =
-          if e = @spawn_error
-            e
-          elsif @timed_out
-            "timed out"
-          elsif @truncated
-            "wrote more than #{MAX_OUTPUT} bytes to stdout"
-          else
-            "exited #{@status}"
-          end
+        return nil if (why = reason).nil?
         tail = @stderr.presence
-        tail ? "#{@command}: #{reason} — #{tail}" : "#{@command}: #{reason}"
+        tail ? "#{@command}: #{why} — #{tail}" : "#{@command}: #{why}"
       end
 
       # A run that never started. Kept as a constructor so the failure sentence for "could not
@@ -127,12 +155,24 @@ module Gori
       cur = String::Builder.new
       has_cur = false
       quote = nil.as(Char?)
-      escape = false
+      escape = false    # unquoted `\x` — escapes ANY next character, as a shell does
+      dq_escape = false # inside `"…"` — escapes ONLY `"` and `\`
       spec.each_char do |c|
         if escape
           cur << c
           has_cur = true
           escape = false
+          next
+        end
+        if dq_escape
+          # A backslash inside `"…"` is an ordinary character before anything but `"` and `\`,
+          # exactly as a POSIX shell has it. Treating it as a universal escape DELETED it:
+          # `"a\d+"` tokenized to `ad+` and `"C:\tools\dev.pem"` to `C:toolsdev.pem`, so the
+          # rule validated at every write surface and then ran a command the operator never
+          # read back, with nothing to say the two differed.
+          (c == '"' || c == '\\') ? (cur << c) : (cur << '\\' << c)
+          has_cur = true
+          dq_escape = false
           next
         end
         case quote
@@ -143,7 +183,7 @@ module Gori
           if c == '"'
             quote = nil
           elsif c == '\\'
-            escape = true
+            dq_escape = true
           else
             cur << c
           end
@@ -168,6 +208,8 @@ module Gori
         end
       end
       argv << cur.to_s if has_cur
+      # A dangling `dq_escape` implies the quote never closed, which `argv_problem` reports
+      # first and more usefully — there is no "trailing backslash" inside an open quote.
       argv_problem(argv, quote, escape) || argv
     end
 
@@ -196,9 +238,10 @@ module Gori
       parse_argv(spec).is_a?(Array)
     end
 
-    # How a command is NAMED in a notice: argv[0] alone, so a rule whose arguments carry a
+    # How a command is NAMED in a notice: argv[0] alone, so a rule whose ARGUMENTS carry a
     # captured token does not put that token in an event row the operator's next `list_events`
-    # hands to an agent.
+    # hands to an agent. This bounds what GORI writes, not what ends up in the row — see
+    # `Result#failure` for the half it cannot bound.
     def self.command_label(argv : Array(String)) : String
       argv.first? || "(empty)"
     end
@@ -234,14 +277,19 @@ module Gori
 
       out_ch, err_ch, wait_ch = start_pumps(process, stdin)
       status, timed_out = await(process, wait_ch, timeout)
-      captured, truncated = collect(out_ch, {Bytes.empty, false})
-      err = collect(err_ch, "")
+      # A pump that could not hand its bytes over inside COLLECT_GRACE is NOT an empty result.
+      # `collect` answers nil rather than a fallback for exactly this: taking an empty `Bytes`
+      # as this run's stdout would make `ok?` true with nothing in it, and the Rewriter would
+      # splice "" over the matched region on the live wire.
+      pair = collect(out_ch)
+      captured, truncated = pair || {Bytes.empty, false}
+      err = collect(err_ch) || ""
 
       process.close rescue nil
 
       code = timed_out ? -1 : (status.try(&.exit_code?) || -1)
       err = err[0, STDERR_IN_NOTICE] if err.size > STDERR_IN_NOTICE
-      Result.new(label, code, captured, err, timed_out, truncated, nil)
+      Result.new(label, code, captured, err, timed_out, truncated, nil, pair.nil?)
     end
 
     # The three fibers that keep the child from deadlocking on a full pipe: one writing stdin,
@@ -302,13 +350,16 @@ module Gori
       end
     end
 
-    # Take what a pump read, or `fallback` if it cannot hand it over inside COLLECT_GRACE.
-    private def self.collect(ch : Channel(T), fallback : T) : T forall T
+    # Take what a pump read, or NIL when it cannot hand it over inside COLLECT_GRACE. Nil is
+    # the point: "the pump never answered" and "the pump answered with nothing" are different
+    # facts, and a caller that cannot tell them apart splices an empty replacement onto the
+    # wire. See `Result#reason`.
+    private def self.collect(ch : Channel(T)) : T? forall T
       select
       when v = ch.receive
         v
       when timeout(COLLECT_GRACE)
-        fallback
+        nil
       end
     end
 

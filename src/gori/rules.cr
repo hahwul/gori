@@ -677,11 +677,15 @@ module Gori
     # Whether a `pipe` rule is live for this side and host — what a preview surface asks so it
     # can say that the transform it is showing left one out. Same lock-free-then-check shape as
     # `rewrites_body_for_host?`, and off any hot path: a redraw, not a message.
+    # `Head` and `Body` only, through the same `rewrites?` predicate every other liveness gate
+    # in this file uses. A `part: ws` pipe rule is not reachable from a preview that splits an
+    # HTTP sample into a head and a body, and counting it made the pane tell the operator its
+    # output was incomplete when it was exact.
     def pipes_for?(target : Store::RuleTarget, host : String) : Bool
       rules = @mutex.synchronize { @rules }
       rules.any? do |r|
-        r.enabled? && r.op.pipe? && !r.pattern.empty? &&
-          (r.target == target) && host_matches?(r.host, host)
+        next false unless r.op.pipe? && host_matches?(r.host, host)
+        rewrites?(r, target, Store::RulePart::Head) || rewrites?(r, target, Store::RulePart::Body)
       end
     end
 
@@ -728,9 +732,15 @@ module Gori
       # outside the lock (the old `active.each` did), so nothing new is read unsynchronised.
       rules = @mutex.synchronize { @rules }
       text = nil.as(String?)
+      # ONE hook budget for this whole rewrite, shared by every pipe rule in it. Per-RULE
+      # deadlines would have multiplied: three enabled pipe rules at the 60s ceiling could hold
+      # one head for three minutes, which is not a bound at all. Built lazily so a rewrite with
+      # no pipe rule reads no clock.
+      pipe_deadline = nil.as(Time::Instant?)
       rules.each do |r|
         next unless rewrites?(r, target, part) && host_matches?(r.host, host)
         next if r.op.pipe? && !run_hooks # see `transform_message`
+        pipe_deadline ||= Time.instant + Rules.pipe_budget if r.op.pipe?
         cur = text
         if cur.nil?
           cur = String.new(bytes)
@@ -741,7 +751,7 @@ module Gori
           # pre-existing behaviour (a body rule simply won't match a compressed body).
           return bytes if part.ws? && !cur.valid_encoding?
         end
-        text = apply_rule(cur, r, target, part, host, report)
+        text = apply_rule(cur, r, target, part, host, report, pipe_deadline)
       end
       t = text
       t ? t.to_slice : bytes # no rule in scope → same bytes, byte-fidelity preserved
@@ -752,12 +762,16 @@ module Gori
     # regex over non-UTF-8 bytes is swallowed → the text passes through unchanged.
     private def apply_rule(text : String, rule : Store::MatchRule,
                            target : Store::RuleTarget, part : Store::RulePart, host : String,
-                           report : Bool = true) : String
+                           report : Bool = true, pipe_deadline : Time::Instant? = nil) : String
       # A rule naming a binding that has no value is NOT applied. Nothing else is a safe
       # answer: injecting `""` sends a request with an empty session header, and injecting
       # the literal `$SESSION` — which is what `Env.expand` does with an unknown key
       # (env.cr) — puts eight meaningless characters on the wire in a credential's place.
       # The operator hears about it through the event feed rather than through a 401.
+      # `Pipe` is resolved differently and must not come through here: `replacement_for`
+      # expands `$KEY` across the WHOLE string, and for an argv that is an argument-injection
+      # primitive — see `pipe_argv`. It resolves per element instead.
+      return pipe_apply(text, rule, target, part, host, report, pipe_deadline) if rule.op.pipe?
       repl = replacement_for(rule)
       if repl.is_a?(Refused)
         report_refused(rule, repl) if report
@@ -786,20 +800,24 @@ module Gori
       in Store::RuleOp::SetHeader    then head_set_header(text, rule.pattern, repl)
       in Store::RuleOp::RemoveHeader then head_remove_header(text, rule.pattern)
       in Store::RuleOp::ShortCircuit then text # answers, never rewrites — `apply` filters it out
-      in Store::RuleOp::Pipe         then pipe_apply(text, rule, repl, target, part, host, report)
+      in Store::RuleOp::Pipe         then text # handled above, before the whole-string resolve
       end
     end
 
     # --- pipe (#818): the replacement is COMPUTED by an external command --------------------
 
-    # How long ONE pipe rule may hold ONE message, across EVERY match in it. This is the P6
-    # guarantee at the rewrite seam and it is a BUDGET, not a per-spawn timeout, because the
-    # two answer different questions: a per-spawn timeout bounds one child, and a regex that
-    # matches four hundred times in a body would then multiply it by four hundred while the
-    # client waits. The budget is handed to `ProcessHook.run` as the remaining time on each
-    # match and, once it is gone, every remaining match passes through UNCHANGED with one
-    # notice saying so. A pipe rule therefore costs a message at most this, whatever the
-    # operator's pattern does.
+    # How long the pipe rules of ONE rewrite may hold it, across every rule and every match in
+    # it. This is the P6 guarantee at the rewrite seam and it is a BUDGET, not a per-spawn
+    # timeout, because the two answer different questions: a per-spawn timeout bounds one child,
+    # and a regex matching four hundred times in a body would multiply it by four hundred while
+    # the client waits. Per-RULE would multiply it too, by however many pipe rules the operator
+    # has. So `apply` mints ONE deadline and every pipe rule in that call shares it; the
+    # remaining time is what each match gets, and once it is gone every remaining match passes
+    # through UNCHANGED with one notice.
+    #
+    # The bound a MESSAGE sees is two of these — `apply` is called once for the head and once
+    # for the body, and they are separate rewrites of separate bytes — plus, per overrunning
+    # spawn, `ProcessHook`'s own kill and collect graces.
     def self.pipe_budget : Time::Span
       Settings.hook_timeout_secs.seconds
     end
@@ -818,18 +836,23 @@ module Gori
     # command at all passes `run_hooks: false` to `apply` and never reaches here. The two flags
     # are separate because they answer different questions: "may this write a row" and "may this
     # fork a process", and the surfaces that want one do not all want the other.
-    private def pipe_apply(text : String, rule : Store::MatchRule, argv_spec : String,
+    private def pipe_apply(text : String, rule : Store::MatchRule,
                            target : Store::RuleTarget, part : Store::RulePart, host : String,
-                           report : Bool) : String
-      parsed = ProcessHook.parse_argv(argv_spec)
-      if parsed.is_a?(String)
-        report_hook_failure(rule, "command does not parse: #{parsed}") if report
+                           report : Bool, deadline : Time::Instant? = nil) : String
+      built = pipe_argv(rule)
+      case built
+      when Refused
+        report_refused(rule, built) if report
+        return text
+      when String
+        report_hook_failure(rule, "command does not parse: #{built}") if report
         return text
       end
-      argv = parsed
-      env = hook_env(rule, target, part, host)
-      deadline = Time.instant + Rules.pipe_budget
+      argv = built.as(Array(String))
+      env = nil.as(Hash(String, String)?)
+      deadline ||= Time.instant + Rules.pipe_budget
       failure = nil.as(String?)
+      failure_key = nil.as(String?)
       exhausted = false
 
       run = ->(matched : String) do
@@ -838,11 +861,15 @@ module Gori
           exhausted = true
           matched
         else
+          # Built on the FIRST match, not per message: a rule live for a side pays nothing
+          # for the messages its pattern does not appear in.
+          env ||= hook_env(rule, target, part, host)
           res = ProcessHook.run(argv, matched.to_slice, remaining, env)
           if res.ok?
             String.new(res.stdout)
           else
             failure ||= res.failure
+            failure_key ||= res.failure_key
             matched
           end
         end
@@ -864,12 +891,45 @@ module Gori
 
       if report
         if f = failure
-          report_hook_failure(rule, f)
+          report_hook_failure(rule, f, key: failure_key)
         elsif exhausted
           report_hook_failure(rule, "ran out of its #{Rules.pipe_budget.total_seconds.to_i}s " \
                                     "budget part-way through this message — the remaining " \
                                     "matches were left unchanged")
         end
+      end
+      out
+    end
+
+    # This rule's command as an ARGV, with `$KEY` resolved INSIDE each element.
+    #
+    # The order is the security property. `replacement` is tokenized FIRST and every `$KEY` is
+    # then expanded within the element it sits in, so a binding's value can never add, split or
+    # remove an argument however it is spelled. Resolving first and tokenizing after — which is
+    # what every other op does, because for them the result is text spliced into a message —
+    # would make a captured value an argument-injection primitive: `./resign.sh --key $TOKEN`
+    # against an origin that mints `TOKEN` as `x --config /tmp/evil.yml` would hand the
+    # operator's own script a flag it never wrote. There is no shell here, so quoting could not
+    # have saved it either; the split has to not happen at all.
+    #
+    # `forges_boundary?` is deliberately not the guard for this (`head_scoped?` answers false
+    # for a pipe rule and says why): CR and LF in an argv element forge nothing, and refusing
+    # them would break a legitimate rule the first time an origin minted a cookie with a stray
+    # CR. The byte that DOES matter, NUL, is refused by `ProcessHook.parse_argv` — but only in
+    # the literal spec, so it is re-checked here over the resolved elements.
+    #
+    # Answers the argv, a `Refused` when a `$KEY` is declared-but-unbound (same disposition as
+    # every other op: the rule does not apply and the operator hears about it), or a String
+    # saying why the spec could not be tokenized.
+    private def pipe_argv(rule : Store::MatchRule) : Array(String) | Refused | String
+      parsed = ProcessHook.parse_argv(rule.replacement)
+      return parsed if parsed.is_a?(String)
+      out = Array(String).new(parsed.size)
+      parsed.each do |tok|
+        resolved = resolve_bindings(tok, rule)
+        return resolved if resolved.is_a?(Refused)
+        return "a binding expanded to a value containing a NUL byte" if resolved.includes?('\0')
+        out << resolved
       end
       out
     end
@@ -897,12 +957,18 @@ module Gori
     # working again. It is rate-limited by shape instead — the same rule reporting the same
     # sentence twice in a row is dropped — so a hook that is simply broken writes one row and
     # then stays quiet until either the rule or the failure changes.
-    private def report_hook_failure(rule : Store::MatchRule, reason : String) : Nil
-      key = {rule.scope, rule.id}
+    private def report_hook_failure(rule : Store::MatchRule, reason : String,
+                                    key : String? = nil) : Nil
+      rid = {rule.scope, rule.id}
       line = "rewrite rule #{(rule.name.presence || rule.pattern).inspect} pipe failed: #{reason}"
+      # Suppress on `key` — the command and the failure CLASS — never on `line`, which carries
+      # the child's stderr. A hook that prints a timestamp or a request id before failing makes
+      # every sentence unique, and de-duplicating on the sentence then writes one SQLite row per
+      # proxied message, on the data path, for one broken command.
+      seen = key || line
       @mutex.synchronize do
-        return if @hook_reported[key]? == line
-        @hook_reported[key] = line
+        return if @hook_reported[rid]? == seen
+        @hook_reported[rid] = seen
       end
       @store.insert_event("rewriter", "hook_failed", "warn", "#{line} (bytes passed through unchanged)")
     end
@@ -917,13 +983,18 @@ module Gori
     # simply did not work before — and one syntax everywhere, with no schema change and no
     # new rule kind.
     private def replacement_for(rule : Store::MatchRule) : String | Refused
-      repl = rule.replacement
+      resolve_bindings(rule.replacement, rule)
+    end
+
+    # Resolve `$KEY` in ONE piece of text on this rule's behalf. Split from `replacement_for`
+    # so a pipe rule can resolve each ARGV ELEMENT separately — see `pipe_argv`.
+    private def resolve_bindings(text : String, rule : Store::MatchRule) : String | Refused
       prefix = Settings.env_prefix
       # The overwhelmingly common case, and the one that must cost nothing: no `$` in the
       # replacement means the identical String comes back, exactly as before this feature.
-      return repl if prefix.empty? || !repl.byte_index(prefix)
+      return text if prefix.empty? || !text.byte_index(prefix)
       vars, declared = subst_snapshot
-      substitute(repl, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?,
+      substitute(text, prefix, vars, declared, rule.op.replace? && rule.match_kind.regex?,
         head: head_scoped?(rule))
     end
 
@@ -1407,8 +1478,11 @@ module Gori
     # front of it — and it would run a side-effecting script (that is what a hook IS) five
     # hundred times over traffic the operator only asked to look at. So the row counts the
     # flows the command would be RUN ON, which is the honest thing to say about a rule whose
-    # output nobody can predict from the row. The single-sample `transform_message` preview
-    # does run it, once, under the same budget the proxy uses.
+    # output nobody can predict from the row.
+    #
+    # No preview surface runs a pipe rule at all: the OUTPUT pane's single-sample transform
+    # passes `run_hooks: false` for the same reason one notch louder (it redraws per frame) and
+    # says so in the pane. A pipe rule is tried on the wire, not in a preview.
     private def pattern_matches?(rule : Store::MatchRule, text : String) : Bool
       if rule.match_kind.regex?
         !!SafeRegexp.compile(rule.pattern).match(text)

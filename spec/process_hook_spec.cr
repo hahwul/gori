@@ -32,6 +32,16 @@ describe Gori::ProcessHook do
         .should eq ["./tool", "$HOME", "*.txt", "`id`", "a;b", "c&&d", ">", "e", "|", "f"]
     end
 
+    it "keeps a backslash inside double quotes unless it escapes a quote or a backslash" do
+      # A POSIX shell does the same. Deleting it made a regex argument (`"a\d+"`) and a Windows
+      # path silently different from what the operator read back in the editor.
+      Gori::ProcessHook.parse_argv(%q{./tool "a\d+"}).should eq ["./tool", %q{a\d+}]
+      Gori::ProcessHook.parse_argv(%q{./sign --key "C:\tools\dev.pem"})
+        .should eq ["./sign", "--key", %q{C:\tools\dev.pem}]
+      Gori::ProcessHook.parse_argv(%q{./tool "say \"hi\""}).should eq ["./tool", %q{say "hi"}]
+      Gori::ProcessHook.parse_argv(%q{./tool "a\\b"}).should eq ["./tool", %q{a\b}]
+    end
+
     it "reports why a spec cannot be tokenized instead of guessing" do
       Gori::ProcessHook.parse_argv(%q{./tool "oops}).should eq "unterminated double quote"
       Gori::ProcessHook.parse_argv(%q{./tool 'oops}).should eq "unterminated single quote"

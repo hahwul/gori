@@ -157,8 +157,12 @@ module Gori::Decoder
       # this entry is registered only so its name resolves and the reason is visible, and a
       # caller that has to refuse a plan before the first dial has to be able to see that
       # without running the converter over the operator's payload.
+      # A saved chain is callable BY NAME, so an `exec:` step inside one is invisible in the
+      # token that invokes it. Carry the fact on the converter so a caller that must refuse
+      # command execution can ask (`Decoder.chain_runs_commands?`) instead of re-flattening.
       Converter.new(name, Array(String).new, Category::Saved, Direction::Transform,
-        "saved chain: #{spec.strip.empty? ? "(empty)" : spec.strip}", fn, unusable: msg)
+        "saved chain: #{spec.strip.empty? ? "(empty)" : spec.strip}", fn, unusable: msg,
+        runs_commands: !!tokens.try(&.any? { |t| Decoder.exec_step?(t) }))
     end
 
     # Run the flattened spec as this one step. A failure INSIDE the recipe is re-raised with

@@ -34,9 +34,14 @@ module Gori::Decoder
   # place the marker is recognised — the chain executor, the autocomplete panes, the Fuzzer and
   # Repeater pre-send gates and the saved-chain flattener all ask HERE rather than each spelling
   # the prefix out (P1).
+  # A bare `exec:` (or `exec:` with only whitespace after it) IS an exec step — an empty one.
+  # Requiring a non-empty remainder sent it to the registry instead, which reported `unknown
+  # converter "exec:"` and pointed the operator at a converter name that was never the problem;
+  # it also re-opened the completion popup over a marker they had just typed. The step now fails
+  # with `no command`, which is what is actually wrong with it.
   def self.exec_spec(token : String) : String?
     t = token.strip
-    return nil unless t.size > EXEC_PREFIX.size && t[0, EXEC_PREFIX.size].compare(EXEC_PREFIX, case_insensitive: true) == 0
+    return nil unless t.size >= EXEC_PREFIX.size && t[0, EXEC_PREFIX.size].compare(EXEC_PREFIX, case_insensitive: true) == 0
     t[EXEC_PREFIX.size..].strip
   end
 
@@ -56,6 +61,19 @@ module Gori::Decoder
     return nil if spec.nil?
     out = ProcessHook.parse_argv(spec)
     out.is_a?(String) ? "#{token}: #{out}" : nil
+  end
+
+  # Whether running `spec` would run an external command — directly (`exec:…`) or through a
+  # saved chain that contains one (`Converter#runs_commands?`). The predicate a caller uses when
+  # command execution is not something it may do at all.
+  #
+  # A saved chain is why this cannot be a scan for the marker: the library registers each saved
+  # spec as a converter callable BY NAME, so `myenc` runs whatever `myenc` was defined as, and
+  # the token says nothing. Asking the registry is the only way to see through the name.
+  def self.chain_runs_commands?(registry : Registry, spec : String) : Bool
+    parse_spec(spec).any? do |tok|
+      exec_step?(tok) || !!registry[tok]?.try(&.runs_commands?)
+    end
   end
 
   # How a (possibly binary) value is rendered in the Output/pipeline panes.

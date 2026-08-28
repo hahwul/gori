@@ -35,7 +35,7 @@ module Gori
       severity : Store::Severity,
       scope : String, # "global" | "project"
       enabled : Bool,
-      on_failure : Proc(CustomRule, String, Nil)? = nil do
+      on_failure : Proc(CustomRule, String, String, Nil)? = nil do
       SIDES   = %w[request response]
       REGIONS = %w[whole header body]
       KINDS   = %w[string regex exec]
@@ -93,6 +93,15 @@ module Gori
       # found nothing" from "the detector never ran". A non-zero exit is neither: it is the
       # rule's own answer and is silent by design.
       #
+      # COST. This runs ONCE PER FLOW, on the passive analyzer's fiber, and it is the only
+      # custom-rule kind that can take real time. A hook that needs two seconds makes
+      # `Probe.scan_detail` the bottleneck for the whole rule set, and `Store#publish` drops
+      # onto `@probe_events` when that channel backs up (best-effort, no catch-up sweep) — so
+      # under live capture a slow exec rule can leave later flows unanalyzed by EVERY passive
+      # rule, with a Probe tab that still looks clean. `hooks.timeout_secs` is the ceiling on
+      # one run; the operator picking a slow detector is picking that cost per flow. Keep an
+      # exec rule's command fast, or scope the rules it competes with.
+      #
       # WHAT THE HOOK SEES is the region text `Passive::Context` hands every custom rule —
       # content-decoded, capped at `Context::BODY_CAP`, and `.scrub`bed. That is a real
       # departure from P7's raw octets and it is deliberate: a rule table where `exec` and
@@ -100,19 +109,27 @@ module Gori
       # one flow mean two different things. A hook that needs the exact wire bytes has the flow
       # id in `GORI_FLOW_ID` and the whole store behind it.
       private def exec_evidence(text : String, ctx : Passive::Context) : {Bool, String?}
-        argv = ProcessHook.argv?(pattern)
-        return {false, nil} if argv.nil?
+        parsed = ProcessHook.parse_argv(pattern)
+        if parsed.is_a?(String)
+          # REPORTED, not silent. `valid_pattern?` guards the three CRUD surfaces, but
+          # `Settings.parse_scan_rules` clamps a hand-edited settings.json without calling it —
+          # and a hand-edited global rule is a supported way to write one. Such a rule listed as
+          # enabled everywhere and never fired, which is the exact failure this method's own
+          # comment argues against.
+          report_failure("its command does not parse: #{parsed}")
+          return {false, nil}
+        end
+        argv = parsed
         res = ProcessHook.run(argv, text.to_slice, Settings.hook_timeout_secs.seconds,
           exec_env(ctx))
-        if reason = res.spawn_error
-          report_failure("#{ProcessHook.command_label(argv)}: #{reason}")
+        # `ok?` covers every way the hook failed to RUN — spawn error, timeout, oversized
+        # stdout, and a stdout pipe left open by something the child started. Only a clean exit
+        # gets to be a verdict, and only a non-zero clean exit is silence.
+        if !res.ok? && res.status != 0
+          report_failure(res.failure || "hook failed", key: res.failure_key)
           return {false, nil}
         end
-        if res.timed_out || res.truncated
-          report_failure(res.failure || "hook failed")
-          return {false, nil}
-        end
-        return {false, nil} unless res.status == 0
+        return {false, nil} unless res.ok?
         line = String.new(res.stdout).scrub.each_line.first?.try(&.strip)
         {true, line.presence.try { |l| safe_evidence(l) }}
       end
@@ -141,8 +158,8 @@ module Gori
       # two rules differing only in which closure they carry are the same rule — but `record`
       # compares every field, so it sits LAST with a nil default and every existing positional
       # construction keeps working.
-      private def report_failure(reason : String) : Nil
-        on_failure.try &.call(self, reason)
+      private def report_failure(reason : String, key : String? = nil) : Nil
+        on_failure.try &.call(self, reason, key || reason)
       end
 
       # The scrubbed text for this rule's side × region (nil when that region is absent, e.g. a
@@ -231,18 +248,27 @@ module Gori
     # detector that never ran is distinguishable from one that ran and found nothing (see
     # `CustomRule#exec_evidence`).
     #
-    # De-duplicated per {rule, sentence} for the LIFE OF THIS RULE LIST, which is exactly the
-    # right window: the list is rebuilt whenever the rules change, so an edited rule is news
-    # again, and a scan over ten thousand flows with a mistyped command writes ONE row instead
-    # of ten thousand. The closure is shared by every rule in the list, so the set is too — one
-    # broken command reported once even when three rules name it.
-    private def self.hook_failure_reporter(store : Store) : Proc(CustomRule, String, Nil)
+    # De-duplicated for the LIFE OF THIS RULE LIST, which is exactly the right window: the list
+    # is rebuilt whenever the rules change, so an edited rule is news again, and a scan over ten
+    # thousand flows with a mistyped command writes ONE row instead of ten thousand. The closure
+    # is shared by every rule in the list, so the memo is too — one broken command reported once
+    # even when three rules name it.
+    #
+    # Keyed on `key` and not on the emitted `line`. `ProcessHook::Result#failure` carries the
+    # child's stderr, which a hook is free to vary per run (a timestamp, a request id), so a set
+    # keyed on the sentence would neither suppress anything nor stop growing — it would write a
+    # row per flow AND retain every one of those sentences for the length of the scan. `key` is
+    # the command and the failure class, which is what "the same failure" means.
+    private def self.hook_failure_reporter(store : Store) : Proc(CustomRule, String, String, Nil)
       seen = Set(String).new
       lock = Mutex.new
-      ->(rule : CustomRule, reason : String) do
-        line = "probe rule #{rule.title.inspect} (#{rule.scope}) could not run its hook: #{reason}"
-        fresh = lock.synchronize { seen.add?(line) }
-        store.insert_event("probe", "hook_failed", "warn", line) if fresh
+      ->(rule : CustomRule, reason : String, key : String) do
+        memo = "#{rule.scope}/#{rule.id}: #{key}"
+        fresh = lock.synchronize { seen.add?(memo) }
+        if fresh
+          store.insert_event("probe", "hook_failed", "warn",
+            "probe rule #{rule.title.inspect} (#{rule.scope}) could not run its hook: #{reason}")
+        end
         nil
       end
     end

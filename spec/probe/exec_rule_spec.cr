@@ -44,7 +44,7 @@ private def exec_flow(store, body : String) : Gori::Store::FlowDetail
 end
 
 private def exec_rule(command : String,
-                      on_failure : Proc(Gori::Probe::CustomRule, String, Nil)? = nil) : Gori::Probe::CustomRule
+                      on_failure : Proc(Gori::Probe::CustomRule, String, String, Nil)? = nil) : Gori::Probe::CustomRule
   Gori::Probe::CustomRule.new("1", "external detector", "runs a real detector",
     "response", "body", "exec", command, Gori::Store::Severity::High, "project", true,
     on_failure: on_failure)
@@ -102,7 +102,7 @@ describe "Probe exec rule" do
     with_store do |store|
       seen = [] of String
       r = exec_rule("/nonexistent/gori-probe-spec",
-        on_failure: ->(_rule : Gori::Probe::CustomRule, reason : String) { seen << reason; nil })
+        on_failure: ->(_r : Gori::Probe::CustomRule, reason : String, _k : String) { seen << reason; nil })
       detections(store, r, "x").should be_empty
       seen.size.should eq 1
       seen.first.should contain "/nonexistent/gori-probe-spec"
@@ -116,7 +116,7 @@ describe "Probe exec rule" do
         Gori::Settings.hook_timeout_secs = 1
         seen = [] of String
         r = exec_rule("/bin/sleep 30",
-          on_failure: ->(_rule : Gori::Probe::CustomRule, reason : String) { seen << reason; nil })
+          on_failure: ->(_r : Gori::Probe::CustomRule, reason : String, _k : String) { seen << reason; nil })
         started = Time.instant
         detections(store, r, "x").should be_empty
         (Time.instant - started).should be < 10.seconds

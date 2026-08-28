@@ -36,8 +36,9 @@ end
 
 private def pipe_rule(command : String, *, pattern = "TOKEN", kind = Gori::Store::MatchKind::Literal,
                       part = Gori::Store::RulePart::Body,
-                      target = Gori::Store::RuleTarget::Request) : Gori::Store::MatchRule
-  Gori::Store::MatchRule.new(1_i64, true, target, part, pattern, command,
+                      target = Gori::Store::RuleTarget::Request,
+                      id = 1_i64) : Gori::Store::MatchRule
+  Gori::Store::MatchRule.new(id, true, target, part, pattern, command,
     Gori::Store::RuleOp::Pipe, kind, "signer", "")
 end
 
@@ -181,6 +182,79 @@ describe "Rewriter pipe op" do
       pv = Gori::Rules.new(store, [] of Gori::Store::MatchRule)
         .preview(pipe_rule("/nonexistent/gori-pipe-spec"))
       pv.matched.should eq 3
+    end
+  end
+  it "expands $KEY INSIDE an argv element, so a captured value can never add an argument" do
+    # The injection this ordering exists to prevent: resolve-then-tokenize would let an origin
+    # that mints `TOKEN` as `x --config /tmp/evil.yml` hand the operator's own script a flag
+    # they never wrote. There is no shell here, so quoting could not have saved it — the split
+    # has to not happen at all.
+    with_store do |store|
+      begin
+        Gori::Env.save_project(store, [{"TOKEN", "x --config /tmp/evil.yml"}])
+        with_hook(%q{printf '%s|' "$@"}) do |hook|
+          rules = Gori::Rules.new(store, [pipe_rule("#{hook} --key $TOKEN", pattern: "X")])
+          got = rules.rewrite_request_body("X".to_slice, "acme.test")
+          # THREE arguments, not five: the value stayed one element.
+          String.new(got).should eq "--key|x --config /tmp/evil.yml|"
+        end
+      ensure
+        Gori::Env.save_project(store, [] of {String, String})
+      end
+    end
+  end
+
+  it "does not splice an EMPTY replacement when the hook's stdout could not be collected" do
+    # `ProcessHook#ok?` must be false when a pump is abandoned. If a lost pump read as an empty
+    # success the matched bytes would be DELETED on the live wire, silently.
+    lost = Gori::ProcessHook::Result.new("hook", 0, Bytes.empty, "", false, false, nil, true)
+    lost.ok?.should be_false
+    lost.failure.not_nil!.should contain "held open"
+    Gori::ProcessHook::Result.new("hook", 0, Bytes.empty, "", false, false, nil).ok?.should be_true
+  end
+
+  it "de-duplicates a notice on the failure CLASS, not on the child's stderr" do
+    # A hook that prints a timestamp before failing must not write one SQLite row per proxied
+    # message on the data path.
+    with_store do |store|
+      with_hook("echo \"attempt $$-$(date +%N)\" >&2; exit 9") do |hook|
+        rules = Gori::Rules.new(store, [pipe_rule(hook, pattern: "TOKEN")])
+        5.times { rules.rewrite_request_body("a TOKEN b".to_slice, "acme.test") }
+        hook_events(store).size.should eq 1
+      end
+    end
+  end
+
+  it "spends ONE budget across every pipe RULE in a rewrite, not one each" do
+    # Per-rule deadlines multiplied: three rules at the 60s ceiling would hold one head for
+    # three minutes, which is not a bound at all.
+    with_store do |store|
+      prev = Gori::Settings.hook_timeout_secs
+      begin
+        Gori::Settings.hook_timeout_secs = 1
+        rules = Gori::Rules.new(store, [
+          pipe_rule("/bin/sleep 30", pattern: "A", id: 1_i64),
+          pipe_rule("/bin/sleep 30", pattern: "B", id: 2_i64),
+          pipe_rule("/bin/sleep 30", pattern: "C", id: 3_i64),
+        ])
+        started = Time.instant
+        got = rules.rewrite_request_body("ABC".to_slice, "acme.test")
+        String.new(got).should eq "ABC"
+        (Time.instant - started).should be < 12.seconds
+      ensure
+        Gori::Settings.hook_timeout_secs = prev
+      end
+    end
+  end
+
+  it "does not claim a ws-only pipe rule was skipped in an HTTP preview" do
+    with_store do |store|
+      ws = pipe_rule("/bin/cat", pattern: "X", part: Gori::Store::RulePart::Ws)
+      rules = Gori::Rules.new(store, [ws])
+      rules.pipes_for?(Gori::Store::RuleTarget::Request, "acme.test").should be_false
+      body = pipe_rule("/bin/cat", pattern: "X")
+      Gori::Rules.new(store, [body])
+        .pipes_for?(Gori::Store::RuleTarget::Request, "acme.test").should be_true
     end
   end
 end
