@@ -122,7 +122,7 @@ describe Gori::RulePresets do
       out = apply_preset("unhide-hidden-fields",
         "HTTP/1.1 200 OK\r\n\r\n<INPUT TYPE=hidden><input type='hidden'><input data-type=\"hidden\" name=\"q\">")
       out.scan(/type\s*=\s*["']?text/i).size.should eq(2) # both real hidden inputs unhidden
-      out.should contain(%(data-type="hidden")) # not a real type attribute — untouched
+      out.should contain(%(data-type="hidden"))           # not a real type attribute — untouched
     end
 
     it "enable-disabled-fields strips disabled and readonly" do

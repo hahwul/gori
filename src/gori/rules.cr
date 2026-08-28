@@ -209,8 +209,8 @@ module Gori
       committed = 0
       preset.rules.each do |spec|
         committed += 1 if add(spec.target, spec.part, spec.pattern, spec.replacement,
-          spec.op, spec.match_kind, spec.name, host: "", body_file: "",
-          scope: scope, enabled: enabled)
+                            spec.op, spec.match_kind, spec.name, host: "", body_file: "",
+                            scope: scope, enabled: enabled)
       end
       committed
     end
