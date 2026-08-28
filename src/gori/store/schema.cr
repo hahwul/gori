@@ -1122,6 +1122,10 @@ module Gori
           SQL
       ]
 
+      V20 = [
+        "ALTER TABLE issues ADD COLUMN cvss TEXT",
+      ]
+
       # gRPC server-reflection cache (#827). ONE row per reflected target, holding the
       # FileDescriptorSet gori synthesized from the FileDescriptorProtos the server returned
       # — so one operator-initiated fetch serves every flow on that host, across restarts,
@@ -1137,7 +1141,7 @@ module Gori
       # and a `protoc --descriptor_set_out` one indistinguishable downstream. `service` records
       # WHICH reflection service answered (`grpc.reflection.v1…` / `…v1alpha…`), because
       # "where did this schema come from" is a question the Project settings row has to answer.
-      V20 = [
+      V21 = [
         <<-SQL,
           CREATE TABLE grpc_reflection (
             target     TEXT    PRIMARY KEY,
@@ -1151,7 +1155,7 @@ module Gori
       ]
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20]
+                    V18, V19, V20, V21]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

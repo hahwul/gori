@@ -25,7 +25,7 @@ module Gori::Tui
     include PreviewPane
     include IssuePresentation
 
-    QUERY_FIELDS = %w[severity: status: host: title:]
+    QUERY_FIELDS = %w[severity: status: host: title: cvss:]
 
     def initialize
       @all = [] of Store::Issue    # the raw store list (severity-desc)
@@ -813,11 +813,35 @@ module Gori::Tui
         # punycode/IDNA, so `日本語.test` (8 chars / 11 columns) would start 3 columns too far
         # right — over the card's border — and hand the title 3 columns it doesn't have,
         # sliding it underneath the host so the two garble each other.
+        #
+        # The host is CAPPED at the columns left of the title, not just measured. `Screen#text`
+        # clips to the SCREEN, not to this pane, so a host longer than the row simply started
+        # left of `title_x` and painted straight over the status tag and the severity badge —
+        # at 40 columns this row's `▎CRIT open` was gone entirely. The title is drawn last with
+        # its width floored at 0, so it never repaints those cells and the damage stays. Cap,
+        # then ellipsize: an ellipsized host still tells you which host, a missing badge does
+        # not tell you anything. (Pre-existing; the score below inherited the same trap.)
         right = rect.right - 1
         if (host = f.host) && !host.empty?
-          hw = Screen.display_width(host)
-          screen.text(rect.right - hw - 1, y, host, Theme.muted, bg, width: hw)
-          right = rect.right - hw - 2
+          hw = {Screen.display_width(host), {rect.right - 1 - title_x, 0}.max}.min
+          if hw > 0
+            screen.text(rect.right - hw - 1, y, ellipsize(host, hw), Theme.muted, bg, width: hw)
+            right = rect.right - hw - 2
+          end
+        end
+        # The score reads as a severity, so it wears the severity's colour — the SEV badge on
+        # the left and this number are the same claim, and a fixed accent made them look like
+        # two unrelated facts.
+        #
+        # Gated on clearing `title_x`, because `Screen#text` clips to the SCREEN, not to this
+        # pane: on a narrow list a long host walks `right` left past the title column, and an
+        # ungated draw then paints the score ON the status tag and the severity badge. The
+        # title is drawn afterwards with `tw` floored at 0, so it never repaints those cells
+        # and the damage stays. Dropping the score is the right loss — the SEV badge already
+        # carries the same claim.
+        if (score = f.cvss_score) && right - (sc_w = sprintf("%.1f", score).size) >= title_x
+          screen.text(right - sc_w, y, sprintf("%.1f", score), severity_color(f.severity), bg, width: sc_w)
+          right = right - sc_w - 2
         end
         title_fg = selected || marked ? Theme.text_bright : Theme.text
         tw = {right - title_x, 0}.max
@@ -880,6 +904,13 @@ module Gori::Tui
       lines << {Theme.text_bright, "#{severity_badge(f.severity)}  #{f.title}"}
       host = f.host.try(&.presence) || "—"
       lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}"}
+      # ONE cvss line: the score is the reading and the vector behind it is the provenance,
+      # so they belong on the same row rather than as a summary chip plus a repeat of the
+      # string two lines apart.
+      if cvss = f.cvss
+        score = f.cvss_score
+        lines << {Theme.muted, score ? "cvss      #{sprintf("%.1f", score)}  ·  #{cvss}" : "cvss      #{cvss}"}
+      end
       if fid = f.flow_id
         lines << {Theme.muted, "evidence  flow ##{fid}"}
       else
@@ -921,7 +952,7 @@ module Gori::Tui
         screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  cvss:>=7  status:open  status:closed  host:", Theme.muted, width: left_w)
       end
     end
 
@@ -953,11 +984,27 @@ module Gori::Tui
       # y1 — chips: a filled severity chip + a status chip.
       cx = rect.x + 1
       cx = Frame.tag_chip(screen, cx, rect.y + 1, " #{severity_badge(issue.severity)} ", severity_color(issue.severity))
-      Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      cx = Frame.tag_chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      # The cvss chip is the ONE chip whose width is unbounded — a v4.0 vector is 60-odd
+      # columns — and `Frame.tag_chip` clips to the SCREEN, not to this pane. So the vector
+      # half is appended only when it fits: the score alone still reads, and a chip that ran
+      # off the panel would paint over the border.
+      if cvss = issue.cvss
+        room = {rect.right - 1 - (cx + 1), 0}.max
+        chip = if score = issue.cvss_score
+                 long = " CVSS #{sprintf("%.1f", score)} · #{cvss} "
+                 Screen.draw_width(long) <= room ? long : " CVSS #{sprintf("%.1f", score)} "
+               else
+                 " CVSS #{cvss} "
+               end
+        Frame.tag_chip(screen, cx + 1, rect.y + 1, chip, severity_color(issue.severity)) if Screen.draw_width(chip) <= room
+      end
 
       # y2 — timestamps.
       meta = "created #{fmt_ts(issue.created_at)}"
       meta += " · edited #{fmt_ts(issue.updated_at)}" if issue.updated_at > issue.created_at
+      # The vector itself rides the chip row above, not this one — a timestamp line is where
+      # you look for WHEN, and a third copy of the same string is not a third fact.
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
       # y3 — primary linked-flow evidence.

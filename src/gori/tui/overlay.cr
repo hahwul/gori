@@ -84,6 +84,7 @@ module Gori::Tui
     Columns
     Column
     LibraryPick
+    CvssCalculator
     # Prompt-tier pickers. These two name a modal that `@overlay` NEVER holds: copy-as
     # and send-to float over whatever is underneath (a tab body OR the History detail
     # drill-in) without disturbing it, and are claimed before the ^G/^F/^B guards, so the

@@ -878,6 +878,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:issue_set_severity)
   end
 
+  def issue_set_cvss : Nil
+    rec(:issue_set_cvss)
+  end
+
   def issue_set_status : Nil
     rec(:issue_set_status)
   end

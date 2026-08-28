@@ -199,16 +199,17 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 | 컬러 규칙(Colormarker) | 위와 동일 — History 필터 바에 쓰는 그 쿼리를 그대로 받습니다 |
 | Intercept 캐치 조건, Extract 규칙 조건 | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body` — **`scope:` 없음** |
 | Probe | `severity`(`sev`), `status`(`st`), `category`(`cat`), `host`, `code` |
-| Issues | `severity`(`sev`), `status`(`st`), `host`, `title` |
+| Issues | `severity`(`sev`), `status`(`st`), `host`, `title`, `cvss` |
 
 `scope:`는 홀드 게이트와 Extract 규칙 조건이 답하지 않고 거부하는 유일한 필드입니다. 두 곳은
 흐르는 중인 메시지를 평가하는데, 프로젝트의 스코프 규칙은 메시지의 일부가 아닙니다. 입력하는
 자리에서 그렇게 알려주고, `scope:`를 담은 Extract 규칙은 저장되지 않습니다.
 
-Probe와 Issues는 심각도 이름(`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`)과 트리아지 상태(`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, 그리고 open이 아닌 모든 상태를 뜻하는 `closed`)를 받습니다. 심각도는 비교를 지원하므로 `sev:>=high`도 동작합니다.
+Probe와 Issues는 심각도 이름(`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`)과 트리아지 상태(`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, 그리고 open이 아닌 모든 상태를 뜻하는 `closed`)를 받습니다. 심각도는 비교를 지원하므로 `sev:>=high`도 동작합니다. Issues는 수치 비교 연산자(`cvss:>=7.0`, `cvss:<4.0`), 일치 점수(`cvss:7.5`), 벡터 부분일치(`cvss:3.1`)를 지원하는 `cvss:`도 받습니다.
 
 ```text
 sev:>=high -status:fp                 Issues: high와 critical, 오탐 제외
+cvss:>=7.0 status:open                Issues: open 상태인 high 이상 CVSS 발견
 cat:cors sev:medium                   Probe: medium 등급 CORS 발견
 host:api.example.com method:POST      Intercept: 한 호스트의 POST만 홀드
 body:secret AND -host:cdn             컬러 규칙: 유출은 칠하고 CDN은 제외
