@@ -76,6 +76,9 @@ class Gori::Tui::RepeaterView
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
                  # the captured one in front of it (DESIGN.md §7).
                  b << {:grpc_reframe, "␣F", "FRAME"} if @grpc_reframable
+                 # Same condition `render_request` draws it under, so the live cells are
+                 # exactly the painted ones — the rule this list already keeps for FRAME.
+                 b << {:grpc_fields, "␣E", "FIELDS"} if grpc_fields_available?
                  b
                elsif ws_mode?
                  WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from
@@ -192,6 +195,14 @@ class Gori::Tui::RepeaterView
     if h = @req_hex_edit
       return if selecting # a nibble cursor has no selection to drag
       h.click_to_nibble(inner, mx, my, @scroll_req)
+      return
+    end
+    if @grpc_fields
+      # A click picks the ROW under the pointer. The form has no text caret to place, and
+      # placing one in the hidden head editor is the invisible no-op this branch exists to
+      # avoid — the same reason the hex branch above answers for itself.
+      return if selecting
+      grpc_field_click(inner, my)
       return
     end
     ed = req_editor

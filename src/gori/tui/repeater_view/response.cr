@@ -248,6 +248,10 @@ class Gori::Tui::RepeaterView
   # holds stale bytes, so scrolling it would move a buffer the operator is not looking at.
   def request_scroll_view(step : Int32) : Nil
     return if request_hex?
+    # The FIELDS form is a list with its own caret; a wheel notch moves the SELECTION, the
+    # way it moves the caret in every TextArea-backed pane. Scrolling the head editor
+    # underneath a form that has replaced it on screen would be a no-op the operator can see.
+    return grpc_field_move(step) if @grpc_fields
     req_editor.scroll_view(step)
   end
 

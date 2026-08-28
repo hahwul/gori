@@ -116,6 +116,82 @@ module Gori
       end
     end
 
+    # One field's BYTE SPAN in the message it was read from — where its tag starts, where
+    # its payload starts, and how far it runs. The decoder above answers "what does this
+    # message say"; this answers "which octets said it", which is what re-encoding one field
+    # while copying every other one VERBATIM needs (#828).
+    #
+    # `value` is the first byte past the tag varint and `body` the first byte of the payload
+    # proper — the two differ only for a length-delimited field, where the length varint sits
+    # between them. Splitting them is what lets a nested rebuild re-emit the ORIGINAL tag
+    # bytes in front of a freshly measured length.
+    record Span,
+      number : UInt32,
+      wire : WireType,
+      start : Int32,
+      value : Int32,
+      body : Int32,
+      size : Int32 do
+      # First byte past this field.
+      def finish : Int32
+        start + size
+      end
+
+      def body_size : Int32
+        finish - body
+      end
+    end
+
+    # The spans of `data`'s TOP-LEVEL fields, in wire order, ONE PER `decode(data).fields`
+    # entry and in the same order — the two walks stop on the same conditions (a truncated
+    # varint, an over-reaching length, an illegal or lone end-group tag, the field ceiling),
+    # so index `i` here is the field `i` there.
+    #
+    # It is a second loop over the same bytes rather than an offset on `Field` because the
+    # decoder's record is the thing four surfaces serialize, and because the loop is the only
+    # part that repeats: every reader it calls — `read_varint`, `skip_value`, `skip_group`,
+    # and the same `MAX_FIELD_NUMBER` / `MAX_FIELDS` ceilings — is the decoder's own. The
+    # 1:1 correspondence is specced against `decode` rather than asserted here.
+    #
+    # No nesting: a rebuild descends by calling this again on `data[span.body, span.body_size]`,
+    # so the budget question the decoder answers with MAX_DEPTH is the caller's here.
+    def field_spans(data : Bytes) : Array(Span)
+      spans = [] of Span
+      pos = 0
+      while pos < data.size
+        break if spans.size >= MAX_FIELDS
+        start = pos
+        tag, pos, ok = read_varint(data, pos)
+        break unless ok
+        break if (tag >> 3) > MAX_FIELD_NUMBER
+        wt = WireType.from_value?((tag & 0x7).to_u8)
+        break if wt.nil? || wt.end_group?
+        number = (tag >> 3).to_u32
+        value = pos
+        body = pos
+        case wt
+        in .length_delimited?
+          len_u, after, len_ok = read_varint(data, pos)
+          break unless len_ok
+          break if len_u > Int32::MAX.to_u64
+          len = len_u.to_i32
+          break if after.to_i64 + len.to_i64 > data.size
+          body = after
+          pos = after + len
+        in .start_group?
+          pos, ok = skip_group(data, pos, number)
+          break unless ok
+        in .varint?, .fixed64?, .fixed32?
+          pos, ok = skip_value(data, pos, wt)
+          break unless ok
+        in .end_group?
+          break # unreachable: rejected above, and `in` demands the arm
+        end
+        spans << Span.new(number, wt, start, value, body, pos - start)
+      end
+      spans
+    end
+
     # Decode a protobuf message body. Empty input is a complete empty message.
     # Never raises.
     def decode(data : Bytes, *, max_depth : Int32 = MAX_DEPTH) : Message

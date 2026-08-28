@@ -297,7 +297,14 @@ module Gori::Tui
       end
     end
 
-    # The value column for a reading the wire agrees with.
+    # The value column for a reading the wire agrees with. PUBLIC under a name that says
+    # what it is, because the Repeater's FIELDS form (#828) draws the same column for the
+    # same bytes — a form whose values disagreed with the pane one keypress away would be
+    # two answers to one question.
+    def self.value_column(f : Protobuf::Field, r : Protobuf::Lens::Reading) : String
+      typed_value(f, r)
+    end
+
     private def self.typed_value(f : Protobuf::Field, r : Protobuf::Lens::Reading) : String
       # `.nil?`, not truthiness — `false` is a `bool` field's value, not an absent one.
       unless (v = r.value).nil?
@@ -327,6 +334,13 @@ module Gori::Tui
       end
       rest = total - parts.size
       "packed #{total}: #{parts.join(", ")}#{rest > 0 ? " … (+#{rest})" : ""}"
+    end
+
+    # `raw_summary` under a public name — see `value_column`. The FIELDS form draws it on
+    # exactly the two rows this one covers: an undeclared field, and one whose declaration
+    # the wire contradicts.
+    def self.raw_column(f : Protobuf::Field) : String
+      raw_summary(f)
     end
 
     # The value column as the no-schema tree would draw it — for an undeclared field, and
@@ -367,12 +381,18 @@ module Gori::Tui
       acc << "#{inner}bytes: #{hex(bytes)}" if f.message.nil? && f.string.nil?
     end
 
+    # `cut` under a public name — the FIELDS form pads its own name/type columns by the same
+    # rule, for the same reason (a descriptor set gori was handed can carry a CJK field name).
+    def self.pad(text : String, width : Int32) : String
+      cut(text, width)
+    end
+
     # Pad to `width` CELLS, or cut with an ellipsis when the text is wider. Measured with
     # `draw_width`, not `size`, for the reason `preview` gives: the protobuf GRAMMAR restricts
     # an identifier to `[A-Za-z0-9_]`, but a descriptor set is a file gori was handed, and a
     # hand-built one can put a CJK or emoji name in it — two cells per char, and the column
     # arithmetic under it is off by one per character for the rest of the message.
-    private def self.cut(text : String, width : Int32) : String
+    protected def self.cut(text : String, width : Int32) : String
       w = Screen.draw_width_upto(text, width + 1)
       return "#{text}#{" " * (width - w)}" if w <= width
       cut = String.build do |io|

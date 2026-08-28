@@ -295,7 +295,11 @@ module Gori::Tui
     end
 
     private def grpc_hint(v : RepeaterView) : String
-      if v.request_hex?
+      if v.grpc_fields_editing?
+        "type the value · ↵ apply · esc cancel · ^R send"
+      elsif v.grpc_fields?
+        "↑/↓ pick a field · i/↵ edit · ␣E/esc head · ^X hex · ^R send"
+      elsif v.request_hex?
         "gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send"
       elsif v.request_insert?
         # `⇧arrows select · ^Y copy` for the same reason the plain-HTTP request footer names
@@ -308,13 +312,16 @@ module Gori::Tui
         "type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text"
       else
         msg = v.grpc_reframable? ? "^X hex-edit payload · " : ""
-        "i/↵ edit head · #{msg}⇧arrows select · y copy · space cmds · ↹ pane"
+        fields = v.grpc_fields_available? ? "␣E fields · " : ""
+        "i/↵ edit head · #{msg}#{fields}⇧arrows select · y copy · space cmds · ↹ pane"
       end
     end
 
     def goto_symbol : Symbol? # the request editor + the response pane are ^G/^F-searchable
       return nil unless v = current_view
-      return :repeater_request if v.focus == :request && !v.request_hex?
+      # …and not while the FIELDS form is up: `^G`/`^F` would drive a caret through the head
+      # editor, which the form has replaced on screen.
+      return :repeater_request if v.focus == :request && !v.request_hex? && !v.grpc_fields?
       :repeater_response if v.focus == :response
     end
 
@@ -364,6 +371,10 @@ module Gori::Tui
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
           view.toggle_request_hex
+        elsif (view = current_view) && view.focus == :request && view.grpc_fields_editing?
+          view.grpc_field_cancel # esc in the VALUE field → back to the list (^E again leaves the form)
+        elsif (view = current_view) && view.focus == :request && view.grpc_fields?
+          view.exit_grpc_fields
         elsif (view = current_view) && view.focus == :request && view.request_insert?
           view.exit_request_insert!
         elsif (view = current_view) && view.focus == :target && view.target_insert?
@@ -562,6 +573,9 @@ module Gori::Tui
         if !view.grpc_reframable?
           @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
         elsif view.focus == :request
+          # FIELDS and hex are two editors over the same payload; entering one leaves the
+          # other rather than stacking two authoritative buffers over one slice.
+          view.exit_grpc_fields if view.grpc_fields?
           on = view.toggle_request_hex
           framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
           @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
@@ -589,6 +603,38 @@ module Gori::Tui
       else
         @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
       end
+    end
+
+    # `␣E` — the schema-typed FIELDS form over a unary gRPC payload (#828). Each refusal
+    # names the thing that is missing, because "no descriptor set loaded", "this rpc is not
+    # in the one that is" and "this call is not unary" have three different fixes and only
+    # the operator can tell which one they are looking at.
+    def repeater_toggle_grpc_fields : Nil
+      return unless view = current_view
+      unless view.grpc_mode?
+        @host.status("the gRPC field editor (␣E) applies to a gRPC tab")
+        return
+      end
+      unless view.focus == :request
+        @host.status("the gRPC field editor (␣E) applies to the REQUEST pane — ↹ to it")
+        return
+      end
+      if view.grpc_fields?
+        view.toggle_grpc_fields
+        @host.status("gRPC fields: off — back to the head/metadata editor")
+        return
+      end
+      unless view.grpc_reframable?
+        @host.status("the gRPC field editor needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
+        return
+      end
+      if view.grpc_field_binding.nil?
+        @host.status("no .proto for #{view.grpc_method_target} — #{Gori::Protobuf::Schemas.status} · Project → Proto schema · ^X edits the bytes")
+        return
+      end
+      view.toggle_grpc_fields
+      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
+      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣E/esc exit)")
     end
 
     def repeater_toggle_sni : Nil
@@ -761,6 +807,9 @@ module Gori::Tui
       when :grpc_reframe
         view.focus_pane(:request)
         repeater_toggle_grpc_reframe
+      when :grpc_fields
+        view.focus_pane(:request)
+        repeater_toggle_grpc_fields
       when :transport
         # No `focus_pane`: the chip sits on the TARGET band but the choice belongs to the whole
         # tab, and `cycle_ws_transport` already re-seats the request/response sub-panes it
@@ -855,7 +904,11 @@ module Gori::Tui
     def set_preedit(text : String) : Bool
       current_view.try do |v|
         next unless v.pane_insert?(v.focus)
-        v.set_preedit(text) unless v.request_hex?
+        if v.grpc_fields_editing?
+          v.grpc_field_set_preedit(text) # composing into the FIELDS value field
+        else
+          v.set_preedit(text) unless v.request_hex?
+        end
       end
       true
     end
@@ -2175,7 +2228,11 @@ module Gori::Tui
       # request_hex? too: a hex-edit session isn't necessarily dirty, and request_text
       # reads CRLF in hex mode vs the LF-persisted row, so the reconcile compare would
       # wrongly see a change and restore() — wiping the hex buffer. Lock it.
-      v.inflight? || v.dirty? || v.request_hex? || v.pane_insert?(:request) || v.pane_insert?(:target)
+      # `grpc_fields?` for the same reason as `request_hex?`: the FIELDS form is an editor
+      # over the payload that the persisted request text cannot round-trip, so a reconcile
+      # that restore()d under it would wipe an applied edit and put the caret nowhere.
+      v.inflight? || v.dirty? || v.request_hex? || v.grpc_fields? ||
+        v.pane_insert?(:request) || v.pane_insert?(:target)
     end
 
     # Re-seed a ^R-from-History tab's captured-original diff baseline after a restore()
@@ -2196,6 +2253,10 @@ module Gori::Tui
     private def edit_repeater_request(ev : Termisu::Event::Key, view : RepeaterView) : Bool
       if view.request_hex?
         edit_repeater_request_hex(ev, view)
+        return true
+      end
+      if view.grpc_fields?
+        edit_repeater_grpc_fields(ev, view)
         return true
       end
       if view.chain_pane_active?
@@ -2312,6 +2373,42 @@ module Gori::Tui
         view.strip_marker_span(span)
       end
       true
+    end
+
+    # FIELDS-form keys for the REQUEST pane of a gRPC tab. Two modes in one handler because
+    # they are two states of one widget: NAVIGATING the list (↑/↓, ↵ opens a value) and TYPING
+    # a value (the field's own keys, ↵ applies, esc backs out to the list). `esc` at the list
+    # level is the global one — `handle_key` leaves the form the same way it leaves hex.
+    private def edit_repeater_grpc_fields(ev : Termisu::Event::Key, view : RepeaterView) : Nil
+      key = ev.key
+      if view.grpc_fields_editing?
+        return if view.grpc_field_input_key(ev) # consumed by the value field
+        if key.enter?
+          if err = view.grpc_field_apply
+            @host.status(err) # the text stays in the field so it can be corrected
+          else
+            # No `save_current_repeater`: a gRPC tab is session-only (the framed binary body
+            # does not round-trip the text store), exactly as after a `^X` hex edit. `@dirty`
+            # is what protects the tab from a cross-session reconcile.
+            @host.status("field applied — the rest of the message is byte-for-byte as captured")
+          end
+        elsif key.escape?
+          view.grpc_field_cancel
+        end
+        return
+      end
+      case
+      when key.up?   then view.at_top? ? view.focus_first : view.grpc_field_move(-1)
+      when key.down? then view.grpc_field_move(1)
+      when key.enter?
+        @host.status(view.grpc_field_begin || "type the value · ↵ applies · esc cancels")
+      else
+        # `i` opens the value field too — the same "i or ↵ enters INSERT" the text panes use.
+        c = ev.char || key.to_char
+        if c == 'i' && !ev.ctrl? && !ev.alt?
+          @host.status(view.grpc_field_begin || "type the value · ↵ applies · esc cancels")
+        end
+      end
     end
 
     # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change length).
