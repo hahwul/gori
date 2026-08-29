@@ -3955,7 +3955,12 @@ module Gori::Tui
     def toggle_sandbox : Nil
       if !@scope.sandbox? && @scope.include_count == 0
         confirm("ENABLE SANDBOX",
-          "The scope has no include rules yet, so the sandbox will BLOCK ALL captured traffic until you add one.\nEnable anyway?",
+          # Hand-wrapped: ConfirmDialog splits on '\n' only and caps the card at 60 columns, so
+          # the single-line version was cut off mid-sentence — and the clause it lost was the
+          # one naming what enabling this does to live traffic.
+          "The scope has no include rules yet, so the sandbox\n" \
+          "will BLOCK ALL captured traffic until you add one.\n\n" \
+          "Enable anyway?",
           confirm_label: "enable", danger: true) do
           report_sandbox_write(@scope.enable_sandbox)
         end

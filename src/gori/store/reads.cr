@@ -117,8 +117,10 @@ module Gori
     # from the window edge in the second case or it would skip everything the window did not
     # reach. `nil` means the feed genuinely ends here — the only value that may be rendered as
     # "that's all of it", and the only one an empty page may be described with.
-    # `window` is how many ids the scan covered, so a caller that has to explain an empty page
-    # can name what it actually looked at instead of implying it read the whole feed.
+    # `window` is how many ids the scan actually READ — not how wide the bound was — so a caller
+    # that has to explain an empty page can name what it looked at instead of implying it read
+    # the whole feed, and a caller that ACCUMULATES it across pages gets a number that stays a
+    # count of events rather than of window widths (see the derivation in `events_recent`).
     record EventPage, rows : Array(EventRow), next_before : Int64?, window : Int32 = 0
 
     # How far back one `events_recent` page may scan: the store's own retention cap.
@@ -179,10 +181,15 @@ module Gori
       # Filled the page → resume below its last row. Short page → the window, not the feed, is
       # what ran out, so resume at the window edge (`floor + 1`, since the scan was `id > floor`).
       nxt = rows.size == limit ? rows.last.id : floor + 1
-      # Both bounds are EXCLUSIVE (`id > floor AND id < anchor`), so the ids actually read are
-      # floor+1 .. anchor-1 — one fewer than `anchor - floor`. The pane renders this number in a
-      # sentence promising it did not look further, so an off-by-one here overstates the scan.
-      scanned = {anchor - 1 - {floor, min_id - 1}.max, 0}.max
+      # The ids the scan actually READ, which is NOT the window whenever the page filled: SQLite
+      # stops at the LIMIT, so nothing below the last row was ever looked at and `nxt` is where
+      # the reading stopped. Crediting the whole window there overstates a full page by two
+      # orders of magnitude, and `ProjectView#activity_load_more` ACCUMULATES this — a walk of a
+      # 200k feed reported 43M ids read, for a sentence whose whole job is to name what the pane
+      # looked at. Both bounds are EXCLUSIVE (`id > floor AND id < anchor`), so a page the window
+      # cut short read floor+1 .. anchor-1 — one fewer id than `anchor - floor`.
+      lowest_read = rows.size == limit ? nxt : {floor + 1, min_id}.max
+      scanned = {anchor - lowest_read, 0}.max
       EventPage.new(rows, nxt <= min_id ? nil : nxt, scanned.to_i32)
     end
 

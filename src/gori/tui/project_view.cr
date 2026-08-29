@@ -101,7 +101,17 @@ module Gori::Tui
       @act_anchor = nil.as(Int64?)      # id of the selected event
       @act_next_before = nil.as(Int64?) # resume point; nil ⇒ the feed genuinely ends here
       @act_feed_empty = true            # the FEED is empty, as opposed to the filters hiding it
-      @act_scanned = 0                  # ids the last page's scan covered (for the empty sentence)
+      @act_scanned = 0                  # ids the scan has READ so far (for the empty sentence)
+      # Whether `↓` has walked the cursor PAST page one. The one thing that tells an empty list
+      # that has looked no further than the newest window from one that has walked windows back,
+      # which `@act_next_before` cannot: it is nil both for a feed whose bottom the scan reached
+      # and for a feed that holds nothing at all. `refresh_activity` needs the difference —
+      # rewinding a walk is a bug, adopting page one's cursor when no walk exists is required.
+      @act_walked = false
+      # Events that landed above a cursor parked mid-list since it was last on the head. Rendered
+      # on the card border: prepending under a parked cursor is silent otherwise, and a feed that
+      # has quietly stopped showing its own newest rows reads as a feed that has gone quiet.
+      @act_new_above = 0
       @act_source = nil.as(String?)
       @act_level = nil.as(String?)
       @act_actor = nil.as(String?)
@@ -1039,6 +1049,12 @@ module Gori::Tui
     # Cycle order for the `l` chip.
     ACT_LEVELS = [nil, "info", "success", "warn", "error"]
 
+    # How many pages `refresh_activity` walks down looking for the row that heads the loaded list
+    # before it gives up and reloads. One page is the ordinary tick; five is what keeps a burst
+    # from an attached agent (a fuzz run writes hundreds of events between two polls) from
+    # discarding a deeply paged list, without letting the render fiber chase an agent forever.
+    ACT_CATCHUP_PAGES = 5
+
     # What a level chip actually matches. The feed carries TWO spellings of one level: every
     # producer writes "warn" except the Sequencer, whose `level.to_s` writes "warning". A chip
     # that matched its own label would hide half the warnings in the feed, and rows already
@@ -1114,6 +1130,8 @@ module Gori::Tui
       @act_rows = page.rows
       @act_next_before = page.next_before
       @act_scanned = page.window
+      @act_walked = false
+      @act_new_above = 0 # page one IS the head again
       @act_feed_empty = if !page.rows.empty?
                           false
                         elsif activity_filtered?
@@ -1146,22 +1164,103 @@ module Gori::Tui
     # paging becomes impossible and the cursor lands on a row nobody selected. The id anchor
     # protects the PREPEND case; it cannot protect against the list being truncated underneath it.
     #
-    # An append-only feed makes the cheap fix exact: page one either still contains the row that
-    # currently heads the list — in which case everything above it is new and prepending is
-    # provably contiguous — or it does not, which means rows were deleted or more than a page
-    # arrived at once, and only then is a full reload the honest answer.
+    # An append-only feed makes the fix exact: the pages above the row that currently heads the
+    # list are, by construction, entirely new, so finding that row is all prepending needs. Only
+    # when it cannot be found at all — a clear, a retention sweep — is a full reload the honest
+    # answer.
+    #
+    # An EMPTY list gets the same protection, and needs it more. A narrowing that matches nothing
+    # in the newest window is walked back one window per `↓` (`activity_load_more`), and a reload
+    # here would throw every walked window away — which it did: the capture-lock holder rewrites
+    # the intercept bridge heartbeat every 3 s, so `data_version` moves on a project nobody is
+    # touching and the walk was rewound to page one before a second `↓` could land. The pane then
+    # promised, permanently, that it had looked no further than the newest 50k events, which is
+    # the exact lie `activity_no_match_line` exists to prevent. Nothing NEW can appear below the
+    # walk either — `id` is AUTOINCREMENT, so every later insert lands above the head — so the
+    # walked cursor stays correct and the new matches are all in page one.
     def refresh_activity(store : Store) : Nil
-      return reload_activity(store) if @act_rows.empty?
-      top = @act_rows.first.id
       page = store.events_recent(ACT_PAGE, source: @act_source,
         levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
-      unless idx = page.rows.index { |r| r.id == top }
-        reload_activity(store)
+      if head = @act_rows.first?
+        refresh_activity_head(store, head.id, page)
         return
       end
-      return if idx == 0 # nothing new above the head
-      @act_rows = page.rows[0...idx] + @act_rows
+
+      # Nothing loaded. `@act_feed_empty` is the one thing that has to be re-asked either way:
+      # the onboarding card is drawn off it, and a feed that has just received its first event
+      # must stop claiming nothing has ever been recorded.
+      @act_feed_empty = if !page.rows.empty?
+                          false
+                        elsif activity_filtered?
+                          store.events_recent(1).rows.empty?
+                        else
+                          true
+                        end
+      # The cursor moves only when no walk is in progress. On a fresh empty list page one IS the
+      # cursor, and adopting it is required — without it a feed that was empty at open would keep
+      # `next_before = nil` and refuse to page past the first 200 events it ever received.
+      unless @act_walked
+        @act_next_before = page.next_before
+        @act_scanned = page.window
+      end
+      return if page.rows.empty?
+      @act_rows = page.rows
       resolve_activity_anchor
+    end
+
+    # Fold in everything that arrived above `head_id`, walking DOWN from the newest page until
+    # the row that heads the loaded list turns up.
+    #
+    # One page covers an ordinary tick. The WALK exists because a single agent job writes events
+    # faster than the poll runs, and the one-page version read "more than 200 arrived at once" as
+    # "the list was truncated": one 500-event burst snapped a list paged 1 250 rows deep back to
+    # 200 and dropped the cursor, by `clamp_act_sel`, on a row nobody had selected — during
+    # exactly the burst this pane exists to show. Bounded all the same, because keeping a scroll
+    # position while an agent is mid-fuzz is not worth an unbounded scan on the render fiber.
+    private def refresh_activity_head(store : Store, head_id : Int64,
+                                      page : Store::EventPage) : Nil
+      fresh = [] of Store::EventRow
+      ACT_CATCHUP_PAGES.times do |i|
+        if idx = page.rows.index { |r| r.id == head_id }
+          fresh.concat(page.rows[0...idx])
+          return if fresh.empty? # nothing new above the head
+          prepend_activity(fresh)
+          return
+        end
+        fresh.concat(page.rows)
+        break if i == ACT_CATCHUP_PAGES - 1
+        break unless before = page.next_before
+        page = store.events_recent(ACT_PAGE, before, source: @act_source,
+          levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
+      end
+      # The head is gone (a peer's ⇧C, a retention sweep) or sits further back than the walk
+      # goes. Either way page one is the only honest starting point left.
+      reload_activity(store)
+    end
+
+    # Put `fresh` on top of the loaded set, and decide what the cursor does about it.
+    #
+    # A cursor parked mid-list keeps its EVENT, which is the whole point of the id anchor. A
+    # cursor on row 0 keeps its POSITION instead, and the two are not in tension: "the newest
+    # row" is a place the operator chose to sit, so following it is what they asked for, while
+    # the neighbour-slide the anchor exists to prevent is what happens to a cursor that chose a
+    # particular event further down. Without this the pane silently stopped being a feed — an
+    # operator watching the top saw a frozen screen while hundreds of events piled up above it.
+    #
+    # For that parked cursor the arrivals are still ANNOUNCED. `activity_meta` renders the count
+    # on the card border, because a list that is quietly no longer at the top of its own feed is
+    # the same failure in a slower form.
+    private def prepend_activity(fresh : Array(Store::EventRow)) : Nil
+      following = @act_sel == 0
+      @act_rows = fresh + @act_rows
+      if following
+        @act_sel = 0
+        @act_anchor = @act_rows.first.id
+        @act_new_above = 0
+      else
+        @act_new_above += fresh.size
+        resolve_activity_anchor
+      end
     end
 
     # Append the next page. Called when the cursor reaches the end of what is loaded — the page
@@ -1177,6 +1276,8 @@ module Gori::Tui
       # window walked has to be counted — reporting only the first one understates the scan in
       # exactly the case the sentence was written for.
       @act_scanned += page.window
+      # Past page one now, which is what stops the external-change poll rewinding the walk.
+      @act_walked = true
       !page.rows.empty?
     end
 
@@ -1189,6 +1290,7 @@ module Gori::Tui
       return if n == 0
       @act_sel = (@act_sel + d).clamp(0, n - 1)
       @act_anchor = activity_selected_row.try(&.id)
+      settle_activity_new_above
     end
 
     def activity_select_at(idx : Int32) : Nil
@@ -1196,6 +1298,14 @@ module Gori::Tui
       return if n == 0
       @act_sel = idx.clamp(0, n - 1)
       @act_anchor = activity_selected_row.try(&.id)
+      settle_activity_new_above
+    end
+
+    # Arriving back on the head clears the "N new" count and re-arms following. The count is a
+    # note about rows the cursor has not seen; being on them again is what makes it seen, and
+    # leaving it up would make the border keep reporting an absence the operator just closed.
+    private def settle_activity_new_above : Nil
+      @act_new_above = 0 if @act_sel == 0
     end
 
     # On the first row (or an empty list) → ↑ pops focus to the sub-tab strip, like the siblings.
@@ -1242,6 +1352,7 @@ module Gori::Tui
     private def reset_activity_cursor : Nil
       @act_sel = 0
       @act_anchor = nil
+      @act_new_above = 0
     end
 
     # --- ACTIVITY `/` filter bar (the OAST CALLBACKS grammar) ---
@@ -2589,6 +2700,16 @@ module Gori::Tui
       parts = [] of String
       n = @act_rows.size
       parts << (activity_more? ? "#{n}+ events" : "#{n} event#{n == 1 ? "" : "s"}")
+      # Rows that arrived above a cursor the operator parked further down. Named FIRST after the
+      # count, because it is the only part of this line that is about something off-screen.
+      #
+      # Capped at the rows that ARE above the cursor. The stored counter is what arrived, which
+      # stops being what is unseen the moment the operator scrolls up through it — without the
+      # cap the border would still promise five new rows overhead to someone standing on the
+      # second one. `@act_sel` shrinks as they climb, so the number empties itself out and hits
+      # zero exactly at the head, which is also where the counter itself is cleared.
+      new_above = {@act_new_above, @act_sel}.min
+      parts << "↑#{new_above} new" if new_above > 0
       if src = @act_source
         parts << src
       end

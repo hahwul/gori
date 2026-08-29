@@ -76,8 +76,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "activity: nothing to clear"
       return
     end
+    # HAND-WRAPPED, like every other confirm in the app. `ConfirmDialog` splits on '\n' and
+    # nothing else, and caps the card at 60 columns — so a line written as prose is TRUNCATED,
+    # and this one lost the half that says what is being deleted ("…what each attac…"). A
+    # destructive confirm that cannot finish naming the thing it destroys is the one place the
+    # cap must not be discovered at runtime; keep every line inside ~50 columns.
     confirm("CLEAR ACTIVITY",
-      "Delete every event in this project's feed?\nThat includes the agent audit trail — what each attached agent changed and sent. This can't be undone.",
+      "Delete every event in this project's feed?\n\n" \
+      "That includes the agent audit trail — what each\n" \
+      "attached agent changed and sent.\n" \
+      "This can't be undone.",
       confirm_label: "clear", danger: true) do
       ok = @session.store.clear_events
       project_controller.reload_activity
