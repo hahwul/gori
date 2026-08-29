@@ -54,7 +54,6 @@
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
   --header-bg: rgb(9 11 18 / 0.82);
-  --sidebar-bg: rgb(9 11 18 / 0.9);
   --modal-bg: #12141e;
   --overlay-bg: rgb(4 5 10 / 0.76);
   --pre-bg: #0c0e17;
@@ -118,7 +117,6 @@
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
   --header-bg: rgb(250 249 247 / 0.82);
-  --sidebar-bg: rgb(244 242 238 / 0.9);
   --modal-bg: #f4f2ee;
   --overlay-bg: rgb(40 34 22 / 0.4);
   --pre-bg: #f1efe9;
@@ -1864,60 +1862,107 @@ kbd {
   clip-path: inset(50% 0 0 0);
 }
 
+/* A centered three-track grid — rail, article, TOC — capped at the footer's
+   own width, so the footer's centered rule and the reading column share one
+   axis. The old layout ran the rail full-bleed from x:0 in a blurred panel;
+   the centered grid drops the panel chrome entirely and lets whitespace do
+   the separating. */
 .docs-container {
   position: relative;
   z-index: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+  gap: 3rem;
+  align-items: start;
+  width: min(100%, 1380px);
+  margin-inline: auto;
   min-height: 100dvh;
   padding-top: var(--header-h);
+  padding-inline: clamp(1.25rem, 4vw, 2.5rem);
 }
 
-/* Sticky, not fixed: a fixed rail never ends, which forced the footer to
-   start after it and centre on the content column instead of the page —
-   visibly off-axis on wide screens. In flow the rail stops with the article,
-   its border-right meets the footer's border-top in a clean T, and the
-   footer spans the real page width. Sticky keeps it parked under the header
-   while the article scrolls, so nothing about the reading experience moves. */
+/* Sticky, not fixed: the rail stays parked under the header while the
+   article scrolls, but it still ends with the flow, so the footer spans the
+   real page width and centres on the page axis. No background, no border —
+   the link tree's own hairline is all the structure the rail needs.
+
+   max-height, never a forced height: a sticky element gets pushed up once
+   its bottom edge hits the container's end, so a rail sized to the full
+   viewport shifted upward on EVERY page the moment the footer scrolled in.
+   At natural height the rail only moves when its content genuinely outruns
+   the space above the footer — i.e. almost never.
+
+   The scroller is the aside itself; the fade mask keeps a long rail's scroll
+   edge from slicing the last link mid-glyph. The fade equals the
+   padding-bottom, so at the end of the scroll the final link sits clear of
+   it and reads at full strength — the fade only ever touches content that is
+   already leaving the viewport. */
 .docs-sidebar {
   position: sticky;
   top: var(--header-h);
-  align-self: flex-start;
-  flex: 0 0 var(--sidebar-w);
-  height: calc(100dvh - var(--header-h));
-  border-right: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgb(var(--ink-rgb) / 0.045), transparent 18rem),
-    var(--sidebar-bg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-/* The rail now stops at the footer's rule, so its scroll edge lands on that
-   line and used to slice the last link mid-glyph. Fade the last 2rem instead.
-   The fade is exactly the scroller's own padding-bottom, so at the end of the
-   scroll the final link sits clear of it and reads at full strength — the
-   fade only ever touches content that is already leaving the viewport. */
-.sidebar-scroll {
-  height: 100%;
-  padding: 1.2rem 0.85rem 2rem;
+  max-height: calc(100dvh - var(--header-h));
+  padding: 3.2rem 0.85rem 2rem 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+/* The scrollbar only surfaces while the pointer is over the rail: thin stays
+   on either way so the gutter never shifts, only the thumb's paint toggles.
+   Same idiom on the TOC rail below. */
+.docs-sidebar:hover,
+.docs-sidebar:focus-within {
   scrollbar-color: var(--line-strong) transparent;
 }
 
-.sidebar-scroll::-webkit-scrollbar {
+.docs-sidebar::-webkit-scrollbar {
   width: 6px;
 }
 
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+.docs-sidebar::-webkit-scrollbar-thumb {
+  background: transparent;
   border-radius: var(--radius-pill);
+}
+
+.docs-sidebar:hover::-webkit-scrollbar-thumb,
+.docs-sidebar:focus-within::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
 }
 
 .sidebar-section {
   margin-bottom: 1.05rem;
+}
+
+/* The <symbol> sprite ships inline at the top of the sidebar partial; park it
+   out of layout without display:none, which some engines take as "never
+   render the referenced content". */
+.sidebar-icon-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* One glyph per section, keyed to the slug in the template. Quiet by default;
+   the open (being-read) section's icon takes the accent so the eye lands on
+   the right group when the rail is scanned. */
+.sidebar-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--quiet);
+  transition: color var(--transition);
+}
+
+.sidebar-section[open] > .sidebar-title .sidebar-icon {
+  color: var(--accent);
+}
+
+.sidebar-title:hover .sidebar-icon {
+  color: var(--accent-strong);
 }
 
 /* Section titles are bold sans in natural case so they read as a different
@@ -2042,11 +2087,12 @@ kbd {
   background: var(--accent);
 }
 
+/* The grid track already sizes and gutters the column; the cap only binds in
+   the two-track range (no TOC), where the track would otherwise run wide. */
 .docs-main {
-  flex: 1 1 auto;
   min-width: 0;
-  max-width: calc(var(--content-max-w) + 6rem);
-  padding: 4rem 3rem 2rem;
+  max-width: var(--content-max-w);
+  padding: 3.2rem 0 4rem;
 }
 
 .docs-main h2,
@@ -2075,23 +2121,25 @@ kbd {
   color: var(--accent-strong);
 }
 
-/* Same fade as .sidebar-scroll, and for the same reason — a long page's TOC
+/* Same fade as .docs-sidebar, and for the same reason — a long page's TOC
    outruns its max-height and used to end on a sliced line. The rail carries
    no panel of its own, so the mask goes straight on it. Keep the fade equal
    to padding-bottom: at the end of the scroll the last heading clears it. */
 .docs-toc-rail {
   display: none;
-  flex: 0 0 var(--toc-w);
-  margin-left: 3rem;
-  align-self: flex-start;
   position: sticky;
-  top: calc(var(--header-h) + 2.2rem);
-  max-height: calc(100dvh - var(--header-h) - 4rem);
-  padding: 0.1rem 0 2rem;
+  top: var(--header-h);
+  max-height: calc(100dvh - var(--header-h));
+  padding: 3.35rem 0 2rem;
   overflow-y: auto;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.docs-toc-rail:hover,
+.docs-toc-rail:focus-within {
   scrollbar-color: var(--line-strong) transparent;
 }
 
@@ -2100,8 +2148,13 @@ kbd {
 }
 
 .docs-toc-rail::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  background: transparent;
   border-radius: var(--radius-pill);
+}
+
+.docs-toc-rail:hover::-webkit-scrollbar-thumb,
+.docs-toc-rail:focus-within::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
 }
 
 .docs-toc-rail .toc-title {
@@ -2162,6 +2215,15 @@ kbd {
 @media (min-width: 1200px) {
   .docs-toc-rail {
     display: block;
+  }
+}
+
+/* Below the TOC's threshold the grid drops to two tracks, so the hidden rail
+   doesn't leave an empty third column gaping at the right edge. */
+@media (max-width: 1199px) {
+  .docs-container {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    gap: 2.5rem;
   }
 }
 
@@ -2776,13 +2838,6 @@ nav.pagination a:hover,
   color: var(--muted);
   font-size: 0.9rem;
   text-align: center;
-}
-
-/* Doc pages are full-bleed — the rail starts at x:0 and the TOC runs to the
-   right edge — so the 1380px cap would leave the rule floating inside the
-   sidebar column on wide screens. Only the home page's content is capped. */
-.is-doc .docs-footer {
-  width: 100%;
 }
 
 .docs-footer p {
@@ -3479,9 +3534,10 @@ html.search-lock body {
     display: block;
   }
 
+  /* The container's own gutter carries the inline padding now. */
   .docs-main {
     max-width: 100%;
-    padding: 2rem 1rem;
+    padding: 2rem 0 3rem;
   }
 
   /* Wide reference tables scroll inside their own box on small screens. */
