@@ -16,6 +16,8 @@ require "./passive/sourcemap"
 require "./passive/sri"
 require "./passive/directory_listing"
 require "./passive/exposed_config"
+require "./passive/serialized_object"
+require "./passive/debug_mode_exposed"
 require "./passive/ws_payloads"
 require "./passive/secrets"
 require "./passive/js_scan"
@@ -51,6 +53,8 @@ module Gori
         Sri.new,
         DirectoryListing.new,
         ExposedConfig.new,
+        SerializedObject.new,
+        DebugModeExposed.new,
         WsPayloads.new,
         DomXss.new,
         DomClobbering.new,
