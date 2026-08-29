@@ -43,7 +43,7 @@ exclude:
   - imgbot[bot]
 
 grid:
-  columns: 3
+  columns: 8
   avatar_size: 96
   shape: circle
   margin: 16
