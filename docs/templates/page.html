@@ -12,7 +12,9 @@
   <section class="home-hero" aria-labelledby="home-title">
     <div class="hero-copy">
       <p class="home-kicker">{{ "home.kicker" | t }}</p>
-      <h1 id="home-title">{{ "home.title" | t }}</h1>
+      {# Three spans so the emphasized word carries the serif-italic gilding;
+         locales place the emphasis where their grammar puts the word. #}
+      <h1 id="home-title">{{ "home.title_pre" | t }}<em class="hero-em">{{ "home.title_em" | t }}</em>{{ "home.title_post" | t }}</h1>
       <p class="hero-lede">{{ "home.lede" | t }}</p>
       <div class="home-actions" aria-label="Primary links">
         <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "home.cta_start" | t }}</a>
@@ -37,9 +39,28 @@
     </div>
   </section>
 
-  <section class="home-showcase rv" aria-label="gori running in the terminal">
+  {# The showcase is the herdr-style centerpiece: a big framed terminal with a
+     REAL, clickable tab row. Each button swaps in that tab's actual capture
+     (SVG render of a live session); home.js keeps the light/dark twin in sync
+     with the theme. The rail above names the interaction. #}
+  <section class="home-showcase rv" aria-label="{{ "home.showcase_aria" | t }}">
+    <div class="showcase-rail" aria-hidden="true">
+      <span>{{ "home.showcase_k_l" | t }}</span>
+      <span class="showcase-rail-hint">{{ "home.showcase_k_r" | t }} ↓</span>
+    </div>
     <figure class="showcase-frame">
-      <img src="{{ base_url }}/images/tui/readme.svg" alt="{{ "home.showcase_alt" | t }}">
+      <div class="showcase-tabs" id="showcaseTabs" role="group" aria-label="{{ "home.showcase_tabs_aria" | t }}">
+        <span class="showcase-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <button type="button" aria-pressed="true" data-shot="history" data-alt="{{ "home.showcase_alt" | t }}">History</button>
+        <button type="button" aria-pressed="false" data-shot="intercept" data-alt="{{ "home.showcase_alt_intercept" | t }}">Intercept</button>
+        <button type="button" aria-pressed="false" data-shot="repeater" data-alt="{{ "home.showcase_alt_repeater" | t }}">Repeater</button>
+        <button type="button" aria-pressed="false" data-shot="fuzzer" data-alt="{{ "home.showcase_alt_fuzzer" | t }}">Fuzzer</button>
+        <button type="button" aria-pressed="false" data-shot="probe" data-alt="{{ "home.showcase_alt_probe" | t }}">Probe</button>
+        <button type="button" aria-pressed="false" data-shot="issues" data-alt="{{ "home.showcase_alt_issues" | t }}">Issues</button>
+      </div>
+      <div class="showcase-screen">
+        <img id="showcaseShot" src="{{ base_url }}/images/tui/history.svg" alt="{{ "home.showcase_alt" | t }}">
+      </div>
     </figure>
     <p class="showcase-note">{{ "home.showcase_note" | t }}</p>
   </section>
@@ -163,6 +184,13 @@
 <div class="docs-container">
 {% include "partials/sidebar.html" %}
   <main id="main" class="docs-main">
+    {# Section kicker: the same mono-caps voice as the landing path links,
+       so a doc page opens by naming where in the IA you are standing. #}
+    {% if page.section == "getting-started" %}<p class="doc-kicker">{{ "nav.start" | t }}</p>
+    {% elif page.section == "playbooks" %}<p class="doc-kicker">{{ "nav.playbooks" | t }}</p>
+    {% elif page.section == "guide" %}<p class="doc-kicker">{{ "nav.guide" | t }}</p>
+    {% elif page.section == "reference" %}<p class="doc-kicker">{{ "nav.reference" | t }}</p>
+    {% endif %}
     {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
     {{ content }}
   </main>
