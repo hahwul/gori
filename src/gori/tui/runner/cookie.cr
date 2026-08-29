@@ -36,6 +36,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     cookie_controller.cycle_algorithm
   end
 
+  def cookie_cycle_salt : Nil
+    cookie_controller.cycle_salt_preset
+  end
+
   def cookie_crack : Nil
     cookie_controller.crack
   end

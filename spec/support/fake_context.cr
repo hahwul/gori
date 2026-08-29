@@ -1379,6 +1379,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:cookie_cycle_algorithm)
   end
 
+  def cookie_cycle_salt : Nil
+    rec(:cookie_cycle_salt)
+  end
+
   def cookie_crack : Nil
     rec(:cookie_crack)
   end

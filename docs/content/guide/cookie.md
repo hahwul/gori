@@ -40,7 +40,7 @@ The **SECRET** field doubles as the source for `c` (crack), so there is no separ
 
 On a hit the field is replaced with the winning secret and the verdict flips to `✓`, ready to carry straight into the Forge lens.
 
-> A Django **session** cookie (`django.contrib.sessions`) is signed under a non-default salt, so cracking it with the default salt fails. Set the salt in **OPTIONS** first — for a session cookie that is `django.contrib.sessions.backends.signed_cookies`. The same applies to `--salt` on the CLI.
+> A Django **session** cookie (`django.contrib.sessions`) is signed under a non-default salt, so cracking it with the default salt fails. When the format resolves to Django, **OPTIONS** shows a ` salt:signing ` badge — click it (or `Space` → **Toggle Django salt**) to flip the salt field to `django.contrib.sessions.backends.signed_cookies`, then verify, crack, and forge all sign under it. You can also type any salt by hand. The same applies to `--salt` on the CLI.
 
 ## Headless
 

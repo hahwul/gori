@@ -12,6 +12,7 @@ abstract class Gori::Verb::ExecContext
   abstract def cookie_toggle_mode : Nil      # flip the DECODE ⇄ FORGE lens
   abstract def cookie_cycle_format : Nil     # cycle the cookie format (auto/flask/rack/django)
   abstract def cookie_cycle_algorithm : Nil  # cycle the Django HMAC algorithm (sha256/sha1)
+  abstract def cookie_cycle_salt : Nil       # flip the Django salt (session-backend ⇄ signing)
   abstract def cookie_crack : Nil            # brute-force the secret over the SECRET field's wordlist
   abstract def cookie_load_decoded : Nil     # seed the FORGE payload from the INPUT cookie's parts
   abstract def cookie_copy : Nil             # copy selection or the focused pane's content

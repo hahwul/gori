@@ -336,6 +336,56 @@ describe "Gori::Tui::CookieController" do
     end
   end
 
+  # A Django `sessionid` cookie — the tab's headline "crack the key, forge an admin session"
+  # target — signs under SESSION_SALT, not the generic `django.core.signing` default. A blank
+  # salt field silently uses the wrong salt, so the correct secret reads as ✗ bad key. The salt
+  # badge flips the field to the session-backend salt in one action, and threads consistently
+  # through verify AND forge.
+  describe "Django salt preset" do
+    it "flips a session cookie from bad key to verified with one salt toggle" do
+      sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
+        salt: Gori::Cookie::Django::SESSION_SALT)
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(sess)
+        # The salt badge is visible even while the format pin stays `auto` (resolved = django).
+        screen_has?(render(ctl), "salt:signing").should be_true
+        ctl.focus_last # :secret
+        type(ctl, SECRET)
+        screen_has?(render(ctl), "bad key").should be_true # blank/default salt = wrong salt
+        ctl.cycle_salt_preset                              # → session salt
+        b = render(ctl)
+        screen_has?(b, "salt:session").should be_true
+        screen_has?(b, "verified").should be_true # the correct secret now verifies
+      end
+    end
+
+    it "threads the session salt through the forged cookie" do
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(Gori::Cookie::Django.forge(%({"x":1}), SECRET, 1_i64,
+          salt: Gori::Cookie::Django::SESSION_SALT))
+        ctl.cycle_format; ctl.cycle_format; ctl.cycle_format # pin django
+        ctl.cycle_salt_preset                                # session salt
+        ctl.toggle_mode                                      # → FORGE
+        type(ctl, %({"_auth_user_id":"1","admin":true}))
+        ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
+        type(ctl, SECRET)
+        ctl.focus_last # :output
+        cookie = ctl.cookie_copy_text
+        Gori::Cookie.verify(cookie, SECRET, "django",
+          salt: Gori::Cookie::Django::SESSION_SALT).should be_true
+        Gori::Cookie.verify(cookie, SECRET, "django").should be_false # not the generic salt
+      end
+    end
+
+    it "is a no-op for non-Django formats" do
+      with_cookie_controller do |ctl, host|
+        ctl.cookie_from_text(FLASK)
+        ctl.cycle_salt_preset
+        (host.statuses.last? || "").should contain("Django-only")
+      end
+    end
+  end
+
   describe "session lifecycle" do
     it "opens and closes sub-tab sessions, keeping at least one" do
       with_cookie_controller do |ctl|
