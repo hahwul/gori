@@ -126,12 +126,27 @@ module Gori::Tui
     def move_subtab(dir : Int32) : Nil
       settle_subtab
       @project_view.pane_advance(dir) # clamps at both ends, like the chips read
+      settle_activity_entry
     end
 
     def jump_subtab(idx : Int32) : Nil
       return unless pane = ProjectView::PANES[idx]?
       settle_subtab
       @project_view.focus_pane(pane)
+      settle_activity_entry
+    end
+
+    # Every route ONTO the ACTIVITY card re-reads the feed. Two independent reasons, and the
+    # pane is wrong without either:
+    #
+    #   * `settle_subtab` drops the text filter on the way past, so the rows left behind are
+    #     narrowed by a filter that no longer exists;
+    #   * `on_external_change` refreshes only while the pane is SHOWING, so every commit made
+    #     while another sub-tab was open is one this card has not seen. Arriving to a stale
+    #     snapshot — at worst the "no activity recorded yet" card over a feed that has since
+    #     filled — is the one thing a log must never do.
+    private def settle_activity_entry : Nil
+      reload_activity if @project_view.pane == :activity
     end
 
     # Everything a sub-tab change has to settle, wherever it came from (strip ←/→, ^1-9, a
@@ -575,7 +590,17 @@ module Gori::Tui
         @host.open_palette
       elsif key.escape?
         # esc peels one layer at a time: an open filter first (clearing it), then the card.
-        leave_to_strip unless @project_view.activity_filter_cancel
+        #
+        # Releasing a filter MUST re-query. `activity_filter_cancel` clears the query and the
+        # cursor but leaves the narrowed `@act_rows` — and the paging cursor that goes with
+        # them — so without this the pane shows a subset as if it were the whole feed, under a
+        # filter bar that says nothing is on, and paging from that cursor drops the events in
+        # between.
+        if @project_view.activity_filter_cancel
+          reload_activity
+        else
+          leave_to_strip
+        end
       elsif key.up? || key.lower_k?
         @project_view.activity_at_top? ? leave_to_strip : @project_view.activity_select(-1)
       elsif key.down? || key.lower_j?

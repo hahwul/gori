@@ -185,18 +185,19 @@ module Gori
       # rule) over a write the store dropped. A rewrite rule can be the operator's control —
       # stripping an Authorization header, redacting a token before it leaves — so a silently
       # absent one is not cosmetic. Mirrors `remove` below: true means COMMITTED.
-      ok =
+      new_id =
         if scope.global?
           Settings.add_rewriter_rule(target.label, part.label, pattern, replacement, op.label,
-            match_kind.label, name, host, body_file, enabled) != 0
+            match_kind.label, name, host, body_file, enabled)
         else
-          @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file) != 0
+          @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file)
         end
+      ok = new_id != 0
       refresh
       # A rewrite rule can be the operator's control — stripping an Authorization header,
-      # redacting a token before it leaves — so who installed one, and what it matches, belongs
-      # in the audit trail beside the scope rules.
-      ConfigLog.record(@store, "rule_add", "#{Rules.scope_word(scope)} rewrite rule added — #{Rules.rule_phrase(name, target, part, pattern)}") if ok
+      # redacting a token before it leaves — so who installed one belongs in the audit trail
+      # beside the scope rules. WHAT it matches deliberately does not; see `rule_phrase`.
+      ConfigLog.record(@store, "rule_add", "#{Rules.scope_word(scope)} rewrite rule added — #{Rules.rule_phrase(new_id, name, target, part)}") if ok
       ok
     end
 
@@ -233,17 +234,24 @@ module Gori
           @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
         end
       refresh
-      ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(name, target, part, pattern)}") if ok
+      ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(id, name, target, part)}") if ok
       ok
     end
 
-    # How an audit line names a rewrite rule. A rule's `name` is optional, so the match itself
-    # is the fallback identity — the same thing the Rewriter list falls back to on screen.
-    # `replacement` is deliberately absent: it is the half most likely to carry a secret an
-    # operator pasted in, and the rule is identifiable without it.
-    def self.rule_phrase(name : String?, target : Store::RuleTarget, part : Store::RulePart, pattern : String) : String
+    # How an audit line names a rewrite rule — by IDENTITY, never by the bytes it matches or
+    # writes.
+    #
+    # An earlier version logged the `pattern` and withheld only the `replacement`, on the theory
+    # that the replacement is where a pasted secret lands. That is backwards for the case this
+    # feature exists to make auditable: a redaction rule — the motivating example, stripping an
+    # Authorization token before it leaves — puts the TOKEN in the pattern and a harmless
+    # placeholder in the replacement. Logging either half can leak, so the line carries neither.
+    #
+    # `id` is what remains identifiable: stable, meaningless on its own, and the number the
+    # Rewriter tab can be cross-referenced against. `name` when the operator gave one.
+    def self.rule_phrase(id : Int64, name : String?, target : Store::RuleTarget, part : Store::RulePart) : String
       label = (name && !name.empty?) ? "#{name.inspect} " : ""
-      "#{label}(#{target.label}/#{part.label} #{pattern.inspect})"
+      "#{label}##{id} (#{target.label}/#{part.label})"
     end
 
     def self.scope_word(scope : Store::RuleScope) : String
@@ -281,12 +289,17 @@ module Gori
             rule.match_kind, rule.name, rule.host, rule.enabled?, body_file: rule.body_file)
         end
       return false if copy_id == 0
-      unless remove(rule.id, rule.scope)
+      # `log: false` — see `remove_rule`. Either half failing rolls the other back, so nothing
+      # is recorded until the move as a whole has happened.
+      unless remove_rule(rule.id, rule.scope, log: false)
         to.global? ? Settings.delete_rewriter_rule(copy_id) : @store.delete_rule(copy_id)
         refresh
         return false
       end
       refresh
+      ConfigLog.record(@store, "rule_move",
+        "rewrite rule moved #{Rules.scope_word(rule.scope)} ──► #{Rules.scope_word(to)} — " \
+        "#{Rules.rule_phrase(copy_id, rule.name, rule.target, rule.part)}")
       true
     end
 
@@ -334,6 +347,15 @@ module Gori
     # surfaces (`mcp/tools/rules.cr`, `cli/run/rewriter.cr`) refused to. It means COMMITTED,
     # not "a row existed", which is the store's own contract.
     def remove(id : Int64, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
+      remove_rule(id, scope, log: true)
+    end
+
+    # `log: false` is for `set_scope`, which MOVES a rule by copying it and then deleting the
+    # original. That delete is half of one act, not a removal: logging it would put "rule
+    # removed" in the audit trail for a rule that still exists — in the other scope — and the
+    # move itself would never be recorded at all. `set_scope` emits its own event once BOTH
+    # halves have succeeded.
+    private def remove_rule(id : Int64, scope : Store::RuleScope, log : Bool) : Bool
       # Named BEFORE the delete — `refresh` below leaves nothing to name it with.
       doomed = rules.find { |r| r.id == id && r.scope == scope }
       ok =
@@ -362,8 +384,8 @@ module Gori
           @store.delete_rule(id)
         end
       refresh
-      if ok && (r = doomed)
-        ConfigLog.record(@store, "rule_remove", "#{Rules.scope_word(scope)} rewrite rule removed — #{Rules.rule_phrase(r.name, r.target, r.part, r.pattern)}")
+      if log && ok && (r = doomed)
+        ConfigLog.record(@store, "rule_remove", "#{Rules.scope_word(scope)} rewrite rule removed — #{Rules.rule_phrase(r.id, r.name, r.target, r.part)}")
       end
       ok
     end
@@ -388,7 +410,7 @@ module Gori
       # Enabling and disabling is the same act as installing and removing, as far as what
       # actually rewrites traffic is concerned.
       state = rule.enabled? ? "disabled" : "enabled"
-      ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule.name, rule.target, rule.part, rule.pattern)}") if ok
+      ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule.id, rule.name, rule.target, rule.part)}") if ok
       ok
     end
 

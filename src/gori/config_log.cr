@@ -56,8 +56,20 @@ module Gori
     # returns whether the store accepted it — several of them had to be fixed to do so — and
     # recording an attempt as a change would put a rule in the audit trail that never gated a
     # single request.
+    # A config change that did not fully land. Separate from `record` because the LEVEL is the
+    # point: a half-applied setting is not a normal entry in the log, it is something the
+    # operator has to go and settle.
+    def self.warn(store : Store, kind : String, message : String) : Nil
+      store.insert_event(SOURCE, kind, "warn", message, actor: FlowSource.surface.try(&.token))
+    rescue ex
+      Log.warn(exception: ex) { "event feed: failed to log config warning #{kind}" }
+    end
+
     def self.record(store : Store, kind : String, message : String) : Nil
-      store.insert_event(SOURCE, kind, "info", message)
+      # The ambient surface, passed EXPLICITLY. A config change is by definition something a
+      # surface did, which is exactly what makes it safe to claim here and unsafe as a default
+      # on `insert_event` (see the note there).
+      store.insert_event(SOURCE, kind, "info", message, actor: FlowSource.surface.try(&.token))
     rescue ex
       Log.warn(exception: ex) { "event feed: failed to log config change #{kind}" }
     end

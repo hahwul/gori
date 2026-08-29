@@ -6,14 +6,21 @@ module Gori
     # fiber like every other insert; returns last_insert_rowid (0 on a dropped/closed-store
     # write — the caller decides whether a lost event matters). NEVER used for flow rows
     # (flows are the firehose via list_history); this is job-lifecycle + agent-action events.
-    # `actor` defaults to whichever surface this process is (`FlowSource.surface`, set once at
-    # the entry point), so every producer records WHO without each one remembering to. Pass it
-    # explicitly only to say something the ambient value cannot — `nil` for an event no surface
-    # asked for.
+    # `actor` defaults to nil — NOT to the ambient surface — and the difference is the whole
+    # point of the column. Most producers here are background engines: a binding that missed, a
+    # hook that failed, an `Alt-Svc` notice the capture proxy wrote about a client's own
+    # request. No surface acted in any of those, and defaulting would file every one of them
+    # under whichever process happened to observe it: `tui` in the TUI, `mcp` inside an MCP
+    # server, for the same event. That is worse than an empty column, because the actor filter
+    # would then return them as the operator's own doing.
+    #
+    # A surface is claimed only where one demonstrably acted — `ConfigLog.record` (a human or an
+    # agent changed a setting) and `log_agent_action` (an agent called a tool), both of which
+    # pass `FlowSource.surface` explicitly.
     def insert_event(source : String, kind : String, level : String, message : String, *,
                      goto_tab : String? = nil, goto_session_id : Int64? = nil,
                      flow_id : Int64? = nil, payload : String? = nil,
-                     actor : String? = FlowSource.surface.try(&.token)) : Int64
+                     actor : String? = nil) : Int64
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO events (created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor) VALUES (?,?,?,?,?,?,?,?,?,?)",
           now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor)

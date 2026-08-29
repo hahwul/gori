@@ -113,6 +113,67 @@ describe "config changes reach the event feed" do
   end
 end
 
+describe "actor attribution" do
+  # A background engine acts on NO surface's behalf. Defaulting `insert_event`'s actor to the
+  # ambient surface filed every one of these under whichever process observed it — `tui` in the
+  # TUI, `mcp` inside an MCP server, for the same event — and the actor filter then returned
+  # them as the operator's own doing.
+  it "leaves an engine's own event un-actored" do
+    cfg_store do |store|
+      store.insert_event("bindings", "extract_miss", "warn", "$sid found nothing")
+      store.insert_event("probe", "alt_svc_h3", "info", "advertised HTTP/3")
+      store.flush
+
+      store.events_recent(50, source: "bindings").rows.first.actor.should be_nil
+      store.events_recent(50, source: "probe").rows.first.actor.should be_nil
+      # …and the actor filter does not sweep them up with the operator's changes.
+      Gori::Scope.load(store).add("include", "host", "acme.test").should be_true
+      store.flush
+      rows = store.events_recent(50, actor: "tui").rows
+      rows.size.should eq(1)
+      rows.first.source.should eq(Gori::ConfigLog::SOURCE)
+    end
+  end
+end
+
+describe "rewrite rule audit lines" do
+  # The motivating case for rewrite rules is REDACTION — stripping an Authorization token
+  # before it leaves — and that puts the token in the PATTERN, with a harmless placeholder in
+  # the replacement. Logging either half leaks; the line carries neither.
+  it "names a rule by identity and never by the bytes it matches or writes" do
+    cfg_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "Bearer eyJhbGciOi-SECRET-TOKEN", "Bearer REDACTED-PLACEHOLDER",
+        name: "strip auth").should be_true
+      store.flush
+
+      row = store.events_recent(50, source: Gori::ConfigLog::SOURCE).rows.first
+      row.kind.should eq("rule_add")
+      row.message.should contain("strip auth")
+      row.message.should_not contain("SECRET-TOKEN")
+      row.message.should_not contain("REDACTED-PLACEHOLDER")
+    end
+  end
+
+  # `set_scope` moves a rule by copying it and deleting the original. Logging that delete put
+  # "rule removed" in the trail for a rule that still exists, and the move was never recorded.
+  it "records a scope move as a move, not as a removal" do
+    cfg_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "X-B",
+        name: "movable").should be_true
+      rule = rules.rules.find { |r| r.name == "movable" }.not_nil!
+      rules.set_scope(rule, Gori::Store::RuleScope::Global).should be_true
+      store.flush
+
+      kinds = store.events_recent(50, source: Gori::ConfigLog::SOURCE).rows.map(&.kind)
+      kinds.should contain("rule_move")
+      kinds.should_not contain("rule_remove")
+    end
+  end
+end
+
 describe Gori::ConfigLog do
   # An audit trail that leaks the secret it exists to protect is worse than none.
   it "strips userinfo from a proxy URL and keeps the host" do

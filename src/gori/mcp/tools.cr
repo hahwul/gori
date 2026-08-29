@@ -836,7 +836,8 @@ module Gori
         return unless s = @store
         level = result.is_error ? "warn" : "info"
         outcome = result.is_error ? "failed (#{result.error_code || "error"})" : "ok"
-        s.insert_event("agent", "agent_action", level, "#{name} #{outcome}", payload: name)
+        s.insert_event("agent", "agent_action", level, "#{name} #{outcome}", payload: name,
+          actor: Gori::FlowSource.surface.try(&.token))
       rescue ex
         Log.warn(exception: ex) { "event feed: failed to log agent action #{name}" }
       end
