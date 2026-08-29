@@ -19,6 +19,15 @@
 # Roles name a kind of contribution, not an amount of it — one word or two, the
 # same weight for everyone. Spelling out what a report contained while a commit
 # stays "Code" ranks the wall by how much was written here, which is backwards.
+#
+# `weight: 0` marks the entries with no commits. The wall ranks by weight, and
+# the contributors API counts from one commit up — so an entry left at the
+# default weighed exactly as much as whoever has a single commit, and the two
+# were separated by nothing but the alphabet. That is how someone who wrote
+# code ended up standing in the middle of the people thanked for reports. 0 is
+# the rung the API can never report, so it holds the thanks behind everyone
+# with a commit without titling either half of the wall. Every new entry here
+# that arrives without a commit wants it.
 style: grid
 
 output: docs/static/CONTRIBUTORS.svg
@@ -33,8 +42,10 @@ users:
     role: Code, Bug Reports
   - login: bash-bunny
     role: Bug Reports
+    weight: 0
   - login: pwnxpl0it
     role: Bug Reports
+    weight: 0
 
 exclude:
   - dependabot[bot]
@@ -43,7 +54,12 @@ exclude:
   - imgbot[bot]
 
 grid:
-  columns: 8
+  # The headcount picks the width: one row until `max_columns`, then the fewest
+  # even rows that hold everyone. A number here is a count of today's people,
+  # and it goes stale the moment someone lands their first commit — this wall
+  # was 3 columns, then 8, and would need editing again at nine faces.
+  columns: auto
+  max_columns: 10
   avatar_size: 96
   shape: circle
   margin: 16
