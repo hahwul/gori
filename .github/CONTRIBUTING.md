@@ -3,6 +3,14 @@
 Thanks for helping improve gori. This is a security tool for **authorized** testing
 only — please keep contributions aligned with that purpose.
 
+## Reporting bugs and ideas
+
+Open an [issue](https://github.com/hahwul/gori/issues) — a bug report is most useful with
+the gori version (`gori --version`), your OS, and the steps that reproduce it. For a
+feature, say what you were trying to do, not only what to build. Small fixes are welcome
+as a PR without an issue first; for anything that adds a subsystem or changes behaviour,
+open an issue so the design can be settled before you write it.
+
 ## Getting set up
 
 Requires [Crystal](https://crystal-lang.org) `>= 1.21.0` and the native libraries used
@@ -46,6 +54,17 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
   body — which the issue number already points at — or, when it settles a design
   question, in [DESIGN.md §7](DESIGN.md). A changelog entry that has to be read twice is
   one nobody can lift into release notes (#709).
+
+## Sending the pull request
+
+1. Fork it (<https://github.com/hahwul/gori/fork>)
+2. Create your branch (`git checkout -b my-new-feature`)
+3. Commit your changes (`git commit -am 'Add some feature'`)
+4. Push to the branch (`git push origin my-new-feature`)
+5. Open a pull request against `main`, describing what changed and why
+
+One PR per concern. A review that has to separate an unrelated rename from the fix it
+travels with is a slower review, and a revert takes the innocent half with it.
 
 ## Where things live
 

@@ -16,7 +16,7 @@
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="docs/">Documentation</a> •
-  <a href="#contributing">Contributing</a>
+  <a href=".github/CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
@@ -170,17 +170,11 @@ If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is miss
 [Installation guide](https://gori.hahwul.com/getting-started/installation/) for the system libraries and the
 `-Dwithout_native_codecs` offline build.
 
-## Contributing
-
-1. Fork it (<https://github.com/hahwul/gori/fork>)
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Add some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Open a Pull Request
-
 ## Contributors
 
 - [hahwul](https://github.com/hahwul) — creator and maintainer
+
+Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to get set up.
 
 ## Why "gori"?
 
