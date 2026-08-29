@@ -1,0 +1,52 @@
+# https://github.com/crystal-actions/contributor-mural
+#
+# One wall, no sections. The role line under each name carries what the person
+# did, which is the only way a single wall can say that someone both wrote code
+# and filed the report that found the bug — a titled "Special Thanks" section
+# would have to pick one of the two, and people move between them.
+#
+# `contributors:` fills the wall from the API and gives everyone it yields the
+# role `Code`, so a new contributor arrives already labelled and this file only
+# names the exceptions: someone whose role is not just code, and someone who
+# helped without a commit and so is not in the API at all.
+#
+# Everyone is labelled by their GitHub login, and no entry sets `name`. The
+# contributors API does not report display names, so a `name` here would only
+# ever cover the people someone remembered to write down — the next contributor
+# would arrive as a login beside them. The login is also what the avatar links
+# to, so it is the one label the whole wall can carry without upkeep.
+#
+# Roles name a kind of contribution, not an amount of it — one word or two, the
+# same weight for everyone. Spelling out what a report contained while a commit
+# stays "Code" ranks the wall by how much was written here, which is backwards.
+style: grid
+
+output: docs/static/CONTRIBUTORS.svg
+
+contributors:
+  role: Code
+
+users:
+  - login: hahwul
+    role: Creator, Maintainer
+  - login: d0kk2bi
+    role: Code, Bug Reports
+  - login: bash-bunny
+    role: Bug Reports
+  - login: pwnxpl0it
+    role: Bug Reports
+
+exclude:
+  - dependabot[bot]
+  - github-actions[bot]
+  - Copilot
+  - imgbot[bot]
+
+grid:
+  columns: 3
+  avatar_size: 96
+  shape: circle
+  margin: 16
+  show_names: true
+  # Full names and roles, uncut: this wall is short enough to afford them.
+  truncate: 0
