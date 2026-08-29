@@ -4690,3 +4690,131 @@ describe Gori::Probe::Passive::ExposedConfig do
     end
   end
 end
+
+describe Gori::Probe::Passive::SerializedObject do
+  html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+
+  it "flags a Java serialized object carried in a request cookie (Medium)" do
+    with_store do |store|
+      dets = analyze(store, resp_head: html,
+        req_headers: "Cookie: session=rO0ABXNyEXAMPLEabcdef\r\n")
+      hit = dets.find(&.code.==("serialized_object")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+      hit.evidence.not_nil!.should eq("Java serialized object in cookie 'session'")
+    end
+  end
+
+  it "flags a .NET BinaryFormatter blob in a query parameter (Medium)" do
+    with_store do |store|
+      dets = analyze(store, resp_head: html, target: "/p?state=AAEAAAD/////AQAAAAAAAAAM")
+      hit = dets.find(&.code.==("serialized_object")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+      hit.evidence.not_nil!.should eq(".NET BinaryFormatter object in parameter 'state'")
+    end
+  end
+
+  it "flags an unencrypted ASP.NET ViewState hidden field in the response (Low)" do
+    with_store do |store|
+      body = %(<form><input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUKLTEyMzQ1Njc4ZGQ=" /></form>)
+      hit = analyze(store, resp_head: html, body: body).find(&.code.==("serialized_object")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Low)
+      hit.evidence.not_nil!.should eq("ASP.NET ViewState (unencrypted) in __VIEWSTATE field")
+    end
+  end
+
+  it "flags a PHP serialized object in a percent-encoded form body (Medium)" do
+    with_store do |store|
+      body = "data=O%3A4%3A%22User%22%3A1%3A%7Bs%3A2%3A%22id%22%3Bi%3A1%3B%7D"
+      dets = analyze(store, resp_head: html, method: "POST", req_body: body,
+        req_headers: "Content-Type: application/x-www-form-urlencoded\r\n")
+      hit = dets.find(&.code.==("serialized_object")).not_nil!
+      hit.evidence.not_nil!.should eq("PHP serialized object in parameter 'data'")
+    end
+  end
+
+  it "does not flag ordinary base64 or path values that merely resemble a marker" do
+    with_store do |store|
+      # A lowercase /web path (not the /wE ViewState marker) and an unrelated base64 token.
+      codes_of(analyze(store, resp_head: html,
+        req_headers: "Cookie: theme=/web/home; token=YWJjZGVmZ2hpamtsbW5vcA==\r\n"))
+        .should_not contain("serialized_object")
+    end
+  end
+
+  it "does not flag an ENCRYPTED ViewState (opaque base64 that is not /wE — encryption is the fix)" do
+    with_store do |store|
+      body = %(<form><input type="hidden" name="__VIEWSTATE" value="AbCdEf0123456789+/xyz=" /></form>)
+      codes_of(analyze(store, resp_head: html, body: body)).should_not contain("serialized_object")
+    end
+  end
+
+  it "accumulates every serialized surface a host exposes, keeping the higher severity" do
+    with_store do |store|
+      req = analyze(store, resp_head: html, target: "/a",
+        req_headers: "Cookie: s=rO0ABXNyEXAMPLE\r\n")
+      resp = analyze(store, resp_head: html, target: "/b",
+        body: %(<input name="__VIEWSTATE" value="/wEPDwUKLTEyMzQ1Njc4" />))
+      (req + resp).each { |d| store.upsert_probe_issue(d) }
+      issue = store.probe_issues.find(&.code.==("serialized_object")).not_nil!
+      issue.severity.should eq(Gori::Store::Severity::Medium) # request-side wins
+      ev = issue.evidence.not_nil!
+      ev.should contain("Java serialized object in cookie 's'")
+      ev.should contain("ASP.NET ViewState (unencrypted) in __VIEWSTATE field")
+    end
+  end
+end
+
+describe Gori::Probe::Passive::DebugModeExposed do
+  it "flags the Symfony profiler via the X-Debug-Token header regardless of content type" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Debug-Token: 7c1f9a\r\n\r\n"
+      hit = analyze(store, resp_head: head, content_type: "application/json",
+        body: "{}").find(&.code.==("debug_mode_exposed")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+      hit.evidence.not_nil!.should eq("Symfony profiler (X-Debug-Token header)")
+    end
+  end
+
+  it "flags a Werkzeug interactive debugger as High (it is an RCE console)" do
+    with_store do |store|
+      body = "<html><head><title>Error // Werkzeug Debugger</title></head><body>Traceback</body></html>"
+      hit = analyze(store, resp_head: "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n",
+        status: 500, body: body).find(&.code.==("debug_mode_exposed")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::High)
+      hit.evidence.not_nil!.should eq("Werkzeug interactive debugger")
+    end
+  end
+
+  it "flags a Django DEBUG=True technical error page (Medium)" do
+    with_store do |store|
+      body = "<html><body><table><tr><th>Django Version:</th><td>4.2.1</td></tr></table></body></html>"
+      codes_of(analyze(store, resp_head: "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n",
+        status: 500, body: body)).should contain("debug_mode_exposed")
+    end
+  end
+
+  it "flags an ASP.NET DETAILED error but not the safe remote page that hides them" do
+    with_store do |store|
+      detailed = "<html><body><h2>Server Error in '/' Application.</h2>Stack Trace: at App.Foo()</body></html>"
+      codes_of(analyze(store, resp_head: "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n",
+        status: 500, body: detailed)).should contain("debug_mode_exposed")
+      safe = "<html><body><h2>Server Error in '/' Application.</h2>Runtime Error. The current custom " \
+             "error settings for this application prevent the details of the application error from " \
+             "being viewed remotely.</body></html>"
+      codes_of(analyze(store, resp_head: "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n",
+        status: 500, body: safe)).should_not contain("debug_mode_exposed")
+    end
+  end
+
+  it "does not flag prose that merely names a framework, nor a non-HTML body" do
+    with_store do |store|
+      prose = "<html><body>We build on the Werkzeug library and the Django framework.</body></html>"
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n", body: prose))
+        .should_not contain("debug_mode_exposed")
+      # A JSON API body carrying the same string is not a rendered debug page.
+      json = %({"note":"Django Version: 4.2 required"})
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        content_type: "application/json", body: json)).should_not contain("debug_mode_exposed")
+    end
+  end
+end
