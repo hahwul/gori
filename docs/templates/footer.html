@@ -1,33 +1,22 @@
+{# One centered tier: three outbound links over a single meta line that
+   carries the hahwul signature inline. The doc sections are already the
+   whole of .top-nav, so repeating them here bought nothing but a grid.
+   Deliberately untranslated — this strip is frame, not content, and the
+   handwriting stack under "Built with Love" carries no Hangul anyway. #}
 <footer class="docs-footer">
-  <div class="footer-grid">
-    <div class="footer-brand">
-      <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
-      <p class="footer-tagline">{{ "footer.tagline" | t }}</p>
-    </div>
-    <nav class="footer-col" aria-label="{{ "footer.docs" | t }}">
-      <h2>{{ "footer.docs" | t }}</h2>
-      <a href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "nav.start" | t }}</a>
-      <a href="{{ base_url }}{{ lang_prefix }}/playbooks/">{{ "nav.playbooks" | t }}</a>
-      <a href="{{ base_url }}{{ lang_prefix }}/guide/">{{ "nav.guide" | t }}</a>
-      <a href="{{ base_url }}{{ lang_prefix }}/reference/">{{ "nav.reference" | t }}</a>
-    </nav>
-    <nav class="footer-col" aria-label="{{ "footer.project" | t }}">
-      <h2>{{ "footer.project" | t }}</h2>
-      <a href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a href="https://github.com/hahwul/gori/releases" target="_blank" rel="noopener noreferrer">{{ "footer.releases" | t }}</a>
-      <a href="https://github.com/hahwul/gori/issues" target="_blank" rel="noopener noreferrer">{{ "footer.issues" | t }}</a>
-    </nav>
-  </div>
-  <div class="footer-bottom">
-    <p>Apache-2.0 · © hahwul</p>
-    <p>{{ "footer.built_with" | t }} <a href="https://github.com/hahwul/hwaro" target="_blank" rel="noopener noreferrer">Hwaro</a></p>
-  </div>
-  <div class="footer-mark">
-    <a href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
-      <span class="hahwul-img" role="img" aria-label="hahwul"></span>
+  <nav class="footer-links" aria-label="Project">
+    <a href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer">GitHub</a>
+    <a href="https://github.com/hahwul/gori/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+    <a href="https://github.com/hahwul/gori/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+  </nav>
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
     </a>
-    <p class="footer-love">Built with Love</p>
-  </div>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © hahwul · Built with <a href="https://github.com/hahwul/hwaro" target="_blank" rel="noopener noreferrer">Hwaro</a></span>
+  </p>
 </footer>
 <script>
   /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
