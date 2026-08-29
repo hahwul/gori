@@ -147,12 +147,24 @@ module Gori
             String.build(js.bytesize) do |io|
               i = 0
               while i < n
-                if j = blank_token_at(chars, i, n, io, 0)
-                  i = j
-                else
-                  io << chars[i]
-                  i += 1
-                end
+                # The token dispatch is spelled out here rather than delegated to
+                # `blank_token_at` (which `emit_interpolation` still uses), and the shape mirrors
+                # `strip_comments`' loop deliberately. That helper returns `Int32?` — nil meaning
+                # "no token starts here" — so the OVERWHELMINGLY common case, an ordinary code
+                # character, paid a nilable-union result on every char of the script. Deciding it
+                # from the char in the loop keeps this hot path on a plain Int32; the branch order
+                # (comment, then string) is the helper's, so what gets blanked is unchanged.
+                c = chars[i]
+                i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
+                      blank_line_comment(chars, i, n, io)
+                    elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+                      blank_block_comment(chars, i, n, io)
+                    elsif c == '\'' || c == '"' || c == '`'
+                      blank_string(chars, i, n, io, 0)
+                    else
+                      io << c
+                      i + 1
+                    end
               end
             end
           end
@@ -399,13 +411,21 @@ module Gori
         # within WINDOW chars each side). Empty when no sink co-occurs with a source.
         def self.source_sink_pairs(code : String) : Array({String, String})
           pairs = [] of {String, String}
-          # Whole-script source prefilter. A sink can only pair with a source that exists SOMEWHERE
-          # in the script, so a bundle with no source at all cannot produce a pair no matter how
-          # many sinks it carries — and a minified SPA/jQuery bundle carries thousands (`.html(`,
-          # `.innerHTML=`, `setTimeout(`). Without this, that bundle paid the full sink walk to
-          # return []: measured 230ms per flow, on the fiber the passive scan shares with the proxy.
-          # 14 whole-body `matches?` passes instead ⇒ 1.0ms (228× — bench/probe_passive_bench).
-          return pairs unless SOURCES.any? { |(re, _)| re.matches?(code) }
+          # Whole-script source INDEX, which is also the prefilter. A sink can only pair with a
+          # source that exists SOMEWHERE in the script, so a bundle with no source at all cannot
+          # produce a pair no matter how many sinks it carries — and a minified SPA/jQuery bundle
+          # carries thousands (`.html(`, `.innerHTML=`, `setTimeout(`). Without this, that bundle
+          # paid the full sink walk to return []: measured 230ms per flow, on the fiber the passive
+          # scan shares with the proxy. 14 whole-body passes instead ⇒ 1.0ms (228×).
+          #
+          # This used to be a bare `SOURCES.any?(&.matches?(code))` and the per-sink window test
+          # then re-ran all 14 SOURCE regexes over two freshly-allocated window strings. On a
+          # bundle with thousands of sink hits that is the dominant cost of the whole passive
+          # scan: 14 patterns × 2 sides × N hits PCRE calls, plus 2N transient strings. Scanning
+          # each source ONCE up front for its match POSITIONS turns every one of those into an
+          # allocation-free binary search (see `source_in_window`).
+          sources = source_spans(code)
+          return pairs if sources.empty?
           SINKS.each do |(sink_re, sink_label)|
             # `scan`, NOT a `while m = sink_re.match(code, pos)` loop: re-entering `match` with a
             # start offset is ~515× slower than one `scan` walk for the SAME matches and the SAME
@@ -413,7 +433,7 @@ module Gori
             # the match call; `match_at_byte_index` is just as slow, so it is not char↔byte
             # conversion). `scan` yields the same MatchData, so begin/end are unchanged.
             code.scan(sink_re) do |m|
-              if src = source_in_window(code, m.byte_begin(0), m.byte_end(0))
+              if src = source_in_window(code, sources, m.byte_begin(0), m.byte_end(0))
                 pairs << {src, sink_label}
               end
             end
@@ -430,13 +450,53 @@ module Gori
         # WINDOW bytes per side and allocates nothing — and this runs once per sink occurrence.
         BOUNDS = {0x3Bu8, 0x7Bu8, 0x7Du8, 0x0Au8}
 
+        # Every taint SOURCE occurrence in the script, as BYTE spans, in SOURCES order. One
+        # `scan` per source pattern, once per script — the index `source_in_window` binary-searches
+        # instead of re-running the 14 patterns per sink occurrence. Sources with no occurrence are
+        # dropped, so a script carrying one source pays one entry, not fourteen; an empty result is
+        # exactly the old `SOURCES.any?` prefilter's "no source anywhere" verdict.
+        #
+        # `scan` yields NON-OVERLAPPING matches left to right, so within one entry both `begin` and
+        # `end` are strictly increasing — the property `span_within?` binary-searches on.
+        private def self.source_spans(code : String) : Array({Array({Int32, Int32}), String})
+          index = [] of {Array({Int32, Int32}), String}
+          SOURCES.each do |(re, label)|
+            spans = [] of {Int32, Int32}
+            code.scan(re) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
+            index << {spans, label} unless spans.empty?
+          end
+          index
+        end
+
+        # Does `spans` hold an occurrence lying ENTIRELY within [a, b)? Binary-searches for the
+        # first span beginning at/after `a`; because the spans are non-overlapping and ordered,
+        # that one also has the SMALLEST end among the candidates, so it alone decides.
+        #
+        # Full containment is what the old two-slice test meant: a source straddling the window
+        # edge was cut by the slice and could not match there either.
+        private def self.span_within?(spans : Array({Int32, Int32}), a : Int32, b : Int32) : Bool
+          lo = 0
+          hi = spans.size
+          while lo < hi
+            mid = (lo + hi) // 2
+            if spans[mid][0] < a
+              lo = mid + 1
+            else
+              hi = mid
+            end
+          end
+          return false if lo >= spans.size
+          spans[lo][1] <= b
+        end
+
         # The first taint source inside the statement window around [from, to), or nil.
         # Offsets are BYTE offsets. Char-index slicing (`code[floor...from]`) is O(1) only while
         # the script is all-ASCII; one non-ASCII byte anywhere makes every `String#[]` walk from
         # the start, and this runs per sink occurrence — thousands of times in a minified bundle.
         # A single accented char in a regex literal (kept intact by `strip`, by design) is enough:
         # measured 9ms → 1765ms per flow, on the fiber the passive scan shares with the proxy.
-        private def self.source_in_window(code : String, from : Int32, to : Int32) : String?
+        private def self.source_in_window(code : String, sources : Array({Array({Int32, Int32}), String}),
+                                          from : Int32, to : Int32) : String?
           bytes = code.to_slice
           floor = from - WINDOW
           floor = 0 if floor < 0
@@ -474,11 +534,21 @@ module Gori
           # source really inside the sink's arguments still sits in the POST side, which is where
           # `document.write(document.URL)` has always been read from.
           #
-          # A window edge can land mid-char, so scrub before handing a slice to PCRE (invalid
-          # UTF-8 makes the match raise). Both slices are bounded by WINDOW, so this costs nothing.
-          pre = String.new(bytes[lo, from - lo]).scrub
-          post = String.new(bytes[to, hi - to]).scrub
-          SOURCES.each { |(re, label)| return label if re.matches?(pre) || re.matches?(post) }
+          # Answered against the precomputed span index (`source_spans`) rather than by slicing the
+          # two sides out and re-running the SOURCE patterns on them. Same verdict — a source
+          # matches a side exactly when one of its occurrences lies entirely within that side's
+          # byte range — and it keeps SOURCES order, so the label reported for a window holding
+          # several sources is the one the slice-and-match version reported. What it drops is the
+          # per-occurrence cost: two String allocations and up to 28 PCRE calls per sink hit, on
+          # the fiber the passive scan shares with the proxy.
+          #
+          # (The slices also had to be `scrub`bed, because a window edge can land mid-char and
+          # invalid UTF-8 makes PCRE raise. Nothing is handed to PCRE here, so that is moot —
+          # and it was never a correctness dimension: every SOURCE pattern is pure ASCII, so a
+          # replacement char at an edge can neither create nor destroy a match.)
+          sources.each do |(spans, label)|
+            return label if span_within?(spans, lo, from) || span_within?(spans, to, hi)
+          end
           nil
         end
       end
