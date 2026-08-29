@@ -122,6 +122,19 @@ SQL
 }
 seed_oast
 
+# The Project scene's DESCRIPTION pane renders whatever `settings.description`
+# holds, and the throwaway project this script creates has none — so the pane
+# shot as an empty box under the stats. `ProjectRegistry.create` writes this
+# same key from its `description` argument; the project here is created
+# implicitly by the capture run, so set it directly — scene dressing, like
+# seed_oast above, not traffic.
+seed_description() {
+  sqlite3 "$DB" \
+    "INSERT OR REPLACE INTO settings (key, value)
+     VALUES ('description', 'Staging assessment for httpbingo.org and the GitHub API. Scope is on for both hosts; findings go to Issues.');"
+}
+seed_description
+
 # _shoot <name> <rows> <title> <subcmd> <preamble:0|1> <tmux-keys...>
 # Launches `gori <subcmd>` in a fresh tmux pane, optionally walks the project
 # picker preamble, sends the keys, and renders the capture to SVG. Interleave
@@ -163,8 +176,16 @@ PY
 
 # run_scene <name> <rows> <title> <tmux-keys...> — the full TUI over the seeded DB.
 # `--db` opens it directly (no project-picker preamble needed).
+#
+# SCENES filters by name, for re-shooting one frame after a fix without
+# disturbing the others: every capture carries live timestamps and durations,
+# so a full run rewrites all of them and buries a one-scene change in noise.
+#   SCENES=project docs/tools/tui-capture/capture.sh
 run_scene() {
   local name="$1" rows="$2" title="$3"; shift 3
+  if [ -n "${SCENES:-}" ]; then
+    case " $SCENES " in *" $name "*) ;; *) return 0;; esac
+  fi
   _shoot "$name" "$rows" "$title" "tui --port $PORT --db '$DB'" 0 "$@"
 }
 
