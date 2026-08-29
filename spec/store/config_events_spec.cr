@@ -11,10 +11,23 @@ private def cfg_store(surface : Gori::FlowSource::Surface? = Gori::FlowSource::S
   store = Gori::Store.open(path)
   saved = Gori::FlowSource.surface
   Gori::FlowSource.surface = surface
+  # A GLOBAL Match & Replace rule does not live in the store this helper throws away — it lives
+  # in `Settings`, which is a process-wide singleton. `set_scope(…, Global)` below moves a rule
+  # there, so without this the leftover outlives the temp db and is handed to every later
+  # example in the same process: `commit_confirmation_spec`'s "refuses an empty pattern without
+  # claiming a write" found a rule named "movable" in a `Rules` it had just built and failed on
+  # a write it never made. It only shows up in CI, and only sometimes, because `spec_shard.sh`
+  # partitions by FILE SIZE — which file shares a process with which is a function of the tree,
+  # so editing an unrelated spec is enough to introduce or hide it. Same save/restore the
+  # `settings_spec` helpers use, for the same reason.
+  saved_rules = Gori::Settings.rewriter_rules
+  saved_next_rule_id = Gori::Settings.rewriter_next_rule_id
   begin
     yield store
   ensure
     Gori::FlowSource.surface = saved
+    Gori::Settings.rewriter_rules = saved_rules
+    Gori::Settings.rewriter_next_rule_id = saved_next_rule_id
     store.close rescue nil
     File.delete?(path)
     File.delete?("#{path}-wal")
