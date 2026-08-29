@@ -1,4 +1,5 @@
 require "../../spec_helper"
+require "compress/gzip"
 
 # --- file-local harness (mirrors spec/probe_spec.cr) -----------------------------------
 private def with_store(&)
@@ -309,6 +310,33 @@ describe Gori::Probe::Passive::PrototypePollution do
           req_headers: "Content-Type: application/json\r\n",
           req_body: %({"__proto__":{"polluted":true}}))
         codes_of(dets).should contain("prototype_pollution_param")
+      end
+    end
+
+    it "still sees a GZIPPED request body (the raw-bytes prefilter must not gate it out)" do
+      with_store do |store|
+        # `check_request` prefilters the RAW body for `__proto__`/`constructor` before letting
+        # Context materialise the decoded text. Those literals are NOT in the compressed bytes,
+        # so a body declaring a Content-Encoding has to skip the prefilter and decode — otherwise
+        # this rule would go silently blind on every compressed upload.
+        plain = %({"__proto__":{"polluted":true}})
+        gz = IO::Memory.new
+        Compress::Gzip::Writer.open(gz, &.print(plain))
+        dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", method: "POST",
+          target: "/submit", content_type: nil,
+          req_headers: "Content-Type: application/json\r\nContent-Encoding: gzip\r\n",
+          req_body: String.new(gz.to_slice))
+        codes_of(dets).should contain("prototype_pollution_param")
+      end
+    end
+
+    it "does not flag an ordinary JSON body (the prefilter's common case)" do
+      with_store do |store|
+        dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", method: "POST",
+          target: "/submit", content_type: nil,
+          req_headers: "Content-Type: application/json\r\n",
+          req_body: %({"filters":{"status":"active"},"items":[1,2,3]}))
+        codes_of(dets).should_not contain("prototype_pollution_param")
       end
     end
 
