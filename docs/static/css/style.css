@@ -1107,6 +1107,16 @@ kbd {
   margin-top: calc(-126 / 1206 * 100%);
 }
 
+/* Cropped to y=126, a 520-tall capture fills this box exactly. The Fuzzer's
+   is 664, so it runs past the bottom — which is what a terminal viewport does
+   with a view taller than the window. Fading its last rows says "continues
+   below" instead of leaving a guillotined pane border at the edge. Scaling it
+   down to fit was the alternative and it just left side gutters. */
+.showcase-screen img[src*="fuzzer"] {
+  -webkit-mask: linear-gradient(180deg, #000 calc(100% - 5.5rem), transparent 100%);
+  mask: linear-gradient(180deg, #000 calc(100% - 5.5rem), transparent 100%);
+}
+
 .showcase-note {
   max-width: 52ch;
   margin: 1.6rem auto 0;
