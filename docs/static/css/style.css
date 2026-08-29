@@ -1136,11 +1136,16 @@ kbd {
   padding: 1rem 0 var(--space-8);
 }
 
+/* Centered on the showcase frame's axis, not flush left inside the 1380
+   band: at 1440 the old `max-width: 1080` left ~300px of dead space on the
+   right and threw the whole section off-center against the frame above it.
+   1180 is the frame's width, so the rails start and end where it does. */
 .path-grid {
   display: grid;
   grid-template-columns: 1.15fr 1fr 1fr;
-  gap: 2rem;
-  max-width: 1080px;
+  gap: 2.4rem;
+  width: min(100%, 1180px);
+  margin-inline: auto;
 }
 
 /* Same hairline-rail language as .structure-grid: a rule above each entry,
@@ -1328,16 +1333,23 @@ kbd {
   padding: 1.5rem 0 4.5rem;
 }
 
+/* Title and list share one centered column on the showcase frame's axis, so
+   the section reads as a block under the frame instead of hugging the left
+   edge of the wider band. `text-wrap: balance` (inherited from the shared
+   heading rule) keeps the line breaks even at this width, so widening the
+   box changes the alignment without stretching the title into one long line. */
 .home-flow h2 {
-  max-width: 14em;
+  width: min(100%, 1180px);
+  max-width: 1180px;
+  margin-inline: auto;
 }
 
 .flow-list {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  max-width: 1080px;
-  margin-top: 1.6rem;
+  width: min(100%, 1180px);
+  margin: 1.6rem auto 0;
   border-top: 1px solid var(--line);
 }
 
