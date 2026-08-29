@@ -13,13 +13,14 @@ module Gori
       # arbitrary redirect (phishing, OAuth token theft). Passive analysis cannot prove the parameter
       # *controls* the target.
       #
-      # For one in-scope flow whose captured response was a 3xx AND whose `Location` authority matches
-      # one of the request's query-parameter values (i.e. that parameter demonstrably DROVE the
-      # redirect), it re-sends ONE request with that parameter replaced by a synthetic external host,
-      # and flags High only when the response `Location` redirects to OUR probe host.
+      # For one in-scope flow whose captured response was a 3xx AND whose `Location` a query
+      # parameter demonstrably DROVE — the param's value carries the same authority as an absolute
+      # `Location`, or IS the path of a relative one — it re-sends ONE request with that parameter
+      # replaced by a synthetic external host, and flags High only when the response `Location`
+      # redirects to OUR probe host.
       #
       # Low-FP by construction:
-      #   * gated to a parameter whose value already equals the captured redirect's authority — a
+      #   * gated to a parameter whose value already accounts for the captured redirect target — a
       #     stray reflected value that doesn't drive the redirect is never probed;
       #   * confirmation parses the response `Location`'s OWN authority (Active.url_authority), so a
       #     relative `Location: /go?next=…probe…` (probe host only in a sub-param) and the
@@ -55,12 +56,21 @@ module Gori
           Plan.new(request, [Param.new("query", name, "")], key_string(detail, method_up, path, name))
         end
 
-        # Mirror the captured value's encoding: a literal `://` in the driving value means the app does
-        # not url-decode it, so send the literal probe URL; otherwise send the percent-encoded form.
+        # Mirror the captured value's encoding: an unencoded delimiter in the driving value means
+        # the app reads the parameter without url-decoding it, so send the literal probe URL;
+        # otherwise send the percent-encoded form.
+        #
+        # The test is a bare `/`, not `://`. Both are unencoded-delimiter evidence and the absolute
+        # driving values this rule used to be limited to always carried both (`https://acme.test/cb`
+        # has a `/` too, so those keep choosing the literal exactly as before). But a RELATIVE
+        # driving value — `next=/dashboard`, now that those are gated in — has a `/` and no `://`,
+        # and would have been sent percent-encoded to an app that just proved it does not decode:
+        # the probe would land in `Location` as a literal `https%3A%2F%2F…`, which parses to no
+        # authority at all, and the rule would report clean on an endpoint it never really asked.
         private def probe_value_for(pair : String) : String
           eq = pair.index('=')
           raw = eq ? pair[(eq + 1)..] : ""
-          raw.includes?("://") ? PROBE_LITERAL : PROBE_VALUE
+          raw.includes?('/') ? PROBE_LITERAL : PROBE_VALUE
         end
 
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
@@ -89,17 +99,30 @@ module Gori
           return nil unless REDIRECT_STATUSES.includes?(detail.row.status)
           rhead = detail.response_head || return nil
           loc = Proxy::Codec::Http1.parse_response_head(rhead).headers.get?("Location") || return nil
-          loc_auth = Active.url_authority(loc) || return nil # captured redirect must be to an absolute host
           path, query = split_target(Active.origin_form(target))
           return nil if query.empty?
           pairs = query.split('&')
-          found = first_driving_param(pairs, loc_auth[0]) || return nil
+          found = first_driving_param(pairs, loc) || return nil
           {method_up, path, pairs, found[0], found[1]}
         end
 
-        # {index, decoded name} of the first query param whose value's authority host == `loc_host`
-        # (i.e. that param drove the captured redirect), or nil.
-        private def first_driving_param(pairs : Array(String), loc_host : String) : {Int32, String}?
+        # {index, decoded name} of the first query param that demonstrably DROVE the captured
+        # redirect, or nil. Two shapes, because a redirect target is written both ways:
+        #
+        #   * `Location` is ABSOLUTE — the param whose value carries the same authority host.
+        #   * `Location` is RELATIVE — the param whose value IS that path. This is the shape the
+        #     rule used to skip entirely (the gate demanded `url_authority(loc)`), and it is the
+        #     COMMON one: `/login?next=/dashboard` → `Location: /dashboard` is how nearly every
+        #     framework's post-login return works, and it is exactly the endpoint worth asking
+        #     whether it will also follow an absolute host. Requiring the captured redirect to
+        #     already point off-site meant the rule mostly confirmed redirects that were external
+        #     before we touched them.
+        #
+        # Widening this widens only WHAT IS PROBED, never what is reported: `detections` still
+        # fires solely when the probe response's `Location` parses to PROBE_HOST as its own
+        # authority. So a wrong guess here costs one request, not a false finding.
+        private def first_driving_param(pairs : Array(String), loc : String) : {Int32, String}?
+          loc_auth = Active.url_authority(loc)
           pairs.each_with_index do |pair, i|
             next if pair.empty?
             eq = pair.index('=')
@@ -108,10 +131,31 @@ module Gori
             next if raw_name.empty?
             raw_value = pair[(eq + 1)..]
             next if raw_value.empty?
-            pa = Active.url_authority(decode(raw_value))
-            return {i, decode(raw_name)} if pa && pa[0] == loc_host
+            value = decode(raw_value)
+            drives =
+              if host = loc_auth
+                Active.url_authority(value).try { |pa| pa[0] == host[0] } || false
+              else
+                relative_driver?(loc, value)
+              end
+            return {i, decode(raw_name)} if drives
           end
           nil
+        end
+
+        # Does this DECODED parameter value account for a RELATIVE `Location`? Only a path-shaped
+        # value counts, and it must be the whole target or its path part:
+        #   `next=/dashboard` → `Location: /dashboard`        (equal)
+        #   `next=/dashboard` → `Location: /dashboard?ok=1`   (app appended its own query)
+        # The `size >= 2` floor keeps a bare `/` — which prefixes every relative Location there is
+        # — from nominating whichever parameter happens to come first.
+        private def relative_driver?(loc : String, value : String) : Bool
+          return false unless value.size >= 2 && value.starts_with?('/')
+          target = loc.strip
+          return true if target == value
+          return false unless target.starts_with?(value)
+          nxt = target[value.size]?
+          nxt == '?' || nxt == '#'
         end
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String

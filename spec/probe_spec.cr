@@ -3745,12 +3745,59 @@ describe "Gori::Probe::Active::OpenRedirect" do
       # Captured 200 → not a redirect.
       probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n",
         target: "/login?next=https%3A%2F%2Facme.test%2Fcb")).should be_nil
-      # Redirect to a relative Location → no absolute target for a param to drive.
+      # Relative Location that NO parameter accounts for: the only param carries an absolute
+      # value, so it cannot be what produced `/home`.
       probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /home\r\n\r\n",
         target: "/login?next=https%3A%2F%2Facme.test%2Fcb", status: 302)).should be_nil
+      # A bare "/" must not nominate a parameter: it prefixes every relative Location there is.
+      probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /home\r\n\r\n",
+        target: "/login?next=%2F", status: 302)).should be_nil
       # Redirect present but no parameter matches its authority.
       probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: https://acme.test/cb\r\n\r\n",
         target: "/login?foo=bar", status: 302)).should be_nil
+    end
+  end
+
+  it "gates on a RELATIVE Location a parameter drives, and probes it unencoded" do
+    with_store do |store|
+      # `/login?next=/dashboard` → `Location: /dashboard` is the dominant open-redirect shape;
+      # the rule used to skip it entirely because the captured Location named no authority.
+      detail = capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /dashboard\r\n\r\n",
+        target: "/login?next=%2Fdashboard", status: 302)
+      plan = probe.plan(detail).not_nil!
+      plan.params.first.name.should eq("next")
+      # This capture arrived percent-encoded, so the app decodes: send the ENCODED probe.
+      String.new(plan.request).should contain(Gori::Probe::Active::OpenRedirect::PROBE_VALUE)
+      probe.detections(plan, resp.call(302, "https://gori-redir-probe.example/x"), detail)
+        .map(&.code).should eq(["open_redirect"])
+      # Confirmation is unchanged: only the probe response's OWN authority counts.
+      probe.detections(plan, resp.call(302, "/dashboard"), detail).should be_empty
+      probe.detections(plan, resp.call(302, "https://gori-redir-probe.example@evil.test/"), detail).should be_empty
+    end
+  end
+
+  it "sends the LITERAL probe when the relative driver arrived undecoded" do
+    with_store do |store|
+      # A raw `/dashboard` in the query is the app telling us it does not url-decode this
+      # parameter. Sending the percent-encoded probe to it would put a literal
+      # `https%3A%2F%2F…` in Location — no authority to parse — and the rule would report
+      # clean on an endpoint it never actually asked.
+      detail = capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /dashboard\r\n\r\n",
+        target: "/login?next=/dashboard", status: 302)
+      req = String.new(probe.plan(detail).not_nil!.request)
+      req.should contain(Gori::Probe::Active::OpenRedirect::PROBE_LITERAL)
+      req.should_not contain(Gori::Probe::Active::OpenRedirect::PROBE_VALUE)
+    end
+  end
+
+  it "accepts a relative driver whose Location gained the app's own query" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /dashboard?welcome=1\r\n\r\n",
+        target: "/login?next=%2Fdashboard", status: 302)
+      probe.plan(detail).not_nil!.params.first.name.should eq("next")
+      # …but not one that merely shares a path PREFIX — /dash is a different endpoint.
+      probe.plan(capture_flow(store, "HTTP/1.1 302 F\r\nLocation: /dashboard\r\n\r\n",
+        target: "/login?next=%2Fdash", status: 302)).should be_nil
     end
   end
 
