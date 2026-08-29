@@ -1593,16 +1593,6 @@ kbd {
 
 /* Narrow: stack the seam vertically and turn the wire on its end. */
 @media (max-width: 720px) {
-  .footer-grid {
-    grid-template-columns: 1fr;
-    gap: var(--space-5);
-  }
-
-  .footer-bottom {
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
   .agent-seam {
     flex-direction: column;
     max-width: 26rem;
@@ -1878,35 +1868,50 @@ kbd {
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 3rem;
   min-height: 100dvh;
   padding-top: var(--header-h);
-  padding-left: var(--sidebar-w);
 }
 
+/* Sticky, not fixed: a fixed rail never ends, which forced the footer to
+   start after it and centre on the content column instead of the page —
+   visibly off-axis on wide screens. In flow the rail stops with the article,
+   its border-right meets the footer's border-top in a clean T, and the
+   footer spans the real page width. Sticky keeps it parked under the header
+   while the article scrolls, so nothing about the reading experience moves. */
 .docs-sidebar {
-  position: fixed;
+  position: sticky;
   top: var(--header-h);
-  left: 0;
-  width: var(--sidebar-w);
+  align-self: flex-start;
+  flex: 0 0 var(--sidebar-w);
   height: calc(100dvh - var(--header-h));
-  padding: 1.2rem 0.85rem 1.5rem;
-  overflow-y: auto;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgb(var(--ink-rgb) / 0.045), transparent 18rem),
     var(--sidebar-bg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+}
+
+/* The rail now stops at the footer's rule, so its scroll edge lands on that
+   line and used to slice the last link mid-glyph. Fade the last 2rem instead.
+   The fade is exactly the scroller's own padding-bottom, so at the end of the
+   scroll the final link sits clear of it and reads at full strength — the
+   fade only ever touches content that is already leaving the viewport. */
+.sidebar-scroll {
+  height: 100%;
+  padding: 1.2rem 0.85rem 2rem;
+  overflow-y: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
 
-.docs-sidebar::-webkit-scrollbar {
+.sidebar-scroll::-webkit-scrollbar {
   width: 6px;
 }
 
-.docs-sidebar::-webkit-scrollbar-thumb {
+.sidebar-scroll::-webkit-scrollbar-thumb {
   background: var(--line-strong);
   border-radius: var(--radius-pill);
 }
@@ -2070,15 +2075,22 @@ kbd {
   color: var(--accent-strong);
 }
 
+/* Same fade as .sidebar-scroll, and for the same reason — a long page's TOC
+   outruns its max-height and used to end on a sliced line. The rail carries
+   no panel of its own, so the mask goes straight on it. Keep the fade equal
+   to padding-bottom: at the end of the scroll the last heading clears it. */
 .docs-toc-rail {
   display: none;
   flex: 0 0 var(--toc-w);
+  margin-left: 3rem;
   align-self: flex-start;
   position: sticky;
   top: calc(var(--header-h) + 2.2rem);
   max-height: calc(100dvh - var(--header-h) - 4rem);
-  padding: 0.1rem 0 1.5rem;
+  padding: 0.1rem 0 2rem;
   overflow-y: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -2757,20 +2769,20 @@ nav.pagination a:hover,
   z-index: 1;
   width: min(100%, 1380px);
   margin: 0 auto;
-  padding: 2rem 1.25rem 2.4rem;
+  padding: var(--space-6) 1.25rem;
   border-top: 1px solid var(--line);
-  color: var(--quiet);
+  /* --muted, not --quiet: the meta line runs at 0.82rem and --quiet is
+     3.9:1 there, under AA (same call as the Meaning block above). */
+  color: var(--muted);
   font-size: 0.9rem;
+  text-align: center;
 }
 
-/* Doc pages keep the sidebar fixed for the full viewport height, so the
-   footer (a flow sibling after .docs-container closes) starts AFTER the
-   sidebar — margin, not padding, so its border-top never runs underneath
-   the translucent sidebar and crosses its border-right. */
+/* Doc pages are full-bleed — the rail starts at x:0 and the TOC runs to the
+   right edge — so the 1380px cap would leave the rule floating inside the
+   sidebar column on wide screens. Only the home page's content is capped. */
 .is-doc .docs-footer {
-  width: auto;
-  margin: 0 0 0 var(--sidebar-w);
-  padding-left: 3rem;
+  width: 100%;
 }
 
 .docs-footer p {
@@ -2785,82 +2797,68 @@ nav.pagination a:hover,
   color: var(--accent-strong);
 }
 
-/* Link columns: brand + two quiet nav stacks, closed by a hairline bottom
-   bar. Column heads borrow the TOC rail's mono uppercase voice. */
-.footer-grid {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
-  gap: var(--space-6);
-  padding-bottom: var(--space-6);
+/* One centered tier: three outbound links over a single meta line. The old
+   brand + two-column grid, its mono column heads, and the hairline bottom
+   bar were more scaffolding than three links and a copyright ever needed,
+   and wrapping keeps them upright without a breakpoint. */
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1) var(--space-2);
 }
 
-.footer-brand .logo-word {
-  font-size: 1.3rem;
+/* Borrows .top-nav a's quiet pill so the row reads as the header's echo
+   rather than a second link idiom. */
+.footer-links a {
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+  text-decoration: none;
+  transition: color var(--transition), background var(--transition);
 }
 
-.footer-brand .footer-tagline {
-  margin-top: var(--space-2);
-  max-width: 26rem;
-  color: var(--quiet);
+.footer-links a:hover {
+  background: rgb(var(--ink-rgb) / 0.06);
+  color: var(--heading);
 }
 
-.footer-col h2 {
-  margin: 0 0 var(--space-3);
-  color: var(--quiet);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+.footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem 0.6rem;
+  margin-top: var(--space-4);
+  font-size: 0.82rem;
 }
 
-.footer-col a {
-  display: block;
-  width: fit-content;
-  padding: var(--space-1) 0;
+/* hahwul mark — Built with Love (matches dalfox docs footer), folded into
+   the meta line so the signature costs a glyph instead of its own block. */
+.footer-sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   text-decoration: none;
 }
 
-.footer-bottom {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--line-soft);
-}
-
-/* hahwul mark — Built with Love (matches dalfox docs footer) */
-.footer-mark {
-  text-align: center;
-  margin-top: 1.5rem;
-}
-
-.footer-mark a {
-  display: inline-block;
-  line-height: 0;
-}
-
-.footer-mark .hahwul-img {
-  display: inline-block;
-  width: 80px;
-  height: 80px;
+.footer-sig .hahwul-img {
+  width: 22px;
+  height: 22px;
   /* Recolor the logo to the footer text tone by using its alpha as a mask
      and filling with the muted token (the raster itself is white). */
   background-color: var(--muted);
   -webkit-mask: url("../images/hahwul.webp") center / contain no-repeat;
   mask: url("../images/hahwul.webp") center / contain no-repeat;
-  transition: background-color 0.3s ease;
+  transition: background-color var(--transition);
 }
 
-.footer-mark .hahwul-img:hover {
+.footer-sig:hover .hahwul-img {
   background-color: var(--text);
 }
 
 .footer-love {
-  margin-top: 0.85rem;
-  color: var(--muted);
   font-family: "Bradley Hand", "Snell Roundhand", "Apple Chancery", cursive;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   letter-spacing: 0.02em;
 }
 
@@ -3480,13 +3478,6 @@ html.search-lock body {
 
   .docs-container {
     display: block;
-    padding-left: 0;
-  }
-
-  .is-doc .docs-footer {
-    width: min(100%, 1380px);
-    margin: 0 auto;
-    padding-left: 1.25rem;
   }
 
   .docs-main {

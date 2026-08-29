@@ -47,14 +47,6 @@ overview = "Overview"
 [section]
 in_this_section = "In This Section"
 
-[footer]
-tagline = "Sit in the loop."
-docs = "Documentation"
-project = "Project"
-releases = "Releases"
-issues = "Issues"
-built_with = "Built with"
-
 [notfound]
 title = "Page not found"
 body = "The page you are looking for does not exist."

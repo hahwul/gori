@@ -1,4 +1,8 @@
+{# The panel (background, border-right, backdrop blur) stays on the <aside>;
+   only this inner scroller carries the fade mask, which would otherwise eat
+   the panel itself and break its seam with the footer. #}
 <aside class="docs-sidebar">
+  <div class="sidebar-scroll">
   {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name != "" and sec.language == page_language %}
   <details class="sidebar-section"{% if page.section == sec.name %} open{% endif %}>
     <summary class="sidebar-title">
@@ -17,4 +21,5 @@
     </ul>
   </details>
   {% endif %}{% endfor %}
+  </div>
 </aside>
