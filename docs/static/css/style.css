@@ -1107,6 +1107,22 @@ kbd {
   margin-top: calc(-126 / 1206 * 100%);
 }
 
+/* The swap in home.js decodes before it assigns, so the frame never blanks;
+   this just softens the cut between two screens. Kept short — the point is a
+   terminal redrawing, not a slideshow crossfade. home.js re-triggers it by
+   toggling .is-cut, since re-assigning `src` alone does not restart a CSS
+   animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .showcase-screen img.is-cut {
+    animation: showcase-cut 260ms ease-out;
+  }
+}
+
+@keyframes showcase-cut {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
 /* Cropped to y=126, a 520-tall capture fills this box exactly. The Fuzzer's
    is 664, so it runs past the bottom — which is what a terminal viewport does
    with a view taller than the window. Fading its last rows says "continues
