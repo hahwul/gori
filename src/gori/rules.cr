@@ -193,6 +193,10 @@ module Gori
           @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file) != 0
         end
       refresh
+      # A rewrite rule can be the operator's control — stripping an Authorization header,
+      # redacting a token before it leaves — so who installed one, and what it matches, belongs
+      # in the audit trail beside the scope rules.
+      ConfigLog.record(@store, "rule_add", "#{Rules.scope_word(scope)} rewrite rule added — #{Rules.rule_phrase(name, target, part, pattern)}") if ok
       ok
     end
 
@@ -229,7 +233,21 @@ module Gori
           @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
         end
       refresh
+      ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(name, target, part, pattern)}") if ok
       ok
+    end
+
+    # How an audit line names a rewrite rule. A rule's `name` is optional, so the match itself
+    # is the fallback identity — the same thing the Rewriter list falls back to on screen.
+    # `replacement` is deliberately absent: it is the half most likely to carry a secret an
+    # operator pasted in, and the rule is identifiable without it.
+    def self.rule_phrase(name : String?, target : Store::RuleTarget, part : Store::RulePart, pattern : String) : String
+      label = (name && !name.empty?) ? "#{name.inspect} " : ""
+      "#{label}(#{target.label}/#{part.label} #{pattern.inspect})"
+    end
+
+    def self.scope_word(scope : Store::RuleScope) : String
+      scope.global? ? "global" : "project"
     end
 
     # Move a rule to the OTHER scope, keeping its fields and its state in this project. Not an
@@ -316,6 +334,8 @@ module Gori
     # surfaces (`mcp/tools/rules.cr`, `cli/run/rewriter.cr`) refused to. It means COMMITTED,
     # not "a row existed", which is the store's own contract.
     def remove(id : Int64, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
+      # Named BEFORE the delete — `refresh` below leaves nothing to name it with.
+      doomed = rules.find { |r| r.id == id && r.scope == scope }
       ok =
         if scope.global?
           # Drop this project's disagreement with it too, so a later rule that inherits the id
@@ -342,6 +362,9 @@ module Gori
           @store.delete_rule(id)
         end
       refresh
+      if ok && (r = doomed)
+        ConfigLog.record(@store, "rule_remove", "#{Rules.scope_word(scope)} rewrite rule removed — #{Rules.rule_phrase(r.name, r.target, r.part, r.pattern)}")
+      end
       ok
     end
 
@@ -362,6 +385,10 @@ module Gori
           @store.set_rule_enabled(id, !rule.enabled?)
         end
       refresh
+      # Enabling and disabling is the same act as installing and removing, as far as what
+      # actually rewrites traffic is concerned.
+      state = rule.enabled? ? "disabled" : "enabled"
+      ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule.name, rule.target, rule.part, rule.pattern)}") if ok
       ok
     end
 

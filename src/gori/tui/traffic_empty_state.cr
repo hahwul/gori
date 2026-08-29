@@ -105,6 +105,7 @@ module Gori::Tui
       when :notes                                           then 5 + 1
       when :project_desc                                    then 5 + 1
       when :project_scope, :project_overrides, :project_env then 5 + 1
+      when :project_activity                                then 5 + 1
       else                                                       0 # unknown variant — render_full draws nothing, as before
       end
     end
@@ -113,7 +114,8 @@ module Gori::Tui
     # All are panes reached by a sub-tab that already names them on its chip (and the three
     # Project list panes sit inside an outer card that names them AGAIN on its border), so a
     # headline would repeat the label the operator just clicked.
-    CENTERED = {:notes, :project_desc, :project_scope, :project_overrides, :project_env}
+    CENTERED = {:notes, :project_desc, :project_scope, :project_overrides, :project_env,
+                :project_activity}
 
     # Rows the full card needs inside `rect`: its interior plus two borders, plus the headline
     # row that rides above it for every variant except the CENTERED ones.
@@ -148,6 +150,7 @@ module Gori::Tui
       when :project_scope     then "no scope rules yet"
       when :project_overrides then "no host overrides yet"
       when :project_env       then "no env variables yet"
+      when :project_activity  then "no activity recorded yet"
       else                         "nothing here yet"
       end
     end
@@ -177,6 +180,7 @@ module Gori::Tui
       when :project_scope     then render_project_scope_full(screen, rect)
       when :project_overrides then render_project_overrides_full(screen, rect)
       when :project_env       then render_project_env_full(screen, rect)
+      when :project_activity  then render_project_activity_full(screen, rect)
       end
     end
 
@@ -226,6 +230,8 @@ module Gori::Tui
                 medium_project_overrides(headline)
               when :project_env
                 medium_project_env(headline)
+              when :project_activity
+                medium_project_activity(headline)
               else
                 [headline]
               end
@@ -278,6 +284,8 @@ module Gori::Tui
                "a map host→IP · space menu"
              when :project_env
                "a add $KEY · space prefix"
+             when :project_activity
+               "agent calls & job results land here"
              else
                headline
              end
@@ -764,6 +772,25 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
     end
 
+    # Unlike its four neighbours this card asks for nothing: the pane REPORTS. So the bullets
+    # name what makes rows appear rather than a key that would create one, and the sentence
+    # names the half an operator does not expect to be here — the failures that were recorded
+    # without ever raising a notification.
+    private def render_project_activity_full(screen : Screen, rect : Rect) : Nil
+      desc = "What agents and background jobs did to this project."
+      hint = "including hooks and bindings that failed quietly"
+      inner, ix, iw = begin_centered_card(screen, rect, :project_activity, "ACTIVITY",
+        full_inner_h(:project_activity), {Screen.display_width(desc), Screen.display_width(hint)}.max)
+      y = inner.y
+
+      draw_wrapped_message(screen, ix, y, iw, desc)
+      y += 2
+      screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
+      y += 2
+      y = draw_chord_hint(screen, ix, y, iw, " s ", "filter by source", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " space ", "all commands", bullet: "▸ ")
+    end
+
     # `begin_card` for a CENTERED variant: the same figure-and-card block, but centred in the
     # whole rect because these draw no headline. Narrower floor than `begin_card`'s 50 —
     # all sit inside a pane that is otherwise empty, where a wide card reads as chrome.
@@ -880,6 +907,10 @@ module Gori::Tui
 
     private def medium_project_env(headline) : Array(String)
       [headline, "$KEY ──► value on send", "a add var · space prefix"]
+    end
+
+    private def medium_project_activity(headline) : Array(String)
+      [headline, "agents & jobs ──► one log", "s source · l level · ↵ open"]
     end
 
     private def draw_medium_lines(screen : Screen, rect : Rect, lines : Array(String)) : Nil

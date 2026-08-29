@@ -96,7 +96,7 @@ module Gori
       nil
     end
 
-    EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload"
+    EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor"
 
     # #124 forward cursor: events with id strictly AFTER `since_id`, OLDEST-first, up to
     # `limit`. Mirrors ws_messages_after — the AI tails the feed exactly-once from a
@@ -108,6 +108,118 @@ module Gori
         rs.each { rows << read_event(rs) }
       end
       rows
+    end
+
+    # One page of `events_recent`, plus where the next one starts.
+    #
+    # `next_before` is NOT simply "the last row's id": a page can end because the LIMIT filled
+    # OR because the scan window ran out with rows still below it, and the caller must resume
+    # from the window edge in the second case or it would skip everything the window did not
+    # reach. `nil` means the feed genuinely ends here — the only value that may be rendered as
+    # "that's all of it", and the only one an empty page may be described with.
+    # `window` is how many ids the scan covered, so a caller that has to explain an empty page
+    # can name what it actually looked at instead of implying it read the whole feed.
+    record EventPage, rows : Array(EventRow), next_before : Int64?, window : Int32 = 0
+
+    # How far back one `events_recent` page may scan: the store's own retention cap.
+    #
+    # A bound is needed at all because nothing indexes `events` (see `recent_agent_actions`),
+    # so a narrowing that matches nothing cannot short-circuit on the LIMIT and scans until it
+    # runs out of table, on the fiber that paints the screen.
+    #
+    # The SIZE is the retention cap and not a hand-picked slice, and that is the whole design.
+    # Measured on a full 50k-row feed, a filtered backwards scan that matches nothing answers in
+    # ~0.9 ms — so a tighter window buys nothing (5_000 measured SLOWER, once its extra
+    # MAX/MIN lookup is counted) and costs correctness: any match below the window renders as
+    # "no events match", which is a lie about the operator's own project. At the retention cap
+    # the bound cannot truncate a store that is being trimmed, and still bounds the one that is
+    # not — `trim_events` only runs off FLOW inserts, so an MCP-only process that writes events
+    # and captures nothing can grow this table past the cap indefinitely. That is the case this
+    # exists for, and there `next_before` says so rather than reporting the end of the feed.
+    private def event_scan_window : Int32
+      @events_retention
+    end
+
+    # #124 feed, NEWEST-first and narrowed — the human mirror of `events_after`.
+    #
+    # That one is the AI's exactly-once forward cursor: oldest-first, unfiltered, with
+    # `list_events` selecting `source`/`kind` in Crystal AFTER the page is fetched. That shape is
+    # right for a watermark tail and wrong for a screenful — a `source:bindings` narrowing over a
+    # feed of agent rows would hand the pane an empty page while the matches sit two pages down.
+    # So every narrowing here goes into the WHERE, and the scan is bounded instead.
+    #
+    # `levels` is a SET, not a string, because the feed carries two spellings of one level:
+    # every producer writes "warn" except the Sequencer, whose `level.to_s` writes "warning"
+    # (`sequencer_controller.cr`). A filter that matched one would silently hide the other, and
+    # rows already written cannot be respelled.
+    #
+    # Does NOT rescue. `recent_agent_actions` degrades to `[]` because it garnishes a
+    # notification that must go out either way; here the read IS the answer, so a swallowed
+    # error would render as "no activity" — the operator's cue to stop looking.
+    def events_recent(limit : Int32, before_id : Int64? = nil, *,
+                      source : String? = nil, levels : Array(String)? = nil,
+                      actor : String? = nil, query : String? = nil) : EventPage
+      limit = limit.clamp(1, 500)
+      # Both ends of the primary key, in one index-served round trip: `anchor` opens the page
+      # and `min_id` is what decides whether `next_before` names a real place or the end.
+      max_id, min_id = @db.query_one(
+        "SELECT COALESCE(MAX(id), 0), COALESCE(MIN(id), 0) FROM events", as: {Int64, Int64})
+      return EventPage.new([] of EventRow, nil) if max_id == 0
+      anchor = before_id || max_id + 1
+      floor = anchor - event_scan_window
+
+      conds, args = event_narrowing(anchor, floor, source, levels, actor, query)
+      args << limit.to_i64
+
+      rows = [] of EventRow
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE #{conds.join(" AND ")} " \
+                "ORDER BY id DESC LIMIT ?", args: args) do |rs|
+        rs.each { rows << read_event(rs) }
+      end
+      # Filled the page → resume below its last row. Short page → the window, not the feed, is
+      # what ran out, so resume at the window edge (`floor + 1`, since the scan was `id > floor`).
+      nxt = rows.size == limit ? rows.last.id : floor + 1
+      # Both bounds are EXCLUSIVE (`id > floor AND id < anchor`), so the ids actually read are
+      # floor+1 .. anchor-1 — one fewer than `anchor - floor`. The pane renders this number in a
+      # sentence promising it did not look further, so an off-by-one here overstates the scan.
+      scanned = {anchor - 1 - {floor, min_id - 1}.max, 0}.max
+      EventPage.new(rows, nxt <= min_id ? nil : nxt, scanned.to_i32)
+    end
+
+    # The WHERE clause `events_recent` scans under, as `{conditions, args}`. Every narrowing the
+    # pane offers goes into SQL rather than being selected out of a fetched page: filtering
+    # afterwards (which is right for `list_events`' forward cursor) would hand a screenful-sized
+    # page back empty while the matches sat two pages down.
+    private def event_narrowing(anchor : Int64, floor : Int64, source : String?,
+                                levels : Array(String)?, actor : String?,
+                                query : String?) : {Array(String), Array(DB::Any)}
+      conds = ["id < ?", "id > ?"]
+      args = [anchor, floor] of DB::Any
+      if source && !source.empty?
+        conds << "source = ?"
+        args << source
+      end
+      if levels && !levels.empty?
+        conds << "level IN (#{Array.new(levels.size, "?").join(',')})"
+        levels.each { |l| args << l }
+      end
+      if actor && !actor.empty?
+        conds << "actor = ?"
+        args << actor
+      end
+      if query && !query.empty?
+        # The same predicate History's `msg:`/`host:` compile to, over the three text columns a
+        # row is identified by. `payload` is deliberately out: it duplicates the tool name the
+        # message already names, and including it would make an `agent` needle match every row.
+        # `actor` joins the haystack with a COALESCE: it is nullable, and SQLite's `||` makes the
+        # whole concatenation NULL if any operand is, which would drop every un-actored row from
+        # a text search that has nothing to do with the actor.
+        cond, qargs = QL.contains_cond(
+          "source || ' ' || kind || ' ' || message || ' ' || COALESCE(actor, '')", query)
+        conds << cond
+        qargs.each { |a| args << a }
+      end
+      {conds, args}
     end
 
     # The agent actions the feed recorded in the last `since_micros`, NEWEST-first.

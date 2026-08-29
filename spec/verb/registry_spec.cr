@@ -752,6 +752,42 @@ private class FakeContext < ExecContext
     true
   end
 
+  def activity_open : Nil
+    @calls << :activity_open
+  end
+
+  def activity_filter_source : Nil
+    @calls << :activity_filter_source
+  end
+
+  def activity_filter_level : Nil
+    @calls << :activity_filter_level
+  end
+
+  def activity_filter_actor : Nil
+    @calls << :activity_filter_actor
+  end
+
+  def activity_clear_filters : Nil
+    @calls << :activity_clear_filters
+  end
+
+  def activity_clear : Nil
+    @calls << :activity_clear
+  end
+
+  def activity_find : Nil
+    @calls << :activity_find
+  end
+
+  def activity_refresh : Nil
+    @calls << :activity_refresh
+  end
+
+  def activity_row_selected? : Bool
+    true
+  end
+
   def issue_create : Nil
     @calls << :issue_create
   end

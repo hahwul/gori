@@ -9,8 +9,16 @@ module Gori::Tui
   # The notification center: a centered overlay listing recent notifications (newest
   # first). Pure state (the anchored cursor) + render; the injected closures run a note's
   # `goto` and the palette hop. Reads the live store, so a note pushed by a drain while the
-  # center is open appears at once. Chosen over a persistent "Activity" tab — lighter,
-  # and it reuses the existing modal-overlay machinery.
+  # center is open appears at once.
+  #
+  # NOT the same surface as the Project tab's ACTIVITY pane (#864), and the distinction is the
+  # whole layering: `[event log] --(promotion policy)--> [notification ring]`. This ring is the
+  # SPARSE interrupt channel — a hundred entries, in memory, thrown away with the project, and
+  # only what was worth breaking into the operator's attention for. Activity is the FULL
+  # durable log (50k rows in the project db, every agent tool call and every quiet failure), a
+  # query with a filter bar rather than a queue. Their cardinalities differ by orders of
+  # magnitude, so they must not be merged: nothing is promoted out of the ring into the pane,
+  # and the pane pushes nothing into the ring.
   #
   #   ▎ ✓ Miner: 3 params found on GET /api/x          3s
   #     ⚠ Repeater: upstream timeout                      5m

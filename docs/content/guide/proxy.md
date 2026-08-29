@@ -675,8 +675,8 @@ detail rather than whole facts.
 
 
 <figure class="tui-shot">
-  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
-  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
+  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, network, and activity panes">
+  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, per-project network settings, and the activity feed.</figcaption>
 </figure>
 
 | Sub-tab | Purpose |
@@ -686,6 +686,7 @@ detail rather than whole facts.
 | **HOST OVERRIDES** | Per-project dial map |
 | **ENV** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
 | **PROJECT SETTINGS** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
+| **ACTIVITY** | Who changed what on this project — the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too. Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧C` empties the feed (it asks first — the agent audit trail goes with it; the key is shifted so plain `c` still toggles capture here as it does everywhere else). This is where a hook or a session binding that failed *without* raising a notification becomes visible |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 

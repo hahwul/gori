@@ -111,6 +111,7 @@ require "./runner/comparer"
 require "./runner/decoder"
 require "./runner/diff"
 require "./runner/discover"
+require "./runner/activity"
 require "./runner/env"
 require "./runner/external_open"
 require "./runner/fuzzer"
@@ -1284,6 +1285,12 @@ module Gori::Tui
       end
       if @active_tab == :oast && @overlay.none? && @focus == :body && oast_controller.cb_filter_editing?
         return if oast_controller.handle_cb_filter_key(ev)
+      end
+      # The Project ACTIVITY pane's `/` bar (#864). Claimed here for the same reason as the six
+      # above: while it is editing, a typed "s" has to reach the field rather than the keymap,
+      # where it would cycle the source chip out from under the query being written.
+      if @active_tab == :project && @overlay.none? && @focus == :body && project_controller.activity_querying?
+        return if project_controller.handle_activity_query_key(ev)
       end
       # Sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc. Opened
       # from the strip (not the body), so it's not gated on @focus. Generic across the

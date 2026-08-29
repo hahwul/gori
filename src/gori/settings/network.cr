@@ -470,6 +470,17 @@ module Gori::Settings
   # reports commit success; all are attempted so an independently busy row cannot leave the
   # rest of the live edit unapplied — except the three ROUTING rows, which go in one task
   # (below) because they are only meaningful together.
+  # The audit line for `save_project_network`. Its own method because the save is already at the
+  # complexity ceiling, and because the redaction below is a decision worth reading on its own.
+  private def self.log_project_network(store : Store, config : ProjectNetworkConfig,
+                                       auth : ProjectProxyAuth?) : Nil
+    up = config.upstream.strip
+    where = up.empty? ? "no upstream proxy" : "upstream #{Gori::ConfigLog.scrub_url(up)}"
+    creds = auth ? " (with credentials, #{Gori::ConfigLog::REDACTED})" : ""
+    Gori::ConfigLog.record(store, "network",
+      "project network set — bind #{config.bind_host}:#{config.bind_port} · #{where}#{creds}")
+  end
+
   def self.save_project_network(store : Store, config : ProjectNetworkConfig) : Bool
     auth = config.auth
     destination = config.destination_host.strip
@@ -502,6 +513,11 @@ module Gori::Settings
     self.project_connect_timeout_secs = config.connect_secs == connect_timeout_secs ? nil : config.connect_secs
     self.project_io_timeout_secs = config.io_secs == io_timeout_secs ? nil : config.io_secs
     self.project_capture_max_mib = config.capture_mib == capture_max_mib ? nil : config.capture_mib
+    # Where this project's traffic BINDS and where it EGRESSES is the most consequential thing
+    # on the Project settings pane, and it was invisible to the feed. The line names the two
+    # ends and NEVER the credential: `ProjectProxyAuth` carries a password an operator typed
+    # in, and an audit trail that leaks the secret it exists to protect is worse than none.
+    log_project_network(store, config, auth) if persisted
     persisted
   end
 

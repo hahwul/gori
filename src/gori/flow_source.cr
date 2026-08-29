@@ -131,6 +131,21 @@ module Gori
       end
     end
 
+    # THE surface this process is. Set once at the entry point (`gori`, `gori run`, `gori mcp`)
+    # and read by anything that records who acted — today the #864 event feed.
+    #
+    # Ambient rather than threaded through, and the shape of the config seam is why: `Scope#add`
+    # has 26 construction sites and `HostOverrides.load` 33, and every one of the three surfaces
+    # reaches the SAME model object — so a surface passed as an argument would have to be
+    # threaded through five model APIs to arrive somewhere the caller already knew. One process
+    # is one surface (the MCP server is its own process over stdio), so there is nothing here
+    # for two callers to disagree about.
+    #
+    # `nil` until an entry point sets it: a default would make every un-updated path claim to be
+    # a surface it is not, and "not recorded" is the honest answer for a spec harness or a
+    # library caller.
+    class_property surface : Surface? = nil
+
     # The gori surface the request was issued from. Stored as `#token` in
     # `flows.source_surface` (TEXT).
     #

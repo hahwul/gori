@@ -115,12 +115,17 @@ module Gori
       host = OverrideHost.key(host)
       ip = ip.strip
       return false unless HostOverrides.valid?(host, ip)
-      @write_mutex.synchronize do
-        return false if snapshot.any? { |e| e.host == host }
+      added = @write_mutex.synchronize do
+        # `next`, not `return`: the config event is emitted outside the mutex, so the method has
+        # to reach its own end (see `Scope#add` for the same shape).
+        next false if snapshot.any? { |e| e.host == host }
         @store.add_host_override(host, ip)
         reload
         snapshot.any? { |e| e.host == host && e.ip == ip }
       end
+      # A dial map is a redirection of where traffic GOES, so the audit line names both ends.
+      ConfigLog.record(@store, "host_override_add", "host override added — #{host} ──► #{ip}") if added
+      added
     end
 
     # Edit an override in place (by id). Dedupes the host against OTHER entries so a
@@ -129,21 +134,29 @@ module Gori
       host = OverrideHost.key(host)
       ip = ip.strip
       return false unless HostOverrides.valid?(host, ip)
-      @write_mutex.synchronize do
-        return false if snapshot.any? { |e| e.id != id && e.host == host }
+      changed = @write_mutex.synchronize do
+        next false if snapshot.any? { |e| e.id != id && e.host == host }
         committed = @store.update_host_override(id, host, ip)
         reload
         committed # false also when the store write rolled back (busy/locked), not just on dup
       end
+      ConfigLog.record(@store, "host_override_update", "host override changed — #{host} ──► #{ip}") if changed
+      changed
     end
 
     # Returns whether the delete committed (false = store busy/locked/closing).
     def remove(id : Int64) : Bool
-      @write_mutex.synchronize do
+      # Named before the delete — after `reload` there is nothing left to name it with.
+      doomed = snapshot.find { |e| e.id == id }
+      ok = @write_mutex.synchronize do
         committed = @store.remove_host_override(id)
         reload
         committed
       end
+      if ok && (e = doomed)
+        ConfigLog.record(@store, "host_override_remove", "host override removed — #{e.host} ──► #{e.ip}")
+      end
+      ok
     end
 
     # Permitted hostname shape: letters/digits/dot/hyphen/underscore, no spaces. Rejects

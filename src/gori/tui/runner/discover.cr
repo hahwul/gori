@@ -85,14 +85,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # of opening it, not a flourish — `esc` comes back out to History's list.
   def discover_open_flow : Nil
     return unless id = discover_controller.open_flow_target
+    # The row carries an id the persist batch committed, so only a prune (or a retention
+    # sweep) between then and now lands on the miss branch. Say that, rather than "nothing
+    # captured".
+    open_flow_detail(id, "that request was pruned since the run recorded it")
+  end
+
+  # Drive the History controller and raise its detail overlay for one flow id, or toast
+  # `missing` when the row is gone.
+  #
+  # Shared because the Activity pane makes the same hop for an event carrying a `flow_id`, and
+  # the three fields it sets are not independent: the detail overlay's own navigation is gated
+  # on `@active_tab == :history`, so a second copy that drifts breaks the arrows silently
+  # rather than loudly. Lives here, on the Runner, because the tab switch and the overlay are
+  # the shell's to set — a controller cannot write either.
+  def open_flow_detail(id : Int64, missing : String) : Nil
     if history_controller.view.open_detail_id(id, @session.store)
       @active_tab = :history
       @focus = :body
       @overlay = OverlayKind::Detail
     else
-      # The row carries an id the persist batch committed, so only a prune (or a retention
-      # sweep) between then and now lands here. Say that, rather than "nothing captured".
-      @toast = "that request was pruned since the run recorded it"
+      @toast = missing
     end
   end
 
