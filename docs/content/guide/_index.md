@@ -18,6 +18,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 
 - **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
 - **[JWT](/guide/jwt/)**: decode, re-sign, and attack JSON Web Tokens.
+- **[Cookie](/guide/cookie/)**: decode, verify, crack, and re-sign Flask / Rack / Django session cookies.
 - **[Sequencer](/guide/sequencer/)**: grade the randomness of session and CSRF tokens.
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
 - **[Authorize](/guide/authorize/)**: replay a request under several identities to find broken access control.
@@ -50,6 +51,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Sequencer** | Token randomness / predictability analysis (hidden by default) |
 | **Decoder** | Encode / decode / hash pipeline |
 | **JWT** | Decode, re-sign, and attack JSON Web Tokens (hidden by default) |
+| **Cookie** | Decode, verify, crack, and re-sign Flask / Rack / Django session cookies (hidden by default) |
 | **Comparer** | Side-by-side diff of two flows |
 | **Rewriter** | Match & Replace rules that rewrite traffic in flight |
 | **Colormarker** | Row-colour rules for History, by query (hidden by default) |
@@ -59,4 +61,4 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Some tabs are hidden on a fresh install (Miner, Sequencer, JWT, Colormarker, Authorize) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Miner, Sequencer, Cookie, Colormarker, Authorize) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

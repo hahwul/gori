@@ -95,6 +95,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :fuzzer   then fuzzer_controller.fuzz_new
     when :decoder  then decoder_controller.decoder_new
     when :jwt      then jwt_controller.jwt_new
+    when :cookie   then cookie_controller.cookie_new
     when :notes    then notes_controller.notes_new
     when :comparer then comparer_controller.comparer_new
     end
@@ -104,8 +105,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
   private def subtab_new_supported? : Bool
     case @active_tab
-    when :repeater, :fuzzer, :decoder, :jwt, :notes, :comparer then true
-    else                                                            false
+    when :repeater, :fuzzer, :decoder, :jwt, :cookie, :notes, :comparer then true
+    else                                                                     false
     end
   end
 
@@ -117,6 +118,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :sequencer then sequencer_controller.request_close
     when :decoder   then decoder_controller.decoder_close
     when :jwt       then jwt_controller.jwt_close
+    when :cookie    then cookie_controller.cookie_close
     when :notes     then notes_controller.notes_close
     when :comparer  then comparer_controller.comparer_close
     end

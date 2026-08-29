@@ -20,6 +20,7 @@ module Gori::Tui
         Destination.new("Decoder", 'd', :decoder, "decode / encode input"),
         Destination.new("Sequencer", 's', :sequencer, "analyze tokens"),
         Destination.new("JWT", 'j', :jwt, "decode / re-sign / attack a token"),
+        Destination.new("Cookie", 'k', :cookie, "decode / verify / crack / forge a session cookie"),
       ]
     end
   end

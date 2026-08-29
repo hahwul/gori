@@ -41,6 +41,7 @@ module Gori
       Comparer      # the Comparer tab has focus
       Decoder       # the Decoder tab has focus
       Jwt           # the JWT workbench tab has focus
+      Cookie        # the Cookie workbench tab has focus (framework signed session cookies)
       Notes         # the Notes tab has focus (sub-tab strip space menu)
       ProjectDesc   # the Project tab's DESCRIPTION pane has focus (read mode)
       Project       # the Project tab's SCOPE rule list has focus

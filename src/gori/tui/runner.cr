@@ -29,6 +29,7 @@ require "./controllers/sequencer_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
+require "./controllers/cookie_controller"
 require "./controllers/rewriter_controller"
 require "./controllers/colormarker_controller"
 require "./controllers/authorize_controller"
@@ -119,6 +120,7 @@ require "./runner/intercept"
 require "./runner/intercept_bridge"
 require "./runner/issues"
 require "./runner/jwt"
+require "./runner/cookie"
 require "./runner/links"
 require "./runner/miner"
 require "./runner/mouse"
@@ -197,7 +199,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove repeater tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | JwtView | MinerView | SequencerView | ComparerView?)
+      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | JwtView | CookieView | MinerView | SequencerView | ComparerView?)
       # The Repeater sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
@@ -324,6 +326,7 @@ module Gori::Tui
         ComparerController.new(self),
         DecoderController.new(self),
         JwtController.new(self),
+        CookieController.new(self),
         RewriterController.new(self),
         ColormarkerController.new(self),
         AuthorizeController.new(self),
@@ -415,6 +418,10 @@ module Gori::Tui
 
     private def jwt_controller : JwtController
       @tabs[:jwt].as(JwtController)
+    end
+
+    private def cookie_controller : CookieController
+      @tabs[:cookie].as(CookieController)
     end
 
     private def rewriter_controller : RewriterController
@@ -1825,6 +1832,7 @@ module Gori::Tui
           case dest.tab
           when :decoder   then decoder_controller.decoder_from_text(sp.payload)
           when :jwt       then jwt_controller.jwt_from_text(sp.payload)
+          when :cookie    then cookie_controller.cookie_from_text(sp.payload)
           when :sequencer then sequencer_controller.sequence_from_text(sp.payload)
           end
         end
@@ -3248,7 +3256,8 @@ module Gori::Tui
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
       @active_tab == :repeater || @active_tab == :fuzzer || @active_tab == :decoder ||
-        @active_tab == :jwt || @active_tab == :miner || @active_tab == :sequencer || @active_tab == :comparer
+        @active_tab == :jwt || @active_tab == :cookie || @active_tab == :miner ||
+        @active_tab == :sequencer || @active_tab == :comparer
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -3261,6 +3270,7 @@ module Gori::Tui
              when :fuzzer    then fuzzer_controller.view_at(idx)
              when :decoder   then decoder_controller.view_at(idx)
              when :jwt       then jwt_controller.view_at(idx)
+             when :cookie    then cookie_controller.view_at(idx)
              when :miner     then miner_controller.view_at(idx)
              when :sequencer then sequencer_controller.view_at(idx)
              when :comparer  then comparer_controller.view_at(idx)
@@ -3288,6 +3298,7 @@ module Gori::Tui
       when FuzzerView    then fuzzer_controller.apply_rename(v, name)
       when DecoderView   then decoder_controller.apply_rename(v, name)
       when JwtView       then jwt_controller.apply_rename(v, name)
+      when CookieView    then cookie_controller.apply_rename(v, name)
       when MinerView     then miner_controller.apply_rename(v, name)
       when SequencerView then sequencer_controller.apply_rename(v, name)
       when ComparerView  then comparer_controller.apply_rename(v, name)
@@ -4607,6 +4618,7 @@ module Gori::Tui
       when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
       when :decoder   then decoder_controller.decoder_selection_active?
       when :jwt       then jwt_controller.jwt_selection_active?
+      when :cookie    then cookie_controller.cookie_selection_active?
       when :issues    then issues_controller.issues_notes_selection_active?
       when :project   then project_controller.project_desc_selection_active?
       when :rewriter  then rewriter_controller.rewriter_selection_active?
@@ -4634,6 +4646,7 @@ module Gori::Tui
       when :fuzzer    then fuzzer_controller.fuzzer_selection_text
       when :decoder   then decoder_controller.decoder_selection_text
       when :jwt       then jwt_controller.jwt_selection_text
+      when :cookie    then cookie_controller.cookie_selection_text
       when :issues    then issues_controller.issues_notes_selection_text
       when :project   then project_controller.project_desc_selection_text
       when :rewriter  then rewriter_controller.rewriter_selection_text
@@ -4657,6 +4670,7 @@ module Gori::Tui
       when :fuzzer    then fuzzer_controller.fuzzer_select_line
       when :decoder   then decoder_controller.decoder_select_line
       when :jwt       then jwt_controller.jwt_select_line
+      when :cookie    then cookie_controller.cookie_select_line
       when :issues    then issues_controller.issues_notes_select_line
       when :project   then project_controller.project_desc_select_line
       when :rewriter  then rewriter_controller.rewriter_select_line
@@ -4678,6 +4692,7 @@ module Gori::Tui
       when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
       when :decoder   then decoder_controller.decoder_clear_selection
       when :jwt       then jwt_controller.jwt_clear_selection
+      when :cookie    then cookie_controller.cookie_clear_selection
       when :issues    then issues_controller.issues_notes_clear_selection
       when :project   then project_controller.project_desc_clear_selection
       when :rewriter  then rewriter_controller.rewriter_clear_selection
@@ -4703,6 +4718,7 @@ module Gori::Tui
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :jwt      then jwt_copy
+      when :cookie   then cookie_copy
       when :issues   then read_selection_active? ? issues_copy : issues_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
         # One delegator, not the selection/all pair: the pane's own copy verb already picks

@@ -25,7 +25,7 @@ One session, two views, toggled with `Ctrl-T`. The top card of each lens carries
 
 Press `l` to load the token currently decoded on the Decode side into the Encode editors, so you can tweak a claim and re-sign in two moves. Copy any result with `y`.
 
-> A signature is decoded and shown but **never verified**, so a decode tells you what a token claims, not whether it is trusted. Encode genuinely signs with the secret and algorithm you give it (the first and only HMAC in gori).
+> A signature is decoded and shown but **never verified**, so a decode tells you what a token claims, not whether it is trusted. Encode genuinely signs with the secret and algorithm you give it. (The [Cookie](/guide/cookie/) tab is the sibling that both verifies and re-signs.)
 
 ## Attack Payloads
 

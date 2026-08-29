@@ -180,6 +180,21 @@ module Gori::Tui
         Item.new("↑/↓ · ↵", "attacks: select · copy the selected payload"),
         Item.new("^N / ^W", "new / close a sub-tab"),
       ]},
+      {"COOKIE", [
+        Item.new("^T", "switch decode ⟷ forge", "cookie.toggle-mode"),
+        Item.new("^A", "cycle the format (auto / flask / rack / django)", "cookie.cycle-format"),
+        # No verb id: cookie.cycle-algorithm has no chord (^G is the shell's go-to-line key), so
+        # the OPTIONS `algo` badge is click-only, plus `Space → g` and the palette. A verb id here
+        # would make build_rows print a key that does not fire.
+        Item.new("algo badge / Space g", "cycle the Django HMAC algorithm (sha256 / sha1)"),
+        Item.new("^L", "clear the session", "cookie.clear"),
+        Item.new("↹", "cycle INPUT → DECODED → OPTIONS → SECRET (decode) / PAYLOAD → OPTIONS → SECRET → OUTPUT (forge)"),
+        Item.new("c", "crack the secret over the SECRET field (a wordlist path or comma list)", "cookie.crack"),
+        Item.new("l", "seed the FORGE payload from the decoded cookie (space menu)", "cookie.load-decoded"),
+        # Same literal-`y` reasoning as the JWT row above — see the note there.
+        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y while typing an editable pane"),
+        Item.new("^N / ^W", "new / close a sub-tab"),
+      ]},
       {"OAST", [
         Item.new("^R · ^X", "start listening · stop", "oast.listen"),
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
@@ -287,6 +302,7 @@ module Gori::Tui
       :sequencer   => "SEQUENCER",
       :decoder     => "DECODER",
       :jwt         => "JWT",
+      :cookie      => "COOKIE",
       :comparer    => "COMPARER",
       :rewriter    => "REWRITER",
       :colormarker => "COLORMARKER",

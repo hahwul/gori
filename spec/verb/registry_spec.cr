@@ -1285,6 +1285,62 @@ private class FakeContext < ExecContext
     false
   end
 
+  def cookie_new : Nil
+    @calls << :cookie_new
+  end
+
+  def cookie_close : Nil
+    @calls << :cookie_close
+  end
+
+  def cookie_rename_subtab : Nil
+    @calls << :cookie_rename_subtab
+  end
+
+  def cookie_duplicate_subtab : Nil
+    @calls << :cookie_duplicate_subtab
+  end
+
+  def cookie_clear : Nil
+    @calls << :cookie_clear
+  end
+
+  def cookie_toggle_mode : Nil
+    @calls << :cookie_toggle_mode
+  end
+
+  def cookie_cycle_format : Nil
+    @calls << :cookie_cycle_format
+  end
+
+  def cookie_cycle_algorithm : Nil
+    @calls << :cookie_cycle_algorithm
+  end
+
+  def cookie_crack : Nil
+    @calls << :cookie_crack
+  end
+
+  def cookie_load_decoded : Nil
+    @calls << :cookie_load_decoded
+  end
+
+  def cookie_copy : Nil
+    @calls << :cookie_copy
+  end
+
+  def cookie_copy_all : Nil
+    @calls << :cookie_copy_all
+  end
+
+  def cookie_copy_output : Nil
+    @calls << :cookie_copy_output
+  end
+
+  def cookie_read_mode? : Bool
+    false
+  end
+
   def rewriter_add : Nil
     @calls << :rewriter_add
   end
