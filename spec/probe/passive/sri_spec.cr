@@ -152,4 +152,22 @@ describe Gori::Probe::Passive::Sri do
       sri(store, body).map(&.evidence).should eq(["a.example.com", "b.example.com"])
     end
   end
+  it "ignores a commented-out third-party <script src> (the browser never fetches it)" do
+    with_store do |store|
+      body = <<-HTML
+        <html><head>
+        <!-- disabled for now: <script src="https://old-analytics.example/t.js"></script> -->
+        <script src="https://cdn.example/app.js"></script>
+        </head><body>hi</body></html>
+        HTML
+      sri(store, body).map(&.evidence).should eq(["cdn.example"])
+    end
+  end
+
+  it "still reports a tag that follows the comment's close" do
+    with_store do |store|
+      body = %(<html><head><!-- note --><script src="https://cdn.example/app.js"></script></head></html>)
+      sri(store, body).map(&.evidence).should eq(["cdn.example"])
+    end
+  end
 end

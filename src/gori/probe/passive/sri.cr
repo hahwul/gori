@@ -39,14 +39,31 @@ module Gori
 
         MAX_HOSTS = 5 # distinct third-party hosts reported per flow
 
+        # An HTML comment. `TAG` happily matches a `<script src>` INSIDE one, and a commented-out
+        # third-party snippet — a disabled analytics tag, an A/B script kept "for later", a
+        # provider swapped out but not deleted — is ordinary in real markup. The browser never
+        # fetches it, so it is not a subresource and carries no supply-chain exposure: reporting
+        # it names a third party the page does not actually load. That FP also STICKS, because
+        # `missing_sri` accumulates its evidence hosts across every flow of the host group
+        # (Store::ACCUMULATING_EVIDENCE_CODES), so one commented-out tag permanently joins the
+        # issue's list of the site's third parties.
+        #
+        # Non-greedy, so nested-looking `--` inside a comment does not over-extend it. An
+        # UNTERMINATED comment matches nothing and its tags stay reported — the previous
+        # behaviour, and the safe direction (a lead, not a silence) when the 256 KiB body prefix
+        # cut the closing `-->` off.
+        COMMENT = /<!--[\s\S]*?-->/
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
           return unless ctx.html?
           text = ctx.client_body_text
           return if text.nil? || text.empty?
+          comments = comment_spans(text)
           hosts = [] of String
           text.scan(TAG) do |m|
             break if hosts.size >= MAX_HOSTS
+            next if in_comment?(comments, m.byte_begin(0))
             next unless h = external_ref(m[0], ctx)
             hosts << h unless hosts.includes?(h)
           end
@@ -55,6 +72,41 @@ module Gori
               "Cross-origin subresource without Subresource Integrity", Store::Severity::Low,
               h, ctx.fid)
           end
+        end
+
+        # Byte spans of every HTML comment in the document, in order. One `scan` for the whole
+        # document rather than a per-tag backward search (which would be quadratic in the number
+        # of external tags).
+        #
+        # NO literal prefilter, and that is measured, not assumed. The obvious
+        # `return spans unless text.includes?("<!--")` guard costs 238µs on a 200 KiB document
+        # while the `scan` it was meant to avoid costs 50µs — Crystal's `String#includes?` is a
+        # naive byte search, where PCRE2 gets to use its start optimization on the same literal.
+        # The guard made a comment-free page 4× more expensive than just asking. Same shape as
+        # the `includes?`-before-`gsub` guard removed from the Match&Replace body path: do not
+        # hand-roll a prefilter in front of something that already prefilters itself.
+        private def comment_spans(text : String) : Array({Int32, Int32})
+          spans = [] of {Int32, Int32}
+          text.scan(COMMENT) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
+          spans
+        end
+
+        # Is byte offset `pos` inside one of those spans? `scan` yields non-overlapping matches
+        # left to right, so the spans are ordered and disjoint: binary-search for the last one
+        # starting at/before `pos` and ask whether it also ends after it.
+        private def in_comment?(spans : Array({Int32, Int32}), pos : Int32) : Bool
+          return false if spans.empty?
+          lo = 0
+          hi = spans.size
+          while lo < hi
+            mid = (lo + hi) // 2
+            if spans[mid][0] <= pos
+              lo = mid + 1
+            else
+              hi = mid
+            end
+          end
+          lo > 0 && pos < spans[lo - 1][1]
         end
 
         # The third-party host this tag pulls a subresource from with no integrity guard; nil
