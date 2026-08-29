@@ -971,15 +971,75 @@ kbd {
     0 24px 70px rgb(60 50 30 / 0.2);
 }
 
+/* Status bar: traffic lights, the project name, and the proxy state — the
+   same line the captures draw at their top, redrawn here because the crop
+   below starts under it. Mono, so it reads as terminal output. */
+.showcase-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem 0.5rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.showcase-bar-sp {
+  flex: 1 1 auto;
+}
+
+.showcase-bar-dim {
+  color: var(--quiet);
+}
+
+.showcase-brand {
+  margin-left: 0.5rem;
+  color: var(--accent);
+  font-family: "STIX Two Math", "Cambria Math", "Apple Symbols", Georgia, serif;
+  font-size: 0.9rem;
+}
+
+/* The proxy listener: a live green pip, as in the running TUI. */
+.showcase-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--syn-string);
+}
+
+.showcase-live i {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The full TUI tab order lives here, so on anything narrower than a desktop
+   the strip scrolls. The mask fades the trailing edge to say so without
+   spending a scrollbar on it; home.js scrolls the picked tab into view and
+   wires ←/→, so the row is reachable by keyboard too. */
 .showcase-tabs {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.55rem 0.8rem;
+  gap: 0.1rem;
+  padding: 0 0.8rem 0.55rem;
   border-bottom: 1px solid var(--line);
-  background: rgb(var(--ink-rgb) / 0.03);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+  -webkit-mask: linear-gradient(90deg, #000 calc(100% - 2.2rem), transparent 100%);
+  mask: linear-gradient(90deg, #000 calc(100% - 2.2rem), transparent 100%);
+}
+
+/* Once the whole row fits there is nothing to scroll to, so drop the fade. */
+@media (min-width: 1240px) {
+  .showcase-tabs {
+    -webkit-mask: none;
+    mask: none;
+  }
 }
 
 .showcase-tabs::-webkit-scrollbar {
@@ -989,7 +1049,6 @@ kbd {
 .showcase-dots {
   display: inline-flex;
   gap: 0.36rem;
-  margin-right: 0.8rem;
   flex: none;
 }
 
@@ -1002,13 +1061,13 @@ kbd {
 
 .showcase-tabs button {
   flex: none;
-  padding: 0.3rem 0.72rem;
+  padding: 0.3rem 0.6rem;
   border: 1px solid transparent;
   border-radius: 7px;
   background: none;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1;
   cursor: pointer;
   transition: color var(--transition), background var(--transition), border-color var(--transition);
@@ -1026,14 +1085,18 @@ kbd {
   font-weight: 700;
 }
 
-/* Every capture is cut to the History shot's 1206:520 box so switching tabs
-   never reflows the page; the taller Fuzzer capture crops from the top, which
-   keeps its marked request and payload rows in view. The SVGs draw their own
-   window chrome — pushed up under the tab row so the two chromes read as one
-   frame instead of stacking. */
+/* Every capture is cut to one box so switching tabs never reflows the page;
+   the taller Fuzzer capture crops from the top, which keeps its marked
+   request and payload rows in view.
+
+   The crop starts at y=126 of the 1206-wide capture, which is below the SVG's
+   own window chrome, top bar AND tab row (that row sits at y≈119.68 in all of
+   them, verified across the set). The strip above is therefore the terminal's
+   only tab row — drawn in HTML so it can be clicked — instead of a second one
+   stacked over the captured one. */
 .showcase-screen {
   position: relative;
-  aspect-ratio: 1206 / 485;
+  aspect-ratio: 1206 / 394;
   overflow: hidden;
   background: var(--pre-bg);
 }
@@ -1041,7 +1104,7 @@ kbd {
 .showcase-screen img {
   width: 100%;
   height: auto;
-  margin-top: calc(-35 / 1206 * 100%);
+  margin-top: calc(-126 / 1206 * 100%);
 }
 
 .showcase-note {
@@ -1202,7 +1265,7 @@ kbd {
   top: 50%;
   max-width: 800px;
   height: auto;
-  transform: translate(-50%, -50%);
+  transform: translate(-20%, -50%);
   border-radius: 9px;
   box-shadow: 0 22px 55px rgb(0 0 0 / 0.55);
   outline: 1px solid rgb(255 255 255 / 0.08);
