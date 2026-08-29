@@ -2828,7 +2828,6 @@ nav.pagination a:hover,
   align-items: center;
   justify-content: center;
   gap: 0.35rem 0.6rem;
-  margin-top: var(--space-4);
   font-size: 0.82rem;
 }
 
