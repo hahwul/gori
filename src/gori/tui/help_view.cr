@@ -474,7 +474,7 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      list = render_search_bar(screen, rect, :shortcuts)
+      list = render_search_bar(screen, rect, :shortcuts, focused)
       rows = visible_rows(:shortcuts, @rows)
       clamp_scroll(list.h, rows.size)
       if rows.empty?
@@ -550,9 +550,9 @@ module Gori::Tui
       @query_scroll == 0
     end
 
-    def render_query(screen : Screen, rect : Rect) : Nil
+    def render_query(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      list = render_search_bar(screen, rect, :query)
+      list = render_search_bar(screen, rect, :query, focused)
       rows = visible_rows(:query, query_rows)
       @query_scroll = @query_scroll.clamp(0, {rows.size - list.h, 0}.max)
       if rows.empty?
@@ -573,12 +573,22 @@ module Gori::Tui
     # The full Help pane keeps the search affordance visible on both reference pages. Unlike
     # the popup it is already inside a framed body, so one compact row is enough; the list
     # begins immediately below it.
-    private def render_search_bar(screen : Screen, rect : Rect, page : Symbol) : Rect
+    #
+    # Only a FOCUSED search field claims the hardware caret. Tab is the shell's focus-ring key
+    # and is consumed by the runner before `handle_body_key`, so an active search survives a
+    # step out to the strip or tab bar; without this gate the pane would keep stamping
+    # `desired_cursor` (and anchoring the terminal's IME composition) inside an unfocused body.
+    private def render_search_bar(screen : Screen, rect : Rect, page : Symbol, focused : Bool) : Rect
       screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
       if @search_page == page
         px = screen.text(rect.x + 1, rect.y, "search: ", Theme.accent, Theme.bg)
-        screen.input_line(px, rect.y, @search_query, @search_query.size, @search_preedit,
-          Theme.text_bright, Theme.bg, width: {rect.right - px - 1, 1}.max)
+        w = {rect.right - px - 1, 1}.max
+        if focused
+          screen.input_line(px, rect.y, @search_query, @search_query.size, @search_preedit,
+            Theme.text_bright, Theme.bg, width: w)
+        else
+          screen.text(px, rect.y, @search_query, Theme.text_bright, Theme.bg, width: w)
+        end
       else
         screen.text(rect.x + 1, rect.y, "/ search", Theme.muted, Theme.bg, width: {rect.w - 2, 1}.max)
       end

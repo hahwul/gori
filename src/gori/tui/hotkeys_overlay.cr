@@ -117,7 +117,7 @@ module Gori::Tui
 
     def hint : String
       return "press a key to bind · esc cancel" if capturing?
-      return "type to search · ↑/↓ select · ↵ jump · esc cancel" if searching?
+      return "type to search · ↑/↓ select · ↵ jump · esc clear" if searching?
       "↑/↓ select · / search · e/␣ rebind · x/⌫ unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc cancel"
     end
 
@@ -469,6 +469,9 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
+        # No card, but the overlay still owns the screen: clear the caret the pane underneath
+        # drew, or it blinks on through the "larger window" message.
+        screen.desired_cursor = nil
         screen.text(area.x + 1, area.y, "hotkeys editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
         return
       end

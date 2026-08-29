@@ -92,13 +92,20 @@ module Gori::Tui
       @current
     end
 
+    # Both cancel an active body search only when the page ACTUALLY changes. The strip's
+    # `step_left_or_find` calls `move_subtab(-1)` as a probe — "am I on the first chip?" is
+    # answered by whether the index moved — so an unconditional cancel here would discard a
+    # typed query on a no-op ← at chip 0.
     def move_subtab(dir : Int32) : Nil
-      @help.cancel_search
-      @current = (@current + dir).clamp(0, PAGE_LABELS.size - 1)
+      switch_page((@current + dir).clamp(0, PAGE_LABELS.size - 1))
     end
 
     def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < PAGE_LABELS.size
+      switch_page(idx) if 0 <= idx < PAGE_LABELS.size
+    end
+
+    private def switch_page(idx : Int32) : Nil
+      return if idx == @current
       @help.cancel_search
       @current = idx
     end
@@ -115,7 +122,7 @@ module Gori::Tui
         if about_page?
           @help.render_about(screen, content)
         elsif query_page?
-          @help.render_query(screen, content)
+          @help.render_query(screen, content, focused: focused)
         else
           @help.render(screen, content, focused: focused) # Shortcuts
         end
@@ -130,19 +137,39 @@ module Gori::Tui
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       search_page = scrollable_page? ? (query_page? ? :query : :shortcuts) : nil
       return true if @help.handle_search_key(ev, search_page)
-      key = ev.key
-      case
-      when key.escape?              then @host.request_focus(:menu)
-      when key.left?, key.lower_h?  then move_subtab(-1)
-      when key.right?, key.lower_l? then move_subtab(1)
-      when key.up?, key.lower_k?
-        (scrollable_page? && !page_at_top?) ? page_move(-1) : @host.request_focus(:subtabs)
-      when key.down?, key.lower_j?
-        page_move(1)
+      case nav_key(ev)
+      when :escape then @host.request_focus(:menu)
+      when :left   then move_subtab(-1)
+      when :right  then move_subtab(1)
+      when :up     then (scrollable_page? && !page_at_top?) ? page_move(-1) : @host.request_focus(:subtabs)
+      when :down   then page_move(1)
       else
         return false # ^P / space / q / global keys pass through
       end
       true
+    end
+
+    # The body's navigation vocabulary, arrows and vi letters collapsed onto one name.
+    #
+    # The letters are BARE-key navigation, which is what the ctrl/alt gate is for: termisu
+    # decodes ^K/^L as LowerK/LowerL with the ctrl modifier set (unlike ^H/^I/^J, which it
+    # remaps to Backspace/Tab/Enter), so an ungated `lower_l?` answers to a redraw-reflex ^L —
+    # switching pages, and with it discarding a half-typed search — while ^K pops focus to the
+    # strip. Neither should be claimed here at all; both belong to the global keymap.
+    private def nav_key(ev : Termisu::Event::Key) : Symbol?
+      key = ev.key
+      return :escape if key.escape?
+      return :left if key.left?
+      return :right if key.right?
+      return :up if key.up?
+      return :down if key.down?
+      return nil if ev.ctrl? || ev.alt?
+      case
+      when key.lower_h? then :left
+      when key.lower_l? then :right
+      when key.lower_k? then :up
+      when key.lower_j? then :down
+      end
     end
 
     def set_preedit(text : String) : Bool

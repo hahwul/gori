@@ -224,6 +224,17 @@ describe Gori::Tui::HelpPopupOverlay do
     end
   end
 
+  it "drops the pane's caret when the card cannot be drawn at all" do
+    # The QL card opens with `?` straight off a filter bar, so the pane underneath is very
+    # often an editor with a live caret. `render_filter` clears it on the drawn path, but the
+    # too-small path returns before ever reaching it — and the shell hands the hardware cursor
+    # to whatever `desired_cursor` last held, so the caret blinks through the degraded line.
+    screen = Screen.new(MemoryBackend.new(40, 6))
+    screen.cursor(3, 1)
+    shortcuts.render(screen, Rect.new(0, 0, 40, 6))
+    screen.desired_cursor.should be_nil
+  end
+
   describe "key routing" do
     it "hops to the palette on ^P" do
       ov = shortcuts

@@ -270,6 +270,10 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
+        # No card, but the overlay still owns the screen: clear the caret the pane underneath
+        # drew (the QL card opens with `?` straight off a filter bar), or it blinks on through
+        # the "larger window" message.
+        screen.desired_cursor = nil
         screen.text(area.x + 1, area.y, "#{@title.downcase} needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
         return
       end

@@ -110,11 +110,29 @@ describe HotkeysOverlay do
       h = OverlayHarness.new(o)
       start_hotkey_search(h)
       h.type("toggle capture")
+      # The hint has to name THIS esc, not the browse-mode one: here it clears the query and
+      # the card stays up, where in browse mode esc discards the working copy and closes.
+      # The popup card next door already words the two apart, and a hint that says "cancel"
+      # over a key that does not cancel is the drift the sibling specs exist to catch.
+      o.hint.should contain("esc clear")
+      o.hint.should_not contain("esc cancel")
       h.press(Termisu::Input::Key::Escape).should eq(:open)
       o.searching?.should be_false
+      o.hint.should contain("esc cancel")
       o.unbind_selected
       o.to_working[0].keys.first.should eq(expected)
       h.press(Termisu::Input::Key::Escape).should eq(:closed)
+    end
+
+    it "drops the pane's caret when the terminal is too small to draw the card at all" do
+      # The degraded line is the only thing on screen, but the pane underneath has already
+      # drawn its own editor caret into this frame — and the shell hands the hardware cursor
+      # to whatever `desired_cursor` last held. Without clearing it here the caret blinks
+      # through the "larger window" message, at a column belonging to a hidden pane.
+      screen = Screen.new(MemoryBackend.new(30, 6))
+      screen.cursor(4, 2)
+      fresh_overlay.render(screen, Rect.new(0, 0, 30, 6))
+      screen.desired_cursor.should be_nil
     end
 
     it "keeps search open and safe when nothing matches" do
