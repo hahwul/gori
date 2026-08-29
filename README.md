@@ -172,9 +172,12 @@ If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is miss
 
 ## Contributors
 
-- [hahwul](https://github.com/hahwul) — creator and maintainer
+[![The people who built gori, with what each of them contributed](docs/static/CONTRIBUTORS.svg)](https://github.com/hahwul/gori/graphs/contributors)
 
 Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md) to get set up.
+Not every kind of help lands as a commit, so the line under each name says what it was: the bug
+reports and reproductions up there found things gori would not have found on its own. To credit
+someone, edit [`.github/contributor-mural.yml`](.github/contributor-mural.yml).
 
 ## Why "gori"?
 

@@ -1,0 +1,30 @@
+---
+name: Contributor mural
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mural
+  cancel-in-progress: true
+
+jobs:
+  mural:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The wall follows the contributors API, so any push to main can move it.
+      # Avatar changes happen on GitHub's side and never reach this repo as a
+      # push, so pick those up by running the workflow by hand.
+      - name: Render the contributor mural
+        uses: crystal-actions/contributor-mural@v1
+        with:
+          config: .github/contributor-mural.yml
+          commit_message: "chore: update the contributor mural"
