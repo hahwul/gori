@@ -48,6 +48,10 @@ module Gori::Tui
       @profile = "auto"
       @selected = 0
       @mode = :browse
+      @visible = [] of Int32
+      @search_query = ""
+      @search_preedit = ""
+      @search_origin = 0
       @feedback = nil.as(String?)
       @feedback_kind = :hint
       reset
@@ -61,6 +65,10 @@ module Gori::Tui
       @profile = Hotkeys.os_profile
       @selected = @rows.index { |r| r.kind == :binding } || 0
       @mode = :browse
+      @visible = (0...@rows.size).to_a
+      @search_query = ""
+      @search_preedit = ""
+      @search_origin = @selected
       @feedback = nil
       @feedback_kind = :hint
     end
@@ -90,6 +98,10 @@ module Gori::Tui
       @mode == :capture
     end
 
+    def searching? : Bool
+      @mode == :search
+    end
+
     def to_working : {Hash(String, Verb::Chord?), String}
       {@overrides, @profile}
     end
@@ -105,7 +117,8 @@ module Gori::Tui
 
     def hint : String
       return "press a key to bind · esc cancel" if capturing?
-      "↑/↓ select · e/␣ rebind · x/⌫ unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc cancel"
+      return "type to search · ↑/↓ select · ↵ jump · esc clear" if searching?
+      "↑/↓ select · / search · e/␣ rebind · x/⌫ unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc cancel"
     end
 
     # In :capture the shell must route EVERY key here before its own pre-filter, so a
@@ -117,7 +130,9 @@ module Gori::Tui
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      capturing? ? handle_capture_key(ev) : handle_browse_key(ev)
+      return handle_capture_key(ev) if capturing?
+      return handle_search_key(ev) if searching?
+      handle_browse_key(ev)
     end
 
     # :capture — the next key IS the new binding.
@@ -156,6 +171,29 @@ module Gori::Tui
       :stay
     end
 
+    # :search — live-filter the visible binding rows. Enter accepts the current match and
+    # returns to the full editor at that binding; esc cancels back to the row search started
+    # from. Unlike capture, this mode never asks the shell for raw chords.
+    private def handle_search_key(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        on_palette.try(&.call)
+      elsif key.escape?
+        cancel_search
+      elsif key.enter?
+        accept_search
+      elsif key.up?
+        select_move(-1)
+      elsif key.down?
+        select_move(1)
+      elsif key.backspace?
+        search_backspace
+      elsif c = bare_char(ev)
+        search_insert(c)
+      end
+      :stay
+    end
+
     # The printable char of an UNMODIFIED key — nil for a Ctrl/Alt chord. Load-bearing, not
     # defensive noise: `Event::Key#char` falls back to `key.to_char`, so the plain
     # `c = ev.char` this replaces read every Ctrl+letter as the bare letter. ^X ran
@@ -164,11 +202,11 @@ module Gori::Tui
     # (reset), ^E (arm capture) and ^J/^K (move). Every sibling dispatcher already guards
     # this — Runner#handle_palette_key, #handle_space_menu_key,
     # TabController#handle_subtab_filter_key — with the inline `&& !ev.ctrl? && !ev.alt?`;
-    # it is a method here only to keep handle_browse_key under the complexity bar.
+    # it is a method here only to keep the browse/search handlers under the complexity bar.
     #
     # It cannot reach CAPTURE mode, where a Ctrl chord is legitimate input being recorded:
-    # handle_key forks on capturing? first, so this runs only in :browse. ^P is claimed by
-    # an earlier branch, and Shift is untouched, so ⇧R (reset all) still lands.
+    # handle_key forks on capturing? first, so this runs only in :browse/:search. ^P is
+    # claimed by an earlier branch, and Shift is untouched, so ⇧R (reset all) still lands.
     private def bare_char(ev : Termisu::Event::Key) : Char?
       return nil if ev.ctrl? || ev.alt?
       ev.char
@@ -176,6 +214,7 @@ module Gori::Tui
 
     private def handle_char(c : Char) : Nil
       case c
+      when '/'      then begin_search
       when 'e', ' ' then begin_capture
       when 'x'      then unbind_selected
       when 'r'      then reset_selected
@@ -183,6 +222,91 @@ module Gori::Tui
       when 'k'      then select_move(-1)
       when 'j'      then select_move(1)
       end
+    end
+
+    private def begin_search : Nil
+      @search_origin = @selected
+      @mode = :search
+      @search_query = ""
+      @search_preedit = ""
+      @visible = (0...@rows.size).to_a
+      @feedback = nil
+    end
+
+    private def cancel_search : Nil
+      @selected = @search_origin
+      finish_search
+    end
+
+    private def accept_search : Nil
+      return unless selected_visible_binding?
+      finish_search # keep @selected: it is the accepted full-list destination
+    end
+
+    private def finish_search : Nil
+      @mode = :browse
+      @search_query = ""
+      @search_preedit = ""
+      @visible = (0...@rows.size).to_a
+    end
+
+    private def search_insert(ch : Char) : Nil
+      return if ch.control?
+      @search_preedit = ""
+      @search_query += ch
+      refilter
+    end
+
+    private def search_backspace : Nil
+      return if @search_query.empty?
+      @search_preedit = ""
+      @search_query = @search_query[0, @search_query.size - 1]
+      refilter
+    end
+
+    # Match only text the row visibly presents: its scope heading, action title and current
+    # effective binding label. A surviving binding keeps its scope header, while empty scopes
+    # disappear. @visible stores canonical @rows indices so every action still addresses the
+    # same verb after filtering.
+    private def refilter : Nil
+      if @search_query.empty?
+        @visible = (0...@rows.size).to_a
+        return
+      end
+      needle = @search_query.downcase
+      out = [] of Int32
+      header = nil.as(Int32?)
+      @rows.each_with_index do |row, i|
+        if row.kind == :header
+          header = i
+          next
+        end
+        scope = SCOPE_LABEL[row.scope]? || row.scope.to_s.upcase
+        chord = effective_chord(row.verb_id).try(&.label) || "(unbound)"
+        next unless "#{scope} #{row.title} #{chord}".downcase.includes?(needle)
+        if h = header
+          out << h
+          header = nil
+        end
+        out << i
+      end
+      @visible = out
+      return if selected_visible_binding?
+      @selected = visible_binding_indices.first? || @search_origin
+    end
+
+    private def visible_binding_indices : Array(Int32)
+      @visible.select { |i| @rows[i].kind == :binding }
+    end
+
+    private def selected_visible_binding? : Bool
+      @visible.includes?(@selected) && selected_binding?
+    end
+
+    # IME composition belongs only to the explicit search input. Browse is mnemonic-driven,
+    # and capture consumes committed raw chords rather than text composition.
+    def set_preedit(text : String) : Nil
+      @search_preedit = text if searching?
     end
 
     # A click outside dismisses (discards the working copy, like esc); a row click selects
@@ -220,16 +344,18 @@ module Gori::Tui
 
     # --- navigation ---
     def select_move(d : Int32) : Nil
-      i = @selected
-      loop do
-        i += d
-        return if i < 0 || i >= @rows.size
-        if @rows[i].kind == :binding
-          @selected = i
-          @feedback = nil
-          return
-        end
+      bindings = visible_binding_indices
+      return if bindings.empty?
+      pos = bindings.index(@selected)
+      unless pos
+        @selected = d < 0 ? bindings.last : bindings.first
+        @feedback = nil
+        return
       end
+      dest = pos + d
+      return unless 0 <= dest < bindings.size
+      @selected = bindings[dest]
+      @feedback = nil
     end
 
     # Click target: snap to the row, or the nearest binding when a header is hit.
@@ -325,39 +451,51 @@ module Gori::Tui
     # --- geometry (mirrors TabsOverlay; reserves the last interior row for the footer) ---
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 56}.min
-      h = {area.h - 2, @rows.size + 4}.min # top border + gap + list + footer + bottom border
+      h = {area.h - 2, @rows.size + 5}.min # top border + search/divider + list + footer + bottom border
       return nil if w < 32 || h < 7
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
     end
 
     private def list_capacity(box : Rect) : Int32
-      {box.bottom - 2 - (box.y + 2), 0}.max # list ends at box.bottom-3; footer at box.bottom-2
+      {box.bottom - 2 - (box.y + 3), 0}.max # list ends at box.bottom-3; footer at box.bottom-2
     end
 
     private def list_window(cap : Int32) : Int32
-      return 0 if cap <= 0 || @rows.size <= cap
-      { {@selected - cap + 1, 0}.max, @rows.size - cap }.min
+      return 0 if cap <= 0 || @visible.size <= cap
+      selected = @visible.index(@selected) || 0
+      { {selected - cap + 1, 0}.max, @visible.size - cap }.min
     end
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
+        # No card, but the overlay still owns the screen: clear the caret the pane underneath
+        # drew, or it blinks on through the "larger window" message.
+        screen.desired_cursor = nil
         screen.text(area.x + 1, area.y, "hotkeys editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
         return
       end
       Frame.card(screen, box, "HOTKEYS", border: Theme.border_focus)
       prof = "profile: #{Hotkeys.profile_label(@profile)}"
       screen.text({box.right - prof.size - 2, box.x + 12}.max, box.y, prof, Theme.muted, Theme.panel)
+      render_search(screen, box)
+      Frame.tee_divider(screen, box, box.y + 2)
 
-      top = box.y + 2
+      top = box.y + 3
       cap = list_capacity(box)
       start = list_window(cap)
+      if @visible.empty?
+        screen.text(box.x + 3, top, "no hotkeys match", Theme.muted, Theme.panel)
+        render_footer(screen, box)
+        return
+      end
       cap.times do |row|
-        i = start + row
-        break if i >= @rows.size
+        vi = start + row
+        break if vi >= @visible.size
+        i = @visible[vi]
         r = @rows[i]
         up = row == 0 && start > 0
-        down = row == cap - 1 && i < @rows.size - 1
+        down = row == cap - 1 && vi < @visible.size - 1
         if r.kind == :header
           draw_header(screen, box, r, top + row)
           # The boundary viewport row can land on a header; still show the ▲/▼ affordance
@@ -368,6 +506,17 @@ module Gori::Tui
         end
       end
       render_footer(screen, box)
+    end
+
+    private def render_search(screen : Screen, box : Rect) : Nil
+      unless searching?
+        screen.text(box.x + 2, box.y + 1, "/ search", Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
+        screen.desired_cursor = nil # the card is browsing, even if the pane underneath edits
+        return
+      end
+      px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
+      screen.input_line(px, box.y + 1, @search_query, @search_query.size, @search_preedit,
+        Theme.text_bright, Theme.panel, width: {box.right - 2 - px, 1}.max)
     end
 
     private def draw_header(screen : Screen, box : Rect, r : Row, ry : Int32) : Nil
@@ -424,7 +573,7 @@ module Gori::Tui
                       else             {'·', Theme.muted}
                       end
         screen.text(box.x + 2, ry, "#{mark} #{fb}", color, Theme.panel, width: {box.w - 4, 1}.max)
-      elsif (r = @rows[@selected]?) && r.kind == :binding && (v = @registry[r.verb_id]?)
+      elsif selected_visible_binding? && (r = @rows[@selected]?) && (v = @registry[r.verb_id]?)
         # Retagged: a description may name a claimed chord (settings.editor's "opened by ^E"),
         # and this is the one surface that renders verb descriptions.
         screen.text(box.x + 2, ry, Hotkeys.retag(v.description), Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
@@ -435,10 +584,10 @@ module Gori::Tui
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
       cap = list_capacity(box)
-      row = my - (box.y + 2)
+      row = my - (box.y + 3)
       return nil if row < 0 || row >= cap
-      i = list_window(cap) + row
-      return nil unless i < @rows.size
+      vi = list_window(cap) + row
+      return nil unless i = @visible[vi]?
       @rows[i].kind == :binding ? i : nil
     end
   end

@@ -302,6 +302,12 @@ module Gori::Tui
 
     @rows : Array(Row)
     @scroll : Int32 = 0
+    @search_page : Symbol? = nil
+    @search_query = ""
+    @search_preedit = ""
+    @search_origin_scroll : Int32 = 0
+
+    getter search_query : String
 
     def initialize(registry : Verb::Registry? = nil)
       @rows = HelpView.shortcut_rows(registry)
@@ -309,6 +315,7 @@ module Gori::Tui
 
     # Rebuild from the live registry (call after a hotkeys save so Help stays honest).
     def reload(registry : Verb::Registry) : Nil
+      cancel_search
       @rows = HelpView.shortcut_rows(registry)
       @scroll = 0
     end
@@ -336,6 +343,124 @@ module Gori::Tui
       rows
     end
 
+    # Filter a grouped reference list while retaining the heading for every surviving item.
+    # The Help tab and its popup use the same projection so `/` cannot disagree between the
+    # two surfaces about what a query matches or leave empty headings behind.
+    def self.search_rows(rows : Array(Row), query : String) : Array(Row)
+      return rows if query.empty?
+      needle = query.downcase
+      out = [] of Row
+      head = nil.as(Row?)
+      rows.each do |row|
+        case row.kind
+        when :head
+          head = row
+        when :item
+          next unless "#{row.a} #{row.b}".downcase.includes?(needle)
+          if h = head
+            out << h
+            head = nil
+          end
+          out << row
+        end
+      end
+      out
+    end
+
+    def searching? : Bool
+      !@search_page.nil?
+    end
+
+    def cancel_search : Nil
+      if page = @search_page
+        restore_search_scroll(page)
+      end
+      @search_page = nil
+      @search_query = ""
+      @search_preedit = ""
+    end
+
+    # Active search claims text and its own escape/navigation vocabulary before the Help
+    # controller's h/l page switching. Modified chords still fall through to the global
+    # keymap (^P, ^B, …), and Tab remains the shell's focus-ring key.
+    def handle_search_key(ev : Termisu::Event::Key, current_page : Symbol? = nil) : Bool
+      return start_search_key(ev, current_page) unless page = @search_page
+      handle_active_search_key(ev, page)
+    end
+
+    private def start_search_key(ev : Termisu::Event::Key, page : Symbol?) : Bool
+      char = ev.char || ev.key.to_char
+      return false unless (page == :shortcuts || page == :query) && char == '/' && !ev.ctrl? && !ev.alt?
+
+      # Search belongs to the reference page that was visible when `/` was pressed. The
+      # controller cancels it before switching pages, so the query never silently follows the
+      # operator from Shortcuts to the unrelated Query/About page.
+      @search_page = page
+      @search_origin_scroll = page == :query ? @query_scroll : @scroll
+      @search_query = ""
+      @search_preedit = ""
+      true
+    end
+
+    private def handle_active_search_key(ev : Termisu::Event::Key, page : Symbol) : Bool
+      key = ev.key
+      case
+      when key.escape?    then cancel_search
+      when key.up?        then search_move(page, -1)
+      when key.down?      then search_move(page, 1)
+      when key.home?      then search_home(page)
+      when key.end?       then search_move(page, 10_000)
+      when key.backspace? then search_backspace(page)
+      when key.enter?, key.left?, key.right? # inert while the search field owns the pane
+      else
+        return insert_search_key(ev, page)
+      end
+      true
+    end
+
+    private def insert_search_key(ev : Termisu::Event::Key, page : Symbol) : Bool
+      char = ev.char || ev.key.to_char
+      return false unless char && !ev.ctrl? && !ev.alt?
+      return true if char.control?
+      @search_preedit = ""
+      @search_query += char
+      search_home(page)
+      true
+    end
+
+    def set_search_preedit(text : String) : Bool
+      return false unless searching?
+      @search_preedit = text
+      true
+    end
+
+    private def search_backspace(page : Symbol) : Nil
+      return if @search_query.empty?
+      @search_preedit = ""
+      @search_query = @search_query[0, @search_query.size - 1]
+      @search_query.empty? ? restore_search_scroll(page) : search_home(page)
+    end
+
+    private def restore_search_scroll(page : Symbol) : Nil
+      if page == :query
+        @query_scroll = @search_origin_scroll
+      else
+        @scroll = @search_origin_scroll
+      end
+    end
+
+    private def search_home(page : Symbol) : Nil
+      if page == :query
+        @query_scroll = 0
+      else
+        @scroll = 0
+      end
+    end
+
+    private def search_move(page : Symbol, delta : Int32) : Nil
+      page == :query ? query_move(delta) : move(delta)
+    end
+
     # Scroll by `delta` lines (the wheel + ↑/↓). render clamps the floor; the top
     # clamp lands in clamp_scroll so a tall pane never scrolls past the last line.
     def move(delta : Int32) : Nil
@@ -349,11 +474,17 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      clamp_scroll(rect.h)
-      (0...rect.h).each do |i|
+      list = render_search_bar(screen, rect, :shortcuts, focused)
+      rows = visible_rows(:shortcuts, @rows)
+      clamp_scroll(list.h, rows.size)
+      if rows.empty?
+        screen.text(list.x + 1, list.y, "no help rows match", Theme.muted, Theme.bg, width: {list.w - 2, 1}.max)
+        return
+      end
+      (0...list.h).each do |i|
         li = @scroll + i
-        break if li >= @rows.size
-        HelpView.draw_row(screen, rect, rect.y + i, @rows[li])
+        break if li >= rows.size
+        HelpView.draw_row(screen, list, list.y + i, rows[li])
       end
     end
 
@@ -384,8 +515,8 @@ module Gori::Tui
     # the "never scroll past the last full page" clamp applies. `@rows` is the built page the
     # draw loop walks — it is rebuilt whole when the sub-tab changes, which is when a stale
     # offset from a longer page would otherwise strand the new one.
-    private def clamp_scroll(h : Int32) : Nil
-      @scroll = Viewport.clamp_scroll(@scroll, h, @rows.size)
+    private def clamp_scroll(h : Int32, size : Int32 = @rows.size) : Nil
+      @scroll = Viewport.clamp_scroll(@scroll, h, size)
     end
 
     # --- the "Query" sub-tab page ---------------------------------------------
@@ -419,15 +550,49 @@ module Gori::Tui
       @query_scroll == 0
     end
 
-    def render_query(screen : Screen, rect : Rect) : Nil
+    def render_query(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      rows = query_rows
-      @query_scroll = @query_scroll.clamp(0, {rows.size - rect.h, 0}.max)
-      (0...rect.h).each do |i|
+      list = render_search_bar(screen, rect, :query, focused)
+      rows = visible_rows(:query, query_rows)
+      @query_scroll = @query_scroll.clamp(0, {rows.size - list.h, 0}.max)
+      if rows.empty?
+        screen.text(list.x + 1, list.y, "no help rows match", Theme.muted, Theme.bg, width: {list.w - 2, 1}.max)
+        return
+      end
+      (0...list.h).each do |i|
         li = @query_scroll + i
         break if li >= rows.size
-        HelpView.draw_row(screen, rect, rect.y + i, rows[li], QUERY_KEY_W)
+        HelpView.draw_row(screen, list, list.y + i, rows[li], QUERY_KEY_W)
       end
+    end
+
+    private def visible_rows(page : Symbol, rows : Array(Row)) : Array(Row)
+      @search_page == page ? HelpView.search_rows(rows, @search_query) : rows
+    end
+
+    # The full Help pane keeps the search affordance visible on both reference pages. Unlike
+    # the popup it is already inside a framed body, so one compact row is enough; the list
+    # begins immediately below it.
+    #
+    # Only a FOCUSED search field claims the hardware caret. Tab is the shell's focus-ring key
+    # and is consumed by the runner before `handle_body_key`, so an active search survives a
+    # step out to the strip or tab bar; without this gate the pane would keep stamping
+    # `desired_cursor` (and anchoring the terminal's IME composition) inside an unfocused body.
+    private def render_search_bar(screen : Screen, rect : Rect, page : Symbol, focused : Bool) : Rect
+      screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.bg)
+      if @search_page == page
+        px = screen.text(rect.x + 1, rect.y, "search: ", Theme.accent, Theme.bg)
+        w = {rect.right - px - 1, 1}.max
+        if focused
+          screen.input_line(px, rect.y, @search_query, @search_query.size, @search_preedit,
+            Theme.text_bright, Theme.bg, width: w)
+        else
+          screen.text(px, rect.y, @search_query, Theme.text_bright, Theme.bg, width: w)
+        end
+      else
+        screen.text(rect.x + 1, rect.y, "/ search", Theme.muted, Theme.bg, width: {rect.w - 2, 1}.max)
+      end
+      rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : Rect.new(rect.x, rect.y, rect.w, 0)
     end
 
     # Memoised per instance: the tables are constants, so this is the same list every time, and

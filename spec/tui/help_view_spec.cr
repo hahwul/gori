@@ -3,6 +3,10 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
+private def help_view_key(char : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(char), char: char)
+end
+
 describe Gori::Tui::HelpView do
   it "renders the grouped shortcut sections" do
     view = HelpView.new
@@ -71,6 +75,65 @@ describe Gori::Tui::HelpView do
       view.render_query(Screen.new(backend), Rect.new(0, 0, 100, 12))
       backend.contains?("WORTH KNOWING").should be_true # the last section is still on screen
       backend.contains?("SYNTAX").should be_false       # ...and the first has gone by
+    end
+  end
+
+  describe "the explicit / search" do
+    it "activates from the real Slash key and filters the Shortcuts pane with its heading" do
+      view = HelpView.new
+      view.handle_search_key(help_view_key('/'), :shortcuts).should be_true
+      "toggle capture".each_char { |char| view.handle_search_key(help_view_key(char), :shortcuts) }
+
+      view.searching?.should be_true
+      view.search_query.should eq("toggle capture")
+      backend = MemoryBackend.new(100, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 20))
+      backend.contains?("GLOBAL").should be_true
+      backend.contains?("toggle capture").should be_true
+      backend.contains?("command palette").should be_false
+    end
+
+    it "searches the Query pane, reports no matches, and ignores direct typing before /" do
+      view = HelpView.new
+      view.handle_search_key(help_view_key('x'), :query).should be_false
+      view.search_query.should be_empty
+
+      view.handle_search_key(help_view_key('/'), :query).should be_true
+      "compressed bodies".each_char { |char| view.handle_search_key(help_view_key(char), :query) }
+      matched = MemoryBackend.new(100, 12)
+      view.render_query(Screen.new(matched), Rect.new(0, 0, 100, 12))
+      matched.contains?("WORTH KNOWING").should be_true
+      matched.contains?("compressed bodies").should be_true
+
+      " zzzz".each_char { |char| view.handle_search_key(help_view_key(char), :query) }
+      empty = MemoryBackend.new(100, 12)
+      view.render_query(Screen.new(empty), Rect.new(0, 0, 100, 12))
+      empty.contains?("no help rows match").should be_true
+    end
+
+    it "restores the pre-search scroll on escape" do
+      view = HelpView.new
+      view.move(3)
+      view.handle_search_key(help_view_key('/'), :shortcuts)
+      view.handle_search_key(help_view_key('x'), :shortcuts)
+      view.at_top?.should be_true
+
+      escape = Termisu::Event::Key.new(Termisu::Input::Key::Escape)
+      view.handle_search_key(escape, :shortcuts).should be_true
+      view.searching?.should be_false
+      view.search_query.should be_empty
+      view.at_top?.should be_false
+    end
+
+    it "keeps reload's reset at the top when it cancels an active search" do
+      view = HelpView.new
+      view.move(3)
+      view.handle_search_key(help_view_key('/'), :shortcuts)
+      view.reload(Gori::Verbs.registry)
+
+      view.searching?.should be_false
+      view.search_query.should be_empty
+      view.at_top?.should be_true
     end
   end
 

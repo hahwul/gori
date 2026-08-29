@@ -621,6 +621,7 @@ describe "C5 · HotkeysOverlay on the Overlay seam" do
     ov = fresh_hotkeys
     OverlayHarness.new(ov).assert_chrome(OverlayKind::Hotkeys, "HOTKEYS")
     ov.hint.should contain("rebind")
+    ov.hint.should contain("/ search")
     ov.begin_capture
     ov.hint.should eq("press a key to bind · esc cancel")
   ensure
