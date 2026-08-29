@@ -216,4 +216,30 @@ describe "Store#events_recent" do
       page.next_before.should be_nil
     end
   end
+
+  # `window` is rendered to the operator as "the newest N events", and `activity_load_more`
+  # ACCUMULATES it across every page a `↓` walk covers. A page that filled at the LIMIT stopped
+  # reading at its last row, so crediting it with the whole scan bound counted ids nothing ever
+  # looked at: walking a 200k feed reported 43.7M. The sum over a full walk has to be the feed.
+  it "counts the ids a page actually read, not the width of its bound" do
+    events_store do |store|
+      2_000.times { |i| store.insert_event("agent", "agent_action", "info", "event #{i}") }
+      store.flush
+
+      first = store.events_recent(200)
+      first.rows.size.should eq(200)
+      # 200 rows read, NOT the 50k the scan was allowed to cover.
+      first.window.should eq(200)
+
+      total = 0
+      cursor = nil.as(Int64?)
+      loop do
+        page = store.events_recent(200, cursor)
+        total += page.window
+        cursor = page.next_before
+        break if cursor.nil?
+      end
+      total.should eq(2_000)
+    end
+  end
 end

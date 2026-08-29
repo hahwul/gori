@@ -445,3 +445,169 @@ describe "ProjectView ACTIVITY pane" do
     end
   end
 end
+
+# The external-change poll (`Runner#apply_external_change` → `ProjectController#refresh_activity`).
+# It fires on every commit, and on a project nobody is touching it STILL fires every 3 s — the
+# capture-lock holder rewrites the intercept-bridge heartbeat on that cadence, which moves
+# `PRAGMA data_version`. So everything this refresh does, it does to an operator who is reading.
+describe "ProjectView ACTIVITY refresh (the data_version poll)" do
+  # The walked scan is the state this poll used to destroy. `↓` on an empty narrowing walks the
+  # cursor back one scan window per press; a reload restarts at page one, and at one reload per
+  # 3 s the walk could never outrun the heartbeat. The pane then insisted, permanently, that it
+  # had looked no further than the newest window — the exact claim `activity_no_match_line`
+  # exists to keep honest.
+  it "does not rewind a walked-back scan" do
+    tmp_store(events_retention: 40) do |store, project|
+      200.times { |i| store.insert_event("agent", "agent_action", "info", "event #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      cycle_source_to(view, "bindings") # nothing wrote one
+      view.reload_activity(store)
+      rect = Rect.new(0, 0, 100, 30)
+
+      view.activity_load_more(store)
+      view.activity_load_more(store)
+      walked = screen_rows(view, rect).find(&.includes?("no events match"))
+      walked.should_not be_nil
+      walked.not_nil!.should contain("in the newest 117 events")
+
+      view.refresh_activity(store)
+      screen_rows(view, rect).find(&.includes?("no events match")).should eq(walked)
+    end
+  end
+
+  # Not rewinding must not become not looking: an event that matches the narrowing can still
+  # arrive, and `id` being AUTOINCREMENT is what makes the head the only place it can land.
+  it "still picks up a new match at the head of a walked, empty list" do
+    tmp_store(events_retention: 40) do |store, project|
+      200.times { |i| store.insert_event("agent", "agent_action", "info", "event #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      cycle_source_to(view, "bindings")
+      view.reload_activity(store)
+      view.activity_load_more(store)
+      view.activity_rows.should be_empty
+
+      store.insert_event("bindings", "extract_miss", "warn", "$sid found nothing")
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_rows.map(&.message).should eq(["$sid found nothing"])
+      view.activity_more?.should be_true # and the walk is still below, not restarted
+    end
+  end
+
+  # The other half of "never move the cursor backwards": a list that is empty because the FEED
+  # was empty has no walk to protect, and must adopt page one's resume point or it can never
+  # page past the first screenful it ever receives.
+  it "adopts a resume point for a feed that was empty when the pane opened" do
+    tmp_store(events_retention: 40) do |store, project|
+      view = activity_view(store, project)
+      view.activity_feed_empty?.should be_true
+
+      500.times { |i| store.insert_event("agent", "agent_action", "info", "event #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_feed_empty?.should be_false
+      view.activity_more?.should be_true
+      before = view.activity_rows.size
+      view.activity_load_more(store)
+      view.activity_rows.size.should be > before
+    end
+  end
+
+  # A cursor sitting on the head is an operator watching the newest row. Following it is not the
+  # neighbour-slide the id anchor exists to prevent — that one happens to a cursor parked on a
+  # particular event further down. Without this the pane silently stopped being a feed.
+  it "follows the head when the cursor is on it" do
+    tmp_store do |store, project|
+      10.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      view.activity_selected_row.not_nil!.message.should eq("old 9")
+
+      5.times { |i| store.insert_event("agent", "agent_action", "info", "new #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_selected_row.not_nil!.message.should eq("new 4")
+      view.activity_rows.size.should eq(15)
+    end
+  end
+
+  # And a cursor parked mid-list keeps its EVENT — but is TOLD, because a list that is quietly
+  # no longer at the top of its own feed reads as a feed that has gone quiet.
+  it "keeps a parked cursor's event and counts what arrived above it" do
+    tmp_store do |store, project|
+      10.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      view.activity_select(3)
+      parked = view.activity_selected_row.not_nil!.message
+
+      5.times { |i| store.insert_event("agent", "agent_action", "info", "new #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_selected_row.not_nil!.message.should eq(parked)
+      rect = Rect.new(0, 0, 120, 30)
+      screen_rows(view, rect).join("\n").should contain("↑5 new")
+      # Climbing through them empties the note out: what ARRIVED stops being what is unseen the
+      # moment the cursor is standing on some of it.
+      # Down to row 3: two of the five are now BELOW the cursor, so three are left above it.
+      view.activity_select(-5)
+      screen_rows(view, rect).join("\n").should contain("↑3 new")
+      # Coming back to the head is what makes them seen, so the note goes.
+      view.activity_select(-99)
+      # By the arrow, not the word: the rows themselves are called "new N".
+      screen_rows(view, rect).join("\n").should_not contain("↑")
+    end
+  end
+
+  # An attached agent writes events faster than the poll runs. Treating "more than one page
+  # arrived" as "the list was truncated" reloaded page one, which threw away every page the
+  # operator had paged in and dropped the cursor, via `clamp_act_sel`, on a row nobody chose —
+  # during exactly the burst this pane exists to show.
+  it "catches up over a burst larger than one page without discarding the loaded pages" do
+    tmp_store do |store, project|
+      1_000.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      3.times { view.activity_load_more(store) }
+      deep = view.activity_rows.size
+      view.activity_select(500)
+      parked = view.activity_selected_row.not_nil!.message
+
+      500.times { |i| store.insert_event("agent", "agent_action", "info", "burst #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_rows.size.should eq(deep + 500)
+      view.activity_selected_row.not_nil!.message.should eq(parked)
+    end
+  end
+
+  # Bounded, though: chasing an agent mid-fuzz down an unbounded number of pages on the render
+  # fiber is a worse trade than the reload, so past the cap the honest restart comes back.
+  it "gives up and reloads once the burst outruns the catch-up bound" do
+    tmp_store do |store, project|
+      500.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      view.activity_load_more(store)
+
+      flood = ProjectView::ACT_PAGE * ProjectView::ACT_CATCHUP_PAGES + 1
+      flood.times { |i| store.insert_event("agent", "agent_action", "info", "flood #{i}") }
+      store.flush
+      view.refresh_activity(store)
+
+      view.activity_rows.size.should eq(ProjectView::ACT_PAGE)
+      view.activity_rows.first.message.should eq("flood #{flood - 1}")
+    end
+  end
+end
