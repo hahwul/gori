@@ -270,7 +270,8 @@ module Gori
                   retention_flows : Int32 = RETENTION_DEFAULT,
                   authorize_events : Channel(FlowEvent)? = nil,
                   read_only : Bool = false,
-                  background_index : Bool = true) : Store
+                  background_index : Bool = true,
+                  events_retention : Int32 = EVENTS_RETENTION) : Store
       # `cache_size` is negative because SQLite reads that as KiB rather than pages: -64000
       # is 64 MiB. The default is -2000 (2 MiB) PER CONNECTION, which on a long-lived project
       # means every unindexed History filter re-reads pages off disk with almost no reuse —
@@ -352,7 +353,8 @@ module Gori
       # Past this point the Store owns the pool and closes it in #close.
       new(db, events, probe_events, retention_flows, authorize_events: authorize_events,
         open_lock: open_lock, read_only: read_only,
-        background_index: background_index && !read_only)
+        background_index: background_index && !read_only,
+        events_retention: events_retention)
     end
 
     # Memory-mapped read window. The default is 0 — every read is a `read()` syscall — and
@@ -1949,7 +1951,7 @@ module Gori
       EventRow.new(
         rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String),
         rs.read(String), rs.read(String), rs.read(String?), rs.read(Int64?),
-        rs.read(Int64?), rs.read(String?))
+        rs.read(Int64?), rs.read(String?), rs.read(String?))
     end
 
     # Non-blocking best-effort publish: if the TUI is behind and the channel is

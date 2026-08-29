@@ -1,3 +1,4 @@
+require "./context/activity"
 require "./context/authorize"
 require "./context/comparer"
 require "./context/cookie"

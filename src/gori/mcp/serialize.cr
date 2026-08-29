@@ -153,6 +153,11 @@ module Gori
           j.field "goto_session_id", row.goto_session_id
           j.field "flow_id", row.flow_id
           j.field "payload", text(row.payload)
+          # WHICH SURFACE acted (#864): `tui` / `cli` / `mcp`, or null for a row written before
+          # the column existed or by a background engine on no surface's behalf. The agent reads
+          # the same field the human's Activity pane renders, so both can tell its OWN writes
+          # from the operator's.
+          j.field "actor", text(row.actor)
         end
       end
 

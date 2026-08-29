@@ -1443,9 +1443,14 @@ module Gori
       getter goto_session_id : Int64?
       getter flow_id : Int64?
       getter payload : String?
+      # Which SURFACE acted — a `FlowSource::Surface` token (`tui`/`cli`/`mcp`), the same three
+      # words `flows.source_surface` uses. nil on a row written before the column existed, and
+      # on anything a background engine produced on no surface's behalf.
+      getter actor : String?
 
       def initialize(@id, @created_at, @source, @kind, @level, @message,
-                     @goto_tab = nil, @goto_session_id = nil, @flow_id = nil, @payload = nil)
+                     @goto_tab = nil, @goto_session_id = nil, @flow_id = nil, @payload = nil,
+                     @actor = nil)
       end
     end
 

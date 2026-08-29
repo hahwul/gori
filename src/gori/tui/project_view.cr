@@ -77,7 +77,7 @@ module Gori::Tui
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
-      @pane = :desc    # :desc | :scope | :overrides | :env | :settings (PANES order)
+      @pane = :desc    # :desc | :scope | :overrides | :env | :settings | :activity (PANES order)
       @strip_start = 0 # first visible sub-tab chip (Chrome.render_tab_strip owns the window)
       @sel = 0         # selected rule row in the SCOPE list
       # SCOPE add/edit is a centered popup (ScopeRuleOverlay), not an inline row.
@@ -90,6 +90,23 @@ module Gori::Tui
       @ov_input = ""               # add-row text ("IP host")
       @ov_icx = 0                  # add-row cursor index
       @ov_preedit = ""             # IME preedit for the add-row
+
+      # ACTIVITY pane: a materialized PAGE of the #124 event feed, not a live object. The
+      # cursor is anchored to an event ID rather than a row index — the list is newest-first and
+      # PREPENDS, so a bare index slides onto a neighbour the moment a peer's write lands and
+      # `↵` then jumps somewhere the operator never selected (the failure
+      # `notifications_overlay.cr` documents in full). `id` is AUTOINCREMENT and never reused.
+      @act_rows = [] of Store::EventRow
+      @act_sel = 0
+      @act_anchor = nil.as(Int64?)      # id of the selected event
+      @act_next_before = nil.as(Int64?) # resume point; nil ⇒ the feed genuinely ends here
+      @act_feed_empty = true            # the FEED is empty, as opposed to the filters hiding it
+      @act_scanned = 0                  # ids the last page's scan covered (for the empty sentence)
+      @act_source = nil.as(String?)
+      @act_level = nil.as(String?)
+      @act_actor = nil.as(String?)
+      @act_filter = TextField.new
+      @act_querying = false
 
       @env_items = [] of {String, String}
       @env_sel = 0
@@ -300,6 +317,8 @@ module Gori::Tui
         @set_preedit = text
       elsif @pane == :desc && desc_insert_mode?
         @desc_area.set_preedit(text)
+      elsif @pane == :activity && @act_querying
+        @act_filter.set_preedit(text)
       end
     end
 
@@ -409,10 +428,15 @@ module Gori::Tui
     # Sub-tab order, left to right. DESCRIPTION leads: it's the one card you WRITE rather
     # than configure, so it's both the most-visited chip and the natural landing spot when
     # the tab opens; the four configuration cards follow.
-    PANES = [:desc, :scope, :overrides, :env, :settings]
+    PANES = [:desc, :scope, :overrides, :env, :settings, :activity]
     # Chip labels, in PANES order. Kept parallel rather than derived from the symbols so a
     # label can read well ("HOST OVERRIDES") without renaming the pane it addresses.
-    PANE_LABELS = ["Description", "Scope", "Host overrides", "Env", "Project settings"]
+    #
+    # ACTIVITY sits LAST: it is the only card that reports rather than configures, and putting
+    # a live log between two settings editors would make the strip read as five settings with
+    # one anomaly. Six chips want 76 columns; below that `Chrome.scroll_start` windows them and
+    # keeps the active one visible, which is the same treatment every other strip gets.
+    PANE_LABELS = ["Description", "Scope", "Host overrides", "Env", "Project settings", "Activity"]
     # One row for the sub-tab chips.
     STRIP_H = 1
 
@@ -940,6 +964,7 @@ module Gori::Tui
     def clamp_selections : Nil
       clamp_sel
       clamp_ov_sel
+      clamp_act_sel
     end
 
     # Re-seed the ENV list from the process global — THE one place `@env_items` is refilled,
@@ -961,6 +986,335 @@ module Gori::Tui
       @env_items = Settings.project_env_vars.dup
       clamp_env_sel
       @env_edit_idx = @env_items.index { |(k, _)| k == @env_edit_key } if @env_edit_key
+    end
+
+    # --- ACTIVITY pane (#864): a human window over the #124 event feed ------------------
+    #
+    # The feed records every agent mutation/send plus the failures that never rose to a
+    # notification (a binding that missed, a hook that failed and passed bytes through). Until
+    # now its only reader was the MCP `list_events` tool, so the audit record the log exists to
+    # keep was unreadable by the person whose project it describes.
+    #
+    # This is a PULL surface (P8): a bounded query over the log with a filter, the way History
+    # is a query over flows. It is NOT a second notification channel — the ring
+    # (`notifications.cr`, 100 entries, in-memory, per open project) stays the sparse interrupt,
+    # and nothing here pushes, promotes, or moves a row out of it.
+
+    # One page. Big enough that the ordinary feed arrives whole, small enough that the first
+    # paint of a busy project is not waiting on 50k rows.
+    ACT_PAGE = 200
+    # Divider + wrapped message rows. The feed's messages are PROSE, not labels — a binding
+    # miss explains which descriptor read what and why nothing bound — so a list that only
+    # truncates would show the token and drop every word of the reason.
+    ACT_DETAIL_H = 4
+    # Below this the card gives every row it has to the list instead. A short pane showing two
+    # events and two lines of one message is worse at both jobs than a short list.
+    ACT_DETAIL_MIN_H = 8
+
+    # Cycle order for the `s` chip, `nil` = no narrowing. These are the sources the feed
+    # actually carries (every `insert_event` call site), listed with the two an operator reaches
+    # for first — the agent audit trail and the silent binding failures — at the front.
+    ACT_SOURCES = [nil, "agent", "config", "bindings", "rewriter", "probe", "discover", "fuzzer", "miner", "sequencer"]
+
+    # Cycle order for the `a` chip: WHICH SURFACE acted. `nil` = every actor, including the
+    # events no surface produced (a background engine's own finding).
+    #
+    # `FlowSource::Surface`'s tokens, in the order an operator asks about them — the human's own
+    # surface first, then the AI. Not a second vocabulary: `flows.source_surface` stores the
+    # same three words, so "who did this" has one answer shape across the app.
+    ACT_ACTORS = [nil] + Gori::FlowSource::Surface.values.map(&.token)
+
+    # What the ACTOR column prints. `mcp` is the protocol; `agent` is the thing that acted, and
+    # on a pane whose subject is "what did the AI do to my project" the actor is the useful
+    # word. Safe to diverge from the stored token here — unlike History's `src:`, this filter is
+    # CYCLED rather than typed, so nobody reads a label off the screen and types it back.
+    def self.act_actor_label(actor : String?) : String
+      case actor
+      when Gori::FlowSource::Surface::Mcp.token then "agent"
+      when nil                                  then "—"
+      else                                           actor
+      end
+    end
+
+    # Cycle order for the `l` chip.
+    ACT_LEVELS = [nil, "info", "success", "warn", "error"]
+
+    # What a level chip actually matches. The feed carries TWO spellings of one level: every
+    # producer writes "warn" except the Sequencer, whose `level.to_s` writes "warning". A chip
+    # that matched its own label would hide half the warnings in the feed, and rows already
+    # written cannot be respelled.
+    def self.act_level_set(level : String?) : Array(String)?
+      return nil unless level
+      level == "warn" ? ["warn", "warning"] : [level]
+    end
+
+    # Where `↵` on an event goes. A PURE function of the row so the routing is decidable
+    # without a Runner (and so the shell has exactly one rule to execute).
+    #
+    # The producer's declared target wins. Rows that set `goto_tab` chose it deliberately —
+    # Probe's H3 notice names the Probe tab even though it also carries the flow — and the rows
+    # that carry only a `flow_id` are the binding failures, where the captured response IS the
+    # answer. `nil` for both, and for a `goto_tab` naming no tab this build has: an unknown
+    # string must not become a Symbol that `switch_tab` then fails to find.
+    record ActivityTarget, tab : Symbol? = nil, session_id : Int64? = nil, flow_id : Int64? = nil
+
+    def self.activity_target(row : Store::EventRow) : ActivityTarget?
+      if (name = row.goto_tab) && !name.empty?
+        if entry = Chrome::TABS.find { |(sym, _)| sym.to_s == name }
+          return ActivityTarget.new(tab: entry[0], session_id: row.goto_session_id)
+        end
+      end
+      (fid = row.flow_id) ? ActivityTarget.new(flow_id: fid) : nil
+    end
+
+    def activity_rows : Array(Store::EventRow)
+      @act_rows
+    end
+
+    def activity_selected_row : Store::EventRow?
+      @act_rows[@act_sel]?
+    end
+
+    def activity_source : String?
+      @act_source
+    end
+
+    def activity_level : String?
+      @act_level
+    end
+
+    def activity_actor : String?
+      @act_actor
+    end
+
+    def activity_filtered? : Bool
+      !@act_source.nil? || !@act_level.nil? || !@act_actor.nil? || !@act_filter.value.blank?
+    end
+
+    def activity_feed_empty? : Bool
+      @act_feed_empty
+    end
+
+    def activity_more? : Bool
+      !@act_next_before.nil?
+    end
+
+    # Re-read page one. THE one place `@act_rows` is replaced, called on tab entry
+    # (`reload`), after a filter change, and from the external-change path — `insert_event` is
+    # an ordinary insert, so a peer's write moves `PRAGMA data_version` and the poll already
+    # routes here.
+    #
+    # `@act_feed_empty` is asked SEPARATELY, and only when a filter is on and the page came back
+    # empty. `@act_rows.empty?` stops meaning "nothing has happened" the moment a narrowing is
+    # applied, and the two readings send the operator opposite ways: one says the log is quiet,
+    # the other says the chip is hiding it. Same shape as History's `@no_flows`.
+    def reload_activity(store : Store) : Nil
+      page = store.events_recent(ACT_PAGE, source: @act_source,
+        levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
+      @act_rows = page.rows
+      @act_next_before = page.next_before
+      @act_scanned = page.window
+      @act_feed_empty = if !page.rows.empty?
+                          false
+                        elsif activity_filtered?
+                          store.events_recent(1).rows.empty?
+                        else
+                          true
+                        end
+      resolve_activity_anchor
+    end
+
+    # Put the cursor back on the event it was on. Re-anchors by event id exactly as
+    # `reload_env_vars` re-anchors an open edit row by KEY: the rows this cursor pointed into
+    # are gone, and an index that is stale but still IN RANGE is the quiet failure — it selects
+    # a different event and `↵` then acts on that one.
+    private def resolve_activity_anchor : Nil
+      if (id = @act_anchor) && (i = @act_rows.index { |r| r.id == id })
+        @act_sel = i
+      else
+        clamp_act_sel
+      end
+      @act_anchor = activity_selected_row.try(&.id)
+    end
+
+    # Fold in events that arrived ABOVE the loaded set, keeping every page already paged in.
+    #
+    # `reload_activity` cannot serve the external-change poll: it re-reads page ONE and replaces
+    # the list, so an operator who has paged 1 000 rows deep gets snapped back to 200 every time
+    # anything commits — and `data_version` moves on our OWN captures too, so during live
+    # capture (or with an agent attached, i.e. the exact situation this pane exists for) deep
+    # paging becomes impossible and the cursor lands on a row nobody selected. The id anchor
+    # protects the PREPEND case; it cannot protect against the list being truncated underneath it.
+    #
+    # An append-only feed makes the cheap fix exact: page one either still contains the row that
+    # currently heads the list — in which case everything above it is new and prepending is
+    # provably contiguous — or it does not, which means rows were deleted or more than a page
+    # arrived at once, and only then is a full reload the honest answer.
+    def refresh_activity(store : Store) : Nil
+      return reload_activity(store) if @act_rows.empty?
+      top = @act_rows.first.id
+      page = store.events_recent(ACT_PAGE, source: @act_source,
+        levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
+      unless idx = page.rows.index { |r| r.id == top }
+        reload_activity(store)
+        return
+      end
+      return if idx == 0 # nothing new above the head
+      @act_rows = page.rows[0...idx] + @act_rows
+      resolve_activity_anchor
+    end
+
+    # Append the next page. Called when the cursor reaches the end of what is loaded — the page
+    # can be short because the SCAN WINDOW ran out rather than the feed, so "fewer rows than
+    # asked for" is not a stopping condition; `next_before` is.
+    def activity_load_more(store : Store) : Bool
+      return false unless before = @act_next_before
+      page = store.events_recent(ACT_PAGE, before, source: @act_source,
+        levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
+      @act_rows.concat(page.rows)
+      @act_next_before = page.next_before
+      # The empty-state sentence promises the pane looked no further than this number, so every
+      # window walked has to be counted — reporting only the first one understates the scan in
+      # exactly the case the sentence was written for.
+      @act_scanned += page.window
+      !page.rows.empty?
+    end
+
+    private def filter_query : String?
+      @act_filter.value.blank? ? nil : @act_filter.value
+    end
+
+    def activity_select(d : Int32) : Nil
+      n = @act_rows.size
+      return if n == 0
+      @act_sel = (@act_sel + d).clamp(0, n - 1)
+      @act_anchor = activity_selected_row.try(&.id)
+    end
+
+    def activity_select_at(idx : Int32) : Nil
+      n = @act_rows.size
+      return if n == 0
+      @act_sel = idx.clamp(0, n - 1)
+      @act_anchor = activity_selected_row.try(&.id)
+    end
+
+    # On the first row (or an empty list) → ↑ pops focus to the sub-tab strip, like the siblings.
+    def activity_at_top? : Bool
+      @act_sel <= 0
+    end
+
+    # True once the cursor sits on the last LOADED row — the controller's cue to page.
+    def activity_at_end? : Bool
+      @act_sel >= @act_rows.size - 1
+    end
+
+    # `s` / `l` cycle the chips; both reset the cursor, because the rows underneath it are about
+    # to be a different set and keeping an anchor into the old one would land arbitrarily.
+    def activity_cycle_source(d : Int32 = 1) : Nil
+      i = ACT_SOURCES.index(@act_source) || 0
+      @act_source = ACT_SOURCES[(i + d) % ACT_SOURCES.size]
+      reset_activity_cursor
+    end
+
+    def activity_cycle_level(d : Int32 = 1) : Nil
+      i = ACT_LEVELS.index(@act_level) || 0
+      @act_level = ACT_LEVELS[(i + d) % ACT_LEVELS.size]
+      reset_activity_cursor
+    end
+
+    def activity_cycle_actor(d : Int32 = 1) : Nil
+      i = ACT_ACTORS.index(@act_actor) || 0
+      @act_actor = ACT_ACTORS[(i + d) % ACT_ACTORS.size]
+      reset_activity_cursor
+    end
+
+    def activity_clear_filters : Bool
+      return false unless activity_filtered?
+      @act_source = nil
+      @act_level = nil
+      @act_actor = nil
+      @act_filter.set("")
+      @act_querying = false
+      reset_activity_cursor
+      true
+    end
+
+    private def reset_activity_cursor : Nil
+      @act_sel = 0
+      @act_anchor = nil
+    end
+
+    # --- ACTIVITY `/` filter bar (the OAST CALLBACKS grammar) ---
+    def activity_querying? : Bool
+      @act_querying
+    end
+
+    def activity_filter_field : TextField
+      @act_filter
+    end
+
+    def activity_filter_start : Nil
+      @act_querying = true
+    end
+
+    # ↵ keeps the query and leaves edit mode; esc clears it outright. Same contract as the
+    # OAST callback filter, so `/` means one thing across the app.
+    def activity_filter_commit : Nil
+      @act_querying = false
+      @act_filter.set_preedit("")
+      reset_activity_cursor
+    end
+
+    def activity_filter_cancel : Bool
+      @act_querying = false
+      @act_filter.set_preedit("")
+      return false if @act_filter.value.empty?
+      @act_filter.set("")
+      reset_activity_cursor
+      true
+    end
+
+    private def clamp_act_sel : Nil
+      @act_sel = @act_sel.clamp(0, {@act_rows.size - 1, 0}.max)
+    end
+
+    # --- ACTIVITY geometry. `act_list_inner` is the ONE offset source: the filter bar and the
+    # detail band both eat rows off the card interior, and the draw, the row hit-test and the
+    # gauge hit-test all have to agree about how many. The ENV pane's post-mortem
+    # (`env_row_offset?`) is exactly this bug: two sub-modes shared a line, only the draw knew,
+    # and every click landed one row off. ---
+
+    # Whether the filter bar occupies the first interior row — THE predicate, read by the draw
+    # and by both hit-tests, so the three cannot disagree (the `env_row_offset?` discipline).
+    #
+    # It is hidden only on a pane with nothing to filter, no filter set, AND no bar being typed
+    # into. That last clause is not defensive: `/` on an empty feed used to open an edit mode
+    # that was never drawn, swallowing every keystroke — including `s`/`l`/`c` — with the typed
+    # text visible nowhere on screen.
+    private def act_bar_shown? : Bool
+      !@act_feed_empty || activity_filtered? || @act_querying
+    end
+
+    # Rows the detail band takes, or 0 when the card cannot afford it.
+    private def act_detail_h(inner : Rect) : Int32
+      return 0 if inner.h < ACT_DETAIL_MIN_H || @act_rows.empty?
+      ACT_DETAIL_H
+    end
+
+    private def act_list_inner(inner : Rect) : Rect
+      top = inner.y + (act_bar_shown? ? 1 : 0)
+      h = inner.h - (act_bar_shown? ? 1 : 0) - act_detail_h(inner)
+      Rect.new(inner.x, top, inner.w, {h, 0}.max)
+    end
+
+    def activity_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless card = card_rect(rect, :activity)
+      row_at(act_list_inner(card.inset(1, 1)), mx, my, false, @act_sel, @act_rows.size)
+    end
+
+    def activity_gauge_row(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless card = card_rect(rect, :activity)
+      gauge_row(act_list_inner(card.inset(1, 1)), mx, my, false, @act_rows.size)
     end
 
     private def clamp_sel : Nil
@@ -1359,6 +1713,7 @@ module Gori::Tui
       when :overrides then render_overrides_card(screen, card, focused)
       when :env       then render_env_card(screen, card, focused)
       when :settings  then render_settings_card(screen, card, focused)
+      when :activity  then render_activity_card(screen, card, focused)
       else                 render_desc_card(screen, card, focused)
       end
     end
@@ -2205,6 +2560,231 @@ module Gori::Tui
     end
 
     # Scroll offset that keeps `sel` visible in a window of `h` rows over `total`.
+    # --- ACTIVITY render ---------------------------------------------------------------
+
+    # Widest source the feed carries ("sequencer"). A fixed column so the messages start on one
+    # line and the eye can read down them; the source is what the row is ABOUT, and a ragged
+    # left edge would make the pane read as prose rather than as a log.
+    ACT_SRC_W = 9
+    # Below this the source column is dropped rather than squeezed: it costs 10 of the message's
+    # cells, and the message is the half only this pane shows.
+    ACT_SRC_MIN_W = 40
+    # `agent` is the widest label the column prints (`tui`/`cli` are shorter, `—` is one cell).
+    ACT_ACTOR_W = 5
+    # The actor column costs 6 more cells than the source one, so it needs its own floor.
+    ACT_ACTOR_MIN_W = 52
+
+    private def render_activity_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "ACTIVITY", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.border_meta(screen, rect, "ACTIVITY", activity_meta,
+        fg: @act_rows.empty? ? Theme.muted : Theme.text_bright)
+      render_activity_body(screen, rect, rect.inset(1, 1), focused)
+    end
+
+    # The card's border summary. Names the narrowings that are ON, because a chip filter is the
+    # kind of state that turns an empty list into a lie about the project — the operator has to
+    # be able to see, without pressing anything, why they are looking at four rows.
+    private def activity_meta : String
+      parts = [] of String
+      n = @act_rows.size
+      parts << (activity_more? ? "#{n}+ events" : "#{n} event#{n == 1 ? "" : "s"}")
+      if src = @act_source
+        parts << src
+      end
+      if lvl = @act_level
+        parts << lvl
+      end
+      if act = @act_actor
+        parts << ProjectView.act_actor_label(act)
+      end
+      parts.join(" · ")
+    end
+
+    private def render_activity_body(screen : Screen, card : Rect, inner : Rect, focused : Bool) : Nil
+      return if inner.h <= 0 || inner.w <= 0
+      # Nothing has EVER been recorded AND nothing is narrowing: the onboarding card owns the
+      # whole interior. Gated on the same predicate the geometry uses, so the row the bar would
+      # occupy is never reserved by one and skipped by the other.
+      unless act_bar_shown?
+        TrafficEmptyState.render(screen, inner, variant: :project_activity)
+        return
+      end
+      render_activity_filter_bar(screen, Rect.new(inner.x, inner.y, inner.w, 1))
+      list = act_list_inner(inner)
+      # A filter is in force (or being typed) over a feed that holds nothing at all. The card
+      # still explains the pane, but it draws BELOW the bar — the bar is what says a narrowing
+      # is on, and hiding it here is what let a chip stay silently active.
+      if @act_feed_empty
+        TrafficEmptyState.render(screen, list, variant: :project_activity) if list.h > 0
+        return
+      end
+      render_activity_detail(screen, card, inner, list)
+      return if list.h <= 0
+
+      # Rows exist in the feed but not in THIS view. A different sentence from the one above on
+      # purpose: "nothing happened" and "your filter hides it" send the operator opposite ways,
+      # and only the second is true here.
+      if @act_rows.empty?
+        render_activity_no_match(screen, list)
+        return
+      end
+
+      today = Time.local
+      scroll = scroll_for(@act_sel, @act_rows.size, list.h)
+      shown = {list.h, @act_rows.size - scroll}.min
+      shown.times do |i|
+        idx = scroll + i
+        ry = list.y + i
+        selected = idx == @act_sel
+        # Dimmed rather than erased when focus leaves, like the SCOPE / HOST OVERRIDES lists:
+        # the detail band below is about the selected row, so a card with no visible selection
+        # would be showing an explanation of nothing.
+        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
+        screen.fill(Rect.new(list.x, ry, list.w, 1), bg) if selected
+        screen.cell(list.x, ry, selected ? '▎' : ' ', Theme.accent, bg)
+        render_activity_row(screen, list, ry, @act_rows[idx], selected, bg, today)
+      end
+      Frame.scroll_gauge(screen, list, @act_rows.size, scroll, focused)
+    end
+
+    # "Nothing matched" is only true of what was actually LOOKED at. A page stops either at the
+    # end of the feed or at the scan bound, and `next_before` is the difference — so when the
+    # scan stopped short, the sentence says how far it got instead of making a claim about
+    # events it never read. (Reachable only on a feed grown past its own retention cap, which
+    # `trim_events` allows for a process that writes events and captures no flows.)
+    private def activity_no_match_line : String
+      base = "no events match #{activity_narrowing}"
+      activity_more? ? "#{base} in the newest #{Fmt.count(@act_scanned.to_i64)} events" : base
+    end
+
+    private def render_activity_no_match(screen : Screen, list : Rect) : Nil
+      # Indented to the column the rows' own text starts on, so the sentence sits where the eye
+      # is already looking rather than flush against the card's hairline.
+      x = list.x + 1
+      w = {list.w - 1, 1}.max
+      screen.text(x, list.y, activity_no_match_line, Theme.muted, width: w)
+      return unless list.h > 1
+      # Names the way OUT, and both halves are keys that actually do it. NOT `r`: refresh
+      # re-reads from the newest end, which THROWS AWAY every window already walked back — the
+      # opposite of what an operator following this line wants. `↓` is what extends the scan
+      # (`page_activity` fires on a cursor already at the end, which an empty list always is).
+      # `⇧C` is not offered either: that key empties the feed.
+      # NOT named `out`: `out` is a Crystal keyword, and `screen.text(…, out, …)` parses as an
+      # out-param (the same trap `Store#ids_matching` documents).
+      way = activity_more? ? "↓ looks further back · space clears the filters" : "s/l cycle back to all · space clears the filters"
+      screen.text(x, list.y + 1, way, Theme.muted, width: w)
+    end
+
+    # The narrowing currently in force, as a phrase a sentence can end with.
+    private def activity_narrowing : String
+      parts = [] of String
+      parts << "source #{@act_source}" if @act_source
+      parts << "level #{@act_level}" if @act_level
+      parts << "actor #{ProjectView.act_actor_label(@act_actor)}" if @act_actor
+      parts << "\"#{@act_filter.value}\"" unless @act_filter.value.blank?
+      parts.empty? ? "the filter" : parts.join(" + ")
+    end
+
+    private def render_activity_row(screen : Screen, list : Rect, ry : Int32,
+                                    row : Store::EventRow, selected : Bool, bg : Color,
+                                    today : Time) : Nil
+      x = list.x + 1
+      right = list.right - 1 # the scroll gauge rides the last column
+      stamp = ProjectView.act_stamp(row.created_at, today)
+      screen.text(x, ry, stamp, Theme.muted, bg)
+      x += stamp.size + 1
+      glyph, gc = ProjectView.act_glyph(row.level)
+      screen.cell(x, ry, glyph, gc, bg)
+      x += 2
+      if list.w >= ACT_SRC_MIN_W
+        screen.text(x, ry, row.source, Theme.muted, bg, width: ACT_SRC_W)
+        x += ACT_SRC_W + 1
+      end
+      # WHO acted, and the AI is the one worth picking out of a scrolling list — the same
+      # accent the notification center gives an agent-produced note, so one actor looks like
+      # itself on both surfaces. Dropped before the source column is, because "what happened"
+      # survives a narrow pane better than "who did it".
+      if list.w >= ACT_ACTOR_MIN_W
+        label = ProjectView.act_actor_label(row.actor)
+        fg = row.actor == Gori::FlowSource::Surface::Mcp.token ? Theme.accent : Theme.muted
+        screen.text(x, ry, label, fg, bg, width: ACT_ACTOR_W)
+        x += ACT_ACTOR_W + 1
+      end
+      w = right - x
+      return if w <= 0
+      fg = selected ? Theme.text_bright : Theme.text
+      screen.text(x, ry, ProjectView.act_one_line(row.message), fg, bg, width: w)
+    end
+
+    # `HH:MM:SS` for today, `MM-DD` for anything older. A bare clock on a feed that retains
+    # 50k rows would read as "just now" for an event from last week; a date that never changes
+    # would waste the column on the rows an operator is actually reading.
+    #
+    # `today` is passed IN rather than read here: this runs once per visible row per frame, and
+    # `Time.local` is a timezone resolution. Asking it forty times a frame to answer a question
+    # whose answer is the same for every row put two tz lookups per row on the render fiber.
+    def self.act_stamp(created_at : Int64, today : Time) : String
+      t = Time.unix(created_at // 1_000_000).to_local
+      t.date == today.date ? t.to_s("%H:%M:%S") : t.to_s("   %m-%d")
+    end
+
+    # Same level vocabulary the notification center draws, so one event looks like itself
+    # wherever it surfaces. "warning" is the Sequencer's spelling of "warn" (see act_level_set).
+    def self.act_glyph(level : String) : {Char, Color}
+      case level
+      when "success"         then {'✓', Theme.green}
+      when "warn", "warning" then {'⚠', Theme.yellow}
+      when "error"           then {'✗', Theme.red}
+      else                        {'·', Theme.muted}
+      end
+    end
+
+    # Feed messages are prose and some are written across several source lines; a newline drawn
+    # into a row would leave a hole in the list. The band below shows the whole thing.
+    def self.act_one_line(message : String) : String
+      message.gsub(/\s+/, " ").strip
+    end
+
+    # The three-state filter bar, the grammar the OAST callbacks list already uses: the input
+    # while editing, the committed query, and the field names when idle.
+    private def render_activity_filter_bar(screen : Screen, rect : Rect) : Nil
+      return if rect.empty? || !act_bar_shown?
+      screen.fill(rect, Theme.bg)
+      if @act_querying
+        prefix = "filter › "
+        screen.text(rect.x + 1, rect.y, prefix, Theme.accent, Theme.bg)
+        base = rect.x + 1 + prefix.size
+        screen.input_line(base, rect.y, @act_filter.value, @act_filter.caret, @act_filter.preedit,
+          Theme.text_bright, Theme.bg, width: {rect.w - prefix.size - 2, 0}.max)
+      elsif !@act_filter.value.blank?
+        screen.text(rect.x + 1, rect.y, ": #{@act_filter.value}", Theme.text, Theme.bg, width: rect.w - 2)
+      else
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  s source  ·  l level  ·  a actor  ·  ↵ open",
+          Theme.muted, Theme.bg, width: rect.w - 2)
+      end
+    end
+
+    # The selected event's message in full, wrapped, under a tee divider. Drawn only when
+    # `act_detail_h` reserved the rows — the geometry decides once and both halves read it.
+    private def render_activity_detail(screen : Screen, card : Rect, inner : Rect, list : Rect) : Nil
+      return if act_detail_h(inner) == 0
+      return unless row = activity_selected_row
+      Frame.tee_divider(screen, card, list.bottom, bg: Theme.bg)
+      w = inner.w - 1
+      return if w <= 0
+      text = ProjectView.act_one_line(row.message)
+      lay = Wrap.layout(text, w)
+      rows = {lay.rows, ACT_DETAIL_H - 1}.min
+      rows.times do |i|
+        line = text[lay.start_of(i)...lay.end_of(i)]
+        # The last drawn row carries an ellipsis when the message runs past the band, so a
+        # truncated explanation cannot be read as a complete one.
+        line = "#{line[0, {line.size - 1, 0}.max]}…" if i == rows - 1 && lay.rows > rows
+        screen.text(inner.x + 1, list.bottom + 1 + i, line, Theme.muted, Theme.bg, width: w)
+      end
+    end
+
     private def scroll_for(sel : Int32, total : Int32, h : Int32) : Int32
       return 0 if total <= h || h <= 0
       (sel - h // 2).clamp(0, total - h)

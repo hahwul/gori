@@ -1173,8 +1173,21 @@ module Gori
         "ALTER TABLE repeaters ADD COLUMN tls_preset TEXT",
       ]
 
+      # WHICH SURFACE acted (#864). The feed already said what happened; it could not say who,
+      # so a scope rule an operator edited in the TUI and one an agent rewrote through MCP read
+      # identically — on the one surface whose job is telling those apart.
+      #
+      # `FlowSource::Surface`'s token (`tui`/`cli`/`mcp`), not a second vocabulary: `flows`
+      # answers the same question with the same three words, and two spellings of one axis is
+      # exactly what P3 forbids. NULL on every row written before this column, and on anything
+      # a background engine produced on nobody's behalf — "not recorded" and "no surface" are
+      # both honest answers that a defaulted string would have overwritten with a guess.
+      V23 = [
+        "ALTER TABLE events ADD COLUMN actor TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22]
+                    V18, V19, V20, V21, V22, V23]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

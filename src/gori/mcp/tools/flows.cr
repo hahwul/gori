@@ -118,11 +118,13 @@ module Gori
         limit = clamp(optional_int_arg(h, "limit"), 100, 500)
         source = str(h, "source")
         kind = str(h, "kind")
+        actor = str(h, "actor")
         scanned = store.events_after(since, limit)
         next_cursor = scanned.empty? ? since : scanned.last.id
         rows = scanned
         rows = rows.select { |r| r.source == source } if source && !source.empty?
         rows = rows.select { |r| r.kind == kind } if kind && !kind.empty?
+        rows = rows.select { |r| r.actor == actor } if actor && !actor.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field("events") { j.array { rows.each { |r| Serialize.event_row(j, r) } } }
@@ -323,11 +325,15 @@ module Gori
           "`since` = the last cursor you saw (0 or omitted starts from the oldest); the response " \
           "carries `next_cursor` — pass it as the next `since`. `next_cursor` never moves backward " \
           "and echoes your input on an empty page, so a poll that returns no events keeps your place. " \
-          "Optional `source`/`kind` filters do NOT affect `next_cursor` (it is the max SCANNED id)." do |s|
+          "Optional `source`/`kind`/`actor` filters do NOT affect `next_cursor` (it is the max SCANNED id). " \
+          "Every event carries `actor` — the surface that acted (tui | cli | mcp) — so you can tell " \
+          "your own writes from the operator's; the human reads this same feed on the Project tab's " \
+          "Activity pane." do |s|
           s.field "since", intprop("forward cursor: only events with id > this (default 0 = from oldest). Pass back the response's next_cursor to tail.")
           s.field "limit", intprop("max events scanned (default 100, max 500)")
-          s.field "source", strprop("filter to one source: miner | fuzzer | probe | agent")
-          s.field "kind", strprop("filter to one kind (e.g. job_done, agent_action)")
+          s.field "source", strprop("filter to one source: config | agent | miner | fuzzer | probe | bindings | rewriter | discover | sequencer")
+          s.field "kind", strprop("filter to one kind (e.g. job_done, agent_action, scope_add)")
+          s.field "actor", strprop("filter to one surface: tui | cli | mcp")
         end
 
         tool j, "get_flow",

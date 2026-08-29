@@ -1967,3 +1967,107 @@ leaves the capture's octets in place rather than sending something else in silen
 
 The Miner is deliberately absent: hidden-parameter discovery over a typed schema is a different
 question, since the schema already tells you the fields.
+
+### 2026-08-29: the event log gets a human window, and stays one layer below the ring
+
+Refines: [P4](#p4), [P8](#p8). Extends the #124 event-feed entry. Issue #864.
+
+The `events` table records every agent mutation and send, and `log_agent_action`'s own comment
+says why: so the AI's activity is *"visible to the human (and tailable via `list_events`)"*. Only
+the second half was built. `events_after` served the MCP tool and nothing in `src/gori/tui/` had
+ever named the table, so the audit record P4 rests on — the human can see what was decided on
+their project — was readable only by the process being audited. The Project tab's ACTIVITY pane
+is the missing reader, and the interesting decisions are about what it must NOT become.
+
+**It is a query, not a queue** (P8). A filter bar over a bounded page, the way History is a query
+over flows: no inbox, no unread badge, no ranking, and nothing is pushed. Which settles the
+question the notification ring raises by existing. `[event log] --(promotion policy)-->
+[notification ring]` is a layering, and the two ends differ by orders of magnitude — the ring
+holds a hundred notes in memory and dies with the project; the log holds fifty thousand rows on
+disk and is the record. Merging them would either drown the interrupt channel or truncate the
+record, so this change moves nothing between them: the promotion policy is untouched, no event
+becomes a notification, and the pane pushes nothing back.
+
+**A narrowed list narrows in SQL, and then must be bounded — at the retention cap, not below it.**
+`list_events` selects `source`/`kind` in Crystal after fetching its page, which is right for a
+forward cursor whose `next_cursor` is the max SCANNED id, and wrong for a screenful: a
+`source:bindings` chip over a feed of agent rows would hand the operator an empty pane while the
+matches sat two pages down. So `events_recent` puts every narrowing in the WHERE — and nothing
+indexes `events`, so a predicate matching nothing cannot short-circuit on the LIMIT and scans
+until the table runs out, on the fiber that paints the screen.
+
+`recent_agent_actions` met this first and answered with an id floor at `MAX(id) - 5000`. Copying
+that constant here was the plan and the measurement refused it: on a full 50k-row feed the
+filtered backwards scan answers in **~0.9 ms**, and the windowed form measured *slower* once its
+extra `MAX/MIN` lookup was counted. A tighter window buys no time and costs correctness — every
+match below it renders as "no events match", a false statement about the operator's own project,
+which is the [absence-reads-as-clean](#p4) failure in its purest form. So the window is
+`@events_retention` itself: in a store being trimmed the whole feed is inside one window and the
+bound can never truncate, while a store that is *not* being trimmed is still bounded.
+That store is reachable — `trim_events` runs off FLOW inserts, so an MCP-only process that writes
+events and captures nothing grows the table past its cap — and there the pane says
+"in the newest N events" rather than claiming nothing matched. The bound and the sentence that
+describes it are one decision; a bound whose truncation is invisible is worse than none.
+`next_before` carries the same distinction: it names the window edge, not nil, when the window
+rather than the feed ran out.
+
+**Absence has two meanings and the pane must not confuse them.** `rows.empty?` means "nothing has
+happened" only while nothing is narrowing the list; the moment a chip is on it means "your filter
+is hiding it", and the two send the operator in opposite directions. The pane asks the feed
+separately, and says the two things in different words — the same discipline History keeps with
+`@no_flows`. For the same reason `events_recent` does not rescue to `[]`: `recent_agent_actions`
+may, because it garnishes a notification that goes out either way, but here the rows ARE the
+answer and a swallowed error rendered as "no activity" is the one reading that tells someone to
+stop looking.
+
+**The cursor is an event id.** The list is newest-first and PREPENDS, and an attached agent writes
+into it while the operator reads. A row-index cursor slides onto a neighbour the moment that
+happens, so `↵` acts on an event nobody selected — the failure `NotificationsOverlay#index_in`
+documents. `id` is `AUTOINCREMENT` and never reused, which is what makes it the anchor.
+
+**`↵` honours the producer's declared target rather than guessing.** A row carrying `goto_tab`
+chose that tab when it was written — Probe's H3 notice names the Probe tab even though it also
+carries a flow — so the declaration wins and `flow_id` is the fallback, which is what makes the
+binding failures (the rows that carry only a flow) open the exchange that explains them. The
+resolution is a pure function of the row, so an unknown `goto_tab` resolves to nothing rather
+than to a Symbol no tab answers to: the feed is written by other processes and outlives any one
+build's tab catalog.
+
+**Out of scope, deliberately: any new event producer.** A silent failure that is not in the feed
+yet is a one-line `insert_event` in its own change. This one surfaces what was already written —
+including the level the feed spells two ways, `"warn"` everywhere and `"warning"` from the
+Sequencer, which the filter matches as a set because rows already on disk cannot be respelled.
+
+
+**The feed had to learn WHO, and the answer already existed.** The first cut recorded what agents
+and engines did; a scope rule the operator edited in the TUI and one an agent rewrote through MCP
+were indistinguishable, on the one surface whose job is telling them apart. `flows` had answered
+the same question since #770 — `source_surface`, spelling it `tui`/`cli`/`mcp` — so `events.actor`
+takes those three words rather than minting a second vocabulary for one axis ([P3](#p3)). It is
+ambient (`FlowSource.surface`, set once per entry point) and not threaded through, because the
+config seam below is shared by all three surfaces and 26 `Scope.load` sites deep: an argument
+would have to be carried through five model APIs to arrive somewhere the caller already knew. One
+process is one surface, so there is nothing for two callers to disagree about. NULL stays a real
+answer — a row from before the column, or an engine acting on nobody's behalf — because a default
+would make every un-updated path claim to be a surface it is not.
+
+**Config changes are recorded at the MODEL, not at the surfaces.** `Scope#add`,
+`HostOverrides#update`, `Rules#toggle` and `Env.save_project` are what all three surfaces reach,
+so one site per change covers TUI, CLI and MCP at once. Recording per surface would be three
+copies of each, and the CLI is reliably the copy that gets forgotten — the same argument
+`apply_external_change` makes for reloading models rather than views. The gate is the store's own
+answer: every one of these returns whether the write COMMITTED (several had to be fixed to, in
+earlier entries), and an attempt recorded as a change would put a rule in the audit trail that
+never gated a request.
+
+**An audit line must not leak what it exists to protect.** `$KEY` vars are the one config surface
+whose content is secret by default, so the line carries NAMES and a count and never a value; an
+upstream proxy URL has its userinfo redacted, and the scrubber stays inside the AUTHORITY —
+reaching past it turned `http://corp.example/a@b` into `http://••••@b`, erasing the host the line
+exists to record. A rewrite rule is named by its match and never by its replacement, which is the
+half an operator pastes a token into.
+
+**An MCP-driven change is recorded twice, deliberately.** `log_agent_action` writes the call and
+its outcome (including the refusals a config event never sees); the config event writes the value
+the tool name cannot carry. Two questions, two rows, one `actor`, separated by the source chip —
+a single row would have to drop one of the halves.

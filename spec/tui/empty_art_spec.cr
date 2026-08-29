@@ -20,7 +20,8 @@ end
 # no art forever and nothing else would ever mention it.
 EXPECTED_ART = [
   :history, :sitemap, :intercept, :repeater, :fuzzer, :fuzzer_results, :probe, :issues,
-  :notes, :project_desc, :project_scope, :project_overrides, :project_env, :discover,
+  :notes, :project_desc, :project_scope, :project_overrides, :project_env, :project_activity,
+  :discover,
   :comparer, :miner, :miner_results, :sequencer, :sequencer_samples, :oast,
   :authorize,
 ]

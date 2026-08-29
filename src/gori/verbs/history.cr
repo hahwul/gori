@@ -824,6 +824,7 @@ module Gori
       register_notes(r)
       register_host_overrides(r)
       register_env(r)
+      register_activity(r)
       register_read_edit(r)
       r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
       r

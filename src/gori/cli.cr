@@ -53,18 +53,24 @@ module Gori
 
       case subcmd
       when "tui"
+        FlowSource.surface = FlowSource::Surface::Tui
         run_tui(subargs)
       when "settings"
         run_settings(subargs)
       when "ca"
         run_ca(subargs)
       when "run"
+        # Which surface is acting, for anything that records WHO (the #864 feed). Set at the
+        # dispatch and not inside each subcommand: `gori run` has dozens of leaves, and a leaf
+        # that forgot would file its writes under whatever ran last.
+        FlowSource.surface = FlowSource::Surface::Cli
         run_run(subargs)
       when "wizard"
         run_wizard(subargs)
       when "tutorial"
         run_tutorial(subargs)
       when "mcp"
+        FlowSource.surface = FlowSource::Surface::Mcp
         run_mcp(subargs)
       when "update"
         run_update(subargs)

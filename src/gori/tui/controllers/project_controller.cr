@@ -32,6 +32,7 @@ module Gori::Tui
       when :scope     then Verb::Scope::Project
       when :overrides then Verb::Scope::HostOverrides
       when :env       then Verb::Scope::Env
+      when :activity  then Verb::Scope::ProjectActivity
       when :desc      then Verb::Scope::ProjectDesc
       else                 Verb::Scope::Body
       end
@@ -40,7 +41,8 @@ module Gori::Tui
     def body_badge : Symbol # the description INS editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
       editing = (@project_view.pane == :desc && @project_view.desc_insert_mode?) ||
                 @project_view.ov_adding? || @project_view.env_adding? || @project_view.env_prefix_editing? ||
-                (@project_view.pane == :settings && @project_view.settings_text_row?)
+                (@project_view.pane == :settings && @project_view.settings_text_row?) ||
+                (@project_view.pane == :activity && @project_view.activity_querying?)
       editing ? :editor : :body
     end
 
@@ -61,22 +63,34 @@ module Gori::Tui
         else
           "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
         end
-      when :settings
-        if @project_view.settings_text_row?
-          "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
-        elsif @project_view.settings_protocol_row?
-          "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
-        elsif @project_view.settings_sandbox_row?
-          "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
+      when :activity
+        if @project_view.activity_querying?
+          "type to filter · ↵ keep · esc clear"
         else
-          "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
+          "↑/↓ select · ↵ open · s source · l level · a actor · / filter · space cmds · esc sub-tabs"
         end
+      when :settings
+        settings_hint
       else
         if @project_view.desc_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
         else
           "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
         end
+      end
+    end
+
+    # The PROJECT SETTINGS arm of `body_hint`, lifted out: it is the longest of the six and the
+    # only one that branches on the selected ROW rather than on a pane mode.
+    private def settings_hint : String
+      if @project_view.settings_text_row?
+        "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
+      elsif @project_view.settings_protocol_row?
+        "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
+      elsif @project_view.settings_sandbox_row?
+        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
+      else
+        "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
       end
     end
 
@@ -112,12 +126,27 @@ module Gori::Tui
     def move_subtab(dir : Int32) : Nil
       settle_subtab
       @project_view.pane_advance(dir) # clamps at both ends, like the chips read
+      settle_activity_entry
     end
 
     def jump_subtab(idx : Int32) : Nil
       return unless pane = ProjectView::PANES[idx]?
       settle_subtab
       @project_view.focus_pane(pane)
+      settle_activity_entry
+    end
+
+    # Every route ONTO the ACTIVITY card re-reads the feed. Two independent reasons, and the
+    # pane is wrong without either:
+    #
+    #   * `settle_subtab` drops the text filter on the way past, so the rows left behind are
+    #     narrowed by a filter that no longer exists;
+    #   * `on_external_change` refreshes only while the pane is SHOWING, so every commit made
+    #     while another sub-tab was open is one this card has not seen. Arriving to a stale
+    #     snapshot — at worst the "no activity recorded yet" card over a feed that has since
+    #     filled — is the one thing a log must never do.
+    private def settle_activity_entry : Nil
+      reload_activity if @project_view.pane == :activity
     end
 
     # Everything a sub-tab change has to settle, wherever it came from (strip ←/→, ^1-9, a
@@ -132,6 +161,7 @@ module Gori::Tui
       @project_view.cancel_ov_add
       @project_view.cancel_env_add
       @project_view.cancel_env_prefix_edit
+      @project_view.activity_filter_cancel
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -148,6 +178,7 @@ module Gori::Tui
       when :scope     then handle_project_scope_key(ev)
       when :overrides then handle_project_overrides_key(ev)
       when :env       then handle_project_env_key(ev)
+      when :activity  then handle_project_activity_key(ev)
       when :settings
         handle_project_settings_key(ev)
         true
@@ -194,6 +225,15 @@ module Gori::Tui
           @project_view.select_env(row)
         elsif idx = @project_view.env_row_at(rect, mx, my)
           @project_view.select_env(idx)
+        end
+      when :activity
+        @project_view.focus_pane(:activity)
+        # The card's scroll gauge rides its right hairline, which `activity_row_at` excludes.
+        if row = @project_view.activity_gauge_row(rect, mx, my)
+          @project_view.activity_select_at(row)
+        elsif idx = @project_view.activity_row_at(rect, mx, my)
+          @project_view.activity_select_at(idx)
+          page_activity
         end
       when :desc
         @project_view.focus_pane(:desc)
@@ -262,6 +302,9 @@ module Gori::Tui
       when :overrides then @project_view.ov_select(step)
       when :env       then @project_view.env_select(step)
       when :settings  then @project_view.set_select(step)
+      when :activity
+        @project_view.activity_select(step)
+        page_activity
       end # :overview band / outside → nothing to scroll
       true
     end
@@ -270,7 +313,8 @@ module Gori::Tui
       return false unless @project_view.pane == :desc && @project_view.desc_insert_mode? ||
                           @project_view.ov_adding? ||
                           @project_view.env_adding? || @project_view.env_prefix_editing? ||
-                          (@project_view.pane == :settings && @project_view.settings_text_row?)
+                          (@project_view.pane == :settings && @project_view.settings_text_row?) ||
+                          (@project_view.pane == :activity && @project_view.activity_querying?)
       @project_view.set_preedit(text)
       true
     end
@@ -329,7 +373,8 @@ module Gori::Tui
     # SCOPE uses a modal popup, so Tab is not owned by the list while that overlay is open.
     def scope_adding? : Bool
       (@project_view.pane == :overrides && @project_view.ov_adding?) ||
-        (@project_view.pane == :env && (@project_view.env_adding? || @project_view.env_prefix_editing?))
+        (@project_view.pane == :env && (@project_view.env_adding? || @project_view.env_prefix_editing?)) ||
+        (@project_view.pane == :activity && @project_view.activity_querying?)
     end
 
     def focus_scope : Nil
@@ -338,6 +383,20 @@ module Gori::Tui
 
     def reload : Nil
       @project_view.reload(@host.session.project, @host.session.store)
+      reload_activity
+    end
+
+    # The ACTIVITY page. Split out from `reload` because the two other routes to it — a filter
+    # change and the external-change poll — must NOT re-snapshot the whole tab.
+    #
+    # A failed read is a TOAST, not an empty list. `events_recent` deliberately does not rescue:
+    # the pane's rows ARE the answer, so degrading to `[]` here would render an unreadable feed
+    # as "nothing has happened" — the one reading that tells the operator to stop looking.
+    def reload_activity : Nil
+      @project_view.reload_activity(@host.session.store)
+    rescue ex : DB::Error | SQLite3::Exception
+      Log.warn(exception: ex) { "activity: event feed read failed" }
+      @host.status("could not read the event feed — see gori.log")
     end
 
     # Runner#apply_external_change already refreshed the live Scope / HostOverrides objects
@@ -351,6 +410,23 @@ module Gori::Tui
     def on_external_change : Nil
       @project_view.clamp_selections
       @project_view.reload_env_vars
+      # `insert_event` is an ordinary insert, so a peer's write (an attached agent's tool call,
+      # most of all) moves `PRAGMA data_version` and lands here. Refresh only while the pane is
+      # showing: the poll runs on every commit, including our own captures, and re-reading a
+      # card nobody is looking at would put a query on the render fiber for nothing.
+      # HEAD refresh, not a reload: `data_version` moves on our own captures as well as on a
+      # peer's write, so re-reading page one here would snap a deeply-paged list back to 200
+      # rows several times a second during live capture. See `ProjectView#refresh_activity`.
+      refresh_activity if @project_view.pane == :activity
+    end
+
+    # As `reload_activity`, but keeps the pages already loaded. Same rescue, same reason: the
+    # rows ARE the answer, so a swallowed read error must not render as a quiet feed.
+    def refresh_activity : Nil
+      @project_view.refresh_activity(@host.session.store)
+    rescue ex : DB::Error | SQLite3::Exception
+      Log.warn(exception: ex) { "activity: event feed refresh failed" }
+      @host.status("could not read the event feed — see gori.log")
     end
 
     def save : Nil
@@ -501,6 +577,133 @@ module Gori::Tui
       else
         return false # a/e/d (scope.*-rule verbs), space (action menu), Global chords
       end
+      true
+    end
+
+    # --- ACTIVITY pane (#864) ---------------------------------------------------------
+    #
+    # Read-only: the pane holds nothing to commit, so unlike its four siblings there is no
+    # settle path and `esc` is free to mean "close the filter bar, then leave".
+    private def handle_project_activity_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        @host.open_palette
+      elsif key.escape?
+        # esc peels one layer at a time: an open filter first (clearing it), then the card.
+        #
+        # Releasing a filter MUST re-query. `activity_filter_cancel` clears the query and the
+        # cursor but leaves the narrowed `@act_rows` — and the paging cursor that goes with
+        # them — so without this the pane shows a subset as if it were the whole feed, under a
+        # filter bar that says nothing is on, and paging from that cursor drops the events in
+        # between.
+        if @project_view.activity_filter_cancel
+          reload_activity
+        else
+          leave_to_strip
+        end
+      elsif key.up? || key.lower_k?
+        @project_view.activity_at_top? ? leave_to_strip : @project_view.activity_select(-1)
+      elsif key.down? || key.lower_j?
+        @project_view.activity_select(1)
+        page_activity
+      elsif key.left? || key.right?
+        # Inert: ←/→ belong to the STRIP one tier up (see the SCOPE handler).
+      else
+        # ↵ included: it is the second chord on `activity.open` (the shape `discover.open-flow`
+        # already uses), so it reaches the verb through the keymap and stays rebindable rather
+        # than being a hard-coded twin the Hotkeys editor cannot see.
+        return false # ↵/o, s, l, c, /, r (activity.* verbs), space (menu), Global chords
+      end
+      true
+    end
+
+    # The filter bar owns keys while it is editing; claimed by the shell before the keymap so a
+    # typed "s" filters instead of cycling the source chip. ↵ keeps the query and leaves edit
+    # mode, esc clears it — the OAST callback-filter contract, so `/` means one thing app-wide.
+    def activity_querying? : Bool
+      @project_view.pane == :activity && @project_view.activity_querying?
+    end
+
+    def handle_activity_query_key(ev : Termisu::Event::Key) : Bool
+      if ev.key.enter?
+        @project_view.activity_filter_commit
+        reload_activity
+      elsif ev.key.escape?
+        @project_view.activity_filter_cancel
+        reload_activity
+      else
+        return false unless @project_view.activity_filter_field.handle_edit_key(ev)
+        # Re-query per keystroke, like History's QL bar: the narrowing is the whole point of
+        # typing, and a bar that only answered on ↵ would hide what the operator is aiming at.
+        reload_activity
+      end
+      true
+    end
+
+    # Pull the next page once the cursor reaches the end of what is loaded. A short page does
+    # NOT mean the feed ended — `events_recent` bounds each call to a scan window, so
+    # `next_before` is the only thing that may be read as "that is all of it".
+    private def page_activity : Nil
+      return unless @project_view.activity_at_end? && @project_view.activity_more?
+      @project_view.activity_load_more(@host.session.store)
+    rescue ex : DB::Error | SQLite3::Exception
+      Log.warn(exception: ex) { "activity: paging the event feed failed" }
+      @host.status("could not read more of the event feed — see gori.log")
+    end
+
+    # --- ACTIVITY verbs (s/l/c///r via the keymap + the pane's action menu) ---
+    def activity_filter_source : Nil
+      @project_view.focus_pane(:activity)
+      @project_view.activity_cycle_source
+      reload_activity
+      src = @project_view.activity_source
+      @host.status(src ? "activity: source #{src}" : "activity: all sources")
+    end
+
+    def activity_filter_level : Nil
+      @project_view.focus_pane(:activity)
+      @project_view.activity_cycle_level
+      reload_activity
+      lvl = @project_view.activity_level
+      @host.status(lvl ? "activity: level #{lvl}" : "activity: all levels")
+    end
+
+    def activity_filter_actor : Nil
+      @project_view.focus_pane(:activity)
+      @project_view.activity_cycle_actor
+      reload_activity
+      act = @project_view.activity_actor
+      @host.status(act ? "activity: actor #{ProjectView.act_actor_label(act)}" : "activity: all actors")
+    end
+
+    def activity_clear_filters : Nil
+      @project_view.focus_pane(:activity)
+      unless @project_view.activity_clear_filters
+        @host.status("activity: no filters set")
+        return
+      end
+      reload_activity
+      @host.status("activity: filters cleared")
+    end
+
+    def activity_find : Nil
+      @project_view.focus_pane(:activity)
+      @host.focus_body
+      @project_view.activity_filter_start
+    end
+
+    def activity_refresh : Nil
+      @project_view.focus_pane(:activity)
+      reload_activity
+    end
+
+    # Selection-driven lists get PageUp/PageDown/Home/End by moving the cursor a screenful.
+    # `ProjectController` has never overridden `body_scroll`, so those keys were dead on every
+    # Project pane; a log is the one card where an operator reaches for them by reflex.
+    def body_scroll(delta : Int32) : Bool
+      return false unless @project_view.pane == :activity
+      @project_view.activity_select(delta)
+      page_activity
       true
     end
 

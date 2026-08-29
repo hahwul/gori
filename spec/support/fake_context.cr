@@ -806,6 +806,44 @@ class FakeExecContext < Gori::Verb::ExecContext
     @env_has_var
   end
 
+  property activity_has_row : Bool = false
+
+  def activity_open : Nil
+    rec(:activity_open)
+  end
+
+  def activity_filter_source : Nil
+    rec(:activity_filter_source)
+  end
+
+  def activity_filter_level : Nil
+    rec(:activity_filter_level)
+  end
+
+  def activity_filter_actor : Nil
+    rec(:activity_filter_actor)
+  end
+
+  def activity_clear_filters : Nil
+    rec(:activity_clear_filters)
+  end
+
+  def activity_clear : Nil
+    rec(:activity_clear)
+  end
+
+  def activity_find : Nil
+    rec(:activity_find)
+  end
+
+  def activity_refresh : Nil
+    rec(:activity_refresh)
+  end
+
+  def activity_row_selected? : Bool
+    @activity_has_row
+  end
+
   def issue_create : Nil
     rec(:issue_create)
   end

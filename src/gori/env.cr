@@ -1245,6 +1245,16 @@ module Gori
         end
       Settings.project_env_vars = vars.dup
       bump_highlight_rev
+      # NAMES only, never values: a `$KEY` table is where a session token, an API key or a
+      # bearer lands, and this is the one config surface whose whole content is secret by
+      # default. The count and the key list are what an audit needs — "who added $ADMIN_TOKEN",
+      # not what it was. Persisted WHOLESALE, so the line describes the resulting set rather
+      # than a delta the caller never computed.
+      if committed
+        names = vars.map(&.[0]).sort!
+        summary = names.empty? ? "cleared" : "#{names.size} var#{names.size == 1 ? "" : "s"} — #{names.join(", ")}"
+        ConfigLog.record(store, "env", "project env vars saved: #{summary}")
+      end
       committed
     end
 

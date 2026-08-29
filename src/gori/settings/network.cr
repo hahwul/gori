@@ -470,6 +470,31 @@ module Gori::Settings
   # reports commit success; all are attempted so an independently busy row cannot leave the
   # rest of the live edit unapplied — except the three ROUTING rows, which go in one task
   # (below) because they are only meaningful together.
+  # The audit line for `save_project_network`. Its own method because the save is already at the
+  # complexity ceiling, and because the redaction below is a decision worth reading on its own.
+  # A partial commit is NOT silence. The six writes are independent tasks, so a busy store can
+  # land some and drop others — and suppressing the event then means a change that DID reach the
+  # live configuration never appears in the audit trail. Worse, a half-applied network pin is
+  # exactly the state an operator most needs told about, so it is recorded at `warn` rather than
+  # merely recorded. `writes` (not a bool) is passed in so this single decision lives in one
+  # place instead of being re-derived beside the caller's own return value.
+  private def self.log_project_network(store : Store, config : ProjectNetworkConfig,
+                                       auth : ProjectProxyAuth?, writes : Array(Bool)) : Nil
+    return if writes.none?
+    persisted = writes.all?
+    up = config.upstream.strip
+    where = up.empty? ? "no upstream proxy" : "upstream #{Gori::ConfigLog.scrub_url(up)}"
+    creds = auth ? " (with credentials, #{Gori::ConfigLog::REDACTED})" : ""
+    line = "project network set — bind #{config.bind_host}:#{config.bind_port} · #{where}#{creds}"
+    if persisted
+      Gori::ConfigLog.record(store, "network", line)
+    else
+      Gori::ConfigLog.warn(store, "network_partial",
+        "#{line} — PARTIALLY applied: the store accepted some of these fields and refused " \
+        "others, so the saved configuration is a mix of old and new. Re-save to settle it.")
+    end
+  end
+
   def self.save_project_network(store : Store, config : ProjectNetworkConfig) : Bool
     auth = config.auth
     destination = config.destination_host.strip
@@ -484,14 +509,15 @@ module Gori::Settings
       {PROJECT_UPSTREAM_DESTINATION_KEY,
        destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination},
     ] of {String, String?})
-    persisted = [
+    writes = [
       set_or_clear_project(store, PROJECT_BIND_HOST_KEY, config.bind_host, bind_host),
       set_or_clear_project(store, PROJECT_BIND_PORT_KEY, config.bind_port.to_s, bind_port.to_s),
       routing_saved,
       set_or_clear_project(store, PROJECT_CONNECT_TIMEOUT_KEY, config.connect_secs.to_s, connect_timeout_secs.to_s),
       set_or_clear_project(store, PROJECT_IO_TIMEOUT_KEY, config.io_secs.to_s, io_timeout_secs.to_s),
       set_or_clear_project(store, PROJECT_CAPTURE_MAX_KEY, config.capture_mib.to_s, capture_max_mib.to_s),
-    ].all?
+    ]
+    persisted = writes.all?
 
     self.project_bind_host = config.bind_host == bind_host ? nil : config.bind_host
     self.project_bind_port = config.bind_port == bind_port ? nil : config.bind_port
@@ -502,6 +528,11 @@ module Gori::Settings
     self.project_connect_timeout_secs = config.connect_secs == connect_timeout_secs ? nil : config.connect_secs
     self.project_io_timeout_secs = config.io_secs == io_timeout_secs ? nil : config.io_secs
     self.project_capture_max_mib = config.capture_mib == capture_max_mib ? nil : config.capture_mib
+    # Where this project's traffic BINDS and where it EGRESSES is the most consequential thing
+    # on the Project settings pane, and it was invisible to the feed. The line names the two
+    # ends and NEVER the credential: `ProjectProxyAuth` carries a password an operator typed
+    # in, and an audit trail that leaks the secret it exists to protect is worse than none.
+    log_project_network(store, config, auth, writes)
     persisted
   end
 

@@ -465,12 +465,19 @@ module Gori
     def add(kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
       return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
-      @write_mutex.synchronize do
-        return false if rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+      added = @write_mutex.synchronize do
+        # `next`, not `return`: the config event below is emitted OUTSIDE the mutex (a store
+        # round-trip has no business holding this lock), so the method must reach its own end.
+        next false if rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         @store.add_scope_rule(kind, match_type, pattern)
         reload_rules
         rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
       end
+      # Only a COMMITTED write is a change. `add` answers by re-reading its own reload precisely
+      # because the store cannot tell it otherwise, and an attempt recorded as a change would
+      # put a rule in the audit trail that never gated a request.
+      ConfigLog.record(@store, "scope_add", "scope rule added — #{kind} #{match_type} #{pattern.inspect}") if added
+      added
     end
 
     # Edit a rule in place (by id). Same validation; dedupes against OTHER rules so a
@@ -478,8 +485,8 @@ module Gori
     def update(id : Int64, kind : String, match_type : String, pattern : String) : Bool
       pattern = pattern.strip
       return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
-      @write_mutex.synchronize do
-        return false if rules_snapshot.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+      changed = @write_mutex.synchronize do
+        next false if rules_snapshot.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
         # The store's answer, not an unconditional `true`. `update_scope_rule` is `exec_task_ok`
         # and has always reported whether the UPDATE committed; `remove` below returns it, and
         # `HostOverrides#update` next door returns it with the note "false also when the store
@@ -499,6 +506,8 @@ module Gori
         reload_rules
         committed
       end
+      ConfigLog.record(@store, "scope_update", "scope rule changed — #{kind} #{match_type} #{pattern.inspect}") if changed
+      changed
     end
 
     # Returns whether the DELETE COMMITTED (false = store busy/locked/closing).
@@ -511,11 +520,18 @@ module Gori
     # flag, and the CLI re-read the reloaded rule list. One dropped return value, three
     # treatments — so it is returned here instead.
     def remove(id : Int64) : Bool
-      @write_mutex.synchronize do
-        ok = @store.remove_scope_rule(id)
+      # Captured BEFORE the delete: the audit line has to name the rule that is going, and after
+      # `reload_rules` there is nothing left to name it with.
+      doomed = rules_snapshot.find { |r| r.id == id }
+      ok = @write_mutex.synchronize do
+        removed = @store.remove_scope_rule(id)
         reload_rules
-        ok
+        removed
       end
+      if ok && (r = doomed)
+        ConfigLog.record(@store, "scope_remove", "scope rule removed — #{r.kind} #{r.match_type} #{r.pattern.inspect}")
+      end
+      ok
     end
 
     def toggle : Nil
@@ -775,12 +791,19 @@ module Gori
     # what keeps a concurrent toggle from interleaving between the read and the write.
     private def set_enabled(value : Bool) : Bool
       @mutex.synchronize { @enabled = value }
-      @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
+      ok = @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
+      ConfigLog.record(@store, "scope_lens", "scope lens turned #{value ? "on" : "off"}") if ok
+      ok
     end
 
+    # The sandbox is the one setting here that changes what leaves the machine — it is the hard
+    # containment gate, not a display lens — so it is the last one that should be able to move
+    # without the log saying who moved it.
     private def set_sandbox(value : Bool) : Bool
       @mutex.synchronize { @sandbox = value }
-      @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
+      ok = @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
+      ConfigLog.record(@store, "sandbox", "sandbox turned #{value ? "ON — out-of-scope traffic is now blocked" : "off — out-of-scope traffic is no longer blocked"}") if ok
+      ok
     end
 
     # The scope-matching URL for a live request: `scheme://host` + `target`, UNLESS

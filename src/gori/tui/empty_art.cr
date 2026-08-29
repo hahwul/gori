@@ -239,6 +239,15 @@ module Gori::Tui
       "╰──────╯",
     ])
 
+    # Several writers converging into one line: the engines and an attached agent both append
+    # to the same feed, which is the fact this pane exists to show. The FEED is the lit part —
+    # unlike its neighbours, this pane asks the operator for nothing, it reports.
+    PROJECT_ACTIVITY = Block.new([
+      " ▓▓▓▓ ╮",
+      " ▓▓▓▓ ┼──> ██████████",
+      " ▓▓▓▓ ╯",
+    ])
+
     # A root fanning out into the endpoints a crawl turns up.
     DISCOVER = Block.new([
       "      ╭── ▓▓▓▓",
@@ -326,6 +335,7 @@ module Gori::Tui
       :project_scope     => PROJECT_SCOPE,
       :project_overrides => PROJECT_OVERRIDES,
       :project_env       => PROJECT_ENV,
+      :project_activity  => PROJECT_ACTIVITY,
       :discover          => DISCOVER,
       :comparer          => COMPARER,
       :authorize         => AUTHORIZE,

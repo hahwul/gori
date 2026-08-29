@@ -1167,7 +1167,13 @@ module Gori
     # but not under `lower()` (`İ`→`i`, `K`→`k`, `ſ`→`s`) stays unreachable by an ASCII needle.
     # All three columns are NOT NULL, so the arms cannot disagree under `NOT` the way a NULL
     # haystack would (`NOT (NULL)` drops the row, `NOT (0)` keeps it).
-    private def self.contains_cond(expr : String, value : String) : {String, Array(DB::Any)}
+
+    # :nodoc: — internal, but NOT private: `Store#events_recent` narrows the #124 event feed
+    # through this same predicate, so the Activity pane's `/` bar and History's `msg:` agree on
+    # what "contains" means and the ASCII fast path above is decided in ONE place. The blank
+    # line above is load-bearing: Crystal only honours `:nodoc:` as the FIRST line of the
+    # comment block attached to the definition, and the rationale above is its own block.
+    def self.contains_cond(expr : String, value : String) : {String, Array(DB::Any)}
       return {"gori_ci_contains(#{expr}, ?)", [value] of DB::Any} unless value.ascii_only?
       {"lower(#{expr}) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
     end
