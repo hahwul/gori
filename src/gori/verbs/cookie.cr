@@ -29,6 +29,9 @@ module Gori
         "cookie.cycle-algorithm", "Cycle Django algorithm", "Cycle the Django HMAC algorithm: sha256 / sha1",
         Verb::Scope::Cookie, available: in_cookie, mnemonic: 'g') { |ctx| ctx.cookie_cycle_algorithm; nil }
       r.register Verb::Definition.new(
+        "cookie.cycle-salt", "Toggle Django salt", "Flip the Django salt between the session-backend salt and the generic signing salt",
+        Verb::Scope::Cookie, available: in_cookie, mnemonic: 's') { |ctx| ctx.cookie_cycle_salt; nil }
+      r.register Verb::Definition.new(
         "cookie.load-decoded", "Load decoded payload", "Seed the FORGE payload editor from the INPUT cookie's parts",
         Verb::Scope::Cookie, available: in_cookie, mnemonic: 'l') { |ctx| ctx.cookie_load_decoded; nil }
       r.register Verb::Definition.new(

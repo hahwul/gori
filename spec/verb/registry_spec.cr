@@ -1353,6 +1353,10 @@ private class FakeContext < ExecContext
     @calls << :cookie_cycle_algorithm
   end
 
+  def cookie_cycle_salt : Nil
+    @calls << :cookie_cycle_salt
+  end
+
   def cookie_crack : Nil
     @calls << :cookie_crack
   end

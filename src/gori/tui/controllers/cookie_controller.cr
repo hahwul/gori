@@ -253,15 +253,17 @@ module Gori::Tui
           if s.mode == :decode
             s.view.render_decode(screen, body,
               input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-              decoded: s.decoded, format: display_format(s), algorithm: s.algorithm,
-              salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
+              algorithm: s.algorithm, salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              salt_preset: salt_preset_label(s),
               verify_state: s.verify_state, crack_note: s.crack_note,
               secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
               pane: s.pane, focused: body_focused, lens_chord: lens_chord)
           else
             s.view.render_forge(screen, body,
-              payload: s.payload, format: display_format(s), algorithm: s.algorithm,
-              salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              payload: s.payload, format: display_format(s), resolved_format: effective_format(s),
+              algorithm: s.algorithm, salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              salt_preset: salt_preset_label(s),
               secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
               output: s.output, output_ok: s.output_ok?,
               pane: s.pane, focused: body_focused, lens_chord: lens_chord)
@@ -616,9 +618,11 @@ module Gori::Tui
     end
 
     private def click_opts_badge(s : CookieSession, opts_c : Rect, mx : Int32, my : Int32) : Nil
-      case s.view.opts_badge_hit(opts_c, mx, my, display_format(s), s.algorithm)
+      case s.view.opts_badge_hit(opts_c, mx, my, display_format(s), effective_format(s),
+        s.algorithm, salt_preset_label(s))
       when :format    then cycle_format
       when :algorithm then cycle_algorithm
+      when :salt      then cycle_salt_preset
       end
     end
 
@@ -677,6 +681,36 @@ module Gori::Tui
       s.algorithm = ALGORITHMS[(i + 1) % ALGORITHMS.size]
       recompute_all(s)
       @host.status(effective_format(s) == "django" ? "algorithm = #{s.algorithm}" : "algorithm = #{s.algorithm} (Django only)")
+    end
+
+    # Flip the Django salt field between the session-backend salt and the generic signing salt.
+    # A Django `sessionid` cookie — the "crack the key, forge an admin session" target — signs
+    # under SESSION_SALT, NOT the default `django.core.signing`, so a blank field silently
+    # verifies/forges under the wrong salt and the correct secret reads as ✗ bad key. This writes
+    # the CONCRETE salt string into the field so decode/verify/crack/forge all sign under the
+    # salt the badge names. Django only (Flask's salt is fixed; Rack has none).
+    def cycle_salt_preset : Nil
+      s = cur
+      unless effective_format(s) == "django"
+        @host.status("salt presets are Django-only")
+        return
+      end
+      s.salt = s.salt.strip == Cookie::Django::SESSION_SALT ? Cookie::Django::DEFAULT_SALT : Cookie::Django::SESSION_SALT
+      s.salt_cx = s.salt.size
+      s.salt_pre = ""
+      recompute_all(s)
+      @host.status("salt = #{salt_preset_label(s)} (#{s.salt})")
+    end
+
+    # The salt badge's label: which canonical Django salt is in effect. A blank field signs under
+    # the signing default, so it reads "signing"; a hand-typed salt that is neither canonical one
+    # reads "custom".
+    def salt_preset_label(s : CookieSession) : String
+      case s.salt.strip
+      when Cookie::Django::SESSION_SALT     then "session"
+      when "", Cookie::Django::DEFAULT_SALT then "signing"
+      else                                       "custom"
+      end
     end
 
     # Crack the signing secret over the SECRET field, read as a wordlist SOURCE: a path to an
@@ -877,7 +911,11 @@ module Gori::Tui
       when :decoded
         "↑/↓ scroll · c crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs"
       when :opts
-        "type salt · ^A format · algo #{s.algorithm} (click/space) · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+        if effective_format(s) == "django"
+          "type salt · salt:#{salt_preset_label(s)} (click/space) · ^A format · algo #{s.algorithm} · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+        else
+          "type salt · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+        end
       when :secret
         "type secret · ^Y copy · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
       when :payload
