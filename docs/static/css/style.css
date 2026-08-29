@@ -625,25 +625,23 @@ kbd {
 }
 
 /* The hero photograph: two interlocked gold rings over dark marbled night,
-   full-bleed across the top of the page. Three background layers, top to
-   bottom: a left scrim seating the hero copy, a floor wash pinning the
-   photo's warm black to the page's indigo, and the photo itself, framed so
-   the ring knot owns the right half. The mask dissolves the photo's lower
-   edge into the page background long before the showcase capture arrives,
-   so the two never compete. */
+   full-bleed across the top of the page. The copy now sits centered on top of
+   it, so the seating scrim is a vertical veil — heaviest where the headline
+   is, dissolving before the showcase frame arrives — and the photo is framed
+   so the ring knot glows behind and above the type instead of beside it. */
 .home-main::before {
   content: "";
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
-  height: min(120vh, 70rem);
+  height: min(115vh, 68rem);
   background:
-    linear-gradient(96deg, rgb(6 8 14 / 0.78) 0%, rgb(6 8 14 / 0.42) 34%, rgb(6 8 14 / 0) 58%),
-    linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
-    url("../images/hero-orbits.webp") 66% 24% / cover no-repeat;
-  -webkit-mask: linear-gradient(180deg, #000 58%, transparent 100%);
-  mask: linear-gradient(180deg, #000 58%, transparent 100%);
+    radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
+    linear-gradient(180deg, rgb(6 8 14 / 0.66) 0%, rgb(6 8 14 / 0.5) 38%, rgb(6 8 14 / 0.18) 62%, rgb(8 10 17 / 0) 80%),
+    url("../images/hero-orbits.webp") 58% 26% / cover no-repeat;
+  -webkit-mask: linear-gradient(180deg, #000 55%, transparent 96%);
+  mask: linear-gradient(180deg, #000 55%, transparent 96%);
 }
 
 /* On paper the photograph flips to ink: invert turns the night to cream and
@@ -666,25 +664,33 @@ kbd {
   margin: 0 auto;
 }
 
-/* Copy on the left, the photograph's ring knot on the right: the empty
-   column is deliberate, the image is the other half of the composition. */
+/* Centered over the artwork: the headline is the composition now, the ring
+   knot its halo. Height leaves the showcase frame peeking above the fold so
+   the page says "scroll" without an arrow. */
 .home-hero {
-  min-height: calc(100dvh - var(--header-h));
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  padding: var(--space-7) 0 3rem;
+  min-height: calc(88dvh - var(--header-h));
+  padding: var(--space-7) 0 2.6rem;
+  text-align: center;
 }
 
 .hero-copy {
-  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Explicit width: as a centered column flex item, fit-content sizing would
+     let the nowrap install one-liner push this past narrow viewports. */
+  width: min(100%, 880px);
 }
 
 .home-kicker {
   display: inline-flex;
   align-items: center;
   width: max-content;
-  margin-bottom: 1.2rem;
+  margin-bottom: 1.4rem;
   padding: 0.34rem 0.78rem;
   border: 1px solid rgb(var(--accent-rgb) / 0.28);
   border-radius: var(--radius-pill);
@@ -696,20 +702,36 @@ kbd {
 }
 
 .home-hero h1 {
-  max-width: 15ch;
+  max-width: 14ch;
   color: var(--heading);
-  font-size: 5.1rem;
-  line-height: 1.04;
-  font-weight: 780;
-  letter-spacing: -0.022em;
+  font-size: clamp(3.2rem, 7.4vw, 6.6rem);
+  line-height: 1.02;
+  font-weight: 800;
+  letter-spacing: -0.028em;
   text-wrap: balance;
 }
 
+/* The emphasized word turns editorial: the reading serif's italic, gilded
+   with the same ramp as the wordmark. --accent is the flat fallback where
+   background-clip text is unsupported. */
+.hero-em {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+  background: var(--grad-logo);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  padding-right: 0.06em;
+}
+
 .hero-lede {
-  max-width: 33rem;
-  margin-top: 1.25rem;
-  color: var(--muted);
-  font-size: 1.1rem;
+  max-width: 40rem;
+  margin-top: 1.35rem;
+  color: var(--text);
+  font-size: 1.12rem;
   line-height: 1.7;
   text-wrap: pretty;
 }
@@ -717,8 +739,9 @@ kbd {
 .home-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.75rem;
-  margin-top: 1.65rem;
+  margin-top: 1.8rem;
 }
 
 .button {
@@ -778,16 +801,18 @@ kbd {
    click copies it. The docker command is long and scrolls inside the code
    element instead of wrapping the widget. */
 .hero-install {
-  max-width: 35rem;
+  width: min(100%, 35rem);
   margin-top: 1.15rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgb(var(--ink-rgb) / 0.03);
+  text-align: left;
 }
 
 .install-tabs {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.3rem;
   padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--line-soft);
@@ -892,7 +917,7 @@ kbd {
   display: block;
 }
 
-/* --- Showcase: a real terminal capture floating under the hero --------- */
+/* --- Showcase: a real terminal, framed big, with a live tab row --------- */
 
 .home-showcase {
   display: flex;
@@ -903,27 +928,214 @@ kbd {
   perspective: 1100px;
 }
 
-.showcase-frame {
-  width: min(100%, 1040px);
-  margin: 0;
+/* The rail above the frame names the interaction, in the drafting-table
+   mono-caps voice herdr uses over its session frame. */
+.showcase-rail {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(100%, 1180px);
+  margin-bottom: 0.65rem;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-.showcase-frame img {
+.showcase-rail-hint {
+  color: var(--accent-strong);
+}
+
+/* The frame is a drawn terminal window: chrome bar with traffic lights and a
+   real tab row, the capture as its screen. A faint gold aura seats it on the
+   night field where the hero art dissolves. */
+.showcase-frame {
+  position: relative;
+  width: min(100%, 1180px);
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--bg-panel);
+  box-shadow:
+    0 0 0 1px rgb(var(--accent-rgb) / 0.07),
+    0 30px 90px rgb(0 0 0 / 0.55),
+    0 0 120px rgb(var(--accent-rgb) / 0.07);
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .showcase-frame {
+  box-shadow:
+    0 0 0 1px rgb(var(--accent-rgb) / 0.08),
+    0 24px 70px rgb(60 50 30 / 0.2);
+}
+
+/* Status bar: traffic lights, the project name, and the proxy state — the
+   same line the captures draw at their top, redrawn here because the crop
+   below starts under it. Mono, so it reads as terminal output. */
+.showcase-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem 0.5rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.showcase-bar-sp {
+  flex: 1 1 auto;
+}
+
+.showcase-bar-dim {
+  color: var(--quiet);
+}
+
+.showcase-brand {
+  margin-left: 0.5rem;
+  color: var(--accent);
+  font-family: "STIX Two Math", "Cambria Math", "Apple Symbols", Georgia, serif;
+  font-size: 0.9rem;
+}
+
+/* The proxy listener: a live green pip, as in the running TUI. */
+.showcase-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--syn-string);
+}
+
+.showcase-live i {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The full TUI tab order lives here, so on anything narrower than a desktop
+   the strip scrolls. The mask fades the trailing edge to say so without
+   spending a scrollbar on it; home.js scrolls the picked tab into view and
+   wires ←/→, so the row is reachable by keyboard too. */
+.showcase-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0 0.8rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-mask: linear-gradient(90deg, #000 calc(100% - 2.2rem), transparent 100%);
+  mask: linear-gradient(90deg, #000 calc(100% - 2.2rem), transparent 100%);
+}
+
+/* Once the whole row fits there is nothing to scroll to, so drop the fade. */
+@media (min-width: 1240px) {
+  .showcase-tabs {
+    -webkit-mask: none;
+    mask: none;
+  }
+}
+
+.showcase-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.showcase-dots {
+  display: inline-flex;
+  gap: 0.36rem;
+  flex: none;
+}
+
+.showcase-dots i {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  background: rgb(var(--ink-rgb) / 0.14);
+}
+
+.showcase-tabs button {
+  flex: none;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.showcase-tabs button:hover {
+  color: var(--heading);
+  background: rgb(var(--ink-rgb) / 0.07);
+}
+
+.showcase-tabs button[aria-pressed="true"] {
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+/* Every capture is cut to one box so switching tabs never reflows the page;
+   the taller Fuzzer capture crops from the top, which keeps its marked
+   request and payload rows in view.
+
+   The crop starts at y=126 of the 1206-wide capture, which is below the SVG's
+   own window chrome, top bar AND tab row (that row sits at y≈119.68 in all of
+   them, verified across the set). The strip above is therefore the terminal's
+   only tab row — drawn in HTML so it can be clicked — instead of a second one
+   stacked over the captured one. */
+.showcase-screen {
+  position: relative;
+  aspect-ratio: 1206 / 394;
+  overflow: hidden;
+  background: var(--pre-bg);
+}
+
+.showcase-screen img {
   width: 100%;
   height: auto;
-  border-radius: 14px;
-  outline: 1px solid rgb(var(--ink-rgb) / 0.1);
-  outline-offset: -1px;
-  filter: drop-shadow(0 24px 54px rgb(0 0 0 / 0.42));
+  margin-top: calc(-126 / 1206 * 100%);
 }
 
-:root[data-theme="light"] .showcase-frame img {
-  filter: drop-shadow(0 20px 46px rgb(60 50 30 / 0.2));
+/* The swap in home.js decodes before it assigns, so the frame never blanks;
+   this just softens the cut between two screens. Kept short — the point is a
+   terminal redrawing, not a slideshow crossfade. home.js re-triggers it by
+   toggling .is-cut, since re-assigning `src` alone does not restart a CSS
+   animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .showcase-screen img.is-cut {
+    animation: showcase-cut 260ms ease-out;
+  }
+}
+
+@keyframes showcase-cut {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+/* Cropped to y=126, a 520-tall capture fills this box exactly. The Fuzzer's
+   is 664, so it runs past the bottom — which is what a terminal viewport does
+   with a view taller than the window. Fading its last rows says "continues
+   below" instead of leaving a guillotined pane border at the edge. Scaling it
+   down to fit was the alternative and it just left side gutters. */
+.showcase-screen img[src*="fuzzer"] {
+  -webkit-mask: linear-gradient(180deg, #000 calc(100% - 5.5rem), transparent 100%);
+  mask: linear-gradient(180deg, #000 calc(100% - 5.5rem), transparent 100%);
 }
 
 .showcase-note {
-  max-width: 46ch;
-  margin: 1.5rem auto 0;
+  max-width: 52ch;
+  margin: 1.6rem auto 0;
   color: var(--muted);
   text-align: center;
   font-size: 0.98rem;
@@ -940,11 +1152,16 @@ kbd {
   padding: 1rem 0 var(--space-8);
 }
 
+/* Centered on the showcase frame's axis, not flush left inside the 1380
+   band: at 1440 the old `max-width: 1080` left ~300px of dead space on the
+   right and threw the whole section off-center against the frame above it.
+   1180 is the frame's width, so the rails start and end where it does. */
 .path-grid {
   display: grid;
   grid-template-columns: 1.15fr 1fr 1fr;
-  gap: 2rem;
-  max-width: 1080px;
+  gap: 2.4rem;
+  width: min(100%, 1180px);
+  margin-inline: auto;
 }
 
 /* Same hairline-rail language as .structure-grid: a rule above each entry,
@@ -1079,7 +1296,7 @@ kbd {
   top: 50%;
   max-width: 800px;
   height: auto;
-  transform: translate(-50%, -50%);
+  transform: translate(-20%, -50%);
   border-radius: 9px;
   box-shadow: 0 22px 55px rgb(0 0 0 / 0.55);
   outline: 1px solid rgb(255 255 255 / 0.08);
@@ -1132,16 +1349,23 @@ kbd {
   padding: 1.5rem 0 4.5rem;
 }
 
+/* Title and list share one centered column on the showcase frame's axis, so
+   the section reads as a block under the frame instead of hugging the left
+   edge of the wider band. `text-wrap: balance` (inherited from the shared
+   heading rule) keeps the line breaks even at this width, so widening the
+   box changes the alignment without stretching the title into one long line. */
 .home-flow h2 {
-  max-width: 14em;
+  width: min(100%, 1180px);
+  max-width: 1180px;
+  margin-inline: auto;
 }
 
 .flow-list {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  max-width: 1080px;
-  margin-top: 1.6rem;
+  width: min(100%, 1180px);
+  margin: 1.6rem auto 0;
   border-top: 1px solid var(--line);
 }
 
@@ -1932,17 +2156,31 @@ kbd {
 .docs-main h1 {
   max-width: 13em;
   color: var(--heading);
-  font-size: 3.2rem;
-  line-height: 1.08;
+  font-size: 2.7rem;
+  line-height: 1.12;
   font-weight: 780;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.014em;
   text-wrap: balance;
+}
+
+/* Section kicker above the page title: the landing path links' mono-caps
+   voice, so the page opens by naming its place in the IA. */
+.doc-kicker {
+  margin: 0 0 0.6rem;
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 /* The page title closes with the same hairline every h2 opens with, so the
    whole column is ruled by one device. (The first h2 drops its own rule
-   below, otherwise the two would stack.) */
-.docs-main > h1:first-child {
+   below, otherwise the two would stack.) The kicker, when present, sits
+   above the title, so both openings are covered. */
+.docs-main > h1:first-child,
+.docs-main > .doc-kicker:first-child + h1 {
   /* The 13em cap above would end this rule mid-column, out of line with every
      h2 rule below it. Page titles are short enough to wrap on their own. */
   max-width: none;
@@ -1963,7 +2201,8 @@ kbd {
   text-wrap: balance;
 }
 
-.docs-main > h1:first-child + h2 {
+.docs-main > h1:first-child + h2,
+.docs-main > .doc-kicker:first-child + h1 + h2 {
   margin-top: var(--space-6);
   padding-top: 0;
   border-top: 0;
@@ -2270,19 +2509,30 @@ pre code .ln {
   -webkit-user-select: none;
 }
 
+/* Tables read as quiet cards: a hairline shell, rounded like every other
+   panel, header row on a faint wash. border-collapse stays separate so the
+   shell's radius survives. */
 table {
   width: 100%;
   max-width: 58rem;
   margin: 1.2rem 0 1.6rem;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   font-size: 0.92rem;
 }
 
 th,
 td {
-  padding: 0.72rem 0.8rem;
+  padding: 0.72rem 0.9rem;
   vertical-align: top;
   border-bottom: 1px solid var(--line);
+}
+
+tbody tr:last-child th,
+tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 th {
@@ -2290,6 +2540,14 @@ th {
   font-weight: 760;
   text-align: left;
   background: rgb(var(--ink-rgb) / 0.035);
+}
+
+thead th:first-child {
+  border-top-left-radius: calc(var(--radius-sm) - 1px);
+}
+
+thead th:last-child {
+  border-top-right-radius: calc(var(--radius-sm) - 1px);
 }
 
 tbody tr:hover {
@@ -3104,10 +3362,7 @@ html.search-lock body {
     padding-top: 3rem;
   }
 
-  .home-hero h1 {
-    max-width: 15ch;
-    font-size: 4.15rem;
-  }
+  /* h1 tracks the viewport via clamp(); no fixed override needed here. */
 
   .home-structure {
     grid-template-columns: 1fr;
@@ -3155,18 +3410,21 @@ html.search-lock body {
     padding: 2.2rem 0 2.5rem;
   }
 
-  /* Stacked, the copy sits over the photograph's full width: the seat scrim
-     turns vertical and deepens, and the frame slides toward the marble left
-     of the ring knot so the bright crossing stays out from under the lede. */
+  /* Stacked, the centered copy sits over the photograph's full width: the
+     veil deepens and the frame slides toward the marble left of the ring
+     knot so the bright crossing stays out from under the lede. */
   .home-main::before {
     height: min(90vh, 46rem);
     background:
+      radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      linear-gradient(180deg, rgb(8 10 17 / 0) 55%, rgb(8 10 17 / 0.5) 100%),
       url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
   }
 
-  .home-hero h1,
+  .home-hero h1 {
+    font-size: 3rem;
+  }
+
   .structure-copy h2,
   .home-flow h2 {
     font-size: 3rem;
@@ -3243,7 +3501,7 @@ html.search-lock body {
   }
 
   .docs-main h1 {
-    font-size: 2.55rem;
+    font-size: 2.2rem;
   }
 
   ul.section-list {

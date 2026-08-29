@@ -42,6 +42,15 @@ Set `ONLY` to shoot a subset of the three groups (`scenes themes readme`):
 ONLY=readme docs/tools/tui-capture/capture.sh   # just the README hero
 ```
 
+Set `SCENES` to shoot named scenes only, which is what you want after fixing
+one frame: every capture carries live timestamps and durations, so a full run
+rewrites all of them and buries the change you meant to make.
+
+```bash
+ONLY=scenes SCENES=project docs/tools/tui-capture/capture.sh
+ONLY=scenes SCENES="project issues" docs/tools/tui-capture/capture.sh
+```
+
 Captures are reproducible but not pixel-identical run to run (timestamps,
 durations, and live response bodies vary), so eyeball the output before
 committing. The theme gallery on the Themes page (`theme-<name>.svg`) is shot in
