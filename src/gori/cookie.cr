@@ -72,11 +72,17 @@ module Gori
 
     # Does `secret` sign this cookie? False on a structural parse failure too (a malformed
     # cookie verifies under no secret) — so a caller can loop candidates without rescuing.
-    def verify(cookie : String, secret : String, format : String? = nil) : Bool
+    #
+    # `salt` / `algorithm` thread the per-format knobs a Flask/Django cookie needs (a Django
+    # SESSION cookie signs under SESSION_SALT, not the default): nil salt falls back to each
+    # format's own default, and Rack ignores both. The three-argument call — used since this
+    # module's first callers — keeps signing under those defaults unchanged.
+    def verify(cookie : String, secret : String, format : String? = nil, *,
+               salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO) : Bool
       case resolve(cookie, format)
-      when "flask" then Flask.verify(cookie, secret)
+      when "flask" then Flask.verify(cookie, secret, salt: salt || Flask::SALT)
       when "rack"  then Rack.verify(cookie, secret)
-      else              Django.verify(cookie, secret)
+      else              Django.verify(cookie, secret, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm)
       end
     rescue CookieError
       false
@@ -85,11 +91,13 @@ module Gori
     # First secret in `secrets` (any `.each`-able of String — an Array, or a
     # Fuzz::PayloadSource wordlist) that verifies the cookie, or nil if none do. The
     # cookie is parsed once; each candidate is a cheap HMAC + constant-time compare.
-    def crack(cookie : String, secrets, format : String? = nil) : String?
+    # `salt` / `algorithm` follow `verify` — the crack must sign under the SAME knobs.
+    def crack(cookie : String, secrets, format : String? = nil, *,
+              salt : String? = nil, algorithm : String = Django::DEFAULT_ALGO) : String?
       case resolve(cookie, format)
-      when "flask" then Flask.crack(cookie, secrets)
+      when "flask" then Flask.crack(cookie, secrets, salt: salt || Flask::SALT)
       when "rack"  then Rack.crack(cookie, secrets)
-      else              Django.crack(cookie, secrets)
+      else              Django.crack(cookie, secrets, salt: salt || Django::DEFAULT_SALT, algorithm: algorithm)
       end
     end
 

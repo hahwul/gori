@@ -236,6 +236,32 @@ describe Gori::Cookie do
     end
   end
 
+  # The module-level salt/algorithm keywords added for the Cookie tab (a Django SESSION cookie
+  # signs under a non-default salt, so verify/crack need to thread them). Existing three-argument
+  # calls sign under the format defaults, unchanged.
+  describe "salt / algorithm keywords" do
+    it "verify threads a custom Django salt through the module facade" do
+      Gori::Cookie.verify(DJANGO_SALTED, SECRET, "django", salt: "my.custom.salt").should be_true
+      Gori::Cookie.verify(DJANGO_SALTED, SECRET, "django").should be_false # default salt must fail
+    end
+
+    it "verify threads the Django sha1 algorithm through the module facade" do
+      Gori::Cookie.verify(DJANGO_SHA1, SECRET, "django", algorithm: "sha1").should be_true
+      Gori::Cookie.verify(DJANGO_SHA1, SECRET, "django", algorithm: "sha256").should be_false
+    end
+
+    it "crack threads salt so a salted Django cookie is cracked under the right salt" do
+      list = ["foo", SECRET, "bar"]
+      Gori::Cookie.crack(DJANGO_SALTED, list, "django", salt: "my.custom.salt").should eq(SECRET)
+      Gori::Cookie.crack(DJANGO_SALTED, list, "django").should be_nil # wrong salt, no match
+    end
+
+    it "leaves the default-salt three-argument path unchanged" do
+      Gori::Cookie.verify(FLASK, SECRET).should be_true
+      Gori::Cookie.verify(DJANGO, SECRET).should be_true
+    end
+  end
+
   describe "error handling" do
     it "raises CookieError on an unrecognized format" do
       expect_raises(Gori::Cookie::CookieError, /unrecognized/) do

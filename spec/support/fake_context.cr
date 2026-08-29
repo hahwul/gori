@@ -1309,6 +1309,64 @@ class FakeExecContext < Gori::Verb::ExecContext
     @jwt_read_mode
   end
 
+  def cookie_new : Nil
+    rec(:cookie_new)
+  end
+
+  def cookie_close : Nil
+    rec(:cookie_close)
+  end
+
+  def cookie_rename_subtab : Nil
+    rec(:cookie_rename_subtab)
+  end
+
+  def cookie_duplicate_subtab : Nil
+    rec(:cookie_duplicate_subtab)
+  end
+
+  def cookie_clear : Nil
+    rec(:cookie_clear)
+  end
+
+  def cookie_toggle_mode : Nil
+    rec(:cookie_toggle_mode)
+  end
+
+  def cookie_cycle_format : Nil
+    rec(:cookie_cycle_format)
+  end
+
+  def cookie_cycle_algorithm : Nil
+    rec(:cookie_cycle_algorithm)
+  end
+
+  def cookie_crack : Nil
+    rec(:cookie_crack)
+  end
+
+  def cookie_load_decoded : Nil
+    rec(:cookie_load_decoded)
+  end
+
+  def cookie_copy : Nil
+    rec(:cookie_copy)
+  end
+
+  def cookie_copy_all : Nil
+    rec(:cookie_copy_all)
+  end
+
+  def cookie_copy_output : Nil
+    rec(:cookie_copy_output)
+  end
+
+  property cookie_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
+
+  def cookie_read_mode? : Bool
+    @cookie_read_mode
+  end
+
   property rewriter_rule_selected : Bool = false # settable so the has-rule gate can be exercised
   property rewriter_rules_sub : Bool = true      # settable so the RULES-sub-tab gate can be exercised
   property rewriter_global_rule : Bool = false   # settable so the global-rule gate (toggle-default) can be exercised
