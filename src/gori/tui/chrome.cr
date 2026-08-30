@@ -193,9 +193,16 @@ module Gori::Tui
       # leading dot + label colour (green/muted/red), so the one address a user glances
       # at doubles as the capture indicator instead of a separate chip.
       #
-      # The bar is now ACTIONS ONLY — the passive clock moved down to the status bar (see
-      # `status_chips`), so "top-right = things you can press, bottom-right = things you can
-      # only read" holds by POSITION. Nothing here is tinted to advertise that: see `Chip`.
+      # The bar is ACTIONS ONLY — the passive clock moved down to the status bar (see
+      # `status_chips`). "Top-right = things you can press" therefore holds without
+      # exception. Its converse no longer does: the status row's readouts are still all
+      # passive, but Miss Ring's chip sits past them and IS pressable (it opens the
+      # notification ring, `status_bar_chip_at`). She is one widget wearing two placements
+      # — pressable in the body, so pressable in the bar — rather than a readout that
+      # learned to act, which is why the exception is hers alone and why `clickable` is a
+      # per-chip flag rather than a property of the row.
+      #
+      # Nothing here is tinted to advertise pressability: see `Chip`.
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,

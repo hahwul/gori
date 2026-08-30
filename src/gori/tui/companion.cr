@@ -688,17 +688,39 @@ module Gori::Tui
       Rect.new(x, y, Mascot::W, Mascot::H)
     end
 
-    # The box a click on her lands in: the sprite PLUS the column of plate either side that
-    # .draw claims, which is what a pointer sees as her.
+    # Did a press land on her? ASKED OF THE FRAME, because .draw paints two things and a
+    # hit test that knows about only one of them is a hole: the bubble is the wider of the
+    # two, it is the half that carries TEXT, and it is therefore the half a reader reaches
+    # for. Missing it sent the press through to the tab underneath — a click that visibly
+    # lands on a speech bubble and selects the flow row behind it, which is the exact
+    # failure the sprite's own hit test exists to prevent.
+    #
+    # TWO RECTS AND NOT THEIR UNION. The bubble sits above her and is right-aligned to her
+    # plate, so a union would claim the cells left of her on the sprite's own rows — cells
+    # .draw never touches, and the body is entitled to every one of them.
+    def self.hit?(body : Rect, frame : Mascot::Frame, mx : Int32, my : Int32) : Bool
+      return false unless rect = place(body)
+      return true if plate_rect(body, rect).contains?(mx, my)
+      return false unless msg = frame.bubble
+      return false unless box = bubble_box(body, rect, msg)
+      box.contains?(mx, my)
+    end
+
+    # The sprite plus the column of plate either side that .draw claims — what a pointer
+    # sees as her body.
     #
     # The RESTING box. The :error shudder shifts her a column for two beats, and a target
     # that moves out from under a pointer mid-press is a worse trade than one that is a
     # column off for 400ms of a reaction — the same reason .place is recomputed from the
     # live body rather than cached, read the other way round.
-    def self.hit_rect(body : Rect) : Rect?
-      return nil unless rect = place(body)
+    def self.plate_rect(body : Rect, rect : Rect) : Rect
       x = {rect.x - 1, body.x}.max
       Rect.new(x, rect.y, {rect.right + 1, body.right}.min - x, rect.h)
+    end
+
+    def self.hit_rect(body : Rect) : Rect?
+      return nil unless rect = place(body)
+      plate_rect(body, rect)
     end
 
     # How wide she may speak in a body this wide, BEFORE the body's own `- 4` clamp. Pure

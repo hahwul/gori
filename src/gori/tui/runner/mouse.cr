@@ -51,6 +51,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # land somewhere draggable — otherwise a click on the tab bar would leave the flag set and
   # the next stray motion would extend a selection the operator had moved on from.
   @dragging = false
+  # The press just consumed was Miss Ring's. Reset at the top of every dispatch_click, so
+  # it is true only for the press immediately after one she took.
+  @companion_pressed = false
 
   private def press_left(layout : Layout, mx : Int32, my : Int32) : Nil
     now = Time.instant
@@ -59,6 +62,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # A double-click consumes the pair: a THIRD press in the same cell starts a new pair
     # rather than reading as another double (and, on the way, as a triple nobody asked for).
     @last_press = double ? nil : {mx, my, now}
+    # THE SECOND PRESS OF A DOUBLE-CLICK ON MISS RING BELONGS TO HER, not to the ring the
+    # first press opened. Without this it falls through to the modal tier and reaches that
+    # overlay: outside its card a `:cancel`, so the gesture reads as "the mascot does
+    # nothing", and inside it a `:commit` that jumps to whatever note happens to sit under
+    # the pointer. The ⌕ pill's rule (see dispatch_click) for the same reason — but scoped
+    # to the press that PAIRS with one she took rather than to her geometry, so it can
+    # never make a cell of the ring's own card dead.
+    if double && @companion_pressed
+      @companion_pressed = false
+      @dragging = false
+      return
+    end
     if double && dispatch_double_click(layout, mx, my)
       @dragging = false
       return
@@ -173,6 +188,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # body drill-in, so it falls through to the tab bar + body (the bar stays live,
   # like the keyboard). Centered modals capture every click (outside → dismiss).
   private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
+    @companion_pressed = false
     return if @space_menu_open && click_space_menu(layout, mx, my)
     return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
     return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
@@ -223,10 +239,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # The same gate render_companion uses: under an overlay or a body editor she is not
       # drawn, and a hit rect over a widget the operator can see would be a trap.
       return false unless companion_visible?
-      return false unless box = Companion.hit_rect(layout.body)
-      return false unless box.contains?(mx, my)
+      # Frame in hand, because .draw paints her bubble as well as her sprite and the bubble
+      # is the half with the text on it.
+      return false unless Companion.hit?(layout.body, frame, mx, my)
     end
     open_notifications
+    @companion_pressed = true
     true
   end
 

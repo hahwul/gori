@@ -334,7 +334,7 @@ describe Gori::Tui::Companion do
         companion.tick(t0 + Companion::BEAT * i)
         companion.frame.not_nil!
       end
-      poses.first.pose.should eq(:error)     # the face lands …
+      poses.first.pose.should eq(:error)      # the face lands …
       poses.map(&.shake).uniq!.should eq([0]) # … and she does not flinch wearing it
     end
   end
@@ -1126,6 +1126,39 @@ describe Gori::Tui::Companion do
       box.x.should eq(rect.x - 1)
       box.right.should eq(rect.right + 1)
       box.right.should be <= body.right # and never off the body's edge
+    end
+
+    # .draw paints TWO things, and the bubble is the wider of them, the one carrying text,
+    # and therefore the one a reader reaches for. A hit test that knew only about the
+    # sprite sent that press through to the tab underneath — a click that visibly lands on
+    # a speech bubble and selects the flow row behind it.
+    #
+    # Same shape as the sprite's: sweep the painted grid, not the arithmetic.
+    it "answers a press on her speech bubble too, and on nothing she did not paint" do
+      backend = MemoryBackend.new(80, 24)
+      frame = Mascot::Frame.new(badge: '!', bubble: "fuzzer: 3 hits on id")
+      Companion.draw(Screen.new(backend), body, frame)
+      painted = 0
+      (body.y...body.bottom).each do |y|
+        row = backend.row(y)
+        (body.x...body.right).each do |x|
+          next if row[x] == ' '
+          painted += 1
+          Companion.hit?(body, frame, x, y).should be_true
+        end
+      end
+      painted.should be > Mascot::W # the bubble is on the grid, not just the sprite
+
+      # …and the body keeps what she never touched: the cells LEFT of her on the sprite's
+      # own rows, which a union of the two boxes would have claimed (the bubble is
+      # right-aligned to her plate and sits above it).
+      rect = Companion.place(body).not_nil!
+      box = Companion.bubble_box(body, rect, frame.bubble.not_nil!).not_nil!
+      box.x.should be < rect.x - 1 # the union would have been strictly wider here
+      Companion.hit?(body, frame, box.x, rect.y).should be_false
+      # A frame with nothing to say gives the bubble's rows straight back.
+      Companion.hit?(body, Mascot::Frame.new, box.x + 2, box.y + 1).should be_false
+      Companion.hit?(body, frame, box.x + 2, box.y + 1).should be_true
     end
 
     # The bubble used to stop growing at 34 columns, so a notice was cut with an '…' on an
