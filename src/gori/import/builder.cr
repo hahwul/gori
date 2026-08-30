@@ -43,6 +43,22 @@ module Gori
       LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
       HTTP_SCHEME    = /\Ahttps?:\/\//i
 
+      # The OTHER shape of a non-http scheme: `scheme ":" path` with no `//` authority at all
+      # (RFC 3986 §3) — `mailto:`, `tel:`, `data:`, `urn:`, `about:`. `Import::Urls` names
+      # `mailto:` and `tel:` among the lines it skips and they were NOT skipped: LEADING_SCHEME
+      # requires the `://`, so these fell through to the `"https://#{u}"` branch and became real
+      # requests. `mailto:bob@example.com` imported as a `GET https://example.com/` — the
+      # userinfo swallowing `mailto:bob` — counted as a successful import and offered to
+      # History, the Sitemap and Scope as a target the operator never listed. A scraped URL
+      # list is full of `mailto:` links, so this was the everyday case, not a corner.
+      #
+      # The `://` in LEADING_SCHEME is not gratuitous, which is why this is a second pattern
+      # and not a relaxation of that one: `example.com:8080/p` is a scheme-LESS line every URL
+      # list carries and it has a leading `token:` too. What tells them apart is what follows
+      # the colon — a PORT (digits, then a path/query/fragment delimiter or the end) and
+      # nothing else.
+      SCHEME_NO_AUTHORITY = /\A[a-z][a-z0-9+.-]*:(?!\/\/)(?!\d*(?:[\/?#]|\z))/i
+
       # A raw control byte (CR, LF, other C0 or DEL) in the PATH or QUERY of an imported
       # URL is NOT rejected: it is the operator's own payload. Importing a HAR of a deliberately
       # CRLF-bearing request — a smuggling case — is exactly what a security-testing proxy is
@@ -87,7 +103,9 @@ module Gori
       def self.normalize_url(url : String) : String
         u = url.strip
         return u if u.starts_with?(HTTP_SCHEME)
-        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.matches?(LEADING_SCHEME)
+        if u.matches?(LEADING_SCHEME) || u.matches?(SCHEME_NO_AUTHORITY)
+          raise Gori::Error.new("invalid URL (missing scheme): #{url}")
+        end
         "https://#{u}"
       end
 

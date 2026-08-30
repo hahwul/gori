@@ -584,6 +584,44 @@ describe Gori::Import do
     end
   end
 
+  # `Import::Urls` names `mailto:` and `tel:` among the lines it skips, and they were not
+  # skipped: LEADING_SCHEME requires the `://`, so a `scheme:path` URI with no authority fell
+  # through to the `"https://" + u` branch. `mailto:bob@example.com` imported as a real
+  # `GET https://example.com/` — the userinfo swallowing `mailto:bob` — counted as a successful
+  # import and offered to History, the Sitemap and Scope as a target nobody listed.
+  it "skips an authority-less non-http URI instead of importing its tail as a host" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://a.test/1\nmailto:bob@example.com\ndata:text/html,x\nabout:blank\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(1)
+        result.skipped.should eq(3)
+        store.search(Gori::QL::EMPTY, 10).map(&.host).should eq(["a.test"])
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  # The `://` in LEADING_SCHEME is load-bearing and the fix above must not relax it:
+  # `example.com:8080/p` is a scheme-LESS line with a leading `token:` too, told apart by the
+  # PORT after the colon.
+  it "still imports a scheme-less host:port line" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "example.com:8080/p?x=1\nlocalhost:3000/x\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.skipped.should eq(0)
+        rows = store.search(Gori::QL::EMPTY, 10).map { |r| {r.host, r.port} }.to_set
+        rows.should eq({ {"example.com", 8080}, {"localhost", 3000} }.to_set)
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
   it "skips a non-http(s) URL line instead of discarding the whole list" do
     urls = File.tempname("gori", ".txt")
     begin
