@@ -84,6 +84,25 @@ describe Gori::Cookie do
       Gori::Cookie.b64_to_int?("AAAAAAAAAAAAAAAA").should be_nil            # decodes to > 8 bytes
     end
 
+    it "b64_to_int? answers nil (not a wrapped-negative) on an 8-byte value past Int64::MAX" do
+      # itsdangerous timestamps are UNSIGNED big-endian: an 8-byte segment with the top bit
+      # set is a value > Int64::MAX. `n << 8 | byte` is a bitwise op (not overflow-checked),
+      # so it used to WRAP to a negative Int64 and render a bogus pre-1970 timestamp for what
+      # is really a far-future one. Refuse it — the same contract base62_decode gives Django.
+      over = Gori::Cookie.b64url(Bytes[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]) # 2**64-1
+      Gori::Cookie.b64_to_int?(over).should be_nil
+      # But an 8-byte value that IS representable (Int64::MAX, top bit clear) still decodes.
+      max = Gori::Cookie.b64url(Bytes[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff])
+      Gori::Cookie.b64_to_int?(max).should eq(Int64::MAX)
+    end
+
+    it "decodes a Flask cookie carrying an oversized (past-Int64) timestamp instead of a negative one" do
+      over = Gori::Cookie.b64url(Bytes[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff])
+      cookie = "Zm9v.#{over}.c2ln"
+      Gori::Cookie.decode(cookie, "flask").should contain("invalid timestamp")
+      JSON.parse(Gori::Cookie.decode_json(cookie, "flask"))["timestamp"].raw.should be_nil
+    end
+
     it "secure_compare is length- and content-exact" do
       Gori::Cookie.secure_compare("abc", "abc").should be_true
       Gori::Cookie.secure_compare("abc", "abd").should be_false

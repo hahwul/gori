@@ -157,7 +157,16 @@ module Gori
       bytes = b64decode(seg)
       return nil if bytes.size > 8
       n = 0_i64
-      bytes.each { |byte| n = n << 8 | byte }
+      bytes.each do |byte|
+        # itsdangerous timestamps are UNSIGNED big-endian, so an exactly-8-byte segment with
+        # the top bit set is a value past Int64::MAX. Left unguarded, `n << 8 | byte` (a
+        # bitwise op, NOT overflow-checked) wraps to a NEGATIVE Int64 and renders a bogus
+        # pre-1970 timestamp for what is really a far-future one — the same silent-wrap
+        # `base62_decode` already guards for Django. Checked before the shift so a value that
+        # wraps is refused rather than surfaced (Int64::MAX itself still decodes cleanly).
+        return nil if n > (Int64::MAX - byte) >> 8
+        n = n << 8 | byte
+      end
       n
     rescue CookieError
       nil
