@@ -169,6 +169,12 @@ module Gori::Tui
 
     # Where the specular walks during a glint sweep — up the left wall and across the
     # crown. Indices into this are what Frame#glint holds; -1 is "no specular".
+    #
+    # STEP 1 IS A CORNER CELL, which is why .draw lets the specular land on role 'C' and
+    # not only on the three band roles. Gating it on H/R/S alone made step 1 paint nothing
+    # at all: the sweep lit the left wall, went dark for the 400ms of that step, then
+    # resumed across the crown — a hole in the middle of a two-second animation, and a
+    # frame change that moved one cell where every other step moves two.
     GLINT_PATH = { {0, 1}, {1, 0}, {2, 0}, {3, 0}, {4, 0} }
 
     # EVERYTHING drawn on one frame — the sprite and the speech bubble both, so Companion#tick
@@ -374,7 +380,9 @@ module Gori::Tui
           role = ink[col]
           fg, bg, attr = role_style(role, pal)
           # The specular overrides one hoop cell — polished metal turning under a light.
-          fg = pal.glint if col == gx && ry == gy && role.in?('H', 'R', 'S')
+          # 'C' is in that set because GLINT_PATH crosses a corner (see the path's note);
+          # only the hole and the plate are exempt, and neither is on the path.
+          fg = pal.glint if col == gx && ry == gy && role.in?('H', 'R', 'S', 'C')
           screen.cell(x + col, y + ry, glyph(frame, col, ry), fg, bg, attr)
         end
       end

@@ -692,6 +692,31 @@ describe Gori::Tui::Companion do
     Mascot::INK.each(&.size.should eq(Mascot::W))
   end
 
+  # A step of the sweep that lands on a cell .draw refuses to tint is a step that paints
+  # NOTHING: the specular blinked out for the 400ms of it and the sweep read as stuttering,
+  # while the frame still compared unequal and cost a repaint. It happened because
+  # GLINT_PATH step 1 is the crown's left corner — role 'C', which the tint gate did not
+  # list — so the path and the gate have to be checked against each other rather than
+  # either one alone.
+  it "moves the specular to a different cell on every step of the sweep" do
+    pal = Mascot.palette(:info, Theme.bg)
+    lit = (0...Mascot::GLINT_PATH.size).map do |i|
+      backend = MemoryBackend.new(Mascot::W, Mascot::H)
+      Mascot.draw(Screen.new(backend), 0, 0, Mascot::Frame.new(glint: i), pal)
+      cells = [] of {Int32, Int32}
+      Mascot::H.times do |ry|
+        Mascot::W.times { |col| cells << {col, ry} if backend.fg_at(col, ry) == pal.glint }
+      end
+      cells
+    end
+    # Exactly one cell carries the specular on each step …
+    lit.each(&.size.should eq(1))
+    # … it is the one the path names …
+    lit.each_with_index { |cells, i| cells.first.should eq(Mascot::GLINT_PATH[i]) }
+    # … and no step repeats another, so the sweep is a walk and not a flicker.
+    lit.map(&.first).uniq.size.should eq(Mascot::GLINT_PATH.size)
+  end
+
   # She is a MISS, so she has lashes — on every pose, whichever way they lean. The brows
   # are an expression axis (Mascot.brows), so this asserts MEMBERSHIP rather than the
   # resting pair: what may never happen is a pose that drops one, which would leave a hole
