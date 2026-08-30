@@ -13,6 +13,12 @@ module Gori
           j.object do
             j.field "enabled", scope.enabled?
             j.field "sandbox", scope.sandbox?
+            # The state `set_sandbox` and `delete_scope_rule` both report on the WRITE that
+            # causes it. Reading it back was the one place it disappeared: `sandbox: true` beside
+            # three exclude rules is a proxy refusing every captured request, and nothing in this
+            # payload said so — a caller would have to know that the allowlist deliberately reads
+            # an empty include set as "block all" rather than "allow all" to derive it.
+            j.field "blocks_all", scope.sandbox? && scope.include_count.zero?
             j.field "rules" do
               j.array do
                 store.scope_rules.each do |(id, kind, match_type, pattern)|

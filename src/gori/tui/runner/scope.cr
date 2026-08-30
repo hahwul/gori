@@ -66,10 +66,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Toggle the scope display lens (in-scope-only ⇄ all flows) right from History —
   # the lens filters History/Sitemap, so reload the active list and confirm the state.
   def scope_toggle_lens : Nil
-    @scope.toggle
+    committed = @scope.toggle
+    # The reloads run either way: `Scope#toggle` flips the in-memory flag whether or not the
+    # write landed, and these lists render off that flag — leaving them stale would put a
+    # SECOND disagreement on screen. What changes is the report. Same shape, and the same
+    # reason, as `report_sandbox_write` for the gate next door: announcing a lens the store
+    # refused is a claim the next data_version poll silently takes back.
     history_controller.view.reload(@session.store)
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
     probe_controller.view.reload(@session.store) if @active_tab == :probe
+    return (@toast = "scope lens NOT changed — the project store is busy or unwritable") unless committed
     project_controller.toast_scope_state
   end
 

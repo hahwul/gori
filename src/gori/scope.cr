@@ -534,7 +534,15 @@ module Gori
       ok
     end
 
-    def toggle : Nil
+    # Returns whether the persisted enabled flag committed, exactly as `enable`/`disable`
+    # below and `toggle_sandbox` above already do. It used to answer `Nil`, so its one caller
+    # (`Runner#scope_toggle_lens`) had nothing to check and announced the new lens state over a
+    # write the store had refused — the in-memory flag flips either way, and the next `reload`
+    # (the TUI's data_version poll, which moves every few seconds even on an idle project)
+    # reverts it to the disk value it never reached. That is the same failure
+    # `report_sandbox_write` was written for one gate over, and MCP's `set_scope_enabled` and
+    # `gori run project scope enable` both already confirm this write before reporting it.
+    def toggle : Bool
       @write_mutex.synchronize { set_enabled(!@mutex.synchronize { @enabled }) }
     end
 

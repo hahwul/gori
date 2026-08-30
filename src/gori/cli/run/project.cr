@@ -525,24 +525,29 @@ module Gori
           if err = Scope.validation_error(new_type, new_pattern)
             abort "gori run project scope update: #{err}"
           end
-          # `scope_rules` carries UNIQUE(kind, match_type, pattern) (store/schema.cr), and this
-          # command writes straight through the store rather than via `Scope#update`, which
-          # dedupes. Without this pre-check the constraint violation rolled the writer batch
-          # back, `update_scope_rule` returned false, and the busy-store abort below reported a
-          # duplicate as "store busy or unwritable" — sending the operator to hunt for a lock.
-          # `scope add` already names the duplicate; this makes the two agree.
+          # `scope_rules` carries UNIQUE(kind, match_type, pattern) (store/schema.cr), and
+          # `Scope#update` collapses a collision and a rolled-back write into ONE false.
+          # Without this pre-check the busy-store abort below reported a duplicate as "store
+          # busy or unwritable" — sending the operator to hunt for a lock. `scope add` already
+          # names the duplicate; this makes the two agree, and leaves whatever false survives
+          # it meaning the store, exactly as MCP's `update_scope_rule` splits the same pair.
           if scope.rules.any? { |r| r.id != id && r.kind == new_kind && r.match_type == new_type && r.pattern == new_pattern }
             store.close
             abort "gori run project scope update: rule ##{id} NOT updated — #{new_kind} #{new_type} #{new_pattern} " \
                   "already exists as another rule; the scope is unchanged"
           end
-          unless store.update_scope_rule(id, new_kind, new_type, new_pattern)
+          # Through `Scope#update`, like `scope add`/`scope delete` beside it. Going straight at
+          # the store skipped `ConfigLog`, which is recorded at the MODEL (see its header, which
+          # names the CLI as the surface that gets forgotten) — so `scope_update` was an event
+          # NO surface but the TUI ever emitted, and narrowing the include rule that gates every
+          # active send left the project's config feed with nothing to show for it.
+          unless scope.update(id, new_kind, new_type, new_pattern)
             abort "gori run project scope update: rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic"
           end
           puts "Scope rule ##{id} updated: #{new_kind} #{new_type} #{new_pattern}"
-          # Re-read: the write went through the store, not this Scope instance, so the
-          # in-memory rule list is one edit stale.
-          warn_scope_blackhole(Scope.load(store), "gori run project scope update")
+          # `Scope#update` reloads its own rule list, so this reads the edit rather than the
+          # list as it stood one write ago.
+          warn_scope_blackhole(scope, "gori run project scope update")
         ensure
           store.close
         end
