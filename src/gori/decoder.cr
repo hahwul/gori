@@ -100,6 +100,20 @@ module Gori::Decoder
     end
   end
 
+  # `display`, guaranteed to be valid UTF-8 — for a caller that puts the rendering INSIDE a
+  # JSON string, where raw bytes are not a thing the format can carry.
+  #
+  # Only `RenderAs::Text` can hand back invalid UTF-8, and only over binary. `gori run decoder
+  # --output text --format json` did exactly that with a base64 blob that decodes to arbitrary
+  # bytes: the bytes went into the document verbatim and no JSON parser would read it back,
+  # with `ok: true` and exit 0 — the CLI's own answer to a documented flag combination. The
+  # fall-back is the AUTO choice rather than an error because the returned mode is what the
+  # `render` field reports, so the document still names the rendering it actually used.
+  def self.display_utf8(data : Bytes, prefer : RenderAs? = nil) : {String, RenderAs}
+    out = display(data, prefer)
+    out[0].valid_encoding? ? out : display(data, nil)
+  end
+
   def self.binary?(data : Bytes) : Bool
     !String.new(data).valid_encoding?
   end

@@ -953,6 +953,33 @@ describe Gori::Decoder do
       end
     end
 
+    # A saved chain is only as runnable as its steps. `brotli-decompress` / `zstd-decompress`
+    # are registered CARRYING a reason on a `-Dwithout_native_codecs` build (the catalog's
+    # `native_codec_reason`) so their names still resolve; a saved chain wrapping one inherited
+    # `unusable: nil`, so `Fuzz::Plan.refuse_unrunnable_chains` — which reads that flag off the
+    # ONE token the spec names — waved the run through and every payload failed at send instead.
+    # Same defect as the unknown-token case above, one arm over. Built by hand rather than off
+    # the shared registry because this build links the native codecs.
+    it "inherits a built-in's `unusable` into a saved chain that wraps it" do
+      r = Gori::Decoder::Registry.new
+      r.register Gori::Decoder.bytes("no-native",
+        category: Gori::Decoder::Category::Compression,
+        direction: Gori::Decoder::Direction::Decode,
+        description: "stand-in for a codec this build dropped",
+        unusable: "no-native: this gori was built without it") { |b| b }
+      r.register Gori::Decoder.text("upcase-it", category: Gori::Decoder::Category::Text,
+        direction: Gori::Decoder::Direction::Transform, description: "x", &.upcase)
+
+      Gori::Decoder::Library.register_all(r, [
+        {"wrapper", "upcase-it > no-native"},
+        {"clean", "upcase-it"},
+      ])
+      r["wrapper"].unusable.not_nil!.should contain "no-native"
+      r["wrapper"].unusable.not_nil!.should contain "built without it"
+      # The complement: a saved chain over runnable steps stays runnable.
+      r["clean"].unusable.should be_nil
+    end
+
     it "publishes through the Settings setter, so every surface sees the same library" do
       before = Gori::Settings.decoder_chains
       begin

@@ -88,3 +88,36 @@ describe "gori run decoder --format json" do
     json["output"].as_s.valid_encoding?.should be_true
   end
 end
+
+# `gori run decoder <chain>` where the chain is only separators. The DECISION and the
+# MESSAGE are split out of the abort for the same reason `list_leftover_error` is —
+# `abort` calls `exit` and cannot run in-process.
+describe "gori run decoder <chain>" do
+  it "proceeds for a chain that has converter tokens" do
+    Gori::CLI::Run.decoder_empty_chain_error("base64-decode").should be_nil
+    Gori::CLI::Run.decoder_empty_chain_error(" hex , url-encode ").should be_nil
+  end
+
+  it "refuses a chain that is only separators, which would echo the input back as a success" do
+    # `Chain.run` treats a zero-token spec as the IDENTITY, so `gori run decoder '>' hello`
+    # printed `hello` and exited 0 — a chain the operator typed wrong reported as a decode
+    # that worked. The MCP `decode` tool already refuses exactly this shape by name.
+    ["", ">", ",", "|", " > | , ", ">>"].each do |chain|
+      msg = Gori::CLI::Run.decoder_empty_chain_error(chain)
+      msg.should_not be_nil
+      msg.not_nil!.should contain("no converter tokens")
+    end
+  end
+end
+
+describe "gori run decoder --format json with --output text" do
+  it "keeps the document parseable when text is forced over binary bytes" do
+    binary = Base64.strict_encode(Bytes[0x00, 0xFF, 0xFE, 0x80])
+    json_str = Gori::CLI::Run.decoder_json_for_spec(
+      run_chain(binary, "base64-decode"), Gori::Decoder::RenderAs::Text)
+    json_str.valid_encoding?.should be_true
+    json = JSON.parse(json_str)
+    json["render"].as_s.should_not eq("text")
+    json["output"].as_s.valid_encoding?.should be_true
+  end
+end

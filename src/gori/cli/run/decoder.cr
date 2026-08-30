@@ -39,6 +39,7 @@ module Gori
         abort "gori run decoder: missing <chain> (e.g. 'base64-decode'; see 'gori run decoder list')" if positional.empty?
         abort "gori run decoder: too many arguments (expected <chain> [input])" if positional.size > 2
         chain = positional[0]
+        (msg = decoder_empty_chain_error(chain)) && abort(msg)
 
         input_str = input_flag || positional[1]?
         input_str ||= STDIN.gets_to_end unless STDIN.tty?
@@ -65,6 +66,21 @@ module Gori
         # A broken chain exits non-zero in BOTH formats — the json branch previously always
         # exited 0, burying "ok":false (inconsistent with the text view + intercept acks).
         exit 1 unless result.ok?
+      end
+
+      # The sentence `cmd_decoder` aborts with when `<chain>` holds no converter at all, or nil
+      # to proceed. Split from the abort so the decision AND the message are spec-able, the same
+      # split `list_leftover_error` documents.
+      #
+      # `Chain.run` treats a zero-token spec as the IDENTITY (which is right for it — the TUI's
+      # empty chain box shows the input), so `gori run decoder '>' hello` printed `hello` and
+      # exited 0: a chain the operator mistyped, reported as a decode that worked. The MCP
+      # `decode` tool already refuses this exact shape rather than "reporting a phantom
+      # 'success' that echoes the input back unchanged"; the CLI was the surface that did not.
+      def self.decoder_empty_chain_error(chain : String) : String?
+        return nil unless Decoder.parse_spec(chain).empty?
+        "gori run decoder: <chain> has no converter tokens (separators are > | ,; " \
+        "e.g. 'base64-decode > gunzip'; see 'gori run decoder list')"
       end
 
       # STDERR line for the first non-Ok step, so a failing chain is diagnosable in
@@ -101,7 +117,9 @@ module Gori
               end
             end
             if final_bytes = result.output
-              rendered, render = Decoder.display(final_bytes, mode)
+              # `display_utf8`, not `display`: this rendering goes inside a JSON string, and
+              # `--output text` over binary would put raw bytes there — see its comment.
+              rendered, render = Decoder.display_utf8(final_bytes, mode)
               j.field "render", render.to_s.downcase
               j.field "output", rendered
             end
