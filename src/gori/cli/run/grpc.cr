@@ -55,7 +55,7 @@ module Gori
           end
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| url = (before + after).first? }
+          p.unknown_args { |before, after| url = one_positional(before, after, "gori run grpc reflect", "URL") }
           p.invalid_option { |f| abort "gori run grpc reflect: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run grpc reflect: missing value for #{f}" }
         end
@@ -235,7 +235,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--all", "Forget every cached reflection target") { all = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| target = (before + after).first? }
+          p.unknown_args { |before, after| target = one_positional(before, after, "gori run grpc forget", "TARGET") }
           p.invalid_option { |f| abort "gori run grpc forget: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run grpc forget: missing value for #{f}" }
         end

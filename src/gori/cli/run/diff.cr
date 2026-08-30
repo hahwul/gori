@@ -59,6 +59,13 @@ module Gori
         chosen = verdicts
         verdict_list = chosen || (unchanged ? Gori::Diff::Render::ORDER : Gori::Diff::Render::LISTED)
 
+        # Each side names its project ONE way. `resolve_read_project` refuses `--project` +
+        # `--db` together, and `diff` reaches it with its own two pairs — so the refusal has to
+        # be raised here, in this command's vocabulary. Without it the operator who typed
+        # `--from acme --from-db baseline.db` was told to choose between `--db` and `--project`,
+        # neither of which `gori run diff` accepts.
+        refuse_two_targets(from_name, from_db, "gori run diff", "--from", "--from-db")
+        refuse_two_targets(to_name, to_db, "gori run diff", "--to", "--to-db")
         a = resolve_read_project(from_name, from_db)
         b = resolve_read_project(to_name, to_db)
         if a.db_path == b.db_path

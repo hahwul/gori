@@ -99,3 +99,74 @@ describe Gori::CLI::Run do
     end
   end
 end
+
+# `CLI::Run.extra_positional_error` — the other half of the same rule, for the commands that
+# take exactly ONE positional rather than none.
+#
+# Most of `gori run` already refuses a second one ("too many arguments (expected one …)").
+# Four did not: `grpc reflect`, `grpc forget`, `oast providers add|update` and `oast resume`
+# read their positional as `(before + after).first?`, which keeps the first token and drops
+# the rest in silence. `gori run oast providers update 3 4 --name=x` renamed provider 3,
+# never touched 4, and exited 0 printing a success line that names one provider — the same
+# silent-mutation-with-a-success-status shape `list_leftover_error` above exists to stop.
+describe Gori::CLI::Run do
+  describe ".extra_positional_error" do
+    it "allows none and one — a command may legitimately be given neither" do
+      Gori::CLI::Run.extra_positional_error([] of String, "gori run grpc forget", "TARGET").should be_nil
+      Gori::CLI::Run.extra_positional_error(["a"], "gori run grpc forget", "TARGET").should be_nil
+    end
+
+    it "refuses a second, and prints what it saw so the operator can spot the typo" do
+      msg = Gori::CLI::Run.extra_positional_error(["3", "4"], "gori run oast providers update", "<id>")
+      msg.should eq("gori run oast providers update: too many arguments (expected one <id>, got: 3 4)")
+    end
+  end
+
+  # A source check, the way spec/cli/run/interrupt_exit_status_spec.cr pins its pairing: the
+  # dropped-positional spelling is a one-liner that reads perfectly fine and would come back
+  # the next time a command grows a positional.
+  #
+  # Banning the literal `(before + after).first?` is NOT enough, and a first pass that did only
+  # that certified nothing about six further sites spelling the same defect differently —
+  # `positional = before + after` on the callback line, `positional.first?` twenty lines down,
+  # nothing in between. So the rule follows the SINK instead of the spelling: whatever variable
+  # `unknown_args` assigns, if the code later reads `.first?` off it, the assignment must go
+  # through `one_positional`/`one_positional_list` or the file must guard the sink's `size`
+  # by hand (`repeater minimize`, `notes delete`, … predate the helper and are fine).
+  #
+  # A sink that is never read with `.first?` is out of scope on purpose: those take a LIST
+  # (`refuse_list_leftovers`, `compare a b`), where a second token is not a dropped one.
+  it "leaves no unknown_args sink whose .first? read drops the rest" do
+    dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
+    offenders = [] of String
+    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+      src = File.read(path)
+      src.scan(/unknown_args\s*(?:do|\{)\s*\|[^|]*\|\s*(\w+)\s*=\s*([^\n}]*)/) do |m|
+        sink, expr = m[1], m[2]
+        next if expr.includes?("one_positional") # routed through the helper
+        # Scoped to the enclosing method, not the whole file: `rewriter.cr` holds both a
+        # `leftover` that `refuse_list_leftovers` guards and a different method's `leftover`
+        # read with `.first?`, and a file-wide search conflates the two into a false positive.
+        start = m.begin
+        rest = src[start..]
+        window = (rest.index(/\n      (?:private )?def self\./) || rest.size).try { |e| rest[0, e] }
+        next unless window.includes?("#{sink}.first?")     # takes a list, not one positional
+        next if window.includes?("#{sink}.size > 1")       # hand-rolled guard, predates the helper
+        next if window.includes?("extra_positional_error") # guarded, branching per verb
+        offenders << "#{File.basename(path)}: #{sink}"
+      end
+    end
+    offenders.should be_empty
+  end
+
+  # …and the rule has to actually select things, or it is a gate that never looked. These four
+  # hand-rolled guards are the ones it deliberately lets through, so if a refactor deletes one
+  # the `size > 1` escape stops applying and the check above starts failing.
+  it "still recognises the hand-rolled guards it exempts" do
+    dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
+    guarded = Dir.glob(File.join(dir, "**", "*.cr")).sort.select do |path|
+      File.read(path).includes?(".size > 1")
+    end
+    guarded.should_not be_empty
+  end
+end

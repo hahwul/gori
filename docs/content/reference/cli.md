@@ -44,7 +44,7 @@ gori tui --listen 0.0.0.0 --port 8080
 
 ## gori run
 
-The non-interactive suite. Each subcommand operates over a project; with neither `--project` nor `--db` it uses the most-recently-active project — and says so once on stderr (`gori run: using project demo (most recently active)`), because creating a project anywhere re-aims every later command. See the [Scripting guide](/guide/scripting/) for the working patterns.
+The non-interactive suite. Each subcommand operates over a project; with neither `--project` nor `--db` it uses the most-recently-active project — and says so once on stderr (`gori run: using project demo (most recently active)`), because creating a project anywhere re-aims every later command. The two are alternatives: passing **both** is a usage error, not a silent win for `--db`. See the [Scripting guide](/guide/scripting/) for the working patterns.
 
 ```bash
 gori run <subcommand> [verb] [options]
@@ -117,7 +117,7 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | `0` | Success |
 | `1` | Error — a failed send, an unreadable project, a mutation that could not be applied |
 | `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
-| `130` | Interrupted by SIGINT/SIGTERM — `fuzz`, `mine`, `discover`, `sequence` and `authorize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM — `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 

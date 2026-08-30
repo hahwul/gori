@@ -96,9 +96,23 @@ module Gori
             keep_alive: true, idle_conns: 1),
           Repeater::Minimize::SEND_CAP)
 
+        # Ctrl-C, the same way `fuzz`/`mine`/`sequence`/`discover` take it (Run.install_interrupt_trap).
+        # This was the last long ACTIVE sweep on this surface without it, and it is the one that
+        # buffers hardest: a minimize is up to SEND_CAP real sends against one origin — minutes —
+        # and NOTHING is printed until `report_repeater_minimize` at the very end, so a raw SIGINT
+        # threw the whole run away, removals already proven and all. `Minimize::Stop` exists for
+        # exactly this (the TUI wires it on pane close) and `Minimize.run` reads it immediately
+        # before every send, returning the removals confirmed so far as a NON-aborted report — the
+        # same partial-but-sound shape a SEND_CAP-capped run returns, so the interrupted path
+        # prints the ordinary report. It does NOT take the `--apply` write with it; see the
+        # `interrupted_run` guard below for why a destructive write is where this parts company
+        # with `discover`.
+        stop = Repeater::Minimize::Stop.new
+        interrupted = Run.install_interrupt_trap("minimize-interrupt",
+          "interrupted — stopping after the probe in flight; reporting what was removed so far") { stop.stop }
         meter = STDERR.tty?
         report = begin
-          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
+          Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend, stop: stop) do |progress|
             if meter
               STDERR.print "\r[minimize] #{progress.done}/#{progress.total} candidates"
               STDERR.flush
@@ -126,7 +140,20 @@ module Gori
         # to a script — over a session still holding the un-minimized request. Same reason
         # `history delete`, `issues delete` and `project scope enable` all check theirs.
         applied = false
-        wanted_apply = apply && !report.aborted && !report.removed.empty?
+        # An INTERRUPTED run does not apply, and that is the one place this parts company with
+        # `discover`, which saves the findings it had collected. Discover's write is ADDITIVE —
+        # rows appear that were not there. `--apply` OVERWRITES the operator's stored request
+        # with a partially-minimized one they never got to look at, and it would land under
+        # `exit 130`: a destructive write reported with a failure status, so a scripted
+        # `… || die` fires and the operator concludes nothing happened while session #id was
+        # rewritten. Ctrl-C is the operator saying stop; the report still prints, so nothing is
+        # lost but the write they can now choose to make.
+        interrupted_run = interrupted.call
+        wanted_apply = apply && !interrupted_run && !report.aborted && !report.removed.empty?
+        if apply && interrupted_run
+          STDERR.puts "gori run repeater minimize: interrupted — --apply skipped, session ##{id} " \
+                      "still holds the original request (the trimmed request is on STDOUT)"
+        end
         if wanted_apply
           w = open_store(project)
           begin
@@ -156,7 +183,12 @@ module Gori
         # search nor what a later `repeater send` would produce. `--apply` still stores the
         # source form (that is what the session row holds, and re-resolving it on every send
         # is the point of storing it).
-        report_repeater_minimize(id, report, format, applied, resolve)
+        report_repeater_minimize(id, report, format, applied, resolve, interrupted_run)
+        # Before the `report.aborted` check below, for the reason `Run.report_interrupted`
+        # records: a run cut short has not demonstrated that calibration failed, so falling
+        # through would print a diagnosis of the wrong cause. A refused `--apply` has already
+        # said so on STDERR just above, and 130 is non-zero, so a `… || die` still fires.
+        Run.report_interrupted(report.removed.size, "candidate", "removed") if interrupted_run
         # A refused `--apply` is a failed mutation, so it must not exit 0 — but the report is
         # printed first either way: the search already spent real sends, and throwing its
         # result away would cost the operator the run as well as the write.
@@ -302,13 +334,21 @@ module Gori
       # the first two here would report a refused write as a successful one.
       private def self.report_repeater_minimize(id : Int64, report : Repeater::Minimize::Report,
                                                 format : Symbol, applied : Bool,
-                                                resolve : Proc(String, Bytes)) : Nil
+                                                resolve : Proc(String, Bytes),
+                                                interrupted : Bool = false) : Nil
         wire = resolve.call(report.minimized_text)
         if format == :json
           puts(JSON.build do |j|
             j.object do
               j.field "repeater_id", id
               j.field "aborted", report.aborted
+              # `aborted` means CALIBRATION failed and the request was left untouched; a run cut
+              # short is a different thing and reports `aborted: false` with a real `removed`
+              # list, so without this field a truncated run is byte-for-byte the shape of a
+              # complete one. A consumer that redirects STDOUT and parses the file — the common
+              # pattern, since the exit code is easy to drop once the JSON parses — had only the
+              # free-text `note` to string-match on.
+              j.field "interrupted", interrupted
               j.field "note", report.note
               j.field "sends", report.sends
               j.field("removed") do

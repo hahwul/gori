@@ -44,7 +44,7 @@ gori tui --listen 0.0.0.0 --port 8080
 
 ## gori run {#gori-run}
 
-비대화형 스위트입니다. 각 서브커맨드는 프로젝트 단위로 동작합니다. `--project`와 `--db`가 모두 없으면 가장 최근에 활성화한 프로젝트를 쓰고, 어느 프로젝트를 골랐는지 stderr에 한 번 알립니다(`gori run: using project demo (most recently active)`). 어디서든 프로젝트를 하나 만들면 이후 모든 명령이 조용히 그쪽을 향하기 때문입니다. 실제 사용 패턴은 [스크립팅 가이드](/ko/guide/scripting/)를 참고하세요.
+비대화형 스위트입니다. 각 서브커맨드는 프로젝트 단위로 동작합니다. `--project`와 `--db`가 모두 없으면 가장 최근에 활성화한 프로젝트를 쓰고, 어느 프로젝트를 골랐는지 stderr에 한 번 알립니다(`gori run: using project demo (most recently active)`). 어디서든 프로젝트를 하나 만들면 이후 모든 명령이 조용히 그쪽을 향하기 때문입니다. 둘은 택일입니다. **둘 다** 주면 `--db`가 조용히 이기는 게 아니라 사용법 오류로 거절합니다. 실제 사용 패턴은 [스크립팅 가이드](/ko/guide/scripting/)를 참고하세요.
 
 ```bash
 gori run <subcommand> [verb] [options]
@@ -117,7 +117,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | `0` | 성공 |
 | `1` | 오류 — 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경 |
 | `3` | `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음 |
-| `130` | SIGINT/SIGTERM으로 중단 — `fuzz`, `mine`, `discover`, `sequence`, `authorize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
+| `130` | SIGINT/SIGTERM으로 중단 — `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `repeater minimize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 `--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다.
 
