@@ -66,13 +66,28 @@ module Gori
         filter = QL.parse(query, scope: lens)
         scope_unconfigured = bound && QL.uses_scope?(query) && !lens.configured?
         scope_unbound = !bound && QL.uses_scope?(query)
+        # `QL.reject_empty?` is true when EVERY term was dropped, so the filter is `EMPTY` and
+        # the compiled SQL is the literal `1` — it matches the WHOLE capture. This was reported
+        # as `matches_nothing`, the exact opposite, in the same object that carried `"sql":"1"`:
+        # `ql_explain{query:"host:"}` said the query matched nothing, so the reading an agent
+        # takes from it is "loosen the filter" when the fix is the reverse. The other half of
+        # the inversion was the never-match case — an uncompilable `~` pattern degrades to `(0)`
+        # — which came back `matches_nothing:false` under a warning that said it matched nothing.
+        # `saved_views` and `colormarker` have always worded this condition correctly ("matches
+        # every flow — it would narrow nothing"); this is the same fact, named the same way.
+        matches_all = QL.reject_empty?(query, filter)
+        # …and both conditions are what `ql_filter_or_error` turns into a QUERY_SYNTAX refusal,
+        # which is the one prediction this tool exists to make and never stated: a caller that
+        # explained first was told the query would run.
+        refused = matches_all || !a.invalid_regex.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "query", query
             j.field("applied_terms") { j.array { a.applied.each { |t| j.string t } } }
             j.field("ignored_terms") { j.array { a.ignored.each { |t| j.string t } } }
             j.field("invalid_regex_terms") { j.array { a.invalid_regex.each { |t| j.string t } } }
-            j.field "matches_nothing", QL.reject_empty?(query, filter)
+            j.field "matches_everything", matches_all
+            j.field "refused_by_query_tools", refused
             j.field "sql", filter.sql
             # Named, not inferred from an empty result: a `scope:` term on a project with no
             # scope rules compiles to a never-match clause, so the query runs clean and returns
@@ -83,8 +98,21 @@ module Gori
             j.field "scope_rules_configured", bound ? lens.configured? : nil
             j.field("warnings") do
               j.array do
+                # First, because it OVERRIDES the "dropped (broadens results)" line below: when
+                # every term is dropped there are no results to broaden — the query becomes
+                # match-all and is refused outright.
+                if matches_all
+                  j.string "every term was dropped, so this compiles to match-ALL (sql `1`) and " \
+                           "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) rather " \
+                           "than return the whole capture — fix or drop the term(s), or pass an " \
+                           "empty query to get the most recent rows"
+                end
                 j.string "dropped (broadens results): #{a.ignored.join(", ")}" unless a.ignored.empty?
-                j.string "invalid regex, matches nothing: #{a.invalid_regex.join(", ")}" unless a.invalid_regex.empty?
+                unless a.invalid_regex.empty?
+                  j.string "invalid regex, matches nothing: #{a.invalid_regex.join(", ")} — " \
+                           "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX); " \
+                           "fix the pattern or drop the term"
+                end
                 if scope_unconfigured
                   j.string "no scope rules are configured, so nothing is in scope: `scope:in` and " \
                            "`scope:out` both match NOTHING here (and a negated `-scope:in` matches " \
@@ -125,7 +153,9 @@ module Gori
           "Diagnose a gori QL query WITHOUT running it: which terms were applied, which " \
           "were silently dropped (broadening results), which regex terms are invalid " \
           "(match nothing), the compiled SQL, and warnings. Use to debug a query that " \
-          "returns too many or zero rows." do |s|
+          "returns too many or zero rows. `matches_everything` means every term was dropped " \
+          "and the query narrows nothing; `refused_by_query_tools` means list_history / " \
+          "list_sitemap / probe_scan will answer QUERY_SYNTAX rather than run it." do |s|
           s.field "query", strprop("the gori QL query to analyze"), required: true
         end
       end
