@@ -149,6 +149,12 @@ private class DenyAfterFirstAsk < D::ScopePolicy
   end
 end
 
+# The three sources `Engine#well_known?` routes through the soft-404 baseline — a document the
+# run GUESSED at a fixed origin path, as opposed to a link the target published.
+private def well_known_source?(f : Gori::Discover::Finding) : Bool
+  f.source.robots? || f.source.sitemap? || f.source.well_known?
+end
+
 # Every path `seed_frontier` queues by name at the origin, in order.
 private WELL_KNOWN_PATHS = Gori::Discover::Engine::WELL_KNOWN.map { |path, _| path }.to_a
 
@@ -416,6 +422,37 @@ describe Gori::Discover::Engine do
     findings.select { |f| f.source.robots? || f.source.sitemap? }.should be_empty
     findings.select(&.source.bruteforced?).should be_empty
     stats.calibrated_out.should be > 0
+  end
+
+  # The same gate on a SPIDER-ONLY run. `--no-bruteforce` used to switch the calibration off
+  # with it — `seed_frontier` set `@seed_calibration_dir` only when both techniques were on, so
+  # a well-known outcome fell through to `record_page`'s raw-status trust. Measured on a
+  # wildcard-200 origin: `--max-depth=1` reported `5 found · calibrated-out 485`, and the same
+  # run with `--no-bruteforce` reported `16 found · calibrated-out 0` — eleven nonexistent
+  # endpoints at confidence 0.9, written into the Sitemap as real without `--no-store`. The
+  # GENTLER flag produced the WORSE data. The calibration is `calibrate_probes` bogus paths at
+  # the origin and owes nothing to the wordlist, so there was never a reason to tie it to one.
+  it "calibrates the well-known guesses on a spider-only run too (--no-bruteforce)" do
+    cfg = D::Config.new(spider: true, bruteforce: false, calibrate_probes: 3, concurrency: 2, retries: 0)
+    findings, stats = run_discover("http://t/", %w(), cfg) do |_t|
+      html("THE SAME SOFT-404 PAGE FOR EVERY SINGLE PATH ON THIS SERVER")
+    end
+    findings.select { |f| well_known_source?(f) }.should be_empty
+    stats.calibrated_out.should be > 0
+  end
+
+  # …and the control: turning brute-force off must not cost a spider-only run the well-known
+  # documents that ARE there. A real 404 baseline means every one of these diverges.
+  it "still records genuine well-known documents on a spider-only run" do
+    cfg = D::Config.new(spider: true, bruteforce: false, calibrate_probes: 3, concurrency: 2, retries: 0)
+    findings, _ = run_discover("http://t/", %w(), cfg) do |t|
+      case t
+      when "/robots.txt" then make(200, "User-agent: *\nDisallow: /admin\n", "text/plain")
+      when "/"           then html("home")
+      else                    notfound
+      end
+    end
+    findings.map(&.url).should contain("http://t/robots.txt")
   end
 
   it "still records a genuine robots.txt/sitemap.xml on a server with a real 404 baseline" do
@@ -887,7 +924,11 @@ describe Gori::Discover::Engine do
       # not fire) and then every send is refused per-URL in `send_with_retries`. This is
       # exactly the shape a mid-run EXCLUDE now produces. `SCOPE_REFUSED` is a benign error, so
       # `errors` stays 0 too — without the send-counter condition the run is completely silent.
-      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      # `calibrate_probes: 0` so the origin-root calibration every spider run queues sends
+      # nothing: its bogus paths are a fresh URL each time, which `DenyAfterFirstAsk` allows
+      # once by construction. What is under test is the per-URL refusal, not the measurement.
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0,
+        calibrate_probes: 0)
       sent = [] of String
       backend = RouteBackend.new(->(t : String) { sent << t; notfound })
       engine = D::Engine.new("http://t/api", [] of String, backend, cfg, DenyAfterFirstAsk.new)
@@ -966,7 +1007,10 @@ describe Gori::Discover::Engine do
         sent << t
         t == "/" ? html("home, no links") : notfound
       end
-      sent.should eq(["/"])
+      # The deny set is the well-known paths and nothing else, so the origin-root soft-404
+      # calibration every spider run queues still goes out — it is the gate that grades those
+      # paths, not one of them. Apart from it, only the seed reached the wire.
+      (sent - root_calibration_probes(sent)).should eq(["/"])
     end
 
     it "still fetches them all when nothing denies them (the control for the case above)" do
@@ -976,7 +1020,7 @@ describe Gori::Discover::Engine do
         sent << t
         t == "/" ? html("home, no links") : notfound
       end
-      sent.sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
+      (sent - root_calibration_probes(sent)).sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
     end
 
     it "gates the origin calibration a path-scoped run queues to grade those paths" do

@@ -811,8 +811,16 @@ module Gori::Discover
       enqueue_dir(bf_dir, 0) if @config.bruteforce?
       # WELL_KNOWN paths are GUESSED, not organically-linked — they deserve the same soft-404
       # gate a brute-forced wordlist hit gets, not the "exists by
-      # construction" trust record_page gives a crawled <a href>. Only wire this up when
-      # bruteforce is on: that's the only mode with a calibration baseline to gate against.
+      # construction" trust record_page gives a crawled <a href>. Wired up for every SPIDER
+      # run, and deliberately NOT conditioned on bruteforce: the seed-only calibration below
+      # is `calibrate_probes + extensions` bogus paths at the ORIGIN and owes nothing to the
+      # wordlist, so `--no-bruteforce` was switching off a gate it does not pay for. It did so
+      # silently, and in the direction that mints findings: on a wildcard-200 origin the same
+      # seed answered `16 found · calibrated-out 0` with `--no-bruteforce` against
+      # `5 found · calibrated-out 485` without it, the extra eleven being sitemap.xml,
+      # robots.txt and the `.well-known/` registry at confidence 0.9 — and, without
+      # `--no-store`, written into the Sitemap as real endpoints. The GENTLER flag produced
+      # the WORSE data.
       # The origin is calibrated separately — a well-known path always lives there even on
       # a path-scoped run confined elsewhere — and `enqueue_seed_only_calibration`'s own @dirs
       # check reuses the bf_dir calibration when that dir IS the origin. Asking @dirs rather
@@ -824,7 +832,7 @@ module Gori::Discover
       # findings recorded, not even counted in calibrated_out. (The shape that first exposed
       # it — a file-shaped seed whose bf_dir fell outside its own confine — is gone with #395,
       # but the assumption it broke was never safe.)
-      if @config.spider? && @config.bruteforce?
+      if @config.spider?
         root_dir = "#{Url.origin(@seed_parts)}/"
         # @seed_calibration_dir is set even when the Calibrate task below is refused, and that
         # is deliberate: it is what routes a robots/sitemap outcome to resolve_seed_finding

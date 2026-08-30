@@ -68,13 +68,19 @@ end
 # vacuously — `CappedBackend` refuses over budget without touching the network, so the origin
 # simply never saw the hop the test is about, and `seen` was empty for the right reason and
 # the wrong one at once.
-private WELL_KNOWN_PATHS     = D::Engine::WELL_KNOWN.map { |path, _| path }.to_a
-private SEED_PLUS_WELL_KNOWN = (1 + WELL_KNOWN_PATHS.size).to_i64
+private WELL_KNOWN_PATHS = D::Engine::WELL_KNOWN.map { |path, _| path }.to_a
+# The origin-root soft-404 calibration `seed_frontier` queues for every SPIDER run — the gate
+# that stops a wildcard-200 origin minting well-known findings — costs `calibrate_probes`
+# sends of its own. Read off the default Config for the same reason the set above is derived
+# from the constant: it is part of what the seed frontier spends before a crawled link can
+# reach the wire.
+private SEED_CALIBRATION_PROBES = D::Config.new.calibrate_probes
+private SEED_FRONTIER_COST      = (1 + WELL_KNOWN_PATHS.size + SEED_CALIBRATION_PROBES).to_i64
 
-# Room for the seed plus its derived well-known probes plus ONE crawled link, so a
-# depth-1 hop is observable. Used by the policy A/B, which asserts on that hop.
+# Room for everything `seed_frontier` queues plus ONE crawled link, so a depth-1 hop is
+# observable. Used by the policy A/B, which asserts on that hop.
 private def crawl_config : D::Config
-  D::Config.new(concurrency: 1, retries: 0, max_requests: SEED_PLUS_WELL_KNOWN + 1, spider: true,
+  D::Config.new(concurrency: 1, retries: 0, max_requests: SEED_FRONTIER_COST + 1, spider: true,
     bruteforce: false, max_depth: 1, timeout: 3.seconds)
 end
 
@@ -82,13 +88,20 @@ end
 # a further request, and headroom on `max_requests` so one would still be visible on the
 # wire rather than swallowed by CappedBackend. Used by the Layer-2 tests on the seed set.
 private def seed_trio_config : D::Config
-  D::Config.new(concurrency: 1, retries: 0, max_requests: SEED_PLUS_WELL_KNOWN + 4, spider: true,
+  D::Config.new(concurrency: 1, retries: 0, max_requests: SEED_FRONTIER_COST + 4, spider: true,
     bruteforce: false, max_depth: 0, timeout: 3.seconds)
 end
 
 # The request targets an origin actually saw, in the order it saw them.
 private def targets_of(heads : Array(String)) : Array(String)
   heads.compact_map { |h| h.lines.first?.try(&.split(' ')[1]?) }
+end
+
+# The origin-root calibration's bogus paths — `Engine#bogus_name` is `Random::Secure.hex(8)`,
+# so 16 hex characters directly under "/". Subtracted where a test asserts on the exact set of
+# paths a gate let through: the calibration is a soft-404 measurement, not a guess under test.
+private def calibration_probes(targets : Array(String)) : Array(String)
+  targets.select(&.matches?(%r{\A/[0-9a-f]{16}\z}))
 end
 
 # Run one plan against a throwaway origin. Yields the listener's port so the caller can
@@ -357,7 +370,8 @@ describe Gori::Discover::Plan do
         _findings, seen = run_one(Gori::Outbound.interactive(scope)) do |port|
           D::PlanOptions.new("http://127.0.0.1:#{port}/", config: seed_trio_config, verify: false)
         end
-        targets_of(seen).sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
+        got = targets_of(seen)
+        (got - calibration_probes(got)).sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
       end
     end
 
