@@ -593,3 +593,64 @@ describe Gori::Outbound do
     end
   end
 end
+
+# The Layer-2 decision `CLI::Run.seed_bindings` makes for a `--bind-from FLOW-ID` seed, reached
+# the way `repeater_out_of_scope_for_spec` reaches its Layer-1 sibling.
+module Gori::CLI::Run
+  def self.bind_from_scope_triple_for_spec(built : Gori::Repeater::FlowRequest::Built)
+    bind_from_scope_triple(built)
+  end
+
+  def self.bind_from_seed_block_for_spec(ob : Gori::Outbound,
+                                         built : Gori::Repeater::FlowRequest::Built) : String?
+    bind_from_seed_block(ob, *bind_from_scope_triple(built))
+  end
+end
+
+private def built_for(target : String, path : String) : Gori::Repeater::FlowRequest::Built
+  host = URI.parse(target).host || ""
+  Gori::Repeater::FlowRequest::Built.new(
+    target: target,
+    bytes: "GET #{path} HTTP/1.1\r\nHost: #{host}\r\nCookie: sid=secret\r\n\r\n".to_slice,
+    http2: false, sni: nil)
+end
+
+describe "gori run --bind-from — the seed replay's Layer-2 gate" do
+  # The seed goes out through `Repeater::Sender`, whose gate is `send_block` — Sandbox only,
+  # because an EXCLUDE deliberately does not stop one HAND-AUTHORED Repeater send. A seed is
+  # not hand-authored: it is the first send of an automated sweep, and it carries the whole
+  # captured request (cookies, Authorization) to the capture's own host. With
+  # --allow-unscoped waiving Layer 1, `discover --bind-from 1 --allow-unscoped` therefore hit
+  # a path an exclude rule had carved out, contradicting both `--allow-unscoped`'s help text
+  # and `EXCLUDE_SWEEP_ERROR`'s own sentence.
+  it "refuses a seed whose host an EXCLUDE rule matches, even under --allow-unscoped" do
+    with_scope do |scope, _store|
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "DANGER-LOGOUT")
+      ob = Gori::Outbound.cli(scope, true)
+      # Layer 1 is waived by the flag — which is what made the leak reachable.
+      gs, gh, gt = Gori::CLI::Run.bind_from_scope_triple_for_spec(
+        built_for("http://acme.test/", "/DANGER-LOGOUT"))
+      ob.check_request(gs, gh, gt).blocked?.should be_false
+      # Layer 2 is what has to hold, and the Repeater's own gate does not.
+      ob.send_block(gs, gh, gt).should be_nil
+      Gori::CLI::Run.bind_from_seed_block_for_spec(ob,
+        built_for("http://acme.test/", "/DANGER-LOGOUT"))
+        .should eq(Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+      # An unrelated in-scope flow still seeds.
+      Gori::CLI::Run.bind_from_seed_block_for_spec(ob,
+        built_for("http://acme.test/", "/login")).should be_nil
+    end
+  end
+
+  it "stops a seed to a SANDBOXed host before the captured request goes out" do
+    with_scope do |scope, _store|
+      scope.add("include", "host", "in.test")
+      scope.enable_sandbox
+      ob = Gori::Outbound.cli(scope, true)
+      Gori::CLI::Run.bind_from_seed_block_for_spec(ob, built_for("http://other.test/", "/a"))
+        .should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
+      Gori::CLI::Run.bind_from_seed_block_for_spec(ob, built_for("http://in.test/", "/a")).should be_nil
+    end
+  end
+end

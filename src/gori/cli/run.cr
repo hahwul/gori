@@ -815,6 +815,27 @@ module Gori
         {scheme, host, Gori::Outbound.request_target(built.bytes)}
       end
 
+      # WHY a `--bind-from` seed replay may not go out, or nil to proceed — Layer 2, judged on
+      # the SWEEP's terms rather than the Repeater's.
+      #
+      # The replay travels through `Repeater::Sender`, whose per-send gate is
+      # `Outbound#send_block`: Sandbox ALONE, because an EXCLUDE rule deliberately does not stop
+      # ONE hand-authored Repeater send — a human replaying a single request has already decided.
+      # A `--bind-from` seed is not that request. It is the first send of an automated sweep,
+      # issued by the sweep's own invocation, so it takes the sweep's gate — `sweep_block`, which
+      # is exactly what `EXCLUDE_SWEEP_ERROR` promises when it says "excludes hold even under
+      # --allow-unscoped". Without this, `--allow-unscoped` waived Layer 1 and `send_block`
+      # skipped the exclude, so `discover --bind-from N --allow-unscoped` (and `fuzz`/`mine`/
+      # `sequence`, which share this helper) replayed the FULL captured request — cookies and
+      # Authorization included — to a host the operator had explicitly carved out.
+      #
+      # Named rather than inlined for the same reason `bind_from_scope_triple` is: the decision
+      # is spec-able without a live send.
+      private def self.bind_from_seed_block(outbound : Gori::Outbound, scheme : String,
+                                            host : String, target : String) : String?
+        outbound.sweep_block(scheme, host, target)
+      end
+
       # Replay flow `flow_id` through `Repeater::Sender` — the one extraction source — so its
       # response can fill the binding table before the sweep starts. Aborts on anything that
       # leaves the table unfilled: a seed that silently did nothing would hand the operator
@@ -845,12 +866,18 @@ module Gori
         # a second, unrelated destination: whatever host that capture was taken from. Without
         # this the seed replayed a full captured request — cookies and all — to an out-of-scope
         # host that the very same invocation would have refused as a `--target`, and only
-        # Sandbox/excludes (Layer 2, inside `Repeater::Sender`) could stop it. `Outbound` exists
-        # so no active request leaves gori without a scope decision; a replay is an active
-        # request. `--allow-unscoped` still waives it, exactly as it does for the sweep.
+        # Sandbox (Layer 2, inside `Repeater::Sender`) could stop it. `Outbound` exists so no
+        # active request leaves gori without a scope decision; a replay is an active request.
+        # `--allow-unscoped` still waives it, exactly as it does for the sweep.
         # Same gap, same shape, and the same fix as #406 gave `gori run repeater`.
         gs, gh, gt = bind_from_scope_triple(built)
         guard_outbound(outbound, gs, gh, gt, "#{cmd}: --bind-from")
+        # Layer 2, BEFORE the send rather than leaving it to `Repeater::Sender` — see
+        # `bind_from_seed_block` for the exclude this closes.
+        if err = bind_from_seed_block(outbound, gs, gh, gt)
+          outbound.close
+          abort "#{cmd}: --bind-from: #{err}"
+        end
         # `evidence: true` is not conditional here and cannot be: `built` is
         # `Repeater::FlowRequest.build(detail)`, which reads `request_head`/`request_body` and
         # nothing else, and the operator supplied one integer. There is no draft on this path
