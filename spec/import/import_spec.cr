@@ -201,6 +201,61 @@ describe Gori::Import do
     end
   end
 
+  # Chrome and Firefox list an h2 request's pseudo-headers in `headers`, so this is the
+  # ORDINARY shape of a HAR of h2 traffic. Writing them out as header LINES did not preserve
+  # them: gori's own `parse_request_head` reads `:method: GET` back as a field NAMED "" with
+  # the value `method: GET`. `HeadCodec.synth_request` drops the same fields when gori captures
+  # h2 itself, so the import now agrees with the capture.
+  it "drops HTTP/2 pseudo-headers rather than storing them as garbled header lines" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [
+              {
+                "startedDateTime": "2026-06-01T12:00:00.000Z", "time": 1,
+                "request": {
+                  "method": "GET", "url": "https://acme.test/x", "httpVersion": "http/2.0",
+                  "headers": [
+                    {"name": ":method", "value": "GET"},
+                    {"name": ":authority", "value": "acme.test"},
+                    {"name": ":scheme", "value": "https"},
+                    {"name": ":path", "value": "/x"},
+                    {"name": "user-agent", "value": "Chrome"}
+                  ]
+                },
+                "response": {
+                  "status": 200, "statusText": "", "httpVersion": "http/2.0",
+                  "headers": [
+                    {"name": ":status", "value": "200"},
+                    {"name": "content-type", "value": "text/html"}
+                  ],
+                  "content": {"mimeType": "text/html", "text": "ok"}
+                }
+              }
+            ]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har)
+        detail = store.get_flow(store.search(Gori::QL::EMPTY, 10).first.id).not_nil!
+        req = String.new(detail.request_head)
+        req.should eq("GET /x HTTP/2\r\nHost: acme.test\r\nuser-agent: Chrome\r\n\r\n")
+        String.new(detail.response_head.not_nil!)
+          .should eq("HTTP/2 200\r\ncontent-type: text/html\r\n\r\n")
+        # The point of dropping them: what is stored re-parses as the fields it was written as,
+        # with no ""-named field carrying a mangled value.
+        parsed = Gori::Proxy::Codec::Http1.parse_request_head(detail.request_head)
+        parsed.headers.to_a.map(&.name).should eq(["Host", "user-agent"])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin
@@ -510,6 +565,27 @@ describe Gori::Import do
     end
   end
 
+  # `ParseResult` carries a skipped tally so `Import.import_file` can say WHY nothing landed
+  # instead of the opaque "no flows found". `Har.parse_file` raised its own message first, which
+  # made that branch dead for the format it matters most for: an all-malformed OpenAPI spec
+  # reported its count (the spec above) and an all-malformed HAR did not.
+  it "reports the skipped count when every HAR entry is malformed" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, {"log" => {"entries" => [
+        {"request" => {"method" => "GET", "url" => "", "headers" => [] of String}},
+        {"request" => {"method" => "GET", "url" => "not a url at all", "headers" => [] of String}},
+      ]}}.to_json)
+      with_store do |store|
+        expect_raises(Gori::Error, /all 2 entries were skipped as malformed/) do
+          Gori::Import.import_file(store, :har, har)
+        end
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "skips a malformed HAR entry (invalid base64 body) instead of aborting the whole import" do
     har = File.tempname("gori", ".har")
     begin
@@ -526,6 +602,44 @@ describe Gori::Import do
       end
     ensure
       File.delete?(har)
+    end
+  end
+
+  # `Import::Urls` names `mailto:` and `tel:` among the lines it skips, and they were not
+  # skipped: LEADING_SCHEME requires the `://`, so a `scheme:path` URI with no authority fell
+  # through to the `"https://" + u` branch. `mailto:bob@example.com` imported as a real
+  # `GET https://example.com/` — the userinfo swallowing `mailto:bob` — counted as a successful
+  # import and offered to History, the Sitemap and Scope as a target nobody listed.
+  it "skips an authority-less non-http URI instead of importing its tail as a host" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://a.test/1\nmailto:bob@example.com\ndata:text/html,x\nabout:blank\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(1)
+        result.skipped.should eq(3)
+        store.search(Gori::QL::EMPTY, 10).map(&.host).should eq(["a.test"])
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  # The `://` in LEADING_SCHEME is load-bearing and the fix above must not relax it:
+  # `example.com:8080/p` is a scheme-LESS line with a leading `token:` too, told apart by the
+  # PORT after the colon.
+  it "still imports a scheme-less host:port line" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "example.com:8080/p?x=1\nlocalhost:3000/x\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.skipped.should eq(0)
+        rows = store.search(Gori::QL::EMPTY, 10).map { |r| {r.host, r.port} }.to_set
+        rows.should eq({ {"example.com", 8080}, {"localhost", 3000} }.to_set)
+      end
+    ensure
+      File.delete?(urls)
     end
   end
 
@@ -1181,9 +1295,37 @@ describe Gori::Import::Builder do
       String.new(pair.request.head).should start_with("get /admin HTTP/1.1\r\n")
     end
 
-    it "is still UPCASED in the projection column History and QL match on" do
+    # The projection COLUMN keeps the case too, matching live capture: `FlowMapper.request`
+    # passes `req.method` straight through, and the consumers that need a canonical form
+    # upcase at the comparison (`Authorize::Passive`, QL's `upper(method) = ?`). Upcasing on
+    # import made the two ingest paths disagree about the same message, and folded a
+    # method-case ACL bypass into the GET rows of every list view — the finding itself. The
+    # demo project's `get /admin/dashboard` came back from gori's own HAR round trip as `GET`.
+    it "reaches the projection column History renders with its case intact" do
       pair = Gori::Import::Builder.pending_request(0_i64, "http://h.test/admin", "get")
-      pair.request.method.should eq("GET")
+      pair.request.method.should eq("get")
+    end
+
+    it "survives a whole HAR import into the column, not just the start line" do
+      har = File.tempname("gori", ".har")
+      begin
+        File.write(har, {"log" => {"entries" => [{
+          "startedDateTime" => "2026-06-01T12:00:00.000Z", "time" => 1,
+          "request" => {"method" => "get", "url" => "https://shop.test/admin/dashboard",
+                        "httpVersion" => "HTTP/1.1", "headers" => [] of String},
+          "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                         "headers" => [] of String, "content" => {"mimeType" => "text/html", "text" => "ok"}},
+        }]}}.to_json)
+        with_store do |store|
+          Gori::Import.import_file(store, :har, har)
+          store.search(Gori::QL::EMPTY, 10).first.method.should eq("get")
+          # QL is unaffected either way — it upcases both sides — which is why the column was
+          # free to keep the wire case all along.
+          store.search(Gori::QL.parse("method:GET"), 10).size.should eq(1)
+        end
+      ensure
+        File.delete?(har)
+      end
     end
 
     it "keeps a non-standard method verbatim on both sides of complete_flow" do
@@ -1191,7 +1333,7 @@ describe Gori::Import::Builder do
       pair = Gori::Import::Builder.complete_flow(
         0_i64, "http://h.test/x", "PaTcH", empty, nil, "HTTP/1.1", 200, "OK", empty, nil, nil, nil)
       String.new(pair.request.head).should start_with("PaTcH /x HTTP/1.1\r\n")
-      pair.request.method.should eq("PATCH")
+      pair.request.method.should eq("PaTcH")
     end
 
     it "still refuses a method that would forge a start line" do
@@ -1329,6 +1471,22 @@ describe Gori::Import::Builder do
         "https://my_host.internal/x"      => "my_host.internal",
         "https://Example.COM/x"           => "Example.COM",
         "https://sub.example.co.uk./x"    => "sub.example.co.uk.",
+      }.each do |url, host|
+        Gori::Import::Builder.endpoint(url)[1].should eq(host)
+      end
+    end
+
+    # A host is not an ASCII thing. `URI.parse` copies an IDN authority through in whatever
+    # form the source wrote it and gori CAPTURES and stores the Unicode form, so an ASCII-only
+    # whitelist meant gori could not read its own HAR export back: the demo project's own
+    # U-label host exported fine and re-imported as a skipped malformed entry, against
+    # `Export::Har`'s stated export→import→export fixed point. The homograph host is the
+    # same bug, and it is evidence an operator imports a capture specifically to keep.
+    it "accepts a U-label IDN host and a homograph one, not just punycode" do
+      {
+        "https://쇼핑몰.한국/api/주문/9"      => "쇼핑몰.한국",
+        "https://ѕhop.demo.test/login" => "ѕhop.demo.test",
+        "https://münchen.de/x"         => "münchen.de",
       }.each do |url, host|
         Gori::Import::Builder.endpoint(url)[1].should eq(host)
       end

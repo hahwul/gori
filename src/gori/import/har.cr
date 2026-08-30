@@ -40,7 +40,12 @@ module Gori
             skipped += 1
           end
         end
-        raise Gori::Error.new("no valid HAR entries in #{path}") if flows.empty?
+        # No raise on an empty result, deliberately. `Import.import_file` owns that message and
+        # says WHY nothing landed — "all N entries were skipped as malformed" — which is the
+        # whole reason `ParseResult` carries a tally. Raising here first made that branch dead
+        # for HAR, the format it matters most for: an operator with a 4000-entry file got "no
+        # valid HAR entries in <path>" and no count, while the same all-malformed OpenAPI spec
+        # got the tally. Every other parser already returns and lets `import_file` speak.
         ParseResult.new(flows, skipped)
       end
 
@@ -110,6 +115,7 @@ module Gori
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared, connect_protocol(req_headers),
+          resp_http_version: resp_version,
           source_surface: prov.surface, source_ref: prov.ref)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
@@ -252,6 +258,17 @@ module Gori
 
       # An ORDERED list of {name, value} — a HAR response commonly has several Set-Cookie
       # entries (and Via/etc.); a Hash would keep only the last, dropping the rest.
+      #
+      # PSEUDO-HEADERS are dropped, which is what `Proxy::H2::HeadCodec.synth_request` does
+      # with the very same fields when gori captures h2 itself: `:method`/`:path`/`:scheme`/
+      # `:authority`/`:status` are the h2 spelling of the start line, and the h1 text form the
+      # store keeps carries them there already (the method and target off the entry's `url`,
+      # the authority via the synthesized `Host:`). Chrome and Firefox list them in `headers`,
+      # so this is the ORDINARY shape of a HAR of h2 traffic, and writing them out as header
+      # LINES did not preserve them — `:method: GET` reads back through gori's own
+      # `parse_request_head` as a field NAMED "" with the value `method: GET`, which is what
+      # History shows, what `Export::Har` then re-exports, and what a Repeater replay would
+      # put on the wire. A colon is not a tchar, so a leading one is unambiguous.
       private def self.headers_list(node : JSON::Any?) : Builder::Headers
         list = Builder::Headers.new
         arr = node.try(&.as_a?)
@@ -259,7 +276,7 @@ module Gori
         arr.each do |item|
           name = item["name"]?.to_s
           value = item["value"]?.to_s
-          next if name.empty?
+          next if name.empty? || name.starts_with?(':')
           list << {name, value}
         end
         list

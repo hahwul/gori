@@ -43,6 +43,22 @@ module Gori
       LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
       HTTP_SCHEME    = /\Ahttps?:\/\//i
 
+      # The OTHER shape of a non-http scheme: `scheme ":" path` with no `//` authority at all
+      # (RFC 3986 §3) — `mailto:`, `tel:`, `data:`, `urn:`, `about:`. `Import::Urls` names
+      # `mailto:` and `tel:` among the lines it skips and they were NOT skipped: LEADING_SCHEME
+      # requires the `://`, so these fell through to the `"https://#{u}"` branch and became real
+      # requests. `mailto:bob@example.com` imported as a `GET https://example.com/` — the
+      # userinfo swallowing `mailto:bob` — counted as a successful import and offered to
+      # History, the Sitemap and Scope as a target the operator never listed. A scraped URL
+      # list is full of `mailto:` links, so this was the everyday case, not a corner.
+      #
+      # The `://` in LEADING_SCHEME is not gratuitous, which is why this is a second pattern
+      # and not a relaxation of that one: `example.com:8080/p` is a scheme-LESS line every URL
+      # list carries and it has a leading `token:` too. What tells them apart is what follows
+      # the colon — a PORT (digits, then a path/query/fragment delimiter or the end) and
+      # nothing else.
+      SCHEME_NO_AUTHORITY = /\A[a-z][a-z0-9+.-]*:(?!\/\/)(?!\d*(?:[\/?#]|\z))/i
+
       # A raw control byte (CR, LF, other C0 or DEL) in the PATH or QUERY of an imported
       # URL is NOT rejected: it is the operator's own payload. Importing a HAR of a deliberately
       # CRLF-bearing request — a smuggling case — is exactly what a security-testing proxy is
@@ -82,12 +98,23 @@ module Gori
       # underscore label. Callers that want a BETTER message for a specific shape still check
       # first (`Vars.unresolved` for `{{baseUrl}}`, `Oas`/`Postman`/`Insomnia`); this is the
       # backstop, not their replacement.
-      HOST_VALID = /\A(?:\[[A-Za-z0-9:.%_-]+\]|[A-Za-z0-9._~%-]+)\z/
+      #
+      # The reg-name half is `\p{L}\p{N}`, not `A-Za-z0-9`, because a host is not an ASCII
+      # thing: `URI.parse` copies an IDN authority through in whatever form the source wrote
+      # it, and gori CAPTURES and stores the Unicode form. An ASCII-only whitelist meant gori
+      # could not read its own HAR export back — `https://쇼핑몰.한국/…` exported fine and
+      # re-imported as a skipped, malformed entry, against `Export::Har`'s stated fixed point.
+      # It cost the homograph cases too (`ѕhop.demo.test`, a Cyrillic dze), which are evidence
+      # an operator imports a capture specifically to keep. The exclusions above are unchanged
+      # and still do the work: `{`, `}`, `,`, `;` and space are neither a letter nor a digit.
+      HOST_VALID = /\A(?:\[[A-Za-z0-9:.%_-]+\]|[\p{L}\p{N}._~%-]+)\z/
 
       def self.normalize_url(url : String) : String
         u = url.strip
         return u if u.starts_with?(HTTP_SCHEME)
-        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.matches?(LEADING_SCHEME)
+        if u.matches?(LEADING_SCHEME) || u.matches?(SCHEME_NO_AUTHORITY)
+          raise Gori::Error.new("invalid URL (missing scheme): #{url}")
+        end
         "https://#{u}"
       end
 
@@ -222,9 +249,8 @@ module Gori
           # non-standard method is the operator's" — and upcasing it here destroyed a
           # method-case bypass probe (`get /admin`) on the way back in, so gori's own HAR
           # round-trip could not carry the test case it had captured. `reject_inject!` above
-          # already refuses the CR/LF/NUL that would forge a start line. The UPCASED form is
-          # not lost: it is what the `flows.method` projection column stores, which is what
-          # `pending_request`/`complete_flow` pass to the DTO and what History/QL match on.
+          # already refuses the CR/LF/NUL that would forge a start line. The `flows.method`
+          # projection column carries the same case, for the reason `pending_request` states.
           b << method << ' ' << target << ' ' << http_version << "\r\n"
           b << "Host: " << host_header(scheme, host, port) << "\r\n" unless has_host
           # One pass, allocation-free case-insensitive compares. Skip any incoming
@@ -443,9 +469,17 @@ module Gori
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head(method, target, http_version, scheme, host, port, headers, body,
           trunc ? size : nil, trunc)
+        # The `flows.method` COLUMN keeps the source's case too, matching live capture:
+        # `FlowMapper.request` passes `req.method` straight through, and the consumers that
+        # need a canonical form upcase at the comparison (`Authorize::Passive`, QL's
+        # `upper(method) = ?`). Upcasing here made the two ingest paths disagree about the
+        # same message and folded a method-case ACL bypass — `get /admin`, RFC 9110 §9.1
+        # makes the method case-SENSITIVE — into the GET rows of every list view, which is
+        # the finding itself. The start line already carried the case; the column, which is
+        # what History renders, did not.
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
-          method: method.upcase, target: target, http_version: http_version,
+          method: method, target: target, http_version: http_version,
           head: head, body: stored, body_truncated: trunc, body_size: size,
           source: source, source_surface: source_surface, source_ref: source_ref)
         FlowPair.new(req, nil)
@@ -461,6 +495,7 @@ module Gori
                              declared_req_body_size : Int64? = nil,
                              declared_resp_body_size : Int64? = nil,
                              connect_protocol : String? = nil,
+                             resp_http_version : String? = nil,
                              source : FlowSource::Kind = FlowSource::Kind::Import,
                              source_surface : FlowSource::Surface? = nil,
                              source_ref : String? = nil) : FlowPair
@@ -473,7 +508,7 @@ module Gori
         # may be believed stays with the importer that read them — see `Import::Har`.
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
-          method: method.upcase, target: target, http_version: http_version,
+          method: method, target: target, http_version: http_version,
           head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size,
           connect_protocol: connect_protocol,
           source: source, source_surface: source_surface, source_ref: source_ref)
@@ -482,7 +517,18 @@ module Gori
         # It does need to KNOW the body was cut short, though, or a capped chunked response
         # loses its Transfer-Encoding (`wire_chunked?`), so cap first and tell it.
         resp_stored, resp_trunc, resp_size = capped(resp_body, declared_resp_body_size)
-        resp_head = response_head(http_version, status, reason, resp_headers, resp_body, resp_trunc)
+        # The RESPONSE's own version when the source recorded one, falling back to the
+        # request's. `Export::Har` writes `resp.version` for exactly this reason — an origin
+        # answering HTTP/1.0 to an HTTP/1.1 request — and only half that round trip existed:
+        # the reader reconstructed the status line from the REQUEST version, so gori read its
+        # own export back with the response head rewritten, and 1.0 vs 1.1 is semantically
+        # load-bearing (no default keep-alive). It also split the status line against the
+        # phrase beside it, since `Import::Har` already decides "h2 has no reason phrase" off
+        # the response's version: a HTTP/1.1 request answered over h2 came back as
+        # `HTTP/1.1 200` with no phrase — the reason-less status line that is supposed to mean
+        # the origin really sent one.
+        resp_head = response_head(resp_http_version || http_version, status, reason,
+          resp_headers, resp_body, resp_trunc)
         content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,

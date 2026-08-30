@@ -78,6 +78,34 @@ describe "HAR round-trip fixed point" do
     req.should start_with("GET /x HTTP/1.0\r\n")
   end
 
+  # `Export::Har` writes the RESPONSE's own `httpVersion` (`resp.version`) precisely because an
+  # origin may answer HTTP/1.0 to an HTTP/1.1 request, and 1.0 vs 1.1 is semantically
+  # load-bearing (no default keep-alive). Only half that round trip existed: the reader rebuilt
+  # the status line from the REQUEST version, so gori read its own export back with the
+  # response head rewritten.
+  it "keeps the response's own version rather than restating the request's" do
+    _, resp = import_heads("HTTP/1.1", "HTTP/1.0")
+    resp.should start_with("HTTP/1.0 200 OK\r\n")
+
+    _, resp = import_heads("HTTP/2", "HTTP/1.1")
+    resp.should start_with("HTTP/1.1 200 OK\r\n")
+  end
+
+  # The same drop split the status line against the phrase beside it: the "h2 carries no reason
+  # phrase" decision already reads the RESPONSE's version, so an HTTP/1.1 request answered over
+  # h2 came back as `HTTP/1.1 200` — the reason-less status line that is supposed to mean the
+  # origin really sent one.
+  it "does not fabricate a reason-less HTTP/1.1 status line for an h2 response" do
+    _, resp = import_heads("HTTP/1.1", "HTTP/2", status_text: nil)
+    resp.should start_with("HTTP/2 200\r\n")
+  end
+
+  # A HAR that states no response httpVersion at all still falls back to the request's.
+  it "falls back to the request version when the response states none" do
+    _, resp = import_heads("HTTP/1.0", "")
+    resp.should start_with("HTTP/1.0 200 OK\r\n")
+  end
+
   # `parse_response_head` yields reason == "" for a reason-less status line
   # (`HTTP/1.1 200\r\n`) — a real server fingerprint and a deliberate probe target. Export
   # writes `"statusText": ""`; importing that used to invent "OK", putting three bytes on the
