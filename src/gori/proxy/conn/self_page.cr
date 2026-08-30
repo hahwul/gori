@@ -1,5 +1,6 @@
 require "html"
 require "../../bind_address"
+require "../../url"
 
 module Gori::Proxy
   # The self-serve landing page ClientConn returns when a browser hits the proxy
@@ -70,16 +71,14 @@ module Gori::Proxy
     # never match, silently 404ing every download. Reduce it to the path. Runs AFTER the
     # query strip, so a '/' inside a query string can't be mistaken for the path start.
     # No path at all ("http://gori.proxy") is the index, matching the "" case above.
+    #
+    # `Url.origin_path` and not a `starts_with?("http://")` pair here: RFC 3986 §3.1 makes a
+    # URI scheme case-INSENSITIVE, so the hand-rolled test missed `GET HTTP://gori.proxy/ca.pem`
+    # and 404'd the CA download for a client that spells its own request-line that way. That is
+    # the fourth copy of this predicate to get it wrong, which is why `Url` owns it — see that
+    # module's own header, where the other three are named.
     private def self.strip_authority(target : String) : String
-      prefix = if target.starts_with?("http://")
-                 7
-               elsif target.starts_with?("https://")
-                 8
-               else
-                 return target
-               end
-      slash = target.index('/', prefix)
-      slash ? target[slash..] : "/"
+      Gori::Url.origin_path(target)
     end
 
     # Build the complete HTTP/1.1 response bytes for `target`. `pem`/`der` are nil

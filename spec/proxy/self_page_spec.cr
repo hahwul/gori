@@ -93,6 +93,17 @@ describe Gori::Proxy::SelfPage do
       Gori::Proxy::SelfPage.route("http://gori.proxy/nope").should eq(:not_found)
     end
 
+    # RFC 3986 §3.1: a URI scheme is case-INSENSITIVE, and a request-line is bytes a client
+    # chose. The hand-rolled `starts_with?("http://")` pair here missed the uppercase spelling,
+    # so `GET HTTP://gori.proxy/ca.pem` 404'd the CA download instead of serving it — the same
+    # miss `Url.absolute_form?`'s own header names three other copies of.
+    it "routes an absolute-form target whose scheme is not lowercase" do
+      Gori::Proxy::SelfPage.route("HTTP://gori.proxy/ca.pem").should eq(:pem)
+      Gori::Proxy::SelfPage.route("Https://gori.proxy/ca.crt").should eq(:der)
+      Gori::Proxy::SelfPage.route("HTTP://gori.proxy/").should eq(:index)
+      Gori::Proxy::SelfPage.route("HTTP://gori.proxy").should eq(:index)
+    end
+
     # The query strip runs first, so a '/' inside the query can't be read as the path.
     it "does not mistake a slash inside the query for the path" do
       Gori::Proxy::SelfPage.route("http://gori.proxy?next=/ca.der").should eq(:index)
