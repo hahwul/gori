@@ -1012,6 +1012,10 @@ module Gori
           m.match_size = c[:size]
           m.match_words = c[:words]
           m.match_lines = c[:lines]
+          # Round-trip time in MILLISECONDS. The one dimension a time-based blind injection
+          # moves — status, size, words and body are identical whether the sleep fired or not
+          # — and until this was wired an agent had no way to name it. See Fuzz::Matcher.
+          m.match_time = c[:time]
           # A case-insensitive substring of the response HEAD. `regex` only ever sees the
           # BODY, so until this was wired an agent had no way to name `Set-Cookie`,
           # `X-Powered-By: PHP` or the `Location:` an open-redirect probe produces — the one
@@ -1025,6 +1029,7 @@ module Gori
           m.filter_size = c[:size]
           m.filter_words = c[:words]
           m.filter_lines = c[:lines]
+          m.filter_time = c[:time]
           m.filter_header = c[:header]
           m.filter_regex = fuzz_regex(c[:regex], "filter")
         end
@@ -1032,7 +1037,7 @@ module Gori
         m
       end
 
-      private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, header: String?, regex: String?)
+      private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, time: String?, header: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
         return nil unless raw
@@ -1047,6 +1052,8 @@ module Gori
           end
         {status: jstr(obj, "status"), grpc: jstr(obj, "grpc"), size: jstr(obj, "size"),
          words: jstr(obj, "words"), lines: jstr(obj, "lines"),
+         # Milliseconds, the unit `timeout_ms` on this same tool already uses.
+         time: jstr(obj, "time"),
          # `jstr`, not `demanded_jstr`: `header` is a plain substring, so the same scalar
          # leniency `status: 500` gets is right here too (`header: 200` reads as "200").
          header: jstr(obj, "header"),
@@ -1183,7 +1190,7 @@ module Gori
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. Giving this pipeline REPLACES the default encoding (it applies to every position, so it is not stacked on top). Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW — turns off the default percent-encoding for those positions (path, JSON body, header and cookie positions are raw either way). For a payload that IS the raw byte: parameter pollution with a bare &, a request-line CRLF probe. Also for a payload that is ALREADY a percent-escape and aims at the origin's own decoder — %00, %c0%af, %2e%2e%2f — which the default encodes again (%00 -> %2500) so it arrives as text, testing something else. An explicit 'processors' pipeline already replaces the default.")
-          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))
+          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "time" is the ROUND TRIP in milliseconds ({"time":">=5000"}), the dimension a time-based blind injection is the only evidence for: `' OR SLEEP(5)--` comes back with the same status, the same byte length and the same body as the payload that did nothing, and differs only in how long it took. A send that TIMED OUT counts as a match on "time" (it is the loudest form of the same signal) and on nothing else. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16"): for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
           s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
@@ -1196,8 +1203,8 @@ module Gori
           s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test")
           s.field "tls_preset", strprop("TLS fingerprint for this WHOLE RUN: shape every ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. Run-level, not per request — keep-alive parks a socket whose handshake is already done. The destination's client certificate, protocol range and permissive flag still apply. Echoed back on fuzz_start so the result set says which handshake produced it. An APPROXIMATION of that client's hello, NOT a byte-exact JA3 match — extension order and GREASE placement are OpenSSL's. https targets only")
-          s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection across many requests (default true) — one TCP/TLS handshake per worker instead of per request. Set false to dial a fresh connection per request, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection) or when keep-alive handling is itself what you are probing.")
-          s.field "http2", boolprop("use real HTTP/2 (default false)")
+          s.field "keep_alive", boolprop("reuse one connection across many requests (default true), on HTTP/1.1 and on h2 alike — an h2 run reuses a connection serially, stream 1 then 3 then 5 — one TCP/TLS handshake per worker instead of per request. Set false to dial a fresh connection per request, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection) or when keep-alive handling is itself what you are probing.")
+          s.field "http2", boolprop("use real HTTP/2 (default false). A run seeded from a captured h2 flow selects it on its own. Pooled like h1 unless keep_alive is false")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")

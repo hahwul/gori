@@ -136,7 +136,7 @@ module Gori
           p.on("--race=N", "Race condition (last-byte-sync): dial N connections and release them together, instead of a --mode sweep") { |v| race = parse_count(v, "--race") }
           p.on("--race-warmup=FILE", "Race mode: send+read this raw request on each connection before it holds the race request") { |v| race_warmup_file = v }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
-          p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse)") { keep_alive = false }
+          p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse, on HTTP/1.1 and h2 alike)") { keep_alive = false }
           # The Repeater's `--verbatim` and Intercept's `update_content_length:false` by the
           # same name and for the same reason: a CL/CL-TE desync template is the payload, and
           # recomputing its Content-Length swept a different request than the one written.
@@ -159,6 +159,12 @@ module Gori
           p.on("--fw=SPEC", "Filter out word count") { |v| matcher.filter_words = v }
           p.on("--ml=SPEC", "Match line count") { |v| matcher.match_lines = v }
           p.on("--fl=SPEC", "Filter out line count") { |v| matcher.filter_lines = v }
+          # The dimension a time-based blind payload is the ONLY evidence for: same status,
+          # same size, same body, and the origin took five seconds. Milliseconds, so a
+          # `SLEEP(5)` sweep reads `--mt '>=4500'`. A send that TIMED OUT counts as a match
+          # here (and nowhere else) — see `Fuzz::Matcher#eligible?`.
+          p.on("--mt=SPEC", "Match round-trip time in ms (e.g. '>=5000' for a time-based blind payload)") { |v| matcher.match_time = v }
+          p.on("--ft=SPEC", "Filter out round-trip time in ms") { |v| matcher.filter_time = v }
           p.on("--mr=REGEX", "Match response-body regex") { |v| matcher.match_regex = parse_regex(v) }
           p.on("--fr=REGEX", "Filter out response-body regex") { |v| matcher.filter_regex = parse_regex(v) }
           # The response HEAD dimension. `Fuzz::Matcher` has carried the predicate since the
@@ -697,7 +703,7 @@ module Gori
       # whether the run may proceed; it only streams it.
       private def self.run_fuzz_stream(engine : Fuzz::Engine, total : Int64?, race : Int32?, scheme : String,
                                        host : String, port : Int32, format : Symbol,
-                                       fail_if_no_matches : Bool, pool : Fuzz::ConnPool? = nil,
+                                       fail_if_no_matches : Bool, pool : Fuzz::Pool? = nil,
                                        max_requests : Int64? = nil,
                                        reframe_grpc : Bool = false,
                                        record_store : Store? = nil, record_policy : Symbol = :none,
@@ -890,7 +896,7 @@ module Gori
                     "marks the success response (a correctly-guarded endpoint should show ≤1)"
       end
 
-      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::ConnPool?,
+      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::Pool?,
                                  max_requests : Int64? = nil, race : Int32? = nil,
                                  matcher_constrained : Bool = false,
                                  reframe_grpc : Bool = false) : Nil

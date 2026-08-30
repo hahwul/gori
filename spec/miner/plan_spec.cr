@@ -214,11 +214,15 @@ describe Gori::Miner::Plan do
       plan.pool.should be_nil
     end
 
-    it "runs connection-per-send on h2, whatever the knob says" do
-      # H2Engine frames its own connection per send — `Fuzz::Sender` excludes h2 from pooling.
+    it "pools h2 as well, on an H2Pool — the knob means the same on both protocols" do
+      # This used to assert `be_nil`, on the ground that "H2Engine frames its own connection
+      # per send". It did, and the Miner paid for it exactly as the Fuzzer did: a dial (and,
+      # on https, a full TLS handshake) per candidate. `Repeater::H2Pool` reuses one
+      # connection serially, so the same `keep_alive` knob now means the same thing whichever
+      # protocol the seed selected.
       plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "https://t.test",
         http2: true, config: config), ungated)
-      plan.pool.should be_nil
+      plan.pool.should be_a(Gori::Repeater::H2Pool)
     end
   end
 

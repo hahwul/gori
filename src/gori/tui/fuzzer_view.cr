@@ -1045,7 +1045,8 @@ module Gori::Tui
         f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
         f_words: @matcher.filter_words || "", f_regex: @s_f_regex,
         grpc_fields: @s_grpc_fields,
-        tls_preset: @config.tls_preset || "")
+        tls_preset: @config.tls_preset || "",
+        m_time: @matcher.match_time || "", f_time: @matcher.filter_time || "")
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1081,6 +1082,10 @@ module Gori::Tui
       # starts, which is where the operator finds out, rather than here where a silent clear
       # would leave the row empty and the sweep looking like it was never asked.
       @config.tls_preset = Settings.tls_preset_normalize(s.tls_preset)
+      # Milliseconds, evaluated over the round trip — the dimension a time-based blind
+      # payload is the only evidence for (see `Fuzz::Matcher#match_time`).
+      @matcher.match_time = blank_nil(s.m_time)
+      @matcher.filter_time = blank_nil(s.f_time)
       @dirty = true
     end
 
@@ -2146,6 +2151,8 @@ module Gori::Tui
           j.field "filter_size", @matcher.filter_size
           j.field "match_words", @matcher.match_words
           j.field "filter_words", @matcher.filter_words
+          j.field "match_time", @matcher.match_time
+          j.field "filter_time", @matcher.filter_time
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
           j.field "extract", @matcher.extract.try(&.source)
@@ -2193,6 +2200,10 @@ module Gori::Tui
       @matcher.filter_size = obj["filter_size"]?.try(&.as_s?)
       @matcher.match_words = obj["match_words"]?.try(&.as_s?)
       @matcher.filter_words = obj["filter_words"]?.try(&.as_s?)
+      # Absent (a session saved before this key existed) reads as nil, which IS the default:
+      # an unconstrained dimension. Same nilable-string reading as every matcher spec above.
+      @matcher.match_time = obj["match_time"]?.try(&.as_s?)
+      @matcher.filter_time = obj["filter_time"]?.try(&.as_s?)
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }

@@ -60,7 +60,7 @@ gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 
 A matcher decides which responses are worth your attention, so the results table surfaces signal instead of every reply. Filter on status, size, words, lines, or a body regex — ffuf-style — and turn on **auto-calibration** so a noisy baseline (a soft 404, a catch-all 200) doesn't drown the real hits. Press `Ctrl-R` to run.
 
-Headless, the matcher flags are `--mc`/`--fc` (status), `--ms`/`--fs` (size), `--mw`/`--fw` (words), `--ml`/`--fl` (lines), `--mr`/`--fr` (body regex), and `--ac` to auto-calibrate:
+Headless, the matcher flags are `--mc`/`--fc` (status), `--ms`/`--fs` (size), `--mw`/`--fw` (words), `--ml`/`--fl` (lines), `--mt`/`--ft` (round-trip time in ms), `--mr`/`--fr` (body regex), and `--ac` to auto-calibrate:
 
 ```bash
 gori run fuzz <flow-id> \
@@ -71,6 +71,18 @@ gori run fuzz <flow-id> \
   --fs 0 \
   --ac
 ```
+
+### When the only difference is the clock
+
+A time-based blind payload — `' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `pg_sleep` — comes back with the same status, the same byte length, the same words and the same body as the payload that did nothing. Every dimension above is blind to it, so it is the one class of finding a sweep could report only by accident. `--mt` names it directly:
+
+```bash
+gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
+```
+
+The unit is milliseconds. A send that **timed out** counts as a match on `--mt` — a payload that pushed the origin past your own timeout is the loudest version of the same signal, and it used to be discarded as an error while the sleep that failed came back in 40 ms and got reported. Nothing else changes: a refused or unreachable send is still not a result, and combining `--mt` with `--mc 200` still needs a response, which a timeout does not have. `--retries` also stops re-sending a timeout on a `--mt` run — that row is the finding, not a failed send, so retrying it would only buy another full timeout of wall clock and another request at the origin.
+
+Timing is noisy — a shared origin, a slow hop, one unlucky pause — so treat a `--mt` row as a lead to re-send by hand, the same as any other match.
 
 <figure class="tui-shot">
   <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar">

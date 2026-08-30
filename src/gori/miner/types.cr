@@ -247,16 +247,19 @@ module Gori
       # surprise. See `Miner::HookBackend` for the timeout unit and where the cost lands.
       property hook : String?
       property notify : NotifyMode
-      # Reuse one HTTP/1.1 connection across the run's sends (`Repeater::ConnPool`, wired in
-      # `Plan.build`) instead of dialing a fresh one per probe. ON by default, as it is for the
+      # Reuse one connection across the run's sends instead of dialing a fresh one per probe —
+      # `Repeater::ConnPool` on HTTP/1.1, `Repeater::H2Pool` on h2, both wired in `Plan.build`. ON by default, as it is for the
       # Fuzzer and Discover: a mine is a sweep — baseline calibration, one request per bucket,
       # then a bisection tree and `confirm_rounds` per finding — all at ONE origin, so without
       # pooling every one of those pays a TCP handshake and, on https, a TLS handshake before a
       # payload byte moves. Off is the right answer when the target behaves per-connection
       # (connection-scoped rate limits, a load balancer pinning by connection) or when the
-      # keep-alive handling is itself what is being probed. Reuse is still opt-in PER MESSAGE
-      # inside the pool — a bucket whose wire body disagrees with its declared length always
-      # gets a fresh socket (see `ConnPool.reusable_request?`).
+      # keep-alive handling is itself what is being probed. On HTTP/1.1 reuse is still opt-in
+      # PER MESSAGE inside the pool — a bucket whose wire body disagrees with its declared
+      # length always gets a fresh socket (see `ConnPool.reusable_request?`). h2 needs no such
+      # rule: every message is its own stream with its own framed DATA, so a mis-declared
+      # length is malformed at the ORIGIN rather than a way to misframe the next probe, and it
+      # retires the connection when the peer says so (see `H2Pool.reusable_request?`).
       property? keep_alive : Bool
 
       # Per-Burp ceilings; query/form are additionally clamped by the URL byte budget

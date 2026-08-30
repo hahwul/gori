@@ -362,15 +362,20 @@ module Gori
       property? auto_calibrate : Bool # drop responses identical to the baseline
       property keep_bodies : Symbol   # :none | :matched | :all
       property max_requests : Int64?  # hard cap on total sends
-      # Reuse one HTTP/1.1 connection across many sends instead of dialing per request
-      # (see Fuzz::ConnPool). On by default: a sweep pays one TCP — and, on https, one TLS
-      # — handshake per WORKER rather than per request, which is the single largest cost of
-      # a run against a remote origin. Turn it off to make every request a fresh connection:
-      # per-connection origin state (a connection-scoped rate limit, a load balancer pinning
-      # by connection, a target you are probing for keep-alive behaviour itself) is then
-      # observable per payload again. Requests the pool cannot prove unambiguous — a
-      # mis-declared Content-Length, `Connection: close`, CL+TE — get their own connection
-      # regardless of this flag.
+      # Reuse one connection across many sends instead of dialing per request — `ConnPool` on
+      # HTTP/1.1, `H2Pool` on h2, both behind `Repeater::Pool`. On by default: a sweep pays one
+      # TCP — and, on https, one TLS — handshake per WORKER rather than per request, which is
+      # the single largest cost of a run against a remote origin. Turn it off to make every
+      # request a fresh connection: per-connection origin state (a connection-scoped rate
+      # limit, a load balancer pinning by connection, a target you are probing for keep-alive
+      # behaviour itself) is then observable per payload again. Requests the pool cannot prove
+      # unambiguous — a mis-declared Content-Length, `Connection: close`, CL+TE — get their own
+      # connection regardless of this flag.
+      #
+      # h2 was excluded from this until `H2Pool`, which mattered more than an opt-in flag
+      # normally would: `gori run fuzz`'s `http2 = force_h2 || seed.http2` (and the TUI's ⇧I)
+      # turn h2 ON for any sweep seeded from a captured h2 flow, so the default workflow
+      # against a modern target was the one paying a handshake per payload.
       property? keep_alive : Bool
       # Race condition (last-byte-sync) mode: nil = off (the ordinary Mode-driven sweep runs).
       # N = dial N dedicated connections to the origin, hold back the request's final byte on

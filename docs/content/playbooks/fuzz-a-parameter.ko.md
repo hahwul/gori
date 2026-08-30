@@ -60,7 +60,7 @@ gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 
 매처는 어떤 응답이 주목할 값어치가 있는지 정하므로, 결과 표는 모든 응답이 아니라 신호를 드러냅니다. status, size, words, lines, 또는 본문 정규식으로 필터링하고(ffuf 스타일) — **자동 보정(auto-calibration)** 을 켜서 노이즈 기준선(소프트 404, 뭐든 받아 주는 200)이 진짜 히트를 묻어 버리지 않게 하세요. `Ctrl-R`로 실행합니다.
 
-헤드리스에서 매처 플래그는 `--mc`/`--fc`(status), `--ms`/`--fs`(size), `--mw`/`--fw`(words), `--ml`/`--fl`(lines), `--mr`/`--fr`(본문 정규식), 그리고 자동 보정용 `--ac`입니다:
+헤드리스에서 매처 플래그는 `--mc`/`--fc`(status), `--ms`/`--fs`(size), `--mw`/`--fw`(words), `--ml`/`--fl`(lines), `--mt`/`--ft`(왕복 시간, ms), `--mr`/`--fr`(본문 정규식), 그리고 자동 보정용 `--ac`입니다:
 
 ```bash
 gori run fuzz <flow-id> \
@@ -71,6 +71,18 @@ gori run fuzz <flow-id> \
   --fs 0 \
   --ac
 ```
+
+### 차이가 시계뿐일 때 {#when-the-only-difference-is-the-clock}
+
+시간 기반 블라인드 페이로드 — `' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, `pg_sleep` — 는 아무 일도 하지 않은 페이로드와 status도, 바이트 길이도, 단어 수도, 본문도 똑같이 돌아옵니다. 위의 모든 차원이 이것을 보지 못하므로, 스윕이 우연히나 잡아낼 수 있는 유일한 부류였습니다. `--mt`는 이것을 직접 지목합니다.
+
+```bash
+gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
+```
+
+단위는 밀리초입니다. **타임아웃된** 전송도 `--mt`에서는 매치로 셉니다 — 오리진을 당신이 정한 타임아웃 너머로 밀어낸 페이로드는 같은 신호의 가장 큰 형태인데, 예전에는 그것이 에러로 버려지고 정작 실패한 sleep이 40 ms에 돌아와 보고됐기 때문입니다. 그 밖에는 달라지는 것이 없습니다. 거부되거나 닿지 않은 전송은 여전히 결과가 아니고, `--mt`를 `--mc 200`과 함께 쓰면 응답이 필요한데 타임아웃에는 응답이 없습니다. `--retries`도 `--mt` 실행에서는 타임아웃을 재전송하지 않습니다 — 그 행은 실패한 전송이 아니라 발견이므로, 재전송해 봐야 타임아웃 한 번과 오리진에 대한 요청 하나를 더 쓸 뿐입니다.
+
+타이밍은 원래 노이즈가 많습니다(공유 오리진, 느린 홉, 운 나쁜 일시 정지 한 번). 그러니 `--mt` 행은 다른 매치와 똑같이 손으로 재전송해 볼 실마리로 다루세요.
 
 <figure class="tui-shot">
   <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar">

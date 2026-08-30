@@ -244,10 +244,12 @@ module Gori::Fuzz
     getter origin : Origin
     getter template : Template
     getter? http2 : Bool
-    # The run's keep-alive pool, or nil when it runs connection-per-send (h2, or
-    # `keep_alive` off). Surfaces read its counters to report how many handshakes the run
-    # actually paid for — the one directly observable measure of what pooling bought.
-    getter pool : ConnPool?
+    # The run's keep-alive pool, or nil when it runs connection-per-send (`keep_alive` off,
+    # or a WebSocket run). `Repeater::Pool` — `ConnPool` on HTTP/1.1, `H2Pool` on h2 — because
+    # a surface reads only the counters, which mean the same on both. They report how many
+    # handshakes the run actually paid for: the one directly observable measure of what
+    # pooling bought.
+    getter pool : Pool?
     # The request-target of the template's first line, taken BEFORE marking so the §…§
     # bytes never leak into the string the scope gate matches on.
     getter request_target : String
@@ -307,7 +309,7 @@ module Gori::Fuzz
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
-                   @mark_matches : Array({String, Int32}), @pool : ConnPool? = nil,
+                   @mark_matches : Array({String, Int32}), @pool : Pool? = nil,
                    @rewrites_content_length : Bool = false,
                    @shadowed_marks : Array(String) = [] of String,
                    @auto_encode : AutoEncode = AutoEncode.none,

@@ -115,11 +115,20 @@ describe "keep-alive across the non-sweep senders" do
     end
   end
 
-  it "leaves keep-alive off for h2, which frames its own connection" do
+  it "pools h2 too, on an H2Pool rather than a ConnPool" do
+    # This example used to assert `pool.should be_nil` and it was pinning the cost, not a
+    # design: an h2 sweep dialed — and, on https, fully handshook — a connection per payload,
+    # on the protocol a captured flow selects for itself. `H2Pool` reuses one serially.
     sender = F::Sender.new(
       F::Origin.new("https", "127.0.0.1", 1), ungated_outbound,
       http2: true, verify: false, keep_alive: true, idle_conns: 4)
-    sender.pool.should be_nil
+    sender.pool.should be_a(Gori::Repeater::H2Pool)
+  end
+
+  it "still frames a connection per send when keep-alive is off, h2 included" do
+    F::Sender.new(
+      F::Origin.new("https", "127.0.0.1", 1), ungated_outbound,
+      http2: true, verify: false, keep_alive: false, idle_conns: 4).pool.should be_nil
   end
 end
 
