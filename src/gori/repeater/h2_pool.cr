@@ -73,8 +73,10 @@ module Gori::Repeater
     end
 
     def send(bytes : Bytes) : Repeater::Result
-      keepable = @pooling && H2Pool.reusable_request?(bytes)
+      # The SAME derivation the reuse decision and the replay gate both key on, taken once —
+      # `ConnPool` threads it for the same reason: two derivations of one fact can disagree.
       method = Repeater::Engine.request_method(bytes)
+      keepable = @pooling && H2Pool.reusable_request?(method)
       if keepable && (conn = @idle.pop?)
         if H2Pool.peer_closed?(conn.io)
           # The peer's FIN was on the socket BEFORE gori wrote a byte, which proves the origin
@@ -91,7 +93,7 @@ module Gori::Repeater
         started = Time.instant
         result = H2Engine.exchange_request(conn, bytes, scheme: @scheme, host: @host,
           port: @port, started: started, timeout: @timeout)
-        if stale?(result)
+        if stale?(result, conn)
           conn.close
           note_stale
           unless ConnPool.replayable?(method)
@@ -132,8 +134,8 @@ module Gori::Repeater
     #
     # What is left is CONNECT, which turns the connection into a tunnel and is therefore not a
     # request that can be followed by another.
-    def self.reusable_request?(bytes : Bytes) : Bool
-      Repeater::Engine.request_method(bytes).compare("CONNECT", case_insensitive: true) != 0
+    def self.reusable_request?(method : String) : Bool
+      method.compare("CONNECT", case_insensitive: true) != 0
     end
 
     # Has the peer sent FIN on this parked connection?
@@ -173,8 +175,18 @@ module Gori::Repeater
     # `ConnPool#stale?`, with the same discriminator and the same limits: it means gori heard
     # nothing back, NOT that the origin never saw the request. The method gate above covers
     # that gap.
-    private def stale?(result : Repeater::Result) : Bool
-      !result.error.nil? && result.response.nil? && !result.delivered?
+    #
+    # Plus one clause the h1 version does not need. `error && response.nil? && !delivered?` IS
+    # a dead socket on HTTP/1.1, where the only way to fail before a response byte is for the
+    # transport to break. On h2 it is also what a live connection produces when the peer
+    # REFUSES the stream — a WAF answering RST_STREAM(ENHANCE_YOUR_CALM) before any HEADERS, a
+    # GOAWAY, or gori's own flow-control stall — and reading those as "stale parked
+    # connection" re-sent a payload the origin had already refused (GET) or replaced the
+    # peer's own stated reason with a fabricated "the connection was closed by the origin"
+    # (POST, via `unsafe_stale_result`), while also disabling pooling for the rest of the run.
+    # `Conn#explained?` is exactly the difference: somebody OBSERVED how this ended.
+    private def stale?(result : Repeater::Result, conn : H2Engine::Conn) : Bool
+      !result.error.nil? && result.response.nil? && !result.delivered? && !conn.explained?
     end
 
     private def unsafe_stale_result(result : Repeater::Result, method : String) : Repeater::Result

@@ -379,9 +379,9 @@ module Gori::Fuzz
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
-      result = # The POOL first, whichever protocol it pools: it is the only branch that can reuse a
+      # The POOL first, whichever protocol it pools: it is the only branch that can reuse a
       # connection, and both unpooled engines below dial a fresh one per send.
-
+      result =
         if p = @pool
           p.send(bytes)
         elsif @http2
@@ -1238,7 +1238,7 @@ module Gori::Fuzz
         # Don't burn retries/sleep on a permanent max-requests stop — further send()s
         # are also refused. Real network errors still retry as configured; each retry means the
         # previous attempt was a failed send, tallied via `resent_count` (see `worker_loop`).
-        if raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+        if retryable?(raw) && attempts < @config.retries
           attempts += 1
           resent_count += 1
           sleep @config.retry_pause
@@ -1268,7 +1268,7 @@ module Gori::Fuzz
           @blocked_reason ||= raw.error
           return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
         end
-        if raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+        if retryable?(raw) && attempts < @config.retries
           attempts += 1
           resent_count += 1
           sleep @config.retry_pause
@@ -1276,6 +1276,16 @@ module Gori::Fuzz
         end
         return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
       end
+    end
+
+    # Whether a failed send is worth sending again. A permanent max-requests stop never is
+    # (further sends are refused too), and — the case `--mt` added — neither is a TIMEOUT on a
+    # run whose matcher reports timeouts as hits: that row is the finding, and re-sending it
+    # buys another full timeout of wall clock, another request at the origin, and two extra
+    # entries in the error tally for a payload the run is about to call a match.
+    private def retryable?(raw : Repeater::Result) : Bool
+      return false if raw.error.nil? || raw.error == CappedBackend::CAP_ERROR
+      !(raw.timed_out? && @matcher.timeout_matchable?)
     end
 
     # A send the SCOPE GATE refused before the socket, told apart from a network error by the

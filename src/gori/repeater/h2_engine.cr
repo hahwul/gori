@@ -223,9 +223,21 @@ module Gori
         # The peer's SETTINGS_INITIAL_WINDOW_SIZE as last seen: what a NEW stream starts at.
         property initial_window : Int64 = DEFAULT_WINDOW.to_i64
         property? settings_seen : Bool = false
-        # Requests exchanged on this connection, and whether its stream ids are used up.
-        getter streams : Int32 = 0
+        # Whether this connection's stream ids are used up.
         getter? spent : Bool = false
+        # Did the last exchange end for a reason somebody OBSERVED — the peer sent RST_STREAM
+        # or GOAWAY, or gori's own flow-control accounting cut the request body short — rather
+        # than because the socket was silently dead?
+        #
+        # `H2Pool#stale?` is the only reader, and it needs this because the h1 predicate it was
+        # copied from (`error && response.nil? && !delivered?`) does not mean the same thing on
+        # h2. On HTTP/1.1 that shape IS a dead socket. On h2 a WAF answering RST_STREAM
+        # (ENHANCE_YOUR_CALM, REFUSED_STREAM) before any HEADERS produces exactly the same
+        # shape on a perfectly live connection — and reading it as a stale parked connection
+        # re-sent the refused payload a second time for a GET, and for a POST replaced the
+        # peer's own stated reason with "the connection was closed by the origin", which
+        # nothing had done.
+        property? explained : Bool = false
         # Something happened on this connection that makes the NEXT request on it unsafe or
         # pointless: a GOAWAY, a reset stream, a clean EOF, a stalled write, a read that timed
         # out, or a response gori could not frame to the end. Set by `exchange`; read by
@@ -243,7 +255,6 @@ module Gori
         # The next client stream id (§5.1.1: odd, strictly increasing, used once).
         def take_stream : UInt32
           id = @next_stream
-          @streams += 1
           if @next_stream >= MAX_STREAM_ID - 2
             @spent = true
           else
@@ -262,9 +273,13 @@ module Gori
       # every one-shot `send` returns, so a pooled run and an unpooled one report a dead
       # origin in identical words.
       #
-      # `Conn.new` writes the preface and gori's SETTINGS, which is the first write on a
-      # socket the dialer only just connected: a peer that resets at that moment surfaces
-      # here rather than as a mystery on the first exchange.
+      # `Conn.new` writes the preface and gori's SETTINGS but deliberately does NOT flush:
+      # `write_request`'s flush is still the first one, so a one-shot send puts exactly the
+      # bytes on the wire it always did — one TLS record carrying preface + SETTINGS +
+      # HEADERS, and record boundaries are a shape a `tls_preset` run cares about. The cost is
+      # that a peer resetting between the handshake and the first request surfaces on the
+      # exchange rather than here; `H2Pool` reads that through `stale?` like any other
+      # failure, so nothing is lost but the earlier report.
       def self.dial(scheme : String, host : String, port : Int32, verify : Bool,
                     sni : String?, timeout : Time::Span?, overrides : Gori::HostOverrides?,
                     tls_preset : String?) : {Conn?, String?}
@@ -389,15 +404,7 @@ module Gori
         flow.expires_at = Time.instant + budget
         write_request(upstream, headers, body, flow)
         reply = read_response(upstream, flow, conn.decoder)
-        conn.send_window = flow.conn
-        conn.initial_window = flow.initial
-        conn.settings_seen = flow.settings_seen?
-        # Whether the SOCKET may carry another request. Deliberately wider than "did this
-        # request succeed": a stream the peer RESET leaves the connection usable in theory,
-        # but on a sweep it is the shape that precedes a GOAWAY, and a truncated read leaves
-        # frames of unknown provenance on the wire for the next request to trip over.
-        conn.poisoned = true if conn.spent? || flow.eof? || flow.goaway || flow.rst ||
-                                flow.stall || reply.timed_out || !reply.clean_eos
+        carry_over(conn, flow, reply)
         # "Did a FINAL response arrive", not "is the status zero". An origin that answered
         # `HEADERS(:status 100)` and then went silent used to come back `ok:true, status:100,
         # error:null` after a full idle timeout, with the head rendered as `HTTP/2 100` — an
@@ -421,6 +428,25 @@ module Gori
         Result.new(head, reply.body, resp, elapsed(started),
           error: send_side_reason(reply, flow, host, port),
           incomplete: !reply.clean_eos, delivered: true, timed_out: reply.timed_out)
+      end
+
+      # Fold one finished exchange back into the CONNECTION: the state the next request on it
+      # inherits, and the two verdicts `H2Pool` reads.
+      private def self.carry_over(conn : Conn, flow : SendFlow, reply : Reply) : Nil
+        conn.send_window = flow.conn
+        conn.initial_window = flow.initial
+        conn.settings_seen = flow.settings_seen?
+        # Whether the SOCKET may carry another request. Deliberately wider than "did this
+        # request succeed": a stream the peer RESET leaves the connection usable in theory,
+        # but on a sweep it is the shape that precedes a GOAWAY, and a truncated read leaves
+        # frames of unknown provenance on the wire for the next request to trip over.
+        conn.poisoned = true if conn.spent? || flow.eof? || flow.goaway || flow.rst ||
+                                flow.stall || reply.timed_out || !reply.clean_eos
+        # …and, separately, whether anything EXPLAINED how it ended. Not the same question:
+        # this one decides whether the request may go on the wire a SECOND time. See
+        # `Conn#explained?`.
+        conn.explained = !(reply.rst || reply.goaway || flow.rst || flow.goaway ||
+                           flow.stall).nil?
       end
 
       # Everything gori has to say about how an exchange went, or nil when it went cleanly:
@@ -977,7 +1003,21 @@ module Gori
           end
           case frame.frame_type
           when Frame::Type::Settings
-            ack(io, Frame::Type::Settings, Bytes.empty) unless frame.ack?
+            unless frame.ack?
+              # APPLIED, not just acknowledged. `pump_once` has always done both, but that runs
+              # only on the WRITE path — i.e. only for a request with a body — so on a pooled
+              # connection whose first request had none, the origin's opening SETTINGS was
+              # consumed here and dropped. Two things then went wrong on the NEXT request:
+              # `conn.settings_seen?` was still false, so `await_settings` spent a whole idle
+              # timeout waiting for a frame that had already arrived; and a
+              # SETTINGS_INITIAL_WINDOW_SIZE below the default was never applied, so the new
+              # stream started above the credit the peer had granted and gori overran a window
+              # it had been told about — with `settings_seen?` false, `attribute` would then
+              # have blamed the ORIGIN for the GOAWAY that followed.
+              apply_settings(frame, flow)
+              flow.settings_seen = true
+              ack(io, Frame::Type::Settings, Bytes.empty)
+            end
           when Frame::Type::Ping
             ack(io, Frame::Type::Ping, frame.payload) unless frame.ack?
           when Frame::Type::Goaway
@@ -1046,8 +1086,21 @@ module Gori
               # a closed stream is at best ignored.
               window_update(io, flow.id, consumed) unless done
             end
+          when Frame::Type::WindowUpdate
+            # CREDITED, not discarded. The old `else` arm below said "ignored for a one-shot"
+            # and that was true of a one-shot: the send window died with the connection a
+            # moment later. On a POOLED connection `flow.conn` is carried into the next
+            # request (`conn.send_window`), so a stream-0 WINDOW_UPDATE that arrives while gori
+            # is in here — which is exactly when an origin replenishes, i.e. as it answers —
+            # was thrown away and the send window could only ever shrink. A sweep with a
+            # request BODY then exhausted it after a few hundred payloads on one connection,
+            # stalled out `write_data`, truncated the body, and reported "the origin never
+            # granted flow-control window" — blaming the origin for gori's own accounting,
+            # the one misattribution `attribute` exists to prevent. (GET sweeps never write
+            # DATA, which is why nothing caught it.)
+            credit(frame, flow)
           else
-            # WINDOW_UPDATE / PUSH_PROMISE / PRIORITY — ignored for a one-shot
+            # PUSH_PROMISE / PRIORITY — nothing this exchange needs.
           end
         end
 

@@ -191,8 +191,16 @@ module Gori::Sequencer
       #
       # Safe for the verdict this tool produces: `ConnPool` refuses to park a socket whose
       # request or response was not cleanly framed, so a reused connection carries the same
-      # bytes a fresh one would. It is also excluded on h2, which frames its own connection.
-      # `Engine#orchestrate` closes the backend, which is what releases the parked sockets.
+      # bytes a fresh one would. `Engine#orchestrate` closes the backend, which is what
+      # releases the parked sockets.
+      #
+      # h2 is no longer the exception it used to be: since `Repeater::H2Pool` an h2 sequence
+      # reuses a connection too (serially — stream 1, then 3, then 5). That is the same
+      # trade this knob has always made on HTTP/1.1, not a new one, and it lands on the same
+      # escape hatch: an origin whose session issuance is CONNECTION-bound would have its
+      # entropy verdict shaped by socket reuse, so `--no-keep-alive` is there to re-take the
+      # sample over fresh connections and compare. Worth knowing on h2 specifically, because
+      # a sequence seeded from a captured h2 flow selects h2 without being asked.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
         evidence: options.evidence?, keep_alive: config.keep_alive?, idle_conns: config.concurrency)

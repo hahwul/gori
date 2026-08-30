@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "socket"
 
 private alias F = Gori::Fuzz
 
@@ -110,17 +111,31 @@ describe "Fuzz::Matcher.tolerance" do
     F::Matcher.tolerance([100_i64, 100_i64, 100_i64], 16_i64).should eq(0_i64)
   end
 
-  it "is the observed spread while that spread is small — gori can only ever suppress what " \
-     "the target's own noise could have produced" do
-    F::Matcher.tolerance([1000_i64, 1006_i64, 1003_i64], 16_i64).should eq(6_i64)
+  it "is the largest GAP between neighbouring samples, not the min-to-max spread — a response " \
+     "is compared against every sample, so the bands only have to bridge what is between them" do
+    F::Matcher.tolerance([1000_i64, 1006_i64, 1003_i64], 16_i64).should eq(3_i64)
+    # …and the union of those bands still covers the whole observed range, which is the
+    # property that matters: 1000±3 and 1003±3 and 1006±3 leave no hole.
+    F::Matcher.tolerance([1000_i64, 1001_i64, 1002_i64, 1004_i64, 1006_i64, 1009_i64],
+      16_i64).should eq(3_i64)
   end
 
   it "is CAPPED once the spread stops looking like jitter, so a rotating baseline's shapes " \
      "stay separate instead of merging into one blanket" do
-    # 100..250 spans 150; 2% of 250 is 5, so the floor (16) decides.
+    # 100 and 250 are 150 apart; 2% of the middle sample (100) is 2, so the floor (16) decides.
     F::Matcher.tolerance([100_i64, 250_i64], 16_i64).should eq(16_i64)
-    # A big body scales: 2% of 100_000 is 2000, which beats the floor.
-    F::Matcher.tolerance([98_000_i64, 100_000_i64], 16_i64).should eq(2000_i64)
+    # A big body scales: 2% of 98_000 is 1960, which beats the floor.
+    F::Matcher.tolerance([98_000_i64, 100_000_i64], 16_i64).should eq(1960_i64)
+  end
+
+  it "is not moved by ONE outsized sample — a calibration set of six against a live target " \
+     "reliably contains a cached error page or an A/B variant, and scaling the cap off the " \
+     "LARGEST sample would read that as licence to widen the band around every other one" do
+    # Five 5000-byte pages and one 200 KB dump. Off the largest sample the cap would be 4000,
+    # so every response between 1000 and 9000 bytes would calibrate out as noise — including
+    # the findings the exact comparison this replaced would have reported.
+    samples = [5000_i64, 5000_i64, 5000_i64, 5000_i64, 5000_i64, 200_000_i64]
+    F::Matcher.tolerance(samples, 16_i64).should eq(100_i64) # 2% of the MIDDLE sample
   end
 end
 
@@ -136,7 +151,7 @@ describe "Fuzz::Matcher auto-calibration bands" do
       sample(1009_i64, 1, 0, 21), sample(1001_i64, 1, 0, 26), sample(1006_i64, 1, 0, 31),
     ]
     m.reflects_length?.should be_false # the wander does not track payload length
-    m.len_tol.should eq(9_i64)
+    m.len_tol.should eq(3_i64)         # the widest gap between neighbouring samples
 
     # A length NEVER sampled, inside the target's demonstrated wander — noise.
     m.build(job, timed_result(200, "a" * 1005, 1000_i64)).matched?.should be_false
@@ -183,5 +198,104 @@ describe "Fuzz::Matcher auto-calibration bands" do
     m.build(job, timed_result(200, ("aa " * 10) + "\n", 1000_i64)).matched?.should be_false
     # A genuinely different shape is not.
     m.build(job, timed_result(200, ("aa " * 40) + "\n", 1000_i64)).matched?.should be_true
+  end
+end
+
+# A backend that hands back whatever the block returns, counting the calls — enough to drive
+# `Engine#run_one`'s retry loop, which is where the interaction below lives.
+private class CountingBackend < F::Backend
+  getter origin : F::Origin
+  getter sent = 0
+
+  def initialize(@origin : F::Origin, &@fn : Bytes -> Gori::Repeater::Result)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    @fn.call(bytes)
+  end
+end
+
+private def drain_engine(engine : F::Engine) : Array(F::Result)
+  results = [] of F::Result
+  engine.run { |ev| results << ev.result if ev.is_a?(F::ResultEvent) }
+  results
+end
+
+describe "Fuzz::Engine retries vs a timeout the matcher REPORTS" do
+  it "does not retry a timed-out send when --mt is what makes it a result — the row is the " \
+     "finding, and re-sending buys another full timeout, another request at the origin and " \
+     "two error-tally entries for a payload the run is about to call a match" do
+    tmpl = F::Template.parse("GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    set = F::PayloadSet.new(F::InlineList.new(["sleep"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 2)
+    backend = CountingBackend.new(F::Origin.new("http", "h", 80)) { |_b| timeout_result(9_000_000_i64) }
+    matcher = F::Matcher.new
+    matcher.match_time = ">=4500"
+    results = drain_engine(F::Engine.new(F::Generator.new(tmpl, [set], cfg), matcher, backend, cfg))
+    backend.sent.should eq(1) # once, not 1 + 2 retries
+    results.size.should eq(1)
+    results.first.matched?.should be_true
+    results.first.resent_count.should eq(0)
+  end
+
+  it "still retries a timeout on a run with no time matcher — the retry knob keeps meaning " \
+     "what it always did" do
+    tmpl = F::Template.parse("GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    set = F::PayloadSet.new(F::InlineList.new(["a"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 2)
+    backend = CountingBackend.new(F::Origin.new("http", "h", 80)) { |_b| timeout_result(9_000_000_i64) }
+    drain_engine(F::Engine.new(F::Generator.new(tmpl, [set], cfg), F::Matcher.new, backend, cfg))
+    backend.sent.should eq(3) # 1 + 2 retries
+  end
+
+  it "still retries an ordinary network error even when --mt is set — only a TIMEOUT is the " \
+     "signal being reported" do
+    tmpl = F::Template.parse("GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    set = F::PayloadSet.new(F::InlineList.new(["a"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 2)
+    backend = CountingBackend.new(F::Origin.new("http", "h", 80)) { |_b| dead_result(10_i64) }
+    matcher = F::Matcher.new
+    matcher.match_time = ">=4500"
+    drain_engine(F::Engine.new(F::Generator.new(tmpl, [set], cfg), matcher, backend, cfg))
+    backend.sent.should eq(3)
+  end
+end
+
+describe "Repeater::Engine — a body that stalls after the head" do
+  it "reports the read timeout as a TIMEOUT, not as an origin that closed the connection " \
+     "(the inner rescue, which is the one the surfaces actually render)" do
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.local_address.port
+    # Held so the ensure below is the ONLY thing that closes them. A server fiber that slept
+    # and then closed its own socket raced the ensure's `server.close` and segfaulted the
+    # suite inside `TCPSocket#close` — spec_helper's PR #555 note is about the same class of
+    # socket-fiber race.
+    conns = [] of TCPSocket
+    spawn do
+      while conn = server.accept?
+        conns << conn
+        spawn do
+          Gori::Proxy::Codec::Http1.read_head(conn)
+          # A head promising ten bytes, and then silence — the ordinary shape of a read
+          # timeout, and of a time-based payload against an origin that streams its head.
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n"
+          conn.flush
+        rescue
+        end
+      end
+    rescue
+    end
+    begin
+      r = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+        timeout: 300.milliseconds)
+      r.incomplete?.should be_true
+      r.timed_out?.should be_true # was false, so every renderer blamed a close that never happened
+      r.response.try(&.status).should eq(200)
+    ensure
+      conns.each { |c| c.close rescue nil }
+      server.close
+    end
   end
 end

@@ -53,7 +53,7 @@ private def self_signed : {String, String}
   {cert, key}
 end
 
-private def start_origin(tls : Bool) : Int32
+private def start_origin(tls : Bool) : {Int32, HTTP::Server}
   server = HTTP::Server.new do |ctx|
     ctx.response.content_type = "text/html"
     ctx.response.print BODY
@@ -68,14 +68,14 @@ private def start_origin(tls : Bool) : Int32
            server.bind_tcp("127.0.0.1", 0).port
          end
   spawn { server.listen }
-  port
+  {port, server}
 end
 
 # A minimal cleartext-h2 origin, because `HTTP::Server` does not speak h2 and the h2 arm is
 # the point of the second half of this bench. It answers whatever stream a complete request
 # arrives on (RFC 9113 §5.1.1: 1, 3, 5, …) — which is exactly what a one-stream-per-connection
 # client could never exercise, and what `Repeater::H2Pool` now does.
-private def start_h2_origin(tls : Bool) : Int32
+private def start_h2_origin(tls : Bool) : {Int32, TCPServer}
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   ctx = nil.as(OpenSSL::SSL::Context::Server?)
@@ -98,7 +98,7 @@ private def start_h2_origin(tls : Bool) : Int32
     end
   rescue
   end
-  port
+  {port, server}
 end
 
 private def serve_h2(conn : TCPSocket, ctx : OpenSSL::SSL::Context::Server?) : Nil
@@ -136,19 +136,27 @@ private def sweep(scheme : String, port : Int32, keep_alive : Bool, http2 : Bool
   sender.pool
 end
 
+# `sweep` and then release its connections. Every timed report goes through this: a report
+# that leaked its pool left up to CONCURRENCY idle sockets open for the rest of the bench,
+# and with four arms that is a few hundred fds the later measurements run against.
+private def timed_sweep(scheme : String, port : Int32, keep_alive : Bool, http2 : Bool = false) : Nil
+  sweep(scheme, port, keep_alive, http2).try(&.close_all)
+end
+
 {"http", "https"}.each do |scheme|
-  port = start_origin(scheme == "https")
+  port, server = start_origin(scheme == "https")
   sleep 200.milliseconds # let the listener come up
 
   puts "\n== #{scheme} · #{REQUESTS} requests · concurrency #{CONCURRENCY}"
   Benchmark.bm do |x|
-    x.report("OLD dial-per-request") { sweep(scheme, port, false) }
-    x.report("NEW keep-alive pool ") { sweep(scheme, port, true) }
+    x.report("OLD dial-per-request") { timed_sweep(scheme, port, false) }
+    x.report("NEW keep-alive pool ") { timed_sweep(scheme, port, true) }
   end
   if pool = sweep(scheme, port, true)
     puts "   handshakes: #{pool.dialed} dialed, #{pool.reused} served off a parked socket"
     pool.close_all
   end
+  server.close
 end
 
 # ── h2 ────────────────────────────────────────────────────────────────────────────────────
@@ -160,17 +168,18 @@ end
 # preface + SETTINGS round, and the h2c-over-TLS arm is what a real origin costs, where every
 # one of those dials also carries a full TLS handshake.
 {false, true}.each do |tls|
-  h2_port = start_h2_origin(tls)
+  h2_port, h2_server = start_h2_origin(tls)
   sleep 200.milliseconds
   scheme = tls ? "https" : "http"
 
   puts "\n== h2 (#{tls ? "TLS" : "cleartext"}) · #{REQUESTS} requests · concurrency #{CONCURRENCY}"
   Benchmark.bm do |x|
-    x.report("OLD connection-per-send") { sweep(scheme, h2_port, false, http2: true) }
-    x.report("NEW h2 connection reuse") { sweep(scheme, h2_port, true, http2: true) }
+    x.report("OLD connection-per-send") { timed_sweep(scheme, h2_port, false, http2: true) }
+    x.report("NEW h2 connection reuse") { timed_sweep(scheme, h2_port, true, http2: true) }
   end
   if pool = sweep(scheme, h2_port, true, http2: true)
     puts "   handshakes: #{pool.dialed} dialed, #{pool.reused} served off a parked connection"
     pool.close_all
   end
+  h2_server.close
 end

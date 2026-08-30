@@ -33,7 +33,9 @@ module Gori
       # response is short; this says which of the two events cut it, and without it the
       # renderers of "incomplete — origin closed before the framed body finished" were blaming
       # the origin for a connection it never closed. Set by the h2 engine, which computes it
-      # per read; false everywhere else.
+      # per read, and by BOTH of this engine's exchange rescues — the outer one (no head yet)
+      # and the inner one (head read, body stalled), which is the shape a real read timeout
+      # usually has and the only one the surfaces above actually render.
       getter? timed_out : Bool
 
       # This exchange is the SECOND copy of its request on the wire: a parked keep-alive
@@ -296,7 +298,14 @@ module Gori
           # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error
           # must NOT throw the head away as a bare error string. Keep the head + parsed
           # response, flag incomplete, and carry the reason so the workbench shows both.
-          Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
+          # `timed_out` for the same reason the outer rescue sets it, and this is the arm that
+          # actually reaches the surfaces: a head that arrived promptly and a body that then
+          # stalled is the ordinary shape of a read timeout, and `incomplete_reason` was
+          # rendering it as "origin closed before the framed body finished" for a socket the
+          # origin never closed. It is also the shape a time-based payload produces against an
+          # origin that streams its head first, which `Fuzz::Matcher#eligible?` has to see.
+          Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed",
+            incomplete: true, timed_out: ex.is_a?(IO::TimeoutError))
         end
       rescue ex
         # `head` is nil iff we failed before/at the FIRST head read (a write error, or a reset

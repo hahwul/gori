@@ -338,27 +338,42 @@ module Gori::Fuzz
     #   * A target that jittered by N bytes gets width ≤ N. gori can only ever suppress a
     #     response the target's own noise could have produced.
     #
-    # CAPPED, because "observed spread" is the right measure of jitter and the wrong measure
-    # of ROTATION: samples of 100 and 250 bytes span 150, and widening each band by 150 would
-    # merge two distinct shapes into one blanket that swallows every anomaly between them.
-    # The cap is what keeps the two cases apart — jitter is small and absolute (a nonce, a
-    # timestamp, a few bytes), a rotation is large and structural — so the width is
-    # `min(observed spread, max(floor, 2% of the largest sample))` and a rotating baseline
-    # keeps its shapes separate. STATUS is still compared exactly at every width, so no
-    # tolerance here can ever calibrate away a seeded 500.
-    JITTER_CAP_DIVISOR = 50_i64 # 2% of the largest sample
+    # Two statistics, and BOTH are deliberately robust to one odd sample, because a
+    # calibration set of six against a live target reliably contains one: a cached error page,
+    # an A/B variant, a debug dump.
+    #
+    #   * the width is the LARGEST GAP between consecutive sorted samples, not the full
+    #     min-to-max spread. Since a response is compared against EVERY sample, the bands only
+    #     have to bridge the gaps BETWEEN them for their union to cover the target's noise —
+    #     and the full spread is a wildly wrong number when the samples are multi-modal.
+    #   * the cap's scale is the sample in the MIDDLE, not the largest. `2% of the biggest
+    #     sample` reads a single 200 KB outlier among five 5 KB pages as licence for a 4 KB
+    #     band around every one of them, which is precisely the over-suppression this whole
+    #     mechanism must not do.
+    #
+    # The cap is there because "observed spread" is the right measure of jitter and the wrong
+    # measure of ROTATION: samples of 100 and 250 bytes are 150 apart, and widening each band
+    # by 150 merges two distinct shapes into one blanket that swallows every anomaly between
+    # them. Jitter is small and absolute (a nonce, a timestamp, a few bytes); a rotation is
+    # large and structural. STATUS is compared exactly at every width, so no tolerance here can
+    # calibrate away a seeded 500.
+    JITTER_CAP_DIVISOR = 50_i64 # 2% of the middle sample
     LEN_JITTER_FLOOR   = 16_i64 # bytes — a request id / timestamp / token is smaller than this
     COUNT_JITTER_FLOOR =  2_i64 # words and lines: a reflected nonce moves these by ~1
 
     # The half-width of a baseline band for one metric, from that metric's values across the
     # calibration samples. 0 (exact match) for a single sample and for a metric that did not
-    # move — see the block above for why it is capped rather than the raw spread.
+    # move — see the block above for the two statistics and why each is the robust one.
     def self.tolerance(values : Array(Int64), floor : Int64) : Int64
       return 0_i64 if values.size < 2
-      hi = values.max
-      spread = hi - values.min
-      return 0_i64 if spread <= 0
-      Math.min(spread, Math.max(floor, hi // JITTER_CAP_DIVISOR))
+      sorted = values.sort
+      gap = 0_i64
+      sorted.each_cons_pair { |a, b| gap = b - a if b - a > gap }
+      return 0_i64 if gap <= 0
+      # Lower-middle rather than a mean of the two middles: it is a sample the target actually
+      # produced, and it needs no tie-breaking rule on an even count.
+      middle = sorted[(sorted.size - 1) // 2]
+      Math.min(gap, Math.max(floor, middle // JITTER_CAP_DIVISOR))
     end
 
     # Detects a target that reflects the substituted payload back into its response body:
@@ -525,6 +540,15 @@ module Gori::Fuzz
 
     private def near?(value : Int64, sampled : Int64, tolerance : Int64) : Bool
       (value - sampled).abs <= tolerance
+    end
+
+    # Whether a TIMED-OUT send is a result this matcher can report rather than a failure —
+    # i.e. whether `--mt` is set (see `eligible?`). The ENGINE reads it: `run_one` retries a
+    # failed send before the matcher ever sees it, so on a `--mt '>=4500' --retries 2` run
+    # every payload that actually fired the sleep was sent three times and cost three
+    # timeouts of wall clock to report the row it had already earned on the first.
+    def timeout_matchable? : Bool
+      !@match_time_c.nil?
     end
 
     # True when ANY match/filter dimension is set — the run carries a success/rejection

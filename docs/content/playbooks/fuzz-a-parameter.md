@@ -80,7 +80,7 @@ A time-based blind payload — `' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `p
 gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
 ```
 
-The unit is milliseconds. A send that **timed out** counts as a match on `--mt` — a payload that pushed the origin past your own timeout is the loudest version of the same signal, and it used to be discarded as an error while the sleep that failed came back in 40 ms and got reported. Nothing else changes: a refused or unreachable send is still not a result, and combining `--mt` with `--mc 200` still needs a response, which a timeout does not have.
+The unit is milliseconds. A send that **timed out** counts as a match on `--mt` — a payload that pushed the origin past your own timeout is the loudest version of the same signal, and it used to be discarded as an error while the sleep that failed came back in 40 ms and got reported. Nothing else changes: a refused or unreachable send is still not a result, and combining `--mt` with `--mc 200` still needs a response, which a timeout does not have. `--retries` also stops re-sending a timeout on a `--mt` run — that row is the finding, not a failed send, so retrying it would only buy another full timeout of wall clock and another request at the origin.
 
 Timing is noisy — a shared origin, a slow hop, one unlucky pause — so treat a `--mt` row as a lead to re-send by hand, the same as any other match.
 

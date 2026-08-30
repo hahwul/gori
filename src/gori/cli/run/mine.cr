@@ -325,7 +325,8 @@ module Gori
       # Handshakes actually paid for. Worth a line for the same reason `gori run fuzz` prints
       # it: it is how an operator sees whether the origin honoured keep-alive at all (dialed ≈
       # sent means it closed after every response, or the probes were too odd to share a socket
-      # — see ConnPool). Nothing is printed for a --no-keep-alive or h2 run, which has no pool.
+      # — see ConnPool / H2Pool). Nothing is printed for a --no-keep-alive run, which has no
+      # pool; an h2 mine has one and prints this like any other.
       private def self.mine_connections(pool : Fuzz::Pool?) : Nil
         return unless pool && pool.dialed > 0
         STDERR.puts "connections · #{pool.dialed} dialed · #{pool.reused} reused" \
