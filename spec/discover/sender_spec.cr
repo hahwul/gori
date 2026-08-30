@@ -198,3 +198,65 @@ describe Gori::Discover::Sender do
     result.not_nil!.error.should eq(D::Sender::UNSAFE_URL)
   end
 end
+
+# ── the active session slot ─────────────────────────────────────────────────────────────
+#
+# A store + registry with one slot active, the state `gori run discover --slot admin` reaches
+# through `CLI::Run.activate_slot`. `Env.layer` is process-wide, so it is restored.
+private def with_active_slot(headers : Array({String, String}), &)
+  path = File.tempname("gori-discover-slot", ".db")
+  store = Gori::Store.open(path)
+  previous = Gori::Env.layer
+  begin
+    slots = Gori::SessionSlots.new(store, [Gori::SessionSlot.new("admin", set_headers: headers)])
+    Gori::Env.layer = Gori::Bindings.load(store, slots)
+    slots.activate("admin").should be_true
+    yield
+  ensure
+    Gori::Env.layer = previous
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+describe Gori::Discover::Sender do
+  describe "with a session slot active" do
+    # `--slot admin` printed "slot: sending as admin" and then crawled ANONYMOUSLY: activation
+    # flipped the registry pointer and nothing downstream read it, because this backend BUILDS
+    # its request from (scheme, host, port, target) and `Config#headers` (`-H`) was the only
+    # header source it had. `fuzz --slot` and `mine --slot` both reached the wire; discover was
+    # the sole outlier, on the one sweep whose result IS "what surface exists" — so the
+    # authenticated half came back reported as absent.
+    it "puts the slot's headers on the wire" do
+      wire = with_active_slot([{"X-Slot", "v"}, {"Cookie", "s=abc"}]) do
+        wire_bytes do |port|
+          D::Sender.new(verify: false, timeout: 2.seconds).fetch("http", "127.0.0.1", port, "/a")
+        end
+      end
+      request_lines(wire).should eq(["GET /a HTTP/1.1"])
+      wire.should contain("X-Slot: v\r\n")
+      wire.should contain("Cookie: s=abc\r\n")
+    end
+
+    # The stored half: `Engine#capture_exchange` keeps `request_head` as the request bytes a
+    # finding is persisted with, so a head without the overlay would describe a request nobody
+    # made — the `Repeater::Sender#wire` failure, one seam over.
+    it "keeps the overlay on the head a finding is stored with" do
+      head = with_active_slot([{"X-Slot", "v"}]) do
+        String.new(D::Sender.new(verify: false).request_head("http", "acme.test", 80, "/a"))
+      end
+      head.should contain("X-Slot: v\r\n")
+    end
+
+    # The control: an overlay that sets nothing changes no byte (`SessionSlots#overlay` returns
+    # the same slice), so a project that never selects a slot is unaffected.
+    it "changes nothing when no slot is active" do
+      wire = wire_bytes do |port|
+        D::Sender.new(verify: false, timeout: 2.seconds).fetch("http", "127.0.0.1", port, "/a")
+      end
+      wire.should_not contain("X-Slot")
+    end
+  end
+end

@@ -149,6 +149,32 @@ private class DenyAfterFirstAsk < D::ScopePolicy
   end
 end
 
+# A scope that changes its mind MID-RUN — the shape `StoreScope#refresh` reaches when an
+# operator runs `gori run project scope add exclude …` in a second terminal while the sweep is
+# in flight (#396). The enqueue gates already said yes; `send_with_retries` is where the new
+# answer lands, and every candidate behind it is dropped.
+private class FlippableScope < Gori::Discover::ScopePolicy
+  property? denying : Bool = false
+
+  def allowed?(url : String, host : String) : Bool
+    !@denying
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
+# The three sources `Engine#well_known?` routes through the soft-404 baseline — a document the
+# run GUESSED at a fixed origin path, as opposed to a link the target published.
+private def well_known_source?(f : Gori::Discover::Finding) : Bool
+  f.source.robots? || f.source.sitemap? || f.source.well_known?
+end
+
 # Every path `seed_frontier` queues by name at the origin, in order.
 private WELL_KNOWN_PATHS = Gori::Discover::Engine::WELL_KNOWN.map { |path, _| path }.to_a
 
@@ -336,6 +362,53 @@ describe Gori::Discover::Engine do
     end
   end
 
+  # The OTHER way a discover run stops short, and the one that had no number at all. #396 made
+  # the Layer-2 gate re-read the scope mid-run, which correctly cuts the traffic off within a
+  # second — but `StoreScope#allowed?` returning false makes `send_with_retries` return a
+  # BENIGN error, so the candidate inflated neither `errors` nor `sent` and was counted
+  # nowhere. A crawl entirely refused after its first probe reported
+  # `done · 1 found · 105 sent · 0 errors`, exit 0, with ~1000 wordlist candidates dropped and
+  # nothing saying the sweep had been cut short — while `budget_exhausted`, the precedent for
+  # exactly this, sat two lines away in the same summary.
+  describe "candidates refused by a mid-run scope change" do
+    it "counts every one of them" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1,
+        concurrency: 1, retries: 0)
+      words = (1..20).map { |i| "w#{i}" }
+      scope = FlippableScope.new
+      served = 0
+      backend = RouteBackend.new(->(_t : String) do
+        served += 1
+        # After the calibration probe and the first real candidate: the exclude rule lands.
+        scope.denying = true if served >= 2
+        notfound
+      end)
+      engine = D::Engine.new("http://t/", words, backend, cfg, scope)
+      done = nil.as(D::DoneEvent?)
+      engine.run { |ev| done = ev if ev.is_a?(D::DoneEvent) }
+      d = done.not_nil!
+      # Every candidate but the one that got through, and each counted ONCE — the refusal
+      # returns before the retry loop.
+      engine.scope_refused.should eq(words.size - 1)
+      # …and the reason the counter had to exist: nothing else in the report moves. Without it
+      # this run is indistinguishable from a complete sweep of a target that held nothing.
+      d.progress.errors.should eq(0)
+      d.stats.sent.should eq(2)
+      d.budget_exhausted.should be_false
+    end
+
+    # The control: a run nothing refuses reports zero, so the CLI's line stays silent on every
+    # ordinary sweep.
+    it "is zero when the scope refuses nothing" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1,
+        concurrency: 1, retries: 0)
+      engine = D::Engine.new("http://t/", ["admin", "login"],
+        RouteBackend.new(->(_t : String) { notfound }), cfg, FlippableScope.new)
+      engine.run { |_ev| }
+      engine.scope_refused.should eq(0)
+    end
+  end
+
   # Mine's `mine_all_refused?` backstop, brought over. A target that accepts TCP and then
   # answers nothing, under a budget small enough that only CALIBRATION probes ever ran,
   # reported `done · 0 found · 9 sent · 0 errors` and exit 0: nine requests went out, nine got
@@ -416,6 +489,37 @@ describe Gori::Discover::Engine do
     findings.select { |f| f.source.robots? || f.source.sitemap? }.should be_empty
     findings.select(&.source.bruteforced?).should be_empty
     stats.calibrated_out.should be > 0
+  end
+
+  # The same gate on a SPIDER-ONLY run. `--no-bruteforce` used to switch the calibration off
+  # with it — `seed_frontier` set `@seed_calibration_dir` only when both techniques were on, so
+  # a well-known outcome fell through to `record_page`'s raw-status trust. Measured on a
+  # wildcard-200 origin: `--max-depth=1` reported `5 found · calibrated-out 485`, and the same
+  # run with `--no-bruteforce` reported `16 found · calibrated-out 0` — eleven nonexistent
+  # endpoints at confidence 0.9, written into the Sitemap as real without `--no-store`. The
+  # GENTLER flag produced the WORSE data. The calibration is `calibrate_probes` bogus paths at
+  # the origin and owes nothing to the wordlist, so there was never a reason to tie it to one.
+  it "calibrates the well-known guesses on a spider-only run too (--no-bruteforce)" do
+    cfg = D::Config.new(spider: true, bruteforce: false, calibrate_probes: 3, concurrency: 2, retries: 0)
+    findings, stats = run_discover("http://t/", %w(), cfg) do |_t|
+      html("THE SAME SOFT-404 PAGE FOR EVERY SINGLE PATH ON THIS SERVER")
+    end
+    findings.select { |f| well_known_source?(f) }.should be_empty
+    stats.calibrated_out.should be > 0
+  end
+
+  # …and the control: turning brute-force off must not cost a spider-only run the well-known
+  # documents that ARE there. A real 404 baseline means every one of these diverges.
+  it "still records genuine well-known documents on a spider-only run" do
+    cfg = D::Config.new(spider: true, bruteforce: false, calibrate_probes: 3, concurrency: 2, retries: 0)
+    findings, _ = run_discover("http://t/", %w(), cfg) do |t|
+      case t
+      when "/robots.txt" then make(200, "User-agent: *\nDisallow: /admin\n", "text/plain")
+      when "/"           then html("home")
+      else                    notfound
+      end
+    end
+    findings.map(&.url).should contain("http://t/robots.txt")
   end
 
   it "still records a genuine robots.txt/sitemap.xml on a server with a real 404 baseline" do
@@ -887,7 +991,11 @@ describe Gori::Discover::Engine do
       # not fire) and then every send is refused per-URL in `send_with_retries`. This is
       # exactly the shape a mid-run EXCLUDE now produces. `SCOPE_REFUSED` is a benign error, so
       # `errors` stays 0 too — without the send-counter condition the run is completely silent.
-      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+      # `calibrate_probes: 0` so the origin-root calibration every spider run queues sends
+      # nothing: its bogus paths are a fresh URL each time, which `DenyAfterFirstAsk` allows
+      # once by construction. What is under test is the per-URL refusal, not the measurement.
+      cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0,
+        calibrate_probes: 0)
       sent = [] of String
       backend = RouteBackend.new(->(t : String) { sent << t; notfound })
       engine = D::Engine.new("http://t/api", [] of String, backend, cfg, DenyAfterFirstAsk.new)
@@ -966,7 +1074,10 @@ describe Gori::Discover::Engine do
         sent << t
         t == "/" ? html("home, no links") : notfound
       end
-      sent.should eq(["/"])
+      # The deny set is the well-known paths and nothing else, so the origin-root soft-404
+      # calibration every spider run queues still goes out — it is the gate that grades those
+      # paths, not one of them. Apart from it, only the seed reached the wire.
+      (sent - root_calibration_probes(sent)).should eq(["/"])
     end
 
     it "still fetches them all when nothing denies them (the control for the case above)" do
@@ -976,7 +1087,7 @@ describe Gori::Discover::Engine do
         sent << t
         t == "/" ? html("home, no links") : notfound
       end
-      sent.sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
+      (sent - root_calibration_probes(sent)).sort.should eq((["/"] + WELL_KNOWN_PATHS).sort)
     end
 
     it "gates the origin calibration a path-scoped run queues to grade those paths" do

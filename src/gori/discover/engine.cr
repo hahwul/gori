@@ -203,8 +203,20 @@ module Gori::Discover
 
     # The real thing, not an approximation of it: `fetch` sends exactly these bytes (it calls
     # this method), so the request a finding is stored with is the request that was made.
+    #
+    # The ACTIVE SESSION SLOT's header overlay is written over the built head, after the
+    # `$NAME` pass and in the order `Repeater::Sender#wire` and `Fuzz::Sender#send` already
+    # use: the message's own references resolve against the active slot's table first, the
+    # identity's headers go over the result. Discover was the ONE send seam without it — the
+    # asymmetry `binding_headers` above names, made real. `--slot admin` flipped
+    # `SessionSlots#activate`, printed "slot: sending as admin", and then crawled anonymously,
+    # because the slot's headers had nothing to be written onto until this line existed and
+    # `Config#headers` (`-H`) was the crawler's only header source. A sweep that reports
+    # "found nothing" over an authenticated surface it never reached is the failure this file
+    # already warns about; announcing the identity while sending none is that failure with a
+    # receipt on top.
     def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
-      build_get(scheme, host, port, target, binding_headers)
+      Gori::Env.overlay_slot(build_get(scheme, host, port, target, binding_headers))
     end
 
     def close : Nil
@@ -566,6 +578,18 @@ module Gori::Discover
     # whose every send failed still has `sent > 0`. Same counter, same name and same purpose
     # as `Miner::Engine#successful_sends`; see `wholly_refused_reason`.
     getter successful_sends : Int64 = 0_i64
+    # Candidates the per-URL Layer-2 gate refused in `send_with_retries` — a sweep CUT SHORT,
+    # in the shape `CappedBackend#refused` already carries for the request cap.
+    #
+    # A scope refusal is deliberately benign (`benign_error?`): it is a decision the operator
+    # asked for, not a failure of the run, so it inflates neither `errors` nor `sent`. That is
+    # right for the error count and wrong for the report, because it left the refusal counted
+    # NOWHERE. A mid-run `scope add exclude …` in a second terminal stops the traffic within
+    # `Outbound::RELOAD_INTERVAL` (#396, and it works) — and the run then ended
+    # `done · 1 found · 105 sent · 0 errors`, exit 0, with ~1000 wordlist candidates refused
+    # and nothing saying so. `budget_exhausted` already exists to stop a truncated sweep
+    # reading as a complete one; this is the same fact arriving by the other door.
+    getter scope_refused : Int32 = 0
     @pages : Int32
     @crawl_enqueued : Int32
     @calibrated_out : Int32
@@ -799,8 +823,16 @@ module Gori::Discover
       enqueue_dir(bf_dir, 0) if @config.bruteforce?
       # WELL_KNOWN paths are GUESSED, not organically-linked — they deserve the same soft-404
       # gate a brute-forced wordlist hit gets, not the "exists by
-      # construction" trust record_page gives a crawled <a href>. Only wire this up when
-      # bruteforce is on: that's the only mode with a calibration baseline to gate against.
+      # construction" trust record_page gives a crawled <a href>. Wired up for every SPIDER
+      # run, and deliberately NOT conditioned on bruteforce: the seed-only calibration below
+      # is `calibrate_probes + extensions` bogus paths at the ORIGIN and owes nothing to the
+      # wordlist, so `--no-bruteforce` was switching off a gate it does not pay for. It did so
+      # silently, and in the direction that mints findings: on a wildcard-200 origin the same
+      # seed answered `16 found · calibrated-out 0` with `--no-bruteforce` against
+      # `5 found · calibrated-out 485` without it, the extra eleven being sitemap.xml,
+      # robots.txt and the `.well-known/` registry at confidence 0.9 — and, without
+      # `--no-store`, written into the Sitemap as real endpoints. The GENTLER flag produced
+      # the WORSE data.
       # The origin is calibrated separately — a well-known path always lives there even on
       # a path-scoped run confined elsewhere — and `enqueue_seed_only_calibration`'s own @dirs
       # check reuses the bf_dir calibration when that dir IS the origin. Asking @dirs rather
@@ -812,7 +844,7 @@ module Gori::Discover
       # findings recorded, not even counted in calibrated_out. (The shape that first exposed
       # it — a file-shaped seed whose bf_dir fell outside its own confine — is gone with #395,
       # but the assumption it broke was never safe.)
-      if @config.spider? && @config.bruteforce?
+      if @config.spider?
         root_dir = "#{Url.origin(@seed_parts)}/"
         # @seed_calibration_dir is set even when the Calibrate task below is refused, and that
         # is deliberate: it is what routes a robots/sitemap outcome to resolve_seed_finding
@@ -1668,6 +1700,12 @@ module Gori::Discover
       # while the run is in flight stops it here within that window — on every surface, not
       # only in the TUI where the `Scope` object happens to be shared live (#396).
       unless @scope.allowed?(Url.gate_url(p), p.host)
+        # Booked here rather than at the enqueue gates, and for the same reason the error
+        # facts above are: this is the one line every send passes, so one candidate is one
+        # count — no retry doubles it (the refusal returns before the loop) and no
+        # containment or path-confine drop, which are the run's own bounds and not a
+        # refusal, can be mistaken for one. See `scope_refused`.
+        @scope_refused += 1
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_REFUSED)
       end
       target = p.query ? "#{p.path}?#{p.query}" : p.path
