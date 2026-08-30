@@ -201,6 +201,16 @@ describe "gori run authorize — output" do
     lines[3].should contain("different")
   end
 
+  # Same `ljust(7)` shape as the history row: `OPTIONS` (a CORS preflight is exactly the kind
+  # of request an authz sweep is pointed at) ran flush into the URL, printing
+  # `#7     OPTIONShttps://acme.test/admin`.
+  it "text: keeps a space between a 7+-character METHOD and the URL" do
+    t = A::Target.new(7_i64, "OPTIONS", "https://acme.test/admin", [
+      trial("as-captured", A::Verdict::Baseline, 200, 10_i64, baseline: true),
+    ])
+    Gori::CLI::Output.authorize_target_text(t).lines[0].should contain("OPTIONS https://acme.test/admin")
+  end
+
   it "text: an enforced request is quiet, and an all-errored one says error" do
     enforced = A::Target.new(8_i64, "GET", "https://acme.test/me", [
       trial("as-captured", A::Verdict::Baseline, 200, 10_i64, baseline: true),
