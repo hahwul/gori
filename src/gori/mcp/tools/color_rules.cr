@@ -60,11 +60,8 @@ module Gori
       private def color_rule_scope(h) : Store::RuleScope | Result
         s = str(h, "scope")
         return Store::RuleScope::Project if s.nil? || s.empty?
-        case s.downcase
-        when "project" then Store::RuleScope::Project
-        when "global"  then Store::RuleScope::Global
-        else                err("invalid 'scope' (expected project|global)", "INVALID_ARGUMENT", field: "scope")
-        end
+        Store::RuleScope.values.find { |v| v.label == s.downcase } ||
+          err("invalid 'scope' (expected #{RULE_SCOPES.join("|")})", "INVALID_ARGUMENT", field: "scope")
       end
 
       # A colour LABEL: one of the six built-in words, or the name of a user-defined custom
@@ -84,7 +81,7 @@ module Gori
       private def marker_style(h, dft : Store::MarkerStyle) : Store::MarkerStyle | Result
         s = str(h, "style")
         return dft if s.nil? || s.empty?
-        return err("invalid 'style' (expected full|strip)",
+        return err("invalid 'style' (expected #{Settings::COLORMARKER_STYLES.join("|")})",
           "INVALID_ARGUMENT", field: "style") unless Settings::COLORMARKER_STYLES.includes?(s.downcase)
         Store::MarkerStyle.from_label(s)
       end
@@ -248,7 +245,7 @@ module Gori
           case dir_s.try(&.downcase)
           when "up"   then -1
           when "down" then 1
-          else             return err("invalid 'direction' (expected up|down)", "INVALID_ARGUMENT", field: "direction")
+          else             return err("invalid 'direction' (expected #{MOVE_DIRS.join("|")})", "INVALID_ARGUMENT", field: "direction")
           end
         return not_found("no #{scope.label} colour rule with id #{id}") unless color_rule_exists?(id, scope)
         scoped = Gori::Colormarker.merged(store).select { |r| r.scope == scope }
@@ -404,7 +401,7 @@ module Gori
           "changes it. `id` is unique only within a scope, so pass both to the mutation tools. " \
           "For a global rule, `enabled` is the state in THIS project and `default_enabled` the " \
           "library's own." do |s|
-          s.field "scope", strprop("show only project | global rules (default: both)")
+          s.field "scope", enumprop("show only rules from this store (default: both)", RULE_SCOPES)
         end
 
         tool j, "preview_color_rule",
@@ -433,9 +430,9 @@ module Gori
           "it. Display only — a colour rule never modifies traffic." do |s|
           s.field "when", strprop("the condition, in History QL — the SAME query language and the same fields list_history takes: host: path: url: method: scheme: proto: status: size: reqsize: respsize: dur: header: body: stub: scope:, ~regex on host/path/url/header/body, plus AND/OR/NOT, -negation and (grouping). Matched against the captured flow. CAVEATS, each of which otherwise fails silently: `host:` is a SUBSTRING, not a DNS-label glob, so host:alpha.test also matches xalpha.test; a flow with no response yet has no status, and is painted once the response lands; `scope:in`/`scope:out` follows the project's scope rules as they change and ignores the ⇧S display lens, so with NO scope rules configured nothing is in scope and both spellings paint nothing; and `body:` here SCANS rather than reading the trigram index list_history uses, so it reaches binary bodies that index skips, but it reads only the first 64 KiB of each side and reads the bytes AS CAPTURED, so a match past that bound — or inside a gzipped body — is not painted"), required: true
           s.field "color", strprop("red | orange | yellow | green | blue | purple (default yellow) — resolved through the active theme, so it reads correctly on light and dark alike — OR the name of a custom colour (list_custom_colors / create_custom_color), which carries an absolute hex")
-          s.field "style", strprop("full (tint the whole History row) | strip (one colour cell in a narrow column ahead of TIME) — default full")
+          s.field "style", enumprop("full tints the whole History row; strip paints one colour cell in a narrow column ahead of TIME (default full)", Settings::COLORMARKER_STYLES)
           s.field "name", strprop("optional label for the rule")
-          s.field "scope", strprop("project (default) | global — a global rule lives in settings.json and applies in EVERY project")
+          s.field "scope", enumprop("which store the rule lives in (default project). A global rule lives in settings.json and applies in EVERY project", RULE_SCOPES)
           s.field "enabled", boolprop("create the rule already enabled (default true)")
         end
 
@@ -445,10 +442,10 @@ module Gori
           "only this project's on/off answer use set_color_rule_enabled. Display only — a " \
           "colour rule never modifies traffic." do |s|
           s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
           s.field "when", strprop("new condition (see create_color_rule for the grammar and its caveats)")
           s.field "color", strprop("a built-in (red | orange | yellow | green | blue | purple) or a custom colour's name")
-          s.field "style", strprop("full | strip")
+          s.field "style", enumprop("full tints the whole row; strip paints one colour cell", Settings::COLORMARKER_STYLES)
           s.field "name", strprop("rule label")
         end
 
@@ -460,7 +457,7 @@ module Gori
           "following later changes to that default." do |s|
           s.field "id", intprop("rule id from list_color_rules"), required: true
           s.field "enabled", boolprop("true to enable, false to disable"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
           s.field "everywhere", boolprop("global rules only: change the default for every project instead of this one")
         end
 
@@ -470,15 +467,15 @@ module Gori
           "cosmetics. Moves within the rule's own scope only: every global rule resolves " \
           "before every project one, so the boundary is not a position." do |s|
           s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "direction", strprop("up (higher precedence) | down (lower)"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "direction", enumprop("up raises the rule's precedence, down lowers it", MOVE_DIRS), required: true
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
         end
 
         tool j, "delete_color_rule",
           "Delete a Colormarker rule by id. Deleting a GLOBAL rule removes it from every " \
           "project, and takes this project's override of it along." do |s|
           s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
         end
 
         tool j, "create_custom_color",

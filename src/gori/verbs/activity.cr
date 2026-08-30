@@ -20,7 +20,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "activity.filter-source", "Filter by source",
-        "Cycle the source narrowing: all, agent, bindings, rewriter, probe, discover, fuzzer, miner, sequencer",
+        "Cycle the source narrowing: all, #{Gori::Store::EVENT_SOURCES.join(", ")}",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("s")]) { |ctx| ctx.activity_filter_source; nil }
 
       r.register Verb::Definition.new(

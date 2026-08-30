@@ -10,6 +10,11 @@ module Gori
       # so cap how many flows an active scan touches. Passive mode is request-free and uncapped.
       PROBE_ACTIVE_MAX_FLOWS = 500
 
+      # How `list_probe_rules{kind}` narrows the catalog: the two built-in families plus the
+      # operator's own. Not a Probe enum — `RuleCatalog` stores this as a plain string per
+      # entry — so the list lives here, read by the reader's refusal AND by the schema.
+      PROBE_RULE_KINDS = %w[passive active custom]
+
       # probe_scan — the MCP surface for the Prism scanner (parity with `gori run probe`).
       # PASSIVE by default (zero outbound requests): scans captured History flows (optional
       # QL filter) + Repeater tabs and returns grouped issues. active:true also runs the
@@ -211,8 +216,8 @@ module Gori
       # state. The ids here are what set_probe_rule_enabled / delete_probe_rule take.
       private def list_probe_rules(h) : Result
         kind = str(h, "kind").try(&.strip.downcase).presence
-        if kind && !%w[passive active custom].includes?(kind)
-          return err("invalid kind '#{kind}' (passive|active|custom)", "INVALID_ARGUMENT", field: "kind")
+        if kind && !PROBE_RULE_KINDS.includes?(kind)
+          return err("invalid kind '#{kind}' (#{PROBE_RULE_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
         end
         entries = Probe::RuleCatalog.load(store)
         entries = entries.select { |e| e.kind == kind } if kind
@@ -473,8 +478,8 @@ module Gori
           "fingerprint, an informational jwt_in_* note, or a custom rule. Writes nothing." do |s|
           s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
           s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
-          s.field "severity", strprop("only return issues at/above this level (info|low|medium|high|critical)")
-          s.field "category", strprop("only return issues in this category (#{Probe::FILTER_CATEGORIES.join("|")})")
+          s.field "severity", enumprop("only return issues at/above this level", SEVERITIES)
+          s.field "category", enumprop("only return issues in this category", Probe::FILTER_CATEGORIES)
           s.field "in_scope", boolprop("only return issues on hosts in the project's configured scope (the TUI ⇧S lens; ALL flows are still scanned). Empty result when no scope rules exist. Independent of active/allow_unscoped. Default false")
           s.field "allow_unscoped", boolprop("with active:true, run even when a target host is outside — or without — a configured scope (default false)")
           s.field "unsafe", boolprop("with active:true, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data (default false)")
@@ -490,8 +495,8 @@ module Gori
           "OPEN findings only, mirroring the TUI's default lens. Returns " \
           "{issues, returned, offset, total, has_more} — not a bare array." do |s|
           s.field "include_closed", boolprop("also return dismissed/confirmed/resolved findings (default false = open only)")
-          s.field "severity", strprop("only return findings at/above this level (info|low|medium|high|critical)")
-          s.field "category", strprop("only return findings in this category (#{Probe::FILTER_CATEGORIES.join("|")})")
+          s.field "severity", enumprop("only return findings at/above this level", SEVERITIES)
+          s.field "category", enumprop("only return findings in this category", Probe::FILTER_CATEGORIES)
           s.field "host", strprop("only return findings for this exact host")
           s.field "limit", intprop("max rows (default 100, max 500)")
           s.field "offset", intprop("start row (default 0)")
@@ -502,7 +507,7 @@ module Gori
           "with whether the operator has each enabled, plus the project's current scan `mode`. " \
           "The `id` of each row is what set_probe_rule_enabled / update_probe_rule / " \
           "delete_probe_rule take. Both a scan here and one in the TUI honour this config." do |s|
-          s.field "kind", strprop("only list rules of this kind (passive|active|custom)")
+          s.field "kind", enumprop("only list rules of this kind", PROBE_RULE_KINDS)
         end
 
         return unless @allow_actions
@@ -551,10 +556,10 @@ module Gori
           s.field "title", strprop("short rule name (shown as the finding title)"), required: true
           s.field "pattern", strprop("the string to look for, a regex when match_kind=regex, or the COMMAND as an argv when match_kind=exec"), required: true
           s.field "description", strprop("what the rule is for (default empty)")
-          s.field "side", strprop("request|response (default response)")
-          s.field "region", strprop("whole|header|body (default body)")
-          s.field "match_kind", strprop("string|regex|exec (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event")
-          s.field "severity", strprop("info|low|medium|high|critical (default info)")
+          s.field "side", enumprop("which half of the exchange the rule reads (default response)", Probe::CustomRule::SIDES)
+          s.field "region", enumprop("which part of that half the pattern is matched against (default body)", Probe::CustomRule::REGIONS)
+          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
+          s.field "severity", enumprop("severity the raised finding carries (default info)", SEVERITIES)
         end
 
         tool j, "update_probe_rule",
@@ -564,10 +569,10 @@ module Gori
           s.field "title", strprop("short rule name"), required: true
           s.field "pattern", strprop("the string or regex to match, or the COMMAND as an argv when match_kind=exec"), required: true
           s.field "description", strprop("what the rule is for")
-          s.field "side", strprop("request|response (default response)")
-          s.field "region", strprop("whole|header|body (default body)")
-          s.field "match_kind", strprop("string|regex|exec (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event")
-          s.field "severity", strprop("info|low|medium|high|critical (default info)")
+          s.field "side", enumprop("which half of the exchange the rule reads (default response)", Probe::CustomRule::SIDES)
+          s.field "region", enumprop("which part of that half the pattern is matched against (default body)", Probe::CustomRule::REGIONS)
+          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
+          s.field "severity", enumprop("severity the raised finding carries (default info)", SEVERITIES)
         end
 
         tool j, "delete_probe_rule",
@@ -581,7 +586,7 @@ module Gori
           "requests to scope-included targets; aggressive = active with raised caps, wider " \
           "bypass sets, and UNSAFE methods (POST/PUT/PATCH/DELETE) — authorized targets only. " \
           "This arms the AUTOMATIC pipeline for live captures, not just one scan." do |s|
-          s.field "mode", strprop("off|passive|active|aggressive"), required: true
+          s.field "mode", enumprop("how much scanning the project does", Probe::Mode.values.map(&.label)), required: true
         end
       end
     end

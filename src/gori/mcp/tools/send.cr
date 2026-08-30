@@ -32,7 +32,9 @@ module Gori
         # as "nothing was sent", so it fixes the argument and sends a second real request with
         # a second repeater row behind it. Same rule `minimize_repeater` states for `apply`:
         # every argument is validated before the sends are spent.
-        body_cap, body_omit = body_return_opts(h)
+        body_opts = body_return_opts(h)
+        return body_opts if body_opts.is_a?(Result)
+        body_cap, body_omit = body_opts
         issue_id = send_issue_id(h, save)
         return issue_id if issue_id.is_a?(Result)
 
@@ -1370,7 +1372,7 @@ module Gori
           s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
           s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
           s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
-          s.field "body_mode", strprop("none | preview | full (default full) — control how much response body is inlined")
+          s.field "body_mode", enumprop("how much response body to inline (default full)", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
           s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")

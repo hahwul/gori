@@ -291,7 +291,7 @@ module Gori
         return nil if raw.nil? || raw.strip.empty?
         raw.split(',').compact_map do |tok|
           next if tok.strip.empty?
-          Miner::Location.parse?(tok) || raise FuzzArgError.new("unknown location '#{tok}' (query|form|multipart|json|headers|cookies)")
+          Miner::Location.parse?(tok) || raise FuzzArgError.new("unknown location '#{tok}' (#{MINE_LOCATIONS.join("|")})")
         end
       end
 
@@ -315,7 +315,7 @@ module Gori
           s.field "template", strprop("raw HTTP request to mine")
           s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
-          s.field "locations", strprop("comma list of where to mine: query,form,multipart,json,headers,cookies (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
+          s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
           s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")

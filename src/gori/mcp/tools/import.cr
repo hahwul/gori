@@ -65,7 +65,7 @@ module Gori
           "of `gori run import`. `path` is read from the MCP SERVER's local filesystem (this " \
           "process runs locally, same trust boundary as send_request). Only `har` and `burp` " \
           "carry responses; the rest import request templates with no response." do |s|
-          s.field "kind", strprop("har | urls | oas | postman | insomnia | burp | wsdl"), required: true
+          s.field "kind", enumprop("the source format to read", KINDS.keys), required: true
           s.field "path", strprop("filesystem path to the source file"), required: true
         end
       end

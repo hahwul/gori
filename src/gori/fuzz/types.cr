@@ -33,6 +33,18 @@ module Gori
         pitchfork? || cluster_bomb?
       end
 
+      # The spelling every gori surface TEACHES for this argument: the `--mode` flag's help and
+      # its refusal, the docs' mode tables (EN and KO), and MCP's `fuzz_start` schema `enum`.
+      #
+      # Deliberately not `label`. `label` is the OUTPUT form — hyphenated, and what
+      # `fuzz_results` echoes back — while the docs have spelled the input `batteringram` since
+      # before it existed. `parse?` takes either, so the two forms cost a reader nothing; an
+      # `enum`, though, is a constraint an MCP client can apply BEFORE the call, so advertising
+      # the form nothing documents would block the one an agent learned from the docs.
+      def self.names : Array(String)
+        %w[sniper batteringram pitchfork clusterbomb]
+      end
+
       # Lenient parse of a CLI/MCP token — ignores case and -/_/space so
       # "cluster-bomb", "ClusterBomb", "clusterbomb" all resolve.
       def self.parse?(token : String) : Mode?

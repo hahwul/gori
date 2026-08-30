@@ -57,11 +57,12 @@ module Gori
       private def rule_scope(h) : Store::RuleScope | Result
         s = str(h, "scope")
         return Store::RuleScope::Project if s.nil? || s.empty?
-        case s.downcase
-        when "project" then Store::RuleScope::Project
-        when "global"  then Store::RuleScope::Global
-        else                err("invalid 'scope' (expected project|global)", "INVALID_ARGUMENT", field: "scope")
-        end
+        # One list — `RuleScope.values` — behind the match, the refusal sentence and the
+        # schema's `enum`, so they cannot come to disagree. Matched on `label` rather than
+        # through `parse?`, which folds separators and so accepts spellings the enum never
+        # advertises; case is folded, as it is in every sibling reader here.
+        Store::RuleScope.values.find { |v| v.label == s.downcase } ||
+          err("invalid 'scope' (expected #{RULE_SCOPES.join("|")})", "INVALID_ARGUMENT", field: "scope")
       end
 
       # Whether a rule's pattern is acceptable: only a Replace+Regex rule must compile; a
@@ -336,11 +337,16 @@ module Gori
       # pair or an error Result. Shared by create/update/preview_rule.
       private def rule_target_part(h, dft_target : Store::RuleTarget, dft_part : Store::RulePart) : {Store::RuleTarget, Store::RulePart} | Result
         tgt_s = str(h, "target").try(&.strip)
-        target = tgt_s.nil? || tgt_s.empty? ? dft_target : Store::RuleTarget.parse?(tgt_s)
-        return err("invalid 'target' (expected request|response)", "INVALID_ARGUMENT", field: "target") unless target
+        # Matched against the LABEL rather than through `parse?`, so ONE list — the enum's own
+        # members — backs the match, the refusal sentence and the schema's `enum` alike; add a
+        # member and all three follow. (`parse?` is also looser than the advertised set: it
+        # folds separators, so it answers for `shortcircuit` where `RuleOp` offers only
+        # `short_circuit`.) Case is still folded, as every sibling reader here folds it.
+        target = tgt_s.nil? || tgt_s.empty? ? dft_target : Store::RuleTarget.values.find { |v| v.label == tgt_s.downcase }
+        return err("invalid 'target' (expected #{RULE_TARGETS.join("|")})", "INVALID_ARGUMENT", field: "target") unless target
         part_s = str(h, "part").try(&.strip)
-        part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.parse?(part_s)
-        return err("invalid 'part' (expected head|body|ws)", "INVALID_ARGUMENT", field: "part") unless part
+        part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.values.find { |v| v.label == part_s.downcase }
+        return err("invalid 'part' (expected #{RULE_PARTS.join("|")})", "INVALID_ARGUMENT", field: "part") unless part
         {target, part}
       end
 
@@ -375,17 +381,9 @@ module Gori
         op = if op_s.nil? || op_s.empty?
                dft_op
              else
-               case op_s.downcase
-               when "replace"       then Store::RuleOp::Replace
-               when "add_header"    then Store::RuleOp::AddHeader
-               when "set_header"    then Store::RuleOp::SetHeader
-               when "remove_header" then Store::RuleOp::RemoveHeader
-               when "short_circuit" then Store::RuleOp::ShortCircuit
-               when "pipe"          then Store::RuleOp::Pipe
-               else                      nil
-               end
+               Store::RuleOp.values.find { |v| v.label == op_s.downcase }
              end
-        return err("invalid 'op' (expected replace|add_header|set_header|remove_header|short_circuit|pipe)", "INVALID_ARGUMENT", field: "op") unless op
+        return err("invalid 'op' (expected #{RULE_OPS.join("|")})", "INVALID_ARGUMENT", field: "op") unless op
         # Validate `match` explicitly instead of leaning on MatchKind.from_label
         # (which coerces any unknown label to Literal). A silent literal fallback
         # would mislead a caller into thinking a `regex` rule was applied while the
@@ -394,13 +392,9 @@ module Gori
         kind = if kind_s.nil? || kind_s.empty?
                  dft_kind
                else
-                 case kind_s.downcase
-                 when "literal" then Store::MatchKind::Literal
-                 when "regex"   then Store::MatchKind::Regex
-                 else                nil
-                 end
+                 Store::MatchKind.values.find { |v| v.label == kind_s.downcase }
                end
-        return err("invalid 'match' (expected literal|regex)", "INVALID_ARGUMENT", field: "match") unless kind
+        return err("invalid 'match' (expected #{RULE_MATCHES.join("|")})", "INVALID_ARGUMENT", field: "match") unless kind
         {op, kind}
       end
 
@@ -521,8 +515,8 @@ module Gori
       private def extract_kind_arg(h, dft : Gori::ExtractKind) : Gori::ExtractKind | Result
         raw = str(h, "kind").try(&.strip)
         return dft if raw.nil? || raw.empty?
-        Gori::ExtractKind.parse?(raw) ||
-          err("invalid 'kind' (expected cookie|header|regex|position|jsonpath)", "INVALID_ARGUMENT", field: "kind")
+        Gori::ExtractKind.values.find { |v| v.label == raw.downcase } ||
+          err("invalid 'kind' (expected #{EXTRACT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
       end
 
       # The `$` is stripped so an agent may pass the token the way an operator reads it.
@@ -700,7 +694,7 @@ module Gori
           "project's own. `id` is unique only within a scope, so pass both to the mutation tools. " \
           "For a global rule, `enabled` is the state in THIS project and `default_enabled` the " \
           "library's own; `overridden` says the two were made to differ here." do |s|
-          s.field "scope", strprop("show only project | global rules (default: both)")
+          s.field "scope", enumprop("show only rules from this store (default: both)", RULE_SCOPES)
         end
 
         tool j, "list_rule_presets",
@@ -724,14 +718,14 @@ module Gori
           "scope=global. Note: a gori TUI already running applies it only after its " \
           "rules reload (reopen the Rewriter tab or restart); `gori run` and newly opened TUIs " \
           "pick it up immediately." do |s|
-          s.field "scope", strprop("project (default) | global — a global rule lives in settings.json and applies in EVERY project")
+          s.field "scope", enumprop("which store the rule lives in (default project). A global rule lives in settings.json and applies in EVERY project", RULE_SCOPES)
           s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME; for short_circuit: the substring/regex matched against the REQUEST head"), required: true
           s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body; for pipe: the COMMAND as an argv ('./sign --key k'), tokenized with quote/backslash rules but NEVER interpreted by a shell")
-          s.field "target", strprop("request|response (default request; short_circuit is always request)")
-          s.field "part", strprop("head|body|ws — head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)")
-          s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header | pipe (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND: 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)")
+          s.field "target", enumprop("which message the rule rewrites (default request; short_circuit is always request)", RULE_TARGETS)
+          s.field "part", enumprop("head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)", RULE_PARTS)
+          s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND: 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
-          s.field "match", strprop("for replace: literal | regex (default literal). Regex supports $1/\\1 capture groups")
+          s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)
           s.field "name", strprop("optional label for the rule")
           s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts)")
           s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
@@ -742,8 +736,8 @@ module Gori
           "Replace rules — the same result as create_rule called once per rule, so they are " \
           "visible, editable and disable-able afterwards. Returns the ids created. Note: a gori " \
           "TUI already running applies them only after its rules reload." do |s|
-          s.field "preset", strprop("the preset key from list_rule_presets (e.g. 'unhide-hidden-fields', 'remove-csp')"), required: true
-          s.field "scope", strprop("project (default) | global — global rules live in settings.json and apply in EVERY project")
+          s.field "preset", enumprop("the preset to install; list_rule_presets describes each one", Gori::RulePresets.keys), required: true
+          s.field "scope", enumprop("which store the rules live in (default project). Global rules live in settings.json and apply in EVERY project", RULE_SCOPES)
           s.field "enabled", boolprop("install the rules already enabled (default true); pass false to install them disabled for review before they touch traffic")
         end
 
@@ -752,14 +746,14 @@ module Gori
           "For a global rule, `enabled` changes the state in THIS project (an override), not " \
           "the library's default — use set_rule_enabled with everywhere=true for that." do |s|
           s.field "id", intprop("rule id from list_rules"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
           s.field "pattern", strprop("new match substring/regex, or header name")
           s.field "replacement", strprop("new replacement / header value / canned response")
-          s.field "target", strprop("request|response")
-          s.field "part", strprop("head|body|ws (ws = a WebSocket message; replace only)")
-          s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header")
+          s.field "target", enumprop("which message the rule rewrites", RULE_TARGETS)
+          s.field "part", enumprop("which part of the message (ws = a WebSocket message; replace only)", RULE_PARTS)
+          s.field "op", enumprop("what the rule does", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: file served as the response body ('' = inline)")
-          s.field "match", strprop("literal | regex")
+          s.field "match", enumprop("how `pattern` is read", RULE_MATCHES)
           s.field "name", strprop("rule label")
           s.field "host", strprop("host glob ('' = all hosts)")
           s.field "enabled", boolprop("enable/disable the rule")
@@ -771,10 +765,10 @@ module Gori
           "Approximate: response bodies are scanned as stored wire bytes." do |s|
           s.field "pattern", strprop("the substring/regex to match, or header name"), required: true
           s.field "replacement", strprop("replacement / header value (matters for header ops, which change the head regardless of match)")
-          s.field "target", strprop("request|response (default request)")
-          s.field "part", strprop("head|body|ws (default head; ws counts captured WebSocket messages, replace only)")
-          s.field "op", strprop("short_circuit | replace | add_header | set_header | remove_header (default replace). For short_circuit this counts the flows the rule WOULD have answered instead of sending")
-          s.field "match", strprop("literal | regex (default literal)")
+          s.field "target", enumprop("which message the rule rewrites (default request)", RULE_TARGETS)
+          s.field "part", enumprop("which part of the message (default head; ws counts captured WebSocket messages, replace only)", RULE_PARTS)
+          s.field "op", enumprop("what the rule does (default replace). For short_circuit this counts the flows the rule WOULD have answered instead of sending", RULE_OPS)
+          s.field "match", enumprop("how `pattern` is read (default literal)", RULE_MATCHES)
           s.field "host", strprop("host glob ('' = all hosts)")
         end
 
@@ -784,7 +778,7 @@ module Gori
           "every project that has not overridden it follows." do |s|
           s.field "id", intprop("rule id from list_rules"), required: true
           s.field "enabled", boolprop("true to enable, false to disable"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
           s.field "everywhere", boolprop("global rules only: change the default for every project instead of this one")
         end
 
@@ -792,7 +786,7 @@ module Gori
           "Delete a Match & Replace rule by id. Deleting a GLOBAL rule removes it from every " \
           "project." do |s|
           s.field "id", intprop("rule id from list_rules"), required: true
-          s.field "scope", strprop("which id: project (default) | global")
+          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
         end
 
         tool j, "create_extract_rule",
@@ -802,7 +796,7 @@ module Gori
           "because a response echoing an attacker-shaped payload back could otherwise rebind the " \
           "operator's session to it. One name, one writer: a duplicate name is refused." do |s|
           s.field "name", strprop("the binding name, without the $ (letters, digits and _, not starting with a digit)"), required: true
-          s.field "kind", strprop("cookie | header | regex | position | jsonpath (default cookie). regex/position/jsonpath read the DECODED body; cookie/header read the parsed head")
+          s.field "kind", enumprop("where the token is read from (default cookie). cookie and header read the parsed head; the rest read the DECODED body", EXTRACT_KINDS)
           s.field "selector", strprop("cookie name, header name, regex source, or JSON path ($.a.b[0]) — required for every kind except position")
           s.field "when", strprop("which messages to read, in intercept-filter syntax (host:/path:/method:/scheme:/status:, AND/OR/NOT, '' = any). status: matches responses only")
           s.field "host", strprop("optional host glob scoping the rule ('example.com' substring, '*.example.com' wildcard; empty = all hosts)")
@@ -816,7 +810,7 @@ module Gori
           "drops the old name's bound value rather than re-labelling it." do |s|
           s.field "id", intprop("extract rule id from list_extract_rules"), required: true
           s.field "name", strprop("new binding name (without the $)")
-          s.field "kind", strprop("cookie | header | regex | position | jsonpath")
+          s.field "kind", enumprop("where the token is read from", EXTRACT_KINDS)
           s.field "selector", strprop("cookie/header name, regex source, or JSON path")
           s.field "when", strprop("intercept-filter condition ('' = any message)")
           s.field "host", strprop("host glob ('' = all hosts)")

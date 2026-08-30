@@ -8,9 +8,9 @@ module Gori
       # Add a scope rule (validates + dedupes, like `gori run project scope add`).
       private def add_scope_rule(h) : Result
         kind = str(h, "kind").try(&.strip.downcase) || "include"
-        return err("invalid 'kind' (expected include|exclude)", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
+        return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
         match_type = str(h, "match_type").try(&.strip.downcase) || "host"
-        return err("invalid 'match_type' (expected host|string|regex)", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
+        return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
         pattern = str(h, "pattern").try(&.strip)
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
         if e = Scope.validation_error(match_type, pattern)
@@ -60,9 +60,9 @@ module Gori
         # Every field defaults to the rule's CURRENT value, so a caller can change just the
         # pattern without restating kind/match_type.
         kind = str(h, "kind").try(&.strip.downcase) || existing.kind
-        return err("invalid 'kind' (expected include|exclude)", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
+        return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
         match_type = str(h, "match_type").try(&.strip.downcase) || existing.match_type
-        return err("invalid 'match_type' (expected host|string|regex)", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
+        return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
         # An ABSENT pattern keeps the current one; a SUPPLIED blank one is a mistake, not a
         # no-op — silently keeping the old pattern would report success for an edit that
         # never happened, on the rule that gates outbound traffic.
@@ -158,8 +158,8 @@ module Gori
         tool j, "add_scope_rule",
           "Add a scope include/exclude rule (the Target/Sitemap ⇧S lens, and the intercept " \
           "gate). Deduped on the kind/match_type/pattern triple." do |s|
-          s.field "kind", strprop("include | exclude (default include)")
-          s.field "match_type", strprop("host | string | regex (default host)")
+          s.field "kind", enumprop("whether the rule brings hosts INTO scope or carves them out (default include)", Scope::KINDS)
+          s.field "match_type", enumprop("how `pattern` is matched against a request (default host)", Scope::TYPES)
           s.field "pattern", strprop("host: exact/subdomain/'*' glob; string: substring of scheme://host/target; regex: over the same (case-sensitive; use (?i) to opt out)"), required: true
         end
 
@@ -186,8 +186,8 @@ module Gori
           "to the rule's current value, so you can change just the pattern. Prefer this over " \
           "delete + re-add, which changes the id and briefly drops the rule from the gate." do |s|
           s.field "id", intprop("scope rule id"), required: true
-          s.field "kind", strprop("include|exclude (default: unchanged)")
-          s.field "match_type", strprop("host|string|regex (default: unchanged)")
+          s.field "kind", enumprop("whether the rule includes or excludes (default: unchanged)", Scope::KINDS)
+          s.field "match_type", enumprop("how `pattern` is matched (default: unchanged)", Scope::TYPES)
           s.field "pattern", strprop("new pattern (default: unchanged)")
         end
       end

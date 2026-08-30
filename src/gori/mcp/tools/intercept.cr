@@ -228,8 +228,8 @@ module Gori
 
       private def intercept_set_direction(h) : Result
         dir = str(h, "direction").try(&.downcase)
-        unless dir && {"both", "request", "response"}.includes?(dir)
-          return err("invalid 'direction' (expected both | request | response)", "INVALID_ARGUMENT", field: "direction")
+        unless dir && INTERCEPT_DIRECTIONS.includes?(dir)
+          return err("invalid 'direction' (expected #{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
         end
         enqueue_intercept("set_direction", arg: dir)
       end
@@ -373,7 +373,7 @@ module Gori
         tool j, "intercept_set_direction",
           "Set which leg(s) intercept holds: both | request | response. Applied by the " \
           "capturing instance." do |s|
-          s.field "direction", strprop("both | request | response"), required: true
+          s.field "direction", enumprop("which side of a flow the proxy holds", INTERCEPT_DIRECTIONS), required: true
         end
       end
     end

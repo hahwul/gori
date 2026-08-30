@@ -383,6 +383,68 @@ module Gori
         @presence = nil
       end
 
+      # --- Closed argument value sets ------------------------------------------
+      #
+      # One list per argument whose reader accepts a FIXED set of strings. Each is read
+      # twice: by `enumprop`, which puts it in the tool's JSON Schema as `enum`, and by the
+      # reader's own refusal message. Two readers, one list, so the two can never disagree.
+      #
+      # Why the schema needs them at all: an MCP client hands the MODEL the schema, not the
+      # reader. With the values spelled out only in the description's prose the model had to
+      # infer the set from a sentence, and when it inferred wrong the call came back refused
+      # and it guessed again — a retry loop that costs a round trip per guess and reads, from
+      # the outside, as a flaky server. `enum` is the one field a client can both show and
+      # validate against before the call is ever made.
+      #
+      # Derived from the domain type wherever one exists (`Store::RuleOp.values.map(&.label)`
+      # rather than a copy of its labels), so a member added there reaches the agent with no
+      # second edit. That drift is not hypothetical: `update_rule` and `preview_rule` both
+      # described `op` without `pipe` while their reader had accepted `pipe` all along.
+      #
+      # Deliberately NOT here: `create_color_rule`'s `color`, whose set grows with the
+      # project's custom colours, and `tls_preset`, which also takes `""` to clear. An `enum`
+      # is a promise about every future call; a set that moves under the client belongs in
+      # prose. `payload set` / `processor` specs are mini-DSLs, not values.
+      RULE_SCOPES    = Store::RuleScope.values.map(&.label)
+      RULE_TARGETS   = Store::RuleTarget.values.map(&.label)
+      RULE_PARTS     = Store::RulePart.values.map(&.label)
+      RULE_OPS       = Store::RuleOp.values.map(&.label)
+      RULE_MATCHES   = Store::MatchKind.values.map(&.label)
+      SEVERITIES     = Store::Severity.values.map(&.label)
+      ISSUE_STATUSES = Store::Status.values.map(&.label)
+      LINK_OWNERS    = Store::LinkOwnerKind.values.map(&.label)
+      LINK_REFS      = Store::LinkRefKind.values.map(&.label)
+      EXTRACT_KINDS  = Gori::ExtractKind.values.map(&.label)
+      # request/response as the two HALVES of one exchange — which pane to diff, which side a
+      # probe rule reads, which stored blob to page. Its own list rather than a reuse of
+      # `RULE_TARGETS`: those happen to be the same two words today, and a member added to the
+      # rewriter's target enum has nothing to say about which half of a flow to read.
+      MESSAGE_SIDES = %w[request response]
+      # How much of a response body `get_flow`/`send_request` inline. `full` is the default
+      # and is also spellable, so a caller can say it rather than omit the argument.
+      BODY_MODES = %w[none preview full]
+      MOVE_DIRS  = %w[up down]
+      # `list_*` and `create_view` differ: a saved view can also be a BUILTIN, which is
+      # readable but not writable, so only the read side offers it.
+      VIEW_SCOPES_R = %w[builtin project global]
+      # The event feed's `source` column, as written by every producer.
+      EVENT_SOURCES = Store::EVENT_SOURCES
+      # …and its `actor` column: the surface that acted, or nothing. Written only by the two
+      # producers that can name one (`log_agent_action`, `ConfigLog.record`), both from
+      # `FlowSource.surface`.
+      EVENT_ACTORS          = Gori::FlowSource::Surface.values.map(&.token)
+      FUZZ_MODES            = Fuzz::Mode.names
+      MINE_LOCATIONS        = Miner::Location.values.map(&.label)
+      DISCOVER_CONTAINMENTS = Discover::Containment.values.map(&.label)
+      # The string spellings of `record_history`. It also takes the booleans send_request
+      # spells this argument with (true = all, false = none), which `"type":"string"` never
+      # advertised either way — the enum makes the three real values precise without
+      # narrowing anything the schema had promised.
+      RECORD_HISTORY_MODES = %w[none matched all]
+      # both/request/response — the intercept direction, and (minus `both`) the two sides a
+      # probe rule and a diff pane name.
+      INTERCEPT_DIRECTIONS = %w[both request response]
+
       # Tools that work with no project store open.
       UNBOUND_SAFE = Set{
         "list_projects", "create_project", "switch_project", "delete_project",
@@ -1108,16 +1170,31 @@ module Gori
       # {cap_bytes, omit} pair. none → metadata only; preview → small cap; full
       # (default) → the full MAX_TEXT cap. max_body_bytes tunes the cap (clamped to
       # MAX_TEXT — larger bodies are paged with get_response_body_chunk).
-      private def body_return_opts(h) : {Int32, Bool}
+      private def body_return_opts(h) : {Int32, Bool} | Result
         # Only a POSITIVE max_body_bytes overrides the cap; 0/negative falls back to
         # the mode default (Crystal treats 0 as truthy, so `max || default` alone
         # wouldn't). Use body_mode:none for a zero-byte, shape-only body.
         raw = optional_int_arg(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
         max = (raw && raw > 0) ? raw : nil
-        case str(h, "body_mode").try(&.strip.downcase)
-        when "none"    then {0, true}
-        when "preview" then {max || BODY_PREVIEW_BYTES, false}
-        else                {max || Serialize::MAX_TEXT, false}
+        mode = str(h, "body_mode").try(&.strip.downcase).presence
+        case mode
+        when nil, "full" then {max || Serialize::MAX_TEXT, false}
+        when "none"      then {0, true}
+        when "preview"   then {max || BODY_PREVIEW_BYTES, false}
+        else
+          # Refused by name, not defaulted. The `else` used to fold every unrecognised value
+          # into `full`, which is the WORST of the three to land on by accident: a caller that
+          # asked for `none` or a preview and mistyped it got the whole body inlined instead —
+          # on this transport, a megabyte into the agent's context for a call whose entire
+          # purpose was to keep it out. The sibling `max_body_bytes` on this same line already
+          # refuses an unreadable value (see send_request, which hoists this read ABOVE the send
+          # for exactly that reason); this is the other half of it.
+          # A Result rather than a `raise`: the blanket `Gori::Error` rescue in `call` can only
+          # produce `INVALID_ARGUMENT` with NO `field`, and every other refusal added alongside
+          # this one names the argument it is about — which is what a machine consumer reads to
+          # know what to fix. Both call sites already have to branch on a Result.
+          err("invalid 'body_mode' #{mode.inspect} (expected #{BODY_MODES.join(" | ")})",
+            "INVALID_ARGUMENT", field: "body_mode")
         end
       end
 
@@ -1270,7 +1347,7 @@ module Gori
       private def bad_severity(s : String?) : Result?
         return nil if s.nil? || s.strip.empty?
         return nil if severity_from(s)
-        Result.new("invalid severity: #{s} (info|low|medium|high|critical)", is_error: true)
+        Result.new("invalid severity: #{s} (#{SEVERITIES.join("|")})", is_error: true)
       end
 
       # The optional `cvss` argument as {value, clear}. THREE readings, because an agent has
@@ -1299,7 +1376,7 @@ module Gori
       private def bad_status(s : String?) : Result?
         return nil if s.nil? || s.strip.empty?
         return nil if status_from(s)
-        Result.new("invalid status: #{s} (open|confirmed|false-positive|resolved)", is_error: true)
+        Result.new("invalid status: #{s} (#{ISSUE_STATUSES.join("|")})", is_error: true)
       end
 
       # --- helpers ------------------------------------------------------------
@@ -1659,6 +1736,19 @@ module Gori
         value
       end
 
+      # A filter argument whose column holds a CLOSED set of strings: the value, nil when the
+      # caller did not narrow, or the refusal. Blank reads as absent, and the match is on the
+      # normalised form — every sibling reader on this surface strips and downcases, and a
+      # filter that refuses `"Agent"` while accepting `"agent"` would be the strictest reader
+      # in the file for no reason anyone could infer from the schema.
+      private def closed_filter(h, key : String, values : Array(String)) : (String | Result)?
+        raw = str(h, key).try(&.strip.downcase).presence
+        return nil unless raw
+        return raw if values.includes?(raw)
+        err("invalid #{key.inspect} #{raw.inspect} (expected #{values.join(" | ")})",
+          "INVALID_ARGUMENT", field: key)
+      end
+
       private def clamp(n : Int64?, default : Int32, max : Int32) : Int32
         return default unless n
         n.clamp(1_i64, max.to_i64).to_i
@@ -1671,13 +1761,13 @@ module Gori
 
       private def status_from(s : String?) : Store::Status?
         return nil unless s
-        case s.strip.downcase
-        when "open"                                              then Store::Status::Open
-        when "confirmed"                                         then Store::Status::Confirmed
-        when "false-positive", "false_positive", "falsepositive" then Store::Status::FalsePositive
-        when "resolved"                                          then Store::Status::Resolved
-        else                                                          nil
-        end
+        # `false_positive` / `falsepositive` stay accepted — they predate the schema's `enum`
+        # and an agent that learned them must not start failing — but the LABEL is what the
+        # enum advertises and what `Status#label` round-trips, so it is matched from the one
+        # list rather than spelled out beside its own aliases.
+        down = s.strip.downcase
+        Store::Status.values.find { |v| v.label == down } ||
+          (down.in?("false_positive", "falsepositive") ? Store::Status::FalsePositive : nil)
       end
 
       # --- tools/list schema builders -----------------------------------------
@@ -1706,6 +1796,17 @@ module Gori
 
       private def strprop(desc : String) : JSON::Any
         prop("string", desc)
+      end
+
+      # A string argument with a CLOSED value set (see the value-set constants above).
+      # Emits JSON Schema `enum` alongside the description, which is what lets an MCP client
+      # both SHOW the model the legal values and reject an illegal one before the call is
+      # made — the difference between one correct call and a guess-refuse-guess loop.
+      #
+      # `desc` should carry the MEANING and the default; it no longer has to repeat the list,
+      # and repeating it is how the list came to drift in the first place.
+      private def enumprop(desc : String, values : Enumerable(String)) : JSON::Any
+        JSON.parse(%({"type":"string","description":#{desc.to_json},"enum":#{values.to_a.to_json}}))
       end
 
       # For an argument that is genuinely fractional (`rate` — see `optional_float_arg`).

@@ -188,7 +188,7 @@ module Gori
           s.field "header", strprop("header JSON object (overrides the token's header)")
           s.field "payload", strprop("payload JSON (overrides the token's payload wholesale; mutually exclusive with 'set')")
           s.field "set", strarrprop("patch individual claims before signing, each \"key=value\" (e.g. \"role=admin\"); value is JSON if it parses (true/3), else a string. Mutually exclusive with 'payload'")
-          s.field "alg", strprop("HS256 (default) | HS384 | HS512 | none")
+          s.field "alg", enumprop("signing algorithm (default HS256; none emits an unsigned token)", Gori::Jwt::ALGS)
           s.field "secret", strprop("HMAC secret for an HS algorithm")
         end
 

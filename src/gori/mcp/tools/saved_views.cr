@@ -244,7 +244,7 @@ module Gori
           "view the TUI is showing this project through — it does NOT apply to list_history, " \
           "which filters only by the `view` you pass it, so a stored UI preference can never " \
           "silently drop rows from your answer. Names are unique only WITHIN a scope." do |s|
-          s.field "scope", strprop("show only builtin | project | global views (default: all three)")
+          s.field "scope", enumprop("show only views from this store (default: all three)", VIEW_SCOPES_R)
         end
 
         return unless @allow_actions
@@ -257,7 +257,7 @@ module Gori
           "chip claims it does, so it is refused." do |s|
           s.field "name", strprop("the view's name — how list_history{view} and `gori run history --view` address it; unique within its scope, and not one of the built-in names"), required: true
           s.field "query", strprop("the view's query, in History QL — the SAME language and fields list_history's `query` takes (host: path: url: method: status: src: size: dur: header: body: scope: …, ~regex, AND/OR/NOT, -negation, grouping)"), required: true
-          s.field "scope", strprop("project (default) | global — a global view appears in EVERY project")
+          s.field "scope", enumprop("which store the view lives in (default project). A global view appears in EVERY project", RULE_SCOPES)
         end
 
         tool j, "update_view",
@@ -265,17 +265,17 @@ module Gori
           "the project and global stores (new_scope), or any combination. Omitted fields are " \
           "left unchanged. Built-in views cannot be edited." do |s|
           s.field "name", strprop("the view to update, as listed by list_views"), required: true
-          s.field "scope", strprop("which store `name` is in: project (default) | global")
+          s.field "scope", enumprop("which store `name` is in (default project)", RULE_SCOPES)
           s.field "new_name", strprop("rename the view")
           s.field "query", strprop("replace the view's query (see create_view for the grammar)")
-          s.field "new_scope", strprop("move the view to the other store: project | global")
+          s.field "new_scope", enumprop("move the view to the other store", RULE_SCOPES)
         end
 
         tool j, "delete_view",
           "Delete a saved view. Built-in views cannot be deleted. If this project was looking " \
           "through the deleted view it falls back to All." do |s|
           s.field "name", strprop("the view to delete, as listed by list_views"), required: true
-          s.field "scope", strprop("which store `name` is in: project (default) | global")
+          s.field "scope", enumprop("which store `name` is in (default project)", RULE_SCOPES)
         end
       end
     end
