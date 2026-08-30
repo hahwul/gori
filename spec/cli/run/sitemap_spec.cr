@@ -18,6 +18,10 @@ module Gori::CLI::Run
   def self.sitemap_truncation_notice_for_spec(truncated : Bool, limit : Int32) : String?
     sitemap_truncation_notice(truncated, limit)
   end
+
+  def self.sitemap_tag_row_for_spec(host : String, path : String, tag : String) : String
+    sitemap_tag_row(host, path, tag)
+  end
 end
 
 private def sitemap_store(&)
@@ -386,5 +390,22 @@ describe "gori run sitemap tag — the key a tag is filed under" do
     # Sitemap.build normalizes before stamping — so the key is "/a", not the whole URL.
     Gori::CLI::Run.sitemap_tag_path_for_spec("http://h/a").should eq("/a")
     Gori::CLI::Run.sitemap_tag_path_for_spec("https://h/a?b=1").should eq("/a?b=1")
+  end
+end
+
+describe "gori run sitemap tag --list — the TSV line" do
+  it "folds a newline and a tab in the tag, so one tag is one line with three fields" do
+    # A tag is free text and can be set from the TUI or MCP too. Printed raw it broke the TSV
+    # two ways at once: the newline split one tag across two physical lines, and the tab
+    # invented a fourth column. The tree view already folds the same tag to `# multi·line`.
+    row = Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "multi\nline\tcol 한글 <b>")
+    row.lines.size.should eq(1)
+    row.split('\t').size.should eq(2)
+    row.should eq("acme.test/api\tmulti·line·col 한글 <b>")
+  end
+
+  it "folds the host and path halves too, and leaves an ordinary tag untouched" do
+    Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/a\nb", "ok").should eq("acme.test/a·b\tok")
+    Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "payment flow").should eq("acme.test/api\tpayment flow")
   end
 end
