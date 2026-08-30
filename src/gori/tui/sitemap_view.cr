@@ -721,8 +721,9 @@ module Gori::Tui
     #   host row (depth 0) → a `host` rule for the whole site
     #   path row           → a `string` rule on "host/path", because Scope has no path type.
     #                        A string rule is a substring of the same `scheme://host/target`
-    #                        the SQL lens builds (QL::URL_EXPR, port-free), so "example.com/api"
-    #                        covers the subtree under /api on any port.
+    #                        the SQL lens builds (QL::URL_EXPR_NO_PORT — the port-free half of
+    #                        the split, which is the INCLUDE side a seed lands on), so
+    #                        "example.com/api" covers the subtree under /api on any port.
     # A fold resolves to its CONTAINER ("/users", not one uuid child) — the same reading
     # `selected_endpoint(:container)` gives Discover, and the only one a scope prefix can mean.
     def selected_scope_seed : {match_type: String, pattern: String}?
