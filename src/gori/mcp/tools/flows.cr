@@ -116,15 +116,29 @@ module Gori
       private def list_events(h) : Result
         since = optional_int_arg(h, "since") || 0_i64
         limit = clamp(optional_int_arg(h, "limit"), 100, 500)
-        source = str(h, "source")
+        # Refused, not filtered. `source` and `actor` are the two CLOSED filters on this tool,
+        # and a value nothing writes narrows the feed to nothing — which comes back
+        # `events: []`, `isError:false`, and reads as "the project has no such activity" rather
+        # than "that is not a source". A wrong answer with no error on it is the worst shape a
+        # read tool has. `kind` stays open: it is a free string each producer coins
+        # (`job_done`, `agent_action`, `scope_add`, …) with no registry to check against.
+        #
+        # `actor` is the likelier trap of the two, because the Activity pane PRINTS `agent` for
+        # the `mcp` token (project_view's `act_actor_label` — the pane's filter is cycled, not
+        # typed, so it can afford the nicer word). An agent reading that label off a screenshot
+        # and calling `list_events{actor:"agent"}` used to get an empty feed for a project full
+        # of its own actions.
+        source = closed_filter(h, "source", EVENT_SOURCES)
+        return source if source.is_a?(Result)
+        actor = closed_filter(h, "actor", EVENT_ACTORS)
+        return actor if actor.is_a?(Result)
         kind = str(h, "kind")
-        actor = str(h, "actor")
         scanned = store.events_after(since, limit)
         next_cursor = scanned.empty? ? since : scanned.last.id
         rows = scanned
-        rows = rows.select { |r| r.source == source } if source && !source.empty?
+        rows = rows.select { |r| r.source == source } if source
         rows = rows.select { |r| r.kind == kind } if kind && !kind.empty?
-        rows = rows.select { |r| r.actor == actor } if actor && !actor.empty?
+        rows = rows.select { |r| r.actor == actor } if actor
         Result.new(JSON.build do |j|
           j.object do
             j.field("events") { j.array { rows.each { |r| Serialize.event_row(j, r) } } }
@@ -150,7 +164,9 @@ module Gori
         # feature on h2 ones.
         ws_msgs = store.ws_messages(id)
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        cap, omit = body_return_opts(h)
+        opts = body_return_opts(h)
+        return opts if opts.is_a?(Result)
+        cap, omit = opts
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
       end
 
@@ -221,8 +237,8 @@ module Gori
           raise Gori::Error.new("pass exactly one of flow_id or repeater_id")
         end
         part = str(h, "part") || "response"
-        unless part == "response" || part == "request"
-          raise Gori::Error.new("invalid 'part' #{part.inspect} (expected \"response\" or \"request\")")
+        unless MESSAGE_SIDES.includes?(part)
+          raise Gori::Error.new("invalid 'part' #{part.inspect} (expected #{MESSAGE_SIDES.join(" or ")})")
         end
         offset = bounded_int_arg(h, "offset", 0_i64, min: 0_i64)
         limit = bounded_int_arg(h, "limit", 65_536_i64, min: 1_i64, max: 262_144_i64).to_i
@@ -331,9 +347,9 @@ module Gori
           "Activity pane." do |s|
           s.field "since", intprop("forward cursor: only events with id > this (default 0 = from oldest). Pass back the response's next_cursor to tail.")
           s.field "limit", intprop("max events scanned (default 100, max 500)")
-          s.field "source", strprop("filter to one source: config | agent | miner | fuzzer | probe | bindings | rewriter | discover | sequencer")
+          s.field "source", enumprop("filter to one producer of feed rows", EVENT_SOURCES)
+          s.field "actor", enumprop("filter to the surface that acted; rows written by a background engine name none", EVENT_ACTORS)
           s.field "kind", strprop("filter to one kind (e.g. job_done, agent_action, scope_add)")
-          s.field "actor", strprop("filter to one surface: tui | cli | mcp")
         end
 
         tool j, "get_flow",
@@ -345,7 +361,7 @@ module Gori
           "unless include_sensitive=true." do |s|
           s.field "id", intprop("flow id from list_history"), required: true
           s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
-          s.field "body_mode", strprop("none | preview | full (default full) — none returns body shape only (encoding/size, omitted:true); preview inlines a small head; page more with get_response_body_chunk")
+          s.field "body_mode", enumprop("how much response body to inline (default full). none returns body shape only (encoding/size, omitted:true); preview inlines a small head; page more with get_response_body_chunk", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
         end
 
@@ -359,7 +375,7 @@ module Gori
           "(requested_offset, offset_out_of_range, warning) rather than silently returning empty." do |s|
           s.field "flow_id", intprop("History flow id")
           s.field "repeater_id", intprop("Repeater workbench database id")
-          s.field "part", strprop("response (default) | request — \"request\" pages the stored REQUEST bytes: for a repeater that is the exact head+body blob send_request(repeater_id) replays, which is the only way to read past get_repeater_context's inline cap")
+          s.field "part", enumprop("which stored blob to page (default response). \"request\" pages the stored REQUEST bytes: for a repeater that is the exact head+body blob send_request(repeater_id) replays, which is the only way to read past get_repeater_context's inline cap", MESSAGE_SIDES)
           s.field "offset", intprop("zero-based byte offset (default 0)")
           s.field "limit", intprop("bytes to return (default 65536, max 262144)")
           s.field "raw", boolprop("page stored response bytes without content decoding (default false)")

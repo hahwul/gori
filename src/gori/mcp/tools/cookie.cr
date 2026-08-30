@@ -83,7 +83,7 @@ module Gori
         when "django"
           Cookie::Django.forge(forge_payload(h), secret, ts,
             salt: str(h, "salt") || Cookie::Django::DEFAULT_SALT,
-            algorithm: str(h, "algorithm") || Cookie::Django::DEFAULT_ALGO)
+            algorithm: django_algorithm(h))
         when "rack"
           data = (str(h, "value") || str(h, "payload")).try(&.presence) ||
                  raise Cookie::CookieError.new("rack forge needs 'value' (the base64 Marshal cookie value)")
@@ -100,12 +100,28 @@ module Gori
 
       # --- shared cookie helpers ----------------------------------------------
 
-      # An optional 'format' pin (flask/rack/django), validated. nil = auto-detect.
+      # An optional 'format' pin, validated. nil = auto-detect. The list is `Cookie::FORMATS`
+      # in both halves — the check and the sentence — so the schema's `enum`, built from the
+      # same constant, cannot come to advertise a format this refuses.
       private def cookie_format(h) : String?
         f = str(h, "format").try(&.presence.try(&.downcase))
         return nil if f.nil?
-        raise Cookie::CookieError.new("unknown format #{f.inspect} (use flask/rack/django)") unless Cookie::FORMATS.includes?(f)
+        raise Cookie::CookieError.new("unknown format #{f.inspect} (use #{Cookie::FORMATS.join("/")})") unless Cookie::FORMATS.includes?(f)
         f
+      end
+
+      # The Django HMAC algorithm, validated the same way — it was read with NO check at all
+      # (`str(h, "algorithm") || DEFAULT_ALGO`), so `algorithm:"SHA256"` (a plausible casing)
+      # or `"sha512"` travelled down to `Django.hmac_algo` and surfaced as a raise from deep in
+      # the crypto path rather than a refusal naming the argument. Its sibling `format` on
+      # these same three tools has been validated all along.
+      private def django_algorithm(h) : String
+        a = str(h, "algorithm").try(&.strip.downcase.presence)
+        return Cookie::Django::DEFAULT_ALGO if a.nil?
+        unless Cookie::Django::SUPPORTED_ALGOS.includes?(a)
+          raise Cookie::CookieError.new("unknown algorithm #{a.inspect} (use #{Cookie::Django::SUPPORTED_ALGOS.join("/")})")
+        end
+        a
       end
 
       private def cookie_resolved_format(cookie : String, h) : String?
@@ -119,7 +135,7 @@ module Gori
         when "rack"  then Cookie::Rack.verify(cookie, secret)
         when "django" then Cookie::Django.verify(cookie, secret,
           salt: str(h, "salt") || Cookie::Django::DEFAULT_SALT,
-          algorithm: str(h, "algorithm") || Cookie::Django::DEFAULT_ALGO)
+          algorithm: django_algorithm(h))
         else raise Cookie::CookieError.new("unrecognized cookie format")
         end
       end
@@ -130,7 +146,7 @@ module Gori
         when "rack"  then Cookie::Rack.crack(cookie, secrets)
         when "django" then Cookie::Django.crack(cookie, secrets,
           salt: str(h, "salt") || Cookie::Django::DEFAULT_SALT,
-          algorithm: str(h, "algorithm") || Cookie::Django::DEFAULT_ALGO)
+          algorithm: django_algorithm(h))
         else raise Cookie::CookieError.new("unrecognized cookie format")
         end
       end
@@ -146,7 +162,7 @@ module Gori
           "signature). Auto-detects the format from the cookie's punctuation. Pure transform: " \
           "no network, no signature verification. Returns {format, payload, timestamp, signature, …}." do |s|
           s.field "cookie", strprop("the raw cookie value (URL-decoded)"), required: true
-          s.field "format", strprop("force a format instead of auto-detect: flask | rack | django")
+          s.field "format", enumprop("force a format instead of auto-detect", Cookie::FORMATS)
         end
 
         tool j, "cookie_verify",
@@ -154,9 +170,9 @@ module Gori
           "confirms a guessed/cracked signing key. Returns {valid, format}." do |s|
           s.field "cookie", strprop("the raw cookie value"), required: true
           s.field "secret", strprop("the candidate signing secret"), required: true
-          s.field "format", strprop("force a format: flask | rack | django (default auto-detect)")
+          s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop("Flask/Django signing salt (Flask default 'cookie-session', Django 'django.core.signing')")
-          s.field "algorithm", strprop("Django HMAC algorithm: sha256 (default) | sha1")
+          s.field "algorithm", enumprop("Django HMAC algorithm (default #{Cookie::Django::DEFAULT_ALGO})", Cookie::Django::SUPPORTED_ALGOS)
         end
 
         tool j, "cookie_crack",
@@ -166,22 +182,22 @@ module Gori
           s.field "cookie", strprop("the raw cookie value"), required: true
           s.field "secrets", strarrprop("inline candidate secrets to try (in order)")
           s.field "wordlist", strprop("path to a newline-delimited wordlist file")
-          s.field "format", strprop("force a format: flask | rack | django (default auto-detect)")
+          s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop("Flask/Django signing salt")
-          s.field "algorithm", strprop("Django HMAC algorithm: sha256 (default) | sha1")
+          s.field "algorithm", enumprop("Django HMAC algorithm (default #{Cookie::Django::DEFAULT_ALGO})", Cookie::Django::SUPPORTED_ALGOS)
         end
 
         tool j, "cookie_forge",
           "Re-sign a (possibly edited) payload with a known/cracked secret and emit a valid " \
           "session cookie — forge an admin session once the key is known. Flask/Django take a " \
           "'payload' JSON; Rack takes the opaque base64 'value'. Returns {cookie, format}." do |s|
-          s.field "format", strprop("flask | rack | django"), required: true
+          s.field "format", enumprop("which framework's cookie to forge", Cookie::FORMATS), required: true
           s.field "secret", strprop("the signing secret"), required: true
           s.field "payload", strprop("session JSON to sign (Flask/Django)")
           s.field "value", strprop("the base64 Marshal cookie value (Rack — opaque bytes)")
           s.field "timestamp", intprop("unix second to stamp (Flask/Django; defaults to now)")
           s.field "salt", strprop("Flask/Django signing salt")
-          s.field "algorithm", strprop("Django HMAC algorithm: sha256 (default) | sha1")
+          s.field "algorithm", enumprop("Django HMAC algorithm (default #{Cookie::Django::DEFAULT_ALGO})", Cookie::Django::SUPPORTED_ALGOS)
         end
       end
 

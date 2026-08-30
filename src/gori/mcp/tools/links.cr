@@ -132,7 +132,7 @@ module Gori
           "Repeater tab, or a Fuzz/Miner run — each resolved to a human label and URL. " \
           "A pointer whose target was pruned comes back with stale:true rather than being " \
           "dropped, so you can tell \"no evidence\" from \"evidence that is gone\"." do |s|
-          s.field "owner_kind", strprop("issue|note"), required: true
+          s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
         end
 
@@ -142,18 +142,18 @@ module Gori
           "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
           "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
           "already_linked:true rather than erroring or duplicating." do |s|
-          s.field "owner_kind", strprop("issue|note"), required: true
+          s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
-          s.field "ref_kind", strprop("flow|repeater|fuzz|miner"), required: true
+          s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true
           s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
         end
 
         tool j, "remove_link",
           "Detach an evidence pointer, addressed by the same (owner, ref) pair add_link " \
           "takes — no need to look up the link row's own id first." do |s|
-          s.field "owner_kind", strprop("issue|note"), required: true
+          s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
-          s.field "ref_kind", strprop("flow|repeater|fuzz|miner"), required: true
+          s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true
           s.field "ref_id", intprop("id of the linked flow/repeater/fuzz/miner"), required: true
         end
       end

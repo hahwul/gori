@@ -101,7 +101,7 @@ module Gori
           p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
           p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the upgrade handshake goes out as an ordinary request and the 101 is read as a response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
-          p.on("--mode=MODE", "sniper (default) | batteringram | pitchfork | clusterbomb") { |v| mode = parse_mode(v) }
+          p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v) }
           p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file (repeatable; order → positions)") { |v| sources << Fuzz::WordlistFile.new(v) }
           p.on("--preset=NAME", "Payload set: a built-in preset (#{Fuzz::Presets.names.join("|")}); NAME:FILE merges a user file into it") { |v| sources << parse_preset(v) }
           p.on("--payloads=LIST", "Payload set: inline comma list (a,b,c)") { |v| sources << Fuzz::InlineList.new(v.split(',')) }
@@ -951,7 +951,7 @@ module Gori
       end
 
       private def self.parse_mode(v : String) : Fuzz::Mode
-        Fuzz::Mode.parse?(v) || abort "gori run fuzz: invalid --mode '#{v}' (sniper|batteringram|pitchfork|clusterbomb)"
+        Fuzz::Mode.parse?(v) || abort "gori run fuzz: invalid --mode '#{v}' (#{Fuzz::Mode.names.join("|")})"
       end
 
       private def self.hydrate_project_env(project_name : String?, db_path : String?) : Nil

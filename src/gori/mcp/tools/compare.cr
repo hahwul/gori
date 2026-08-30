@@ -23,8 +23,8 @@ module Gori
         return not_found("no flow with id #{id_b}") unless detail_b
 
         pane_s = str(h, "pane").try(&.strip.downcase)
-        if pane_s && !pane_s.in?("request", "response")
-          return err("invalid 'pane' (expected request|response)", "INVALID_ARGUMENT", field: "pane")
+        if pane_s && !MESSAGE_SIDES.includes?(pane_s)
+          return err("invalid 'pane' (expected #{MESSAGE_SIDES.join("|")})", "INVALID_ARGUMENT", field: "pane")
         end
         pane = pane_s == "request" ? :request : :response
         changes_only = bool_arg(h, "changes_only", false)
@@ -186,7 +186,7 @@ module Gori
           "text unless include_sensitive=true. Pure read: no network, nothing written." do |s|
           s.field "flow_id_a", intprop("first flow id (the 'original' side)"), required: true
           s.field "flow_id_b", intprop("second flow id (the 'new' side)"), required: true
-          s.field "pane", strprop("request | response (default response)")
+          s.field "pane", enumprop("which half of the two flows to diff (default response)", MESSAGE_SIDES)
           s.field "changes_only", boolprop("omit unchanged (same) lines from the diff (default false)")
           s.field "context", intprop("collapse unchanged runs to {kind:fold,hidden} markers, keeping N lines around each change — the readable form for a long response (mutually exclusive with changes_only)")
           s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")

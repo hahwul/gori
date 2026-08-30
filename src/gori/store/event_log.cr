@@ -2,6 +2,18 @@ require "db"
 
 module Gori
   class Store
+    # Every `source` the #124 feed carries, as the producers spell it. The column is a free
+    # string — `insert_event` takes whatever it is handed — so this is the list of what is
+    # actually WRITTEN, and it exists because three surfaces had each grown their own copy of
+    # it: the Activity pane's filter cycle (`ACT_SOURCES`), that filter's keybinding help in
+    # `verbs/activity.cr` (which had already lost `config`), and the MCP `list_events{source}`
+    # schema. All three read this now. A filter offering a source nothing writes returns an
+    # empty feed that reads as "nothing happened".
+    #
+    # Ordered the way a reader wants them: who acted first (`agent`, `config`), then the
+    # background producers.
+    EVENT_SOURCES = %w[agent config bindings rewriter probe discover fuzzer miner sequencer]
+
     # Append one row to the #124 event feed (the AI firehose). Goes through the writer
     # fiber like every other insert; returns last_insert_rowid (0 on a dropped/closed-store
     # write — the caller decides whether a lost event matters). NEVER used for flow rows

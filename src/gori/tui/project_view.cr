@@ -1040,10 +1040,10 @@ module Gori::Tui
     # events and two lines of one message is worse at both jobs than a short list.
     ACT_DETAIL_MIN_H = 8
 
-    # Cycle order for the `s` chip, `nil` = no narrowing. These are the sources the feed
-    # actually carries (every `insert_event` call site), listed with the two an operator reaches
-    # for first — the agent audit trail and the silent binding failures — at the front.
-    ACT_SOURCES = [nil, "agent", "config", "bindings", "rewriter", "probe", "discover", "fuzzer", "miner", "sequencer"]
+    # Cycle order for the `s` chip, `nil` = no narrowing. The sources themselves come from
+    # `Store::EVENT_SOURCES` — the list next to the writer — rather than a copy here: this used
+    # to be its own literal, and the keybinding help beside it had already lost `config`.
+    ACT_SOURCES = [nil] + Gori::Store::EVENT_SOURCES
 
     # Cycle order for the `a` chip: WHICH SURFACE acted. `nil` = every actor, including the
     # events no surface produced (a background engine's own finding).

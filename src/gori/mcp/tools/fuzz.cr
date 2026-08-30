@@ -543,14 +543,12 @@ module Gori
         when true  then return :all
         when false then return :none
         end
-        case raw.as_s?.try(&.strip.downcase)
-        when "none"    then :none
-        when "matched" then :matched
-        when "all"     then :all
-        else
+        spelled = raw.as_s?.try(&.strip.downcase)
+        unless spelled && RECORD_HISTORY_MODES.includes?(spelled)
           raise FuzzArgError.new("invalid 'record_history' #{raw.to_json} " \
-                                 "(expected none | matched | all; true = all, false = none)")
+                                 "(expected #{RECORD_HISTORY_MODES.join(" | ")}; true = all, false = none)")
         end
+        spelled.to_s == "matched" ? :matched : (spelled.to_s == "all" ? :all : :none)
       end
 
       # {template text, the seeding flow's target, http2, EVIDENCE?}. The last element is the
@@ -722,7 +720,7 @@ module Gori
       private def fuzz_mode(h) : Fuzz::Mode
         s = str(h, "mode")
         return Fuzz::Mode::Sniper if s.nil? || s.strip.empty?
-        Fuzz::Mode.parse?(s) || raise FuzzArgError.new("invalid mode '#{s}' (sniper|batteringram|pitchfork|clusterbomb)")
+        Fuzz::Mode.parse?(s) || raise FuzzArgError.new("invalid mode '#{s}' (#{FUZZ_MODES.join("|")})")
       end
 
       # Mirrors `fuzz_sets`'s array-pulling pattern (bare array, or a JSON-encoded
@@ -1186,7 +1184,7 @@ module Gori
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
           s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template. An occurrence already inside a §…§ (or flush against one) is skipped — re-wrapping it would merge the two positions — and a token left with none of its own is named in `marks_warning`")
           s.field "fields", strarrprop("schema-known gRPC fields of a UNARY request to sweep, each a field name, a path into a nested message ('profile.age'), or a field number, with [i] for one occurrence of a repeated field ('tags[1]'); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it. Each payload goes through the field's DECLARATION on its way to bytes (-3 is a different set of octets as int32, sint32, bool or an enum), every other byte of the message is copied from the capture, and the 5-byte gRPC length prefix is recomputed. Needs a descriptor set that resolves the rpc (see grpc_schema / grpc_reflect). These positions follow the template's own §…§ positions in the run's index space, so 'mode' and 'payloads' keep their meaning. A field the schema does not declare, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request. The field must be PRESENT on the captured message — gori replaces an occurrence, it never adds one, so a proto3 field left at its default is not a position. Payloads for a `bytes` field are read as HEX ('de ad be ef').")
-          s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
+          s.field "mode", enumprop("how payload sets are combined across marks (default sniper)", FUZZ_MODES)
           s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. Giving this pipeline REPLACES the default encoding (it applies to every position, so it is not stacked on top). Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW — turns off the default percent-encoding for those positions (path, JSON body, header and cookie positions are raw either way). For a payload that IS the raw byte: parameter pollution with a bare &, a request-line CRLF probe. Also for a payload that is ALREADY a percent-escape and aims at the origin's own decoder — %00, %c0%af, %2e%2e%2f — which the default encodes again (%00 -> %2500) so it arrives as text, testing something else. An explicit 'processors' pipeline already replaces the default.")
@@ -1208,7 +1206,7 @@ module Gori
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
-          s.field "record_history", strprop("none (default) | matched | all — record each sent request+response as a History flow for audit/evidence; matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.")
+          s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body (default true). Set FALSE to send your template's declared value verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
           s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
           s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")

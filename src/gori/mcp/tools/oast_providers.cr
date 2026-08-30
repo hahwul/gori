@@ -160,7 +160,7 @@ module Gori
         tool j, "oast_start",
           "Register an OAST listener and return {session_id, payload_url}. Default provider is " \
           "interactsh on a public server. Put payload_url in a target, then oast_poll for hits." do |s|
-          s.field "provider", strprop("interactsh (default) | custom-http | webhook.site | BOAST | postbin")
+          s.field "provider", enumprop("out-of-band provider to register with (default interactsh)", Oast::ProviderKind.values.map(&.label))
           s.field "server", strprop("provider server/base URL (default: the provider's public preset)")
           s.field "token", strprop("optional provider auth token")
         end

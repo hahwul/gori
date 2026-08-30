@@ -174,7 +174,7 @@ module Gori
 
         tool j, "create_issue", "Record a new issue in the project." do |s|
           s.field "title", strprop("issue title"), required: true
-          s.field "severity", strprop("info|low|medium|high|critical (default auto from cvss, else info)")
+          s.field "severity", enumprop("issue severity (default: derived from cvss, else info)", SEVERITIES)
           s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
           s.field "host", strprop("optional host the issue concerns")
           s.field "flow_id", intprop("optional flow id this issue links to")
@@ -184,10 +184,10 @@ module Gori
         tool j, "update_issue", "Update an existing issue's fields." do |s|
           s.field "id", intprop("issue id"), required: true
           s.field "title", strprop("new title")
-          s.field "severity", strprop("info|low|medium|high|critical")
+          s.field "severity", enumprop("new severity", SEVERITIES)
           s.field "cvss", strprop("optional CVSS vector or score (empty to clear)")
           s.field "notes", strprop("free-form notes (replaces existing)")
-          s.field "status", strprop("open|confirmed|false-positive|resolved")
+          s.field "status", enumprop("new triage state", ISSUE_STATUSES)
           s.field "repeater_id", intprop("optional repeater id to link to the issue")
         end
 
