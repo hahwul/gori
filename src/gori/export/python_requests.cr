@@ -18,7 +18,10 @@ module Gori
         s = RequestParts.sendable(parts)
         String.build do |b|
           b << "import requests\n\n"
-          b << "url = " << pystr(parts.url) << "\n"
+          # The URL is TEXT to requests, which percent-encodes the str's UTF-8 — see
+          # `Escape.percent_encode_non_ascii`. The headers below stay byte-wise: requests encodes
+          # a header str latin-1, so a `\xNN` escape is one byte on the wire.
+          b << "url = " << pystr(Escape.percent_encode_non_ascii(parts.url)) << "\n"
           unless s.headers.empty?
             # requests takes headers as a dict, which cannot hold a repeated name — the last
             # value wins. curl (`-H` twice) and Go (`Header.Add`) reproduce both; a dict cannot,

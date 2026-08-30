@@ -9,6 +9,22 @@ private def py(wire : String, target : String) : String
 end
 
 describe Gori::Export::PythonRequests do
+  # requests takes the URL as TEXT and percent-encodes the str's UTF-8, so a `\xNN` per captured
+  # byte was re-encoded: measured against a raw listener, `/안` went out as
+  # `/%C3%AC%C2%95%C2%88` while curl, Go and httpie all sent `/%EC%95%88` — a different resource
+  # than the capture's, from four surfaces that must agree.
+  it "percent-encodes a non-ASCII URL so requests cannot re-encode it" do
+    code = py("GET /\u{c548} HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    code.should contain(%(url = "https://h.test/%EC%95%88"))
+  end
+
+  # The headers stay byte-wise: requests encodes a header str latin-1, so one code unit is one
+  # byte on the wire — measured correct, and the reason the URL is the only field that moved.
+  it "keeps a non-ASCII header value byte-wise" do
+    code = py("GET /a HTTP/1.1\r\nHost: h.test\r\nX-K: \u{c548}\r\n\r\n", "https://h.test")
+    code.should contain(%("X-K": "\\xec\\x95\\x88",))
+  end
+
   it "emits a runnable GET with the resolved URL and no body" do
     code = py("GET /search?q=1 HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
     code.should contain("import requests")
