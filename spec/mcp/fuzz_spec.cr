@@ -637,6 +637,46 @@ describe "MCP fuzz tools" do
   end
 end
 
+# An origin that is SLOW for one payload and fast for the other, with a byte-identical
+# response either way — the shape of a time-based blind injection, and the one an agent could
+# not name until `match:{time}` existed: status, size, words and body are the same on both
+# rows, so every other dimension `fuzz_conditions` parses is blind to it.
+private def start_slow_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      head = String.new(Gori::Proxy::Codec::Http1.read_head(conn) || Bytes.empty)
+      sleep 0.3.seconds if head.includes?("q=slow")
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+      conn.flush
+      conn.close
+    end
+  end
+  port
+end
+
+describe "MCP fuzz_start match:{time}" do
+  it "matches on the ROUND TRIP in milliseconds — the dimension a time-based blind payload " \
+     "is the only evidence for, and the one an identical-response origin leaves untouched" do
+    port = start_slow_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["fast","slow"]}]),
+        "match"          => {"time" => ">=200"},
+        "concurrency"    => 1,
+        "allow_unscoped" => true,
+      }.to_json)
+      status = await_fuzz_done(tools, start["job_id"].as_s)
+      status["sent"].as_i.should eq(2)
+      status["matched"].as_i.should eq(1) # the slow one, and only it
+    end
+  end
+end
+
 # An origin that answers ONE payload with a matching body and the other with a
 # `Content-Length` longer than the bytes it writes before closing. The short read is a
 # premature EOF, which `Codec::Body` reports as an incomplete body — so that row is STORED

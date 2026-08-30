@@ -159,6 +159,12 @@ module Gori
           p.on("--fw=SPEC", "Filter out word count") { |v| matcher.filter_words = v }
           p.on("--ml=SPEC", "Match line count") { |v| matcher.match_lines = v }
           p.on("--fl=SPEC", "Filter out line count") { |v| matcher.filter_lines = v }
+          # The dimension a time-based blind payload is the ONLY evidence for: same status,
+          # same size, same body, and the origin took five seconds. Milliseconds, so a
+          # `SLEEP(5)` sweep reads `--mt '>=4500'`. A send that TIMED OUT counts as a match
+          # here (and nowhere else) — see `Fuzz::Matcher#eligible?`.
+          p.on("--mt=SPEC", "Match round-trip time in ms (e.g. '>=5000' for a time-based blind payload)") { |v| matcher.match_time = v }
+          p.on("--ft=SPEC", "Filter out round-trip time in ms") { |v| matcher.filter_time = v }
           p.on("--mr=REGEX", "Match response-body regex") { |v| matcher.match_regex = parse_regex(v) }
           p.on("--fr=REGEX", "Filter out response-body regex") { |v| matcher.filter_regex = parse_regex(v) }
           # The response HEAD dimension. `Fuzz::Matcher` has carried the predicate since the

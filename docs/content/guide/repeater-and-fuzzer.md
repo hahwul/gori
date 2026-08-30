@@ -92,7 +92,7 @@ A single marker can also carry a Decoder chain of its own. Put the cursor inside
 
 ### Matching
 
-Filter results with ffuf-style matchers and filters on status, size, words, lines, and body regex, plus auto-calibration to drop noisy baselines. Matched responses are highlighted and can be extracted with a capture regex.
+Filter results with ffuf-style matchers and filters on status, size, words, lines, round-trip time (`--mt`/`--ft`, in ms — the dimension a time-based blind payload is the only evidence for), and body regex, plus auto-calibration to drop noisy baselines. Auto-calibration samples the target several times before the sweep and compares each response against every sampled shape, widened by the jitter those samples themselves showed — so a page carrying a per-request id or timestamp calibrates out, while a target whose samples were identical is still compared exactly. Matched responses are highlighted and can be extracted with a capture regex.
 
 ### Framing a Sweep
 

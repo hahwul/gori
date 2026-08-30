@@ -303,7 +303,15 @@ module Gori
         # on a parked socket) — the pre-delivery case the pool may re-send. A raise AFTER a head
         # was read (an interim-1xx read that then reset) means the origin already has the whole
         # request, so mark it delivered and do not re-send a non-idempotent one.
-        error(exchange_error(ex, host, port, interim_status), started, delivered: !head.nil?)
+        # `timed_out` distinguishes "the origin went silent and the read timed out" from every
+        # other way an exchange can fail, and its doc on `Result` has always said so — but only
+        # the h2 engine ever set it, so on the h1 path (which is most sends, and every
+        # keep-alive one) it was false on a read timeout too. Two readers were wrong because of
+        # it: the surfaces that render "incomplete — the origin closed" for a socket the origin
+        # never closed, and `Fuzz::Matcher#eligible?`, whose whole point is that a timeout is
+        # the signal a time-based payload produces.
+        error(exchange_error(ex, host, port, interim_status), started, delivered: !head.nil?,
+          timed_out: ex.is_a?(IO::TimeoutError))
       end
 
       # The sentence for a raise DURING the exchange.
@@ -343,8 +351,10 @@ module Gori
 
       # An error Result with no head/body, timed from `started` (shared with the pool, which
       # reports a failed dial the same way `send` does).
-      def self.error(message : String, started : Time::Instant, delivered : Bool = false) : Result
-        Result.new(Bytes.new(0), nil, nil, elapsed(started), message, delivered: delivered)
+      def self.error(message : String, started : Time::Instant, delivered : Bool = false,
+                     timed_out : Bool = false) : Result
+        Result.new(Bytes.new(0), nil, nil, elapsed(started), message,
+          delivered: delivered, timed_out: timed_out)
       end
 
       # Why the dial produced no socket.

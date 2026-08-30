@@ -218,6 +218,25 @@ module Gori::Fuzz
     num_spec filter_words
     num_spec match_lines
     num_spec filter_lines
+    # Round-trip time in MILLISECONDS, the dimension every other one here is blind to: a
+    # time-based blind injection (`' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `pg_sleep`)
+    # answers with the SAME status, the same byte length, the same words and the same body as
+    # the payload that did nothing. The only thing it changes is how long the origin took, and
+    # `Metrics`/`Result` have carried `duration_us` since the Fuzzer landed while no surface
+    # could name it — so the one payload class whose whole signal is timing was the one class
+    # a run could not express.
+    #
+    # MILLISECONDS rather than the stored microseconds because that is the unit the operator
+    # thinks and types in (`--mt '>=5000'` for a 5-second sleep, the same unit MCP's
+    # `timeout_ms` already uses); microseconds would make every useful threshold a
+    # seven-digit number. Compiled as a NUMERIC spec, so ranges (`4500-6000`) and comparators
+    # (`>=5000`) both work — the two shapes a timing threshold actually wants.
+    #
+    # A timing dimension is noisy by nature (a shared origin, a slow hop, one unlucky GC
+    # pause), so it is a matcher, not a verdict: `--mt` narrows a sweep to the rows worth
+    # re-sending by hand, exactly as `--ms` does. Nothing here calls a slow response a finding.
+    num_spec match_time
+    num_spec filter_time
 
     property match_regex : Regex?
     property filter_regex : Regex?
@@ -255,6 +274,12 @@ module Gori::Fuzz
     # Cached alongside `baseline` (recomputed only when the set changes, never on the
     # per-response hot path) — see Matcher.reflects_length? for what it detects.
     getter? reflects_length : Bool = false
+    # Half-widths of the baseline bands, recomputed with `baseline` and never on the
+    # per-response path — see `Matcher.tolerance`. All 0 until a calibration set is assigned,
+    # which is what makes an uncalibrated matcher's arithmetic identical to plain equality.
+    getter len_tol : Int64 = 0_i64
+    getter word_tol : Int64 = 0_i64
+    getter line_tol : Int64 = 0_i64
     property? auto_calibrate : Bool
     property keep_bodies : Symbol # :none | :matched | :all
 
@@ -283,12 +308,58 @@ module Gori::Fuzz
     def baseline=(samples : Array(BaselineSample)) : Nil
       @baseline = samples
       @reflects_length = Matcher.reflects_length?(samples)
+      @len_tol = Matcher.tolerance(samples.map(&.metrics.length), LEN_JITTER_FLOOR)
+      @word_tol = Matcher.tolerance(samples.map(&.metrics.words.to_i64), COUNT_JITTER_FLOOR)
+      @line_tol = Matcher.tolerance(samples.map(&.metrics.lines.to_i64), COUNT_JITTER_FLOOR)
     end
 
     # A generous per-pair slack (bytes) for the length-tracks-payload check below — covers
     # HTML-entity re-encoding of a few nonce characters, off-by-one wrapper text, etc.
     # without being wide enough to misclassify genuinely-noisy (non-reflecting) targets.
     LENGTH_TOLERANCE = 4_i64
+
+    # ── the baseline's own jitter ────────────────────────────────────────────
+    #
+    # `baseline_matches?` used to compare EXACTLY (`length == b.length && words == b.words`),
+    # which answers the discrete case perfectly and the continuous one not at all. A target
+    # that embeds anything per-response — a request id, a rendering time, a CSRF token, a
+    # cache-age — has no finite set of shapes for six samples to enumerate, so every sampled
+    # length was a length no sweep response would ever hit again, `--ac` suppressed NOTHING,
+    # and the operator got a page of false positives from the flag whose whole job is to
+    # remove them. (The rotating-banner case the multi-sample baseline fixed is the OTHER
+    # failure; both are real and they want different answers.)
+    #
+    # So a sample is now a small BAND rather than a point, and the band's width is the
+    # variability the target ITSELF demonstrated across the calibration samples — never a
+    # constant this file invented. Two properties follow, and they are the reason it is safe:
+    #
+    #   * A target whose samples were byte-identical gets width 0, i.e. exact equality —
+    #     bit-for-bit the old behaviour, on every stable target there is.
+    #   * A target that jittered by N bytes gets width ≤ N. gori can only ever suppress a
+    #     response the target's own noise could have produced.
+    #
+    # CAPPED, because "observed spread" is the right measure of jitter and the wrong measure
+    # of ROTATION: samples of 100 and 250 bytes span 150, and widening each band by 150 would
+    # merge two distinct shapes into one blanket that swallows every anomaly between them.
+    # The cap is what keeps the two cases apart — jitter is small and absolute (a nonce, a
+    # timestamp, a few bytes), a rotation is large and structural — so the width is
+    # `min(observed spread, max(floor, 2% of the largest sample))` and a rotating baseline
+    # keeps its shapes separate. STATUS is still compared exactly at every width, so no
+    # tolerance here can ever calibrate away a seeded 500.
+    JITTER_CAP_DIVISOR = 50_i64 # 2% of the largest sample
+    LEN_JITTER_FLOOR   = 16_i64 # bytes — a request id / timestamp / token is smaller than this
+    COUNT_JITTER_FLOOR =  2_i64 # words and lines: a reflected nonce moves these by ~1
+
+    # The half-width of a baseline band for one metric, from that metric's values across the
+    # calibration samples. 0 (exact match) for a single sample and for a metric that did not
+    # move — see the block above for why it is capped rather than the raw spread.
+    def self.tolerance(values : Array(Int64), floor : Int64) : Int64
+      return 0_i64 if values.size < 2
+      hi = values.max
+      spread = hi - values.min
+      return 0_i64 if spread <= 0
+      Math.min(spread, Math.max(floor, hi // JITTER_CAP_DIVISOR))
+    end
 
     # Detects a target that reflects the substituted payload back into its response body:
     # the calibration samples deliberately inject STAGGERED payload lengths (see
@@ -355,7 +426,7 @@ module Gori::Fuzz
       need_text = !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
       text = need_text ? String.new(body).scrub : ""
       extracted = extract_value(text)
-      matched = decide(raw, status, grpc_status, length, words, lines, text)
+      matched = decide(raw, status, grpc_status, length, words, lines, elapsed_ms(raw), text)
       keep = keep?(matched)
 
       Result.new(
@@ -382,12 +453,40 @@ module Gori::Fuzz
       @grpc_stale_reason ||= Proxy::H2::Grpc.framing_error(residual)
     end
 
+    # The round-trip in MILLISECONDS, the unit `--mt`/`--ft` are written in. Truncating
+    # division: a spec is a threshold ("slower than 5s"), and rounding 4999.6µs up to 5ms
+    # would put a sub-millisecond response on the wrong side of `>=5`.
+    private def elapsed_ms(raw : Repeater::Result) : Int64
+      raw.duration_us // 1000
+    end
+
     private def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
-                       length : Int64, words : Int32, lines : Int32, text : String) : Bool
-      return false unless raw.error.nil?
+                       length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
+                       text : String) : Bool
+      return false unless eligible?(raw)
       return false if calibrated_out?(status, length, words, lines)
-      matchers_pass?(raw, status, grpc_status, length, words, lines, text) &&
-        !filtered?(raw, status, grpc_status, length, words, lines, text)
+      matchers_pass?(raw, status, grpc_status, length, words, lines, elapsed_ms, text) &&
+        !filtered?(raw, status, grpc_status, length, words, lines, elapsed_ms, text)
+    end
+
+    # A failed send has nothing to match on — no status, no body, no header — so it is not a
+    # result, and every dimension but one is being asked about bytes that never arrived.
+    #
+    # The one is TIME. A payload that pushes the origin past the run's own timeout is the
+    # loudest possible time-based signal, and it arrives here as an error with a duration
+    # attached: on `--mt '>=5000'` against a 10s timeout, the sleep that WORKED timed out and
+    # was discarded, while the sleep that did nothing came back at 40ms and was reported —
+    # exactly inverted. So a TIMED-OUT send stays eligible while a match_time spec is set, and
+    # nothing else changes: a refused, reset or unreachable send is still not a result, and a
+    # run with no `--mt` behaves as it always did.
+    #
+    # The other dimensions do not need a special case on that path. A timed-out send carries
+    # no status and an empty body, so a `--mc`/`--ms`/`--mr` alongside `--mt` fails it on its
+    # own terms — "slow AND 200" cannot be satisfied by a response that never came, and it
+    # should not be.
+    private def eligible?(raw : Repeater::Result) : Bool
+      return true if raw.error.nil?
+      raw.timed_out? && !@match_time_c.nil?
     end
 
     # A response is "noise" when it matches ANY collected baseline sample — not just a
@@ -410,11 +509,22 @@ module Gori::Fuzz
     # payload (no finite sample set would ever exact-match it); word/line counts are
     # used instead, since an opaque alphanumeric nonce substitution — unlike its byte
     # length — rarely changes how many whitespace-delimited words or lines a page has.
+    #
+    # Each comparison is against that sample's BAND — the value ± the jitter the calibration
+    # set itself showed for that metric (see the `JITTER_CAP_DIVISOR` block). Every band is
+    # zero-width on a stable target, so this reduces to the exact `==` it replaced.
     private def baseline_matches?(b : Metrics, status : Int32?, length : Int64,
                                   words : Int32, lines : Int32) : Bool
       return false unless status == b.status
-      return words == b.words && lines == b.lines if reflects_length?
-      length == b.length && words == b.words
+      if reflects_length?
+        return near?(words.to_i64, b.words.to_i64, @word_tol) &&
+          near?(lines.to_i64, b.lines.to_i64, @line_tol)
+      end
+      near?(length, b.length, @len_tol) && near?(words.to_i64, b.words.to_i64, @word_tol)
+    end
+
+    private def near?(value : Int64, sampled : Int64, tolerance : Int64) : Bool
+      (value - sampled).abs <= tolerance
     end
 
     # True when ANY match/filter dimension is set — the run carries a success/rejection
@@ -428,18 +538,21 @@ module Gori::Fuzz
         @match_size_c.nil? && @filter_size_c.nil? &&
         @match_words_c.nil? && @filter_words_c.nil? &&
         @match_lines_c.nil? && @filter_lines_c.nil? &&
+        @match_time_c.nil? && @filter_time_c.nil? &&
         @match_regex.nil? && @filter_regex.nil? &&
         @match_header_lc.nil? && @filter_header_lc.nil?)
     end
 
     # Every active matcher dimension must pass.
     private def matchers_pass?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
-                               length : Int64, words : Int32, lines : Int32, text : String) : Bool
+                               length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
+                               text : String) : Bool
       status_pass?(@match_status_c, status, default: true) &&
         grpc_pass?(@match_grpc_c, grpc_status, default: true) &&
         num_pass?(@match_size_c, length, default: true) &&
         num_pass?(@match_words_c, words.to_i64, default: true) &&
         num_pass?(@match_lines_c, lines.to_i64, default: true) &&
+        num_pass?(@match_time_c, elapsed_ms, default: true) &&
         # header_pass? (an allocation-free byte scan over the short head) before regex_pass?
         # (a PCRE match over the whole body): both are pure predicates, so `&&` short-circuits
         # identically either way, but this order lets a failing --mh skip the body match.
@@ -449,12 +562,14 @@ module Gori::Fuzz
 
     # Any filter dimension that passes removes the result.
     private def filtered?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
-                          length : Int64, words : Int32, lines : Int32, text : String) : Bool
+                          length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
+                          text : String) : Bool
       status_pass?(@filter_status_c, status, default: false) ||
         grpc_pass?(@filter_grpc_c, grpc_status, default: false) ||
         num_pass?(@filter_size_c, length, default: false) ||
         num_pass?(@filter_words_c, words.to_i64, default: false) ||
         num_pass?(@filter_lines_c, lines.to_i64, default: false) ||
+        num_pass?(@filter_time_c, elapsed_ms, default: false) ||
         # Before the body regex, for the reason `matchers_pass?` orders them that way: a byte
         # scan over the short head is cheaper than a PCRE match over the whole body, and `||`
         # short-circuits identically either way.

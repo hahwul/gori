@@ -24,7 +24,12 @@ module Gori::Tui
     # The run's TLS fingerprint override (#844) — a `Settings::TLS_PRESETS` name, "" for none.
     # DEFAULTED for the same reason `grpc_fields` is: every construction site that predates it
     # keeps compiling, and a caller that does not know about it cannot silently clear it.
-    tls_preset : String = ""
+    tls_preset : String = "",
+    # Round-trip time in ms (`Fuzz::Matcher#match_time`). DEFAULTED for the reason the two
+    # above it are: every construction site that predates it keeps compiling, and a caller
+    # that does not know about it cannot silently clear it.
+    m_time : String = "",
+    f_time : String = ""
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -104,6 +109,16 @@ module Gori::Tui
       # Appended LAST for the reason the two rows above it were — it renumbers no row a spec
       # reaches by index.
       {:tls_preset, "TLS fingerprint", :text},
+      # The TIME dimension — `gori run fuzz --mt/--ft`, MCP `match:{time:…}`. Milliseconds,
+      # because that is what an operator types for a `SLEEP(5)` sweep (`>=4500`), and because
+      # a time-based blind payload is the one class whose entire signal is this row: status,
+      # size and body come back identical whether the sleep fired or not.
+      #
+      # Appended LAST for the reason Race, gRPC field(s) and TLS fingerprint were: the rows
+      # above are reached by hardcoded index in spec/tui/fuzz_advanced_overlay_spec.cr, and
+      # this is the one position that renumbers none of them.
+      {:m_time, "Match time (ms)", :text},
+      {:f_time, "Filter time (ms)", :text},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -132,6 +147,8 @@ module Gori::Tui
         :f_regex      => TextField.new(snap.f_regex),
         :grpc_fields  => TextField.new(snap.grpc_fields),
         :tls_preset   => TextField.new(snap.tls_preset),
+        :m_time       => TextField.new(snap.m_time),
+        :f_time       => TextField.new(snap.f_time),
       }
     end
 
@@ -230,7 +247,8 @@ module Gori::Tui
         f_status: @fields[:f_status].value, f_size: @fields[:f_size].value,
         f_words: @fields[:f_words].value, f_regex: @fields[:f_regex].value,
         grpc_fields: @fields[:grpc_fields].value,
-        tls_preset: @fields[:tls_preset].value)
+        tls_preset: @fields[:tls_preset].value,
+        m_time: @fields[:m_time].value, f_time: @fields[:f_time].value)
     end
 
     # --- rendering ----------------------------------------------------------
