@@ -25,40 +25,61 @@ module Gori
             Category::INFOLEAK)
         end
 
-        # {literal prefilter, confirming pattern, evidence label, severity}. The prefilter is a
-        # NECESSARY substring of the pattern, matched case-sensitively where the marker's casing
-        # is fixed, so a body that cannot match never enters PCRE.
+        # {optional cheap prefilter, confirming pattern, evidence label, severity}.
+        #
+        # The prefilters here used to be `String` needles tested with `String#includes?`, and on
+        # this rule that was a straight PESSIMISATION: `String#includes?` is a naive byte search,
+        # while PCRE2 skips a non-matching subject with its own start optimization. Over a 64 KiB
+        # HTML body one `includes?` cost ~85µs and the pattern it guarded cost ~19µs, so every
+        # HTML flow paid ~600µs to save nothing — the rule was the second most expensive on a
+        # large document. Same finding, same file-level shape, as the `includes?`-before-regex
+        # guards removed elsewhere in this tree: never hand-roll a prefilter in front of
+        # something that already prefilters itself, and settle it by measurement.
+        #
+        # So the guard is nil for every pattern PCRE already anchors on a literal, and a cheap
+        # LITERAL REGEX (~19µs, not an `includes?`) only where the confirming pattern genuinely
+        # cannot anchor itself — today just the Rails web-console alternation, which opens on
+        # `<[^>]+` and costs ~178µs unguarded.
         SIGNATURES = [
           # Werkzeug/Flask interactive debugger — a live Python console (RCE if the PIN is off or
           # brute-forced). The title string is emitted only by the debugger page.
-          {"Werkzeug Debugger",
+          {nil,
            /Werkzeug Debugger/,
            "Werkzeug interactive debugger", Store::Severity::High},
           # Rails web-console — an in-browser IRB on the error page (RCE). The mount marker and
-          # its session id are rendered only when the console gem is active.
-          {"console-",
+          # its session id are rendered only when the console gem is active. `console-` is a
+          # necessary substring of BOTH alternatives (`id="console-`, `data-console-session`).
+          #
+          # Case-INSENSITIVE, and that is load-bearing: the pattern it guards is /i, so a
+          # case-sensitive gate would drop `DATA-CONSOLE-SESSION` / `<div ID="CONSOLE-abc">`
+          # — uppercased markup out of a template, a minifier or a proxy — and silently lose a
+          # HIGH (RCE) finding. That is exactly the bug `reverse_tabnabbing` shipped once: an /i
+          # regex paired with a case-SENSITIVE membership test. `/i` on a literal costs the same
+          # as a case-sensitive one (see the measurements in body_leaks), so there is nothing to
+          # trade here.
+          {/console-/i,
            /<[^>]+\bid\s*=\s*["']console-|data-console-session/i,
            "Rails web-console", Store::Severity::High},
           # Django DEBUG=True technical error / 404 page. `Django Version:` is rendered by that
           # page (and the technical-404 page) — never by an ordinary response.
-          {"Django Version:",
+          {nil,
            /Django Version:/,
            "Django debug page (DEBUG=True)", Store::Severity::Medium},
           # Laravel Ignition (the modern debug page). Its client bundle / config marker.
-          {"ignition",
+          {nil,
            /laravel-ignition|"ignitionConfig"|flare-client/i,
            "Laravel Ignition debug page", Store::Severity::Medium},
           # Whoops (older Laravel / generic PHP). The namespaced handler class is printed in the
           # page frames — a prose "whoops" cannot produce `Whoops\Something`.
-          {"Whoops\\",
+          {nil,
            /Whoops\\[A-Z]\w+/,
            "PHP Whoops error page", Store::Severity::Medium},
           # Rails development exception page (`config.consider_all_requests_local = true`). The
           # source-extract heading is dev-only; the production page says "something went wrong".
-          {"Extracted source",
+          {nil,
            /Extracted source \(around line/,
            "Rails development error page", Store::Severity::Medium},
-        ]
+        ] of {Regex?, Regex, String, Store::Severity}
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -71,8 +92,8 @@ module Gori
           text = ctx.body_text
           return if text.nil? || text.empty?
 
-          SIGNATURES.each do |(needle, pattern, label, severity)|
-            next unless text.includes?(needle)
+          SIGNATURES.each do |(prefilter, pattern, label, severity)|
+            next if prefilter && !prefilter.matches?(text)
             next unless pattern.matches?(text)
             acc << det(ctx, label, severity)
           end
@@ -95,8 +116,12 @@ module Gori
         # page says the details are hidden. So the detailed page is confirmed by a real detail
         # section (`Stack Trace:`) AND the ABSENCE of the "settings … prevent … viewed remotely"
         # sentence the safe page carries.
+        # The banner regex is run directly — its `Server Error in '` literal prefix is what PCRE
+        # anchors on, so the `includes?("Server Error in")` that used to guard it only added a
+        # naive scan (~85µs) in front of a ~22µs one. The two `includes?` below it stay: they are
+        # reached only once the banner has ALREADY matched, i.e. on an actual ASP.NET error page,
+        # so they cost nothing on the ordinary responses this rule spends its time on.
         private def check_aspnet(ctx : Context, acc : Array(Detection), text : String) : Nil
-          return unless text.includes?("Server Error in")
           return unless /Server Error in '[^']*' Application/.matches?(text)
           return unless text.includes?("Stack Trace:")
           return if text.includes?("prevent the details of the application error from being viewed")

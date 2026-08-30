@@ -47,8 +47,29 @@ module Gori
         # An `<input …>` that both names itself a ViewState field AND carries a value, capturing
         # the value. Two orderings (name-before-value and value-before-name) are both covered
         # because the leading `[^>]*` scans the whole tag up to whichever attribute it needs.
+        # Group 1 is the field NAME (captured inside the lookahead), group 2 the value. The name
+        # is captured rather than re-derived from the body, because "which framework is this?"
+        # has to be answered by the tag that matched: a page can mention `javax.faces.ViewState`
+        # in a script or a second form while the input that actually carries the blob is
+        # `__VIEWSTATE`, and a whole-body test then labels the ASP.NET finding as JSF.
         VIEWSTATE_INPUT =
-          /<input\b(?=[^>]*\bname\s*=\s*["'](?:__VIEWSTATE|javax\.faces\.ViewState)["'])[^>]*\bvalue\s*=\s*["']([^"']*)["']/i
+          /<input\b(?=[^>]*\bname\s*=\s*["'](__VIEWSTATE|javax\.faces\.ViewState)["'])[^>]*\bvalue\s*=\s*["']([^"']*)["']/i
+
+        # Cheap gate in front of VIEWSTATE_INPUT, whose `<input\b(?=…` opening gives PCRE no
+        # literal to skip on. It is a REGEX, not the pair of `String#includes?("VIEWSTATE")` /
+        # `includes?("ViewState")` calls it replaces: `String#includes?` is a naive byte search,
+        # so those two cost ~170µs on a 64 KiB body while this costs a fraction of that — and
+        # this rule is not response-shape-gated, so EVERY response with a body paid them. Same
+        # trap, same fix, as the `includes?` prefilters in `debug_mode_exposed` and `sourcemap`.
+        #
+        # It spells out the two FIELD NAMES rather than a bare `/viewstate/i`. The short form is
+        # tempting (it is /i, so it also picks up a lowercase `__viewstate` the old exact-case
+        # pair missed) but it matches the plain identifier `viewState` — the standard prop name
+        # in react-map-gl / deck.gl and a common local in map and canvas SPAs — and every such
+        # page would then pay a whole-body `scan(VIEWSTATE_INPUT)`, whose `[^>]*`+`\bvalue`
+        # backtracks per `<input` tag. Naming the fields keeps the /i widening (the lowercase
+        # field is still caught) without opening the gate onto ordinary SPA bundles.
+        VIEWSTATE_MARKER = /__VIEWSTATE|javax\.faces\.ViewState/i
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           # evidence => severity, deduped within the flow (a cookie echoed in both the request
@@ -105,14 +126,21 @@ module Gori
             end
           end
 
-          if (body = ctx.body_text) && (body.includes?("VIEWSTATE") || body.includes?("ViewState"))
-            field = body.includes?("javax.faces.ViewState") ? "javax.faces.ViewState" : "__VIEWSTATE"
+          if (body = ctx.body_text) && VIEWSTATE_MARKER.matches?(body)
             body.scan(VIEWSTATE_INPUT) do |m|
-              if fmt = classify(m[1])
-                mark(hits, fmt, "#{field} field", Store::Severity::Low)
+              if fmt = classify(m[2])
+                mark(hits, fmt, "#{field_label(m[1])} field", Store::Severity::Low)
               end
             end
           end
+        end
+
+        # Normalise the captured field name to its canonical spelling, so a lowercase
+        # `__viewstate` (which the /i pattern accepts) still reports as `__VIEWSTATE` and the
+        # evidence string stays stable across flows — evidence for this code ACCUMULATES per
+        # (code, host), so a casing variant would otherwise split into a second entry.
+        private def field_label(name : String) : String
+          name.compare("javax.faces.ViewState", case_insensitive: true) == 0 ? "javax.faces.ViewState" : "__VIEWSTATE"
         end
 
         # Classify one VALUE by its serialized magic, trying the raw form and — for the query /

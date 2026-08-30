@@ -18,8 +18,8 @@ module Gori
       # site, or a config reference showing the same text, and that is what the two-marker /
       # structural anchoring (the `directory_listing` pattern) is for.
       #
-      # Every signature is prefiltered by an allocation-free literal, so a body that cannot
-      # match is rejected without ever entering PCRE — this rule scans the body of every
+      # Every signature is anchored on a literal PCRE can skip a clean body on, and the scan is
+      # bounded to the response's opening SCAN_PREFIX bytes — this rule reads the body of every
       # texty 2xx response.
       class ExposedConfig < Rule
         def info : RuleInfo
@@ -29,37 +29,40 @@ module Gori
             Category::INFOLEAK)
         end
 
-        # {literal prefilter, confirming pattern, evidence label, severity}.
+        # {confirming pattern, evidence label, severity}.
         #
-        # The prefilter must be a NECESSARY condition of the pattern beside it, and is matched
-        # case-sensitively where the artifact's own casing is fixed (`[core]`, `phpinfo()`,
-        # SCREAMING_SNAKE env keys all are).
+        # There is no separate prefilter, and that is a measured decision rather than an
+        # omission. Each of these carried a `String#includes?` literal in front of it, on the
+        # theory that a body which cannot match should never enter PCRE. Over the 16 KiB prefix
+        # this rule actually scans, the guards cost ~35µs each while the patterns they guarded
+        # cost ~7.6µs: five naive byte searches (~180µs on EVERY texty 2xx response) to save
+        # ~38µs of PCRE. `String#includes?` is a naive O(n·m) walk; PCRE2 memchr-skips on the
+        # literal each of these patterns already opens with or requires. Same finding as the
+        # guards removed from `debug_mode_exposed`, `sourcemap`, `serialized_object` and
+        # `directory_listing` — the rule is: do not hand-roll a prefilter in front of something
+        # that already prefilters itself, and settle it by measurement, not by reasoning about
+        # allocations.
         SIGNATURES = [
           # A `.git/config`: the `[core]` section header is immediately followed by the
           # repository format version. A prose mention of "[core]" cannot produce that pair.
-          {"repositoryformatversion",
-           /\[core\][^\[]{0,80}repositoryformatversion\s*=/,
+          {/\[core\][^\[]{0,80}repositoryformatversion\s*=/,
            ".git/config", Store::Severity::High},
           # phpinfo() output. The <title> is emitted by the function itself and is not something
           # a page merely DISCUSSING phpinfo would carry; the PHP Version table row confirms it.
-          {"phpinfo()",
-           /<title>phpinfo\(\)<\/title>/i,
+          {/<title>phpinfo\(\)<\/title>/i,
            "phpinfo() output", Store::Severity::Medium},
           # An Apache/nginx password file: `user:$apr1$…` (or bcrypt / SHA-512 crypt). The hash
-          # prefix is the anchor — a bare `user:password` line would match nothing here.
-          # The prefilter is `:$`, the adjacency the pattern requires, NOT a bare `$`: a lone
-          # dollar sign is in every jQuery-shaped body on the web and would filter nothing,
-          # leaving the regex (whose own first-byte set is just `\n`) to walk every response.
-          {":$",
-           /(?:\A|\n)[\w.\-]{1,64}:\$(?:apr1|2[aby]|5|6)\$[^\s:]{8,}/,
+          # prefix is the anchor — a bare `user:password` line would match nothing here. This is
+          # the one signature whose own first-byte set is just `\n`, so it is the least skippable
+          # of the five; it still measured 7.5µs over the 16 KiB prefix, against 35µs for the
+          # `:$` byte search that used to guard it.
+          {/(?:\A|\n)[\w.\-]{1,64}:\$(?:apr1|2[aby]|5|6)\$[^\s:]{8,}/,
            ".htpasswd credentials", Store::Severity::High},
           # wp-config.php served as source instead of executed: the DB password define().
-          {"DB_PASSWORD",
-           /define\s*\(\s*['"]DB_PASSWORD['"]\s*,/,
+          {/define\s*\(\s*['"]DB_PASSWORD['"]\s*,/,
            "wp-config.php credentials", Store::Severity::High},
           # Spring Boot Actuator /env (or /configprops): the response envelope is distinctive.
-          {"propertySources",
-           /"propertySources"\s*:\s*\[/,
+          {/"propertySources"\s*:\s*\[/,
            "Spring actuator env", Store::Severity::Medium},
         ]
 
@@ -80,11 +83,10 @@ module Gori
         # the actuator envelope keys are the outermost JSON object, and a `.env`'s keys sit at
         # the top. So the scan is bounded to this prefix instead of the full 64 KiB `body_text`.
         #
-        # This is a real cost, not a hypothetical one: the rule runs on EVERY texty 2xx response
-        # and its literal prefilters are substring searches, so scanning the whole prefix cost
-        # ~0.4ms per flow on the shared passive fiber (measured, bench/probe_passive_bench) —
-        # for bytes that structurally cannot hold the signal. A body already under the bound is
-        # used as-is and copies nothing.
+        # This is a real cost, not a hypothetical one: the rule runs on EVERY texty 2xx response,
+        # so scanning the full 64 KiB `body_text` cost ~0.4ms per flow on the shared passive
+        # fiber (measured, bench/probe_passive_bench) — for bytes that structurally cannot hold
+        # the signal. A body already under the bound is used as-is and copies nothing.
         SCAN_PREFIX = 16 * 1024
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
@@ -97,10 +99,8 @@ module Gori
           return if full.nil? || full.empty?
           text = head_of(full)
 
-          SIGNATURES.each do |(needle, pattern, label, severity)|
-            next unless text.includes?(needle)
-            next unless pattern.matches?(text)
-            acc << det(ctx, label, severity)
+          SIGNATURES.each do |(pattern, label, severity)|
+            acc << det(ctx, label, severity) if pattern.matches?(text)
           end
           check_dotenv(ctx, acc, text)
         end
