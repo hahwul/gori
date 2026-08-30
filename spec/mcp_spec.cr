@@ -3758,6 +3758,44 @@ describe "MCP update_scope_rule" do
       Gori::Scope.load(store).rules.first.pattern.should eq("a.test")
     end
   end
+
+  # `ConfigLog` is recorded at the MODEL so that one site covers TUI, CLI and MCP (see its
+  # header). These two tools wrote straight at the store instead, so an agent could rewrite or
+  # delete the include rule that gates every active send and the config feed said nothing —
+  # `scope_update` was an event no headless surface emitted at all.
+  it "records the VALUE of an edit and a delete in the config feed, like every other surface" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "old.test")
+      id = Gori::Scope.load(store).rules.first.id
+      tools = tools_for(store)
+
+      ok_json(tools, "update_scope_rule", %({"id":#{id},"pattern":"new.test"}))
+      ok_json(tools, "delete_scope_rule", %({"id":#{id}}))
+
+      store.flush
+      rows = store.events_recent(100, source: Gori::ConfigLog::SOURCE).rows.reverse
+      rows.map(&.kind).should eq(["scope_add", "scope_update", "scope_remove"])
+      rows[1].message.should contain("new.test")
+      rows[2].message.should contain("new.test") # the rule that GOES, named before it is gone
+    end
+  end
+
+  # An edit can black-hole the proxy exactly as a delete can: flip the last include to an
+  # exclude and the sandbox holds an empty allowlist. `delete_scope_rule` reported that; the
+  # edit changed it silently.
+  it "reports blocks_all when an edit leaves the sandbox holding an empty allowlist" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.enable_sandbox
+      id = Gori::Scope.load(store).rules.first.id
+      tools = tools_for(store)
+
+      ok_json(tools, "update_scope_rule", %({"id":#{id},"kind":"exclude"}))["blocks_all"].as_bool.should be_true
+      ok_json(tools, "list_scope", "{}")["blocks_all"].as_bool.should be_true
+    end
+  end
 end
 
 describe "MCP sitemap tags" do

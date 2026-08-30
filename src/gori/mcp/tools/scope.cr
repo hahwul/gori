@@ -85,7 +85,15 @@ module Gori
           return err("another scope rule already matches #{kind} #{match_type} #{pattern}",
             "INVALID_ARGUMENT", field: "pattern")
         end
-        unless store.update_scope_rule(id, kind, match_type, pattern)
+        # Through `Scope#update`, not straight at the store: `ConfigLog` is recorded at the
+        # MODEL on purpose (see its header — "a per-surface producer would be three copies, and
+        # the CLI is the one that gets forgotten"), and this surface plus `gori run project
+        # scope update` were both writing past it. `scope_update` was therefore an event NO
+        # headless surface ever emitted: an agent could rewrite the include rule that gates
+        # every active send and the feed carried only `agent | "update_scope_rule ok"`, which
+        # by that header's own argument cannot carry the VALUE. The in-place reload it also
+        # does is one SELECT on a throwaway Scope, and `blocks_all` below now reads it.
+        unless scope.update(id, kind, match_type, pattern)
           return busy("scope rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic")
         end
         Result.new(JSON.build do |j|
@@ -94,6 +102,11 @@ module Gori
             j.field "kind", kind
             j.field "match_type", match_type
             j.field "pattern", pattern
+            # An EDIT can black-hole the proxy exactly as a delete can — flip the last include
+            # to an exclude and the sandbox holds an empty allowlist. `delete_scope_rule`
+            # reports that state and the TUI/CLI both re-ask on this edge; MCP's edit was the
+            # one write that changed it silently.
+            j.field "blocks_all", scope.sandbox? && scope.include_count.zero?
           end
         end)
       end
@@ -103,16 +116,19 @@ module Gori
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
         scope = Scope.load(store)
         return not_found("no scope rule with id #{id}") unless scope.rules.any? { |r| r.id == id }
-        # Write straight to the store (this Scope is a throwaway load, so scope.remove's
-        # in-place reload buys nothing here) and confirm it committed — a busy/locked
-        # rollback must not report the rule deleted while it still gates active requests.
-        return busy("scope rule NOT deleted (store busy or unwritable); it is unchanged and still gates traffic") unless store.remove_scope_rule(id)
+        # Through `Scope#remove`, not straight at the store, and confirm it committed — a
+        # busy/locked rollback must not report the rule deleted while it still gates active
+        # requests. It used to take the store directly on the argument that the in-place reload
+        # buys nothing on a throwaway Scope; what it actually skipped was `ConfigLog`, which is
+        # recorded at the MODEL (see its header) and which alone can name WHICH rule went. The
+        # TUI and `gori run project scope delete` both go through here, so MCP was the surface
+        # that could delete the include rule gating every active send and leave the config feed
+        # silent. The reload is also what makes `include_count` below current.
+        return busy("scope rule NOT deleted (store busy or unwritable); it is unchanged and still gates traffic") unless scope.remove(id)
         # `set_sandbox` reports `blocks_all` for exactly this state; a delete that CAUSES
         # it used to return a bare {id, deleted:true}, so an agent could black-hole the
-        # proxy and read the write as ordinary success. Re-load — the removal went through
-        # the store, not this throwaway Scope.
-        after = Scope.load(store)
-        blocks_all = after.sandbox? && after.include_count.zero?
+        # proxy and read the write as ordinary success.
+        blocks_all = scope.sandbox? && scope.include_count.zero?
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true; j.field "blocks_all", blocks_all } })
       end
 
