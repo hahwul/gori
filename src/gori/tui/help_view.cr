@@ -79,6 +79,8 @@ module Gori::Tui
         Item.new("/", "filter (query language — see the Query page)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
         Item.new("space → Y", "copy as… — urls · hosts · cURL · raw · req+res pair"),
+        Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
+        Item.new("⇧X", "clear all History flows (asks first)", "history.clear"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
         Item.new("detail", "↑/↓ move · x line · ⇧arrows select · y copy · space cmds"),
         Item.new("^X · b · p", "in detail: hex · whitespace · pretty bodies"),

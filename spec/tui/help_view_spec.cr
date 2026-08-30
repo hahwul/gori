@@ -21,6 +21,15 @@ describe Gori::Tui::HelpView do
     backend.contains?("DECODER").should be_true # the Decoder tab cheat-sheet
   end
 
+  it "documents the direct History deletion shortcuts" do
+    history = HelpView::SECTIONS.find { |(title, _)| title == "HISTORY" }.not_nil![1]
+    delete = history.find { |item| item.verb_id == "history.delete" }.not_nil!
+    clear = history.find { |item| item.verb_id == "history.clear" }.not_nil!
+
+    delete.key.should eq("d")
+    clear.key.should eq("⇧X")
+  end
+
   describe "the Query page" do
     it "renders the whole language, built from the parser's own tables" do
       view = HelpView.new
