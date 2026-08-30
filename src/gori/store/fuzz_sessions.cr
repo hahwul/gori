@@ -104,22 +104,35 @@ module Gori
     # AUTOINCREMENT (V10), so a dangling `session_id` can never be re-pointed at a new session —
     # this is a space leak, not the evidence-contamination class.
     #
-    # Returns whether the delete COMMITTED, like `delete_repeater` next door: a rolled-back batch
-    # leaves the row, so the tab the operator closed comes back on the next project open.
+    # Returns true only when the session row was deleted and the transaction committed. An
+    # active child run refuses the whole operation: closing a tab must not remove the parent
+    # underneath a writer that is still appending result batches. The check and deletes share
+    # the writer transaction, so a second Store cannot insert a run into the gap.
     def delete_fuzz_session(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM fuzz_results WHERE run_id IN (SELECT id FROM fuzz_runs WHERE session_id = ?)", id)
-        c.exec("DELETE FROM fuzz_runs WHERE session_id = ?", id)
-        c.exec("DELETE FROM entity_links WHERE ref_kind = 'fuzz' AND ref_id = ?", id)
-        c.exec("DELETE FROM fuzz_sessions WHERE id = ?", id)
-        # Already-stranded rows from before the cascade existed. RUNS FIRST, then results:
-        # a stranded run still exists in `fuzz_runs` (only its session is gone), so reaping
-        # results first would find none orphaned by `run_id` and then the run's removal would
-        # strand them with nothing left to sweep. The spec caught exactly that ordering.
-        c.exec("DELETE FROM fuzz_runs WHERE session_id IS NOT NULL AND session_id NOT IN (SELECT id FROM fuzz_sessions)")
-        c.exec("DELETE FROM fuzz_results WHERE run_id NOT IN (SELECT id FROM fuzz_runs)")
+      deleted = false
+      committed = exec_task_ok ->(c : DB::Connection) {
+        exists = !c.query_one?("SELECT 1 FROM fuzz_sessions WHERE id = ?", id, as: Int64).nil?
+        active = exists && c.query_one(
+          "SELECT EXISTS(SELECT 1 FROM fuzz_runs WHERE session_id = ? " \
+          "AND status IN ('running', 'saving'))", id, as: Int64) != 0
+        if exists && !active
+          c.exec("DELETE FROM fuzz_results WHERE run_id IN (SELECT id FROM fuzz_runs WHERE session_id = ?)", id)
+          c.exec("DELETE FROM fuzz_runs WHERE session_id = ?", id)
+          c.exec("DELETE FROM entity_links WHERE ref_kind = 'fuzz' AND ref_id = ?", id)
+          c.exec("DELETE FROM fuzz_sessions WHERE id = ?", id)
+          deleted = c.scalar("SELECT changes()").as(Int64) == 1
+          if deleted
+            # Already-stranded rows from before the cascade existed. RUNS FIRST, then results:
+            # a stranded run still exists in `fuzz_runs` (only its session is gone), so reaping
+            # results first would find none orphaned by `run_id` and then the run's removal would
+            # strand them with nothing left to sweep. The spec caught exactly that ordering.
+            c.exec("DELETE FROM fuzz_runs WHERE session_id IS NOT NULL AND session_id NOT IN (SELECT id FROM fuzz_sessions)")
+            c.exec("DELETE FROM fuzz_results WHERE run_id NOT IN (SELECT id FROM fuzz_runs)")
+          end
+        end
         nil
       }
+      committed && deleted
     end
   end
 end

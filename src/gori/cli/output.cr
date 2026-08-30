@@ -301,6 +301,36 @@ module Gori
         JSON.build { |j| fuzz_row_fields(j, r) }
       end
 
+      # Incremental `--format json` writer. The opening bracket is emitted immediately and
+      # every row is appended as one already-valid JSON object, so a large fuzz run retains no
+      # Result array merely to produce an array on stdout. Owners close it from ensure: an
+      # interrupted or exceptional run is therefore still a valid JSON prefix array (`[]` when
+      # no row completed), rather than a missing document or a dangling `[...,` fragment.
+      class FuzzArrayStream
+        @first = true
+        @closed = false
+
+        def initialize(@io : IO)
+          @io << '['
+          @io.flush
+        end
+
+        def append(result : Fuzz::Result) : Nil
+          raise IO::Error.new("fuzz JSON array is already closed") if @closed
+          @io << ',' unless @first
+          @io << Output.fuzz_row_json(result)
+          @io.flush
+          @first = false
+        end
+
+        def close : Nil
+          return if @closed
+          @io << "]\n"
+          @io.flush
+          @closed = true
+        end
+      end
+
       def self.fuzz_array_json(results : Array(Fuzz::Result)) : String
         JSON.build { |j| j.array { results.each { |r| fuzz_row_fields(j, r) } } }
       end
@@ -609,7 +639,10 @@ module Gori
       def self.fuzz_row_text(r : Fuzz::Result) : String
         String.build do |io|
           io << '#' << r.index.to_s.ljust(6)
-          io << r.payloads.join(", ").ljust(24)
+          # ONE one-line terminal-safety seam for every dynamic fuzz-row string below. Payloads
+          # come from operator wordlists and the other fields come from remote responses/errors;
+          # either can carry CR/LF or ANSI/OSC controls that would rewrite the surrounding row.
+          io << term_safe(r.payloads.join(", ")).ljust(24)
           io << "  " << (r.status.try(&.to_s) || (r.error ? "ERR" : "—")).ljust(4)
           io << "  " << human_size(r.length).ljust(8)
           io << "  " << "#{r.words}w".ljust(7)
@@ -618,19 +651,27 @@ module Gori
           # Only rendered when the response carried it, so a non-gRPC row is unchanged.
           if gs = r.grpc_status
             io << "  grpc " << gs << ' ' << Proxy::H2::Grpc.status_name(gs)
-            io << " · " << r.grpc_message if r.grpc_message
+            if message = r.grpc_message
+              io << " · " << term_safe(message)
+            end
           end
           fuzz_row_ws(io, r)
-          io << "  ⟦" << r.extracted << '⟧' if r.extracted
+          if extracted = r.extracted
+            io << "  ⟦" << term_safe(extracted) << '⟧'
+          end
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
           io << "  re-sent" if r.retried?
           # A CONFIG-retry re-send (`--retries`), with its count — DISTINCT from the keep-alive
           # `re-sent` above. Beside it because both qualify the SEND, not the response.
           io << "  re-sent (" << r.resent_count << "×)" if r.resent?
-          io << "  " << r.error if r.error
+          if error = r.error
+            io << "  " << term_safe(error)
+          end
           # The transform declared for this payload did not run; the payload went out raw.
-          io << "  ⚠ " << r.chain_error if r.chain_error
+          if chain_error = r.chain_error
+            io << "  ⚠ " << term_safe(chain_error)
+          end
           # A trailing clause when the captured response was cut short, with the SAME three-way
           # sentence the Repeater appends (`Run.incomplete_reason`) so `length`/`words` above are
           # not read as the whole response. Body-keyed ceiling detection is exact only when the

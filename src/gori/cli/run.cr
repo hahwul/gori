@@ -54,6 +54,7 @@ require "./run/diff"
 require "./run/intercept"
 require "./run/fuzz_args"
 require "./run/fuzz"
+require "./run/fuzz_saved"
 require "./run/mine"
 require "./run/sequence"
 require "./run/authorize"
@@ -191,6 +192,7 @@ module Gori
         {"diff", "Retest report: diff two projects at endpoint scale (--from/--to, text/json/md)"},
         {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},
         {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
+        {"fuzz save/list/show", "Persist and inspect complete fuzz-run results (delete removes one)"},
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
         {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},

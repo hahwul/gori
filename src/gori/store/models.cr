@@ -1351,8 +1351,25 @@ module Gori
       end
     end
 
-    # One fuzz sweep's metadata. Live counters are updated as the run streams; `status`
-    # is running | done | stopped | error.
+    enum FuzzRunDeleteStatus
+      Deleted
+      NotFound
+      Active
+      WriteFailed
+    end
+
+    # Atomic run-deletion outcome. `deleted_results` is counted inside the same writer
+    # transaction and is exposed only after that transaction commits.
+    record FuzzRunDeleteResult,
+      status : FuzzRunDeleteStatus,
+      deleted_results : Int64 = 0_i64 do
+      def deleted? : Bool
+        status == FuzzRunDeleteStatus::Deleted
+      end
+    end
+
+    # One persisted fuzz sweep. `status` is running/saving while rows are arriving, then
+    # done | budget_exhausted | stopped | error; save_failed marks an incomplete snapshot.
     struct FuzzRunRecord
       getter id : Int64
       getter session_id : Int64?
@@ -1365,19 +1382,28 @@ module Gori
       getter matched : Int64
       getter errors : Int64
       getter status : String
+      getter? http2 : Bool
+      getter sni : String?
+      getter tls_preset : String?
+      getter? websocket : Bool
+      getter surface : String?
+      getter source_ref : String?
+      getter snapshot_version : Int32
 
       def initialize(@id, @session_id, @created_at, @finished_at, @target, @mode,
-                     @total, @sent, @matched, @errors, @status)
+                     @total, @sent, @matched, @errors, @status, @http2 = false,
+                     @sni = nil, @tls_preset = nil, @websocket = false,
+                     @surface = nil, @source_ref = nil, @snapshot_version = 0)
       end
     end
 
-    # One persisted fuzz result row. `payloads` is a JSON array; the captured bytes are
-    # present only for the matched/kept results (per keep_bodies).
-    struct FuzzResultRecord
-      getter id : Int64
-      getter run_id : Int64
+    # Input row for a bounded bulk insert. It deliberately mirrors Fuzz::Result without
+    # depending on the engine namespace: Store loads before Fuzz and remains a persistence
+    # layer, while Fuzz::Persistence owns the conversion.
+    struct FuzzResultWrite
       getter idx : Int64
       getter payloads : String
+      getter position : Int32?
       getter status : Int32?
       getter length : Int64
       getter words : Int32
@@ -1385,14 +1411,68 @@ module Gori
       getter duration_us : Int64
       getter error : String?
       getter? matched : Bool
+      getter? incomplete : Bool
       getter extracted : String?
       getter request : Bytes?
       getter response_head : Bytes?
       getter response_body : Bytes?
+      getter? retried : Bool
+      getter chain_error : String?
+      getter grpc_status : Int32?
+      getter grpc_message : String?
+      getter? timed_out : Bool
+      getter resent_count : Int32
+      getter wire : Bytes?
+      getter ws_close_code : Int32?
+      getter ws_frames_in : Int32?
+
+      def initialize(@idx, @payloads, @position, @status, @length, @words, @lines,
+                     @duration_us, @error, @matched, @incomplete, @extracted,
+                     @request = nil, @response_head = nil, @response_body = nil,
+                     @retried = false, @chain_error = nil, @grpc_status = nil,
+                     @grpc_message = nil, @timed_out = false, @resent_count = 0,
+                     @wire = nil, @ws_close_code = nil, @ws_frames_in = nil)
+      end
+    end
+
+    # One persisted fuzz result row. `payloads` is a JSON array (valid strings, or base64
+    # envelopes for malformed bytes); byte columns are BLOBs and round-trip operator-authored
+    # requests without text normalization.
+    struct FuzzResultRecord
+      getter id : Int64
+      getter run_id : Int64
+      getter idx : Int64
+      getter payloads : String
+      getter position : Int32?
+      getter status : Int32?
+      getter length : Int64
+      getter words : Int32
+      getter lines : Int32
+      getter duration_us : Int64
+      getter error : String?
+      getter? matched : Bool
+      getter? incomplete : Bool
+      getter extracted : String?
+      getter request : Bytes?
+      getter response_head : Bytes?
+      getter response_body : Bytes?
+      getter? retried : Bool
+      getter chain_error : String?
+      getter grpc_status : Int32?
+      getter grpc_message : String?
+      getter? timed_out : Bool
+      getter resent_count : Int32
+      getter wire : Bytes?
+      getter ws_close_code : Int32?
+      getter ws_frames_in : Int32?
 
       def initialize(@id, @run_id, @idx, @payloads, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @extracted,
-                     @request = nil, @response_head = nil, @response_body = nil)
+                     @request = nil, @response_head = nil, @response_body = nil,
+                     @position = nil, @incomplete = false, @retried = false,
+                     @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
+                     @timed_out = false, @resent_count = 0, @wire = nil,
+                     @ws_close_code = nil, @ws_frames_in = nil)
       end
     end
 

@@ -28,8 +28,9 @@ private def decode(head : Bytes, body : Bytes)
   Gori::Proxy::Codec::ContentDecode.decode(head, body)
 end
 
-private def decode_full(head : Bytes, body : Bytes)
-  Gori::Proxy::Codec::ContentDecode.decode_full(head, body)
+private def decode_full(head : Bytes, body : Bytes,
+                        max_out : Int32 = Gori::Proxy::Codec::ContentDecode::MAX_OUT)
+  Gori::Proxy::Codec::ContentDecode.decode_full(head, body, max_out)
 end
 
 # ~172 KB of RANDOM word soup, seeded for determinism. A regular pattern compresses to a few
@@ -80,6 +81,25 @@ describe Gori::Proxy::Codec::ContentDecode do
       "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n".to_slice)
     String.new(decoded.not_nil!).should eq("hello world")
     note.should eq("de-chunked")
+  end
+
+  it "bounds a chunk-amplified preview before walking the remaining entity/trailers" do
+    entity = "x" * 200_000
+    wire = "#{entity.bytesize.to_s(16)}\r\n#{entity}\r\n0\r\nCookie: late-secret\r\n\r\n".to_slice
+    decoded, note, clean = decode_full(
+      head("HTTP/1.1 200 OK", "Transfer-Encoding: chunked"), wire, 33)
+    decoded.not_nil!.size.should eq(33)
+    String.new(decoded.not_nil!).should eq("x" * 33)
+    note.not_nil!.should contain("truncated")
+    clean.should be_false
+  end
+
+  it "returns at most max_out bytes for a gzip amplification" do
+    decoded, note, clean = decode_full(
+      head("HTTP/1.1 200 OK", "Content-Encoding: gzip"), gzip("z" * 200_000), 33)
+    decoded.not_nil!.size.should eq(33)
+    note.not_nil!.should contain("truncated")
+    clean.should be_false
   end
 
   it "treats a chunk size with a leading '+' as malformed (no smuggled length)" do

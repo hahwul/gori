@@ -17,8 +17,8 @@ include Gori::Tui
 # third-party scanner traffic, and the poller ingests at `POLL_INTERVAL = 5.seconds` for as
 # long as the listener lives — so retained bytes were a function of how long the listener was
 # left up and how popular the provider's domain is, neither of which the operator controls.
-# Every sibling buffer in this layer is bounded (`Notifications::CAP` 100, `Jobs::CAP` 50,
-# `FuzzerView::RESULT_CAP` 5000); this one was the outlier.
+# Notifications and Jobs are bounded; unlike Fuzzer results, this buffer is paced by a remote
+# party rather than by an operator-triggered run, so it requires its own hard window.
 #
 # The fix is a WINDOW, not a destructive trim: the newest `CALLBACK_CAP` rows are held in
 # memory, every evicted row is still in `oast_callbacks`, and the pane SAYS SO — a silent cap

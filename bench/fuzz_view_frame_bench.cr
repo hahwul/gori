@@ -4,7 +4,7 @@
 #
 # Two shapes that used to scale with the whole result set rather than the visible rows:
 #   * matched_count — a rev-keyed memo whose key bumped on every appended result, so the full
-#     count(&.matched?) scan over RESULT_CAP rows ran on every frame of a live run anyway.
+#     count(&.matched?) scan over the 5,000-row benchmark ran on every frame of a live run.
 #   * the detail pane's selection spans — rebuilt once per DRAWN ROW inside the row loop, then
 #     all but the matching line discarded.
 #
@@ -16,8 +16,9 @@ require "../spec/support/memory_backend"
 
 include Gori::Tui
 
-W = 160
-H =  48
+W                 =  160
+H                 =   48
+RESULT_BENCH_ROWS = 5000
 
 def result(idx : Int32, matched : Bool, body_lines : Int32 = 40) : Gori::Fuzz::Result
   head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: nginx\r\n\r\n".to_slice
@@ -39,11 +40,11 @@ def build_view(n : Int32) : FuzzerView
   view
 end
 
-FULL = build_view(Gori::Tui::FuzzerView::RESULT_CAP)
+FULL = build_view(RESULT_BENCH_ROWS)
 
 # Same view with the detail pane open on a matched row — exercises the per-row chrome path.
 DETAIL = begin
-  v = build_view(Gori::Tui::FuzzerView::RESULT_CAP)
+  v = build_view(RESULT_BENCH_ROWS)
   v.focus_pane(:results)
   v.open_detail
   v
@@ -67,7 +68,7 @@ backend = MemoryBackend.new(W, H)
 screen = Screen.new(backend)
 rect = Rect.new(0, 0, W, H)
 
-puts "FuzzerView frame render, #{Gori::Tui::FuzzerView::RESULT_CAP} results, #{W}x#{H}:"
+puts "FuzzerView frame render, #{RESULT_BENCH_ROWS} results, #{W}x#{H}:"
 puts "  matched_count = #{FULL.matched_count} of #{FULL.result_count}"
 
 Benchmark.ips do |x|

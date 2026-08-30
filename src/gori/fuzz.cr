@@ -1,6 +1,6 @@
 # Umbrella for the fuzzer / intruder engine. See src/gori/fuzz/types.cr for the
-# module overview. Built on the Repeater send engines + the body decoder; no Store /
-# TUI dependency, so the one engine drives the TUI tab, `gori run fuzz`, and MCP.
+# module overview. Built on the Repeater send engines + the body decoder. The engine remains
+# surface-neutral; persistence is an opt-in adapter over Store shared by TUI, CLI, and MCP.
 require "./fuzz/types"
 require "./fuzz/content_length"
 require "./fuzz/template"
@@ -14,3 +14,5 @@ require "./fuzz/grpc_fields"
 require "./fuzz/engine"
 require "./fuzz/plan"
 require "./fuzz/history_record"
+require "./fuzz/persistence"
+require "./fuzz/spool"

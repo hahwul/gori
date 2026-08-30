@@ -36,6 +36,7 @@ require "./tools/grpc"
 require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
+require "./tools/fuzz_runs"
 require "./tools/host_overrides"
 require "./tools/session_slots"
 require "./tools/import"
@@ -114,7 +115,7 @@ module Gori
         # reshapes the human's queue; they are recorded for the same reason.
         "intercept_forward", "intercept_drop", "intercept_forward_edit",
         "intercept_toggle", "intercept_set_filter", "intercept_set_direction",
-        "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop",
+        "fuzz_start", "fuzz_stop", "delete_fuzz_run", "mine_start", "mine_stop", "sequence_start", "sequence_stop", "discover_start", "discover_stop",
         "authorize_start", "authorize_stop", "stop_job",
         # An outbound request to a target, and a project mutation (the descriptor cache) —
         # both halves of what AGENT_ACTION_TOOLS records. `grpc_forget` mutates the same row.
@@ -540,6 +541,13 @@ module Gori
         # `fuzz_results` can all say WHICH HANDSHAKE produced this result set — the A/B the
         # override exists for is only readable if the run says which side it was.
         property tls_preset : String? = nil
+        # Optional permanent writer. The live result buffer below remains capped and selective;
+        # this adapter receives every ResultEvent and writes the complete run independently.
+        property persistence : Fuzz::Persistence? = nil
+        property? persistence_finished = false
+        # A terminal failure observed while the drain must stay logically running until Done
+        # flushes the permanent tail; otherwise project switching can rebind the store mid-job.
+        property? terminal_error = false
         property error_msg : String? = nil
         # How many times the drain / history-record rescues have fired for this job. Those
         # rescues log, and they sit on the per-EVENT path: a persistent failure (a broken
@@ -841,6 +849,7 @@ module Gori
           list_send_tools j
           list_repeater_tools j
           list_minimize_tools j
+          list_fuzz_run_tools j
           list_fuzz_tools j
           list_mine_tools j
           list_discover_tools j
@@ -1024,6 +1033,8 @@ module Gori
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context
         when "get_repeater_context"    then get_repeater_context(h)
+        when "list_fuzz_runs"          then list_fuzz_runs(h)
+        when "get_fuzz_run"            then get_fuzz_run(h)
         when "ql_reference"            then ql_reference
         when "list_notes"              then list_notes
         when "get_note"                then get_note(h)
@@ -1111,6 +1122,7 @@ module Gori
         when "fuzz_status"               then gated { fuzz_status(h) }
         when "fuzz_results"              then gated { fuzz_results(h) }
         when "fuzz_stop"                 then gated { fuzz_stop(h) }
+        when "delete_fuzz_run"           then gated { delete_fuzz_run(h) }
         when "mine_start"                then gated { mine_start(h) }
         when "mine_status"               then gated { mine_status(h) }
         when "mine_results"              then gated { mine_results(h) }

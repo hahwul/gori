@@ -1804,6 +1804,16 @@ module Gori
       "?"
     end
 
+    # Nullable companion to `blob_slot`: nil is SQL NULL, an empty slice is a real
+    # zero-length BLOB, and only non-empty bytes consume a bound parameter. The explicit X''
+    # branch matters because the driver binds an empty slice's null pointer as SQL NULL.
+    def self.optional_blob_slot(args : Array(DB::Any), value : Bytes?) : String
+      return "NULL" unless value
+      return "X''" if value.empty?
+      args << value
+      "?"
+    end
+
     # The six V7 shape columns, in the order every `ws_messages` INSERT lists them. Shared
     # by the capture writer and `update_repeater_ws_messages` so a captured frame and the
     # repeater row seeded from it cannot drift apart.

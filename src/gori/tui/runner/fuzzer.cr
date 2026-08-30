@@ -1,3 +1,5 @@
+require "../fuzz_run_picker"
+
 # Fuzzer workbench — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
@@ -40,6 +42,36 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def fuzz_stop : Nil
     fuzzer_controller.fuzz_stop
+  end
+
+  def fuzz_save_results : Nil
+    fuzzer_controller.fuzz_save_results
+  end
+
+  def fuzzer_results_saveable? : Bool
+    fuzzer_controller.results_saveable?
+  end
+
+  def fuzz_run_history : Nil
+    rows = fuzzer_controller.saved_runs
+    if rows.empty?
+      @toast = "no saved fuzz runs for this session"
+      return
+    end
+    picker = Gori::Tui::FuzzRunPicker.new(rows)
+    # Arm inside commit/key handling, act from on_close after the shell has dropped this
+    # picker. Confirm dialogs then open over the tab body instead of displacing and restoring a
+    # stale history card (which allowed duplicate loads and showed deleted rows).
+    picker.on_commit = -> { picker.arm_load }
+    picker.on_close = -> {
+      if action = picker.pending_action
+        case action.kind
+        when :load   then fuzzer_controller.load_saved_run(action.id)
+        when :delete then fuzzer_controller.delete_saved_run(action.id)
+        end
+      end
+    }
+    open_overlay(picker)
   end
 
   def fuzz_new : Nil
@@ -123,7 +155,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     seed = fuzzer_controller.selected_repeater_seed
     return (@toast = "select a result first") unless seed
     repeater_controller.repeater_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
-      name: seed.label)
+      name: seed.label, tls_preset: seed.tls_preset)
     @toast = "repeater ← fuzz: #{seed.label}"
   end
 end

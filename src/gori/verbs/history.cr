@@ -576,6 +576,16 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
+      # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
+      # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
+      r.register Verb::Definition.new(
+        "fuzz.save-results", "Save results", "Permanently save every result and its full request/response in this project",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("s", shift: true)],
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_results_saveable? },
+        mnemonic: 'P') { |ctx| ctx.fuzz_save_results; nil }
+      r.register Verb::Definition.new(
+        "fuzz.run-history", "Run history", "Open the permanent result sets saved for this fuzz session",
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'H') { |ctx| ctx.fuzz_run_history; nil }
       # Send the selected result row (the request that produced it) to Repeater — the
       # Miner's mine.repeater for a fuzz result; gated on a selected row so it hides
       # before the first run. COMMON like the Miner's, so it survives the detail

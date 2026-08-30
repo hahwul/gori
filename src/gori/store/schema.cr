@@ -263,10 +263,9 @@ module Gori
         #  - fuzz_sessions: a saved template + opaque config JSON (the TUI manages its shape),
         #    mirroring `repeaters` so a Fuzzer tab survives reopen and syncs across sessions.
         #  - fuzz_runs: one sweep's metadata (live counters + status), linked to a session.
-        #  - fuzz_results: per-request rows (metrics + optional captured bytes for the
-        #    matched/kept results), so a finished run can be reopened and inspected. The
-        #    frontends persist selectively per keep_bodies (a billion-row cluster bomb is
-        #    never stored whole).
+        #  - fuzz_results: per-request rows (metrics + optional captured bytes). V1 had no
+        #    production writer; V24 adds complete explicit run saves while ordinary fuzz runs
+        #    remain ephemeral.
         <<-SQL,
           CREATE TABLE fuzz_sessions (
             id         INTEGER PRIMARY KEY,
@@ -1165,10 +1164,9 @@ module Gori
       # send (`Settings.tls_preset_error`), never folded away here, so a project written by a
       # newer gori reads back as the name it holds rather than as silence.
       #
-      # The Fuzzer gets NO column of its own. Its per-run value rides `fuzz_sessions.config`,
-      # the opaque JSON the frontend already owns, and a RUN reports its fingerprint through
-      # the same summary/JSON/MCP-job metadata that reports the rest of its settings —
-      # `fuzz_runs` has no production writer at all, so a column there would record nothing.
+      # At V22 the Fuzzer still had no production `fuzz_runs` writer, so its per-session value
+      # remained inside `fuzz_sessions.config`. V24 below adds the permanent per-run column as
+      # part of the complete result snapshot; this historical migration stays repeater-only.
       V22 = [
         "ALTER TABLE repeaters ADD COLUMN tls_preset TEXT",
       ]
@@ -1186,8 +1184,50 @@ module Gori
         "ALTER TABLE events ADD COLUMN actor TEXT",
       ]
 
+      # Complete, permanent Fuzzer run snapshots. V1 created the run/result tables for this
+      # purpose, but their shape stopped at the first HTTP-only Result and no production path
+      # ever wrote them. Keep every fact the current Fuzz::Result exposes, plus the transport
+      # context needed to reopen a run after its session has since been edited.
+      V24 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN http2 INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_runs ADD COLUMN sni TEXT",
+        "ALTER TABLE fuzz_runs ADD COLUMN tls_preset TEXT",
+        "ALTER TABLE fuzz_runs ADD COLUMN websocket INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_runs ADD COLUMN surface TEXT",
+        "ALTER TABLE fuzz_runs ADD COLUMN source_ref TEXT",
+        "ALTER TABLE fuzz_results ADD COLUMN position INTEGER",
+        "ALTER TABLE fuzz_results ADD COLUMN incomplete INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_results ADD COLUMN retried INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_results ADD COLUMN chain_error TEXT",
+        "ALTER TABLE fuzz_results ADD COLUMN grpc_status INTEGER",
+        "ALTER TABLE fuzz_results ADD COLUMN grpc_message TEXT",
+        "ALTER TABLE fuzz_results ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_results ADD COLUMN resent_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE fuzz_results ADD COLUMN wire BLOB",
+        "ALTER TABLE fuzz_results ADD COLUMN ws_close_code INTEGER",
+        "ALTER TABLE fuzz_results ADD COLUMN ws_frames_in INTEGER",
+      ]
+
+      # Version complete result snapshots independently from the database schema. Rows written
+      # through V24's three production surfaces contain the current complete shape; older rows
+      # came from the never-finished V1 path and cannot be safely auto-restored. The surface is
+      # the only durable provenance V24 recorded, so only its three known values are backfilled.
+      #
+      # V24 compaction wrote X'' to request/response_head/response_body and did not clear wire.
+      # That exact three-empty-BLOB shape is unambiguous: ordinary writes preserve nil versus
+      # empty per field and therefore do not make all three empty as a deletion marker. Normalize
+      # only that old marker, and clear wire with it so a compacted snapshot retains no request.
+      V25 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN snapshot_version INTEGER NOT NULL DEFAULT 0",
+        "UPDATE fuzz_runs SET snapshot_version = 1 WHERE surface IN ('tui', 'cli', 'mcp')",
+        "UPDATE fuzz_results SET request = NULL, response_head = NULL, response_body = NULL, wire = NULL " \
+        "WHERE TYPEOF(request) = 'blob' AND LENGTH(request) = 0 " \
+        "AND TYPEOF(response_head) = 'blob' AND LENGTH(response_head) = 0 " \
+        "AND TYPEOF(response_body) = 'blob' AND LENGTH(response_body) = 0",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23]
+                    V18, V19, V20, V21, V22, V23, V24, V25]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

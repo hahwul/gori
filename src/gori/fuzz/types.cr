@@ -331,6 +331,23 @@ module Gori
       ws_notes : Int64 = 0_i64,
       ws_note_reason : String? = nil
 
+    # One durable verdict across CLI and TUI. `max_requests` is a wire-attempt budget,
+    # so exhausting it before every payload completes is a partial run rather than `done`.
+    def self.terminal_status(progress : Progress, stopped : Bool, max_requests : Int64?,
+                             errored : Bool = false) : String
+      return "error" if errored
+      return "stopped" if stopped
+      incomplete = if total = progress.total
+                     progress.sent < total
+                   else
+                     true
+                   end
+      if (cap = max_requests) && progress.requests >= cap && incomplete
+        return "budget_exhausted"
+      end
+      "done"
+    end
+
     # Engine → consumer events. A union (not a class hierarchy) so `Channel(Event)`
     # carries them without boxing surprises. Progress is droppable (latest wins);
     # Result/Done/Error are never dropped.

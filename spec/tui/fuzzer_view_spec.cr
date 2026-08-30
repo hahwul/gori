@@ -925,7 +925,7 @@ describe Gori::Tui::FuzzerView do
       view.detail_step_pane(-1) # :response → :request
       lines = view.detail_plain_lines
       lines.first.should contain("reconstructed from the template")
-      lines.first.should contain("keep_bodies: matched")
+      lines.first.should contain("keep_bodies: all")
       # It reads as a sibling of the response pane's own retention note, not as a new dialect.
       view.detail_step_pane(1)
       view.detail_plain_lines.first.should contain("response not retained")
@@ -966,6 +966,20 @@ describe Gori::Tui::FuzzerView do
       seed2 = FuzzerController.repeater_seed_for(view, view.selected_result.not_nil!)
       seed2.note.should be_nil
       seed2.label.should eq("#1 zzz")
+    end
+
+    it "carries a saved run's frozen TLS preset into the Repeater seed" do
+      view = FuzzerView.new
+      run = Gori::Store::FuzzRunRecord.new(9_i64, 2_i64, 3_i64, 4_i64,
+        "https://h", "sniper", 1_i64, 1_i64, 1_i64, 0_i64, "done",
+        false, nil, "chrome", false, "tui", "run", 1)
+      result = Gori::Fuzz::Result.new(0_i64, ["x"], nil, 200, 0_i64, 0, 0, 1_i64,
+        nil, true, false, nil, Bytes.empty, Bytes.empty,
+        "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice)
+      view.load_saved_run(run, [result])
+
+      seed = FuzzerController.repeater_seed_for(view, view.selected_result.not_nil!)
+      seed.tls_preset.should eq("chrome")
     end
 
     it "hands a non-UTF-8 payload byte to the Repeater verbatim instead of U+FFFD" do
@@ -1512,24 +1526,13 @@ describe "Gori::Tui::FuzzerView matched_count accounting" do
     view.result_count.should eq(3)
   end
 
-  it "decrements when the ring evicts a matched row past RESULT_CAP" do
+  it "keeps every row beyond the former 5,000-result ring cap" do
     view = loaded_fuzzer
-    cap = Gori::Tui::FuzzerView::RESULT_CAP
-    # Fill exactly to the cap with matched rows, then push unmatched ones in: each append
-    # past the cap evicts a matched row off the front, so the count must fall in step.
-    cap.times { |i| view.append_result(fuzz_result(i, 200, 100, matched: true)) }
-    view.matched_count.should eq(cap)
-    view.result_count.should eq(cap)
-
-    10.times { |i| view.append_result(fuzz_result(cap + i, 404, 100, matched: false)) }
-    view.result_count.should eq(cap) # ring stays pinned
-    view.matched_count.should eq(cap - 10)
-
-    # Drain the rest of the matched rows out of the ring: the count must reach exactly 0 and
-    # not undershoot, which is what a decrement on the wrong branch would do.
-    (cap - 10).times { |i| view.append_result(fuzz_result(cap + 10 + i, 404, 100, matched: false)) }
-    view.matched_count.should eq(0)
-    view.result_count.should eq(cap)
+    5_010.times do |i|
+      view.append_result(fuzz_result(i, i.even? ? 200 : 404, 100, matched: i.even?))
+    end
+    view.result_count.should eq(5_010)
+    view.matched_count.should eq(2_505)
   end
 
   it "resets on a new run" do
@@ -1538,6 +1541,84 @@ describe "Gori::Tui::FuzzerView matched_count accounting" do
     view.matched_count.should eq(3)
     view.begin_run(10_i64)
     view.matched_count.should eq(0)
+  end
+end
+
+describe "Gori::Tui::FuzzerView durable run state" do
+  it "makes one completed result set saveable exactly once" do
+    view = loaded_fuzzer
+    view.begin_run(1_i64)
+    view.append_result(fuzz_result(0, 200, 10, matched: true))
+    view.finish_run("done")
+    view.results_saveable?.should be_true
+
+    generation = view.run_generation
+    view.begin_results_save
+    view.results_saveable?.should be_false
+    view.finish_results_save(42_i64)
+    view.saved_run_id.should eq(42_i64)
+    view.results_saveable?.should be_false
+
+    view.begin_run(1_i64)
+    view.run_generation.should eq(generation + 1)
+    view.saved_run_id.should be_nil
+    first_load = view.reserve_result_load
+    view.reserve_result_load.should eq(first_load + 1)
+  end
+
+  it "stays unsaveable after an error until the terminal event drains" do
+    view = loaded_fuzzer
+    view.begin_run(2_i64)
+    view.append_result(fuzz_result(0, 500, 10, error: "worker failed"))
+    view.results_saveable?.should be_false
+    view.finish_run("error")
+    view.results_saveable?.should be_true
+  end
+
+  it "marks a max-requests cutoff as budget_exhausted" do
+    view = loaded_fuzzer
+    view.@config.max_requests = 3_i64
+    view.@config.race_count = 5
+    view.begin_run(5_i64)
+    view.saved_run_meta(7_i64).mode.should eq("race ×5")
+    progress = Gori::Fuzz::Progress.new(2_i64, 5_i64, 0_i64, 0_i64, requests: 3_i64)
+    view.terminal_status(progress, false).should eq("budget_exhausted")
+    view.terminal_status(progress, true).should eq("stopped")
+  end
+
+  it "remembers a failed row so a retry can replace rather than duplicate it" do
+    view = loaded_fuzzer
+    view.begin_run(1_i64)
+    view.append_result(fuzz_result(0, 500, 10, error: "closed"))
+    view.finish_run("error")
+    view.begin_results_save
+    view.finish_results_save(nil, 17_i64)
+
+    view.failed_save_run_id.should eq(17_i64)
+    view.results_saveable?.should be_true
+    view.forget_saved_run(17_i64)
+    view.failed_save_run_id.should be_nil
+  end
+
+  it "uses a loaded run's frozen target and transport for result actions" do
+    with_fuzz_store do |store|
+      saved = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "https://old.example:8443", "sniper", 1_i64,
+          http2: true, sni: "edge.old.example", surface: "tui"))
+      saved.append(Gori::Fuzz::Result.new(0_i64, ["p"], 0, 200, 2_i64, 1, 1, 3_i64,
+        nil, true, false, nil, "HTTP/2 200\r\n\r\n".to_slice, "ok".to_slice,
+        "GET /old HTTP/2\r\n\r\n".to_slice))
+      saved.finish(1_i64, 1_i64, 0_i64, "done")
+
+      view = loaded_fuzzer # its editable session points at https://h
+      view.load_saved_run(store.get_fuzz_run(saved.run_id).not_nil!,
+        store.fuzz_results(saved.run_id))
+      view.result_target_origin.should eq("https://old.example:8443")
+      view.result_http2?.should be_true
+      view.result_sni.should eq("edge.old.example")
+      view.saved_run_id.should eq(saved.run_id)
+      view.results_saveable?.should be_false
+    end
   end
 end
 

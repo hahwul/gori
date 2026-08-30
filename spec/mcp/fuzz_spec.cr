@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "socket"
 require "base64"
+require "compress/gzip"
 
 # The MCP fuzz tools run the engine in a background fiber, so they're driven here
 # through a Tools instance directly (with sleeps that yield to the job fiber)
@@ -62,6 +63,31 @@ private def call_json(tools, name, args : String) : JSON::Any
   JSON.parse(text)
 end
 
+private def wait_fuzz_done(tools, job_id : String) : JSON::Any
+  100.times do
+    sleep 0.02.seconds
+    status = call_json(tools, "fuzz_status", {job_id: job_id}.to_json)
+    return status unless status["status"].as_s == "running"
+  end
+  fail "fuzz job #{job_id} did not finish"
+end
+
+private def mcp_fuzz_gzip(text : String) : Bytes
+  io = IO::Memory.new
+  Compress::Gzip::Writer.open(io) { |writer| writer.print(text) }
+  io.to_slice
+end
+
+private def mcp_saved_body(head : String, body : Bytes, cap : Int32,
+                           include_sensitive : Bool = false) : JSON::Any
+  JSON.parse(JSON.build do |json|
+    json.object do
+      Gori::MCP::Serialize.emit_body(json, "body", head.to_slice, body, false, cap,
+        include_sensitive: include_sensitive)
+    end
+  end)["body"]
+end
+
 describe "MCP fuzz tools" do
   it "starts a job, polls to completion, returns matched results" do
     port = start_origin
@@ -77,6 +103,7 @@ describe "MCP fuzz tools" do
       start = call_json(tools, "fuzz_start", args)
       job_id = start["job_id"].as_s
       start["total"].as_i.should eq(3)
+      start["save_results"]?.should be_nil
 
       done = false
       30.times do
@@ -98,6 +125,200 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "permanently saves every row independently of the bounded selective live cache" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer secret\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => [{"list" => ["a", "b"]}],
+        "match"          => {"status" => "500"}, # both clean 200 rows are absent from the live cache
+        "save_results"   => true,
+        "allow_unscoped" => true,
+      }.to_json)
+      job_id = start["job_id"].as_s
+      run_id = start["run_id"].as_i64
+      start["save_results"].as_bool.should be_true
+      start["save_status"].as_s.should eq("running")
+
+      status = wait_fuzz_done(tools, job_id)
+      status["status"].as_s.should eq("done")
+      status["save_status"].as_s.should eq("done")
+      status["saved_results"].as_i.should eq(2)
+      call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"].as_a.should be_empty
+
+      # A fresh Tools instance has no live job, but the permanent run remains project data.
+      reader = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      listed = call_json(reader, "list_fuzz_runs", %({"limit":10}))
+      listed["runs"][0]["id"].as_i64.should eq(run_id)
+      listed["runs"][0]["stored_results"].as_i.should eq(2)
+      _, delete_disabled = call_raw(reader, "delete_fuzz_run", {run_id: run_id}.to_json)
+      delete_disabled.should be_true
+
+      page = call_json(reader, "get_fuzz_run", {run_id: run_id}.to_json)
+      page["results"].as_a.size.should eq(2)
+      page["results"][0]["matched"].as_bool.should be_false
+      page["run"]["surface"].as_s.should eq("mcp")
+      page["run"]["source_ref"].as_s.should eq(job_id)
+
+      redacted = call_json(reader, "get_fuzz_run", {
+        run_id: run_id, result_index: 0, include_content: true,
+      }.to_json)
+      redacted["result"]["request"]["head"].as_s.should contain("Authorization: [REDACTED]")
+      redacted["result"]["request"]["raw_redacted"].as_bool.should be_true
+      redacted["result"]["response_body"]["text"].as_s.should eq("ok")
+
+      exact = call_json(reader, "get_fuzz_run", {
+        run_id: run_id, result_index: 0, include_content: true,
+        include_sensitive: true, max_body_bytes: 4096,
+      }.to_json)
+      raw = Base64.decode_string(exact["result"]["request"]["raw_base64"].as_s)
+      raw.should contain("Authorization: Bearer secret")
+      Base64.decode_string(exact["result"]["response_body_raw_base64"].as_s).should eq("ok")
+    end
+  end
+
+  it "pages saved metrics without BLOBs and caps content pages at 25 full rows" do
+    with_store do |store|
+      run_id = store.insert_fuzz_run(nil, "http://saved.test", "sniper", 30_i64,
+        surface: "mcp")
+      rows = (0...30).map do |i|
+        Gori::Store::FuzzResultWrite.new(i.to_i64, %(["p#{i}"]), 0, 200, 2_i64,
+          1, 1, 1_i64, nil, true, false, nil,
+          "GET /#{i} HTTP/1.1\r\nHost: saved.test\r\n\r\n".to_slice,
+          "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice, "ok".to_slice)
+      end
+      store.insert_fuzz_results(run_id, rows).should be_true
+      store.finish_fuzz_run(run_id, 30_i64, 30_i64, 0_i64, "done").should be_true
+
+      # The exact projection contract the default MCP page consumes.
+      summaries = store.fuzz_result_summaries(run_id, 30)
+      summaries.size.should eq(30)
+      summaries.all? { |row| row.request.nil? && row.response_head.nil? &&
+        row.response_body.nil? && row.wire.nil? }.should be_true
+
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      metrics = call_json(tools, "get_fuzz_run", {run_id: run_id, limit: 30}.to_json)
+      metrics["results"].as_a.size.should eq(30)
+      metrics["results"][0]["request"]?.should be_nil
+      metrics["run"]["snapshot_version"].as_i.should eq(1)
+      metrics["run"]["legacy"].as_bool.should be_false
+      legacy = Gori::Store::FuzzRunRecord.new(99_i64, nil, 1_i64, nil,
+        "http://legacy.test", "sniper", nil, 0_i64, 0_i64, 0_i64, "done")
+      legacy_json = JSON.parse(JSON.build do |json|
+        Gori::MCP::Serialize.saved_fuzz_run(json, legacy, 0_i64)
+      end)
+      legacy_json["snapshot_version"].as_i.should eq(0)
+      legacy_json["legacy"].as_bool.should be_true
+
+      content = call_json(tools, "get_fuzz_run",
+        {run_id: run_id, limit: 1000, include_content: true}.to_json)
+      content["results"].as_a.size.should eq(25)
+      content["returned"].as_i.should eq(25)
+      content["has_more"].as_bool.should be_true
+      content["results"][0]["request"]["head"].as_s.should contain("GET /0")
+    end
+  end
+
+  it "redacts CR-only and obs-fold credentials in every saved head plus trailers" do
+    with_store do |store|
+      run_id = store.insert_fuzz_run(nil, "http://saved.test", "sniper", 1_i64)
+      request = "GET / HTTP/1.1\rHost: saved.test\rAuthorization:\r Bearer request-secret\r\rbody"
+      wire = "GET / HTTP/1.1\nHost: saved.test\nCookie:\n sid=wire-secret\n\nbody"
+      response_head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nSet-Cookie:\r\n sid=head-secret\r\n\r\n"
+      response_body = "2\r\nok\r\n0\r\nAuthorization: trailer-secret\r\n\r\n"
+      row = Gori::Store::FuzzResultWrite.new(0_i64, %(["p"]), 0, 200, 2_i64,
+        1, 1, 1_i64, nil, true, false, nil, request.to_slice, response_head.to_slice,
+        response_body.to_slice, wire: wire.to_slice)
+      store.insert_fuzz_results(run_id, [row]).should be_true
+      store.finish_fuzz_run(run_id, 1_i64, 1_i64, 0_i64, "done").should be_true
+
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      redacted = call_json(tools, "get_fuzz_run",
+        {run_id: run_id, result_index: 0, include_content: true}.to_json)["result"]
+      redacted["request"]["head"].as_s.should_not contain("request-secret")
+      redacted["request"]["head"].as_s.should contain("Authorization: [REDACTED]\r [REDACTED]\r")
+      redacted["request"]["raw_base64"]?.should be_nil
+      redacted["wire"]["head"].as_s.should_not contain("wire-secret")
+      redacted["wire"]["raw_base64"]?.should be_nil
+      redacted["response_head"].as_s.should_not contain("head-secret")
+      trailers = redacted["response_body"]["trailers"].as_a
+      trailers[0]["value"].as_s.should eq("[REDACTED]")
+      trailers[0]["value_base64"]?.should be_nil
+
+      exact = call_json(tools, "get_fuzz_run", {run_id: run_id, result_index: 0,
+                                                include_content: true, include_sensitive: true}.to_json)["result"]
+      exact["request"]["head"].as_s.should contain("request-secret")
+      exact["wire"]["head"].as_s.should contain("wire-secret")
+      exact["response_head"].as_s.should contain("head-secret")
+      exact["response_body"]["trailers"][0]["value"].as_s.should eq("trailer-secret")
+      exact["request"]["raw_base64"]?.should_not be_nil
+    end
+  end
+
+  it "bounds compressed and chunked saved previews before String/base64 work" do
+    gzip = mcp_saved_body("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
+      mcp_fuzz_gzip("A" * 200_000), 32)
+    gzip["text"].as_s.bytesize.should eq(32)
+    gzip["truncated"].as_bool.should be_true
+    gzip["decode_truncated"].as_bool.should be_true
+
+    chunk = "#{200_000.to_s(16)}\r\n#{"B" * 200_000}\r\n0\r\n" \
+            "Cookie: should-not-be-scanned-after-cap\r\n\r\n"
+    chunked = mcp_saved_body("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+      chunk.to_slice, 32)
+    chunked["text"].as_s.should eq("B" * 32)
+    chunked["decode_truncated"].as_bool.should be_true
+    chunked["trailers"]?.should be_nil
+  end
+
+  it "deletes a terminal permanent run and cascades its results" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template" => "GET /§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url" => "http://127.0.0.1:#{port}", "payloads" => [{"list" => ["a"]}],
+        "save_results" => true, "allow_unscoped" => true,
+      }.to_json)
+      wait_fuzz_done(tools, start["job_id"].as_s)
+      run_id = start["run_id"].as_i64
+
+      deleted = call_json(tools, "delete_fuzz_run", {run_id: run_id}.to_json)
+      deleted["deleted_results"].as_i.should eq(1)
+      store.get_fuzz_run(run_id).should be_nil
+      store.fuzz_result_count(run_id).should eq(0)
+      _, missing = call_raw(tools, "get_fuzz_run", {run_id: run_id}.to_json)
+      missing.should be_true
+
+      stale = store.insert_fuzz_run(nil, "http://stale", "sniper", 1_i64, status: "saving")
+      forced = call_json(tools, "delete_fuzz_run", {run_id: stale, force_stale: true}.to_json)
+      forced["deleted"].as_bool.should be_true
+    end
+  end
+
+  it "refuses to delete a permanent run while its live job can still append" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template" => "GET /§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url" => "http://127.0.0.1:#{port}", "payloads" => [{"numbers" => "1-100"}],
+        "rate" => 1, "save_results" => true, "allow_unscoped" => true,
+      }.to_json)
+      run_id = start["run_id"].as_i64
+      text, refused = call_raw(tools, "delete_fuzz_run", {run_id: run_id}.to_json)
+      refused.should be_true
+      text.should contain("still being written")
+      _, force_refused = call_raw(tools, "delete_fuzz_run",
+        {run_id: run_id, force_stale: true}.to_json)
+      force_refused.should be_true # force never overrides this server's known-live writer
+      call_json(tools, "fuzz_stop", {job_id: start["job_id"].as_s}.to_json)
+      wait_fuzz_done(tools, start["job_id"].as_s)["save_status"].as_s.should eq("stopped")
+    end
+  end
+
   it "runs a race_count job with no payloads at all" do
     port = start_origin
     with_store do |store|
@@ -107,6 +328,7 @@ describe "MCP fuzz tools" do
         "url"            => "http://127.0.0.1:#{port}",
         "race_count"     => 6,
         "match"          => {"status" => "200"},
+        "save_results"   => true,
         "allow_unscoped" => true,
       }.to_json
 
@@ -126,6 +348,7 @@ describe "MCP fuzz tools" do
         break
       end
       done.should be_true
+      store.get_fuzz_run(start["run_id"].as_i64).not_nil!.mode.should eq("race ×6")
     end
   end
 
@@ -633,6 +856,28 @@ describe "MCP fuzz tools" do
         break
       end
       done.should be_true
+    end
+  end
+
+  it "persists budget_exhausted when an unknown-total run reaches its wire cap" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start", {
+        "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"      => "http://127.0.0.1:#{port}",
+        # This combinatorial count overflows Int64, so the engine honestly reports total:null.
+        "payloads"       => [{"brute" => {"charset" => "ab", "min" => 1, "max" => 100}}],
+        "max_requests"   => 1,
+        "save_results"   => true,
+        "allow_unscoped" => true,
+      }.to_json)
+      start["total"].raw.should be_nil
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("budget_exhausted")
+      status["save_status"].as_s.should eq("budget_exhausted")
+      store.get_fuzz_run(start["run_id"].as_i64).not_nil!.status
+        .should eq("budget_exhausted")
     end
   end
 end

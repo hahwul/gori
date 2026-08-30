@@ -17,22 +17,46 @@ module Gori::Tui
   # Mirrors RepeaterController (multi-session, sub-tab strip, save-on-leave, async drain),
   # but a run streams MANY results (blocking Result/Done sends — never dropped; only
   # Progress is droppable). The session (template+config) persists across reopen; the
-  # results stay in-memory per session (like Repeater responses before V11).
+  # results stay in-memory per session and the latest successfully saved snapshot is restored
+  # asynchronously when a persisted session is first activated.
   class FuzzerController < TabController
     CONFIRM_THRESHOLD = 1000 # confirm before a run larger than this (or unknown size)
     DRAIN_CAP         =  512 # bounded per-tick drain so a fast run can't starve render
 
+    # Store work happens on fibers, but view/Jobs/toast mutations stay on the Runner fiber.
+    # Carry view identity + generation so a completion cannot land on a later run.
+    record SaveDone, view : FuzzerView, generation : Int64, job_id : Int32,
+      run_id : Int64, written : Int64, error : String?
+    record LoadDone, view : FuzzerView, generation : Int64, job_id : Int32,
+      session_id : Int64, automatic : Bool, run : Store::FuzzRunRecord?,
+      rows : Array(Fuzz::Result), error : String?
+    alias IoEvent = SaveDone | LoadDone
+
+    private class ResultIoCancelled < Exception
+    end
+
+    private class ResultCopyStopped < Exception
+    end
+
     def initialize(host : Host)
       super(host)
       @fuzzers = [] of FuzzerTab
+      # Bigger than Repeater's 8 — a run emits one event per request plus progress.
+      @fuzz_events = Channel({FuzzerView, Fuzz::Event}).new(256)
+      @fuzz_io_events = Channel(IoEvent).new(256)
+      @auto_load_considered = Set(Int64).new
+      @spool = Fuzz::Spool.new
+      @spool_runs = {} of FuzzerView => Fuzz::Spool::Run
+      @workers = Hash(FuzzerView, Int32).new(0)
+      @cancelled_views = Set(FuzzerView).new
+      @closing = false
       @host.session.store.fuzz_sessions.each do |rec|
         view = FuzzerView.new
         view.restore(rec)
         @fuzzers << FuzzerTab.new(view, rec.flow_id, rec.id)
       end
       @current_idx = @fuzzers.empty? ? -1 : 0
-      # Bigger than Repeater's 8 — a run emits one event per request plus progress.
-      @fuzz_events = Channel({FuzzerView, Fuzz::Event}).new(256)
+      auto_load_current_saved_run
     end
 
     def tab : Symbol
@@ -171,7 +195,7 @@ module Gori::Tui
           "i/↵ edit · #{read_common} · #{marks} · ^F find · ^O config · #{run} run · ↹ pane · esc tabs"
         end
       when :config  then config_hint(v, run)
-      when :results then "↑/↓ select · ↵ detail · o sort · m matched · v dist · #{run} run · #{stop} stop · space cmds · ↹ pane"
+      when :results then "↑/↓ select · ↵ detail · o sort · m matched · v dist · ⇧S save · #{run} run · #{stop} stop · space cmds · ↹ pane"
       when :detail  then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else               "↹/esc tabs"
       end
@@ -409,8 +433,7 @@ module Gori::Tui
       return unless c
       idx = c.to_i - 1
       if idx < @fuzzers.size
-        save_current
-        @current_idx = idx
+        select_subtab(idx)
       end
     end
 
@@ -423,7 +446,7 @@ module Gori::Tui
       case v.focus
       when :target   then edit_target(ev, v)
       when :template then edit_template(ev, v)
-      when :config   then edit_config(ev, v); true
+      when :config   then edit_config(ev, v)
       when :results  then handle_results(ev, v)
       when :detail   then handle_detail(ev, v)
       else                true
@@ -622,7 +645,7 @@ module Gori::Tui
     # including a forward-only re-cycle of Mode (cycle_mode_forward): with only 4
     # modes, forward-only cycling still reaches every value, it just costs up to 3
     # extra presses instead of a reverse step.
-    private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+    private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Bool
       key = ev.key
       case
       # CONFIG is a row list, not a text field, so j/k navigate here (like RESULTS and
@@ -633,7 +656,10 @@ module Gori::Tui
       when key.right?                  then v.form_adjust(1)
       when key.enter?                  then activate_config_row(v)
       when key.delete?, key.backspace? then v.form_delete
+      when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
+        return false # Shift-S save and other Fuzzer keymap verbs
       end
+      true
     end
 
     # ↵ on a config row: drill into the Set / Advanced overlay, or cycle Mode. (Run is no
@@ -856,7 +882,7 @@ module Gori::Tui
 
     def locked? : Bool
       return false unless v = current_view
-      v.running? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target) ||
+      v.running? || v.saving_results? || v.loading_results? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target) ||
         (@host.active_tab == :fuzzer && @host.focus == :body)
     end
 
@@ -907,10 +933,16 @@ module Gori::Tui
     end
 
     # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---
+    private def select_subtab(idx : Int32, *, save : Bool = true) : Nil
+      return unless 0 <= idx < @fuzzers.size
+      save_current if save
+      @current_idx = idx
+      auto_load_current_saved_run
+    end
+
     def move_subtab(dir : Int32) : Nil
       if t = step_visible(@current_idx, dir)
-        save_current
-        @current_idx = t
+        select_subtab(t)
       end
     end
 
@@ -918,8 +950,7 @@ module Gori::Tui
       return unless 0 <= idx < @fuzzers.size
       clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
       return if idx == @current_idx
-      save_current
-      @current_idx = idx
+      select_subtab(idx)
     end
 
     # --- rename (the shell's orthogonal rename prompt drives this by VIEW identity) ---
@@ -947,12 +978,22 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       n = 0
-      while n < DRAIN_CAP && (pair = nonblocking_event)
-        n += 1
-        v, ev = pair
-        next unless @fuzzers.any?(&.view.same?(v)) # session closed mid-run → drop
-        apply_event(v, ev)
-        applied = true
+      while n < DRAIN_CAP
+        # Save/load completion is rare and operator-visible; take it before another burst of
+        # result rows so a fast run cannot starve a finished database operation indefinitely.
+        if io_event = nonblocking_io_event
+          n += 1
+          apply_io_event(io_event)
+          applied = true
+        elsif pair = nonblocking_event
+          n += 1
+          v, ev = pair
+          next unless @fuzzers.any?(&.view.same?(v)) # session closed mid-run → drop
+          apply_event(v, ev)
+          applied = true
+        else
+          break
+        end
       end
       applied
     end
@@ -963,6 +1004,64 @@ module Gori::Tui
         p
       else
         nil
+      end
+    end
+
+    private def nonblocking_io_event : IoEvent?
+      select
+      when event = @fuzz_io_events.receive
+        event
+      else
+        nil
+      end
+    end
+
+    private def apply_io_event(event : IoEvent) : Nil
+      case event
+      when SaveDone then apply_save_done(event)
+      when LoadDone then apply_load_done(event)
+      end
+    end
+
+    private def apply_save_done(event : SaveDone) : Nil
+      ok = event.error.nil?
+      @host.jobs.finish(event.job_id, ok ? :done : :error,
+        ok ? "saved run ##{event.run_id}" : (event.error || "save failed"))
+      return unless @fuzzers.any?(&.view.same?(event.view))
+      return unless event.view.run_generation == event.generation
+
+      failed_id = !ok && event.run_id > 0 ? event.run_id : nil
+      event.view.finish_results_save(ok ? event.run_id : nil, failed_id)
+      if ok
+        if spool_run = @spool_runs.delete(event.view)
+          @spool.delete(spool_run)
+        end
+        @host.status("saved #{event.written} fuzz results as run ##{event.run_id}")
+      else
+        @host.status("fuzz results NOT saved: #{event.error || "project write failed"}")
+      end
+    end
+
+    private def apply_load_done(event : LoadDone) : Nil
+      ok = event.error.nil? && !event.run.nil?
+      @host.jobs.finish(event.job_id, ok ? :done : :error,
+        ok ? "#{event.rows.size} results" : (event.error || "load failed"))
+      # A failed automatic read is retryable on the next navigation. The id stays claimed
+      # while work is in flight, so repeated navigation cannot launch duplicate readers.
+      @auto_load_considered.delete(event.session_id) if event.automatic && !ok
+      return unless @fuzzers.any?(&.view.same?(event.view))
+      return unless event.view.run_generation == event.generation
+      if run = event.run
+        if old = @spool_runs.delete(event.view)
+          @spool.delete(old)
+        end
+        event.view.load_saved_run(run, event.rows)
+        shown = event.rows.size.to_i64 < run.sent ? " · showing #{event.rows.size}" : ""
+        @host.status("loaded fuzz run ##{run.id} · #{run.status} · #{run.mode} · " \
+                     "#{run.sent} results#{shown} · #{run.target}")
+      else
+        event.view.fail_result_load
+        @host.status(event.error || "could not load saved fuzz run")
       end
     end
 
@@ -985,10 +1084,16 @@ module Gori::Tui
         # ProgressEvent is droppable (latest wins) — so without this the header could keep
         # rendering a mid-run snapshot forever. See `Fuzz::Progress#requests`.
         v.apply_progress(ev.progress)
-        v.finish_run
-        finish_job(v, ev)
+        # A setup ErrorEvent is followed by Done. Do not overwrite its durable status with
+        # `done`; finish_job already applies the same errored-job guard to notifications.
+        terminal = @host.jobs.errored?(v.job_id) ? "error" : v.terminal_status(ev.progress, ev.stopped)
+        spool_run = @spool_runs[v]?
+        archive_ready = !!spool_run && !spool_run.failed? && spool_run.finished?
+        v.finish_run(terminal, archive_ready: archive_ready)
+        finish_job(v, ev, terminal)
       when Fuzz::ErrorEvent
-        v.finish_run
+        # Generation/worker errors can be followed by many queued Result events and then Done.
+        # Keep the view running (and therefore unsaveable) until that terminal event drains.
         # The failure persists in the jobs center (survives the next keystroke) and shows
         # in the bottom bar. It is deliberately NOT pushed to the notification center: a
         # job error is an operational failure, not a result the human wants surfaced there
@@ -1007,10 +1112,11 @@ module Gori::Tui
     # :matched plus this one matched); a :none run has nothing to scan, same limit
     # the Repeater path doesn't face.
     private def probe_scan_fuzz_result(result : Fuzz::Result, v : FuzzerView) : Nil
+      return unless result.matched?
       return unless head = result.head
       return if head.empty?
       rec = Store::RepeaterRecord.new(
-        0_i64, v.target_origin, result.request || Bytes.empty, v.http2?, false,
+        0_i64, v.result_target_origin, result.request || Bytes.empty, v.result_http2?, false,
         nil, 0, head, result.body, nil, result.duration_us, nil, nil)
       return unless detail = Probe.detail_from_repeater(rec)
       @host.session.probe.scan_detail(detail)
@@ -1018,11 +1124,12 @@ module Gori::Tui
       # Probe must never break the Fuzzer UX
     end
 
-    private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent) : Nil
+    private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent, terminal : String) : Nil
       return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
       #                                         engine's trailing DoneEvent must not log/notify success
       n = v.matched_count
-      @host.jobs.finish(v.job_id, :done, "#{n} hit")
+      summary = terminal == "budget_exhausted" ? "#{n} hit · budget exhausted" : "#{n} hit"
+      @host.jobs.finish(v.job_id, :done, summary)
       level = n > 0 ? :success : :info
       # `requests` only when it DIFFERS from the payload count — retries and redirect hops
       # are the two things that make them diverge, and a run with neither should not grow a
@@ -1031,7 +1138,13 @@ module Gori::Tui
       # sweep down a redirect chain put 18 requests on the target and said "3 sent".
       p = ev.progress
       wire = p.requests > p.sent ? " / #{p.requests} requests" : ""
-      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
+      ending =
+        case terminal
+        when "stopped"          then " (stopped)"
+        when "budget_exhausted" then " (request budget exhausted — partial run)"
+        else                         ""
+        end
+      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}"
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
       @host.status(msg) if Settings.notify_toast?
@@ -1050,10 +1163,34 @@ module Gori::Tui
       (tab && (id = tab.db_id)) ? Jobs::Goto.new(:fuzzer, id) : nil
     end
 
+    private def begin_worker(view : FuzzerView) : Nil
+      @workers[view] += 1
+    end
+
+    private def end_worker(view : FuzzerView) : Nil
+      remaining = @workers[view] - 1
+      if remaining > 0
+        @workers[view] = remaining
+      else
+        @workers.delete(view)
+      end
+    end
+
+    # Keep draining while a producer may be blocked on a terminal/result send. The Store and
+    # temp spool are closed only after every captured fiber has left its ensure block.
+    private def quiesce_view(view : FuzzerView) : Nil
+      while @workers[view] > 0
+        drain_events
+        sleep 1.millisecond
+      end
+      while drain_events
+      end
+    end
+
     # Focus a fuzz sub-tab by persisted id (notification "jump to result").
     def reveal_session(id : Int64) : Nil
       if idx = @fuzzers.index { |t| t.db_id == id }
-        @current_idx = idx
+        select_subtab(idx, save: false)
         @host.focus_body
       end
     end
@@ -1061,6 +1198,11 @@ module Gori::Tui
     # --- run lifecycle ---
     def fuzz_run : Nil
       return unless v = current_view
+      return @host.status("project is closing") if @closing
+      if v.saving_results? || v.loading_results?
+        @host.status(v.loading_results? ? "loading results — wait" : "saving results — wait for the database commit")
+        return
+      end
       if v.running?
         @host.status("fuzz running — ^X to stop")
         return
@@ -1085,7 +1227,7 @@ module Gori::Tui
       end
       if total.nil? || total > CONFIRM_THRESHOLD
         e = engine
-        @host.confirm("RUN FUZZ", "Send #{total ? total.to_s : "an unknown number of"} requests to #{v.target_origin}?",
+        @host.confirm("RUN FUZZ", "Send #{total ? total.to_s : "an unknown number of"} requests to #{v.target_origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.",
           confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
@@ -1096,19 +1238,32 @@ module Gori::Tui
       # A peer may have closed this session (reconcile evicted the tab) while its RUN FUZZ
       # confirm dialog was pending — don't launch an unstoppable engine fiber + orphaned job
       # into a detached view whose events drain_events would then drop forever.
-      unless @fuzzers.any?(&.view.same?(v))
+      unless tab = @fuzzers.find(&.view.same?(v))
         @host.status("fuzz session no longer open — run cancelled")
         return
       end
       save_current
+      if old = @spool_runs.delete(v)
+        @spool.delete(old)
+      end
+      @cancelled_views.delete(v)
       # Hand the engine over BEFORE anything can be sent, so ^X reaches it even during
       # calibration — which runs outside `engine.run` and so outside the in-loop stop check.
       v.engine = engine
       v.begin_run(total)
+      spool_run = begin
+        @spool.start(v.saved_run_meta(tab.db_id))
+      rescue ex
+        @host.status("temporary fuzz archive unavailable: #{ex.message} — run continues with a bounded view")
+        nil
+      end
+      @spool_runs[v] = spool_run if spool_run
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
       calibrate = v.config.auto_calibrate?
-      terminal_sent = false
+      done_sent = false
+      error_sent = false
+      begin_worker(v)
       spawn(name: "gori-fuzz") do
         engine.calibrate_baseline if calibrate
         engine.run do |ev|
@@ -1118,41 +1273,242 @@ module Gori::Tui
             when events.send({v, ev})
             else
             end
-          else
-            # Done/Error is the run's VERDICT. Once one is on the channel the rescue below
-            # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the run,
-            # so a raise on the way out of a COMPLETED run would relabel it :error and fire
-            # an error notification for work that succeeded. (`jobs.finish` keeps the first
-            # terminal state, so the job itself was already safe — nothing else was.)
-            terminal_sent = true if ev.is_a?(Fuzz::DoneEvent) || ev.is_a?(Fuzz::ErrorEvent)
-            events.send({v, ev}) # Result/Done/Error — blocking, never dropped
+          when Fuzz::ResultEvent
+            # Temp persistence is non-blocking. A saturated/full spool becomes unavailable,
+            # but the authorized sweep and bounded display continue (P6).
+            spool_run.try(&.append(ev.result))
+            events.send({v, ev})
+          when Fuzz::ErrorEvent
+            error_sent = true
+            events.send({v, ev})
+          when Fuzz::DoneEvent
+            terminal = v.terminal_status(ev.progress, ev.stopped, error_sent)
+            spool_run.try(&.finish(ev.progress.sent, ev.progress.matched,
+              ev.progress.errors, terminal))
+            events.send({v, ev})
+            done_sent = true
           end
           engine.stop if v.stop_requested?
         end
       rescue ex
-        # An unrescued raise in a `spawn` block kills only this fiber and prints to STDERR,
-        # which under the TUI is the alternate screen (#411) — so a bug in run/calibrate used
-        # to garble the display AND leave the run looking merely stalled. The engine already
-        # reports its own setup/generation failures this way (Fuzz::Engine), so reuse that
-        # channel rather than inventing a second way to say the same thing.
         ::Log.error(exception: ex) { "fuzz run fiber died" }
-        v.finish_run # before the blocking send — see the Miner's sibling for why
-        events.send({v, Fuzz::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
+        unless done_sent
+          engine.stop
+          unless error_sent
+            events.send({v, Fuzz::ErrorEvent.new("#{ex.class}: #{ex.message}")})
+          end
+          spool_run.try(&.abort(reason: "fuzz run failed before spool completion"))
+          events.send({v, Fuzz::DoneEvent.new(Fuzz::Progress.new(0_i64, total, 0_i64, 1_i64), true)})
+        end
       ensure
-        v.finish_run # backstop — the drain's Done also clears it + shows the summary
+        end_worker(v)
       end
       # The CL note rides the run-start line, the way `gori run fuzz` prints it on stderr
       # before the first send: once, up front, naming the switch that turns it off. Silent
       # rewriting is the half that bites even an operator who does not want the switch —
       # they typed `Content-Length: 5`, the pane still says 5, and the wire carried 37.
       note = v.rewrites_content_length? ? " · note: #{FuzzerView::CL_REWRITE_NOTE}" : ""
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{note}")
+      archive = spool_run ? "" : " · complete archive unavailable"
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{note}")
     end
 
     def fuzz_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
       @host.status("stopping…")
+    end
+
+    def results_saveable? : Bool
+      current_view.try(&.results_saveable?) == true
+    end
+
+    # Shift-S copies the complete private spool into the project. The bounded pane is only a
+    # display window and is never the persistence source.
+    def fuzz_save_results : Nil
+      return unless tab = current_tab_obj
+      view = tab.view
+      if id = view.saved_run_id
+        @host.status("fuzz results already saved as run ##{id}")
+        return
+      end
+      return @host.status("finish a fuzz run before saving its results") unless view.results_saveable?
+      session_id = tab.db_id
+      return @host.status("fuzz session is not persisted — save unavailable") unless session_id
+
+      spool_run = @spool_runs[view]?
+      return @host.status("complete fuzz archive unavailable for this run") unless spool_run && !spool_run.failed?
+      count = spool_run.written
+      bytes = spool_run.accepted_bytes
+      @host.confirm("SAVE FUZZ RESULTS",
+        "Permanently save #{count} result#{count == 1 ? "" : "s"} (#{Fmt.size(bytes)}) in this project?",
+        confirm_label: "save", danger: false) do
+        start_results_save(view, session_id)
+      end
+    end
+
+    private def start_results_save(view : FuzzerView, session_id : Int64) : Nil
+      return unless view.results_saveable?
+      spool_run = @spool_runs[view]? || return
+      meta = view.saved_run_meta(session_id)
+      sent, matched, errors, status = view.saved_run_counters
+      generation = view.run_generation
+      failed_run_id = view.failed_save_run_id
+      view.begin_results_save
+      job = @host.jobs.start(:fuzz_save, "save #{spool_run.written} fuzz results", goto: goto_for(view))
+      store = @host.session.store
+      completions = @fuzz_io_events
+      begin_worker(view)
+      spawn(name: "gori-fuzz-save") do
+        persisted = nil.as(Fuzz::Persistence?)
+        begin
+          # This ID belongs to a local save fiber that has already stopped. A terminal-update
+          # failure can leave it `saving`, so its explicit stale allowance is safe and is never
+          # applied to an arbitrary history row.
+          if failed = failed_run_id
+            deleted = store.delete_fuzz_run_result(failed, allow_active: true)
+            unless deleted.status.in?(Store::FuzzRunDeleteStatus::Deleted,
+                     Store::FuzzRunDeleteStatus::NotFound)
+              completions.send(SaveDone.new(view, generation, job, failed, 0_i64,
+                "could not remove failed run ##{failed} before retry (project busy)"))
+              next
+            end
+          end
+
+          persisted = Fuzz::Persistence.new(store, meta, initial_status: "saving")
+          cancelled = false
+          begin
+            spool_run.each_result(batch_size: 32) do |record|
+              raise ResultIoCancelled.new if @closing || @cancelled_views.includes?(view)
+              raise ResultCopyStopped.new unless persisted.append(record)
+            end
+          rescue ResultIoCancelled
+            cancelled = true
+          rescue ResultCopyStopped
+            # Persistence already carries the concrete database/queue error.
+          end
+          if cancelled
+            persisted.abort(sent, matched, errors, reason: "project closed during fuzz save")
+            completions.send(SaveDone.new(view, generation, job, persisted.run_id,
+              persisted.written, "save cancelled while project closed"))
+          else
+            ok = persisted.finish(sent, matched, errors, status)
+            ok = false unless persisted.written == spool_run.written
+            completions.send(SaveDone.new(view, generation, job, persisted.run_id,
+              persisted.written, ok ? nil : (persisted.error || "project write failed")))
+          end
+        rescue ex
+          persisted.try(&.abort(sent, matched, errors, reason: "fuzz save crashed"))
+          completions.send(SaveDone.new(view, generation, job,
+            persisted.try(&.run_id) || 0_i64, persisted.try(&.written) || 0_i64,
+            ex.message || "save failed"))
+        ensure
+          end_worker(view)
+        end
+      end
+    end
+
+    def saved_runs : Array(Store::FuzzRunRecord)
+      tab = current_tab_obj
+      id = tab.try(&.db_id)
+      id ? @host.session.store.fuzz_runs(id) : [] of Store::FuzzRunRecord
+    end
+
+    # One automatic restore decision per persisted session for this project-open lifetime.
+    # The initial tab calls this from initialize; other tabs call it only when selected.
+    private def auto_load_current_saved_run : Nil
+      return unless tab = current_tab_obj
+      session_id = tab.db_id || return
+      return if @auto_load_considered.includes?(session_id)
+      @auto_load_considered.add(session_id)
+      view = tab.view
+      return if view.running? || view.saving_results? || view.loading_results? || view.result_count > 0
+      begin
+        return unless run = @host.session.store.latest_saved_fuzz_run(session_id)
+        start_saved_run_load(tab, run, automatic: true)
+      rescue ex
+        # A transient read failure is not a decision that this session has no history.
+        @auto_load_considered.delete(session_id)
+        @host.status("could not restore latest fuzz run: #{ex.message}")
+      end
+    end
+
+    def load_saved_run(id : Int64, replace_unsaved : Bool = false) : Nil
+      return unless tab = current_tab_obj
+      session_id = tab.db_id || return
+      view = tab.view
+      return @host.status("finish the current fuzz run before loading history") if view.running?
+      return @host.status("result I/O in progress — wait before loading history") if view.saving_results? || view.loading_results?
+      if view.results_saveable? && !replace_unsaved
+        @host.confirm("REPLACE UNSAVED RESULTS",
+          "Load saved run ##{id}?\nThe current #{view.result_count}-row run has not been saved and will be replaced.",
+          confirm_label: "load", danger: true) { load_saved_run(id, true) }
+        return
+      end
+      run = @host.session.store.get_fuzz_run(id)
+      return @host.status("saved fuzz run ##{id} is gone") unless run && run.session_id == session_id
+      return @host.status("legacy fuzz run ##{id} has incomplete transport context — inspect it with `gori run fuzz show`") if run.snapshot_version == 0
+      return @host.status("saved fuzz run ##{id} is still #{run.status}") if run.status.in?("running", "saving")
+      @auto_load_considered.add(session_id)
+      start_saved_run_load(tab, run)
+    end
+
+    private def start_saved_run_load(tab : FuzzerTab, run : Store::FuzzRunRecord,
+                                     automatic : Bool = false) : Nil
+      session_id = tab.db_id || return
+      id = run.id
+      view = tab.view
+      generation = view.reserve_result_load
+      job = @host.jobs.start(:fuzz_load, "load saved fuzz run ##{id}", goto: goto_for(view))
+      store = @host.session.store
+      completions = @fuzz_io_events
+      begin_worker(view)
+      spawn(name: "gori-fuzz-load") do
+        total = store.fuzz_result_count(id)
+        offset = {total - FuzzerResultWindow::ROW_CAP, 0_i64}.max
+        window = FuzzerResultWindow.new
+        seen = 0
+        cancelled = false
+        begin
+          store.each_fuzz_result_page(id, FuzzerResultWindow::ROW_CAP, offset) do |record|
+            raise ResultIoCancelled.new if @closing || @cancelled_views.includes?(view)
+            window.append(Fuzz::Persistence.result(record))
+            seen += 1
+            Fiber.yield if seen % 64 == 0
+          end
+        rescue ResultIoCancelled
+          cancelled = true
+        end
+        fresh = store.get_fuzz_run(id)
+        if !cancelled && fresh && fresh.session_id == session_id
+          completions.send(LoadDone.new(view, generation, job, session_id, automatic,
+            fresh, window.rows.dup, nil))
+        else
+          message = cancelled ? "saved-run load cancelled" : "saved fuzz run ##{id} was deleted while it loaded"
+          completions.send(LoadDone.new(view, generation, job, session_id, automatic,
+            nil, [] of Fuzz::Result, message))
+        end
+      rescue ex
+        completions.send(LoadDone.new(view, generation, job, session_id, automatic, nil,
+          [] of Fuzz::Result, "could not load fuzz run ##{id}: #{ex.message}"))
+      ensure
+        end_worker(view)
+      end
+    end
+
+    def delete_saved_run(id : Int64) : Nil
+      run = @host.session.store.get_fuzz_run(id)
+      return @host.status("saved fuzz run ##{id} is gone") unless run
+      count = @host.session.store.fuzz_result_count(id)
+      @host.confirm("DELETE FUZZ RUN", "Delete saved run ##{id} and #{count} results?",
+        confirm_label: "delete", danger: true) do
+        deleted = @host.session.store.delete_fuzz_run_result(id)
+        if deleted.deleted?
+          current_view.try(&.forget_saved_run(id))
+          @host.status("deleted saved fuzz run ##{id} and #{deleted.deleted_results} results")
+        else
+          @host.status("saved run NOT deleted (#{deleted.status.to_s.underscore})")
+        end
+      end
     end
 
     # --- new / close / cross-tab seeds ---
@@ -1179,6 +1535,7 @@ module Gori::Tui
       request_text : String,
       http2 : Bool,
       sni : String?,
+      tls_preset : String?,
       label : String,      # sub-tab chip + toast ("#index payload")
       note : String? = nil # provenance when request_text is NOT the retained wire bytes
 
@@ -1221,7 +1578,7 @@ module Gori::Tui
         # reconstruction — the same caveat `fuzz.repeater` carries in its label, and it has
         # to survive into the Comparer header where the two sides are read against each other.
         v.result_request_note(r) ? "fuzz·rebuilt" : "fuzz",
-        ComparerSlot.method_of(req), v.target_origin,
+        ComparerSlot.method_of(req), v.result_target_origin,
         req, nil, r.head, r.body,
         status: r.status, duration_us: r.duration_us, error: r.error, size: r.length,
         label: "##{r.index} #{payload}".rstrip)
@@ -1248,7 +1605,8 @@ module Gori::Tui
       # field that reaches the operator through every consumer of this seed, and a tab holding
       # a reconstruction should keep saying so after the toast has gone.
       label = "#{label} · reconstructed" if note
-      RepeaterSeed.new(v.target_origin, text, v.http2?, v.sni_override, label, note)
+      RepeaterSeed.new(v.result_target_origin, text, v.result_http2?, v.result_sni,
+        v.result_tls_preset, label, note)
     end
 
     # ⇧I from History (or Issues evidence): open a captured flow as a fuzz session.
@@ -1269,7 +1627,12 @@ module Gori::Tui
     end
 
     private def open_session(view : FuzzerView, flow_id : Int64?) : Nil
-      @fuzzers << FuzzerTab.new(view, flow_id, persist_new(view, flow_id))
+      tab = FuzzerTab.new(view, flow_id, persist_new(view, flow_id))
+      @fuzzers << tab
+      # A session created in this controller lifetime has no prior saved run to restore.
+      if id = tab.db_id
+        @auto_load_considered.add(id)
+      end
       @current_idx = @fuzzers.size - 1
       @host.goto_tab(:fuzzer)
     end
@@ -1282,18 +1645,37 @@ module Gori::Tui
 
     def request_close : Nil
       return unless tab = current_tab_obj
-      @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config and results are discarded.",
+      if tab.view.saving_results? || tab.view.loading_results?
+        @host.status("result I/O in progress — wait before closing this fuzz session")
+        return
+      end
+      if (session_id = tab.db_id) &&
+         (active = @host.session.store.fuzz_runs(session_id).find(&.status.in?("running", "saving")))
+        @host.status("saved run ##{active.id} is still #{active.status} in another writer — " \
+                     "wait before closing (or remove a crashed row with CLI --force-stale)")
+        return
+      end
+      @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config, private temporary spool, and every saved run are deleted.",
         confirm_label: "close", danger: true) { close_tab }
     end
 
     def close_tab : Nil
       return if @current_idx < 0 || @current_idx >= @fuzzers.size
       tab = @fuzzers[@current_idx]
+      if (session_id = tab.db_id) &&
+         @host.session.store.fuzz_runs(session_id).any?(&.status.in?("running", "saving"))
+        @host.status("fuzz session NOT closed — a saved run started writing; wait for it to finish")
+        return
+      end
+      was_running = tab.view.running?
+      @cancelled_views.add(tab.view)
       tab.view.request_stop # halt a running sweep before detaching its view (the run fiber polls this)
-      # Finish the job NOW: once the view leaves @fuzzers, drain_events drops its remaining
-      # events (incl. Done), so jobs.finish would never run and the bottom-bar spinner would
-      # animate forever (mirrors MinerController#close_tab).
-      @host.jobs.finish(tab.view.job_id, :stopped, "closed") if tab.view.running?
+      quiesce_view(tab.view)
+      # Finish the job NOW: once the view leaves @fuzzers, no later event may own its spinner.
+      @host.jobs.finish(tab.view.job_id, :stopped, "closed") if was_running
+      if spool_run = @spool_runs.delete(tab.view)
+        @spool.delete(spool_run)
+      end
       # The store reports whether the DELETE committed. The tab leaves the list either way —
       # the operator asked to close it — but a rolled-back batch leaves the saved session on
       # disk, so it reappears on the next project open. Saying so is the difference between a
@@ -1301,6 +1683,7 @@ module Gori::Tui
       orphaned = (id = tab.db_id) ? !@host.session.store.delete_fuzz_session(id) : false
       @fuzzers.delete_at(@current_idx)
       @current_idx = @fuzzers.empty? ? -1 : @current_idx.clamp(0, @fuzzers.size - 1)
+      auto_load_current_saved_run
       @host.status(TabClose.message(@fuzzers.empty? ? "closed — none open (^N new · ⇧I from History)" : "closed (#{@fuzzers.size} open)", orphaned))
     end
 
@@ -1311,11 +1694,23 @@ module Gori::Tui
     # back at the picker. Same order as close_tab: stop first, then finish the job, since
     # once the Runner unwinds `drain_events` never runs again to see the Done event.
     def stop_all : Nil
+      return if @closing && @workers.empty?
+      @closing = true
       @fuzzers.each do |tab|
-        next unless tab.view.running?
-        tab.view.request_stop
-        @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
+        @cancelled_views.add(tab.view)
+        if tab.view.running?
+          tab.view.request_stop
+          @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
+        end
       end
+      until @workers.empty?
+        drain_events
+        sleep 1.millisecond
+      end
+      while drain_events
+      end
+      @spool_runs.clear
+      @spool.close
     end
 
     # --- persistence ---
@@ -1376,6 +1771,7 @@ module Gori::Tui
         else
           @current_idx.clamp(0, @fuzzers.size - 1)
         end
+      auto_load_current_saved_run
     end
 
     def current_session_db_id : Int64?
@@ -1398,7 +1794,7 @@ module Gori::Tui
     # Don't clobber a tab mid-edit or mid-run (mirrors Repeater).
     private def fuzz_tab_locked?(tab : FuzzerTab) : Bool
       v = tab.view
-      v.running? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target)
+      v.running? || v.saving_results? || v.loading_results? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target)
     end
   end
 end

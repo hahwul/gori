@@ -76,7 +76,7 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 ### Attack Modes
 
 | Mode | Behavior |
-|------|----------|
+| ------ | ---------- |
 | `sniper` | One position at a time, cycling a single payload set (default) |
 | `batteringram` | The same payload in every marked position |
 | `pitchfork` | Parallel sets: payload *n* from each set together |
@@ -93,6 +93,26 @@ A single marker can also carry a Decoder chain of its own. Put the cursor inside
 ### Matching
 
 Filter results with ffuf-style matchers and filters on status, size, words, lines, round-trip time (`--mt`/`--ft`, in ms — the dimension a time-based blind payload is the only evidence for), and body regex, plus auto-calibration to drop noisy baselines. Auto-calibration samples the target several times before the sweep and compares each response against every sampled shape, widened by the jitter those samples themselves showed — so a page carrying a per-request id or timestamp calibrates out, while a target whose samples were identical is still compared exactly. Matched responses are highlighted and can be extracted with a capture regex.
+
+### Saving and Reopening Runs
+
+During a TUI run, gori writes every result to a private temporary SQLite spool while the pane keeps a bounded display window: at most 5,000 rows and 64 MiB of dynamic result data. The newest rows remain interactive; an individually oversized row is shown as metrics only. The spool still holds its complete rendered request, final wire request, response head, and response body. It is owner-only, removed when the run is discarded or the project closes, and a spool failure never stops outbound traffic—it only makes that run unavailable for permanent saving.
+
+After a non-empty run finishes and its spool is complete, press **`Shift-S` in READ mode** to save every spooled row permanently in the project. An uppercase `S` still types normally while you are editing. Saving uses row- and byte-bounded background batches, and the status line and Jobs panel report success or failure. Repeating the shortcut does not create a duplicate; a failed project copy retains its temporary spool for retry.
+
+Reopening a project restores the latest successfully saved run for its initially selected Fuzzer session. Other Fuzzer sessions restore lazily on first selection. Restore reads only the newest 5,000 rows / 64 MiB into the pane and labels it `showing N`; the complete archive remains available through paged CLI/MCP readers. Active, partially failed, and legacy incomplete snapshots are never restored automatically. Open **Space → Run history** to choose an older current-format run; `Enter` loads it and `d` deletes it. Closing the Fuzzer session deletes its saved-run history too; the close confirmation says so.
+
+The headless and agent surfaces use the same permanent store:
+
+```bash
+gori run fuzz save 42 --auto --preset sqli
+gori run fuzz list
+gori run fuzz show RUN_ID
+gori run fuzz show RUN_ID RESULT_INDEX --format json
+gori run fuzz delete RUN_ID --yes
+```
+
+The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save_results: true` to `fuzz_start`, then use `list_fuzz_runs`, `get_fuzz_run`, and `delete_fuzz_run`. Permanent runs are separate from History flows: `--record-history` / `record_history` still controls whether individual sends also appear in History.
 
 ### Framing a Sweep
 
@@ -197,7 +217,7 @@ gori run fuzz <flow-id> \
   --fs 0
 ```
 
-Sources can be a captured flow (`--flow`), a saved HTTP repeater session (`--repeater`), a raw request file (`--request`), or stdin. Output is `text`, `json`, or `jsonl`.
+Sources can be a captured flow (`--flow`), a saved HTTP repeater session (`--repeater`), a raw request file (`--request`), or stdin. Output is `text`, `json`, or `jsonl`. This form is ephemeral and backward-compatible; put the exact same arguments after `gori run fuzz save` to retain every row permanently. `fuzz list`, `fuzz show`, and `fuzz delete` manage those saved runs.
 
 **A Repeater send from the TUI is recorded in History.** The tester driving a request by hand is the one whose evidence went missing, and a send that leaves no flow cannot be compared, exported or handed over; the status line names the id it wrote (`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends* turns it off. WebSocket sends and send-groups are not recorded — a socket's evidence is its frame transcript, which the session already keeps — and the status line says so once.
 

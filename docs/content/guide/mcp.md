@@ -72,7 +72,7 @@ While an MCP server is bound to a project, gori shows it. In the project picker 
 gori can write the MCP configuration for common clients for you:
 
 | Flag | Client | Config written |
-|------|--------|----------------|
+| ------ | -------- | ---------------- |
 | `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
@@ -103,8 +103,8 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 **Read tools** (always available):
 
 | Tool | Purpose |
-|------|---------|
-| `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` — `proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, … — so a flow gori made is never read back as evidence about the target. Filter with `src:` . Pass `columns` — the same `[LABEL=][req|res:]kind:selector` specs `gori run ls --column` takes — to carry an extracted value per row (a header, a JSON field, a regex capture) under a `columns` object: what QL can *filter* on, [shown](/guide/proxy/#columns). Opt-in, since it costs a read per row |
+| ------ | --------- |
+| `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` — `proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, … — so a flow gori made is never read back as evidence about the target. Filter with `src:` . Pass `columns` — the same `[LABEL=][req\|res:]kind:selector` specs `gori run ls --column` takes — to carry an extracted value per row (a header, a JSON field, a regex capture) under a `columns` object: what QL can *filter* on, [shown](/guide/proxy/#columns). Opt-in, since it costs a read per row |
 | `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows. Every event carries `actor` — the surface that acted (`tui` / `cli` / `mcp`) — so an agent can tell its own writes from the operator's, and config changes are recorded whoever makes them. The human reads the same feed on the **Project → Activity** pane |
 | `list_views` | The project's History [views](/guide/proxy/#views) — named QL queries `list_history{view}` applies as a lens, ANDed over `query` rather than replacing it. Seven built-ins (`All`, `History`, `History + Repeater` — the default — `WebSocket`, `gRPC`, `SSE`, `Errors`), then the global library, then the project's own; `active` marks the one the TUI is showing, which does **not** apply to `list_history` — that filters only by the `view` you pass it |
 | `get_flow` | Full request + response for one flow |
@@ -141,13 +141,14 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `project_info` | Flow / issue counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_repeater_context` | Repeater workbench state and saved sessions |
+| `list_fuzz_runs` / `get_fuzz_run` | List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, so retained BLOBs are not loaded. `include_content:true` returns at most 25 rows with byte/decode-bounded redacted request/wire/response previews; `include_sensitive:true` opts into capped exact raw bytes. Run metadata labels pre-current snapshots as `legacy:true` |
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
 **Action tools** (disabled by `--read-only`):
 
 | Tool | Purpose |
-|------|---------|
+| ------ | --------- |
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent — off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage Repeater sessions |
@@ -177,7 +178,8 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `set_probe_mode` | Set the scan mode: `off`, `passive`, `active`, or `aggressive` (authorized targets only) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | Manage custom match rules and arm or disarm any scan rule |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | Manage the OAST providers `oast_start` can listen on |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer. `fuzz_start{fields: ["role"]}` sweeps a **schema-known gRPC field** of a unary request — each payload goes through the field's declaration on its way to bytes, every other byte of the message is copied from the capture, and the length prefix follows. A gRPC sweep of BYTE positions reports `grpc_stale_prefix` when a payload changed a message's length; `fuzz_start{reframe_grpc: true}` recomputes the prefix instead of reporting it. `fuzz_results` keeps rows the matcher rejected when the run observed something about them (a re-send, a retry, a truncated response), so read each row's `matched` — or pass `matched_only: true` |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer. `save_results:true` permanently stores **every** row through a byte-bounded asynchronous writer and returns a database `run_id`; storage backpressure marks the save failed without stopping outbound traffic. This is independent of the bounded/selective live-job cache and `record_history`. `fuzz_start{fields: ["role"]}` sweeps a **schema-known gRPC field** of a unary request — each payload goes through the field's declaration on its way to bytes, every other byte of the message is copied from the capture, and the length prefix follows. A gRPC sweep of BYTE positions reports `grpc_stale_prefix` when a payload changed a message's length; `fuzz_start{reframe_grpc: true}` recomputes the prefix instead of reporting it. `fuzz_results` keeps rows the matcher rejected when the run observed something about them, so read each row's `matched` — or pass `matched_only: true` |
+| `delete_fuzz_run` | Delete a permanent fuzz run and its results; refuses a known live writer. `force_stale:true` removes a `running`/`saving` row left by a crashed process, and must never be used while another gori is saving |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline — broken access control. Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`) and a flat, never-paged `bypasses` list |

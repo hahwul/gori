@@ -30,7 +30,7 @@ The Fuzzer sends the template verbatim except where you mark a position. Wrap th
 How markers and payloads combine is the **mode**, set in CONFIG:
 
 | Mode | Behavior |
-|------|----------|
+| ------ | ---------- |
 | `sniper` | One position at a time, cycling a single payload set (default) |
 | `batteringram` | The same payload in every marked position |
 | `pitchfork` | Parallel sets: payload *n* from each set together |
@@ -94,6 +94,17 @@ Timing is noisy — a shared origin, a slow hop, one unlucky pause — so treat 
 ## 5. Read results and seed the next step
 
 The finding is the row that doesn't match its neighbours — an unexpected `200` or `500` where the rest `404`, or a length that jumps when one payload lands differently. That row is a lead, not a conclusion: from a result, its `Space` menu sends it on to the **Repeater**, or to the **Comparer** to diff it against the baseline, so you keep probing the one payload that stood out by hand.
+
+To keep the complete run, leave the editor in READ mode and press **`Shift-S`** after it finishes. During the sweep gori privately spools every full request/wire/response row to disk while the pane stays bounded to 5,000 rows / 64 MiB; Shift-S promotes the complete spool into the project. The latest successful run reopens automatically as a bounded window with its Fuzzer session; **Space → Run history** selects an older run, while CLI/MCP can page the whole archive. Headless, make persistence explicit and inspect it by id:
+
+```bash
+gori run fuzz save <flow-id> --auto --wordlist params.txt --mc 200,302
+gori run fuzz list
+gori run fuzz show RUN_ID
+gori run fuzz show RUN_ID RESULT_INDEX --format json
+```
+
+The original `gori run fuzz …` remains ephemeral, so an existing script does not start growing the project database after an upgrade.
 
 Hidden parameters the app never named at all are a different job. Where the Fuzzer varies a value you can see, the **Miner** guesses candidate names the server accepts but doesn't advertise — see [Param Miner](/guide/scanning/#param-miner).
 
