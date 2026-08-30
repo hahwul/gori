@@ -249,9 +249,8 @@ module Gori
           # non-standard method is the operator's" — and upcasing it here destroyed a
           # method-case bypass probe (`get /admin`) on the way back in, so gori's own HAR
           # round-trip could not carry the test case it had captured. `reject_inject!` above
-          # already refuses the CR/LF/NUL that would forge a start line. The UPCASED form is
-          # not lost: it is what the `flows.method` projection column stores, which is what
-          # `pending_request`/`complete_flow` pass to the DTO and what History/QL match on.
+          # already refuses the CR/LF/NUL that would forge a start line. The `flows.method`
+          # projection column carries the same case, for the reason `pending_request` states.
           b << method << ' ' << target << ' ' << http_version << "\r\n"
           b << "Host: " << host_header(scheme, host, port) << "\r\n" unless has_host
           # One pass, allocation-free case-insensitive compares. Skip any incoming
@@ -470,9 +469,17 @@ module Gori
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head(method, target, http_version, scheme, host, port, headers, body,
           trunc ? size : nil, trunc)
+        # The `flows.method` COLUMN keeps the source's case too, matching live capture:
+        # `FlowMapper.request` passes `req.method` straight through, and the consumers that
+        # need a canonical form upcase at the comparison (`Authorize::Passive`, QL's
+        # `upper(method) = ?`). Upcasing here made the two ingest paths disagree about the
+        # same message and folded a method-case ACL bypass — `get /admin`, RFC 9110 §9.1
+        # makes the method case-SENSITIVE — into the GET rows of every list view, which is
+        # the finding itself. The start line already carried the case; the column, which is
+        # what History renders, did not.
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
-          method: method.upcase, target: target, http_version: http_version,
+          method: method, target: target, http_version: http_version,
           head: head, body: stored, body_truncated: trunc, body_size: size,
           source: source, source_surface: source_surface, source_ref: source_ref)
         FlowPair.new(req, nil)
@@ -501,7 +508,7 @@ module Gori
         # may be believed stays with the importer that read them — see `Import::Har`.
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
-          method: method.upcase, target: target, http_version: http_version,
+          method: method, target: target, http_version: http_version,
           head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size,
           connect_protocol: connect_protocol,
           source: source, source_surface: source_surface, source_ref: source_ref)

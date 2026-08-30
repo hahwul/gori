@@ -1274,9 +1274,37 @@ describe Gori::Import::Builder do
       String.new(pair.request.head).should start_with("get /admin HTTP/1.1\r\n")
     end
 
-    it "is still UPCASED in the projection column History and QL match on" do
+    # The projection COLUMN keeps the case too, matching live capture: `FlowMapper.request`
+    # passes `req.method` straight through, and the consumers that need a canonical form
+    # upcase at the comparison (`Authorize::Passive`, QL's `upper(method) = ?`). Upcasing on
+    # import made the two ingest paths disagree about the same message, and folded a
+    # method-case ACL bypass into the GET rows of every list view — the finding itself. The
+    # demo project's `get /admin/dashboard` came back from gori's own HAR round trip as `GET`.
+    it "reaches the projection column History renders with its case intact" do
       pair = Gori::Import::Builder.pending_request(0_i64, "http://h.test/admin", "get")
-      pair.request.method.should eq("GET")
+      pair.request.method.should eq("get")
+    end
+
+    it "survives a whole HAR import into the column, not just the start line" do
+      har = File.tempname("gori", ".har")
+      begin
+        File.write(har, {"log" => {"entries" => [{
+          "startedDateTime" => "2026-06-01T12:00:00.000Z", "time" => 1,
+          "request" => {"method" => "get", "url" => "https://shop.test/admin/dashboard",
+                        "httpVersion" => "HTTP/1.1", "headers" => [] of String},
+          "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                         "headers" => [] of String, "content" => {"mimeType" => "text/html", "text" => "ok"}},
+        }]}}.to_json)
+        with_store do |store|
+          Gori::Import.import_file(store, :har, har)
+          store.search(Gori::QL::EMPTY, 10).first.method.should eq("get")
+          # QL is unaffected either way — it upcases both sides — which is why the column was
+          # free to keep the wire case all along.
+          store.search(Gori::QL.parse("method:GET"), 10).size.should eq(1)
+        end
+      ensure
+        File.delete?(har)
+      end
     end
 
     it "keeps a non-standard method verbatim on both sides of complete_flow" do
@@ -1284,7 +1312,7 @@ describe Gori::Import::Builder do
       pair = Gori::Import::Builder.complete_flow(
         0_i64, "http://h.test/x", "PaTcH", empty, nil, "HTTP/1.1", 200, "OK", empty, nil, nil, nil)
       String.new(pair.request.head).should start_with("PaTcH /x HTTP/1.1\r\n")
-      pair.request.method.should eq("PATCH")
+      pair.request.method.should eq("PaTcH")
     end
 
     it "still refuses a method that would forge a start line" do
