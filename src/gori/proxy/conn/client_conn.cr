@@ -20,6 +20,7 @@ require "../ws/relay"
 require "../ws/handshake"
 require "../../flow_mapper"
 require "../../alt_svc"
+require "../../sse"
 require "./self_page"
 
 module Gori::Proxy
@@ -3051,9 +3052,18 @@ module Gori::Proxy
       line[0...colon].strip.downcase == name
     end
 
+    # Is this response an event stream? `Sse.sse?` and not a `downcase.includes?` scan, which
+    # is the brittle test that module's own header says it exists to replace — and which every
+    # OTHER surface had already left behind: `Proto.classify` asks `Sse.sse?`, `QL` compiles
+    # `proto:sse` to `LIKE 'text/event-stream%'`, and History's EVENTS pane asks
+    # `Sse.event_stream?`. A substring match makes this the only reader that says yes to a
+    # `Content-Type` merely CARRYING the token in a parameter — and this is the reader with
+    # side effects: `application/json; profile="urn:x:text/event-stream"` on a Content-Length
+    # body took the streaming path, so the intercept response hold was skipped, a Match&Replace
+    # body rule no-opped, and the client connection was closed instead of kept alive, while
+    # every display and query surface reported an ordinary JSON flow.
     private def sse?(resp : Codec::RawResponse) : Bool
-      ct = resp.headers.get?("Content-Type")
-      !!ct && ct.downcase.includes?("text/event-stream")
+      Gori::Sse.sse?(resp.headers.get?("Content-Type"))
     end
 
     private def write_gateway_error : Nil

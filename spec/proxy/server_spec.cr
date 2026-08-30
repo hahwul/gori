@@ -582,6 +582,56 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should contain("data: two") # streamed body captured
   end
 
+  # The streaming decision is `Sse.sse?` — a media-type test — and not a substring scan of the
+  # whole field value. A `Content-Type` that merely CARRIES the token in a parameter is an
+  # ordinary Length-framed response to `Proto`, to `QL`'s `proto:sse`, and to History's EVENTS
+  # pane; the proxy used to be the one reader that disagreed, and it is the reader with side
+  # effects — such a response took the streaming path, which skips the intercept response hold,
+  # no-ops a Match&Replace body rule, and closes the client connection instead of keeping it
+  # alive. Keep-alive is the half a client can see, so that is what this asserts.
+  it "does not read a Content-Type that merely CONTAINS text/event-stream as a stream" do
+    done = Channel(Nil).new(2)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        spawn do
+          n = 0
+          while head = Gori::Proxy::Codec::Http1.read_head(conn)
+            n += 1
+            body = "RESP-#{n}"
+            conn << "HTTP/1.1 200 OK\r\n" \
+                    "Content-Type: application/json; profile=\"urn:x:text/event-stream\"\r\n" \
+                    "Content-Length: #{body.bytesize}\r\nConnection: keep-alive\r\n\r\n" << body
+            conn.flush
+          end
+          conn.close
+        rescue
+        end
+      end
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/one HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    read_until(client, "RESP-1").should contain("RESP-1")
+    client << "GET http://127.0.0.1:#{origin_port}/two HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    # The connection stayed open, so the second request is answered (was: gori closed it after
+    # the first, and this read returned "").
+    read_until(client, "RESP-2").should contain("RESP-2")
+    client.close
+
+    done.receive
+    done.receive
+    proxy.stop
+  end
+
   it "forwards interim 1xx responses then reads the final status, with no reuse desync" do
     # Origin: for each keep-alive request, send a 100 Continue THEN the real 200.
     done = Channel(Nil).new(2)
