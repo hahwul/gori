@@ -67,6 +67,37 @@ describe "gori run history — CLI::Output rows" do
     rel.should contain("api.test/a")
   end
 
+  # The location cell was `Url.location(row.host, row.target)` — host + target, no PORT — so
+  # every origin-form (HTTPS/CONNECT) capture printed its host bare and two services on one
+  # host were the SAME cell. `--format json` told them apart the whole time (it emits `port`,
+  # and its `url` goes through `FlowRow#url`), which is exactly what makes the text list
+  # misleading rather than merely terse.
+  it "keeps the non-default port of an origin-form flow, so two services on one host differ" do
+    a = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "127.0.0.1",
+      port: 19315, target: "/service-A", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    b = Gori::Store::FlowRow.new(
+      id: 2_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "127.0.0.1",
+      port: 19316, target: "/service-B", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    Gori::CLI::Output.flow_row_text(a).should contain("127.0.0.1:19315/service-A")
+    Gori::CLI::Output.flow_row_text(b).should contain("127.0.0.1:19316/service-B")
+    # The SCHEME column already says https; the cell must not repeat it.
+    Gori::CLI::Output.flow_row_text(a).should_not contain("https://")
+  end
+
+  it "leaves a default-port flow and an IPv6 literal spelled the way FlowRow#url spells them" do
+    plain = Gori::Store::FlowRow.new(
+      id: 3_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "api.test",
+      port: 443, target: "/a", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    Gori::CLI::Output.flow_row_text(plain).should contain("api.test/a")
+    Gori::CLI::Output.flow_row_text(plain).should_not contain(":443")
+
+    v6 = Gori::Store::FlowRow.new(
+      id: 4_i64, created_at: 0_i64, scheme: "http", method: "GET", host: "::1",
+      port: 8080, target: "/a", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    Gori::CLI::Output.flow_row_text(v6).should contain("[::1]:8080/a")
+  end
+
   # R4. `target.starts_with?("http")` is not the absolute-form test — RFC 3986 §3.1 makes a
   # URI scheme case-insensitive, and gori captures the request line the client wrote. Driven
   # live through the proxy: `GET HTTP://127.0.0.1:19594/upper HTTP/1.1` printed as

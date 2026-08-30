@@ -224,6 +224,29 @@ module Gori
         String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
       end
 
+      # The listing's location cell: the flow's absolute URL minus the scheme the SCHEME column
+      # beside it already printed.
+      #
+      # `row.url`, not the `Gori::Url.location(row.host, row.target)` this used to be: that
+      # spelling is host + target and carries no PORT, so every origin-form capture (the
+      # HTTPS/CONNECT case — the target is a bare "/path") printed its host bare and two
+      # services on one host, 127.0.0.1:19315/a and 127.0.0.1:19316/a, came out as the same
+      # cell. `--format json` told them apart the whole time — it emits `port`, and its `url`
+      # goes through `FlowRow#url`. That is also the reason the fix routes through `row.url`
+      # rather than pasting `:#{port}` in here: `FlowRow.url_of` is the single definition of a
+      # flow's absolute URL, non-default-port and IPv6-bracket rules included, and a second
+      # copy of it on this line is a copy that drifts.
+      #
+      # An absolute-form target keeps its scheme, exactly as before: it is the request line the
+      # client wrote (`GET HTTP://host/x` — RFC 3986 §3.1 makes the scheme case-insensitive, so
+      # the old `target.starts_with?("http")` test let it double into
+      # `127.0.0.1HTTP://127.0.0.1:19594/upper`), and rewriting the operator's own bytes to
+      # match the column beside them would be a different lie.
+      private def self.flow_location(row : Store::FlowRow) : String
+        url = row.url
+        Store::FlowRow.absolute_form?(row.target) ? url : url.lchop("#{row.scheme}://")
+      end
+
       # A padded cell that is never flush against the one after it. `ljust(n)` alone guarantees
       # a separator only while the value is SHORTER than the column: an HTTP method is an RFC
       # 9110 token of any length, and at exactly 7 characters — `OPTIONS` and `CONNECT`, both
@@ -240,12 +263,7 @@ module Gori
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow, columns : Array({String, String})? = nil) : String
         status = row.status.try(&.to_s) || "—"
-        # HTTP proxied requests store an absolute-form target ("http://host/path") that
-        # already carries the host; only origin-form targets need the host prefixed.
-        # `Gori::Url.location`, not the `target.starts_with?("http")` spelled out here before:
-        # that is not the absolute-form test (RFC 3986 §3.1 — schemes are case-insensitive),
-        # so a captured `GET HTTP://host/x` printed as `127.0.0.1HTTP://127.0.0.1:19594/upper`.
-        loc = term_safe(Gori::Url.location(row.host, row.target))
+        loc = term_safe(flow_location(row))
         dur = row.duration_us.try { |us| " #{human_us(us)}" } || ""
         String.build do |io|
           io << '#' << row.id.to_s.ljust(6)
