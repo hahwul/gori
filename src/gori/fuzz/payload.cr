@@ -64,15 +64,29 @@ module Gori::Fuzz
   # A wordlist file, read lazily line by line (never materialized). `size` counts
   # lines once and caches — which doubles as a pre-flight open check, so a missing /
   # unreadable file raises before any worker fiber spawns.
+  #
+  # That lazy shape opens the path TWICE per run (the count, then every cursor), which
+  # only holds for a path whose every `open` starts a fresh read. A ONE-SHOT source —
+  # a FIFO, a character device, `-w /dev/stdin` fed by a pipe — is drained by the count
+  # and the send pass then reads an empty stream: the preflight promises `· N requests ·`
+  # and ZERO payloads reach the wire, exit 0 (or, for a FIFO whose writer already left,
+  # the second `open` blocks forever). Such a path is read ONCE into an `InlineList`
+  # instead, and both `size` and every cursor are served from it — the same materializing
+  # shape `Miner::Wordlist.load` already uses, which is why `mine -w /dev/stdin` works.
   class WordlistFile < PayloadSource
     getter path : String
 
     def initialize(@path : String)
       @count = nil.as(Int64?)
       @counted = false
+      @cache = nil.as(InlineList?)
+      @probed = false
     end
 
     def size : Int64?
+      if c = cache
+        return c.size
+      end
       unless @counted
         ensure_readable
         n = 0_i64
@@ -84,8 +98,47 @@ module Gori::Fuzz
     end
 
     def open_iterator : SetIterator
+      if c = cache
+        return c.open_iterator
+      end
       ensure_readable
       LineIterator.new(@path)
+    end
+
+    # nil while the path re-opens independently — that one stays lazy, because counting a
+    # multi-GB wordlist without materializing it is the whole point of the lazy design.
+    private def cache : InlineList?
+      return @cache if @probed
+      ensure_readable
+      unless reopenable?
+        lines = [] of String
+        File.each_line(@path, chomp: true) { |line| lines << line } # same fidelity as LineIterator
+        @cache = InlineList.new(lines)
+      end
+      @probed = true
+      @cache
+    end
+
+    # Two concurrent `open`s, and the second one must get its OWN file offset. A FIFO or a
+    # character device is not a regular file at all; but macOS resolves `/dev/stdin` to
+    # `/dev/fd/0`, which reports type File and DUPS fd 0 — both handles then share one
+    # offset, so even under a `< wordlist.txt` redirect the count leaves it at EOF and the
+    # send pass reads nothing. `pos` is a plain seek — it consumes no bytes — but on the
+    # shared-offset case the nudge IS the read cursor, so put it back before returning.
+    private def reopenable? : Bool
+      return false unless File.info(@path).type.file?
+      File.open(@path) do |a|
+        File.open(@path) do |b|
+          at = a.pos
+          a.pos = at + 1
+          shared = b.pos != at
+          a.pos = at if shared
+          return !shared
+        end
+      end
+      false
+    rescue IO::Error
+      false
     end
 
     # Turn a missing / directory / unreadable wordlist path into a clean Gori::Error
