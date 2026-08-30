@@ -125,16 +125,26 @@ class Gori::Tui::RepeaterView
   # whatever followed the caret.
   #
   # The second is that gori is a tool for sending requests an origin should not accept. A
-  # `Content-Length: 0abc`, a `Content-Length: +5`, a duplicated or space-padded value are
-  # request-smuggling and desync primitives an operator types ON PURPOSE, and auto-CL
-  # quietly correcting them means the test on screen is not the test on the wire. Auto-CL's
-  # job is keeping an ordinary length honest while the body is edited; a value that is not a
-  # bare number is a deliberate one, so it is left exactly as typed.
+  # `Content-Length: 0abc`, a `Content-Length: +5`, an empty one, an indented (obs-fold) one —
+  # request-smuggling and desync primitives an operator types ON PURPOSE — and auto-CL quietly
+  # correcting them means the test on screen is not the test on the wire. Auto-CL's job is
+  # keeping an ordinary length honest while the body is edited; a value that is not a bare
+  # number is a deliberate one, so it is left exactly as typed. (Surrounding OWS and leading
+  # zeros are NOT in that set: `strip` runs before the digit test, so `  0005  ` is an ordinary
+  # length and is kept honest. The rule is about the value's SHAPE, not its spelling.)
+  #
+  # A DUPLICATED Content-Length is deliberate too, and it is guarded one level down rather
+  # than here: `resync_content_length` refuses the whole message when it finds two, so
+  # `reflect_chunk_content_length`'s `synced == source` early return means this predicate is
+  # never even reached for one.
+  #
+  # THE predicate lives in `Repeater::FlowRequest`, because the WIRE has to apply the same
+  # rule and did not: `resync_content_length` rewrote a `Content-Length: 0abc` that this
+  # guard deliberately preserved, so the pane went on showing `0abc` while the socket got
+  # `Content-Length: 2` — the display-vs-wire lie the paragraph above is entirely about,
+  # told by the half nobody was looking at.
   private def plain_numeric_header?(line : String) : Bool
-    value = line.split(':', 2)[1]?
-    return false unless value
-    digits = value.strip
-    !digits.empty? && digits.each_char.all?(&.ascii_number?)
+    Repeater::FlowRequest.rewritable_length_header?(line)
   end
 
   # See @link_host_to_target: on the FIRST target edit of a fresh ^N tab, mirror the new

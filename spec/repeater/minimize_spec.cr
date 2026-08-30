@@ -422,6 +422,12 @@ describe Gori::Repeater::Minimize do
     report = Min.run(text, auto_cl: false, resolve: RESOLVE, backend: capped) { |_| }
     report.note.should contain("cap")
     capped.sent.should eq(3)
+    # …and the run REPORTS the three it spent, not four. `CappedBackend#send` returns
+    # `CAP_ERROR` ahead of its own `@sent += 1`, so the refused call put nothing on the wire;
+    # counting it made `sends` (the note, the CLI/MCP `sends` field) read SEND_CAP + 1 for
+    # every capped run there has ever been.
+    report.sends.should eq(3)
+    report.note.should contain("3 sends")
   end
 end
 
@@ -541,5 +547,54 @@ describe "Gori::Repeater::Minimize — body bytes on the round trip" do
     # An LF head stays an LF head even though the body carries a CRLF pair.
     report.minimized_text.split("\n\n", 2)[0].should_not contain('\r')
     report.minimized_text.should end_with("line1\r\nline2")
+  end
+end
+
+# The auto-CL resolver every surface uses, so this gate is measured against the bytes a real
+# run would send.
+private def cl_resolve(text : String) : Bytes
+  Gori::Repeater::FlowRequest.resync_content_length(Gori::Env.expand_wire(text))
+end
+
+# The body-param candidate gate's premise is "resolve re-lengths the body" — and `auto_cl`
+# alone stopped being that test once `FlowRequest.resync_content_length` learned to leave a
+# deliberately malformed length alone. With the flag on and a `Content-Length: 0abc` in the
+# head, every variant would go out one param shorter under an unchanged, unparseable length:
+# the origin mis-frames all of them identically, `unchanged?` says so, and the minimizer
+# strips every body param it has — which `--apply` then writes back over the operator's
+# request. `StaticOrigin` answers identically to everything, so anything OFFERED is removed
+# and the removal list is exactly the candidate set.
+describe Gori::Repeater::Minimize do
+  describe "a head whose Content-Length cannot be re-synced" do
+    it "offers no BODY params — their framing could not be kept honest" do
+      text = "POST /x HTTP/1.1\nHost: h\nContent-Type: application/json\nContent-Length: 0abc\n\n" +
+             %({"a":1,"b":2})
+      report = Min.run(text, auto_cl: true, resolve: ->cl_resolve(String),
+        backend: StaticOrigin.new) { }
+      report.removed.any?(&.kind.param?).should be_false
+    end
+
+    # …and the gate is scoped to the BODY: a header, a cookie crumb and a query param do not
+    # change the body's length, so refusing them would be a second bug in the other direction.
+    it "still offers header / cookie / query candidates" do
+      text = "POST /x?keep=1 HTTP/1.1\nHost: h\nUser-Agent: gori\nCookie: theme=dark\n" \
+             "Content-Type: application/json\nContent-Length: 0abc\n\n" + %({"a":1})
+      report = Min.run(text, auto_cl: true, resolve: ->cl_resolve(String),
+        backend: StaticOrigin.new) { }
+      kinds = report.removed.map(&.kind)
+      kinds.should contain(Min::Kind::Header)
+      kinds.should contain(Min::Kind::Cookie)
+      kinds.should contain(Min::Kind::Query)
+    end
+
+    # The control: the identical request with an ORDINARY length does offer them, so the two
+    # examples above are about the malformed header and not about JSON candidates at large.
+    it "offers them again once the length is an ordinary number" do
+      text = "POST /x HTTP/1.1\nHost: h\nContent-Type: application/json\nContent-Length: 13\n\n" +
+             %({"a":1,"b":2})
+      report = Min.run(text, auto_cl: true, resolve: ->cl_resolve(String),
+        backend: StaticOrigin.new) { }
+      report.removed.count(&.kind.param?).should eq(2)
+    end
   end
 end

@@ -1230,14 +1230,19 @@ module Gori::Tui
         view, result = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_ws(result)
+        # The stored last response follows `answered?`, not `ok?`: a failed re-send must not
+        # wipe a good stored handshake, and a 403/426 where the row holds a 101 is exactly the
+        # news the row should carry. The PROBE scan stays on `ok?` — it wants a completed
+        # exchange. See `WsEngine::Result#answered?`.
+        id = tab.db_id
+        if id && result.answered?
+          @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+        end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
           @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
-          if id = tab.db_id
-            @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
-            probe_scan_ws_repeater(id, result, tab.flow_id, view)
-          end
+          probe_scan_ws_repeater(id, result, tab.flow_id, view) if id
         else
           @host.status("ws repeater error: #{result.error}")
         end

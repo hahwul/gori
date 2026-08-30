@@ -134,8 +134,29 @@ module Gori
         body = text[(sep + 4)..]
         lines = head.split("\r\n")
         return bytes if lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
-        idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
-        if idx
+        cl_at = [] of Int32
+        lines.each_with_index { |l, i| cl_at << i if l.lstrip.downcase.starts_with?("content-length:") }
+        if idx = cl_at.first?
+          # TWO of them is a CL.CL desync probe: the disagreement IS the test, exactly as it
+          # is for the CL+TE pair guarded above. Rewriting only the first (the sole one this
+          # rewrite can reach) turns `5`/`7` into `2`/`7` — the operator's probe replaced by a
+          # different one, silently. Refuse the whole message instead.
+          return bytes if cl_at.size > 1
+          # …and one of them only when it is REWRITABLE: a `Content-Length: 0abc`, a `+5`, an
+          # empty one, a mid-edit line with the next header glued to its tail, or a line whose
+          # field name is indented (an obs-fold continuation, itself a smuggling primitive —
+          # and rewriting REPLACES the whole line, so it would come back unindented as a
+          # second real header). Every one of those is a deliberately malformed length, which
+          # is one of the things this tool exists to send, so auto-CL "correcting" it turns the
+          # operator's probe into an ordinary request.
+          #
+          # The TUI editor has long refused to rewrite these (`RepeaterView#plain_numeric_header?`,
+          # whose own comment states the rule as "the test on screen must be the test on the
+          # wire") — but the WIRE did not, so the two disagreed about one request: the pane went
+          # on showing `Content-Length: 0abc` while the socket got `Content-Length: 2`. Measured
+          # through `gori run repeater create` + `repeater send` against a raw-socket origin.
+          # One predicate now, read by both.
+          return bytes unless rewritable_length_header?(lines[idx])
           lines[idx] = "Content-Length: #{body.bytesize}"
         elsif add_if_missing && body.bytesize > 0
           # ADD only into a head this function actually parsed. `split("\r\n")` collapses a
@@ -155,6 +176,32 @@ module Gori
           return bytes
         end
         "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
+      end
+
+      # May auto-Content-Length rewrite THIS line? Two things have to hold, and the rewrite
+      # replacing the WHOLE line is why both do.
+      #
+      #   * the FIELD NAME starts at column 0. A leading space makes the line an obs-fold
+      #     continuation of the header above it (RFC 9112 §5.2 — a smuggling primitive gori
+      #     stores byte-exact), and the matcher that finds this line deliberately `lstrip`s so
+      #     a bail-out guard cannot be dodged by indenting. Liberal matching is right for a
+      #     REFUSAL and destructive for a REWRITE: `X-Foo: bar\r\n Content-Length: 5` came back
+      #     as an unindented `Content-Length: 2`, i.e. gori un-folding the operator's fold and
+      #     minting a second real header.
+      #   * the VALUE is a plain decimal count and nothing else. Leading zeros and surrounding
+      #     OWS still count as plain — `  0005  ` is an ordinary length gori may keep honest,
+      #     because `strip` runs before the digit test; what is refused is a value with a
+      #     non-digit in it (`0abc`, `+5`, `4GET / HTTP/1.1`) or none at all.
+      #
+      # THE home for that rule: `resync_content_length` above (the wire) and the TUI's
+      # `RepeaterView#plain_numeric_header?` (the visible header) both read it, and they used
+      # to answer differently for the same line.
+      def self.rewritable_length_header?(line : String) : Bool
+        return false if line.starts_with?(' ') || line.starts_with?('\t')
+        value = line.split(':', 2)[1]?
+        return false unless value
+        digits = value.strip
+        !digits.empty? && digits.each_char.all?(&.ascii_number?)
       end
 
       # The CAPTURED-FLOW replay policy, as opposed to the repeater's auto-CL toggle above.

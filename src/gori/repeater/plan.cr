@@ -334,12 +334,28 @@ module Gori::Repeater
     # origin, and a rewrite must not be able to move the dial target out from under it.
     # `websocket?` IS re-derived, because a rule that adds or strips `Upgrade: websocket`
     # would otherwise leave the plan classified against bytes it no longer carries.
+    #
+    # EVERY OTHER FIELD IS COPIED, and that is a rule rather than a list: this is a
+    # copy-with-new-bytes, so a field the copy forgets is one the SEND still applies (it
+    # lives on the reused `Sender`) while the plan REPORTS it gone. `tls_preset` was
+    # forgotten for exactly that reason — the send presented the chrome hello it was told
+    # to, and `send_request`'s `tls_preset` field and the repeater row it saves both came
+    # back empty, so a later `repeater send` on that saved session dialed a different
+    # handshake from the one that produced the answer it was saved with. Reproduced against
+    # a raw-socket origin: `apply_rules:true` + `tls_preset:"chrome"` + `save_as_repeater`
+    # wrote `tls_preset = NULL`, while the identical call whose rules did not fire wrote
+    # `chrome`. `h2_fields`/`h2_body` ride along for the same reason: dropping them would
+    # turn a field-native plan into a byte plan whose `requests` is only the synthetic scope
+    # line — the rewrite would be sent INSTEAD of the operator's field list. (MCP declines
+    # to offer Match&Replace on a field-native plan at all, so nothing exercises that today;
+    # carrying them is what keeps the next caller from having to know.)
     def with_requests(requests : Array(Bytes)) : Plan
       raise PlanError.new(PlanError::Reason::NoRequest, "no request to send") if requests.empty?
       Plan.new(sender: @sender, requests: requests, scheme: @scheme, host: @host,
         port: @port, http2: @http2,
         websocket: WsEngine.upgrade_request?(String.new(requests.first)), sni: @sni,
-        preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
+        preserve_field_case: @preserve_field_case, h2_fields: @h2_fields, h2_body: @h2_body,
+        reframe_grpc: @reframe_grpc, tls_preset: @tls_preset)
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan

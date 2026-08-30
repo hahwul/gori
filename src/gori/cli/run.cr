@@ -316,6 +316,41 @@ module Gori
         "#{prefix}: too many arguments (expected one #{what}, got: #{all.join(" ")})"
       end
 
+      # ZERO positionals: the same decision for a command whose every argument is a flag.
+      #
+      # `one_positional*` above covers the sites that KEEP the first token and drop the rest.
+      # This is one step further down the same slope: three `repeater` subcommands installed
+      # no `unknown_args` handler at all, and `OptionParser`'s default one is silent — so
+      # `gori run repeater create -t URL -f req.txt extra.txt` built the session from
+      # `req.txt`, discarded `extra.txt` and printed `Repeater session #N created
+      # successfully.`, and `repeater h2 --target U --fields F stray` put the request on the
+      # wire without a word. A dropped argument under a SUCCESS status is what a scripted
+      # surface can least afford, which is the whole argument the twelve sites above make.
+      #
+      # `hint` names the flag the value belongs to, because a bare token here is almost always
+      # something the operator meant to pass through one.
+      def self.no_positional_error(all : Array(String), prefix : String, hint : String) : String?
+        return nil if all.empty?
+        "#{prefix}: unexpected argument#{all.size == 1 ? "" : "s"} #{all.join(" ").inspect} — #{hint}"
+      end
+
+      # Parse a command whose every argument is a flag, refusing any leftover word.
+      #
+      # A method rather than three copies of the idiom, because the subtle half is
+      # `before + after`: a copy that keeps only `before` lets a bare word after `--` through
+      # in silence, which is the same footgun `optionparser-unknown-args` was written about.
+      # Installing the handler HERE makes the correct form the only form, and the call site
+      # reads as what it means.
+      private def self.parse_no_positionals(parser : OptionParser, args : Array(String),
+                                            prefix : String, hint : String) : Nil
+        positional = [] of String
+        parser.unknown_args { |before, after| positional = before + after }
+        parser.parse(args)
+        if msg = no_positional_error(positional, prefix, hint)
+          abort msg
+        end
+      end
+
       # `--db` and `--project` both name the target, so BOTH is not a preference to resolve —
       # it is two answers to one question, and silently keeping one is the failure this
       # surface is least able to survive.

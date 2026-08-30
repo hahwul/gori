@@ -1,5 +1,6 @@
 require "json"
 require "./engine"
+require "./flow_request"
 require "../media_type"
 require "../tolerance"
 require "../env"
@@ -188,7 +189,7 @@ module Gori::Repeater
       crlf = head_crlf?(base_text)
       base_text = normalize_head_lf(base_text) if crlf
       candidates = candidates_for(base_text, auto_cl: auto_cl)
-      return Report.new(restore_eol(base_text, crlf), [] of Removed, 0, false, "already minimal — nothing removable") if candidates.empty?
+      return Report.new(restore_eol(base_text, crlf), [] of Removed, 0, false, "already minimal — nothing removable (0 sends)") if candidates.empty?
 
       sends = 0
       # --- calibrate a FROZEN baseline from the original request ---
@@ -209,13 +210,13 @@ module Gori::Repeater
       # and `aborted` says so (same shape as an unreachable baseline, different sentence).
       if stop.try(&.stopped?)
         return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
-          "stopped before the baseline was calibrated — request left unchanged")
+          "stopped before the baseline was calibrated — request left unchanged (#{sends} sends)")
       end
-      return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true, "baseline unreachable — request left unchanged") if metrics.empty?
+      return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true, "baseline unreachable — request left unchanged (#{sends} sends)") if metrics.empty?
       statuses = metrics.compact_map(&.status).uniq!
       unless statuses.size <= 1
         return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
-          "baseline response unstable (status #{statuses.join("/")}) — request left unchanged")
+          "baseline response unstable (status #{statuses.join("/")}) — request left unchanged (#{sends} sends)")
       end
       baseline = calibrate(metrics, sigs)
 
@@ -233,8 +234,12 @@ module Gori::Repeater
         # baseline, so keeping them (aborted: false) is as sound as the capped partial.
         return Report.new(restore_eol(working, crlf), removed, sends, false, stop_note(removed, sends)) if stop.try(&.stopped?)
         r = backend.send(resolve.call(variant))
+        # The cap REFUSES before it charges (`CappedBackend#send` returns CAP_ERROR ahead of
+        # its own `@sent += 1`), so a refused call put nothing on the wire and must not be
+        # counted here either — counting it made `sends` report SEND_CAP + 1, in the note and
+        # in every surface's `sends` field.
+        return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed, sends)) if r.error == Fuzz::CappedBackend::CAP_ERROR
         sends += 1
-        return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed)) if r.error == Fuzz::CappedBackend::CAP_ERROR
         if unchanged?(r, baseline)
           working = variant
           removed << Removed.new(cand.kind, cand.label)
@@ -307,9 +312,17 @@ module Gori::Repeater
 
       query_segments(head_lines[0]?).each { |seg| out << query_candidate(seg) }
 
-      # Body params only when Auto-Content-Length is on (so resolve re-lengths the body) —
-      # otherwise a deliberately-wrong CL (a smuggling/CL.TE probe) would be clobbered.
-      if has_body && auto_cl && !body.empty?
+      # Body params only when the resolver will actually RE-LENGTH the body — otherwise a
+      # deliberately-wrong CL (a smuggling/CL.TE probe) would be clobbered.
+      #
+      # `auto_cl` alone was the whole test, and it stopped being sufficient the moment
+      # `FlowRequest.resync_content_length` learned to leave a deliberately malformed length
+      # alone: the flag was on, the re-length was not happening, and this gate's own premise
+      # was false. Every variant then went out with a body one param shorter under an
+      # unchanged (and unparseable) Content-Length — the origin mis-framed all of them
+      # identically, `unchanged?` said so, and the minimizer stripped every body param it had.
+      # `--apply` then wrote that back over the operator's request.
+      if has_body && auto_cl && body_reframable?(head_lines) && !body.empty?
         ct = (header_value(head_lines, "content-type") || "").downcase
         # `MediaType.json?`, not `includes?("application/json")`: that substring is absent from
         # every `+json` structured-syntax type — `application/graphql+json`,
@@ -323,6 +336,18 @@ module Gori::Repeater
         end
       end
       out
+    end
+
+    # Would `resolve` actually re-length this head's body? The two shapes that stop it are
+    # exactly the two `FlowRequest.resync_content_length` refuses: a `Transfer-Encoding` (the
+    # message is chunked, and the CL+TE pair is itself the probe) and a Content-Length that is
+    # not gori's to rewrite — malformed, duplicated, or obs-folded. A head with NO
+    # Content-Length is fine: `resolve` adds one (`add_if_missing` is on for this caller).
+    private def self.body_reframable?(head_lines : Array(String)) : Bool
+      return false if head_lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
+      cl = head_lines.select { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return true if cl.empty?
+      cl.size == 1 && FlowRequest.rewritable_length_header?(cl[0])
     end
 
     private def self.header_candidate(line : String) : Candidate
@@ -709,13 +734,19 @@ module Gori::Repeater
       "minimized: removed #{parts.join(", ")} (#{sends} sends)"
     end
 
-    private def self.cap_note(removed : Array(Removed)) : String
-      "send cap reached — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} so far (partial)"
+    # `sends` for the same reason the other two notes carry it: `report.note` is the ONE
+    # sentence the TUI notification and the `gori run` status line both print, so a note that
+    # omits the count is a surface that cannot state it. It IS redundant here (a capped run
+    # spent exactly `SEND_CAP`) and is stated anyway, because the alternative — the CLI
+    # appending the count itself — made the other two read `… (11 sends) · 11 sends`.
+    private def self.cap_note(removed : Array(Removed), sends : Int32) : String
+      "send cap reached — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} " \
+      "so far (partial, #{sends} sends)"
     end
 
-    # A stop reports the SENDS as well as the removals, unlike `cap_note`: the cap's count is
-    # already known (it is the cap), while "how many requests did the origin actually get
-    # before it stopped" is the whole question the operator pressed stop to ask.
+    # The send count matters most here: a capped run spent `SEND_CAP` by definition and a
+    # finished one ran to the end, but "how many requests did the origin actually get before
+    # it stopped" is the whole question the operator pressed stop to ask.
     private def self.stop_note(removed : Array(Removed), sends : Int32) : String
       "stopped — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} (#{sends} sends)"
     end

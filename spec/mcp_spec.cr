@@ -88,6 +88,29 @@ private def start_mcp_ws_origin : Int32
   port
 end
 
+# An origin that reads the upgrade and REFUSES it with a real HTTP response. The handshake
+# failed, but the origin answered — the distinction `WsEngine::Result#answered?` draws, and
+# the one that decides whether a session's stored last response is replaced.
+private def start_refusing_ws_origin(status : Int32) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    conn = origin.accept?
+    origin.close rescue nil
+    next unless conn
+    begin
+      conn.read_timeout = 5.seconds
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      conn << "HTTP/1.1 #{status} Forbidden\r\nContent-Length: 0\r\n\r\n"
+      conn.flush
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+  port
+end
+
 # An origin that completes the TCP handshake and then says nothing, so a send_request
 # against it occupies the tools worker until its own idle timeout fires. The socket is held
 # by the fiber for the life of the example (the spec's timeout, not the origin's, ends it).
@@ -2494,6 +2517,55 @@ describe Gori::MCP::Server do
         payload["repeater_id"].as_i64.should eq(repeater_id)
         payload["upgraded"].as_bool.should be_false
         payload["error"].as_s.should contain("connect failed")
+      end
+    end
+
+    # `gori run repeater send`'s WS path and the TUI's `drain_results` both persist the last
+    # response ONLY on success, and both say why: a later FAILED re-send must not wipe a good
+    # stored handshake. This surface wrote unconditionally, so one send at a session whose
+    # origin was momentarily down (or whose target had been retargeted) replaced a stored 101
+    # with an empty head — measured through the MCP stdio server, `length(response_head)`
+    # 129 → 0 — taking the TUI tab's handshake card and `repeater send --diff`'s baseline with
+    # it. Three surfaces, one row; the failure belongs in the RESULT, which carries it in full.
+    it "keeps a good stored handshake when a later send fails" do
+      with_store do |store|
+        rid = store.insert_repeater("ws://127.0.0.1:1",
+          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
+          false, true, nil, 0)
+        good = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
+        store.update_repeater_response(rid, good.to_slice, Bytes.empty, nil, 42_i64)
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+
+        row = store.get_repeater_full(rid).not_nil!
+        String.new(row.response_head.not_nil!).should eq(good)
+        row.response_error.should be_nil
+      end
+    end
+
+    # The other half of the same gate. `ok?` alone would keep the stale 101 forever at an
+    # origin that has started answering 403 — the TUI handshake card, `repeater list` and
+    # `repeater send --diff`'s baseline all going on showing a handshake the origin no longer
+    # performs, with `--diff` silently comparing each new run against it. The origin ANSWERED;
+    # that answer is the news, and it is what the row now holds.
+    it "replaces the stored handshake when the origin answers, but does not upgrade" do
+      with_store do |store|
+        port = start_refusing_ws_origin(403)
+        rid = store.insert_repeater("ws://127.0.0.1:#{port}",
+          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
+          false, true, nil, 0)
+        store.update_repeater_response(rid,
+          "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n".to_slice, Bytes.empty, nil, 42_i64)
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+
+        row = store.get_repeater_full(rid).not_nil!
+        String.new(row.response_head.not_nil!).should contain("403")
+        row.response_error.not_nil!.should contain("did not upgrade")
       end
     end
 

@@ -375,7 +375,11 @@ module Gori
           end)
           return
         end
-        STDERR.puts "#{report.note} · #{report.sends} send#{report.sends == 1 ? "" : "s"}"
+        # `report.note` already ends in the send count (every one of `Minimize`'s three notes
+        # states it, because that note is the whole sentence the TUI notification prints), so
+        # appending it here read `minimized: removed 2 cookies, 3 params (8 sends) · 8 sends`.
+        # The JSON form keeps its own `sends` field — a script should not have to parse prose.
+        STDERR.puts report.note
         report.removed.each { |r| STDERR.puts "  - [#{r.kind.to_s.downcase}] #{r.label}" }
         STDERR.puts "saved back to session ##{id}" if applied
         STDOUT.write(wire)

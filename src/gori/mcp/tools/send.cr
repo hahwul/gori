@@ -926,8 +926,14 @@ module Gori
         end
         result = plan.send_ws(out_messages, idle, keep_key)
 
+        # ONLY when the origin ANSWERED (see `WsEngine::Result#answered?`). This surface wrote
+        # unconditionally, so one `send_websocket` at a session whose target had moved (or an
+        # origin that was momentarily down) replaced the stored 101 with an empty head —
+        # measured: `length(response_head)` 129 → 0, and with it the TUI tab's handshake card
+        # and `repeater send --diff`'s baseline. The row is not this call's report; the result
+        # below is, and it carries the failure in full.
         store.update_repeater_response(repeater_id, result.handshake_head, Bytes.empty,
-          result.error, result.duration_us)
+          result.error, result.duration_us) if result.answered?
         Log.info { "send_websocket #{plan.scheme}://#{host}:#{plan.port} repeater_id=#{repeater_id} -> #{result.ok? ? "ok" : result.error}" }
 
         payload = JSON.build do |j|

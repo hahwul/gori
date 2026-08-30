@@ -116,6 +116,73 @@ describe Gori::Repeater::FlowRequest do
       wire = "POST /x HTTP/1.1\r\n transfer-encoding: chunked\r\nContent-Length: 3\r\n\r\nABCDEFGHIJ".to_slice
       Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
     end
+
+    # The TUI editor has always refused to rewrite these (`RepeaterView#rewritable_length_header?`,
+    # whose comment states the rule as "the test on screen must be the test on the wire") — and
+    # the wire did it anyway, so one request had two Content-Lengths depending on where you
+    # read it. Measured through `gori run repeater create -f req.txt` + `repeater send` against
+    # a raw-socket origin: the stored/pane value `0abc`, the bytes the origin logged
+    # `Content-Length: 2`. A malformed length is a desync primitive, so the repair also defused
+    # the probe.
+    it "leaves a deliberately malformed Content-Length alone (the editor guard's other half)" do
+      %w[0abc +5 -1].each do |bad|
+        wire = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: #{bad}\r\n\r\nhi".to_slice
+        Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+      end
+    end
+
+    # `-H "Content-Length:"` sends the header with an EMPTY value, which is a different test
+    # from omitting it — and inventing a number for it would make the flag read as a no-op.
+    it "leaves an EMPTY Content-Length alone" do
+      wire = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length:\r\n\r\nhi".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+
+    # …and the guard is about the VALUE's shape, not about tidiness: leading zeros and OWS
+    # around the digits are still an ordinary length auto-CL may keep honest, exactly as the
+    # editor reads them (both strip before the digit test).
+    it "still rewrites a padded / zero-padded decimal" do
+      wire = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length:  0005  \r\n\r\nhi".to_slice
+      String.new(Gori::Repeater::FlowRequest.resync_content_length(wire))
+        .should contain("Content-Length: 2\r\n")
+    end
+
+    # A CL.CL desync probe: the disagreement IS the test, exactly as it is for the CL+TE pair.
+    # Rewriting only the first (the sole one this rewrite can reach) turned `5`/`7` into
+    # `2`/`7` — the operator's probe replaced by a different one, silently.
+    it "leaves a message carrying TWO Content-Lengths alone" do
+      wire = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nhi".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+
+    # The matcher that FINDS the line `lstrip`s, so a guard cannot be dodged by indenting —
+    # right for a refusal, destructive for a rewrite, which replaces the WHOLE line. An
+    # obs-fold continuation (RFC 9112 §5.2) came back unindented as a second real header.
+    it "leaves an obs-fold continuation line alone" do
+      wire = "POST /x HTTP/1.1\r\nHost: h\r\nX-Foo: bar\r\n Content-Length: 5\r\n\r\nhi".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
+    end
+  end
+
+  # ONE predicate, because the editor and the wire were reading two.
+  describe ".rewritable_length_header?" do
+    it "accepts a decimal, with or without padding and leading zeros" do
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 5").should be_true
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length:  0005  ").should be_true
+    end
+
+    it "refuses anything else — those are the operator's deliberate bytes" do
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 0abc").should be_false
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: +5").should be_false
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length:").should be_false
+      # The mid-edit clobber shape the editor guard was written for: the next header still
+      # glued to this line's tail. Rewriting replaces the WHOLE line, taking it with it.
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 4GET / HTTP/1.1").should be_false
+      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length").should be_false
+      # An indented field name is an obs-fold continuation, not a header this may replace.
+      Gori::Repeater::FlowRequest.rewritable_length_header?(" Content-Length: 5").should be_false
+      Gori::Repeater::FlowRequest.rewritable_length_header?("\tContent-Length: 5").should be_false
+    end
   end
 
   # The REQUEST-side fact behind the "captured incomplete" replay warning. It used to key on
