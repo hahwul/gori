@@ -171,7 +171,7 @@ module Gori::Miner
     # `config.keep_alive?` off). Surfaces read its counters to report how many handshakes the
     # run actually paid for — the one directly observable measure of what pooling bought.
     # Same accessor `Fuzz::Plan` publishes, so the two CLI reporters stay one shape.
-    def pool : Fuzz::ConnPool?
+    def pool : Fuzz::Pool?
       @sender.pool
     end
 

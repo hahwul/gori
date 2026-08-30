@@ -220,7 +220,7 @@ module Gori
 
       private def self.run_mine_stream(engine : Miner::Engine, scheme : String, host : String,
                                        port : Int32, config : Miner::Config, format : Symbol,
-                                       pool : Fuzz::ConnPool? = nil) : Nil
+                                       pool : Fuzz::Pool? = nil) : Nil
         total = engine.total_names
         STDERR.puts "mining #{scheme}://#{host}:#{port} · #{config.locations.map(&.label).join("/")} · #{total} names"
         # Names the wordlist supplied that this location cannot carry. Dropping them is
@@ -326,7 +326,7 @@ module Gori
       # it: it is how an operator sees whether the origin honoured keep-alive at all (dialed ≈
       # sent means it closed after every response, or the probes were too odd to share a socket
       # — see ConnPool). Nothing is printed for a --no-keep-alive or h2 run, which has no pool.
-      private def self.mine_connections(pool : Fuzz::ConnPool?) : Nil
+      private def self.mine_connections(pool : Fuzz::Pool?) : Nil
         return unless pool && pool.dialed > 0
         STDERR.puts "connections · #{pool.dialed} dialed · #{pool.reused} reused" \
                     "#{pool.stale_retries > 0 ? " · #{pool.stale_retries} re-sent on a closed connection" : ""}" \

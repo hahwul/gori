@@ -6,6 +6,7 @@ require "../outbound"
 require "../env"
 require "../scope"
 require "../repeater/conn_pool"
+require "../repeater/h2_pool"
 require "../pacing"
 
 module Gori::Fuzz
@@ -13,6 +14,11 @@ module Gori::Fuzz
   # (it is transport over `Repeater::Engine`, not anything fuzz-specific). The fuzz-side name
   # is what the sweep code, its spec and half a dozen comments say, so it stays spelled here.
   alias ConnPool = Repeater::ConnPool
+  # The HTTP/2 half of the same idea, and the abstract both answer to. A sweep holds ONE of
+  # them, chosen by the run's protocol, and every surface that reports handshakes reads the
+  # abstract — see `Repeater::Pool`.
+  alias H2Pool = Repeater::H2Pool
+  alias Pool = Repeater::Pool
 
   # The origin a run targets (also the boundary for redirect following).
   #
@@ -208,9 +214,11 @@ module Gori::Fuzz
     # so `Progress#requests` ("REQUESTS actually put on the wire") stays honest — a race of 50
     # with a warmup is 100 requests, not 50. See `Backend#extra_requests`.
     @race_warmups : Int64 = 0_i64
-    # The HTTP/1.1 keep-alive pool, or nil for connection-per-send (h2, or keep_alive off).
-    # Exposed so a surface can report how many handshakes a run actually paid for.
-    getter pool : ConnPool?
+    # The run's keep-alive pool, or nil for connection-per-send (`keep_alive` off, or a
+    # WebSocket run, which has no request/response connection to park). `ConnPool` on
+    # HTTP/1.1, `H2Pool` on h2 — a surface reads the shared counters off `Repeater::Pool` and
+    # never asks which. Exposed so it can report how many handshakes a run actually paid for.
+    getter pool : Pool?
 
     # PROVENANCE, carried from the plan builder's `PlanOptions#evidence?` — the twin of
     # `Repeater::Sender#evidence?`, which has gated this same pair of passes since #501.
@@ -291,10 +299,24 @@ module Gori::Fuzz
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                    @ws_keep_key : Bool = false, tls_preset : String? = nil)
       @tls_preset = Settings.tls_preset_normalize(tls_preset)
-      # h2 is excluded: H2Engine frames its own connection per send, and multiplexing it is
-      # a separate change with its own stream-state rules.
-      @pool = (keep_alive && !@http2) ? ConnPool.new(@origin.scheme, @origin.host, @origin.port,
-        @verify, @sni, @timeout, @overrides, Math.max(idle_conns, 1), @tls_preset) : nil
+      # h2 used to be excluded here, on the ground that "H2Engine frames its own connection
+      # per send". It did, and that WAS the cost: an h2 sweep paid a TCP handshake, a TLS
+      # handshake and an h2 preface round per payload, on the protocol a captured flow selects
+      # automatically. `H2Pool` reuses a connection SERIALLY (stream 1, then 3, then 5) — not
+      # multiplexing, which is a different program, but all of the handshake win, which is
+      # what a sweep was actually paying. Same `idle_conns` reading for both: one parked
+      # connection per worker fiber is the most that can ever be checked out at once.
+      idle = Math.max(idle_conns, 1)
+      @pool =
+        if !keep_alive
+          nil
+        elsif @http2
+          H2Pool.new(@origin.scheme, @origin.host, @origin.port, @verify, @sni, @timeout,
+            @overrides, idle, @tls_preset)
+        else
+          ConnPool.new(@origin.scheme, @origin.host, @origin.port, @verify, @sni, @timeout,
+            @overrides, idle, @tls_preset)
+        end
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -357,13 +379,15 @@ module Gori::Fuzz
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
-      result =
-        if @http2
+      result = # The POOL first, whichever protocol it pools: it is the only branch that can reuse a
+      # connection, and both unpooled engines below dial a fresh one per send.
+
+        if p = @pool
+          p.send(bytes)
+        elsif @http2
           Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
             port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,
             overrides: @overrides, tls_preset: @tls_preset)
-        elsif p = @pool
-          p.send(bytes)
         else
           Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
             port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,

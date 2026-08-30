@@ -85,7 +85,7 @@ private def start_origin(tls : Bool, delay : Time::Span) : Int32
   port
 end
 
-private def mine(scheme : String, port : Int32, keep_alive : Bool) : {Int64, Int32, Gori::Repeater::ConnPool?}
+private def mine(scheme : String, port : Int32, keep_alive : Bool) : {Int64, Int32, Gori::Repeater::Pool?}
   request = "GET /?q=1 HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nAccept: */*\r\nCookie: sid=1\r\n\r\n"
   config = M::Config.new(
     locations: [M::Location::Query, M::Location::Headers, M::Location::Cookies],

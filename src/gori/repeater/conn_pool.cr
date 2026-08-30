@@ -1,6 +1,7 @@
 require "../proxy/codec/body"
 require "../proxy/codec/http1"
 require "./engine"
+require "./pool"
 
 # Non-blocking "is there residue in the read buffer?" — the piece Crystal's public IO has no
 # way to ask. `ConnPool#checkout_state` needs it because `read_head` reads byte-by-byte through the
@@ -85,7 +86,7 @@ module Gori::Repeater
   # array's `pop`/`push` nor the counter bumps yield, so a worker fiber can never observe a
   # half-updated pool. The array is a LIFO free list — the most recently used socket is the
   # least likely to have hit the origin's idle timeout.
-  class ConnPool
+  class ConnPool < Pool
     # A parked socket the origin closed while it sat idle is normal (every server has a
     # keep-alive idle timeout) and must not surface as a failed result. There are two moments
     # it can be discovered, and they are NOT the same fact:

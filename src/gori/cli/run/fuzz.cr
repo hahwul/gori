@@ -136,7 +136,7 @@ module Gori
           p.on("--race=N", "Race condition (last-byte-sync): dial N connections and release them together, instead of a --mode sweep") { |v| race = parse_count(v, "--race") }
           p.on("--race-warmup=FILE", "Race mode: send+read this raw request on each connection before it holds the race request") { |v| race_warmup_file = v }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
-          p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse)") { keep_alive = false }
+          p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse, on HTTP/1.1 and h2 alike)") { keep_alive = false }
           # The Repeater's `--verbatim` and Intercept's `update_content_length:false` by the
           # same name and for the same reason: a CL/CL-TE desync template is the payload, and
           # recomputing its Content-Length swept a different request than the one written.
@@ -703,7 +703,7 @@ module Gori
       # whether the run may proceed; it only streams it.
       private def self.run_fuzz_stream(engine : Fuzz::Engine, total : Int64?, race : Int32?, scheme : String,
                                        host : String, port : Int32, format : Symbol,
-                                       fail_if_no_matches : Bool, pool : Fuzz::ConnPool? = nil,
+                                       fail_if_no_matches : Bool, pool : Fuzz::Pool? = nil,
                                        max_requests : Int64? = nil,
                                        reframe_grpc : Bool = false,
                                        record_store : Store? = nil, record_policy : Symbol = :none,
@@ -896,7 +896,7 @@ module Gori
                     "marks the success response (a correctly-guarded endpoint should show ≤1)"
       end
 
-      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::ConnPool?,
+      private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32, pool : Fuzz::Pool?,
                                  max_requests : Int64? = nil, race : Int32? = nil,
                                  matcher_constrained : Bool = false,
                                  reframe_grpc : Bool = false) : Nil

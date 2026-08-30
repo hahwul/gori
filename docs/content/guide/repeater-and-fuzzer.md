@@ -178,7 +178,9 @@ Four knobs do not apply. `--race` and `--http2` are refused outright — a race 
 
 ### Connection Reuse
 
-A sweep reuses one HTTP/1.1 connection across many requests, so a run pays one TCP — and, on `https`, one TLS — handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.
+A sweep reuses one connection across many requests, so a run pays one TCP — and, on `https`, one TLS — handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.
+
+**HTTP/2 too.** An h2 sweep reuses a connection serially — stream 1, then 3, then 5 — rather than dialing one per payload. It matters more than it sounds, because h2 is not something you usually turn on by hand: a sweep seeded from a captured h2 flow (`⇧I` from History, `gori run fuzz <flow-id>`) selects it for itself, which is most captured traffic from a modern target. Measured on loopback, where the round trip is ~0 and the win is therefore understated: 2000 requests over h2+TLS went 1.56s to 0.08s, and 2000 handshakes to 50.
 
 Requests gori cannot prove unambiguous never share a socket, whatever the setting: a `Content-Length` that does not match the body on the wire, `CL`+`TE`, an obfuscated framing header, `Connection: close`, or `Upgrade` each get their own connection, so a smuggling payload can never misframe the next payload's result. Turn reuse off entirely with `--no-keep-alive` (CLI), `keep_alive: false` (MCP), or the **Keep-alive** toggle in the Fuzzer's ADVANCED overlay when the target's behaviour is per-connection — a connection-scoped rate limit, a load balancer pinning by connection — or when keep-alive handling is itself what you are testing.
 
