@@ -100,6 +100,10 @@ NixOS / home-manager 설정에 입력(input)으로 고정할 수도 있습니다
 
   # 이후 패키지 목록에서:
   #   inputs.gori.packages.${pkgs.system}.default
+
+  # 또는 오버레이를 한 번 얹으면 어디서든 `pkgs.gori`로 쓸 수 있습니다. 사용할 때마다
+  # ${system}을 적을 필요가 없고, gori도 설정의 나머지와 같은 nixpkgs로 빌드됩니다:
+  #   nixpkgs.overlays = [ inputs.gori.overlays.default ];
 }
 ```
 

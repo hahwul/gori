@@ -69,11 +69,27 @@ module Gori::Update
   end
 
   # Covers every Nix entry point — `nix profile`, `nix run`, NixOS/home-manager —
-  # because all of them ultimately resolve to a store path. Kept to the default
-  # store location (a relocated NIX_STORE_DIR would degrade to Binary, which the
-  # read-only store then rejects with a plain permission error).
+  # because all of them ultimately resolve to a store path.
+  #
+  # The default `/nix/store` prefix is enough on its own. A RELOCATED store still has
+  # to be caught, though: a rootless install keeps one under `~/.local/share/nix/root`
+  # and `NIX_STORE_DIR` moves it anywhere, and misreading those as Binary sends gori
+  # off to overwrite an immutable file — the user gets a bare permission error where
+  # the Nix guidance belongs. Away from the default prefix it is the SHAPE that
+  # identifies a store: a `nix/store/` segment followed by a store hash, 32 characters
+  # of Nix's base32 alphabet (no e/o/t/u) and then a `-`. Demanding the hash is what
+  # keeps a plain `~/nix/store/gori` classified as Binary, which is where it belongs.
+  #
+  # `.scrub` because the subject is an OS path: `Update.run` hands this whatever
+  # `File.realpath(Process.executable_path)` returned, and a Linux path is bytes, not
+  # necessarily UTF-8. PCRE raises `ArgumentError` on an invalid subject, and the only
+  # rescue above this is `Gori::Error` — so an un-scrubbed match would turn a path this
+  # predicate used to answer `false` for into a backtrace out of `gori update`.
+  # `matches?` rather than `match`: this is a yes/no, and it skips the MatchData.
+  NIX_STORE_SEGMENT = /(?:\A|\/)nix\/store\/[0-9a-df-np-sv-z]{32}-/
+
   def self.nix_path?(path : String) : Bool
-    path.starts_with?("/nix/store/")
+    path.starts_with?("/nix/store/") || NIX_STORE_SEGMENT.matches?(path.scrub)
   end
 
   # Paths where distro packages typically install the CLI (not /usr/local).

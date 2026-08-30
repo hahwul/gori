@@ -96,6 +96,36 @@ describe Gori::Update do
       Gori::Update.detect_channel("/home/u/nix/store/gori").should eq(Gori::Update::Channel::Binary)
     end
 
+    it "detects a relocated store by the store-path shape" do
+      # A rootless install (`nix` without root, or NIX_STORE_DIR moved) puts the store
+      # somewhere under $HOME. It is still read-only, so classifying it as Binary would
+      # send `gori update` off to overwrite an immutable file.
+      Gori::Update.detect_channel(
+        "/home/u/.local/share/nix/root/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.4.0/bin/gori")
+        .should eq(Gori::Update::Channel::Nix)
+      Gori::Update.detect_channel(
+        "/opt/mystore/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.4.0/bin/gori")
+        .should eq(Gori::Update::Channel::Nix)
+      # The hash is the whole discriminator: without one, a directory a user happens to
+      # have called `nix/store` off the default prefix is an ordinary binary install.
+      Gori::Update.detect_channel("/home/u/nix/store/bin/gori").should eq(Gori::Update::Channel::Binary)
+      # `e`, `o`, `t` and `u` are not in Nix's base32 alphabet, so 32 characters that
+      # include them are not a store hash.
+      Gori::Update.detect_channel(
+        "/home/u/nix/store/euteuteuteuteuteuteuteuteuteuteu-gori-0.4.0/bin/gori")
+        .should eq(Gori::Update::Channel::Binary)
+    end
+
+    it "answers for a path that is not valid UTF-8 instead of raising" do
+      # `Update.run` passes `File.realpath(Process.executable_path)` straight in, and a
+      # Linux path is bytes. PCRE raises on an invalid subject, so a store predicate
+      # that matched without scrubbing would backtrace out of `gori update` on a path
+      # it is supposed to simply answer `false` for.
+      dirty = String.new(Bytes[0x2f, 0x6f, 0x70, 0x74, 0x2f, 0xfe, 0xff, 0x2f, 0x67, 0x6f, 0x72, 0x69])
+      Gori::Update.detect_channel(dirty).should eq(Gori::Update::Channel::Binary)
+      Gori::Update.nix_path?(dirty).should be_false
+    end
+
     it "classifies /usr/bin by package ownership, not path alone" do
       Gori::Update.detect_channel("/usr/bin/gori",
         owner: Gori::Update::OwnerResult::Pacman).should eq(Gori::Update::Channel::Pacman)

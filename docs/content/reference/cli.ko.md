@@ -1368,7 +1368,9 @@ gori update --exec   # Homebrew/Snap: run the package-manager command
 | pacman / AUR | `yay` / `paru` / `pacman` 안내 출력 |
 | deb (dpkg) | `apt` 업그레이드 안내 출력 |
 | rpm | `dnf` / `yum` / `zypper` 안내 출력 |
-| Nix (`/nix/store`) | `nix profile upgrade` / 플레이크 업데이트 안내 출력; 스토어가 읽기 전용이므로 아무것도 내려받지 않음 |
+| Nix (스토어 경로) | `nix profile upgrade` / 플레이크 업데이트 안내 출력; 스토어가 읽기 전용이므로 아무것도 내려받지 않음 |
+
+스토어 경로란 `/nix/store/…`뿐 아니라 옮겨진 스토어도 포함합니다. 루트 없이 설치하면 스토어가 `~/.local/share/nix/root` 아래에 놓이고, `NIX_STORE_DIR`로 어디로든 옮길 수 있습니다. 기본 접두사를 벗어나면 스토어 해시의 형태로 판별하므로, 사용자가 우연히 `nix/store`라고 이름 붙인 디렉터리는 그대로 일반 바이너리 설치로 분류됩니다.
 
 `/usr/bin` 또는 `/bin` 아래 경로는 패키지 소유권(`pacman -Qo`, `dpkg-query -S`, `rpm -qf`)으로 분류됩니다. 관리자가 파일을 소유하면 gori는 절대 덮어쓰지 않습니다. 프로브가 소유자를 찾지 못하면 바이너리 채널이 자체 업데이트합니다. 패키지 도구가 전혀 없으면 `/etc/os-release`(`ID` / `ID_LIKE`)로 Arch 계열 / Debian 계열 / RHEL 계열 안내를 폴백으로 고릅니다.
 
