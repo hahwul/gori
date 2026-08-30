@@ -205,7 +205,7 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 
 - **JWT**: `Authorization`, 쿠키, URL, 본문에서 헤더와 페이로드를 디코드합니다(서명은 표시되지만 검증하지 않습니다).
 - **SAML**: `SAMLRequest` / `SAMLResponse`에 대해 base64(그리고 리다이렉트 바인딩의 경우 DEFLATE)를 디코드합니다.
-- **GraphQL**: POST 본문과 `?query=` 파라미터에서 `query`, `operationName`, `variables`를 파싱합니다.
+- **GraphQL**: 실제 API가 노출하는 모든 형태에서 `query`, `operationName`, `variables`를 파싱합니다 — POST JSON 본문, GET `?query=`, `query=…&variables=…` urlencoded 본문, 배치 배열, persisted query(`extensions.persistedQuery`. 와이어에 문서 자체가 없습니다), multipart 업로드 뮤테이션, 그리고 `Content-Type: application/graphql` 원문 문서. GraphQL을 실어 나르는데 파싱되지 않는 요청은 패널을 잃는 대신 **이유** 를 말합니다. 읽을 가치가 있는 쪽은 보통 그 망가진 요청입니다. **구독(subscription)도 포함됩니다.** 캡처된 소켓의 `graphql-transport-ws` 또는 구형 `subscriptions-transport-ws` 프레임도 같은 GRAPHQL 패널로 디코드되며, 판정 기준은 서브프로토콜이 프레임 `type`을 뭐라고 부르는지가 아니라 payload가 GraphQL 봉투인지입니다.
 - **Form 파라미터**: `application/x-www-form-urlencoded` 및 `multipart/form-data` 요청 본문과 URL 쿼리 문자열을 PARAMS 패널에서 단순한 key=value 목록으로 디코드합니다(multipart 파일 파트는 요약됩니다).
 
 ## 이 플로우는 어디서 왔나 {#flow-source}
@@ -364,6 +364,26 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 표시는 필터 변경, 정렬 변경, 다른 탭에 갔다 오는 것에도 유지됩니다. 카운트 칩이 현재 화면에 없는 개수를 알려줍니다. 트래픽을 보내는 동작은 여전히 먼저 확인을 받고 요청마다 스코프를 검사합니다 — 표시는 요청 수를 바꾸지, 게이트를 바꾸지 않습니다. 플로우 하나에만 의미가 있는 몇 가지(상세 보기 열기, Sequencer, 브라우저로 응답 열기)는 단일 대상으로 남으며, 표시가 있는 동안 메뉴 항목에 `(cursor)`가 붙습니다.
 
+## 요청을 코드로 복사하기 {#copy-as-code}
+
+플로우 하나 위에서 `Space` `Y` — History에서, 상세 뷰의 REQUEST 패널에서, Repeater 탭에서 — 를 누르면 **Copy as…** 가 열립니다. 같은 요청을 다른 도구가 읽는 모양으로 내줍니다.
+
+| 항목 | 클립보드에 담기는 것 |
+|------|----------------------|
+| URL / Headers / Body / Cookies | 각 부분만. 요청에 담을 내용이 없는 항목은 아예 나타나지 않습니다 |
+| cURL | 실행 가능한 `curl` 명령 |
+| Python | `requests` 스크립트 |
+| fetch | JavaScript `fetch()` 호출 |
+| Go | `net/http` 프로그램 |
+| httpie | `http` 명령줄 |
+| CSRF PoC | 요청을 교차 출처로 재현하는 자동 제출 HTML 폼 |
+| wscat | WebSocket Repeater 탭 전용. 핸드셰이크와 out-프레임을 `wscat` 세션으로 |
+| Raw request / Raw response / Req + Res pair | 와이어 바이트 그대로 |
+
+언어 항목은 모두 **요청** 입니다. 응답 패널에는 더 짧은 자체 메뉴(status + headers / body / raw)가 있습니다. 메뉴와 CLI가 직렬화기 하나를 공유하므로 `gori run show --format curl|python|fetch|go|httpie|csrf`([run show](/ko/reference/cli/#run-show))와 바이트 단위로 같은 텍스트가 나옵니다. Repeater 탭에서는 이 메뉴가 `¦chain`의 [`exec:` 훅](/ko/guide/scripting/)을 **실행** 합니다. 요청을 그리기만 하는 다른 경로와 다른 점인데, 훅을 건너뛴 명령줄은 스스로 재현한다고 주장하는 그 전송을 재현하지 못하기 때문입니다.
+
+여러 플로우를 마크하면 메뉴가 집합용 형식으로 바뀝니다 — URL 목록, 호스트 목록, 그리고 (20개까지) cURL, raw request, raw response, req+res 쌍. 언어별 스니펫은 단일 플로우 전용입니다. Go 프로그램 스무 개가 든 파일은 아무도 붙여넣지 않습니다.
+
 ## 브라우저로 응답 열기 {#open-in-browser}
 
 터미널은 페이지를 레이아웃하지도, PNG를 보여주지도, PDF를 페이지 단위로 넘기지도 못합니다. `Space` `Shift-B`는 그걸 할 수 있는 곳으로 응답을 넘깁니다. gori가 **디코딩된** 본문을 `~/.gori/preview/` 아래 파일로 쓰고, 데스크톱의 오프너(macOS는 `open`, Linux는 `xdg-open`)로 엽니다.
@@ -409,6 +429,24 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 목록은 `a` 추가, `e`/`Enter` 편집, `x` 켜기/끄기, `d` 삭제, `s` 전역/프로젝트 전환, `Shift-J`/`Shift-K` 순서 변경(규칙은 위에서 아래로 적용), `space`로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로우에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 저장 즉시 적용되고 재시작은 필요 없습니다.
 
 목록 아래에는 편집 가능한 **샘플** 메시지와, 그 옆에 켜져 있는 규칙을 통과시킨 결과가 나란히 놓입니다. 실제로 캡처한 요청을 붙여 넣어 규칙을 풀어놓기 전에 무엇이 바뀌는지 확인하는 자리입니다. 샘플은 그것이 미리 보여 주는 규칙과 마찬가지로 프로젝트에 저장됩니다.
+
+### 프리셋 — 능력이 아니라 출발점 {#rewriter-presets}
+
+거의 모든 엔게이지먼트에서 반복되는 응답 재작성이 일곱 가지 있고, 하나같이 다시 타이핑하기 싫은 정규식입니다. Rewriter에서 `p`(**Add from preset…**)를 눌러 고르세요.
+
+| 프리셋 | 설치하는 것 |
+|--------|-------------|
+| `unhide-hidden-fields` | `<input type="hidden">`을 `type="text"`로 바꿔 필드를 보이고 편집 가능하게 |
+| `enable-disabled-fields` | 폼 컨트롤에서 `disabled` / `readonly` 제거 |
+| `remove-length-limits` | `maxlength=` 제거 |
+| `strip-validation` | 제출을 막는 `required`, `pattern=`, `on{submit,change,input}=` 핸들러 제거 |
+| `remove-csp` | Content-Security-Policy 헤더 제거 |
+| `remove-security-headers` | 브라우저 측 보호 헤더 제거 |
+| `disable-sri` | `integrity=`를 벗겨 subresource-integrity 검사가 수정된 자산을 막지 않게 |
+
+프리셋은 **능력이 아니라 출발점**입니다 — 일곱 가지 모두 Match & Replace가 이미 표현할 수 있습니다. 설치하면 `a`와 같은 경로로 평범한 규칙이 쓰이므로, 목록에 나타나고, 어느 프리셋에서 왔는지 이름을 달고 있으며, 직접 타이핑한 규칙과 똑같이 편집·순서변경·비활성화·삭제됩니다. 같은 프리셋을 두 번 설치하면 조용히 병합되지 않고 눈에 보이게 중복됩니다.
+
+헤드리스에서는 `gori run rewriter preset list`와 `gori run rewriter preset add <name>`(`--scope=global`, 트래픽에 닿기 전에 검토하려면 `--disabled`)이고, 에이전트는 `list_rule_presets`로 읽고 `create_rule_from_preset`으로 설치합니다.
 
 ### 전역 규칙과 프로젝트 규칙 {#reusing-a-rule-across-projects}
 
@@ -638,7 +676,7 @@ gori는 모든 HTTPS 연결을 가로채므로, 인증서를 피닝하는 클라
 }
 ```
 
-이름은 `chrome`, `firefox`, `safari`, `curl` 네 가지입니다. 각각 암호군 목록과 순서, TLS 1.3 스위트, 지원 그룹, 서명 알고리즘, 브라우저가 제안하는 `h2, http/1.1` ALPN 쌍(gori의 기본값은 프로토콜 하나만 제안하는데, 이것부터가 이미 티가 납니다), 그리고 `session_ticket`·`status_request` 확장이 아예 나타나는지 여부를 채웁니다. 규칙에 직접 적은 값은 프리셋을 이기고, 각 필드는 프리셋 없이 단독으로도 쓸 수 있습니다 — [`outbound_tls`](/ko/reference/config/#outbound_tls) 참고.
+이름은 `chrome`, `firefox`, `safari`, `curl` 네 가지입니다. 각각 암호군 목록과 순서, TLS 1.3 스위트, 지원 그룹, 서명 알고리즘, 브라우저가 제안하는 `h2, http/1.1` ALPN 쌍(gori의 기본값은 프로토콜 하나만 제안하는데, 이것부터가 이미 티가 납니다), 그리고 `session_ticket`·`status_request` 확장이 아예 나타나는지 여부를 채웁니다. 규칙에 직접 적은 값은 프리셋을 이기고, 각 필드는 프리셋 없이 단독으로도 쓸 수 있습니다 — [`outbound_tls`](/ko/reference/config/#outbound-tls) 참고.
 
 그리고 확인하세요. 와이어에 닿지 못한 손잡이는 닿은 손잡이와 겉보기가 똑같습니다:
 

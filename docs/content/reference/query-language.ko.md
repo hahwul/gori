@@ -17,7 +17,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `url` | 전체 URL |
 | `method` | HTTP 메서드 |
 | `scheme` | `http` / `https` |
-| `proto` | 프로토콜: `http`, `ws`, `grpc`, `sse` |
+| `proto` | 프로토콜: `http`, `ws`, `grpc`, `sse` — TLS 쪽은 `s`를 붙입니다(`https`, `wss`, `grpcs`, `sses`). `websocket`은 `ws`의 별칭입니다 |
 | `src` | 이 플로우가 어디서 왔는지([아래](#src-provenance)) |
 | `status` | 응답 상태 코드 |
 | `size` | 요청 + 응답 전체 바이트 |
@@ -25,6 +25,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `dur` | 응답 시간(밀리초) |
 | `header` | 헤드(요청 + 응답 헤더) 부분 문자열 |
 | `body` | 본문 전문 검색(trigram FTS 인덱스) |
+| `stub` | `true` / `false` — 원본에 닿지 않고 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)이 gori 자신이 답한 플로우 |
 | `scope` | `in` / `out` — 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
 
 ```text

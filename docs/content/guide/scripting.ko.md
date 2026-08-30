@@ -97,13 +97,14 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계산*해야 할 때 — JWT 재서명, 바디
 재압축, 독자 포맷 봉투 복호화, 진짜 탐지기 실행 — 이미 가지고 있는 프로그램에 바이트를 넘기면
 됩니다. stdin으로 바이트를 주고 stdout으로 교체 바이트를 받습니다. 확장 표면은 이게 전부이고,
-같은 원시 도구가 세 군데에 붙어 있습니다.
+같은 원시 도구가 네 군데에 붙어 있습니다.
 
 | 이음매 | 위치 | 하는 일 |
 |--------|------|---------|
 | Rewriter `pipe` 액션 | Rewriter 탭, `gori run rewriter add --op=pipe`, MCP `create_rule` | 매치된 구간을 명령에 넘기고 stdout으로 교체 — 프록시에서 실시간으로 |
 | Decoder `exec:` 스텝 | Decoder 탭 체인, `gori run decoder`, `§value¦chain§` 마커 | 체인의 한 스텝이 컨버터가 아니라 명령 |
 | Probe `exec` 룰 | Probe 룰, `gori run probe rules add --exec` | 구간을 명령에 넘겨 exit 0이면 발견, stdout이 근거 |
+| Miner `--hook` | `gori run mine --hook`, MCP `mine_start`의 `hook` | 조립된 요청 전체를 명령에 넘기고 그 stdout이 실제로 나가는 요청 — 프로브 하나당 훅 하나 |
 
 ```bash
 # 브라우저에서 나가는 모든 JWT를 내 서명기로 재서명한다.
@@ -115,6 +116,9 @@ gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$
 
 # 정규식 대신 진짜 탐지기가 판정하게 한다.
 gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
+
+# 서명이 걸린 API에서 숨은 파라미터 찾기: 나가기 전에 모든 프로브에 서명한다.
+gori run mine 42 --locations=query --hook './sign.sh'
 ```
 
 **명령은 직접 exec됩니다. 셸이 없습니다.** `argv`는 따옴표와 백슬래시 규칙(`'a b'`, `"a b"`,
@@ -130,6 +134,15 @@ gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak
 없습니다. Rewriter에서 타임아웃은 한 번의 재작성에 걸린 모든 pipe 룰과 모든 매치가 나눠 쓰는
 *예산*입니다. 400번 매치되는 패턴도, 한 헤드에 걸린 pipe 룰 4개도 예산 한 번만큼만 듭니다. 메시지
 하나는 헤드와 바디로 두 번 재작성되므로 메시지가 보는 한계는 그 두 배입니다.
+
+**Miner의 훅은 프로브마다 한 번 실행되며, 서명이 걸린 API의 값을 치릅니다.** 모든 파라미터가 HMAC이나
+서명된 봉투, 요청마다 다른 nonce를 지녀야 하는 앱은 날것의 후보를 반응하기도 전에 거절하므로, 훅이
+없으면 캘 것이 없습니다 — 모든 프로브가 똑같아 보입니다. `--hook`은 조립된 요청 하나하나를(후보가
+주입되고 세션 바인딩이 이미 해소된 상태로) 당신의 명령에 넘기고, 그 stdout이 실제로 나갑니다. 실행할 수
+없는 훅은 **이유를 밝히며 그 프로브를 건너뜁니다.** 서명 없는 요청을 보내면 앱이 거절하고 마이너는 그것을
+깨끗한 음성으로 읽을 것이기 때문입니다. 타임아웃은 같은 `hooks.timeout_secs` 예산이며 **아웃바운드 요청
+단위**입니다. 마인의 요청 수는 `--max-requests`와 자체 버킷/이분/확인 트리로 묶여 있으므로 훅 비용 총량도
+함께 묶입니다. 마이너는 왕복을 세는 지연 바운드 작업이라, 훅은 그 왕복마다 fork-and-wait 하나를 더합니다.
 
 **의도적으로 연결하지 않은 두 곳.** MCP `decode` 툴은 `exec:` 스텝을 거부합니다(저장된 체인
 포함) — read-only·unbound로 노출되는 툴이라 순수 계산으로 남깁니다. 훅이 필요한 에이전트는 `pipe`

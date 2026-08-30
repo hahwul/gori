@@ -756,6 +756,8 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 | `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#reusing-a-rule-across-projects) 참고 |
 | `colormarker` | 전역 History 행 색상 규칙. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
+| `saved_views` | 전역 History **뷰** 라이브러리 — 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
+| `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |

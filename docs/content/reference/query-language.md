@@ -17,7 +17,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `url` | Full URL |
 | `method` | HTTP method |
 | `scheme` | `http` / `https` |
-| `proto` | Protocol: `http`, `ws`, `grpc`, `sse` |
+| `proto` | Protocol: `http`, `ws`, `grpc`, `sse` — suffix `s` for the TLS one (`https`, `wss`, `grpcs`, `sses`), and `websocket` is an alias of `ws` |
 | `src` | Where the flow came from ([below](#src-provenance)) |
 | `status` | Response status code |
 | `size` | Total request + response bytes |
@@ -25,6 +25,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `dur` | Response time in milliseconds |
 | `header` | Substring over the head (request + response headers) |
 | `body` | Full-text match over bodies (trigram FTS index) |
+| `stub` | `true` / `false` — flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
 | `scope` | `in` / `out` — the project's scope rules ([below](#scope-in-scope-out)) |
 
 ```text

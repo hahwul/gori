@@ -87,7 +87,7 @@ gori run notes --all
 
 **체크포인트.** Notes 탭에 노트가 담기고, 링크한 이슈 아래에 증거 플로우나 세션이 나열됩니다.
 
-## 5. 리포트 내보내기 {#5-export-the-report}
+## 5. 리포트 내보내기 {#export-the-report}
 
 이슈 트리아지가 끝나면, gori 없이도 동료가 읽을 수 있는 단일 Markdown 문서로 내보냅니다:
 

@@ -208,7 +208,7 @@ On top of the wire protocols, gori decodes common payloads inline:
 
 - **JWT**: header and payload decoded from `Authorization`, cookies, URLs, and bodies (signatures are shown but never verified).
 - **SAML**: base64 (and DEFLATE for the redirect binding) decoded for `SAMLRequest` / `SAMLResponse`.
-- **GraphQL**: `query`, `operationName`, and `variables` parsed from POST bodies and `?query=` parameters.
+- **GraphQL**: `query`, `operationName`, and `variables` parsed out of every shape a real API exposes — a POST JSON body, a GET `?query=`, a `query=…&variables=…` urlencoded body, a batched array, a persisted query (`extensions.persistedQuery`, which carries no document at all), a multipart upload mutation, and a raw `Content-Type: application/graphql` document. A request that is GraphQL-carrying but does not parse says *why* rather than losing the pane — the malformed one is usually the one worth reading. **Subscriptions count too**: a `graphql-transport-ws` or legacy `subscriptions-transport-ws` frame on a captured socket is decoded into the same GRAPHQL pane, keyed on the payload being a GraphQL envelope rather than on the subprotocol's spelling of the frame `type`.
 - **Form params**: `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
 
 ## Where a flow came from {#flow-source}
@@ -262,7 +262,7 @@ Type a query in the History filter bar, or run it headless:
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
-## Views (`v`)
+## Views (`v`) {#views}
 
 A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar — a view is ANDed *over* whatever you type, the same way the `⇧S` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess — lowercase like the `f:follow` and `⇧S scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name — the picker, `gori run views`, `--view`, MCP — and `--view` ignores case, so `--view history` finds `History`.
 
@@ -368,6 +368,26 @@ So `/ status:5xx` → `Shift-T` → `Space` → `X` deletes every error in one c
 
 Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request — marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser); their menu entries say `(cursor)` while marks are set.
 
+## Copy a request as code {#copy-as-code}
+
+`Space` `Y` on a single flow — in History, in the detail view's REQUEST pane, or on a Repeater tab — opens **Copy as…**, which offers that request in the shape another tool reads:
+
+| Row | What lands on the clipboard |
+|-----|-----------------------------|
+| URL / Headers / Body / Cookies | The parts on their own; a row is dropped when the request has nothing to put in it |
+| cURL | A runnable `curl` command |
+| Python | A `requests` script |
+| fetch | A JavaScript `fetch()` call |
+| Go | A `net/http` program |
+| httpie | An `http` command line |
+| CSRF PoC | A self-submitting HTML form reproducing the request cross-origin |
+| wscat | WebSocket Repeater tabs only: the handshake plus the out-frames as a `wscat` session |
+| Raw request / Raw response / Req + Res pair | The wire bytes, unchanged |
+
+Every language row is the **request** — a response pane has its own shorter menu (status + headers / body / raw). They are byte-identical to `gori run show --format curl|python|fetch|go|httpie|csrf` ([run show](/reference/cli/#run-show)), because the menu and the CLI share one serializer. On a Repeater tab the menu also *runs* a `¦chain` [`exec:` hook](/guide/scripting/), unlike every pane that merely draws the request: a command line that omitted the hook would not reproduce the send it claims to be.
+
+Marking several flows switches the menu to the set-shaped formats instead — URLs, host list, and (up to 20 flows) cURL, raw requests, raw responses and req+res pairs. The per-language snippets stay single-flow: a file of twenty Go programs is not something anyone pastes.
+
 ## Open a response in the browser {#open-in-browser}
 
 A terminal cannot lay out a page, show you a PNG, or paginate a PDF. `Space` `Shift-B` hands the response to something that can: gori writes the **decoded** body to a file under `~/.gori/preview/` and opens it with your desktop's opener (`open` on macOS, `xdg-open` on Linux).
@@ -413,6 +433,24 @@ Scope any rule to a **host** glob so it only fires for matching traffic: a plain
 Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
 
 Under the list sits an editable **sample** message and, beside it, the same message after the enabled rules run. Paste a real captured request in there to see what your rules do to it before you turn them loose. The sample is saved with the project, like the rules it previews.
+
+### Presets — a starting point, not a capability {#rewriter-presets}
+
+Seven response rewrites come up on almost every engagement, and each is a regex nobody enjoys retyping. Press `p` in the Rewriter (**Add from preset…**) and pick one:
+
+| Preset | What it installs |
+|--------|------------------|
+| `unhide-hidden-fields` | Rewrites `<input type="hidden">` to `type="text"` so the field is visible and editable |
+| `enable-disabled-fields` | Strips `disabled` / `readonly` from form controls |
+| `remove-length-limits` | Strips `maxlength=` |
+| `strip-validation` | Removes `required`, `pattern=` and `on{submit,change,input}=` handlers that block submission |
+| `remove-csp` | Drops the Content-Security-Policy headers |
+| `remove-security-headers` | Drops the browser-side protection headers |
+| `disable-sri` | Strips `integrity=` so subresource-integrity checks stop blocking modified assets |
+
+A preset is a **starting point, not a capability** — Match & Replace already expresses every one of them. Installing one writes plain rules through the same path `a` does, so they show up in the list, carry the preset's name, and are editable, re-orderable, disable-able and deletable like anything you typed yourself. Installing the same preset twice duplicates visibly rather than silently merging.
+
+Headless it is `gori run rewriter preset list` and `gori run rewriter preset add <name>` (`--scope=global`, `--disabled` to review before they touch traffic); an agent reads `list_rule_presets` and installs with `create_rule_from_preset`.
 
 ### Global and project rules
 
@@ -460,7 +498,7 @@ Six things are worth knowing before you rely on it:
 
 A rule rewrites in flight and nothing pauses. To stop a message and decide about it by hand, hold it instead — see [Intercept on WebSocket](#intercept-websocket). The two compose: rules run first, and the editor shows you their output.
 
-### Short circuit — answer without an origin
+### Short circuit — answer without an origin {#short-circuit}
 
 The other four operations rewrite a message that already exists. **Short circuit** answers instead: the request is matched, gori replies with a response you wrote, and the origin is never dialed. That covers what a Replace rule structurally cannot — the endpoint 404s or 500s, the origin is offline or behind an auth wall, or the body has to be constructed rather than derived.
 
@@ -642,7 +680,7 @@ The give-away is a layer below. The ClientHello an origin sees is **gori's OpenS
 }
 ```
 
-`chrome`, `firefox`, `safari` and `curl` are the names. Each fills in the cipher list and its order, the TLS 1.3 suites, the named groups, the signature algorithms, the `h2, http/1.1` ALPN pair a browser offers (gori's own default offers one protocol, which is already a tell), and whether the `session_ticket` and `status_request` extensions appear at all. Anything you set on the rule itself wins over the preset, and each field is also usable on its own — see [`outbound_tls`](/reference/config/#outbound_tls).
+`chrome`, `firefox`, `safari` and `curl` are the names. Each fills in the cipher list and its order, the TLS 1.3 suites, the named groups, the signature algorithms, the `h2, http/1.1` ALPN pair a browser offers (gori's own default offers one protocol, which is already a tell), and whether the `session_ticket` and `status_request` extensions appear at all. Anything you set on the rule itself wins over the preset, and each field is also usable on its own — see [`outbound_tls`](/reference/config/#outbound-tls).
 
 Then check it, because a knob that never reached the wire looks exactly like one that did:
 

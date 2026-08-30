@@ -60,6 +60,36 @@ gori run fuzz 42 --bind-from 17 --wordlist ids.txt
 
 **체크포인트.** 실행이 `bind-from: flow #… replayed → bound $…` 줄을 찍고, 응답이 `401` 벽 대신 인증된 채로 돌아옵니다.
 
+## 5. 세션을 여러 개 들고 다니기 {#carry-more-than-one-session}
+
+2~4단계는 세션 *하나* 를 들고 다닙니다. 실제 엔게이지먼트는 보통 여러 개를 동시에 필요로 합니다 — 관리자, 저권한 사용자, 익명 클라이언트 — 그런데 `$SESSION`은 한 번에 하나만 뜻할 수 있습니다. **세션 슬롯** 이 그 이름입니다. 자기 헤더 오버레이와 자기 바인딩 테이블을 가진 아이덴티티이고, **활성** 인 슬롯이 곧 전송이 나가는 신원입니다.
+
+슬롯은 [Authorize](/ko/guide/authorize/) 탭의 identities 카드가 편집하는 바로 그 행이라, 거기서 이미 구성해 둔 집합이 여기에도 그대로 있습니다. 헤드리스로 추가하려면:
+
+```bash
+gori run session add --name admin    --set 'Authorization: Bearer $SESSION' --rule SESSION
+gori run session add --name low-priv --set 'Authorization: Bearer $SESSION' --rule SESSION
+gori run session list
+```
+
+두 슬롯이 같은 `$SESSION`에서 같은 헤더를 쓰는데도 서로 다른 토큰을 뜻합니다. extract 규칙의 소유권을 **주장한**(`--rule SESSION`) 슬롯은 그 규칙이 관찰한 값을 전역 테이블이 아니라 자기 테이블로 가져가기 때문입니다. 각자 어떤 토큰을 들게 되는지는 그 슬롯이 활성인 동안 어떤 로그인을 재생했는지가 결정합니다.
+
+그다음 전송에 신원을 지정합니다. TUI에서는 `Ctrl-P` → **Session slot**(또는 상단 바의 `session:NAME` 칩)이고, 이후 모든 전송이 누구로 나가는지 밝힙니다. 헤드리스에서는 `--slot`입니다.
+
+```bash
+gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
+# slot: sending as low-priv
+# bind-from: flow #17 replayed → bound $SESSION
+```
+
+`--slot`은 `--bind-from` **보다 먼저** 적용되므로, 로그인 재생이 활성 슬롯의 테이블을 채우고 스윕은 같은 테이블에서 `$SESSION`을 해소합니다. 똑같은 명령을 `--slot admin`과 다른 로그인 플로우로 돌리면, 두 실행은 같은 대상의 두 세션이 됩니다.
+
+오버레이는 헤더 전용이라 `Content-Length`는 움직이지 않고 본문은 바이트 그대로입니다. 그래서 당신이 작성하지 않은 바이트 — 캡처된 재전송, 페이로드가 이미 끼워진 퍼즈 템플릿 — 위에서도 슬롯은 안전합니다.
+
+기대기 전에 알아 둘 한계가 둘 있습니다. 활성 슬롯은 **절대 저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 그대로에서 시작하는데, 슬롯의 값이 메모리 전용이라 포인터만 비어 있는 테이블 위로 복원하면 `$SESSION`이 리터럴인 오버레이를 보내게 되기 때문입니다. 그리고 쿠키 항아리도 자동 로그인 매크로도 없습니다. 슬롯은 당신이 쓴 헤더와 gori가 관찰한 값을 들고 있고, `--bind-from`이 "다시 로그인한다"의 명시적인 버전입니다.
+
+**체크포인트.** `gori run session list`가 두 슬롯을 보여 주고, `--slot low-priv` 실행은 첫 요청 전에 `slot: sending as low-priv`를 찍습니다.
+
 ## 다음 단계 {#next-steps}
 
 - [디코딩과 변환](/ko/playbooks/decode-and-transform/): 세션이 올라타는 인코딩된 값을 읽고 되쓰기

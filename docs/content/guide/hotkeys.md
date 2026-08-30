@@ -65,7 +65,7 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-Z` (undo, consumed by every text editor — Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor. Their key is fixed.
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier — see [Command modifier](#command-modifier) below.
 
@@ -90,8 +90,8 @@ The chord family listed under *Reserved keys* is fixed because a hardcoded guard
 
 | Modifier | Effect |
 |----------|--------|
-| `Ctrl` (default) | `^P` `^N` `^W` `^G` `^F` `^B` `^E` `^,` `^1`-`^9` |
-| `Option (⌥)` | the above **plus** `⌥P` `⌥N` `⌥W` `⌥G` `⌥F` `⌥B` `⌥E` `⌥,` `⌥1`-`⌥9` |
+| `Ctrl` (default) | `^P` `^N` `^W` `^G` `^F` `^B` `^E` `^Z` `^,` `^1`-`^9` |
+| `Option (⌥)` | the above **plus** `⌥P` `⌥N` `⌥W` `⌥G` `⌥F` `⌥B` `⌥E` `⌥Z` `⌥,` `⌥1`-`⌥9` |
 
 Because Ctrl keeps working, picking Option can never lock you out of the palette — worth knowing before you flip it, since **on macOS your terminal must be set to send Option as Meta/Esc+** or `⌥P` arrives as `π` and nothing happens:
 

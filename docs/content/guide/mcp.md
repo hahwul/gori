@@ -121,6 +121,11 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
 | `list_projects` | Every gori project on this host |
 | `list_notes` / `get_note` | Read project notes |
+| `list_rule_presets` | The response-modification [presets](/guide/proxy/#rewriter-presets) — named starting points that install ordinary Match & Replace rules (unhide hidden fields, enable disabled controls, remove `maxlength`, strip client-side validation, drop CSP / security headers, disable SRI). Each row names the rules it would install |
+| `list_extract_rules` | The project's **extract** rules — the read half of a [session binding](/guide/proxy/#session-bindings): each observes a response and binds one `$NAME` in memory for a Match & Replace rule to inject |
+| `list_color_rules` / `list_custom_colors` | The [Colormarker](/guide/proxy/#colouring-rows-colormarker-tab) rules in precedence order, and the global custom colours a rule's `color` can name. Display only — a colour rule never modifies traffic |
+| `preview_color_rule` | How many recent flows a colour condition would MATCH, and how many it would actually PAINT once the rules resolving ahead of it are counted |
+| `grpc_schema` | What `.proto` schema this project renders captured gRPC through, and where each piece came from — a descriptor-set file or a reflection fetch. Sends nothing |
 | `list_rules` | List the Match & Replace rules applied to the project in apply order — global rules first, then the project's own (`scope` filters to one) |
 | `list_env` | Project env tokens available to `$KEY` substitution (values redacted) |
 | `list_host_overrides` | The host to IP dial map in force for this project |
@@ -129,6 +134,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `list_oast_sessions` | The project's persisted OAST listening sessions — payload host, hits, last poll — the rows `oast_resume` re-arms |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
 | `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
+| `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | The [Cookie workbench](/guide/cookie/) as pure offline compute: parse a Flask / Rack / Django signed session cookie, check it against a candidate secret, brute-force the secret over a wordlist, and re-sign an edited payload. No network, so all four survive `--read-only` |
 | `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
 | `oast_presets` / `oast_payload` / `oast_poll` | List OAST providers, read the active payload, and poll a running listener for callbacks |
 | `discover_status` / `discover_results` | Progress and findings of a Discover run |
@@ -150,6 +156,11 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope` — `project` (default) or `global`, which applies in every project |
+| `create_rule_from_preset` | Install a preset (see `list_rule_presets`) as ordinary Match & Replace rules — the same result as calling `create_rule` once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created |
+| `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | Manage the extract rules that bind `$NAME` from a response. Renaming drops the old name's bound value rather than re-labelling it, and disabling **un-declares** the name, so a rule injecting it goes back to refusing rather than sending a stale value |
+| `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Manage Colormarker rules. `move_color_rule` is a semantic edit, not cosmetic: the first enabled match paints the row. Each takes `scope` — `project` (default) or `global` |
+| `create_custom_color` / `update_custom_color` / `delete_custom_color` | Define the global custom colours the picker offers on top of the six built-ins. Deleting one leaves a rule that still names it inert — its rows fall back to a visible default rather than the deletion cascading into rules |
+| `grpc_reflect` / `grpc_forget` | Ask a target's `grpc.reflection.v1` service (falling back to `v1alpha`) for its descriptors and cache them in the project, or drop a cached target. `grpc_reflect` is an outbound send and is scope-gated like any other |
 | `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope` — `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
 | `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History |

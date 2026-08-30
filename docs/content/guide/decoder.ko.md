@@ -57,16 +57,18 @@ myenc > url-encode
 
 | 범주 | 예시 |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩 — WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`) |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` — 바이너리 문서를 JSON 텍스트로 렌더 |
-| **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음) |
+| **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음), 그리고 서명된 세션 쿠키 리더 `cookie-decode`(프레임워크 자동 판별), `flask-decode`(itsdangerous), `django-decode`(`django.core.signing`), `rack-decode`(Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
 `brotli-decompress`와 `zstd-decompress`는 압축 해제 전용이며, 이는 빠뜨린 것이 아니라 의존성의 모양 그대로입니다. gori는 brotli의 *디코더* 라이브러리를 링크하고 libzstd의 압축 해제기만 감쌉니다 — 프록시에게 필요한 것은 원 서버가 보낸 것을 읽는 일이기 때문입니다. 둘 다 `Content-Encoding`이 쓰는 `br`, `zstd` 별칭을 받고, 잘린 스트림도 견딥니다(캡처 상한에 걸린 플로우에서 본문을 복사해 오면 흔한 경우입니다). `-Dwithout_native_codecs`로 빌드한 gori도 이름은 그대로 알고 있으며, 오타라고 답하는 대신 그런 빌드라는 사실을 알려 줍니다.
+
+세션 쿠키 리더 네 개는 봉투를 디코드해 쿠키가 무엇을 싣고 있는지 보여 줄 뿐, 서명은 검증하지 않습니다. 서명 키 크래킹, 쿠키 위조, 라이브 검증은 [Cookie 워크벤치](/ko/guide/cookie/)의 몫이고, 이 탭은 체인 안에서 부를 수 있는 읽기 전용 절반입니다.
 
 `msgpack-decode`와 `cbor-decode`는 남이 쓴 바이너리 문서를 읽어 JSON으로 렌더합니다. 한 방향이고, 그 방향이 필요한 쪽입니다. 여기서 JSON은 *투영*이지 재인코딩이 아닙니다. JSON에 담을 자리가 없는 것은 접어 없애지 않고 이름을 달아 돌려줍니다(바이트 문자열은 `{"$bin": …}`, CBOR 태그는 `{"$tag": …}`, MessagePack 확장은 `{"$ext": …}`, JSON 숫자로는 정확하지 않은 정수는 10진 문자열). 입력이 도중에 끊긴 문서는 읽은 데까지 렌더하고 멈춘 자리를 `{"$partial": …}`로 표시합니다 — 캡처 상한에 잘린 본문에서 흔한 경우입니다. 투영에는 모호함이 하나 따라옵니다. 문서 자신의 맵 키가 문자 그대로 `$bin`이나 `$tag`이면 래퍼와 같은 모양으로 렌더됩니다. 그런 본문 하나를 막자고 모든 본문의 모든 키를 이스케이프하면 흔한 본문이 오히려 읽기 어려워집니다.
 
