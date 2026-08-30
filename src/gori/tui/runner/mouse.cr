@@ -195,7 +195,39 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return if click_top_bar(layout.topbar, mx, my)
     return click_menu(layout.menu, mx, my) if layout.menu.contains?(mx, my)
     return if subtabs_shown? && !subtab_strip_self_drawn? && click_subtab_strip(layout.body, mx, my)
+    return if click_companion(layout, mx, my)
     click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
+  end
+
+  # Miss Ring is a click target in both placements. She is the notification ring's FACE —
+  # the bubble she speaks is the newest note, and reacting to notes is most of what she
+  # does — so pressing her opens the ring, exactly as the top bar's unread chip does. It is
+  # the affordance the feature was missing: everything she reports had to be chased through
+  # a chord the reader had to already know.
+  #
+  # ABOVE the body tier because she PAINTS above it: render_companion runs after
+  # render_body, so without this a press on her sprite reached whatever list row she is
+  # standing on — a click that visibly lands on a mascot and selects a flow behind her.
+  #
+  # Both branches ask the DRAWING code where she is (Companion.hit_rect off the same
+  # Companion.place the render uses; Chrome.status_bar_chip_at off the same chip run
+  # render_status lays out), so the target cannot drift from the pixels.
+  private def click_companion(layout : Layout, mx : Int32, my : Int32) : Bool
+    return false unless Settings.companion?
+    return false unless frame = @companion.frame # not drawn yet, or dropped while disabled
+    if Settings.companion_in_bar?
+      return false unless Chrome.status_bar_chip_at(layout.status, mx, my, focus: focus_label,
+                            activity: activity_chip, resource: @resource.label,
+                            time: clock_label, companion: frame) == :companion
+    else
+      # The same gate render_companion uses: under an overlay or a body editor she is not
+      # drawn, and a hit rect over a widget the operator can see would be a trap.
+      return false unless companion_visible?
+      return false unless box = Companion.hit_rect(layout.body)
+      return false unless box.contains?(mx, my)
+    end
+    open_notifications
+    true
   end
 
   # The overlays that fully capture input (a centered card); Detail and None do not.

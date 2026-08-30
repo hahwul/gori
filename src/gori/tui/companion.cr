@@ -688,6 +688,19 @@ module Gori::Tui
       Rect.new(x, y, Mascot::W, Mascot::H)
     end
 
+    # The box a click on her lands in: the sprite PLUS the column of plate either side that
+    # .draw claims, which is what a pointer sees as her.
+    #
+    # The RESTING box. The :error shudder shifts her a column for two beats, and a target
+    # that moves out from under a pointer mid-press is a worse trade than one that is a
+    # column off for 400ms of a reaction — the same reason .place is recomputed from the
+    # live body rather than cached, read the other way round.
+    def self.hit_rect(body : Rect) : Rect?
+      return nil unless rect = place(body)
+      x = {rect.x - 1, body.x}.max
+      Rect.new(x, rect.y, {rect.right + 1, body.right}.min - x, rect.h)
+    end
+
     # How wide she may speak in a body this wide, BEFORE the body's own `- 4` clamp. Pure
     # arithmetic on a width so a spec can sweep it without a Screen.
     def self.bubble_cap(body_w : Int32) : Int32

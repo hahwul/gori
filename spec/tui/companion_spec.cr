@@ -879,6 +879,30 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # The bar placement's half of the same affordance. Asserted against the cells
+  # render_status actually painted her chip into — the hit test and the render read one
+  # ordered chip run precisely so this can be checked end to end.
+  it "answers a press on the bar chip, over the cells the status row painted it in" do
+    rect = Rect.new(0, 23, 80, 1)
+    backend = MemoryBackend.new(80, 24)
+    frame = Mascot::Frame.new(badge: '!')
+    Chrome.render_status(Screen.new(backend), rect, focus: "BODY", hints: "hints here",
+      resource: "CPU 1%", time: "01:23 PM", companion: frame)
+    row = backend.row(rect.y)
+    # Her chip is the run ending at the hoop's right wall — find it on the grid.
+    right = row.rindex(Mascot::WALL_R).not_nil!
+    left = row.rindex(Mascot::WALL_L, right).not_nil!
+    left.should eq(right - (Mascot::W - 2)) # the equator, where draw_row put it
+    row[right + 1].should eq('!')           # …and the borrowed badge cell beside it
+
+    args = {focus: "BODY", resource: "CPU 1%", time: "01:23 PM", companion: frame}
+    Chrome.status_bar_chip_at(rect, left, rect.y, **args).should eq(:companion)
+    Chrome.status_bar_chip_at(rect, right + 1, rect.y, **args).should eq(:companion)
+    # The clock to her left is not her, and neither is the edge past her.
+    Chrome.status_bar_chip_at(rect, left - 2, rect.y, **args).should_not eq(:companion)
+    Chrome.status_bar_chip_at(rect, right + 2, rect.y, **args).should be_nil
+  end
+
   it "keeps the ink layer the same shape as the art" do
     Mascot::INK.size.should eq(Mascot::H)
     Mascot::INK.each(&.size.should eq(Mascot::W))
@@ -1074,6 +1098,34 @@ describe Gori::Tui::Companion do
       (Mascot::H).times do |i|
         (0...80).each { |x| backend.cont_grid[rect.y + i][x].should be_false }
       end
+    end
+
+    # She paints ABOVE the tab body, so a press on her has to be answered before the body
+    # tier — and the box that answers it has to be the box that was painted, plate strips
+    # included, or the click either misses her edge or steals a cell she never drew on.
+    #
+    # Driven off the PAINTED grid rather than off the same arithmetic the hit rect uses:
+    # restating .place here would agree with a wrong answer as readily as a right one.
+    it "offers a click target over exactly the cells she paints" do
+      backend = MemoryBackend.new(80, 24)
+      Companion.draw(Screen.new(backend), body, Mascot::Frame.new(badge: '!'))
+      box = Companion.hit_rect(body).not_nil!
+      painted = [] of {Int32, Int32}
+      (body.y...body.bottom).each do |y|
+        row = backend.row(y)
+        (body.x...body.right).each { |x| painted << {x, y} if row[x] != ' ' }
+      end
+      painted.should_not be_empty
+      painted.each { |(x, y)| box.contains?(x, y).should be_true } # nothing drawn is unclickable
+      # …and nothing clickable is undrawn: the box is her plate, which .draw fills opaquely,
+      # so every cell of it is hers even where the glyph happens to be a space.
+      box.h.should eq(Mascot::H)
+      box.w.should eq(Mascot::W + 2)
+      # Her plate's own columns, from the drawing code's answer rather than from GUTTER.
+      rect = Companion.place(body).not_nil!
+      box.x.should eq(rect.x - 1)
+      box.right.should eq(rect.right + 1)
+      box.right.should be <= body.right # and never off the body's edge
     end
 
     # The bubble used to stop growing at 34 columns, so a notice was cut with an '…' on an
