@@ -121,6 +121,46 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # `placement: bar` paints the middle row and nothing else (Mascot.draw_row), so the
+  # badge, the glint and the shake are mute there — and a Frame that carries them anyway
+  # compares unequal on beats the CHIP is identical across, which is a full frame rebuild
+  # that forwards not one cell. Measured before the fold: 11 of the 45 changes she reported
+  # over 40 idle seconds in bar were blind, essentially all of them the glint sweep.
+  #
+  # Asserts against the PAINTED chip rather than against the folded fields, because the
+  # fields are only the current spelling of the answer — anything else that goes mute in
+  # the bar has to be caught by the same test.
+  it "reports no change the status chip cannot show, in bar placement" do
+    prev = Gori::Settings.companion_placement
+    Gori::Settings.companion_placement = "bar"
+    begin
+      with_companion(true) do
+        companion = Companion.new(Notifications.new, honors_placement: true)
+        t0 = Time.instant
+        companion.tick(t0)
+        painted = nil.as(Array({Char, Color})?)
+        blind = 0
+        (1..200).each do |i| # 40s: one whole glint window, several gesture windows
+          now = t0 + Companion::BEAT * i
+          companion.poke(now) # kept awake, as someone at the keyboard does
+          next unless companion.tick(now)
+          f = companion.frame.not_nil!
+          backend = MemoryBackend.new(Mascot::BAR_W, 1)
+          Mascot.draw_row(Screen.new(backend), 0, 0, f, Mascot.palette(f.mood, Theme.panel))
+          row = (0...Mascot::BAR_W).map { |x| {backend.row(0)[x], backend.fg_at(x, 0)} }
+          # The bubble is the one field the chip legitimately does not carry — it goes to
+          # the status row's text slot instead (Runner#status_line) — so a change that only
+          # moves the bubble is a change something on screen does show.
+          blind += 1 if row == painted && f.bubble == Companion::GREETING
+          painted = row
+        end
+        blind.should eq(0)
+      end
+    ensure
+      Gori::Settings.companion_placement = prev
+    end
+  end
+
   it "drops the frame once on the disable edge, then stays quiet" do
     companion = Companion.new(Notifications.new)
     with_companion(true) { companion.tick(Time.instant).should be_true }

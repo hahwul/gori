@@ -259,7 +259,7 @@ module Gori::Tui
       @resource = ResourceMeter.new
       # Miss Ring (settings:companion). Off by default; while off she is the same zero-cost
       # no-op the resource meter is, and she stops ticking entirely once she dozes.
-      @companion = Companion.new(@notifications)
+      @companion = Companion.new(@notifications, honors_placement: true)
       @spinner_frame = 0
       # The Miner config popup (History/Repeater → space → "Mine parameters") rides the
       # Overlay seam (@active_overlay); built fresh each open with an injected commit.

@@ -153,7 +153,12 @@ module Gori::Tui
     # slot with the toast, and the two are resolved by recency (Runner#companion_notice).
     getter bubble_at : Time::Instant?
 
-    def initialize(@notes : Notifications)
+    # `honors_placement` is the HOST's answer to "does `placement: bar` mean anything
+    # here?" — true for the Runner, which has a status row to put the chip in, false for
+    # the project picker and the tutorial, which have none and paint the body sprite
+    # whatever the setting says. #compose folds the fields a chip cannot show, and it may
+    # only do that where a chip is actually what gets drawn.
+    def initialize(@notes : Notifications, @honors_placement : Bool = false)
       @frame = nil.as(Mascot::Frame?)
       @beat = 0
       @last_beat = nil.as(Time::Instant?)
@@ -296,12 +301,22 @@ module Gori::Tui
     # wall clock — or the same beat could yield two different frames and the diff would
     # stop being meaningful (or specifiable).
     private def compose : Mascot::Frame
+      # FIELDS THE BAR CANNOT SHOW ARE FOLDED HERE. `placement: bar` paints
+      # Mascot.draw_row — columns 0..6 of the middle row — so the badge (column 7), the
+      # glint (which sweeps the crown and the left wall) and the shake (which has nowhere
+      # to travel inside a status chip) are all mute in that placement. Carried on the
+      # Frame anyway they still make it compare unequal to its neighbour, and #tick would
+      # report a change the chip forwards not one cell of — the glint alone is six of them
+      # per sweep and a sweep every 25 seconds, which measured out at a QUARTER of every
+      # change she reports in bar. Same class as the wink :idle folds below, and as the
+      # on-screen gate in runner.cr; this is the third face of it.
+      bar = @honors_placement && Settings.companion_in_bar?
       if @dozing
-        return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble)
+        return Mascot::Frame.new(pose: :doze, badge: bar ? nil : 'z', mood: :doze, bubble: @bubble)
       end
       if @beat < @wake_until_beat
         # Startled awake, then settles.
-        return Mascot::Frame.new(pose: :alert, badge: '·', bubble: @bubble)
+        return Mascot::Frame.new(pose: :alert, badge: bar ? nil : '·', bubble: @bubble)
       end
       mood = @mood
       pose = pose_for(mood)
@@ -314,11 +329,11 @@ module Gori::Tui
         # happening on any blink beat that landed inside a wink window; the multi-beat
         # gestures would have made it routine.
         wink: mood == :info && pose == :idle ? wink_for : :none,
-        badge: badge_for(mood),
-        glint: glint_for,
+        badge: bar ? nil : badge_for(mood),
+        glint: bar ? -1 : glint_for,
         mood: mood,
         bubble: @bubble,
-        shake: shake_for(mood),
+        shake: bar ? 0 : shake_for(mood),
       )
     end
 
