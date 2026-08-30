@@ -686,6 +686,13 @@ module Gori::Tui
       spawn(name: "gori-oast-deregister") do
         outcome, err = Oast::Sessions.release_detail(provider, session, http)
         ch.send(ReleaseResult.new(sid, outcome, label, err)) if report
+      rescue ex
+        # `release_detail` never raises (it owns the four-way answer), so what is left is the
+        # SEND — the drain is gone with the project and the channel closed under a release the
+        # operator has already been told is in flight. An unrescued raise in `spawn` prints its
+        # backtrace to STDERR, which under the TUI is the alternate screen (#411), so the one
+        # visible sign of a detached teardown failing would be a garbled display.
+        ::Log.error(exception: ex) { "oast deregister fiber died" }
       end
     end
 

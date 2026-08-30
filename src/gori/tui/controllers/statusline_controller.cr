@@ -161,6 +161,9 @@ module Gori::Tui
       @discard = false            # drop the in-flight result: it belongs to a superseded run
       @last_run = nil.as(Time::Instant?)
       @last_spec = current_spec # the {command, interval, timeout} the last launch used
+      # Last unexpected-raise signature the worker logged, so a persistent failure at a 1s
+      # interval writes one backtrace rather than one per second. Worker-fiber only.
+      @last_error = nil.as(String?)
     end
 
     # Called every main-loop tick. Drains a finished result and (re-)launches the
@@ -263,7 +266,19 @@ module Gori::Tui
     private def ensure_started : Nil
       return if @started
       @started = true
-      spawn(name: "gori-statusline") { worker_loop }
+      spawn(name: "gori-statusline") do
+        worker_loop
+      rescue ex
+        # The outermost net. `worker_loop` already answers for the two failures it expects — one
+        # run raising, and the channel closing on `stop` — so a raise reaching HERE means the
+        # worker is gone. Logging alone would leave the row dead for the session with no way
+        # back: `@running` is only cleared by a result that will never arrive, so `tick` stops
+        # queueing entirely, and `@started` is only ever set, so nothing respawns. Clear both and
+        # the next tick starts a fresh worker.
+        ::Log.error(exception: ex) { "statusline worker fiber died" }
+        @started = false
+        @running = false
+      end
     end
 
     private def worker_loop : Nil
@@ -271,7 +286,28 @@ module Gori::Tui
         msg = @work_ch.receive?
         break if msg.nil? # channel closed (stop) → exit
         cmd, ctx, to = msg
-        line = Statusline.run(cmd, ctx, to)
+        line = begin
+          Statusline.run(cmd, ctx, to)
+        rescue ex
+          # `Statusline.run` converts every failure it names into a marker of its own, so a raise
+          # reaching here is one it does not name. Letting it out ends the WORKER and the row
+          # dies with it; one bad run must cost one bad row instead.
+          #
+          # Its own text, not `Statusline.run`'s "(statusline failed)": those two are different
+          # answers — one is a failure the code accounted for, the other is not — and printing
+          # the same seven characters for both leaves the difference visible only in a log.
+          #
+          # Logged ONCE per distinct failure. The interval floors at one second and the
+          # motivating cases are persistent (no `sh`, a fork that cannot succeed), so an
+          # unconditional `Log.error(exception:)` writes a full backtrace every second into an
+          # append-only gori.log that nothing rotates.
+          signature = "#{ex.class}: #{ex.message}"
+          if signature != @last_error
+            @last_error = signature
+            ::Log.error(exception: ex) { "statusline command raised" }
+          end
+          "⋯ (statusline error)"
+        end
         select
         when @result_ch.send(line) # latest-wins
         else

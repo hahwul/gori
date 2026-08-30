@@ -302,6 +302,7 @@ module Gori::Tui
       run.begin_run
       run.job_id = @host.jobs.start(:discover, run.label(40), goto: Jobs::Goto.new(:target, run.id.to_i64))
       events = @discover_events
+      terminal_sent = false
       spawn(name: "gori-discover") do
         engine.run do |ev|
           case ev
@@ -311,9 +312,28 @@ module Gori::Tui
             else
             end
           else
+            # Done/Error is the run's VERDICT. Once one is on the channel the rescue below
+            # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the row,
+            # so a raise on the way out of a COMPLETED run would relabel it :error and fire
+            # an error notification for work that succeeded. (`jobs.finish` keeps the first
+            # terminal state, so the job itself was already safe — nothing else was.)
+            terminal_sent = true if ev.is_a?(Discover::DoneEvent) || ev.is_a?(Discover::ErrorEvent)
             events.send({run, ev}) # Finding/Baseline/Done/Error — blocking, never dropped
           end
         end
+      rescue ex
+        # An unrescued raise in a `spawn` block kills only this fiber and prints to STDERR,
+        # which under the TUI is the alternate screen (#411) — so a bug in the crawl garbled
+        # the display AND left no terminal event behind. Without one the row stays `:running`
+        # for the rest of the session: its bottom-bar job never finishes (the spinner turns
+        # forever and the exit prompt keeps counting it), and `discover_dismiss` refuses the
+        # row because it still reads as live. The engine already reports its own setup /
+        # frontier failures this way, so reuse that channel rather than inventing a second way
+        # to say the same thing — `apply_event`'s ErrorEvent arm does the whole finish.
+        ::Log.error(exception: ex) { "discover run fiber died" }
+        # `ex.class` too — see the Miner's sibling. No `ensure` here because the row's status
+        # lives on the main fiber: this event IS the finish, so there is nothing local to clear.
+        events.send({run, Discover::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       end
       @host.status("discovering #{run.target} in the background — watch the bottom bar / notifications")
     end

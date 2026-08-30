@@ -143,8 +143,7 @@ module Gori
     # still works. `settings_warning` is anything Settings.load has to say about the
     # file it loaded: it was written to STDERR, which the alt screen is about to wipe.
     def run_tui(open_db_path : String? = nil, settings_warning : String? = nil) : Nil
-      log_io = File.open(File.join(Paths.home_dir, "gori.log"), "a")
-      setup_logging(log_io)
+      Tui.bind_log_file                # gori.log, and OFF the screen — see Tui.bind_log_file
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
@@ -152,15 +151,17 @@ module Gori
       # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean
       # message instead of a raw backtrace.
       term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use 'gori run capture' for non-interactive capture")
-      # Termisu.new (just above) unconditionally runs its OWN `Log.setup("*", ...)`, aimed at
+      # Termisu.new (just above) runs its OWN `Log.setup("*", ...)` unless told not to, aimed at
       # TERMISU_LOG_FILE (default /tmp/termisu.log, a shared, unbounded, non-project-scoped
-      # file). Crystal's `Log.setup` always fully reconfigures the root logger (clears prior
-      # bindings first), so whichever call runs LAST wins process-wide — Termisu's call would
-      # otherwise silently swallow every subsequent `Log.*` call gori itself makes, including
-      # the "failed to open session" error this TUI depends on landing in gori.log. Re-assert
-      # gori's binding now that Termisu has had its say, so it's the one left standing
-      # regardless of what Termisu does internally (same io — no new fd, no duplicate lines).
-      setup_logging(log_io)
+      # file). `Tui.open_terminal` heads that off around the constructor, so ordinarily there is
+      # nothing here to undo. This stays because the guard yields to an operator who exported
+      # TERMISU_LOG_LEVEL themselves, and because Crystal's `Log.setup` always fully
+      # reconfigures the root logger (clears prior bindings first): whichever call runs LAST
+      # wins process-wide, and Termisu's would otherwise silently swallow every subsequent
+      # `Log.*` call gori itself makes, including the "failed to open session" error this TUI
+      # depends on landing in gori.log. Re-assert gori's binding now that Termisu has had its
+      # say (same memoized io — no new fd, no duplicate lines).
+      Tui.bind_log_file
 
       begin
         # Armed FIRST, before anything else in this block: `open_terminal` above has ALREADY
