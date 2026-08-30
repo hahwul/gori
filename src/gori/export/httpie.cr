@@ -44,9 +44,15 @@ module Gori
             notes << "# header '#{n}' omitted: it holds a NUL no shell argument can carry — read the head with --format raw"
             next
           end
-          # httpie's header item syntax is `Name:Value` (no space); the whole word is quoted so
-          # a value's shell metacharacters cannot end the command.
-          out << Curl.shell_quote("#{n}:#{v}")
+          # A backslash the escaping below cannot survive — see `escape_defeated?`. Dropped and
+          # named for the same reason a NUL is: the alternative is an item that means something
+          # other than this header.
+          if escape_defeated?(n) || escape_defeated?(v)
+            notes << "# header '#{n}' omitted: a backslash before one of httpie's item separators (; = @) " \
+                     "cannot be escaped, so httpie would eat it — read the head with --format raw"
+            next
+          end
+          out << Curl.shell_quote(header_item(n, v))
         end
         unless s.body.empty?
           if s.body.to_slice.includes?(0_u8)
@@ -60,6 +66,54 @@ module Gori
         # note earlier would truncate the command it annotates.
         out.concat(notes)
         out.join(" \\\n  ")
+      end
+
+      # The bytes httpie reads as an item separator, on their own or paired (`:=`, `:@`, `:=@`,
+      # `==`, `=@`, `==@`, `;`). A backslash in front of one is httpie's own escape, and it is
+      # stripped back off before the request is built.
+      SEPARATOR_BYTES = {0x3b_u8, 0x3d_u8, 0x40_u8} # ; = @
+
+      # One httpie request item for a header field. `Name:Value` (no space), with two things the
+      # plain interpolation gets wrong — both measured against httpie 3.2.4 and a raw listener:
+      #
+      #   * an EMPTY value. `Name:` is httpie's syntax for UNSETTING a header, so a captured
+      #     `X-Empty:` produced a command that sent no such field at all. `Name;` is the spelling
+      #     for "send it with an empty value" — the same split curl's `-H` draws.
+      #   * httpie chooses an item's separator by scanning for the FIRST of `;`/`=`/`:`/`@`, so
+      #     one of those in the NAME, or a `=`/`@` opening the VALUE, silently changes what the
+      #     item IS. `X=A: v1` became the DATA field `X`, and the reproduction of a bodyless GET
+      #     went out as `Content-Type: application/json` with a body of `{"X": "A:v1"}` — the
+      #     header dropped and a body invented. `X-E: @boom` became httpie's `Header:@file` and
+      #     made the command read the local file `boom`.
+      #
+      # Only the value's FIRST byte needs escaping: a `=` or `@` deeper in cannot extend the `:`
+      # that already separated the item. Byte-wise, like everything else here, so a header name
+      # that is not valid UTF-8 is not rewritten into U+FFFD on its way into the command.
+      private def self.header_item(name : String, value : String) : String
+        escaped = String.build do |b|
+          name.to_slice.each do |byte|
+            b << '\\' if SEPARATOR_BYTES.includes?(byte)
+            b.write_byte(byte)
+          end
+        end
+        return "#{escaped};" if value.empty?
+        first = value.to_slice[0]
+        lead = (first == 0x3d_u8 || first == 0x40_u8) ? "\\" : ""
+        "#{escaped}:#{lead}#{value}"
+      end
+
+      # Does this field carry a backslash that `header_item`'s escaping cannot get past? httpie
+      # keeps `\x` verbatim when `x` is not a separator byte, but reads `\;`/`\=`/`\@` as the
+      # escape and drops the backslash — and there is no way to spell a LITERAL backslash in
+      # front of one, since `\\` stays two backslashes and re-exposes the separator. So a value
+      # of `a\=b` cannot be carried by an item at all, either as itself (httpie sends `a=b`) or
+      # escaped (httpie sends `a\\=b`).
+      private def self.escape_defeated?(s : String) : Bool
+        bytes = s.to_slice
+        bytes.each_with_index do |b, i|
+          return true if b == 0x5c_u8 && i + 1 < bytes.size && SEPARATOR_BYTES.includes?(bytes[i + 1])
+        end
+        false
       end
     end
   end
