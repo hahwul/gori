@@ -282,9 +282,12 @@ module Gori
       end
 
       private def self.mine_baseline(ev : Miner::BaselineEvent) : Nil
-        note = ev.stable ? "stable" : "UNSTABLE"
-        note += " — #{ev.warning}" if ev.warning
-        STDERR.puts "baseline: #{note}"
+        line = ev.stable ? "stable" : "UNSTABLE"
+        line += " — #{ev.warning}" if ev.warning
+        # The calibration note is its own line: it is not a caveat on the findings, and running
+        # it into the same sentence as `warning` is what makes it read like one.
+        line += "\n  #{ev.note}" if ev.note
+        STDERR.puts "baseline: #{line}"
       end
 
       private def self.emit_mine_finding(f : Miner::Finding, format : Symbol) : Nil

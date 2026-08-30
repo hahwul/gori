@@ -89,6 +89,12 @@ module Gori::Miner
     @idle : Channel(Nil)
     # Per-location cache of the names the base request already carries — see `present_at`.
     @present : Hash(Location, Set(String))
+    # Per-location caches of the name filtering, which is pure over `@names` + `@base`.
+    @carriable : Hash(Location, Array(String))
+    @valid : Hash(Location, Array(String))
+    # Form-encoded byte size per candidate name — see `encoded_name_bytes`. Keyed by name
+    # alone: query and form encode identically, and no other location encodes at all.
+    @encoded : Hash(String, Int32)
 
     # The first per-send failure reason of the run. `@errors` counts refusals and drops the
     # string, which is how a scope-blocked run could report "0 found" and exit 0 with the
@@ -140,6 +146,9 @@ module Gori::Miner
       @inflight = 0
       @idle = Channel(Nil).new(1)
       @present = Hash(Location, Set(String)).new
+      @carriable = Hash(Location, Array(String)).new
+      @valid = Hash(Location, Array(String)).new
+      @encoded = Hash(String, Int32).new
     end
 
     # The number of distinct (name × location) tests this run will perform — the stable
@@ -200,7 +209,12 @@ module Gori::Miner
         @events.send(DoneEvent.new(snapshot, true))
         return
       end
-      report = Baseline.new(@backend, @base, @config, -> { @state.stopped? }).calibrate(@config.locations)
+      # The width the run will actually mine each location at, derived BEFORE calibration so
+      # the control bucket can be sent at that width (see `Baseline#calibrate`) — a control
+      # eight names wide answers a question about eight names, and the run then sends 128.
+      widths = Hash(Location, Int32).new
+      @config.locations.each { |loc| widths[loc] = bucket_width(loc) }
+      report = Baseline.new(@backend, @base, @config, -> { @state.stopped? }).calibrate(@config.locations, widths)
       # A stop that landed DURING calibration, which the check above cannot catch: the predicate
       # handed to `Baseline` kept the remaining probes off the wire, so `report` describes a wave
       # that never finished. Publishing it would claim a baseline was established.
@@ -209,7 +223,7 @@ module Gori::Miner
         return
       end
       @report = report
-      @events.send(BaselineEvent.new(report.stable, report.warning))
+      @events.send(BaselineEvent.new(report.stable, report.warning, report.note))
       # A baseline that never answered is not a baseline. Its `Report` carries placeholders —
       # `status: nil`, every tolerance 0 — and `decide` reads them literally, so mining on one
       # made EVERY candidate a Status finding (nil != 200) and every bucket bisect down to its
@@ -366,7 +380,10 @@ module Gori::Miner
       # so the send seam protects them from session-binding expansion. Without this a `$NAME`
       # a param wordlist carries — or an injected byte colliding with a bound name — expands
       # to the live credential and leaves gori for the target, the run reporting `0 errors`.
-      bytes, spans = Inject.apply_with_spans(@base, task.location, pairs, @config.add_content_length_when_missing?)
+      # Resolved ONCE for the send: the padding, the byte delta and the decision all need it.
+      ref = report.reference_for(task.location)
+      bytes, spans = Inject.apply_with_spans(@base, task.location, pad_pairs(pairs, ref),
+        @config.add_content_length_when_missing?)
       # Nothing was injected, so this location cannot carry candidates in THIS request — e.g.
       # a request line that is not METHOD SP TARGET SP VERSION, which `inject_query` bails on
       # unmodified rather than rewrite the operator's bytes (P7, and it is right to). Sending
@@ -401,7 +418,7 @@ module Gori::Miner
       end
 
       probe = Fingerprint.probe(raw)
-      decision = Miner.decide(report, probe, pairs, task.location)
+      decision = Miner.decide(report, probe, pairs, task.location, ref, byte_delta(pairs, ref, task.location))
 
       # Reflection is self-identifying — resolve those names with no bisection. `reflected`
       # maps canary → name, so the confirming canary is in hand without a name→canary lookup.
@@ -484,9 +501,17 @@ module Gori::Miner
 
       # Once `majority` matching rounds land, `reproduced` is locked true and no further round
       # can change the verdict — so stop re-sending. Saves the tail confirm requests for every
-      # finding whose signal reproduces early (the common case, e.g. confirm_rounds=2 → 1 round);
-      # the classification is identical, and a run that never reaches majority still runs them all.
-      majority = (rounds + 1) // 2
+      # finding whose signal reproduces early; the classification is identical, and a run that
+      # never reaches majority still runs them all.
+      #
+      # A REAL majority — `(rounds + 1) // 2` made the default `confirm_rounds: 2` mean "one of
+      # two rounds is enough", which was already thin and became unsafe once the isolated
+      # re-test stopped having to reproduce the same METRIC (`matches_evidence?`): one 429 or
+      # 503 from a rate limiter during confirmation is a Status diff, and a single such round
+      # would confirm any name a jittery bucket had nominated, relabelled as Status with the
+      # rate limiter's own code as its evidence. Two rounds have to agree now, at a cost of one
+      # request per finding.
+      majority = rounds // 2 + 1
       hits = 0
       last_status = nil.as(Int32?)
       last_delta = 0_i64
@@ -494,6 +519,13 @@ module Gori::Miner
       last_grpc_status = nil.as(Int32?)
       last_grpc_message = nil.as(String?)
       interval = pace_interval
+      ref = r.reference_for(location)
+      # The delta a finding REPORTS is measured from whatever it was compared against. Off a
+      # width-matched control that is the control's own length: the confirm round carried
+      # `width - 1` padding names, so against the untouched baseline the number the TUI, the
+      # CLI row and MCP all print as "observed length delta" would be the padding's bulk —
+      # kilobytes on a page that answers a row per parameter — and not what the parameter did.
+      anchor = ref ? ref.probe.metrics.length : r.base_length
       rounds.times do
         # A confirm round is a REQUEST, so the stop flag has to be read here and not only at
         # the top of the bucket: `process_bucket` checks it once on entry, and everything below
@@ -505,7 +537,8 @@ module Gori::Miner
         break if @state.stopped?
         c = Canary.fresh
         # Same span-protection as the main loop — the confirm re-send injects the same name.
-        bytes, spans = Inject.apply_with_spans(@base, location, [{name, c}], @config.add_content_length_when_missing?)
+        bytes, spans = Inject.apply_with_spans(@base, location, pad_pairs([{name, c}], ref),
+          @config.add_content_length_when_missing?)
         # A confirm round is a REQUEST. Only the bucket send that produced this candidate was
         # paced by the dispatch loop, so these ran on top of the operator's rate — up to
         # `confirm_rounds` extra unpaced requests for every candidate that shows signal.
@@ -524,13 +557,19 @@ module Gori::Miner
           next
         end
         probe = Fingerprint.probe(raw)
-        decision = Miner.decide(r, probe, [{name, c}], location)
+        decision = Miner.decide(r, probe, [{name, c}], location, ref,
+          byte_delta([{name, c}], ref, location))
         if matches_evidence?(decision, evidence, name)
           hits += 1
+          # The isolated round is the better measurement of WHAT this parameter does: the
+          # bucket's kind was decided with up to `bucket_size` other names in the request, and
+          # a name whose effect is a status change can easily read as Length inside one. Report
+          # what the name did alone.
+          evidence = evidence_of(decision.kind) unless evidence.reflection? || decision.kind.none?
           # Only record status/delta from a round that actually reproduced the signal, so a
           # Confirmed finding's reported evidence can't come from a non-matching (flaky) round.
           last_status = probe.metrics.status
-          last_delta = probe.metrics.length - r.base_length
+          last_delta = probe.metrics.length - anchor
           last_canary = c if evidence.reflection?
           # Same projection the Fuzzer uses (`Fuzz::GrpcVerdict.response`): the h2 `:status`
           # above is 200 for every gRPC call, so for a gRPC target this — not `last_status` —
@@ -550,11 +589,23 @@ module Gori::Miner
       (reproduced && r.stable && !r.reflection_only[location]?) ? Confidence::Confirmed : Confidence::Tentative
     end
 
+    # Did the isolated re-test reproduce the signal the bucket nominated this name for?
+    #
+    # For a metric nomination this asks "does this name still move the response", NOT "does it
+    # move the SAME metric". Demanding the identical kind conflated the two and dropped real
+    # parameters: the bucket's kind is measured with up to `bucket_size` other names in the
+    # request, so a name that returns 500 alone can read as Length inside a bucket whose
+    # status was already 200 — evidence Status vs kind Length, no match, no finding, and
+    # nothing anywhere saying a candidate had been seen and thrown away. A name that moves
+    # the response ALONE, reproducibly, is the thing the miner exists to report; which of the
+    # four metrics carried it is a label, and `confirm` now relabels it from the isolated
+    # round. False positives are still held off by the same two gates as before — the name
+    # has to clear the calibrated band on a MAJORITY of rounds.
     private def matches_evidence?(decision : Decision, evidence : Evidence, name : String) : Bool
       if evidence.reflection?
         decision.reflected.has_value?(name)
       else
-        decision.kind == diffkind_of(evidence)
+        !decision.kind.none?
       end
     end
 
@@ -568,42 +619,116 @@ module Gori::Miner
       end
     end
 
-    private def diffkind_of(evidence : Evidence) : DiffKind
-      case evidence
-      in Evidence::Reflection then DiffKind::None
-      in Evidence::Status     then DiffKind::Status
-      in Evidence::Length     then DiffKind::Length
-      in Evidence::Words      then DiffKind::Words
-      in Evidence::Lines      then DiffKind::Lines
+    # ── buckets + name filtering ────────────────────────────────────────────────────
+
+    # The number of candidate names one probe carries at `loc`: the configured bucket size,
+    # lowered only if that many of THIS wordlist's names could not fit the location's byte
+    # budget. Derived from the widest name, so it is a single number for the whole location —
+    # which is what a width-matched control needs (`Baseline#calibrate`): every probe of the
+    # run carries exactly this many parameters, so the control's reaction cancels against the
+    # probe's and only the candidate's own effect is left.
+    private def bucket_width(loc : Location) : Int32
+      cap = @config.bucket_for(loc)
+      names = valid_names_for(loc)
+      return cap if names.empty?
+      budget = byte_budget(loc)
+      return cap if budget == Int32::MAX
+      worst = names.max_of { |n| name_cost(n, loc) }
+      return cap if worst <= 0
+      {cap, {budget // worst, 1}.max}.min
+    end
+
+    # Per-request byte ceiling for the location, or Int32::MAX where there is none.
+    private def byte_budget(loc : Location) : Int32
+      if loc.query? || loc.form?
+        Inject::MAX_URL_BYTES
+      elsif loc.json?
+        MAX_JSON_INJECT_BYTES
+      else
+        Int32::MAX
       end
     end
 
-    # ── buckets + name filtering ────────────────────────────────────────────────────
+    # What one name costs on the wire at `loc`: the ENCODED name (a name with reserved chars
+    # expands under URI.encode_www_form, so the raw bytesize would under-budget the URL and a
+    # bucket could overflow MAX_URL_BYTES → 414), its canary, the separators — times the JSON
+    # node count, since a JSON candidate is injected into EVERY object node.
+    private def name_cost(n : String, loc : Location) : Int32
+      (encoded_name_bytes(n, loc) + Canary::LEN + 2) * (loc.json? ? json_nodes : 1)
+    end
+
+    # Object nodes in the BASE body — fixed for the run (the node set never varies with bucket
+    # size, so bisection and confirmation stay valid), so derived once.
+    @json_nodes : Int32? = nil
+
+    private def json_nodes : Int32
+      @json_nodes ||= {Inject.json_object_node_count(Inject.split(@base)[1], Inject::MAX_JSON_NODES), 1}.max
+    end
+
+    # Extend a probe's candidate list with bogus names to the location's calibrated width, so
+    # every request of the run — initial bucket, bisection child, confirmation round — carries
+    # the SAME number of parameters as the control it is compared against. Without this the
+    # comparison changes shape as the bisection narrows, and on a page that reacts to unknown
+    # parameters (a "3 filters applied" counter, an error page that lists what it received)
+    # the reaction itself is what the reference cancels.
+    #
+    # The padding is NOT in the candidate list handed to `decide`, so a bogus name can never
+    # become a finding, and its canary is never looked up.
+    private def pad_pairs(pairs : Array({String, String}),
+                          ref : Baseline::Reference?) : Array({String, String})
+      return pairs unless ref && pairs.size < ref.width
+      extra = ref.width - pairs.size
+      values = Canary.fresh_batch(extra)
+      # Padding names carry the CONTROL's own length, so the only byte difference left between
+      # a probe and its reference is the candidate names themselves — which is exactly what
+      # `byte_delta` measures and the length band is widened by. One draw for the whole batch,
+      # and DISTINCT by construction: see `Canary.bogus_batch`.
+      names = Canary.bogus_batch(extra, ref.name_len)
+      padded = Array({String, String}).new(ref.width)
+      padded.concat(pairs)
+      extra.times { |i| padded << {names[i], values[i]} }
+      padded
+    end
+
+    # How many more (or fewer) bytes of parameter NAME this probe carries than the location's
+    # control did. A page that prints back what it received returns that difference in its own
+    # byte count — and the difference is gori's own doing, so `decide` widens the length band
+    # by `echo x this` instead of reading it as a finding.
+    private def byte_delta(pairs : Array({String, String}),
+                           ref : Baseline::Reference?, loc : Location) : Int32
+      return 0 unless ref
+      mine = pairs.sum(0) { |(n, _)| encoded_name_bytes(n, loc) }
+      pad = {ref.width - pairs.size, 0}.max * ref.name_len
+      (mine + pad - ref.name_bytes) * (loc.json? ? json_nodes : 1)
+    end
+
+    # Memoized per location: the encoded size is pure over {name, location} and fixed for the
+    # run, and this is on the hot path — `byte_delta` asks it for every candidate of every
+    # send, which without the memo re-ran `URI.encode_www_form` (and allocated a throwaway
+    # String) 128 times per probe to recompute a number the bucketing had already computed.
+    # Only query/form encode at all; everywhere else the name's own `bytesize` is the answer.
+    private def encoded_name_bytes(n : String, loc : Location) : Int32
+      return n.bytesize unless loc.query? || loc.form?
+      (@encoded[n] ||= URI.encode_www_form(n).bytesize)
+    end
 
     private def initial_buckets(loc : Location, names : Array(String)) : Array(Task)
-      cap = @config.bucket_for(loc)
-      url_loc = loc.query? || loc.form?
-      # JSON injects each candidate into EVERY object node, so a name's real byte cost is the
-      # per-name cost × node count. Derive the count ONCE from @base (fixed → the node set never
-      # varies with bucket size, so bisection/confirm stay valid) and bound per-request growth.
-      json_nodes = loc.json? ? {Inject.json_object_node_count(Inject.split(@base)[1], Inject::MAX_JSON_NODES), 1}.max : 1
-      byte_budget = if url_loc
-                      Inject::MAX_URL_BYTES
-                    elsif loc.json?
-                      MAX_JSON_INJECT_BYTES
-                    else
-                      Int32::MAX
-                    end
+      # The CALIBRATED width, not the configured one: the target may have refused the width the
+      # config asked for (`Baseline#settle`), and at a location with a width-matched control
+      # the comparison is only valid while every probe carries the same number of parameters —
+      # `pad_pairs` can pad a short bucket UP but nothing can shrink an over-wide one.
+      cap = @report.try(&.width_for(loc)) || @config.bucket_for(loc)
+      budget = byte_budget(loc)
       buckets = [] of Task
       cur = [] of String
       cur_bytes = 0
       names.each do |n|
-        # Count the ENCODED size for query/form — a name with reserved chars (e.g. "v2/x")
-        # expands under URI.encode_www_form, so the raw bytesize would under-budget the URL
-        # and a bucket could overflow MAX_URL_BYTES → 414. For Json, multiply by the node count.
-        # (One-time cost during bucketing.)
-        nb = ((url_loc ? URI.encode_www_form(n).bytesize : n.bytesize) + Canary::LEN + 2) * (loc.json? ? json_nodes : 1)
-        if !cur.empty? && (cur.size >= cap || cur_bytes + nb > byte_budget)
+        # `name_cost` counts the ENCODED size for query/form — a name with reserved chars
+        # (e.g. "v2/x") expands under URI.encode_www_form, so the raw bytesize would
+        # under-budget the URL and a bucket could overflow MAX_URL_BYTES → 414 — and multiplies
+        # by the JSON node count, since a JSON candidate is injected into every object node.
+        nb = name_cost(n, loc)
+        if !cur.empty? && (cur.size >= cap || cur_bytes + nb > budget)
           buckets << Task.new(loc, cur)
           cur = [] of String
           cur_bytes = 0
@@ -621,6 +746,15 @@ module Gori::Miner
     # the operator's own value, so testing a visible name corrupted the request AND reported it
     # back as a hidden parameter).
     private def valid_names_for(loc : Location) : Array(String)
+      @valid[loc] ||= compute_valid_names(loc)
+    end
+
+    # Memoized: `@names` and `@base` are both fixed for the run, so this answer cannot change
+    # — and it was recomputed over the WHOLE wordlist on every call, including the two
+    # coverage accessors (`skipped_names`, `present_names`) that a live surface polls while
+    # the run is going (MCP `mine_status`, the TUI tab). A 100k-name user wordlist made each
+    # poll a full re-filter of the list, per location, for a number that never moves.
+    private def compute_valid_names(loc : Location) : Array(String)
       present = present_at(loc)
       return carriable_names_for(loc) if present.empty?
       # Header field names are case-insensitive, so `X-Api-Key` in the request rules out a
@@ -632,6 +766,10 @@ module Gori::Miner
     # Wordlist names the location can carry at all (a header/cookie name must be an RFC 7230
     # token; a framing header is never injected).
     private def carriable_names_for(loc : Location) : Array(String)
+      @carriable[loc] ||= compute_carriable_names(loc)
+    end
+
+    private def compute_carriable_names(loc : Location) : Array(String)
       case loc
       when Location::Headers   then @names.select { |n| Inject.valid_header_name?(n) }
       when Location::Cookies   then @names.select { |n| Inject.valid_cookie_name?(n) }

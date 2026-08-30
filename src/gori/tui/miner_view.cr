@@ -47,6 +47,7 @@ module Gori::Tui
       @stop_requested = false
       @baseline_stable = true
       @baseline_warning = nil.as(String?)
+      @baseline_note = nil.as(String?)
       @progress = Miner::Progress.new(0, 0, 0, 0, 0)
       @results = [] of Miner::Finding
 
@@ -336,6 +337,7 @@ module Gori::Tui
       @sel = 0
       @progress = Miner::Progress.new(0, 0, 0, 0, 0)
       @baseline_warning = nil
+      @baseline_note = nil
       @baseline_stable = true
     end
 
@@ -367,6 +369,7 @@ module Gori::Tui
     def apply_baseline(ev : Miner::BaselineEvent) : Nil
       @baseline_stable = ev.stable
       @baseline_warning = ev.warning
+      @baseline_note = ev.note
     end
 
     def append_finding(f : Miner::Finding) : Nil
@@ -532,13 +535,25 @@ module Gori::Tui
         line = "found #{@progress.found} · #{@progress.names_done}/#{@progress.names_total} names · #{@progress.sent} sent · #{@progress.errors} err"
         screen.text(x, y, line, Theme.muted, Theme.bg, width: rect.w - 4)
       end
-      y += 1
+      render_notices(screen, rect, x, y + 1)
+    end
+
+    # The card's tail: the budget note, the baseline WARNING, and — separately, and not drawn
+    # as a warning — the baseline NOTE. Each takes the next row only if one is left, so a
+    # short card drops the least important first.
+    private def render_notices(screen : Screen, rect : Rect, x : Int32, y : Int32) : Nil
       if budget_exhausted? && y < rect.bottom - 1
         screen.text(x, y, budget_note, Theme.yellow, Theme.bg, width: rect.w - 4)
         y += 1
       end
       if (w = @baseline_warning) && y < rect.bottom - 1
         screen.text(x, y, "⚠ #{w}", Theme.yellow, Theme.bg, width: rect.w - 4)
+        y += 1
+      end
+      # Not a caveat and not painted like one: this says the COMPARISON changed shape, which is
+      # how an ordinary page that reacts to unknown parameters gets mined at all.
+      if (n = @baseline_note) && y < rect.bottom - 1
+        screen.text(x, y, n, Theme.muted, Theme.bg, width: rect.w - 4)
       end
     end
 

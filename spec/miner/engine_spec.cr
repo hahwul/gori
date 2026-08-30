@@ -51,6 +51,125 @@ private class HiddenParamBackend < F::Backend
   end
 end
 
+# A page that reacts to HOW MANY parameters it was handed — a "N filters applied" counter, a
+# canonical link that lists what was received, an error page quoting the query. It is the
+# ordinary case on the web, and against the untouched baseline it moves on EVERY probe, which
+# is why the location used to be written off wholesale and found nothing at all.
+#
+# `max_params` records the widest request it ever saw, so a spec can assert what the run
+# actually put on the wire.
+private class ParamCountBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+  getter max_params : Int32 = 0
+
+  # `refuse_over` stands in for a max_input_vars ceiling / an oversized-header refusal: past
+  # that many parameters the request itself is rejected, whatever is in it.
+  def initialize(@origin : F::Origin, @secret : String, @refuse_over : Int32 = 1024)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    params = query_params(bytes)
+    @max_params = params.size if params.size > @max_params
+    return refused if params.size > @refuse_over
+    body = String.build do |io|
+      io << "BASELINE BODY CONTENT\n"
+      # One row per parameter: the reaction a control of the same width cancels.
+      params.size.times { |i| io << "filter row " << i << "\n" }
+      io << "secret parameter accepted\nvalue applied to the request\nsee the audit log\n" if params.has_key?(@secret)
+    end
+    ok(body)
+  end
+
+  private def refused : Gori::Repeater::Result
+    body = "too many parameters"
+    head = "HTTP/1.1 400 Bad Request\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+
+  private def query_params(bytes : Bytes) : Hash(String, String)
+    pairs = Hash(String, String).new
+    line = String.new(bytes).lines.first? || ""
+    target = line.split(' ')[1]? || ""
+    qi = target.index('?')
+    return pairs unless qi
+    target[(qi + 1)..].split('&').each do |pair|
+      k, _, v = pair.partition('=')
+      pairs[k] = v unless k.empty?
+    end
+    pairs
+  end
+
+  private def ok(body : String) : Gori::Repeater::Result
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
+# The secret changes the response in DIFFERENT ways depending on how much company it has: it
+# always grows the body, and it additionally returns 500 when it arrives alone. A bucket
+# therefore nominates it on Length and the isolating re-test answers Status.
+private class KindFlipBackend < F::Backend
+  getter origin : F::Origin
+
+  def initialize(@origin : F::Origin, @secret : String)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    params = query_params(bytes)
+    hit = params.has_key?(@secret)
+    body = "BASELINE BODY CONTENT"
+    body += " XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" if hit
+    code = (hit && params.size <= 2) ? 500 : 200
+    head = "HTTP/1.1 #{code} X\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+
+  private def query_params(bytes : Bytes) : Hash(String, String)
+    pairs = Hash(String, String).new
+    line = String.new(bytes).lines.first? || ""
+    target = line.split(' ')[1]? || ""
+    qi = target.index('?')
+    return pairs unless qi
+    target[(qi + 1)..].split('&').each do |pair|
+      k, _, v = pair.partition('=')
+      pairs[k] = v unless k.empty?
+    end
+    pairs
+  end
+end
+
+# Answers every request normally EXCEPT the `nth` one, which comes back 503 — a rate limiter
+# tripping mid-run. Nothing in the request means anything to it: no name is hidden.
+private class OneTransientBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin, @nth : Int32, @grow_after : Int32 = 0)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    if @sent == @nth
+      return result(503, "slow down")
+    end
+    # A body that drifts once, so a bucket has something to nominate a name on.
+    body = "BASELINE BODY CONTENT"
+    body += " XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" if @grow_after > 0 && @sent > @grow_after
+    result(200, body)
+  end
+
+  private def result(code : Int32, body : String) : Gori::Repeater::Result
+    head = "HTTP/1.1 #{code} X\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+end
+
 # Returns one fixed (large) body regardless of input — for exercising the baseline
 # tolerance floors on a big page.
 private class FixedBodyBackend < F::Backend
@@ -582,8 +701,11 @@ describe Gori::Miner::Engine do
         end
       end
       findings.should be_empty
-      # …and it stopped there rather than spending the wordlist on it.
-      backend.sent.should eq(4)
+      # …and it stopped there rather than spending the wordlist on it. Five sends, not four:
+      # calibration is ONE wave — `stability_rounds` copies of the base request plus one
+      # control bucket per location — so the location's control goes out alongside the
+      # stability rounds rather than in a second round trip after them.
+      backend.sent.should eq(5)
       errors.size.should eq(1)
       errors[0].should eq("baseline unreachable — connection refused")
       # The baseline event still goes out first (a surface renders it), and the run still ends
@@ -774,6 +896,107 @@ describe Gori::Miner::Engine do
       # re-sending the baseline as if it were a probe is exactly what produced the false
       # clean verdict.
       backend.sent.should eq(3)
+    end
+  end
+
+  # The single largest false-negative class the miner had: an application that reacts to
+  # unknown parameters AT ALL — a "N filters applied" counter, a page that lists what it
+  # received — moves on every probe, so the calibration marked the location `reflection_only`
+  # and every metric finding there was suppressed for the rest of the run. Measured against a
+  # 441-name wordlist and 5 hidden parameters: 0 of 5 found, 9 requests, exit 0.
+  describe "a page that reacts to unknown parameters" do
+    it "mines it against a same-width control instead of writing the location off" do
+      names = %w(alpha beta gamma delta epsilon zeta eta theta)
+      backend = ParamCountBackend.new(F::Origin.new("http", "h", 80), "gamma")
+      base = "GET /search?q=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: cfg)
+      findings = [] of M::Finding
+      engine.run { |ev| findings << ev.finding if ev.is_a?(M::FindingEvent) }
+
+      findings.map(&.name).should eq(["gamma"])
+      # …and only that one: every other name is padded into requests of the same width, so the
+      # page's own reaction is on both sides of the diff and cancels.
+      findings.size.should eq(1)
+    end
+
+    it "mines at a width the target ACCEPTS rather than bisecting its own refusal" do
+      # A max_input_vars ceiling: past 4 parameters the request is rejected outright. The
+      # configured bucket is 4 names (plus the request's own `q`), so the control is refused
+      # and the width has to come down before a single candidate is worth sending.
+      names = %w(alpha beta gamma delta epsilon zeta eta theta)
+      backend = ParamCountBackend.new(F::Origin.new("http", "h", 80), "gamma", refuse_over: 3)
+      base = "GET /search?q=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      c = cfg
+      c.bucket_size[M::Location::Query] = 8
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: c)
+      findings = [] of M::Finding
+      engine.run { |ev| findings << ev.finding if ev.is_a?(M::FindingEvent) }
+
+      findings.map(&.name).should eq(["gamma"])
+    end
+  end
+
+  # `confirm` used to demand that the isolated re-test reproduce the SAME metric the bucket
+  # was nominated on. A name's effect inside a bucket of 128 is not always the effect it has
+  # alone, so a parameter the miner had already isolated was thrown away with nothing anywhere
+  # saying it had been seen.
+  describe "a signal that changes kind when the name is isolated" do
+    it "confirms it, and reports what the name did ALONE" do
+      names = %w(alpha beta gamma delta)
+      backend = KindFlipBackend.new(F::Origin.new("http", "h", 80), "gamma")
+      base = "GET /search?q=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: cfg)
+      findings = [] of M::Finding
+      engine.run { |ev| findings << ev.finding if ev.is_a?(M::FindingEvent) }
+
+      findings.map(&.name).should eq(["gamma"])
+      findings[0].evidence.should eq(M::Evidence::Status)
+      findings[0].status.should eq(500)
+    end
+  end
+
+  # `matches_evidence?` no longer demands that the isolated re-test reproduce the same METRIC,
+  # which means a single odd response during confirmation now "reproduces" anything. The
+  # majority is what has to hold the line: with the default `confirm_rounds: 2` that is two
+  # agreeing rounds, not one.
+  describe "a transient response during confirmation" do
+    it "does not confirm a name on its own" do
+      names = %w(alpha beta gamma delta)
+      # Every send after the calibration wave grows the body, so bucket probes nominate names
+      # on Length; one send then comes back 503. Neither is a parameter doing anything.
+      backend = OneTransientBackend.new(F::Origin.new("http", "h", 80), nth: 8, grow_after: 3)
+      base = "GET /search?q=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      c = cfg
+      c.confirm_rounds = 2
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: c)
+      findings = [] of M::Finding
+      engine.run { |ev| findings << ev.finding if ev.is_a?(M::FindingEvent) }
+      # The 503 round cannot carry a finding by itself, and no round after it disagrees with
+      # the baseline, so nothing is Confirmed off it.
+      findings.any? { |f| f.status == 503 }.should be_false
+    end
+  end
+
+  # A finding's reported delta is measured from whatever it was COMPARED against. At a
+  # width-matched location the confirm round carries `width - 1` padding names, so measuring
+  # from the untouched baseline reports the padding's bulk as the parameter's effect.
+  describe "the length delta a finding reports" do
+    it "is measured from the reference, not from the untouched baseline" do
+      # A wide bucket on purpose: the padding is what makes the two anchors disagree, and at
+      # the 4-name bucket the rest of this file uses there is barely any.
+      names = (1..64).map { |i| "p#{i}" } + ["gamma"]
+      backend = ParamCountBackend.new(F::Origin.new("http", "h", 80), "gamma")
+      base = "GET /search?q=1 HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+      c = cfg
+      c.bucket_size[M::Location::Query] = 64
+      engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: c)
+      findings = [] of M::Finding
+      engine.run { |ev| findings << ev.finding if ev.is_a?(M::FindingEvent) }
+
+      findings.size.should eq(1)
+      # The hit marker is ~70 bytes; the padding at this width is several times that. Against
+      # the baseline this number came out far larger than anything the parameter did.
+      findings[0].delta.abs.should be < 200
     end
   end
 end

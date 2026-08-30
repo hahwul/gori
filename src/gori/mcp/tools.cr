@@ -529,9 +529,12 @@ module Gori
         property found = 0
         property errors = 0_i64
         property? baseline_stable = true
-        # The baseline's own sentence when it is not stable — status varied, the endpoint echoes
-        # any input, or it never answered (see `Miner::Baseline::Report#warning`).
+        # The baseline's own sentence about anything that DOWNGRADES this run's findings: the
+        # status varied, the endpoint echoes any input, a location had to be muted, or it never
+        # answered at all (see `Miner::Baseline::Report#warning`).
         property baseline_warning : String? = nil
+        # The calibration note — informational, never a downgrade (see `Miner::BaselineEvent`).
+        property baseline_note : String? = nil
         property error_msg : String? = nil
         getter results = [] of Miner::Finding
         property? truncated = false

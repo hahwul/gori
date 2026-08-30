@@ -46,6 +46,7 @@ module Gori
         when Miner::BaselineEvent
           mjob.baseline_stable = ev.stable
           mjob.baseline_warning = ev.warning
+          mjob.baseline_note = ev.note
         when Miner::ProgressEvent then apply_mine_progress(mjob, ev.progress)
         when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
         when Miner::DoneEvent
@@ -92,13 +93,20 @@ module Gori
             j.field "found", mjob.found
             j.field "errors", mjob.errors
             j.field "baseline_stable", mjob.baseline_stable?
-            # Anything that makes this run's findings tentative — the status varied, the endpoint
-            # echoes any input (reflection detection is then OFF at those locations), or it never
-            # answered at all. NOT a gloss on `baseline_stable`: the echo note is raised off
+            # How this run had to be calibrated: the status varied, the endpoint echoes any
+            # input (reflection detection is then OFF at those locations), it never answered at
+            # all — or a location reacts to unknown parameters and is mined against a
+            # same-width control, which changes the COMPARISON without downgrading anything.
+            # NOT a gloss on `baseline_stable`: the echo note is raised off
             # `reflects_all` alone, so it accompanies a perfectly STABLE baseline. `baseline_stable:
             # false` on its own told an agent every finding was tentative without telling it what to
             # do about it, and the CLI has printed this sentence (stable or not) since the miner shipped.
             j.field "baseline_warning", Serialize.text(mjob.baseline_warning)
+            # How the run had to be CALIBRATED, which is not a caveat: a location that reacts
+            # to unknown parameters at all (a "3 filters applied" counter, a page that lists
+            # what it received) is mined against a same-width control instead of against the
+            # untouched baseline its own reaction already moved. Findings there are ordinary.
+            j.field "baseline_note", Serialize.text(mjob.baseline_note)
             j.field "results_truncated", mjob.truncated?
             j.field "job_complete", mjob.status != :running
             j.field "incomplete_reason", incomplete_reason(mjob.status)
