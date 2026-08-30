@@ -161,6 +161,80 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # --- background work ------------------------------------------------------
+
+  # The badge cell is the only thing she owns that can say "still going" — the status
+  # row's activity chip is off screen entirely in `placement: body`, which is the default.
+  it "wears a bobbing work badge while the host reports background work" do
+    with_companion(true) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      companion.frame.not_nil!.badge.should be_nil # nothing running: no badge
+      seen = (1..8).map do |i|
+        companion.tick(t0 + Companion::BEAT * i, working: i)
+        companion.frame.not_nil!.badge
+      end
+      seen.compact.size.should eq(seen.size) # …a badge on every working beat
+      seen.uniq.size.should be > 1           # …and it moves
+      seen.each { |b| Companion::WORK.includes?(b).should be_true }
+      # It goes away with the work, rather than sticking until something else changes.
+      companion.tick(t0 + Companion::BEAT * 9)
+      companion.frame.not_nil!.badge.should be_nil
+    end
+  end
+
+  # One cell, two claims on it. A failure mid-run is exactly when the × matters most, and
+  # the work is still legible in the status row's own chip.
+  it "lets a reaction outrank the work badge" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0, working: 0)
+      notes.push(:error, "upstream refused the connection")
+      companion.tick(t0 + Companion::BEAT, working: 1)
+      companion.frame.not_nil!.badge.should eq('×')
+    end
+  end
+
+  # The doze exists so an UNATTENDED gori animates nothing. A run in flight is the one case
+  # where the corner has something to say with nobody at the keyboard — and a mascot that
+  # slept through the only work in the session would be showing a frozen dot.
+  it "does not doze off while work is running, and wakes for work that starts while she is" do
+    with_companion(true) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      # Never poked, well past SLEEP_AFTER, but work is running the whole way.
+      companion.tick(t0 + Companion::SLEEP_AFTER + 1.second, working: 1)
+      companion.frame.not_nil!.pose.should_not eq(:doze)
+
+      # …and the other direction: asleep first, then something an agent started.
+      dozed = Companion.new(Notifications.new)
+      dozed.tick(t0)
+      dozed.tick(t0 + Companion::SLEEP_AFTER)
+      dozed.frame.not_nil!.pose.should eq(:doze)
+      dozed.tick(t0 + Companion::SLEEP_AFTER + 1.second, working: 1)
+      dozed.frame.not_nil!.pose.should_not eq(:doze)
+    end
+  end
+
+  # "still" is about motion she starts herself. THAT work is running is a fact; the bob is
+  # the motion — so the badge stays and stops moving.
+  it "freezes the work badge on still" do
+    with_companion(true, "still") do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      seen = (1..8).map do |i|
+        companion.tick(t0 + Companion::BEAT * i, working: i)
+        companion.frame.not_nil!.badge
+      end
+      seen.uniq.should eq([Companion::WORK[0]])
+    end
+  end
+
   it "drops the frame once on the disable edge, then stays quiet" do
     companion = Companion.new(Notifications.new)
     with_companion(true) { companion.tick(Time.instant).should be_true }
@@ -697,7 +771,10 @@ describe Gori::Tui::Companion do
   # neighbour's cell and orphan-clear the one before it.
 
   it "assembles every pose x wink x badge to exactly W columns of width-1 glyphs" do
-    badges = [nil, '·', '!', '×', 'z']
+    # The mood/doze badges are literals in Companion#compose, so they are literals here
+    # too; the WORK frames are a TABLE, so they are swept from it — a new frame added
+    # there has to arrive in this sweep by existing, not by someone remembering this line.
+    badges = [nil, '·', '!', '×', 'z'] + Companion::WORK.to_a
     Mascot::POSES.each do |pose|
       Mascot::WINKS.each do |wink|
         badges.each do |badge|
@@ -989,8 +1066,9 @@ describe Gori::Tui::Companion do
     it "never claims a continuation cell" do
       backend = MemoryBackend.new(80, 24)
       screen = Screen.new(backend)
+      badges = ['!'] + Companion::WORK.to_a
       Mascot::POSES.each do |pose|
-        Companion.draw(screen, body, Mascot::Frame.new(pose: pose, badge: '!'))
+        badges.each { |b| Companion.draw(screen, body, Mascot::Frame.new(pose: pose, badge: b)) }
       end
       rect = Companion.place(body).not_nil!
       (Mascot::H).times do |i|

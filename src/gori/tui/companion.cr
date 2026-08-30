@@ -80,6 +80,16 @@ module Gori::Tui
     # Beats she stays startled after being woken from a doze.
     WAKE_BEATS = 3
 
+    # The badge while a background job is running: a dot bobbing in the badge cell, one
+    # frame per step of whatever counter the host hands #tick.
+    #
+    # NOT the run loop's braille job spinner, deliberately. Two spinners of the same
+    # design in one status row read as one thing rendered twice; this is her own gesture,
+    # in the vocabulary the badge column already speaks ('·', '!', '×', 'z') and out of
+    # glyphs the sprite has already proven in every terminal gori runs in. Index 0 is the
+    # resting one, because "still" freezes here.
+    WORK = {'˙', '·', '.', '·'}
+
     # Beats a reaction holds its PEAK face before settling into its quieter cousin — see
     # #pose_for. 8 beats is 1.6s, roughly half of the shortest mood hold (:happy, 3s), so
     # every reaction gets a visible peak and a visible settle.
@@ -173,6 +183,8 @@ module Gori::Tui
       # BEAT later. The same wasted repaint runner.cr's on-screen gate exists to prevent,
       # arriving from the other end.
       @restless = false
+      # The host's background-work counter, or nil for "nothing running" — see #tick.
+      @working = nil.as(Int32?)
       @wake_until_beat = 0
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
@@ -187,7 +199,18 @@ module Gori::Tui
     # Advance the animation, pick up new notifications, and report whether the DRAWN frame
     # changed. Same contract as ResourceMeter#tick and the top-bar clock: a beat that lands
     # on an identical frame is silent, so the run loop never repaints on a bare timer.
-    def tick(now : Time::Instant) : Bool
+    # `working` is the host's background-work counter: nil while nothing is running, else a
+    # number that advances as work proceeds. She wears it as a bobbing dot in the badge
+    # cell, so a run that takes minutes is visible on her face rather than only in the
+    # status row's activity chip — which is off screen entirely in `placement: body`.
+    #
+    # A COUNTER AND NOT A BOOLEAN, because the host already has one: the Runner advances
+    # @spinner_frame on a fixed cadence while a job runs and forces a repaint with it. Take
+    # that same number and her bob is in lockstep with the activity chip for free — no
+    # second clock to drift against it, and no repaint that was not already bought. A
+    # boolean would have made her invent a cadence, and the two would beat against each
+    # other in the one placement that shows both.
+    def tick(now : Time::Instant, working : Int32? = nil) : Bool
       unless Settings.companion?
         # Disable edge, as in ResourceMeter#tick: drop the frame ONCE, then stay silent.
         # Clearing the timers also means a re-enable starts a fresh idle window rather
@@ -206,6 +229,7 @@ module Gori::Tui
         greet(now)
       end
       @last_poke ||= now
+      take_working(now, working)
       # THE BEAT CLOCK RUNS FIRST, then the state that reads it. #apply_mood stamps
       # @mood_beat with the CURRENT beat and every arc measured from it counts from there
       # — #pose_for's peak/settle and #shake_for's three-beat shudder both. Consuming a
@@ -219,6 +243,22 @@ module Gori::Tui
       expire_bubble(now)
       expire_mood(now)
       repaint(stepped)
+    end
+
+    # Pick up the host's work counter. Restless on any change, which costs nothing: the
+    # host that advances this counter is repainting for it already, so her frame is
+    # recomposed inside a render the run loop had committed to anyway — and being in step
+    # with it is the whole reason the counter is borrowed rather than invented.
+    #
+    # The RISING edge pokes her. A job she is showing progress for can be started by
+    # something that never touched the keyboard (an agent over MCP, a retest), and a dozing
+    # mascot would sleep through the only work in the session.
+    private def take_working(now : Time::Instant, working : Int32?) : Nil
+      return if working == @working
+      rising = @working.nil?
+      @working = working
+      @restless = true
+      poke(now) if rising
     end
 
     # Any sign of life re-arms the idle clock and wakes her if she had dozed off.
@@ -257,6 +297,7 @@ module Gori::Tui
       @mood = :info
       @mood_until = nil
       @restless = false
+      @working = nil
       @seen_id = @notes.latest_id
     end
 
@@ -292,6 +333,10 @@ module Gori::Tui
 
     private def check_doze(now : Time::Instant) : Nil
       return if @dozing
+      # Not while there is work to show. The doze exists so an UNATTENDED gori animates
+      # nothing; a run in flight is the one case where the corner has something to say with
+      # nobody at the keyboard, and the host is repainting for it regardless.
+      return if @working
       poke = @last_poke
       return unless poke && now - poke >= SLEEP_AFTER
       @dozing = true
@@ -374,12 +419,23 @@ module Gori::Tui
       gesture_pose || (blink? ? :blink : :idle)
     end
 
+    # A REACTION OUTRANKS THE WORK BADGE. One cell, two things that want it, and a failure
+    # mid-run is exactly when the `×` matters most — the work is still legible in the
+    # status row's own chip, and the reaction settles in a few seconds either way.
     private def badge_for(mood : Symbol) : Char?
       case mood
       when :happy then '·'
       when :warn  then '!'
       when :alarm then '×'
+      else             work_badge
       end
+    end
+
+    private def work_badge : Char?
+      return nil unless w = @working
+      # "still" takes the resting frame and holds it: the fact that work is running is not
+      # motion she started, but the bob is.
+      Settings.companion_still? ? WORK[0] : WORK[w.remainder(WORK.size).abs]
     end
 
     # The :error reaction gets a three-beat shudder; every other mood sits still.
