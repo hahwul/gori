@@ -1108,6 +1108,7 @@ module Gori::Tui
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
       calibrate = v.config.auto_calibrate?
+      terminal_sent = false
       spawn(name: "gori-fuzz") do
         engine.calibrate_baseline if calibrate
         engine.run do |ev|
@@ -1118,6 +1119,12 @@ module Gori::Tui
             else
             end
           else
+            # Done/Error is the run's VERDICT. Once one is on the channel the rescue below
+            # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the run,
+            # so a raise on the way out of a COMPLETED run would relabel it :error and fire
+            # an error notification for work that succeeded. (`jobs.finish` keeps the first
+            # terminal state, so the job itself was already safe — nothing else was.)
+            terminal_sent = true if ev.is_a?(Fuzz::DoneEvent) || ev.is_a?(Fuzz::ErrorEvent)
             events.send({v, ev}) # Result/Done/Error — blocking, never dropped
           end
           engine.stop if v.stop_requested?
@@ -1129,7 +1136,8 @@ module Gori::Tui
         # reports its own setup/generation failures this way (Fuzz::Engine), so reuse that
         # channel rather than inventing a second way to say the same thing.
         ::Log.error(exception: ex) { "fuzz run fiber died" }
-        events.send({v, Fuzz::ErrorEvent.new(ex.message || "fuzz run error")})
+        v.finish_run # before the blocking send — see the Miner's sibling for why
+        events.send({v, Fuzz::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       ensure
         v.finish_run # backstop — the drain's Done also clears it + shows the summary
       end

@@ -255,6 +255,15 @@ module Gori::Tui
         @remote_latest = latest
         @fetched_live = true
         @remote_ready = true # set last so the reader never sees a half-written pair
+      rescue ex
+        # `latest_version` answers nil for every failure it knows about, so a raise here is one
+        # it does not — and it is one file away, free to change without this one being read.
+        # Unrescued it would print a backtrace onto the PICKER's alternate screen (#411) and
+        # leave `@remote_ready` false, so the check would never resolve and never say why.
+        # Ready-with-no-version is the same outcome an offline fetch already has: nothing
+        # shown, the day cache untouched, retried next launch.
+        ::Log.error(exception: ex) { "update check fiber died" }
+        @remote_ready = true
       end
     end
 

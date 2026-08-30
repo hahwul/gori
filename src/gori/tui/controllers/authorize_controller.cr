@@ -252,20 +252,7 @@ module Gori::Tui
       store = @host.session.store
       spawn(name: "authorize-passive") do
         while ev = feed.receive?
-          next unless @passive
-          next unless ev.kind == :updated # the response side exists only on the second event
-          detail = store.get_flow(ev.id)
-          next unless detail
-          next unless proxy_origin?(detail.row)
-          # NO filtering here. The decision needs the identity set and its outcome needs to be
-          # COUNTED, and both live on the main fiber — a flow silently dropped on this side is
-          # exactly how this mode came to look broken.
-          select
-          when @seeds.send(detail)
-          else
-            # main fiber behind — drop rather than stall the feed; the next matching flow
-            # queues the endpoint anyway, and the queue is a sample, not a ledger.
-          end
+          offer_passive_seed(store, ev)
         end
       rescue Channel::ClosedError
         # project closing
@@ -275,6 +262,42 @@ module Gori::Tui
         @passive_closed = true
       end
       start_passive_catchup(store)
+    end
+
+    # One live-feed event, off the main fiber.
+    #
+    # EXTRACTED so it can carry the same `DB::Error | SQLite3::Exception` rescue the catch-up
+    # sweep has always had, and for the same reason: `get_flow` reads the store, and a store
+    # that is closing or momentarily busy raises. Inline in the `while` above, that raise
+    # unwound the whole watcher — and because the watcher's `ensure` sets `@passive_closed`,
+    # which is the ONLY thing that stops the catch-up timer, one transient busy killed BOTH
+    # halves of passive replay for the rest of the session while printing its backtrace onto
+    # the alternate screen (#411). Dropping the flow instead costs a delay, not the endpoint:
+    # the sweep re-offers it within PASSIVE_CATCHUP_INTERVAL.
+    private def offer_passive_seed(store : Store, ev : Store::FlowEvent) : Nil
+      return unless @passive
+      return unless ev.kind == :updated # the response side exists only on the second event
+      detail = store.get_flow(ev.id)
+      return unless detail
+      return unless proxy_origin?(detail.row)
+      # NO filtering here. The decision needs the identity set and its outcome needs to be
+      # COUNTED, and both live on the main fiber — a flow silently dropped on this side is
+      # exactly how this mode came to look broken.
+      select
+      when @seeds.send(detail)
+      else
+        # main fiber behind — drop rather than stall the feed; the next matching flow
+        # queues the endpoint anyway, and the queue is a sample, not a ledger.
+      end
+    rescue DB::Error | SQLite3::Exception
+      # store closing / busy — the catch-up sweep re-reads (see start_passive_catchup)
+    rescue ex
+      # And everything else, at the SAME depth. Narrowing to the two DB classes only moved the
+      # original failure one exception over: any other raise from here still unwound the watcher
+      # and, through its `ensure`, stopped the catch-up sweep with it. One bad flow must cost one
+      # flow. `@seeds` is never closed, so nothing legitimate is being swallowed — the watcher's
+      # own `rescue Channel::ClosedError` is for `feed`, which this does not touch.
+      ::Log.error(exception: ex) { "authorize passive seed dropped" }
     end
 
     # The live feed DROPS on a full channel (see `Store#publish`), and both this consumer and
@@ -307,6 +330,13 @@ module Gori::Tui
           end
         rescue DB::Error | SQLite3::Exception
           # store closing / busy — the next tick re-reads
+        rescue ex
+          # Same depth, deliberately: one level out (on the spawn block) this reads as a rescue
+          # but still ENDS the sweep, and nothing restarts it. The sweep is the only cover for
+          # the live feed's dropped events (`Store#publish` drops on a full channel), so losing
+          # it degrades passive replay silently while the tab still reads ON — the exact shape
+          # this mode came to look broken in. A bad tick costs a tick.
+          ::Log.error(exception: ex) { "authorize passive catch-up tick failed" }
         end
       end
     end

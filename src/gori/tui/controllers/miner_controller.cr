@@ -567,6 +567,7 @@ module Gori::Tui
       view.begin_run
       view.job_id = @host.jobs.start(:miner, view.summary, goto: goto_for(view))
       events = @mine_events
+      terminal_sent = false
       spawn(name: "gori-miner") do
         engine.run do |ev|
           case ev
@@ -576,10 +577,32 @@ module Gori::Tui
             else
             end
           else
+            # Done/Error is the run's VERDICT. Once one is on the channel the rescue below
+            # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the run,
+            # so a raise on the way out of a COMPLETED run would relabel it :error and fire
+            # an error notification for work that succeeded. (`jobs.finish` keeps the first
+            # terminal state, so the job itself was already safe — nothing else was.)
+            terminal_sent = true if ev.is_a?(Miner::DoneEvent) || ev.is_a?(Miner::ErrorEvent)
             events.send({view, ev}) # Baseline/Finding/Done/Error — blocking, never dropped
           end
           engine.stop if view.stop_requested?
         end
+      rescue ex
+        # An unrescued raise in a `spawn` block kills only this fiber and prints to STDERR,
+        # which under the TUI is the alternate screen (#411). The `ensure` below clears the
+        # view's running flag, so the pane merely looked finished — but `jobs.finish` is only
+        # ever reached from `apply_event`'s Done/Error arms, so with no terminal event the
+        # bottom-bar job spun for the rest of the session and the exit prompt kept counting a
+        # mine that had already died. Worse, a mine that stops with no verdict reads as one
+        # that found nothing. Hand the failure back the way the engine reports its own.
+        ::Log.error(exception: ex) { "mine run fiber died" }
+        # Cleared BEFORE the send, not only in the `ensure`: `events` is bounded and this send
+        # blocks, so with the drain gone the `ensure` would be reached late or not at all — and
+        # un-wedging the pane is the one thing that must not wait on a reader.
+        view.finish_run
+        # `ex.class` too: "Nil assertion failed" alone is what the operator gets in the job's
+        # error text, the notification AND the persisted event log, and it names nothing.
+        events.send({view, Miner::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       ensure
         view.finish_run # backstop — the drain's Done also clears it
       end

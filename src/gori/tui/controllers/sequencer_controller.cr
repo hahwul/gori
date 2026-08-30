@@ -679,6 +679,7 @@ module Gori::Tui
       view.begin_run
       view.job_id = @host.jobs.start(:sequence, view.summary, goto: goto_for(view))
       events = @seq_events
+      terminal_sent = false
       spawn(name: "gori-sequencer") do
         engine.run do |ev|
           case ev
@@ -688,10 +689,24 @@ module Gori::Tui
             else
             end
           else
+            # Done/Error is the collection's VERDICT. Once one is on the channel the rescue below
+            # must not send a second: `apply_event`'s ErrorEvent arm re-finishes the run,
+            # so a raise on the way out of a COMPLETED run would relabel it :error and fire
+            # an error notification for work that succeeded. (`jobs.finish` keeps the first
+            # terminal state, so the job itself was already safe — nothing else was.)
+            terminal_sent = true if ev.is_a?(Sequencer::DoneEvent) || ev.is_a?(Sequencer::ErrorEvent)
             events.send({view, ev}) # Sample/Done/Error — blocking, never dropped
           end
           engine.stop if view.stop_requested?
         end
+      rescue ex
+        # Same shape as the Miner's, for the same two reasons: an unrescued raise here writes
+        # its backtrace to the alternate screen (#411), and `jobs.finish` is only reached from
+        # `apply_event`'s Done/Error arms — so a dead fiber left the bottom-bar job spinning
+        # and the exit prompt counting a collection that had already stopped.
+        ::Log.error(exception: ex) { "sequencer run fiber died" }
+        view.finish_run # before the blocking send — see the Miner's sibling for why
+        events.send({view, Sequencer::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       ensure
         view.finish_run
       end
