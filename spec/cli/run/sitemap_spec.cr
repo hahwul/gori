@@ -10,6 +10,78 @@ module Gori::CLI::Run
   def self.sitemap_tag_path_for_spec(target : String) : String
     sitemap_tag_path(target)
   end
+
+  def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32) : {Array(Gori::Sitemap::Node), Bool}
+    collect_sitemap(store, Gori::QL::EMPTY, limit, false, true, true)
+  end
+
+  def self.sitemap_truncation_notice_for_spec(truncated : Bool, limit : Int32) : String?
+    sitemap_truncation_notice(truncated, limit)
+  end
+end
+
+private def sitemap_store(&)
+  path = File.tempname("gori-clisitemap", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+  Gori::Store::Schema.migrate!(db)
+  store = Gori::Store.new(db, nil)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private def sitemap_captured(host : String, target : String) : Gori::Store::CapturedRequest
+  Gori::Store::CapturedRequest.new(
+    created_at: 1_000_i64, scheme: "https", host: host, port: 443,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil,
+    source: Gori::FlowSource::Kind::Proxy)
+end
+
+describe "gori run sitemap — a capped scan" do
+  # The tree used to be built off `store.sitemap_entries(filter, limit)` with nothing ever
+  # comparing the returned size to `limit`, so `sitemap -n 5` on a project with more endpoints
+  # printed a short host list AND a per-host `(N paths)` header counted off the surviving
+  # rows — a positive, wrong claim about the project, with nothing on STDERR in text, json OR
+  # paths. The cut is invisible by the time the tree exists (every fold below collapses rows),
+  # so it has to be measured on the raw read.
+  it "reports the cut when the read comes back at the limit" do
+    sitemap_store do |store|
+      8.times { |i| store.insert_flow(sitemap_captured("acme.test", "/p#{i}")) }
+      store.flush
+
+      hosts, truncated = Gori::CLI::Run.collect_sitemap_for_spec(store, 5)
+      truncated.should be_true
+      # The counts the header prints ARE the truncated ones — which is exactly why the notice
+      # has to fire rather than the number being quietly trusted.
+      hosts.sum(&.endpoints).should eq(5)
+      Gori::CLI::Output.sitemap_text(hosts).should contain("(5 paths)")
+    end
+  end
+
+  it "reports no cut when the whole set fits under the limit" do
+    sitemap_store do |store|
+      3.times { |i| store.insert_flow(sitemap_captured("acme.test", "/p#{i}")) }
+      store.flush
+
+      hosts, truncated = Gori::CLI::Run.collect_sitemap_for_spec(store, 5)
+      truncated.should be_false
+      hosts.sum(&.endpoints).should eq(3)
+    end
+  end
+
+  it "names the limit and disowns the counts in the notice, and stays silent otherwise" do
+    note = Gori::CLI::Run.sitemap_truncation_notice_for_spec(true, 5).should_not be_nil
+    note.should contain("TRUNCATED")
+    note.should contain("5")
+    note.should contain("(N paths)")
+    Gori::CLI::Run.sitemap_truncation_notice_for_spec(false, 5).should be_nil
+  end
 end
 
 describe "gori run sitemap — text tree" do

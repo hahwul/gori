@@ -203,7 +203,7 @@ module Gori
           store.close
           abort "gori run sitemap: #{err}"
         end
-        hosts = begin
+        hosts, truncated = begin
           collect_sitemap(store, filter, limit, in_scope, group, fold_query)
         rescue ex
           abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
@@ -211,7 +211,7 @@ module Gori
           store.close
         end
 
-        emit_sitemap(hosts, format)
+        emit_sitemap(hosts, format, truncated, limit)
       end
 
       # QL.parse + the same un-compilable-query rejection as history (a non-blank query
@@ -240,12 +240,18 @@ module Gori
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool,
-                                       fold_query : Bool) : Array(Sitemap::Node)
+                                       fold_query : Bool) : {Array(Sitemap::Node), Bool}
         # A `--query body:…` filter arrives here already drained and CHECKED — see
         # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
         # is still behind.
         # The drain used to sit on this line, where a leftover backlog had no way to be reported.
-        hosts = Sitemap.build(store.sitemap_entries(filter, limit, raise_on_error: true))
+        entries = store.sitemap_entries(filter, limit, raise_on_error: true)
+        # Measured HERE, on the raw read, and not after the folds: every step below collapses
+        # rows, so by the time the tree exists the cut is invisible. Same test as
+        # `Diff::Snapshot` (`rows.size >= limit`) — the read is capped, not cursored, so a
+        # group that lost the cut is not on a later page, it is simply absent.
+        truncated = entries.size >= limit
+        hosts = Sitemap.build(entries)
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope
           scope = Scope.load(store)
@@ -261,12 +267,30 @@ module Gori
         # children they always did (/items/7?ref=home still joins the /items/7 numeric run).
         hosts.each { |h| Sitemap.fold_queries!(h) } if fold_query
         hosts.each { |h| h.endpoints = Sitemap.endpoint_count(h) }
-        hosts
+        {hosts, truncated}
       end
 
-      # Results → STDOUT; the empty-state note → STDERR (STDOUT-purity). JSON always
-      # emits a (possibly empty) array so scripts get valid JSON either way.
-      private def self.emit_sitemap(hosts : Array(Sitemap::Node), format : Symbol) : Nil
+      # The sentence for a tree built off a capped read, or nil when the read was complete.
+      # Pure and separate for the same reason `tag_match_warning` is: a capped read is the one
+      # thing this tree must not be silent about, because the per-host `(N paths)` header is
+      # counted off whatever survived the cut — so a truncated run makes a POSITIVE and wrong
+      # claim about the project's endpoints. The cap counts 6-column transport keys (see
+      # `sitemap_node_exists?`), which multiply past the default long before the collapsed row
+      # count suggests, so this fires on real engagements rather than on a pathological one.
+      private def self.sitemap_truncation_notice(truncated : Bool, limit : Int32) : String?
+        return nil unless truncated
+        "TRUNCATED — the scan stopped at the --limit of #{limit} endpoint keys, so hosts are " \
+        "missing and every '(N paths)' count is a count of the partial read, not of the " \
+        "project. Raise -n/--limit or narrow the query."
+      end
+
+      # Results → STDOUT; the empty-state and truncation notes → STDERR (STDOUT-purity). JSON
+      # always emits a (possibly empty) array so scripts get valid JSON either way.
+      private def self.emit_sitemap(hosts : Array(Sitemap::Node), format : Symbol,
+                                    truncated : Bool, limit : Int32) : Nil
+        if note = sitemap_truncation_notice(truncated, limit)
+          STDERR.puts "gori run sitemap: #{note}"
+        end
         if format == :json
           puts CLI::Output.sitemap_json(hosts)
         elsif hosts.empty?
