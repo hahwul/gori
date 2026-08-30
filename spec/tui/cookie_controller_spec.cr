@@ -386,6 +386,58 @@ describe "Gori::Tui::CookieController" do
     end
   end
 
+  # The other half of the Django trap: older apps sign with SHA-1, but the tab defaults to
+  # SHA-256, so the correct secret would read as ✗ bad key. Unlike the salt (undetectable), the
+  # algorithm is unambiguous from the signature length — 20 raw bytes (sha1) vs 32 (sha256) — so
+  # the tab infers it until the operator pins one by cycling.
+  describe "Django algorithm auto-detection" do
+    it "verifies a SHA-1 session cookie with no manual algorithm toggle" do
+      sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
+        salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(sess)
+        ctl.cycle_salt_preset # session salt (the salt half still needs its toggle)
+        ctl.focus_last        # :secret
+        type(ctl, SECRET)
+        b = render(ctl)
+        screen_has?(b, "algo:sha1").should be_true # inferred from the 27-char signature
+        screen_has?(b, "verified").should be_true  # the correct secret verifies, no algo toggle
+      end
+    end
+
+    it "lets an explicit algorithm cycle pin the choice over detection" do
+      sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
+        salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(sess)
+        ctl.cycle_salt_preset
+        ctl.focus_last # :secret
+        type(ctl, SECRET)
+        ctl.cycle_algorithm # from the detected sha1 → pin sha256
+        b = render(ctl)
+        screen_has?(b, "algo:sha256").should be_true
+        screen_has?(b, "bad key").should be_true # the pinned algo now mismatches the sha1 cookie
+      end
+    end
+
+    it "forges under the algorithm detected from the loaded cookie" do
+      sess = Gori::Cookie::Django.forge(%({"a":1}), SECRET, 1_i64,
+        salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
+      with_cookie_controller do |ctl|
+        ctl.cookie_from_text(sess)
+        ctl.cycle_salt_preset                                     # session salt
+        ctl.load_decoded                                          # → FORGE, pins format django, INPUT retained for detection
+        ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
+        type(ctl, SECRET)
+        cookie = forge_output(ctl)
+        Gori::Cookie.verify(cookie, SECRET, "django",
+          salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1").should be_true
+        Gori::Cookie.verify(cookie, SECRET, "django",
+          salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha256").should be_false
+      end
+    end
+  end
+
   describe "session lifecycle" do
     it "opens and closes sub-tab sessions, keeping at least one" do
       with_cookie_controller do |ctl|

@@ -29,7 +29,12 @@ module Gori::Tui
     property salt_pre : String = ""
     property format : String = "auto"      # auto | flask | rack | django
     property algorithm : String = "sha256" # sha256 | sha1 (Django only)
-    property mode : Symbol = :decode       # :decode | :forge
+    # False until the operator cycles the algorithm by hand. While false, a Django cookie's
+    # algorithm is inferred from its signature length (sha1 = 20 bytes, sha256 = 32) — the
+    # same "auto until you pin it" contract `format` has — so a real SHA-1 `sessionid` does
+    # not read as ✗ bad key under the SHA-256 default. Cycling the algo pins the choice.
+    property? algorithm_pinned : Bool = false
+    property mode : Symbol = :decode # :decode | :forge
     property pane : Symbol = :input
     # Cached results (recomputed on edit, never on the render hot path).
     property decoded : String = ""
@@ -213,6 +218,7 @@ module Gori::Tui
       dup.salt = s.salt
       dup.format = s.format
       dup.algorithm = s.algorithm
+      dup.algorithm_pinned = s.algorithm_pinned?
       recompute_decode(dup)
       recompute_forge(dup)
       @sessions << dup
@@ -254,7 +260,7 @@ module Gori::Tui
             s.view.render_decode(screen, body,
               input: s.input, input_mode: s.input_mode, input_read: s.input_read,
               decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
-              algorithm: s.algorithm, salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
               salt_preset: salt_preset_label(s),
               verify_state: s.verify_state, crack_note: s.crack_note,
               secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
@@ -262,7 +268,7 @@ module Gori::Tui
           else
             s.view.render_forge(screen, body,
               payload: s.payload, format: display_format(s), resolved_format: effective_format(s),
-              algorithm: s.algorithm, salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+              algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
               salt_preset: salt_preset_label(s),
               secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
               output: s.output, output_ok: s.output_ok?,
@@ -619,7 +625,7 @@ module Gori::Tui
 
     private def click_opts_badge(s : CookieSession, opts_c : Rect, mx : Int32, my : Int32) : Nil
       case s.view.opts_badge_hit(opts_c, mx, my, display_format(s), effective_format(s),
-        s.algorithm, salt_preset_label(s))
+        effective_algorithm(s), salt_preset_label(s))
       when :format    then cycle_format
       when :algorithm then cycle_algorithm
       when :salt      then cycle_salt_preset
@@ -677,8 +683,12 @@ module Gori::Tui
 
     def cycle_algorithm : Nil
       s = cur
-      i = ALGORITHMS.index(s.algorithm) || 0
+      # Step from what is CURRENTLY in effect — the inferred algorithm when it was auto, so the
+      # first cycle moves off the detected one rather than jumping back to the sha256 default —
+      # and pin the choice so detection no longer overrides it.
+      i = ALGORITHMS.index(effective_algorithm(s)) || 0
       s.algorithm = ALGORITHMS[(i + 1) % ALGORITHMS.size]
+      s.algorithm_pinned = true
       recompute_all(s)
       @host.status(effective_format(s) == "django" ? "algorithm = #{s.algorithm}" : "algorithm = #{s.algorithm} (Django only)")
     end
@@ -737,7 +747,7 @@ module Gori::Tui
         return
       end
       source = crack_source(spec)
-      found = Cookie.crack(token, source, decode_format(s), salt: effective_salt(s), algorithm: s.algorithm)
+      found = Cookie.crack(token, source, decode_format(s), salt: effective_salt(s), algorithm: effective_algorithm(s))
       if found
         s.secret = found
         s.secret_cx = found.size
@@ -912,7 +922,7 @@ module Gori::Tui
         "↑/↓ scroll · c crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs"
       when :opts
         if effective_format(s) == "django"
-          "type salt · salt:#{salt_preset_label(s)} (click/space) · ^A format · algo #{s.algorithm} · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+          "type salt · salt:#{salt_preset_label(s)} (click/space) · ^A format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · esc sub-tabs"
         else
           "type salt · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
         end
@@ -961,6 +971,31 @@ module Gori::Tui
       t.empty? ? nil : t
     end
 
+    # The Django HMAC algorithm the engine actually verifies/signs under: the operator's pinned
+    # choice once they cycle it, otherwise inferred from the INPUT cookie's signature length
+    # (sha1 = 20 raw bytes, sha256 = 32 — unambiguous). This closes the sibling of the salt trap
+    # ([[cookie-tab-session-salt-trap]]): a genuine SHA-1 `sessionid` would otherwise read as
+    # ✗ bad key under the SHA-256 default even with the correct secret. Non-Django and a pinned
+    # choice both fall straight through to the stored value; an undetectable cookie keeps it too.
+    private def effective_algorithm(s : CookieSession) : String
+      return s.algorithm if s.algorithm_pinned? || effective_format(s) != "django"
+      detect_django_algo(s.input.text.strip) || s.algorithm
+    end
+
+    # sha1 / sha256 read off the byte length of a Django cookie's signature segment, or nil when
+    # the cookie is not a parseable 3-part Django token or the signature is some other length.
+    private def detect_django_algo(token : String) : String?
+      parts = token.split(':')
+      return nil unless parts.size == 3
+      case Cookie.b64decode(parts[2]).size
+      when 20 then "sha1"
+      when 32 then "sha256"
+      else         nil
+      end
+    rescue Cookie::CookieError
+      nil
+    end
+
     private def recompute_all(s : CookieSession) : Nil
       recompute_decode(s)
       recompute_forge(s)
@@ -988,7 +1023,7 @@ module Gori::Tui
         s.crack_note = nil
         return
       end
-      ok = Cookie.verify(token, s.secret, decode_format(s), salt: effective_salt(s), algorithm: s.algorithm)
+      ok = Cookie.verify(token, s.secret, decode_format(s), salt: effective_salt(s), algorithm: effective_algorithm(s))
       s.verify_state = ok ? :ok : :bad
       # A green "cracked" verdict cannot outlive a failing verify: changing the INPUT cookie, the
       # salt, the format or the algorithm re-runs this, and if the cracked key no longer signs
@@ -1025,7 +1060,7 @@ module Gori::Tui
         Cookie::Rack.forge(body.strip, s.secret)
       when "django"
         Cookie::Django.forge(body, s.secret, ts,
-          salt: salt || Cookie::Django::DEFAULT_SALT, algorithm: s.algorithm)
+          salt: salt || Cookie::Django::DEFAULT_SALT, algorithm: effective_algorithm(s))
       else # flask
         Cookie::Flask.forge(body, s.secret, ts, salt: salt || Cookie::Flask::SALT)
       end
