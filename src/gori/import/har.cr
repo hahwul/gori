@@ -110,6 +110,7 @@ module Gori
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us,
           req_declared, resp_declared, connect_protocol(req_headers),
+          resp_http_version: resp_version,
           source_surface: prov.surface, source_ref: prov.ref)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)

@@ -461,6 +461,7 @@ module Gori
                              declared_req_body_size : Int64? = nil,
                              declared_resp_body_size : Int64? = nil,
                              connect_protocol : String? = nil,
+                             resp_http_version : String? = nil,
                              source : FlowSource::Kind = FlowSource::Kind::Import,
                              source_surface : FlowSource::Surface? = nil,
                              source_ref : String? = nil) : FlowPair
@@ -482,7 +483,18 @@ module Gori
         # It does need to KNOW the body was cut short, though, or a capped chunked response
         # loses its Transfer-Encoding (`wire_chunked?`), so cap first and tell it.
         resp_stored, resp_trunc, resp_size = capped(resp_body, declared_resp_body_size)
-        resp_head = response_head(http_version, status, reason, resp_headers, resp_body, resp_trunc)
+        # The RESPONSE's own version when the source recorded one, falling back to the
+        # request's. `Export::Har` writes `resp.version` for exactly this reason — an origin
+        # answering HTTP/1.0 to an HTTP/1.1 request — and only half that round trip existed:
+        # the reader reconstructed the status line from the REQUEST version, so gori read its
+        # own export back with the response head rewritten, and 1.0 vs 1.1 is semantically
+        # load-bearing (no default keep-alive). It also split the status line against the
+        # phrase beside it, since `Import::Har` already decides "h2 has no reason phrase" off
+        # the response's version: a HTTP/1.1 request answered over h2 came back as
+        # `HTTP/1.1 200` with no phrase — the reason-less status line that is supposed to mean
+        # the origin really sent one.
+        resp_head = response_head(resp_http_version || http_version, status, reason,
+          resp_headers, resp_body, resp_trunc)
         content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,
