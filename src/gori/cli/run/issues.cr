@@ -121,7 +121,8 @@ module Gori
         # Refuse a cvss nothing can score, BEFORE the insert. Stored as-is it would sit in a
         # column the Issues list, `cvss:` queries and every export read through a parser that
         # answers nil for it — a field only its own raw string can see, written on a command
-        # that reported success. Same rule --severity and --flow already follow.
+        # that reported success. Same rule --severity follows; --flow is checked against the
+        # store below, where the answer lives.
         cvss = cvss.try(&.strip).presence
         cvss.try do |c|
           abort "gori run issues create: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
@@ -138,6 +139,9 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
+          if err = issue_flow_error(store, flow_id)
+            abort "gori run issues create: #{err}"
+          end
           masked_title = Env.mask_secrets(t)
           masked_host = host.try { |h| Env.mask_secrets(h) }
           id = store.insert_issue(masked_title, severity, masked_host, flow_id, cvss: cvss)
@@ -146,6 +150,21 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # The refusal for a `--flow` that names no captured flow, or nil when it names one (or
+      # was not given). The same existence check `links add --ref flow` makes, and for the same
+      # reason: a dangling flow id is not caught later, it is ADVERTISED — the listing row, the
+      # markdown report and the SARIF location all print `flow#N` as evidence a reader is then
+      # told to open. `flow_row`, not `get_flow`: the row-only read answers "does this exist?"
+      # without materializing both BLOBs. The `<= 0` half is separate because the store has no
+      # row there to disagree with — `--flow 0` and `--flow -5` parsed fine and persisted a
+      # reference no id can ever be. Pure and returning the sentence (not aborting in place) so
+      # the decision is spec-able; `abort` is `exit`, which a spec process cannot survive.
+      private def self.issue_flow_error(store : Store, flow_id : Int64?) : String?
+        return nil unless fid = flow_id
+        return "invalid --flow #{fid} (expected a positive flow id)" if fid <= 0
+        store.flow_row(fid) ? nil : "no flow with id #{fid}"
       end
 
       # Remove an issue outright. Distinct from `update --status=resolved|false-positive`,

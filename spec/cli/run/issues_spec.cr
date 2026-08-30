@@ -29,6 +29,53 @@ module Gori::CLI::Run
   def self.issues_text_for_spec(issues : Array(Gori::Store::Issue)) : String
     issues_text(issues)
   end
+
+  def self.issue_flow_error_for_spec(store : Gori::Store, flow_id : Int64?) : String?
+    issue_flow_error(store, flow_id)
+  end
+end
+
+private def captured_flow(store : Gori::Store) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
+    method: "GET", target: "/admin", http_version: "HTTP/1.1",
+    head: "GET /admin HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+    source: Gori::FlowSource::Kind::Proxy))
+  store.flush
+  id
+end
+
+describe "gori run issues create --flow" do
+  # `--flow` went through `parse_flow_id`, which is only `to_i64? || abort` — so
+  # `issues create --flow 424242` reported "Issue #4 created" and persisted a reference the
+  # listing, the markdown report and the SARIF location then advertise as `flow#424242`
+  # evidence that cannot be opened. The sibling `links add --ref flow --ref-id 999999`
+  # refuses the identical id.
+  it "refuses a flow id no captured flow has" do
+    with_store do |store|
+      captured_flow(store)
+      Gori::CLI::Run.issue_flow_error_for_spec(store, 424_242_i64).should eq("no flow with id 424242")
+    end
+  end
+
+  # A separate arm: the store has no row at 0 or -5 to disagree with, and "no flow with id -5"
+  # would send the reader looking for a capture instead of at their own argument.
+  it "refuses a zero or negative flow id as invalid rather than as missing" do
+    with_store do |store|
+      Gori::CLI::Run.issue_flow_error_for_spec(store, 0_i64)
+        .should eq("invalid --flow 0 (expected a positive flow id)")
+      Gori::CLI::Run.issue_flow_error_for_spec(store, -5_i64)
+        .should eq("invalid --flow -5 (expected a positive flow id)")
+    end
+  end
+
+  it "accepts a real flow id, and says nothing when --flow was not given" do
+    with_store do |store|
+      id = captured_flow(store)
+      Gori::CLI::Run.issue_flow_error_for_spec(store, id).should be_nil
+      Gori::CLI::Run.issue_flow_error_for_spec(store, nil).should be_nil
+    end
+  end
 end
 
 describe "gori run issues — the text listing" do
