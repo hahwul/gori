@@ -65,12 +65,23 @@ private CORPUS = [
   both(f("x-gori-pushed", "v"), false, "a field name colliding with gori's pushed marker"),
   both(f("x-gori-protocol", "v"), false, "a field name colliding with gori's protocol marker"),
   both(f("x-echo", "   "), false, "an all-spaces value"),
+  # `line_safe` escapes a backslash that would otherwise read back as one of its own `\r`/`\n`
+  # escapes, and `parse_*` never un-escapes: these come back one backslash LONGER. The escape's
+  # own note claimed every path that could put it on an h2 wire refuses it first, which held for
+  # the CR/LF half only — so a rule that changed some OTHER field silently lengthened an ordinary
+  # value (`C:\new`, a regex, JSON inside a header) on the wire.
+  both(f("x-echo", "line1\\nline2"), false, "a backslash before `n` in a value"),
+  both(f("x-echo", "x\\ry"), false, "a backslash before `r` in a value"),
+  both(f("x-echo", "a\\\\b"), false, "a doubled backslash in a value"),
+  both(f("x-a\\nb", "v"), false, "a backslash before `n` in a field NAME"),
   # --- regular fields the text carries exactly ---------------------------------------------
   both(f("x-echo", "trail   "), true, "a trailing space in a value"),
   both(f("x-echo", "\tlead\t"), true, "tabs around a value"),
   both(f("x-echo", "a: b"), true, "a colon-space inside a value"),
   both(f("x-echo", "HTTP/1.1 200 OK"), true, "a value shaped like a status line"),
   both(f("x-echo", "a\u0000b"), true, "a NUL in a value"),
+  # ... and the control for the four above: a backslash `line_safe` leaves alone round-trips.
+  both(f("x-echo", "C:\\path\\to"), true, "a backslash before anything else, in a value"),
   both(f("x-echo", "a\vb\fc\td"), true, "other control bytes in a value"),
   both(f("x-echo", ""), true, "an empty value"),
   both(f("x-echo", INVALID_UTF8_VALUE), true, "invalid UTF-8 in a value"),
@@ -82,6 +93,12 @@ private CORPUS = [
     [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a\r\nx-admin: true")], true, false),
   Entry.new("a lone LF in :path",
     [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a\nx-admin: true")], true, false),
+  Entry.new("a backslash before `n` in :path (the start line escapes it and never reads it back)",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/a\\nb")], true, false),
+  Entry.new("a backslash before `n` in :authority",
+    [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a\\nb.test"), f(":path", "/")], true, false),
+  Entry.new("a backslash before `n` in :method",
+    [f(":method", "GE\\nT"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "/")], true, false),
   Entry.new("an empty :path",
     [f(":method", "GET"), f(":scheme", "https"), f(":authority", "a.test"), f(":path", "")], true, false),
   Entry.new("a space in :method (it moves the tail into :path)",

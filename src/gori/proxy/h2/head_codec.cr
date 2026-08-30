@@ -396,6 +396,8 @@ module Gori::Proxy::H2
       return "the value of #{name.inspect} carries a CR or LF, so the h1 text form would read " \
              "it back as two fields (a header-injection primitive — the raw frames are " \
              "untouched and the stored head escapes it)" if line_broken?(f.value)
+      return backslash_reason("the field name #{name.inspect}") if backslash_escaped?(name)
+      return backslash_reason("the value of #{name.inspect}") if backslash_escaped?(f.value)
       return "the value of #{name.inspect} starts with a space, which the h1 round trip eats" if f.value.starts_with?(' ')
       # `peer_field_name` renames a field whose name collides with one of gori's own markers,
       # so the peer's anomaly stays visible under a name that cannot be confused for gori's.
@@ -432,14 +434,16 @@ module Gori::Proxy::H2
       return ":method is empty, and the h1 text form has no way to say so" if value.empty?
       return ":method #{value.inspect} contains a space, and the h1 start line splits on its " \
              "first one — the tail would move into :path" if value.includes?(' ')
-      ":method #{value.inspect} carries a CR or LF, which would split the start line" if line_broken?(value)
+      return ":method #{value.inspect} carries a CR or LF, which would split the start line" if line_broken?(value)
+      backslash_reason(":method #{value.inspect}") if backslash_escaped?(value)
     end
 
     # A CRLF here splits the START line — the injected field lands ahead of every real one.
     private def path_reason(value : String) : String?
       return ":path is empty, and the h1 text form would come back with \"/\" invented" if value.empty?
-      ":path #{value.inspect} carries a CR or LF, which splits the START line — the injected " \
-      "field would land ahead of every real one" if line_broken?(value)
+      return ":path #{value.inspect} carries a CR or LF, which splits the START line — the " \
+             "injected field would land ahead of every real one" if line_broken?(value)
+      backslash_reason(":path #{value.inspect}") if backslash_escaped?(value)
     end
 
     # Only the SYNTHETIC `Host:` line can damage `:authority`; with an explicit `host` field
@@ -447,7 +451,8 @@ module Gori::Proxy::H2
     private def authority_reason(value : String) : String?
       return ":authority is empty, and the h1 text form has no way to say so" if value.empty?
       return ":authority #{value.inspect} starts with a space, which the Host: round trip eats" if value.starts_with?(' ')
-      ":authority #{value.inspect} carries a CR or LF, which the Host: line cannot hold" if line_broken?(value)
+      return ":authority #{value.inspect} carries a CR or LF, which the Host: line cannot hold" if line_broken?(value)
+      backslash_reason(":authority #{value.inspect}") if backslash_escaped?(value)
     end
 
     # `synth_response` normalizes the code through `to_i` so a stored head does not vary with a
@@ -478,6 +483,24 @@ module Gori::Proxy::H2
 
     private def line_broken?(s : String) : Bool
       s.includes?('\r') || s.includes?('\n')
+    end
+
+    # `line_safe` escapes a backslash that would otherwise read back as one of its own `\r`/`\n`
+    # escapes — and NOTHING un-escapes it: `parse_*` reads the text back literally. So a name or
+    # value carrying `\` before `r`, `n` or another `\` comes back one backslash longer, and on a
+    # REWRITTEN head those are the bytes that go on the wire: `C:\new`, a regex, JSON inside a
+    # header field. `line_safe`'s own note says every path that could put its escapes back on an
+    # h2 wire refuses them first — which was true of the CR/LF half only, because `line_broken?`
+    # was the whole of what this method asked. Refused for the same reason a CR is: a rule that
+    # changes ONE field must not silently lengthen another.
+    private def backslash_escaped?(s : String) : Bool
+      !line_broken?(s) && needs_escape?(s)
+    end
+
+    # :ditto: — the sentence, so the five sites that ask cannot word it five ways.
+    private def backslash_reason(what : String) : String
+      "#{what} carries a backslash the h1 text form escapes and never reads back, so the " \
+      "round trip would put a longer value on the wire"
     end
 
     # `explicit_host?` over decoded fields — the same test `synth_request` makes before it
