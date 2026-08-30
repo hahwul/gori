@@ -335,7 +335,7 @@ describe Gori::Tui::Companion do
         companion.frame.not_nil!
       end
       poses.first.pose.should eq(:error)     # the face lands …
-      poses.map(&.shake).uniq.should eq([0]) # … and she does not flinch wearing it
+      poses.map(&.shake).uniq!.should eq([0]) # … and she does not flinch wearing it
     end
   end
 
@@ -930,7 +930,7 @@ describe Gori::Tui::Companion do
     # … it is the one the path names …
     lit.each_with_index { |cells, i| cells.first.should eq(Mascot::GLINT_PATH[i]) }
     # … and no step repeats another, so the sweep is a walk and not a flicker.
-    lit.map(&.first).uniq.size.should eq(Mascot::GLINT_PATH.size)
+    lit.map(&.first).uniq!.size.should eq(Mascot::GLINT_PATH.size)
   end
 
   # She is a MISS, so she has lashes — on every pose, whichever way they lean. The brows
