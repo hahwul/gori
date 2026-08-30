@@ -201,6 +201,61 @@ describe Gori::Import do
     end
   end
 
+  # Chrome and Firefox list an h2 request's pseudo-headers in `headers`, so this is the
+  # ORDINARY shape of a HAR of h2 traffic. Writing them out as header LINES did not preserve
+  # them: gori's own `parse_request_head` reads `:method: GET` back as a field NAMED "" with
+  # the value `method: GET`. `HeadCodec.synth_request` drops the same fields when gori captures
+  # h2 itself, so the import now agrees with the capture.
+  it "drops HTTP/2 pseudo-headers rather than storing them as garbled header lines" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [
+              {
+                "startedDateTime": "2026-06-01T12:00:00.000Z", "time": 1,
+                "request": {
+                  "method": "GET", "url": "https://acme.test/x", "httpVersion": "http/2.0",
+                  "headers": [
+                    {"name": ":method", "value": "GET"},
+                    {"name": ":authority", "value": "acme.test"},
+                    {"name": ":scheme", "value": "https"},
+                    {"name": ":path", "value": "/x"},
+                    {"name": "user-agent", "value": "Chrome"}
+                  ]
+                },
+                "response": {
+                  "status": 200, "statusText": "", "httpVersion": "http/2.0",
+                  "headers": [
+                    {"name": ":status", "value": "200"},
+                    {"name": "content-type", "value": "text/html"}
+                  ],
+                  "content": {"mimeType": "text/html", "text": "ok"}
+                }
+              }
+            ]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har)
+        detail = store.get_flow(store.search(Gori::QL::EMPTY, 10).first.id).not_nil!
+        req = String.new(detail.request_head)
+        req.should eq("GET /x HTTP/2\r\nHost: acme.test\r\nuser-agent: Chrome\r\n\r\n")
+        String.new(detail.response_head.not_nil!)
+          .should eq("HTTP/2 200\r\ncontent-type: text/html\r\n\r\n")
+        # The point of dropping them: what is stored re-parses as the fields it was written as,
+        # with no ""-named field carrying a mangled value.
+        parsed = Gori::Proxy::Codec::Http1.parse_request_head(detail.request_head)
+        parsed.headers.to_a.map(&.name).should eq(["Host", "user-agent"])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin

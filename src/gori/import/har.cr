@@ -253,6 +253,17 @@ module Gori
 
       # An ORDERED list of {name, value} — a HAR response commonly has several Set-Cookie
       # entries (and Via/etc.); a Hash would keep only the last, dropping the rest.
+      #
+      # PSEUDO-HEADERS are dropped, which is what `Proxy::H2::HeadCodec.synth_request` does
+      # with the very same fields when gori captures h2 itself: `:method`/`:path`/`:scheme`/
+      # `:authority`/`:status` are the h2 spelling of the start line, and the h1 text form the
+      # store keeps carries them there already (the method and target off the entry's `url`,
+      # the authority via the synthesized `Host:`). Chrome and Firefox list them in `headers`,
+      # so this is the ORDINARY shape of a HAR of h2 traffic, and writing them out as header
+      # LINES did not preserve them — `:method: GET` reads back through gori's own
+      # `parse_request_head` as a field NAMED "" with the value `method: GET`, which is what
+      # History shows, what `Export::Har` then re-exports, and what a Repeater replay would
+      # put on the wire. A colon is not a tchar, so a leading one is unambiguous.
       private def self.headers_list(node : JSON::Any?) : Builder::Headers
         list = Builder::Headers.new
         arr = node.try(&.as_a?)
@@ -260,7 +271,7 @@ module Gori
         arr.each do |item|
           name = item["name"]?.to_s
           value = item["value"]?.to_s
-          next if name.empty?
+          next if name.empty? || name.starts_with?(':')
           list << {name, value}
         end
         list
