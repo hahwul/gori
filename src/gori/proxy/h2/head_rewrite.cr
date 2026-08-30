@@ -352,13 +352,13 @@ module Gori::Proxy::H2
       # skip the strip on exactly the heads most worth stripping, and it would put the field
       # through a String round-trip for nothing. Before `head_text` too, so the projection, the
       # text an intercept editor shows and the bytes on the wire all say the same thing.
-      # `message_head?` and not merely `!request`: a trailer block and a PUSH_PROMISE both
-      # arrive on this direction, neither carries `:status`, and neither is a head a client
-      # acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK passthrough
-      # (the latch below is one-way) on a field nothing reads — and a hostile origin could
-      # close that latch at will by putting `alt-svc` in a trailer.
+      # `final_response_head?` and not merely `!request`: a trailer block and a PUSH_PROMISE
+      # both arrive on this direction, neither carries `:status`, and neither is a head a
+      # client acts on an `Alt-Svc` in. Stripping one would spend the connection's HPACK
+      # passthrough (the latch below is one-way) on a field nothing reads — and a hostile
+      # origin could close that latch at will by putting `alt-svc` in a trailer.
       alt_svc_stripped = false
-      if !request && message_head?(fields, request) && (pruned = strip_alt_svc(fields, stream_id))
+      if !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
         fields = pruned
         alt_svc_stripped = true
       end
@@ -378,9 +378,10 @@ module Gori::Proxy::H2
       rewritten = head ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
       # The OFF half of the h3 `Alt-Svc` seam (#835), on the fields actually going out — see
-      # `note_alt_svc_kept`. Gated exactly as the strip is: a trailer block and a PUSH_PROMISE
-      # both arrive on this direction and neither is a head a client acts on an `Alt-Svc` in.
-      if !request && !Settings.strip_alt_svc? && message_head?(emit_fields, request)
+      # `note_alt_svc_kept`. Gated exactly as the strip is: a trailer block, a PUSH_PROMISE and
+      # an interim 1xx all arrive on this direction and none is a head a client acts on an
+      # `Alt-Svc` in.
+      if !request && !Settings.strip_alt_svc? && final_response_head?(emit_fields)
         note_alt_svc_kept(emit_fields, stream_id)
       end
       # `alt_svc_stripped` forces the re-encode branch: the passthrough one forwards `snapshot`,
@@ -567,6 +568,25 @@ module Gori::Proxy::H2
     private def message_head?(fields : Array(HPACK::Field), request : Bool) : Bool
       want = request ? ":method" : ":status"
       fields.any? { |f| f.name == want }
+    end
+
+    # A response head a client acts on: `message_head?` minus the interim 1xx — the one head
+    # `Assembler#finish_header_block` REPLACES rather than keeps. That replacement is what
+    # made the `Alt-Svc` seam wrong on a 103 Early Hints: with the switch off the flow carried
+    # "kept 1 Alt-Svc HTTP/3 advertisement … in this response" while the stored response head
+    # was the 200's and contained no such field, so an operator was told about a header they
+    # could not find anywhere in the flow; with the switch on, gori edited an interim head and
+    # closed this connection's one-way re-encode latch for it. The HTTP/1.1 path forwards a 1xx
+    # byte-exact and asks neither question (`client_conn.cr#skip_interim_responses`: "no rewrite
+    # on interim"), and `Alt-Svc`'s sentences are one fact spelled once for both transports —
+    # `H2::Extract#observe` already states that parity rule for its own gate.
+    #
+    # An UNPARSEABLE `:status` stays a final head, matching `Assembler#interim_status?`: h1
+    # reads such a head as status 0, which is not interim either, and the two must agree.
+    private def final_response_head?(fields : Array(HPACK::Field)) : Bool
+      status = fields.find { |f| f.name == ":status" } || return false
+      code = status.value.to_i?
+      code.nil? || code >= 200
     end
 
     # A rewritten head that is no longer a head reaches this from a destructive `Replace` rule

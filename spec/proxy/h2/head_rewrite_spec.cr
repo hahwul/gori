@@ -418,6 +418,49 @@ describe Gori::Proxy::H2::HeadRewrite do
       end
     end
 
+    # An interim 1xx is the third head that arrives on this direction and is not one a client
+    # acts on an `Alt-Svc` in — and unlike a trailer, it carries `:status`, so the old
+    # `message_head?` gate took it. `Assembler#finish_header_block` REPLACES an interim head
+    # with the final one, so with the switch off the flow ended up carrying "kept 1 Alt-Svc
+    # HTTP/3 advertisement … in this response" against a stored head that contains no such
+    # field; with it on, gori edited a head the HTTP/1.1 path forwards byte-exact and closed
+    # this connection's one-way re-encode latch to do it.
+    it "leaves a 103 Early Hints head alone, switch off, and says nothing about it" do
+      before = Gori::Settings.strip_alt_svc?
+      begin
+        Gori::Settings.strip_alt_svc = false
+        pipe, assembler, sink = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+        assembler.feed("out", headers(1_u32, HPACK::Encoder.new.encode(req("/a"))))
+        sender = HPACK::Encoder.new
+        hints = sender.encode([{":status", "103"}, {"alt-svc", %(h3=":443")},
+                               {"link", "</a.css>; rel=preload"}])
+        final = sender.encode([{":status", "200"}, {"content-type", "text/html"}])
+        emitted = [] of Frame::Header
+        pipe.accept(headers(1_u32, hints, Frame::END_HEADERS)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        pipe.accept(headers(1_u32, final)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        emitted.first.payload.should eq(hints)
+        pipe.engaged?.should be_false
+        sink.responses.first.advisory.should be_nil
+      ensure
+        Gori::Settings.strip_alt_svc = before
+      end
+    end
+
+    it "does not strip a 103 Early Hints head, switch on, and stays unengaged" do
+      before = Gori::Settings.strip_alt_svc?
+      begin
+        Gori::Settings.strip_alt_svc = true
+        pipe, assembler, _ = pipeline(SubRewriter.new("nothing", "matches", on: false), direction: "in")
+        block = HPACK::Encoder.new.encode([{":status", "103"}, {"alt-svc", %(h3=":443")}])
+        emitted = [] of Frame::Header
+        pipe.accept(headers(1_u32, block, Frame::END_HEADERS)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+        emitted.first.payload.should eq(block)
+        pipe.engaged?.should be_false
+      ensure
+        Gori::Settings.strip_alt_svc = before
+      end
+    end
+
     it "leaves a PUSH_PROMISE alone — it is a request head arriving on the response side" do
       before = Gori::Settings.strip_alt_svc?
       begin
