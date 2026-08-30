@@ -110,7 +110,20 @@ module Gori::Decoder
             break
           end
           out << tok
-        elsif r[tok]?
+        elsif conv = r[tok]?
+          # A built-in that CANNOT RUN on this build fails the chain here, exactly as an
+          # unknown token does. `brotli-decompress` / `zstd-decompress` are registered carrying
+          # `native_codec_reason` on a `-Dwithout_native_codecs` build so their names still
+          # resolve — but a saved chain wrapping one was spliced as if it were ordinary and
+          # inherited `unusable: nil`, which is the same blindness the comment above describes:
+          # `Fuzz::Plan.refuse_unrunnable_chains` reads the flag off the one token the spec
+          # names, so it waved the run through and every payload failed at send instead of the
+          # plan being refused before the first dial.
+          if reason = conv.unusable
+            failed = true
+            why[nk] = reason # already prefixed with the built-in's own name
+            break
+          end
           out << tok
         elsif !specs.has_key?(tk)
           failed = true
