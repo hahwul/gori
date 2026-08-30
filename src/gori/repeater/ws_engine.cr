@@ -139,6 +139,20 @@ module Gori
         def ok? : Bool
           @error.nil?
         end
+
+        # Did the origin ANSWER the handshake — with anything at all? True for a 101 and for
+        # the 403/401/426 that `ok?` calls a failure, false only when there was no response to
+        # read (a refused dial, a TLS handshake that never completed, a silent origin).
+        #
+        # It is the predicate the three surfaces persist a repeater's last response on.
+        # `ok?` alone was too narrow in one direction and absent in the other: writing
+        # unconditionally let a failed re-send replace a good stored 101 with an empty head,
+        # and writing only on `ok?` would keep that stale 101 forever at an origin that has
+        # started answering 403 — the TUI handshake card, `repeater list` and `repeater send
+        # --diff`'s baseline all going on showing a handshake the origin no longer performs.
+        def answered? : Bool
+          !@handshake_head.empty?
+        end
       end
 
       def self.send(upgrade_request : Bytes, out_messages : Array(OutMsg), *,
@@ -243,6 +257,7 @@ module Gori
           # delivery is unconfirmed.
           note = with_delivery_note(note, sent, messages.size, st.close_code)
           note = with_unsent_note(note, sent, out_messages.size, st)
+          note = with_transport_note(note, sent, out_messages.size, st)
           Result.new(head, messages, elapsed(started), note: note,
             close_code: st.close_code, upgraded: true, truncated: st.truncated)
         rescue ex
@@ -280,11 +295,19 @@ module Gori
           # A CLOSE the OPERATOR wrote does NOT stop the loop: "data frames after a CLOSE" is
           # a §5.5.1 test this engine deliberately lets them run, exactly as it lets them send
           # a lone CONT or an unmasked frame. Only the SERVER's close stops it.
+          # Framed OUTSIDE the rescue below: that rescue means "the peer is gone", and a frame
+          # the encoder could not build is not that.
+          bytes = Proxy::WS.encode(op, m.payload, m.shape, mask: true)
           begin
-            upstream.write(Proxy::WS.encode(op, m.payload, m.shape, mask: true))
+            upstream.write(bytes)
             upstream.flush
-          rescue IO::Error
+          rescue ex : IO::Error | OpenSSL::Error
+            # BOTH hierarchies, not `IO::Error` alone — see `DrainState#gone_reason`. Kept to
+            # the two the transport can actually raise rather than a bare `rescue`: anything
+            # else reaching here is a gori bug, and folding one into `peer_gone` would report
+            # it as an exchange that merely lost its socket — `ok? == true`, exit 0.
             st.peer_gone = true
+            st.gone_reason ||= transport_reason(ex)
             break
           end
           messages << Message.new("out", op.to_i, m.payload, m.shape)
@@ -320,7 +343,7 @@ module Gori
         why = if st.close_code
                 "the server sent CLOSE (§5.5.1: no data frames may follow it)"
               elsif st.peer_gone?
-                "the connection ended"
+                (r = st.gone_reason) ? failed_clause(r) : "the connection ended"
               elsif st.deadline_reached?
                 # NOT "a capture cap": the deadline is a bound on how long the engine spent
                 # reading, and saying "cap" sent operators looking at MAX_RECV_* — the wrong
@@ -331,6 +354,41 @@ module Gori
               end
         unsent = "stopped after #{sent} of #{total} message(s): #{why}"
         note ? "#{note}; #{unsent}" : unsent
+      end
+
+      # The same fact for a run in which every recorded message DID go out: `with_unsent_note`
+      # is silent there (nothing was left unsent), so a transport failure during the LAST
+      # drain — the commonest shape, since that drain is where the exchange spends its time —
+      # had nothing at all to report it. Guarded on `sent >= total` so the two never say it
+      # twice.
+      #
+      # `total == 0` gets its own sentence rather than the tail: a session with no messages at
+      # all (`messages: []`, or a seed whose every stored row was a `[gori]` advisory
+      # `ws_seed_rows` dropped) passes `sent < total` — 0 < 0 is false — and would otherwise
+      # be told the connection failed "after the last message was written" when nothing was
+      # ever written. Its one drain is the generous first-reply pass, so that is what failed.
+      private def self.with_transport_note(note : String?, sent : Int32, total : Int32,
+                                           st : DrainState) : String?
+        return note if sent < total # `with_unsent_note` already named it
+        reason = st.gone_reason || return note
+        line = total == 0 ? "#{failed_clause(reason)} while waiting for the origin; no message was sent" : "#{failed_clause(reason)} after the last message was written; the transcript ends there"
+        note ? "#{note}; #{line}" : line
+      end
+
+      # The clause both notes are built from, in ONE place: they describe a single fact from
+      # two vantage points and were written in the same round, so a later edit to the wording
+      # would otherwise reach one and not the other — and which one an operator sees depends
+      # on whether the script ran out of messages first.
+      private def self.failed_clause(reason : String) : String
+        "the connection failed (#{reason})"
+      end
+
+      # A raised transport failure as one short clause. `ex.message` is the useful half
+      # (`SSL_read: error:0A000119:… bad record mac`, `Broken pipe`); the class name is the
+      # fallback for the exceptions that carry none, because "the connection failed ()" names
+      # nothing at all.
+      private def self.transport_reason(ex : Exception) : String
+        ex.message.presence || ex.class.name
       end
 
       # Everything the drain accumulates, carried ACROSS the per-message drains an interleaved
@@ -360,6 +418,25 @@ module Gori
         property? peer_gone = false                      # EOF / IO error / failed write — nothing more can be sent
         property? capped = false                         # a HARD cap ended the drain (the control cap does not)
         property? deadline_reached = false               # ...and that cap was DRAIN_DEADLINE, not a capture cap
+
+        # WHY the socket ended, when it ended in a RAISE rather than a clean EOF. nil for an
+        # ordinary EOF (the peer closed; "the connection ended" is the whole story) and for a
+        # run that never lost the socket.
+        #
+        # It exists because the two rescues that set `peer_gone` used to catch `IO::Error`
+        # ALONE, and a `wss://` origin does not fail that way: Crystal raises
+        # `OpenSSL::SSL::Error`, which is not an `IO::Error`, so a bad record mac / decryption
+        # failure / a write into a torn-down TLS session unwound past BOTH of them and out of
+        # `exchange` into `send`'s rescue — the one whose comment says "reaching here means the
+        # handshake failed". It had not: measured against a TLS origin that answered the 101,
+        # echoed a frame and then wrote a bogus TLS record, gori reported
+        # `upgraded:false, messages:[], error:"SSL_read: … bad record mac"` — the upgrade
+        # denied, and the frame the origin really sent thrown away. The IDENTICAL event on a
+        # `ws://` socket was (and is) a note with the transcript intact, so one protocol's
+        # findings were being deleted by the other's exception type. Keeping the reason is what
+        # lets that stay a NOTE without going silent about the failure.
+        property gone_reason : String? = nil
+
         # DRAIN_DEADLINE runs from here, over the whole exchange — but ADVANCED past every idle
         # gap by `credit_idle`, so what it measures is active drain time and not wall clock.
         getter started : Time::Instant = Time.instant
@@ -449,8 +526,15 @@ module Gori
             # the engine's turn, so it is credited back rather than charged to DRAIN_DEADLINE.
             st.credit_idle(Time.instant - read_started)
             break
-          rescue IO::Error
-            st.peer_gone = true # RST or broken pipe — end the exchange, keep what we have
+          rescue ex : IO::Error | OpenSSL::Error
+            # RST, broken pipe, or a TLS-layer failure — end the exchange, keep what we have.
+            # BOTH hierarchies and no more: `OpenSSL::Error` is not an `IO::Error` (which is
+            # the whole gap — see `DrainState#gone_reason`), while a parse bug raising
+            # `IndexError` out of `read_frame` must stay LOUD. Swallowed here it would come
+            # back as `ok? == true` with a note blaming the peer, and (once the repeater row
+            # is written from it) overwrite the session's stored handshake with the wreckage.
+            st.peer_gone = true
+            st.gone_reason ||= transport_reason(ex)
             break
           end
           if frame.nil? # EOF / truncated

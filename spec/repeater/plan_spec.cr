@@ -444,6 +444,32 @@ describe Gori::Repeater::Plan do
       rewritten.sni.should eq(plan.sni)
       rewritten.sender.should be(plan.sender) # the SAME gated dialer, not a second one
     end
+
+    # The rewrite reuses the SENDER, so the fingerprint kept reaching the socket while the
+    # PLAN forgot it — and every surface that reports or persists reads the plan. Measured
+    # through MCP against a raw-socket origin: `send_request` with `apply_rules:true`,
+    # `tls_preset:"chrome"` and `save_as_repeater:true` wrote `repeaters.tls_preset = NULL`
+    # whenever a rule actually fired, and `chrome` whenever none did — so a later
+    # `repeater send` on the saved session dialed a different handshake from the one that
+    # produced the response it was saved with, and the tool result denied an override it had
+    # applied.
+    it "carries the per-send TLS fingerprint (#844) across the rewrite" do
+      plan = R::Plan.build(R::PlanOptions.new([SESSION_RAW.to_slice],
+        target: "https://t.test:8443", tls_preset: "chrome"), ungated)
+      plan.tls_preset.should eq("chrome")
+      plan.with_requests(["GET /rewritten HTTP/1.1\r\n\r\n".to_slice]).tls_preset.should eq("chrome")
+    end
+
+    # A field-native plan's `requests` is only the synthetic scope line, so dropping the
+    # field list here would make `send` encode THAT instead of the operator's fields — the
+    # rewrite sent in place of the message. MCP declines Match&Replace on such a plan, which
+    # is why nothing exercises it today; carrying the fields is what keeps the next caller
+    # from having to know.
+    it "keeps a field-native plan field-native" do
+      plan = R::Plan.build(R::PlanOptions.new(h2_fields: FN_FIELDS, target: "http://t.test"), ungated)
+      rewritten = plan.with_requests(["GET /rewritten HTTP/1.1\r\n\r\n".to_slice])
+      rewritten.h2_fields.should eq(FN_FIELDS)
+    end
   end
   # `downgrade_version_line` documents itself as running "unasked on every send", but the TUI
   # was its only caller — so the SAME session sent `HTTP/2` down an h1 socket from

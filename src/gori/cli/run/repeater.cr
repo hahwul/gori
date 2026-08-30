@@ -75,7 +75,9 @@ module Gori
           p.invalid_option { |f| abort "gori run repeater h2: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater h2: missing value for #{f}" }
         end
-        parser.parse(args)
+        # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
+        parse_no_positionals(parser, args, "gori run repeater h2",
+          "pass the origin as --target URL and the field list as --fields FILE")
 
         tgt = target
         abort "gori run repeater h2: --target is required" if tgt.nil? || tgt.empty?
@@ -164,7 +166,9 @@ module Gori
           p.invalid_option { |f| abort "gori run repeater list: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater list: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run repeater list",
+          "`repeater list` takes no positional arguments; to act on one session use " \
+          "`gori run repeater send <id>`")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project, read_only: true)
@@ -278,7 +282,11 @@ module Gori
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
         end
-        parser.parse(args)
+        # A bare word here is almost always the request or the target the operator meant to
+        # pass through a flag, and creating the session WITHOUT it left a row whose request
+        # was not the one they typed — reported as a clean "session #N created".
+        parse_no_positionals(parser, args, "gori run repeater create",
+          "pass the request via --request-file/--request-raw/--flow and the origin via --target")
 
         req_content = ""
         if file = request_file
@@ -728,9 +736,12 @@ module Gori
         result = plan.send_ws(out_messages, idle, keep_key)
         outbound.close
 
-        # Persist ONLY on success — parity with the TUI (repeater_controller#drain_results):
-        # a later failed resend must not wipe a good stored handshake/response.
-        if result.ok?
+        # Persist ONLY when the ORIGIN ANSWERED — parity with the TUI
+        # (repeater_controller#drain_results) and MCP `send_websocket`: a failed re-send must
+        # not wipe a good stored handshake, and `ok?` alone was the other half of that mistake
+        # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
+        # See `WsEngine::Result#answered?`.
+        if result.answered?
           store2 = open_store(resolve_read_project(project_name, db_path))
           begin
             store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
