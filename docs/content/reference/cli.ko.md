@@ -83,8 +83,12 @@ gori run <subcommand> [verb] [options]
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
+| `rewriter preset list` · `add` | 응답 수정 프리셋 목록, 그리고 하나를 평범한 Match & Replace 규칙으로 설치 |
 | `rewriter extract` · `bindings` | 세션 바인딩 추출 규칙 관리, 그 규칙이 선언한 `$NAME` 목록 |
 | `colormarker` · `add` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | History 행 색상 규칙 관리 |
+| `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리 — 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
+| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | 세션 슬롯 — 전송이나 Authorize 실행이 그 이름으로 나가는 신원 |
+| `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
@@ -113,6 +117,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | `0` | 성공 |
 | `1` | 오류 — 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경 |
 | `3` | `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음 |
+| `130` | SIGINT/SIGTERM으로 중단 — `fuzz`, `mine`, `discover`, `sequence`, `authorize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 `--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다.
 
@@ -363,6 +368,7 @@ gori run repeater h2 --target https://api.example.com --fields fields.json
 | WebSocket | `Upgrade: websocket` 핸드셰이크를 선언한 템플릿은 프레임 교환으로 스윕한다 — **페이로드 하나가 세션 하나**(완전한 RFC 6455 세션). `--message=TEXT` / `--message-frame=SPEC`로 송신 프레임을 작성하며(반복 가능, 지정한 순서대로; `SPEC`은 `gori run repeater send`와 같은 문법 — `opcode=`, `fin=`, `rsv=`, `mask=`, `mask_key=`, `len=`, 그리고 `hex=`\|`b64=`\|`text=` 중 하나), `--flow`/`--repeater` 시드가 가져온 프레임을 대체한다. `§…§` 위치는 프레임 안에 표시한다 — 핸드셰이크도 위치 공간이며 둘은 한 번의 실행에서 함께 스윕된다. `--idle-ms=N` 세션별 침묵 대기(100–60000, 기본 3000), `--ws-keep-key`는 템플릿 자체의 `Sec-WebSocket-Key`를 보낸다. `--ws-http-only`는 핸드셰이크를 평범한 요청으로 스윕한다. 업그레이드가 성공하면 모든 행이 `101`이므로 행마다 `ws_close_code`와 `ws_frames_in`이 붙는다. 프레임 경로에서 `--race`, `--http2`, `--record-history`는 거부된다(셋 다 `--ws-http-only` 아래에서는 동작하며, 그쪽은 평범한 HTTP 스윕이라 History에도 기록된다). `--follow-redirects` / `--timeout` / `--ac`는 무의미하여 한 번 알려 준다. 송신 프레임이 없는 WebSocket 시드는 빈 프레임 세션이 아니라 평범한 HTTP로 스윕한다 |
 | Matchers | `--mc`/`--fc` status, `--mg`/`--fg` `grpc-status` 트레일러의 gRPC 상태 (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mr`/`--fr` body regex, `--mh`/`--fh` 응답 HEAD의 대소문자 무시 부분 문자열 (`--mh 'x-powered-by: php'` — body regex는 헤더를 보지 않는다), `--extract=REGEX`, `--ac` auto-calibrate |
 | Session bindings | `--bind-from=FLOW-ID` — 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 바인딩을 채우게 합니다 |
+| Session slot | `--slot=NAME` — 이 [세션 슬롯](#run-session)으로 전송: 그 슬롯의 헤더 오버레이, 그리고 `$NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용됩니다 |
 | Scope | `--allow-unscoped` — 프로젝트 스코프 밖으로도 전송. 샌드박스와 명시적 제외 규칙은 매 전송을 여전히 거부합니다 |
 | Output | `--format` (`text`\|`json`\|`jsonl`), `--force`, `--fail-if-no-matches` (매칭이 없으면 종료 코드 `3`) |
 | Evidence | `--record-history=none\|matched\|all` — 전송한 각 요청 + 응답을 History에 플로우로 기록(기본 `none`; `matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한). `gori run history` / `get_flow`로 다시 읽습니다 |
@@ -381,6 +387,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
 | `--bind-from=FLOW-ID` | 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 세션 바인딩을 채우게 합니다 |
+| `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송 — 그 슬롯의 헤더 오버레이, 그리고 `$NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용되므로 시드가 채우는 슬롯이 곧 실행이 나가는 슬롯입니다 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
 
 기본적으로 연결을 재사용합니다. 마이닝 한 번이 프로브마다가 아니라 워커마다 TCP(https라면 TLS) 핸드셰이크를 한 번씩만 치릅니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄에서 대상이 이를 지켰는지 확인할 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
@@ -403,6 +410,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | `--target`, `--http2`, `--sni`, `-k` | 트랜스포트(`--request`/stdin에는 target 필요) |
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어(상태 기반 토큰을 위해 concurrency는 1 유지) |
 | `--bind-from=FLOW-ID` | 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 세션 바인딩을 채우게 합니다 |
+| `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송 — 그 슬롯의 헤더 오버레이, 그리고 `$NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용되므로 시드가 채우는 슬롯이 곧 실행이 나가는 슬롯입니다 |
 | `--format` | `text`, `json`, `jsonl`, 또는 `markdown`(TUI의 Export가 쓰는 리포트) |
 
 ### run authorize {#run-authorize}
@@ -436,6 +444,34 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 `set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요하며, 그렇지 않으면 비교할 것이 없습니다.
 
 의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
+
+### run session {#run-session}
+
+프로젝트의 **세션 슬롯** — 이름 붙은 신원 각각이 헤더 오버레이 하나와, 그 값을 묶어 주는 extract 규칙들로 이루어집니다. TUI [Authorize 탭](/ko/guide/authorize/)의 identities 카드가 편집하고 MCP의 `*_session_slot` 도구가 관리하는 바로 그 목록입니다. Authorize 실행은 *모든* 슬롯으로 재생하고, 전송은 `--slot`이 지목한 *하나* 로 나갑니다.
+
+```bash
+gori run session                                     # 목록 (값은 [REDACTED])
+gori run session show admin --show-values
+gori run session add --name admin --set 'Cookie: session=…' --rule SESSION
+gori run session edit admin --clear-set --set 'Cookie: session=new'
+gori run session baseline as-captured
+gori run session rm admin
+```
+
+| 동사 | 옵션 |
+|------|------|
+| `list`(기본) | `--show-values`(`[REDACTED]` 대신 헤더 값 출력), `--format text\|json` |
+| `show <name>` | `--show-values`, `--format text\|json` |
+| `add` | `--name`, `--set 'Name: value'`(반복 가능), `--remove NAME`(반복 가능), `--rule NAME`(반복 가능), `--baseline` |
+| `edit <name>` | 같은 플래그에 `--clear-set` / `--clear-remove` / `--clear-rules` 추가. 컬렉션 플래그는 그 컬렉션 **전체를 교체** 하고, 생략한 것은 그대로 둡니다 |
+| `rm`\|`delete <name>` | 그 슬롯이 주장하던 extract 규칙은 다시 전역 바인딩 테이블에 쓰게 됩니다 |
+| `baseline <name>` | Authorize 기준선 이동(정확히 한 슬롯이 갖습니다) |
+
+모든 동사가 `--project=NAME` / `--db=PATH`를 받습니다.
+
+`--set` 값은 TUI 폼과 같은 헤더 파서를 지납니다. 이름은 RFC 7230 토큰이어야 하고 값에 CR이나 LF가 들어갈 수 없으며, 통과하지 못한 줄은 버려지지 않고 지목되어 거부됩니다.
+
+**`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸칠 시간이 없고, 저장해 두면 다음 실행에서 비어 있는 바인딩 테이블로 해소되어 `$SESSION`이 리터럴인 오버레이를 보내게 됩니다. 대신 전송할 때 신원을 지목하세요 — `repeater`, `fuzz`, `mine`, `sequence`, `discover`에서 `--slot NAME`. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
 
 ### run probe {#run-probe}
 
@@ -490,6 +526,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--no-keep-alive` | origin별 연결 재사용 대신 프로브마다 새로 연결 |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
 | `--bind-from=FLOW-ID` | 캡처된 그 플로우를 먼저 재생해, 응답이 남은 실행 동안 쓸 `$NAME` 세션 바인딩을 채우게 합니다 |
+| `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송 — 그 슬롯의 헤더 오버레이, 그리고 `$NAME`을 위한 그 슬롯의 바인딩 테이블. `--bind-from`보다 먼저 적용되므로 시드가 채우는 슬롯이 곧 실행이 나가는 슬롯입니다 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 실행. 사전(Layer 1) 검사만 면제되며 Sandbox 모드와 명시적 exclude 룰은 매 전송마다 그대로 거부합니다. 거부 메시지는 둘 중 어느 게이트가 막았는지 이름을 밝힙니다. |
 | `--force` | 무제한 실행 안전 게이트 우회 |
 | `--no-store` | 결과를 프로젝트에 기록하지 않음 |
@@ -780,6 +817,16 @@ gori run rewriter rm 3
 
 본문 규칙은 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제하며, 활성화된 규칙은 매칭되는 호스트에서 HTTP/1.1을 강제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
 
+**`rewriter preset`**: [응답 수정 프리셋](/ko/guide/proxy/#rewriter-presets) 설치 — 평범한 Match & Replace 규칙을 써 주는 이름 붙은 출발점입니다. 동사: `list`, `add <name>`.
+
+```bash
+gori run rewriter preset list
+gori run rewriter preset add unhide-hidden-fields
+gori run rewriter preset add remove-csp --scope global --disabled
+```
+
+이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`과 `--disabled`(무장하지 않고 설치해 먼저 검토)를 받습니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 병합되지 않고 눈에 보이게 중복됩니다.
+
 **`rewriter extract`**: [세션 바인딩](/ko/guide/proxy/#session-bindings)을 선언하는 규칙입니다. `$NAME`을 어느 응답의 어디에서 읽을지 정합니다. 동사: `list`(기본), `add`, `rm`(`delete`), `enable`, `disable`.
 
 ```bash
@@ -798,6 +845,30 @@ gori run rewriter extract add --name CSRF --kind regex --selector 'name="csrf" v
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |
 
 **`rewriter bindings`**: 그 규칙들이 선언한 이름을 나열합니다(`--format text|json`). 값은 여기에 나오지 않으며, 나올 수도 없습니다. 바인딩 값은 실행 중인 gori의 메모리에만 있고 어디에도 기록되지 않으므로 다른 프로세스가 읽을 것이 없기 때문입니다. 살아 있는 값 테이블은 Rewriter 탭의 `bindings` 하위 탭에서 봅니다. 헤드리스 스윕에서는 `--bind-from`이 같은 프로세스 안에서 값을 채웁니다 — [명령줄에서 세션 바인딩 쓰기](#session-bindings-from-the-command-line)를 참고하세요.
+
+### run grpc {#run-grpc}
+
+gRPC [`.proto` 렌즈](/ko/guide/proxy/#proto-schema)를 명령줄에서: 이 프로젝트가 캡처된 gRPC를 어떤 스키마로 렌더하는지, 각 조각이 어디서 왔는지.
+
+```bash
+gori run grpc                                  # 무엇이 로드됐는지 (schema가 기본 동사)
+gori run grpc schema --format json
+gori run grpc reflect https://api.test:443     # ACTIVE: 대상에게 디스크립터를 요청
+gori run grpc forget https://api.test:443      # 캐시된 대상 하나 버리기 (`rm`도 받습니다)
+gori run grpc forget --all
+```
+
+`schema`와 `forget`은 프로젝트 DB 밖을 건드리지 않습니다. 보내는 쪽은 `reflect` 하나입니다. 대상의 `grpc.reflection.v1` 서비스에 — 없으면 `v1alpha`로, 실제 배포된 서버 대부분은 아직 이쪽입니다 — 서비스 목록, 각 서비스를 선언한 파일, 그 파일들의 import 순으로 그래프가 닫힐 때까지 요청해 결과를 프로젝트에 캐시합니다. 다른 액티브 `gori run` 명령과 같은 스코프 게이트를 지나므로 범위를 벗어난 대상은 다이얼러에 닿기 전에 거부됩니다. 두 리플렉션 버전 모두 응답하지 않는 서버는 조용히 실패하지 않고 그렇다고 말하며, 무엇도 스스로 다시 받아오지 않습니다.
+
+| 옵션 | 설명 |
+|------|------|
+| `--format=FMT` | `schema`와 `reflect`에서 `text`(기본) 또는 `json` |
+| `--allow-unscoped` | `reflect`: 대상이 프로젝트 스코프 밖이어도 보냅니다 |
+| `-k`, `--insecure-upstream` | `reflect`: 대상의 TLS 인증서를 검증하지 않습니다 |
+| `--timeout=SECONDS` | `reflect`: 작업당 타임아웃(기본값: 프로젝트의 io 타임아웃) |
+| `--all` | `forget`: 캐시된 리플렉션 대상 전부 버리기 |
+
+디스크립터 셋 **파일**(Project settings → Proto schema)은 `forget`으로 내려가지 않습니다. 프로젝트 설정에서 경로를 지우세요. 파일과 리플렉션 페치가 어떤 선언에 대해 어긋나면 그 수는 `redefined`로 보고되고 대상 자신의 말이 우선합니다.
 
 ### run colormarker {#run-colormarker}
 

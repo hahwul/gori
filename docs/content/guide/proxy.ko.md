@@ -430,6 +430,24 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 목록 아래에는 편집 가능한 **샘플** 메시지와, 그 옆에 켜져 있는 규칙을 통과시킨 결과가 나란히 놓입니다. 실제로 캡처한 요청을 붙여 넣어 규칙을 풀어놓기 전에 무엇이 바뀌는지 확인하는 자리입니다. 샘플은 그것이 미리 보여 주는 규칙과 마찬가지로 프로젝트에 저장됩니다.
 
+### 프리셋 — 능력이 아니라 출발점 {#rewriter-presets}
+
+거의 모든 엔게이지먼트에서 반복되는 응답 재작성이 일곱 가지 있고, 하나같이 다시 타이핑하기 싫은 정규식입니다. Rewriter에서 `p`(**Add from preset…**)를 눌러 고르세요.
+
+| 프리셋 | 설치하는 것 |
+|--------|-------------|
+| `unhide-hidden-fields` | `<input type="hidden">`을 `type="text"`로 바꿔 필드를 보이고 편집 가능하게 |
+| `enable-disabled-fields` | 폼 컨트롤에서 `disabled` / `readonly` 제거 |
+| `remove-length-limits` | `maxlength=` 제거 |
+| `strip-validation` | 제출을 막는 `required`, `pattern=`, `on{submit,change,input}=` 핸들러 제거 |
+| `remove-csp` | Content-Security-Policy 헤더 제거 |
+| `remove-security-headers` | 브라우저 측 보호 헤더 제거 |
+| `disable-sri` | `integrity=`를 벗겨 subresource-integrity 검사가 수정된 자산을 막지 않게 |
+
+프리셋은 **능력이 아니라 출발점**입니다 — 일곱 가지 모두 Match & Replace가 이미 표현할 수 있습니다. 설치하면 `a`와 같은 경로로 평범한 규칙이 쓰이므로, 목록에 나타나고, 어느 프리셋에서 왔는지 이름을 달고 있으며, 직접 타이핑한 규칙과 똑같이 편집·순서변경·비활성화·삭제됩니다. 같은 프리셋을 두 번 설치하면 조용히 병합되지 않고 눈에 보이게 중복됩니다.
+
+헤드리스에서는 `gori run rewriter preset list`와 `gori run rewriter preset add <name>`(`--scope=global`, 트래픽에 닿기 전에 검토하려면 `--disabled`)이고, 에이전트는 `list_rule_presets`로 읽고 `create_rule_from_preset`으로 설치합니다.
+
 ### 전역 규칙과 프로젝트 규칙 {#reusing-a-rule-across-projects}
 
 모든 규칙은 두 곳 중 하나에 저장되며, 목록의 `G`/`P` 열이 어느 쪽인지 보여 줍니다.

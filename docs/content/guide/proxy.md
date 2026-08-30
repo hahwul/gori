@@ -434,6 +434,24 @@ Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, 
 
 Under the list sits an editable **sample** message and, beside it, the same message after the enabled rules run. Paste a real captured request in there to see what your rules do to it before you turn them loose. The sample is saved with the project, like the rules it previews.
 
+### Presets — a starting point, not a capability {#rewriter-presets}
+
+Seven response rewrites come up on almost every engagement, and each is a regex nobody enjoys retyping. Press `p` in the Rewriter (**Add from preset…**) and pick one:
+
+| Preset | What it installs |
+|--------|------------------|
+| `unhide-hidden-fields` | Rewrites `<input type="hidden">` to `type="text"` so the field is visible and editable |
+| `enable-disabled-fields` | Strips `disabled` / `readonly` from form controls |
+| `remove-length-limits` | Strips `maxlength=` |
+| `strip-validation` | Removes `required`, `pattern=` and `on{submit,change,input}=` handlers that block submission |
+| `remove-csp` | Drops the Content-Security-Policy headers |
+| `remove-security-headers` | Drops the browser-side protection headers |
+| `disable-sri` | Strips `integrity=` so subresource-integrity checks stop blocking modified assets |
+
+A preset is a **starting point, not a capability** — Match & Replace already expresses every one of them. Installing one writes plain rules through the same path `a` does, so they show up in the list, carry the preset's name, and are editable, re-orderable, disable-able and deletable like anything you typed yourself. Installing the same preset twice duplicates visibly rather than silently merging.
+
+Headless it is `gori run rewriter preset list` and `gori run rewriter preset add <name>` (`--scope=global`, `--disabled` to review before they touch traffic); an agent reads `list_rule_presets` and installs with `create_rule_from_preset`.
+
 ### Global and project rules
 
 Every rule lives in one of two places, shown in the `G`/`P` column of the list:

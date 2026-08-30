@@ -97,7 +97,7 @@ See [Session bindings](/guide/proxy/#session-bindings) for how extract rules def
 gori has no plugin SDK and is not getting one. When a transform has to be *computed* — re-sign a
 JWT, recompress a body, decrypt a proprietary envelope, run a real detector — you hand the bytes
 to a program you already own. Bytes in on stdin, replacement bytes out on stdout. That is the
-whole extension surface, and it is the same primitive at three seams.
+whole extension surface, and it is the same primitive at four seams.
 
 | Seam | Where | What it does |
 |------|-------|--------------|

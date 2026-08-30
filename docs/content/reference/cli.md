@@ -83,8 +83,12 @@ gori run <subcommand> [verb] [options]
 | `issues` · `create` · `update` | List / export issues, or write issues |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
+| `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
 | `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$NAME`s they declare |
 | `colormarker` · `add` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
+| `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views — named QL queries the list is narrowed by, as a lens |
+| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | Session slots — the named identities a send or an Authorize run goes out as |
+| `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
@@ -813,6 +817,16 @@ gori run rewriter rm 3
 
 Body rules re-sync `Content-Length` and de-chunk as needed, and an enabled rule forces HTTP/1.1 on hosts it matches. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
+**`rewriter preset`**: install a [response-modification preset](/guide/proxy/#rewriter-presets) — a named starting point that writes ordinary Match & Replace rules. Verbs: `list` and `add <name>`.
+
+```bash
+gori run rewriter preset list
+gori run rewriter preset add unhide-hidden-fields
+gori run rewriter preset add remove-csp --scope global --disabled
+```
+
+Names are `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers` and `disable-sri`. `add` takes `--scope=project|global` and `--disabled` (install without arming, to review them first). The rules it writes go through the same path `rewriter add` does, so they are listed, editable and deletable afterwards — installing the same preset twice duplicates visibly rather than merging.
+
 **`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings) — which response a `$NAME` is read from, and where in it. Verbs: `list` (default), `add`, `rm` (`delete`), `enable`, `disable`.
 
 ```bash
@@ -831,6 +845,30 @@ gori run rewriter extract add --name CSRF --kind regex --selector 'name="csrf" v
 | `--disabled` | Create the rule without arming it |
 
 **`rewriter bindings`**: list the names those rules declare (`--format text|json`). Values are not shown here and cannot be: a binding's value lives in the memory of the running gori and is never written anywhere, so another process has nothing to read. The Rewriter tab's `bindings` sub-tab shows the live table. For a headless sweep, `--bind-from` fills the values in-process — see [Session bindings from the command line](#session-bindings-from-the-command-line).
+
+### run grpc
+
+The gRPC [`.proto` lens](/guide/proxy/#proto-schema) from the command line: what schema this project renders captured gRPC through, and where each piece came from.
+
+```bash
+gori run grpc                                  # what is loaded (schema is the default verb)
+gori run grpc schema --format json
+gori run grpc reflect https://api.test:443     # ACTIVE: ask the target for its descriptors
+gori run grpc forget https://api.test:443      # drop one cached target (`rm` is accepted)
+gori run grpc forget --all
+```
+
+`schema` and `forget` touch nothing outside the project database. `reflect` is the one that sends: it asks the target's `grpc.reflection.v1` service — falling back to `v1alpha`, still what most deployed servers expose — for the services, then the file declaring each one, then their imports until the graph closes, and caches the result in the project. It goes through the same scope gate every other active `gori run` command does, so an out-of-scope target is refused before the dialer. A server that answers neither reflection version says so rather than failing quietly, and nothing ever re-fetches on its own.
+
+| Option | Description |
+|--------|-------------|
+| `--format=FMT` | `text` (default) or `json`, on `schema` and `reflect` |
+| `--allow-unscoped` | `reflect`: send even though the target is outside the project scope |
+| `-k`, `--insecure-upstream` | `reflect`: do not verify the target's TLS certificate |
+| `--timeout=SECONDS` | `reflect`: per-operation timeout (default: the project's io timeout) |
+| `--all` | `forget`: drop every cached reflection target |
+
+A descriptor-set **file** (Project settings → Proto schema) is not unloaded by `forget` — clear the path in the project's settings instead. Where a file and a reflection fetch disagree about a declaration, the count is reported as `redefined` and the target's own word wins.
 
 ### run colormarker
 

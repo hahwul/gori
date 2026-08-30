@@ -5,9 +5,10 @@ module Gori
   # This is gori's whole extension axis. Burp answers "run MY code over these bytes" with
   # BApps/Bambdas, Caido with a JS plugin SDK; gori answers with the UNIX process boundary —
   # language-agnostic, reuses every script the operator already owns, and needs no in-process
-  # runtime, no stable ABI and no recompile (P0). Three seams call it and NONE re-implement it
+  # runtime, no stable ABI and no recompile (P0). Four seams call it and NONE re-implement it
   # (P1/§2): the Rewriter `pipe` op (`rules.cr`), the Decoder chain `exec:` step
-  # (`decoder/chain.cr`), and the Probe `exec` custom rule (`probe/custom_rule.cr`).
+  # (`decoder/chain.cr`), the Probe `exec` custom rule (`probe/custom_rule.cr`), and the Miner's
+  # per-probe request hook (`miner/inject.cr`, driven by `miner/hook_backend.cr`).
   #
   # TRUST: a hook runs with the OPERATOR'S OWN privileges. It is not sandboxed, jailed or
   # confined in any way, deliberately — the same trust level a `--config` file, a Rewriter
