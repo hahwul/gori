@@ -110,4 +110,77 @@ describe "ACTIVITY pane controller wiring" do
       ctl.view.activity_rows.size.should eq(3)
     end
   end
+
+  # …and the mirror image: a step the strip REFUSES must settle nothing. ACTIVITY is the last
+  # chip, so `→` there moves nowhere, yet it still ran `settle_subtab` + `settle_activity_entry`
+  # — dropping a committed filter, throwing away every page walked in, and re-seating the
+  # cursor (via `clamp_act_sel`) on a different event. An arrow key that moves nothing must not
+  # change what the pane is showing.
+  it "leaves the pane alone when the strip refuses the step" do
+    with_activity do |ctl, store|
+      500.times { |i| store.insert_event("agent", "agent_action", "info", "e#{i}") }
+      store.flush
+      ctl.view.focus_pane(:activity)
+      ctl.reload_activity
+      ctl.body_scroll(400)
+      ctl.body_scroll(400)
+      loaded = ctl.view.activity_rows.size
+      loaded.should eq(500)
+      parked = ctl.view.activity_selected_row.not_nil!.id
+
+      ctl.move_subtab(1) # ACTIVITY is PANES.last — refused
+
+      ctl.view.pane.should eq(:activity)
+      ctl.view.activity_rows.size.should eq(loaded)
+      ctl.view.activity_selected_row.not_nil!.id.should eq(parked)
+    end
+  end
+
+  it "keeps a committed text filter through a refused step" do
+    with_activity do |ctl, store|
+      seed(store)
+      ctl.view.focus_pane(:activity)
+      ctl.view.activity_filter_field.set("extract")
+      ctl.reload_activity
+      ctl.view.activity_rows.size.should eq(1)
+
+      ctl.move_subtab(1)
+
+      ctl.view.activity_filtered?.should be_true
+      ctl.view.activity_rows.size.should eq(1)
+    end
+  end
+
+  # This is the one Project list whose rows are a PAGE rather than the whole set, so the gauge
+  # has to pull the next one exactly as `↓` does. It did not: the keyboard walked past the end
+  # of page one and the gauge stopped dead there.
+  it "pages from a scroll-gauge grab, not only from the keyboard" do
+    with_activity do |ctl, store|
+      500.times { |i| store.insert_event("agent", "agent_action", "info", "e#{i}") }
+      store.flush
+      ctl.view.focus_pane(:activity)
+      ctl.reload_activity
+      ctl.view.activity_rows.size.should eq(Gori::Tui::ProjectView::ACT_PAGE)
+
+      # Located through the view's OWN hit-test rather than re-derived here, so the spec cannot
+      # drift from the card geometry (`act_list_inner` is the single offset source).
+      rect = Gori::Tui::Rect.new(0, 0, 120, 40)
+      last = ctl.view.activity_rows.size - 1
+      hit = nil.as({Int32, Int32}?)
+      (0...rect.h).each do |y|
+        (0...rect.w).each do |x|
+          if ctl.view.activity_gauge_row(rect, x, y) == last
+            hit = {x, y}
+            break
+          end
+        end
+        break if hit
+      end
+      x, y = hit.not_nil!
+
+      ctl.handle_click(rect, x, y)
+
+      ctl.view.activity_rows.size.should eq(Gori::Tui::ProjectView::ACT_PAGE * 2)
+    end
+  end
 end

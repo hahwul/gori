@@ -495,12 +495,19 @@ module Gori::Tui
       cancel_env_prefix_edit
     end
 
+    # Whether `pane_advance` would land on a pane at all. Peeked SEPARATELY because the
+    # controller has to decide before it settles: settling a step that then gets refused is a
+    # side effect with no navigation attached to it (see `ProjectController#move_subtab`).
+    def pane_can_advance?(dir : Int32) : Bool
+      i = pane_index + dir
+      i >= 0 && i < PANES.size
+    end
+
     # Step to the neighbouring sub-tab; false at either end (the strip clamps, it does not
     # wrap — same as the chips read). Driven by the strip's ←/→ via move_subtab.
     def pane_advance(dir : Int32) : Bool
-      i = pane_index + dir
-      return false if i < 0 || i >= PANES.size
-      @pane = PANES[i]
+      return false unless pane_can_advance?(dir)
+      @pane = PANES[pane_index + dir]
       true
     end
 
@@ -1013,6 +1020,18 @@ module Gori::Tui
     # One page. Big enough that the ordinary feed arrives whole, small enough that the first
     # paint of a busy project is not waiting on 50k rows.
     ACT_PAGE = 200
+    # Ceiling on the rows this pane KEEPS. The loaded list only ever grew: `prepend_activity`
+    # runs on every `data_version` poll for as long as the pane is open — and the capture-lock
+    # holder moves `data_version` every 3 s on an idle project — so a session left on this card
+    # while an agent worked accumulated every event that agent ever wrote, and paid for it
+    # twice, because each prepend reallocates and copies the whole array on the render fiber.
+    # (Measured: 2 050 events written under an open pane, 2 050 rows retained.)
+    #
+    # 25 pages is more scrollback than anyone reads in one sitting, and nothing is LOST by
+    # trimming: `@act_next_before` moves up to the last row kept, so the dropped tail pages
+    # straight back in on the next `↓`. Rows at or above the cursor are never trimmed — the
+    # selected event has to stay selected — so a cursor parked deep still holds its whole list.
+    ACT_MAX_ROWS = 5_000
     # Divider + wrapped message rows. The feed's messages are PROSE, not labels — a binding
     # miss explains which descriptor read what and why nothing bound — so a list that only
     # truncates would show the token and drop every word of the reason.
@@ -1252,15 +1271,49 @@ module Gori::Tui
     # the same failure in a slower form.
     private def prepend_activity(fresh : Array(Store::EventRow)) : Nil
       following = @act_sel == 0
-      @act_rows = fresh + @act_rows
+      # Read BEFORE the concat below, which grows `fresh` into the whole list — taking it
+      # afterwards credited the border's "↑N new" with every row on screen (`↑8 new` over five
+      # arrivals). The count is what ARRIVED, and after the concat `fresh` no longer means that.
+      arrived = fresh.size
+      # `fresh.concat`, not `fresh + @act_rows`: the sum allocates a THIRD array and copies
+      # both halves into it, and this runs on the render fiber on every poll. `fresh` is the
+      # walk's own scratch list and is dropped by its caller, so growing it in place is free.
+      @act_rows = fresh.concat(@act_rows)
       if following
         @act_sel = 0
         @act_anchor = @act_rows.first.id
         @act_new_above = 0
       else
-        @act_new_above += fresh.size
+        @act_new_above += arrived
         resolve_activity_anchor
       end
+      trim_activity_tail
+    end
+
+    # Drop the oldest loaded rows once the list passes `ACT_MAX_ROWS`, and move the resume
+    # point up to match.
+    #
+    # THE cut is below the cursor, never at it: the selected row must still be selected
+    # afterwards, and the rows within a `↓` of it must still be there, or trimming would do to
+    # the cursor exactly what a full reload does (`ProjectController#move_subtab`'s post-mortem).
+    # So a cursor parked deep in the list keeps everything above it — that growth is the
+    # operator's own doing and is bounded by their scrolling; what this bounds is the growth
+    # NOTHING asked for, the head-following list that the poll extends by itself.
+    #
+    # `@act_next_before` becomes the last row KEPT, so the tail is re-read rather than skipped,
+    # and `@act_walked` goes with it: the resume point is now a hand-set place further down the
+    # feed, which is precisely the state a page-one refresh must not rewind.
+    #
+    # `@act_scanned` is deliberately left alone. It only reaches the screen through
+    # `activity_no_match_line`, which is drawn only for an EMPTY list, and every route from a
+    # trimmed list (5 000+ rows) back to an empty one — a chip, the query bar, a clear, a lost
+    # head — goes through `reload_activity`, which re-seeds it from a fresh page one.
+    private def trim_activity_tail : Nil
+      keep = {ACT_MAX_ROWS, @act_sel + 1 + ACT_PAGE}.max
+      return if @act_rows.size <= keep
+      @act_next_before = @act_rows[keep - 1].id
+      @act_rows = @act_rows[0, keep]
+      @act_walked = true
     end
 
     # Append the next page. Called when the cursor reaches the end of what is loaded — the page
