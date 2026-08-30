@@ -203,8 +203,20 @@ module Gori::Discover
 
     # The real thing, not an approximation of it: `fetch` sends exactly these bytes (it calls
     # this method), so the request a finding is stored with is the request that was made.
+    #
+    # The ACTIVE SESSION SLOT's header overlay is written over the built head, after the
+    # `$NAME` pass and in the order `Repeater::Sender#wire` and `Fuzz::Sender#send` already
+    # use: the message's own references resolve against the active slot's table first, the
+    # identity's headers go over the result. Discover was the ONE send seam without it — the
+    # asymmetry `binding_headers` above names, made real. `--slot admin` flipped
+    # `SessionSlots#activate`, printed "slot: sending as admin", and then crawled anonymously,
+    # because the slot's headers had nothing to be written onto until this line existed and
+    # `Config#headers` (`-H`) was the crawler's only header source. A sweep that reports
+    # "found nothing" over an authenticated surface it never reached is the failure this file
+    # already warns about; announcing the identity while sending none is that failure with a
+    # receipt on top.
     def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
-      build_get(scheme, host, port, target, binding_headers)
+      Gori::Env.overlay_slot(build_get(scheme, host, port, target, binding_headers))
     end
 
     def close : Nil

@@ -258,6 +258,12 @@ module Gori
         # like any other — so this one flush covers the normal, error, AND interrupted paths.
         flush_discover(store, pending) unless no_store
         puts CLI::Output.discover_array_json(findings) if format == :json
+        # LAST, after the summary: `--slot NAME` whose overlay resolved to nothing means every
+        # probe in the sweep carried `$SESSION` itself instead of a session, so the whole crawl
+        # ran UNAUTHENTICATED while announcing "slot: sending as NAME" — and a crawl is the one
+        # sweep whose result IS "what surface exists", so an anonymous one reports the
+        # authenticated half as absent. Same drain, same sentence, as fuzz/repeater/authorize.
+        report_unbound_slot_overlay("gori run discover")
         # `Run.report_interrupted` (exit 130) rather than the local reporter this used to call:
         # that one only wrote to STDERR and returned, so a Ctrl-C'd crawl fell through to a
         # plain exit 0 and a scripted `gori run discover … && ./triage.sh` treated a truncated
