@@ -259,7 +259,7 @@ module Gori::Tui
       @resource = ResourceMeter.new
       # Miss Ring (settings:companion). Off by default; while off she is the same zero-cost
       # no-op the resource meter is, and she stops ticking entirely once she dozes.
-      @companion = Companion.new(@notifications)
+      @companion = Companion.new(@notifications, honors_placement: true)
       @spinner_frame = 0
       # The Miner config popup (History/Repeater → space → "Mine parameters") rides the
       # Overlay seam (@active_overlay); built fresh each open with an injected commit.
@@ -621,7 +621,7 @@ module Gori::Tui
             # Animate the bottom-bar background-job spinner: while any job runs, advance the
             # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
             # CPU at zero when nothing is running.
-            if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
+            if background_work? && now - last_spin >= SPINNER_INTERVAL
               last_spin = now
               @spinner_frame &+= 1
               dirty = true
@@ -651,7 +651,12 @@ module Gori::Tui
             # wasted render/second for as long as a modal is up, and for as long as you keep
             # typing in an editor (every keystroke pokes her, so she never dozes there). The
             # tick itself still has to run or the frame she comes back with would be stale.
-            dirty = true if @companion.tick(now) && companion_on_screen?
+            #
+            # WORK IS HANDED IN, and it is @spinner_frame itself: the branch above has
+            # already advanced it and taken the repaint for it this tick, so her bobbing
+            # work badge rides that render rather than buying one, and cannot drift out of
+            # step with the activity chip drawn from the same number.
+            dirty = true if @companion.tick(now, working: background_work? ? @spinner_frame : nil) && companion_on_screen?
             # Debounced QL filter: fire the deferred search once typing has paused.
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
@@ -2359,6 +2364,14 @@ module Gori::Tui
 
     private def rules_label : String
       @session.rules.active? ? "rules:#{@session.rules.enabled_count}" : ""
+    end
+
+    # Is anything running in the background? ONE spelling, because three readers now agree
+    # on it: the spinner's own advance, the activity chip, and Miss Ring's work badge —
+    # which is only in lockstep with the chip because it is the same question and the same
+    # counter, not a second guess at both.
+    private def background_work? : Bool
+      @jobs.any_active? || repeater_controller.any_inflight?
     end
 
     # The bottom-bar background-activity chip (spinner + label), or nil when no job runs.

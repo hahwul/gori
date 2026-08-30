@@ -11,16 +11,26 @@ module Gori::Settings
   DEFAULT_COMPANION = false
   # "lively" = blinks, winks, a glint sweep, and about every 25 seconds one of seven idle
   # gestures (a yawn, a smile, a squint, a deadpan, a curious look, a huff, an "hmm").
-  # "calm" halves the blink rate and drops the rest — for SSH sessions and battery. Her
-  # REACTIONS to results are not motion she starts on her own, so both modes play them,
-  # arc and all (tui/companion.cr#pose_for).
-  DEFAULT_COMPANION_MOTION  = "lively" # "lively" | "calm"
+  # "calm" halves the blink rate and drops the rest — for SSH sessions and battery.
+  # "still" drops the blink too, so nothing she does on her own moves at all: #compose
+  # then returns the same frame on every beat and #tick reports a change exactly never
+  # while she is idle. That is for an asciinema recording, a screen reader, a shared tmux
+  # pane and anywhere a repainting corner is noise rather than company — and it is a
+  # THIRD mode rather than a second meaning for "calm", because someone who picked calm
+  # asked for a quieter mascot, not for a still image.
+  #
+  # Her REACTIONS to results are not motion she starts on her own, so all three modes play
+  # them, arc and all (tui/companion.cr#pose_for). "still" is the one exception, and only
+  # for the part of a reaction that is literally movement: the :error shudder displaces
+  # her a column, so it is suppressed while the face change it accompanies is not.
+  DEFAULT_COMPANION_MOTION  = "lively" # "lively" | "calm" | "still"
   DEFAULT_COMPANION_NOTICES = true
   # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner; "bar"
-  # is a 7-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
-  # middle row alone, so the face survives and only the crown and floor are dropped. The
-  # bar form occludes nothing and needs no speech bubble: the status row already carries
-  # the toast for exactly these notifications.
+  # is an 8-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
+  # middle row plus the mood badge, so the face and the one glyph that says "something is
+  # wrong" both survive, and only the crown and floor are dropped. The bar form occludes
+  # nothing and needs no speech bubble: the status row already carries the toast for
+  # exactly these notifications.
   DEFAULT_COMPANION_PLACEMENT = "body" # "body" | "bar"
 
   # All read live at the tick/draw sites, so a save takes effect on the next frame.
@@ -29,11 +39,19 @@ module Gori::Settings
   class_property? companion_notices : Bool = DEFAULT_COMPANION_NOTICES
   class_property companion_placement : String = DEFAULT_COMPANION_PLACEMENT
 
-  COMPANION_MOTIONS    = {"lively", "calm"}
+  COMPANION_MOTIONS    = {"lively", "calm", "still"}
   COMPANION_PLACEMENTS = {"body", "bar"}
 
+  # NAMED POSITIVELY, not as "not calm". This read `!= "calm"` while there were two modes,
+  # which is the same answer written the way that does not survive a third: "still" would
+  # have arrived as the liveliest mode there is, winks and glint and all.
   def self.companion_lively? : Bool
-    companion_motion != "calm"
+    companion_motion == "lively"
+  end
+
+  # Nothing she starts herself moves. See DEFAULT_COMPANION_MOTION for what that excludes.
+  def self.companion_still? : Bool
+    companion_motion == "still"
   end
 
   def self.companion_in_bar? : Bool

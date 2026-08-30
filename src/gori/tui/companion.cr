@@ -28,7 +28,7 @@ module Gori::Tui
   # engines push notes from their own fibers into channels that the MAIN fiber drains, so
   # a controller worker must never touch a Companion.
   class Companion
-    # Evaluation cadence. NOT the redraw cadence — see #advance.
+    # Evaluation cadence. NOT the redraw cadence — see #repaint.
     BEAT = 200.milliseconds
 
     # No key, no click, no note for this long and she falls asleep (and stops ticking).
@@ -79,6 +79,16 @@ module Gori::Tui
 
     # Beats she stays startled after being woken from a doze.
     WAKE_BEATS = 3
+
+    # The badge while a background job is running: a dot bobbing in the badge cell, one
+    # frame per step of whatever counter the host hands #tick.
+    #
+    # NOT the run loop's braille job spinner, deliberately. Two spinners of the same
+    # design in one status row read as one thing rendered twice; this is her own gesture,
+    # in the vocabulary the badge column already speaks ('·', '!', '×', 'z') and out of
+    # glyphs the sprite has already proven in every terminal gori runs in. Index 0 is the
+    # resting one, because "still" freezes here.
+    WORK = {'˙', '·', '.', '·'}
 
     # Beats a reaction holds its PEAK face before settling into its quieter cousin — see
     # #pose_for. 8 beats is 1.6s, roughly half of the shortest mood hold (:happy, 3s), so
@@ -153,12 +163,28 @@ module Gori::Tui
     # slot with the toast, and the two are resolved by recency (Runner#companion_notice).
     getter bubble_at : Time::Instant?
 
-    def initialize(@notes : Notifications)
+    # `honors_placement` is the HOST's answer to "does `placement: bar` mean anything
+    # here?" — true for the Runner, which has a status row to put the chip in, false for
+    # the project picker and the tutorial, which have none and paint the body sprite
+    # whatever the setting says. #compose folds the fields a chip cannot show, and it may
+    # only do that where a chip is actually what gets drawn.
+    def initialize(@notes : Notifications, @honors_placement : Bool = false)
       @frame = nil.as(Mascot::Frame?)
       @beat = 0
       @last_beat = nil.as(Time::Instant?)
       @last_poke = nil.as(Time::Instant?)
       @dozing = false
+      # Set by every writer that changes what #compose would return BETWEEN two beats: a
+      # note, a #say, a bubble/mood expiry, waking from a doze. Without it #tick answered
+      # "the drawn frame changed" for a frame it had not recomposed — the beat gate skips
+      # the compose on every tick that falls inside a beat, and the run loop polls several
+      # times per beat, so a note arriving mid-beat bought a full frame rebuild that
+      # repainted the PREVIOUS frame and only showed its bubble on the next beat, up to
+      # BEAT later. The same wasted repaint runner.cr's on-screen gate exists to prevent,
+      # arriving from the other end.
+      @restless = false
+      # The host's background-work counter, or nil for "nothing running" — see #tick.
+      @working = nil.as(Int32?)
       @wake_until_beat = 0
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
@@ -173,7 +199,18 @@ module Gori::Tui
     # Advance the animation, pick up new notifications, and report whether the DRAWN frame
     # changed. Same contract as ResourceMeter#tick and the top-bar clock: a beat that lands
     # on an identical frame is silent, so the run loop never repaints on a bare timer.
-    def tick(now : Time::Instant) : Bool
+    # `working` is the host's background-work counter: nil while nothing is running, else a
+    # number that advances as work proceeds. She wears it as a bobbing dot in the badge
+    # cell, so a run that takes minutes is visible on her face rather than only in the
+    # status row's activity chip — which is off screen entirely in `placement: body`.
+    #
+    # A COUNTER AND NOT A BOOLEAN, because the host already has one: the Runner advances
+    # @spinner_frame on a fixed cadence while a job runs and forces a repaint with it. Take
+    # that same number and her bob is in lockstep with the activity chip for free — no
+    # second clock to drift against it, and no repaint that was not already bought. A
+    # boolean would have made her invent a cadence, and the two would beat against each
+    # other in the one placement that shows both.
+    def tick(now : Time::Instant, working : Int32? = nil) : Bool
       unless Settings.companion?
         # Disable edge, as in ResourceMeter#tick: drop the frame ONCE, then stay silent.
         # Clearing the timers also means a re-enable starts a fresh idle window rather
@@ -192,11 +229,36 @@ module Gori::Tui
         greet(now)
       end
       @last_poke ||= now
-      changed = consume_note(now)
-      changed = true if expire_bubble(now)
-      changed = true if expire_mood(now)
-      changed = true if advance(now)
-      changed
+      take_working(now, working)
+      # THE BEAT CLOCK RUNS FIRST, then the state that reads it. #apply_mood stamps
+      # @mood_beat with the CURRENT beat and every arc measured from it counts from there
+      # — #pose_for's peak/settle and #shake_for's three-beat shudder both. Consuming a
+      # note BEFORE the clock had stepped to the beat that is about to be composed put
+      # every reaction one beat past its own beat 0: the shudder's opening flinch was
+      # never drawn at all (the frame carrying it is composed on the next beat, by which
+      # point the offset has already stepped to 0, so the "flinch, back, flinch" played
+      # as a single twitch), and the peak face held REACT_PEAK - 1 beats.
+      stepped = step_beat(now)
+      consume_note(now)
+      expire_bubble(now)
+      expire_mood(now)
+      repaint(stepped)
+    end
+
+    # Pick up the host's work counter. Restless on any change, which costs nothing: the
+    # host that advances this counter is repainting for it already, so her frame is
+    # recomposed inside a render the run loop had committed to anyway — and being in step
+    # with it is the whole reason the counter is borrowed rather than invented.
+    #
+    # The RISING edge pokes her. A job she is showing progress for can be started by
+    # something that never touched the keyboard (an agent over MCP, a retest), and a dozing
+    # mascot would sleep through the only work in the session.
+    private def take_working(now : Time::Instant, working : Int32?) : Nil
+      return if working == @working
+      rising = @working.nil?
+      @working = working
+      @restless = true
+      poke(now) if rising
     end
 
     # Any sign of life re-arms the idle clock and wakes her if she had dozed off.
@@ -206,6 +268,7 @@ module Gori::Tui
       @dozing = false
       @last_beat = now
       @wake_until_beat = @beat + WAKE_BEATS
+      @restless = true # the startle is a different frame; draw it now, not a beat later
     end
 
     # Wake hook for the input path. Self-gated so a keystroke costs nothing at all while
@@ -233,12 +296,16 @@ module Gori::Tui
       @bubble_until = nil
       @mood = :info
       @mood_until = nil
+      @restless = false
+      @working = nil
       @seen_id = @notes.latest_id
     end
 
     # --- the beat clock ------------------------------------------------------
 
-    private def advance(now : Time::Instant) : Bool
+    # Step the beat, and report whether it moved — the one input that can change the frame
+    # on its own, since every idle track is a pure function of @beat.
+    private def step_beat(now : Time::Instant) : Bool
       return false if @dozing # asleep: the static frame is already drawn, do nothing
       if last = @last_beat
         # NOT `last + BEAT`: after a stall (a modal held open, the process suspended) she
@@ -250,6 +317,14 @@ module Gori::Tui
         @last_beat = now
       end
       check_doze(now)
+      true
+    end
+
+    # Recompose and diff. `stepped` is the beat clock's verdict, @restless is every other
+    # writer's; composing on neither is what keeps a still beat free.
+    private def repaint(stepped : Bool) : Bool
+      return false unless stepped || @restless
+      @restless = false
       next_frame = compose
       return false if next_frame == @frame
       @frame = next_frame
@@ -258,6 +333,10 @@ module Gori::Tui
 
     private def check_doze(now : Time::Instant) : Nil
       return if @dozing
+      # Not while there is work to show. The doze exists so an UNATTENDED gori animates
+      # nothing; a run in flight is the one case where the corner has something to say with
+      # nobody at the keyboard, and the host is repainting for it regardless.
+      return if @working
       poke = @last_poke
       return unless poke && now - poke >= SLEEP_AFTER
       @dozing = true
@@ -267,6 +346,20 @@ module Gori::Tui
     # wall clock — or the same beat could yield two different frames and the diff would
     # stop being meaningful (or specifiable).
     private def compose : Mascot::Frame
+      # FIELDS THE BAR CANNOT SHOW ARE FOLDED HERE. `placement: bar` paints
+      # Mascot.draw_row, which is the middle row plus the badge — so the glint (which
+      # sweeps the crown and the left wall) and the shake (which has nowhere to travel
+      # inside a status chip) are mute in that placement. Carried on the Frame anyway they
+      # still make it compare unequal to its neighbour, and #tick would report a change the
+      # chip forwards not one cell of — the glint alone is six of them per sweep and a
+      # sweep every 25 seconds, which measured out at a QUARTER of every change she reports
+      # in bar. Same class as the wink :idle folds below, and as the on-screen gate in
+      # runner.cr; this is the third face of it.
+      #
+      # The BADGE is not in that set: Mascot::BAR_W borrows it into the chip precisely so
+      # the mood is not left to a hue shift of one gold. A field leaves this fold the
+      # moment the chip learns to draw it.
+      bar = @honors_placement && Settings.companion_in_bar?
       if @dozing
         return Mascot::Frame.new(pose: :doze, badge: 'z', mood: :doze, bubble: @bubble)
       end
@@ -286,10 +379,10 @@ module Gori::Tui
         # gestures would have made it routine.
         wink: mood == :info && pose == :idle ? wink_for : :none,
         badge: badge_for(mood),
-        glint: glint_for,
+        glint: bar ? -1 : glint_for,
         mood: mood,
         bubble: @bubble,
-        shake: shake_for(mood),
+        shake: bar ? 0 : shake_for(mood),
       )
     end
 
@@ -326,12 +419,23 @@ module Gori::Tui
       gesture_pose || (blink? ? :blink : :idle)
     end
 
+    # A REACTION OUTRANKS THE WORK BADGE. One cell, two things that want it, and a failure
+    # mid-run is exactly when the `×` matters most — the work is still legible in the
+    # status row's own chip, and the reaction settles in a few seconds either way.
     private def badge_for(mood : Symbol) : Char?
       case mood
       when :happy then '·'
       when :warn  then '!'
       when :alarm then '×'
+      else             work_badge
       end
+    end
+
+    private def work_badge : Char?
+      return nil unless w = @working
+      # "still" takes the resting frame and holds it: the fact that work is running is not
+      # motion she started, but the bob is.
+      Settings.companion_still? ? WORK[0] : WORK[w.remainder(WORK.size).abs]
     end
 
     # The :error reaction gets a three-beat shudder; every other mood sits still.
@@ -348,6 +452,9 @@ module Gori::Tui
     # So flinch-back-flinch instead of left-right-still: same three beats, same read, and
     # every offset it emits is one .draw honours.
     private def shake_for(mood : Symbol) : Int32
+      # The one part of a REACTION "still" drops, because it is the one part that is
+      # literally movement — she keeps the ×_× face, she just does not flinch wearing it.
+      return 0 if Settings.companion_still?
       return 0 unless mood == :alarm
       case @beat - @mood_beat
       when 0, 2 then -1
@@ -374,8 +481,13 @@ module Gori::Tui
     end
 
     # One blink per window at a hashed offset, plus a double-blink in one window in four.
-    # On "calm" the window doubles, so she blinks half as often.
+    # On "calm" the window doubles, so she blinks half as often; on "still" there is no
+    # window at all. The blink is the LAST track to go, which is why it is the one that
+    # tells the three modes apart: with it gone #compose is constant across every idle
+    # beat, so #repaint answers false forever and a still Miss Ring costs the run loop
+    # nothing whatsoever — the doze, without the ninety-second wait.
     private def blink? : Bool
+      return false if Settings.companion_still?
       shift = Settings.companion_lively? ? BLINK_SHIFT : BLINK_SHIFT + 1
       h, off = window(shift, 1_u32)
       at = (h % 13).to_i
@@ -457,6 +569,7 @@ module Gori::Tui
       @bubble = GREETING
       @bubble_at = now
       @bubble_until = now + GREET_TTL
+      @restless = true
     end
 
     # Forget that this process has been greeted. A SPEC SEAM only — nothing in the app
@@ -481,21 +594,22 @@ module Gori::Tui
       @bubble_at = now
       @bubble_until = now + bubble_ttl(mood)
       apply_mood(mood, now)
+      @restless = true
       poke(now)
     end
 
-    private def consume_note(now : Time::Instant) : Bool
+    private def consume_note(now : Time::Instant) : Nil
       id = @notes.latest_id
-      return false if id <= @seen_id # empty, unchanged, or post-clear
+      return if id <= @seen_id # empty, unchanged, or post-clear
       @seen_id = id
-      return false unless note = @notes.latest
-      return false unless Settings.companion_notices?
+      return unless note = @notes.latest
+      return unless Settings.companion_notices?
       @bubble = condense(note.message)
       @bubble_at = now
       @bubble_until = now + bubble_ttl(mood_of(note.level))
       apply_mood(mood_of(note.level), now)
+      @restless = true
       poke(now) # a result is worth waking up for
-      true
     end
 
     private def mood_of(level : Symbol) : Symbol
@@ -535,22 +649,22 @@ module Gori::Tui
       end
     end
 
-    private def expire_bubble(now : Time::Instant) : Bool
-      return false unless until_ = @bubble_until
-      return false if now < until_
+    private def expire_bubble(now : Time::Instant) : Nil
+      return unless until_ = @bubble_until
+      return if now < until_
       @bubble = nil
       @bubble_at = nil
       @bubble_until = nil
-      true
+      @restless = true
     end
 
-    private def expire_mood(now : Time::Instant) : Bool
-      return false unless until_ = @mood_until
-      return false if now < until_
+    private def expire_mood(now : Time::Instant) : Nil
+      return unless until_ = @mood_until
+      return if now < until_
       @mood = :info
       @mood_until = nil
       @settle_beat = @beat + 1
-      true
+      @restless = true
     end
 
     # First line only, control bytes dropped, whitespace squeezed. The result is stored
@@ -572,6 +686,41 @@ module Gori::Tui
       y = body.bottom - Mascot::H - BOTTOM_MARGIN
       return nil if x < body.x || y < body.y
       Rect.new(x, y, Mascot::W, Mascot::H)
+    end
+
+    # Did a press land on her? ASKED OF THE FRAME, because .draw paints two things and a
+    # hit test that knows about only one of them is a hole: the bubble is the wider of the
+    # two, it is the half that carries TEXT, and it is therefore the half a reader reaches
+    # for. Missing it sent the press through to the tab underneath — a click that visibly
+    # lands on a speech bubble and selects the flow row behind it, which is the exact
+    # failure the sprite's own hit test exists to prevent.
+    #
+    # TWO RECTS AND NOT THEIR UNION. The bubble sits above her and is right-aligned to her
+    # plate, so a union would claim the cells left of her on the sprite's own rows — cells
+    # .draw never touches, and the body is entitled to every one of them.
+    def self.hit?(body : Rect, frame : Mascot::Frame, mx : Int32, my : Int32) : Bool
+      return false unless rect = place(body)
+      return true if plate_rect(body, rect).contains?(mx, my)
+      return false unless msg = frame.bubble
+      return false unless box = bubble_box(body, rect, msg)
+      box.contains?(mx, my)
+    end
+
+    # The sprite plus the column of plate either side that .draw claims — what a pointer
+    # sees as her body.
+    #
+    # The RESTING box. The :error shudder shifts her a column for two beats, and a target
+    # that moves out from under a pointer mid-press is a worse trade than one that is a
+    # column off for 400ms of a reaction — the same reason .place is recomputed from the
+    # live body rather than cached, read the other way round.
+    def self.plate_rect(body : Rect, rect : Rect) : Rect
+      x = {rect.x - 1, body.x}.max
+      Rect.new(x, rect.y, {rect.right + 1, body.right}.min - x, rect.h)
+    end
+
+    def self.hit_rect(body : Rect) : Rect?
+      return nil unless rect = place(body)
+      plate_rect(body, rect)
     end
 
     # How wide she may speak in a body this wide, BEFORE the body's own `- 4` clamp. Pure

@@ -193,9 +193,16 @@ module Gori::Tui
       # leading dot + label colour (green/muted/red), so the one address a user glances
       # at doubles as the capture indicator instead of a separate chip.
       #
-      # The bar is now ACTIONS ONLY — the passive clock moved down to the status bar (see
-      # `status_chips`), so "top-right = things you can press, bottom-right = things you can
-      # only read" holds by POSITION. Nothing here is tinted to advertise that: see `Chip`.
+      # The bar is ACTIONS ONLY — the passive clock moved down to the status bar (see
+      # `status_chips`). "Top-right = things you can press" therefore holds without
+      # exception. Its converse no longer does: the status row's readouts are still all
+      # passive, but Miss Ring's chip sits past them and IS pressable (it opens the
+      # notification ring, `status_bar_chip_at`). She is one widget wearing two placements
+      # — pressable in the body, so pressable in the bar — rather than a readout that
+      # learned to act, which is why the exception is hers alone and why `clickable` is a
+      # per-chip flag rather than a property of the row.
+      #
+      # Nothing here is tinted to advertise pressability: see `Chip`.
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
@@ -675,9 +682,8 @@ module Gori::Tui
                            activity : {String, Color}? = nil, resource : String? = nil,
                            time : String? = nil, companion : Mascot::Frame? = nil) : Nil
       screen.fill(rect, Theme.panel)
-      badge = " #{focus} "
-      screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
-      hint_x = rect.x + badge.size + 1
+      screen.text(rect.x, rect.y, " #{focus} ", Theme.text_bright, Theme.elevated, Attribute::Bold)
+      hint_x = status_hint_x(rect, focus)
 
       chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
@@ -695,6 +701,31 @@ module Gori::Tui
           Mascot.draw_row(screen, box.x, box.y, frame, Mascot.palette(frame.mood, Theme.panel))
         end
       end
+    end
+
+    # Where the hint text starts, which is also the floor the chip run may not cross.
+    # Shared by render_status and status_bar_chip_at, so the two cannot disagree about the
+    # run's left edge — and with it about which cells a chip occupies.
+    private def self.status_hint_x(rect : Rect, focus : String) : Int32
+      rect.x + " #{focus} ".size + 1
+    end
+
+    # Hit-test the status row's chips. Mirrors top_bar_chip_at, and for the same reason the
+    # chips carry a `tag`: render and hit-test read ONE ordered source, so a chip cannot be
+    # drawn in cells the pointer misses. Takes `focus` because the focus badge is what
+    # pushes the hint start, and the hint start is the run's floor.
+    def self.status_bar_chip_at(rect : Rect, mx : Int32, my : Int32, *, focus : String,
+                                activity : {String, Color}? = nil, resource : String? = nil,
+                                time : String? = nil, companion : Mascot::Frame? = nil) : Symbol?
+      return nil unless rect.contains?(mx, my)
+      chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
+      rects = chip_layout(rect, chips, status_hint_x(rect, focus))
+      chips.each_with_index do |chip, i|
+        next unless chip.clickable
+        r = rects[i]?
+        return chip.tag if r && r.contains?(mx, my)
+      end
+      nil
     end
 
     # The optional dedicated statusline row (below the status bar) — draws a user
@@ -737,7 +768,9 @@ module Gori::Tui
       # and face repertoire) — a chip that breathed out here would drag the entire row with
       # it on every blink. The colour is a placeholder: render_status overdraws these cells
       # per-role once the layout is known.
-      chips << Chip.new(:companion, Mascot.bar_label(companion), Theme.focus_gold) if companion
+      # CLICKABLE: she is the notification ring's face — her bubble is the newest note — so
+      # pressing her opens the ring, the same overlay the top bar's unread chip opens.
+      chips << Chip.new(:companion, Mascot.bar_label(companion), Theme.focus_gold, clickable: true) if companion
       chips
     end
 

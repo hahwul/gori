@@ -169,6 +169,12 @@ module Gori::Tui
 
     # Where the specular walks during a glint sweep — up the left wall and across the
     # crown. Indices into this are what Frame#glint holds; -1 is "no specular".
+    #
+    # STEP 1 IS A CORNER CELL, which is why .draw lets the specular land on role 'C' and
+    # not only on the three band roles. Gating it on H/R/S alone made step 1 paint nothing
+    # at all: the sweep lit the left wall, went dark for the 400ms of that step, then
+    # resumed across the crown — a hole in the middle of a two-second animation, and a
+    # frame change that moved one cell where every other step moves two.
     GLINT_PATH = { {0, 1}, {1, 0}, {2, 0}, {3, 0}, {4, 0} }
 
     # EVERYTHING drawn on one frame — the sprite and the speech bubble both, so Companion#tick
@@ -343,19 +349,42 @@ module Gori::Tui
       end
     end
 
-    # The one-row form, for the status bar: columns 0..6 of the middle row — the hoop's
-    # equator with the whole face still in it. Deliberately NOT a second art table; it is a
-    # slice of the same sprite, so the two placements cannot drift apart.
-    BAR_W = 7
+    # The one-row form, for the status bar: the middle row's seven cells — the hoop's
+    # equator with the whole face still in it — PLUS the mood badge. Deliberately NOT a
+    # second art table; every cell is a cell of the same sprite, so the two placements
+    # cannot drift apart.
+    #
+    # THE BADGE IS BORROWED FROM ROW 0, which is the one place the chip is not a straight
+    # slice. It sits at (7, 0) on the sprite — diagonally off the ring, the only cell the
+    # crown's taper leaves free — and dropping it left `placement: bar` with the mood
+    # carried by the palette alone: a hue shift of the same gold, which is exactly the
+    # signal a dark theme, a washed-out terminal or a colourblind reader has least of. `×`
+    # beside her is the one glyph that says "something is wrong" without asking anyone to
+    # compare two shades of yellow. It costs a column and never a reflow — an absent badge
+    # is a space, so the chip is BAR_W wide whatever her face is doing (a spec pins that
+    # across every pose and wink, because a chip that breathed here would drag every
+    # readout to its left on each blink).
+    BAR_W = 8
+
+    # What the chip shows at `col`. Column BAR_W - 1 is the badge; the rest is row 1.
+    def self.bar_glyph(frame : Frame, col : Int32) : Char
+      col == W - 1 ? (frame.badge || ' ') : glyph(frame, col, 1)
+    end
+
+    # …and its ink role, from the same two sources: the badge cell is role 'X' wherever it
+    # is drawn, which is what INK already says about it on row 0.
+    def self.bar_role(col : Int32) : Char
+      col == W - 1 ? 'X' : INK[1][col]
+    end
 
     def self.bar_label(frame : Frame) : String
-      String.build { |io| BAR_W.times { |c| io << glyph(frame, c, 1) } }
+      String.build { |io| BAR_W.times { |c| io << bar_glyph(frame, c) } }
     end
 
     def self.draw_row(screen : Screen, x : Int32, y : Int32, frame : Frame, pal : Palette) : Nil
       BAR_W.times do |col|
-        fg, bg, attr = role_style(INK[1][col], pal)
-        screen.cell(x + col, y, glyph(frame, col, 1), fg, bg, attr)
+        fg, bg, attr = role_style(bar_role(col), pal)
+        screen.cell(x + col, y, bar_glyph(frame, col), fg, bg, attr)
       end
     end
 
@@ -374,7 +403,9 @@ module Gori::Tui
           role = ink[col]
           fg, bg, attr = role_style(role, pal)
           # The specular overrides one hoop cell — polished metal turning under a light.
-          fg = pal.glint if col == gx && ry == gy && role.in?('H', 'R', 'S')
+          # 'C' is in that set because GLINT_PATH crosses a corner (see the path's note);
+          # only the hole and the plate are exempt, and neither is on the path.
+          fg = pal.glint if col == gx && ry == gy && role.in?('H', 'R', 'S', 'C')
           screen.cell(x + col, y + ry, glyph(frame, col, ry), fg, bg, attr)
         end
       end

@@ -121,6 +121,120 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # `placement: bar` paints the middle row and nothing else (Mascot.draw_row), so the
+  # badge, the glint and the shake are mute there — and a Frame that carries them anyway
+  # compares unequal on beats the CHIP is identical across, which is a full frame rebuild
+  # that forwards not one cell. Measured before the fold: 11 of the 45 changes she reported
+  # over 40 idle seconds in bar were blind, essentially all of them the glint sweep.
+  #
+  # Asserts against the PAINTED chip rather than against the folded fields, because the
+  # fields are only the current spelling of the answer — anything else that goes mute in
+  # the bar has to be caught by the same test.
+  it "reports no change the status chip cannot show, in bar placement" do
+    prev = Gori::Settings.companion_placement
+    Gori::Settings.companion_placement = "bar"
+    begin
+      with_companion(true) do
+        companion = Companion.new(Notifications.new, honors_placement: true)
+        t0 = Time.instant
+        companion.tick(t0)
+        painted = nil.as(Array({Char, Color})?)
+        blind = 0
+        (1..200).each do |i| # 40s: one whole glint window, several gesture windows
+          now = t0 + Companion::BEAT * i
+          companion.poke(now) # kept awake, as someone at the keyboard does
+          next unless companion.tick(now)
+          f = companion.frame.not_nil!
+          backend = MemoryBackend.new(Mascot::BAR_W, 1)
+          Mascot.draw_row(Screen.new(backend), 0, 0, f, Mascot.palette(f.mood, Theme.panel))
+          row = (0...Mascot::BAR_W).map { |x| {backend.row(0)[x], backend.fg_at(x, 0)} }
+          # The bubble is the one field the chip legitimately does not carry — it goes to
+          # the status row's text slot instead (Runner#status_line) — so a change that only
+          # moves the bubble is a change something on screen does show.
+          blind += 1 if row == painted && f.bubble == Companion::GREETING
+          painted = row
+        end
+        blind.should eq(0)
+      end
+    ensure
+      Gori::Settings.companion_placement = prev
+    end
+  end
+
+  # --- background work ------------------------------------------------------
+
+  # The badge cell is the only thing she owns that can say "still going" — the status
+  # row's activity chip is off screen entirely in `placement: body`, which is the default.
+  it "wears a bobbing work badge while the host reports background work" do
+    with_companion(true) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      companion.frame.not_nil!.badge.should be_nil # nothing running: no badge
+      seen = (1..8).map do |i|
+        companion.tick(t0 + Companion::BEAT * i, working: i)
+        companion.frame.not_nil!.badge
+      end
+      seen.compact.size.should eq(seen.size) # …a badge on every working beat
+      seen.uniq.size.should be > 1           # …and it moves
+      seen.each { |b| Companion::WORK.includes?(b).should be_true }
+      # It goes away with the work, rather than sticking until something else changes.
+      companion.tick(t0 + Companion::BEAT * 9)
+      companion.frame.not_nil!.badge.should be_nil
+    end
+  end
+
+  # One cell, two claims on it. A failure mid-run is exactly when the × matters most, and
+  # the work is still legible in the status row's own chip.
+  it "lets a reaction outrank the work badge" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0, working: 0)
+      notes.push(:error, "upstream refused the connection")
+      companion.tick(t0 + Companion::BEAT, working: 1)
+      companion.frame.not_nil!.badge.should eq('×')
+    end
+  end
+
+  # The doze exists so an UNATTENDED gori animates nothing. A run in flight is the one case
+  # where the corner has something to say with nobody at the keyboard — and a mascot that
+  # slept through the only work in the session would be showing a frozen dot.
+  it "does not doze off while work is running, and wakes for work that starts while she is" do
+    with_companion(true) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      # Never poked, well past SLEEP_AFTER, but work is running the whole way.
+      companion.tick(t0 + Companion::SLEEP_AFTER + 1.second, working: 1)
+      companion.frame.not_nil!.pose.should_not eq(:doze)
+
+      # …and the other direction: asleep first, then something an agent started.
+      dozed = Companion.new(Notifications.new)
+      dozed.tick(t0)
+      dozed.tick(t0 + Companion::SLEEP_AFTER)
+      dozed.frame.not_nil!.pose.should eq(:doze)
+      dozed.tick(t0 + Companion::SLEEP_AFTER + 1.second, working: 1)
+      dozed.frame.not_nil!.pose.should_not eq(:doze)
+    end
+  end
+
+  # "still" is about motion she starts herself. THAT work is running is a fact; the bob is
+  # the motion — so the badge stays and stops moving.
+  it "freezes the work badge on still" do
+    with_companion(true, "still") do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      seen = (1..8).map do |i|
+        companion.tick(t0 + Companion::BEAT * i, working: i)
+        companion.frame.not_nil!.badge
+      end
+      seen.uniq.should eq([Companion::WORK[0]])
+    end
+  end
+
   it "drops the frame once on the disable edge, then stays quiet" do
     companion = Companion.new(Notifications.new)
     with_companion(true) { companion.tick(Time.instant).should be_true }
@@ -182,6 +296,63 @@ describe Gori::Tui::Companion do
       beats(companion, t0, n)
     end
     calm.should be < lively
+  end
+
+  # The point of the mode, asserted as the number the run loop actually pays: not "she
+  # blinks less" but "she never reports a change at all". #compose is constant across every
+  # idle beat once the blink is gone, so this is the doze without the ninety-second wait —
+  # and it holds for a sweep far longer than SLEEP_AFTER, poking her the whole way so the
+  # doze is not what is being measured.
+  # Notices off isolates the axis: a bubble arriving or expiring IS a change something on
+  # screen shows, so it belongs to the speech tests, not to this one.
+  it "reports no change at all on still, however long she is awake" do
+    with_companion(true, "still", notices: false) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      changed = (1..600).count do |i| # 2 minutes of AWAKE time
+        now = t0 + Companion::BEAT * i
+        companion.poke(now)
+        companion.tick(now)
+      end
+      changed.should eq(0)
+      companion.frame.not_nil!.pose.should eq(:idle)
+    end
+  end
+
+  # "still" is about motion she starts HERSELF. A result someone is waiting on is not that,
+  # so the face still reacts — the mode would otherwise be a second, quieter spelling of
+  # Notices off, which already exists.
+  it "still reacts to a result on still, minus the movement" do
+    with_companion(true, "still") do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      notes.push(:error, "upstream refused the connection")
+      poses = (1..4).map do |i|
+        companion.tick(t0 + Companion::BEAT * i)
+        companion.frame.not_nil!
+      end
+      poses.first.pose.should eq(:error)      # the face lands …
+      poses.map(&.shake).uniq!.should eq([0]) # … and she does not flinch wearing it
+    end
+  end
+
+  # The mode was added to a predicate spelled `!= "calm"`, which is the same answer as
+  # `== "lively"` for exactly as long as there are two modes. Pinned as a property of the
+  # whole set rather than of the one new member.
+  it "counts only lively as lively" do
+    prev = Gori::Settings.companion_motion
+    begin
+      Gori::Settings::COMPANION_MOTIONS.each do |mode|
+        Gori::Settings.companion_motion = mode
+        Gori::Settings.companion_lively?.should eq(mode == "lively")
+        Gori::Settings.companion_still?.should eq(mode == "still")
+      end
+    ensure
+      Gori::Settings.companion_motion = prev
+    end
   end
 
   # --- idle gestures --------------------------------------------------------
@@ -416,10 +587,60 @@ describe Gori::Tui::Companion do
         end
         poses.first.should eq(peak)
         poses.last.should eq(settled)
-        # …and the switch is where REACT_PEAK says it is: beat 1 is the first drawn beat of
-        # the mood, so the settle starts at index REACT_PEAK - 1.
-        poses.index(settled).should eq(Companion::REACT_PEAK - 1)
+        # …and the switch is where REACT_PEAK says it is — ALL of it. #tick steps the beat
+        # clock before consuming the note, so the beat #apply_mood stamps is the beat that
+        # is about to be composed and the peak gets its full count. Consuming first (which
+        # is what this line pinned at REACT_PEAK - 1) stamped the beat BEFORE the drawn
+        # one, docking a beat off the peak and — the visible half — dropping the opening
+        # flinch of the shudder, whose whole script is three beats long.
+        poses.index(settled).should eq(Companion::REACT_PEAK)
       end
+    end
+  end
+
+  # The other end of the same bug, and the one an operator sees: a note lands mid-beat far
+  # more often than on one (the run loop polls several times per BEAT), and the beat gate
+  # skips the compose on those ticks. #tick still answered "changed" — so the run loop
+  # bought a full frame rebuild that repainted the PREVIOUS frame, and the bubble it was
+  # rebuilding FOR only appeared on the next beat. Asserts the pair: the frame the tick
+  # reports as changed is a frame that actually changed, and it already carries the note.
+  it "puts the note on the frame in the tick it lands, without a repaint that paints nothing" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      # A tick that falls INSIDE a beat, the way a 50ms run loop mostly does.
+      mid = t0 + 50.milliseconds
+      notes.push(:error, "upstream refused the connection")
+      before = companion.frame
+      companion.tick(mid).should be_true
+      companion.frame.should_not eq(before) # …and it is not the same frame redrawn
+      f = companion.frame.not_nil!
+      f.bubble.not_nil!.should contain("upstream")
+      f.mood.should eq(:alarm)
+      # Every remaining in-beat tick is silent again, which is what makes the one above a
+      # report of a change rather than a bare "something happened".
+      companion.tick(mid + 1.millisecond).should be_false
+    end
+  end
+
+  # "flinch-back-flinch", three beats. The first flinch is composed on the beat the note
+  # lands, so the frame that carries it is only ever drawn if the mood is stamped on the
+  # beat about to be composed — otherwise the sequence opens on the 0 and plays as a
+  # single twitch, which is what it did.
+  it "plays the whole shudder, opening on the flinch" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      notes.push(:error, "upstream refused the connection")
+      seen = (1..4).map do |i|
+        companion.tick(t0 + Companion::BEAT * i)
+        companion.frame.not_nil!.shake
+      end
+      seen.should eq([-1, 0, -1, 0])
     end
   end
 
@@ -550,7 +771,10 @@ describe Gori::Tui::Companion do
   # neighbour's cell and orphan-clear the one before it.
 
   it "assembles every pose x wink x badge to exactly W columns of width-1 glyphs" do
-    badges = [nil, '·', '!', '×', 'z']
+    # The mood/doze badges are literals in Companion#compose, so they are literals here
+    # too; the WORK frames are a TABLE, so they are swept from it — a new frame added
+    # there has to arrive in this sweep by existing, not by someone remembering this line.
+    badges = [nil, '·', '!', '×', 'z'] + Companion::WORK.to_a
     Mascot::POSES.each do |pose|
       Mascot::WINKS.each do |wink|
         badges.each do |badge|
@@ -618,11 +842,29 @@ describe Gori::Tui::Companion do
 
   # The bar placement is a SLICE of the body sprite, not a second art table — if these ever
   # disagree the two placements have drifted.
-  it "draws the bar chip from the body sprite's own middle row" do
+  # Every cell of the chip is a cell of the body sprite — the face from row 1, the mood
+  # badge from row 0 — so the two placements cannot drift into two art tables.
+  it "draws the bar chip from the body sprite's own cells" do
     Mascot::POSES.each do |pose|
-      frame = Mascot::Frame.new(pose: pose)
-      Mascot.bar_label(frame).should eq(Mascot.rows(frame)[1][0, Mascot::BAR_W])
+      {nil, '×', '!'}.each do |badge|
+        frame = Mascot::Frame.new(pose: pose, badge: badge)
+        rows = Mascot.rows(frame)
+        chip = Mascot.bar_label(frame)
+        chip[0, Mascot::W - 1].should eq(rows[1][0, Mascot::W - 1]) # the equator, verbatim
+        chip[Mascot::W - 1].should eq(rows[0][Mascot::W - 1])       # …and the badge cell
+      end
     end
+  end
+
+  # The chip is where a `placement: bar` reader learns her mood, and leaving that to a hue
+  # shift of one gold is the signal a washed-out terminal or a colourblind reader has least
+  # of. Sweeps the mood ladder end to end rather than pinning one glyph: what matters is
+  # that a reaction is legible in the chip AT ALL.
+  it "carries the mood badge into the bar chip" do
+    seen = [:info, :happy, :warn, :alarm].map do |mood|
+      Mascot.bar_label(Mascot::Frame.new(mood: mood, badge: mood == :info ? nil : 'x'))[Mascot::W - 1]
+    end
+    seen.uniq.size.should be > 1 # …a reaction is not the same chip as rest
   end
 
   # The chip run is ordered so the fixed-width clock anchors the right edge; a chip that
@@ -637,9 +879,58 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # The bar placement's half of the same affordance. Asserted against the cells
+  # render_status actually painted her chip into — the hit test and the render read one
+  # ordered chip run precisely so this can be checked end to end.
+  it "answers a press on the bar chip, over the cells the status row painted it in" do
+    rect = Rect.new(0, 23, 80, 1)
+    backend = MemoryBackend.new(80, 24)
+    frame = Mascot::Frame.new(badge: '!')
+    Chrome.render_status(Screen.new(backend), rect, focus: "BODY", hints: "hints here",
+      resource: "CPU 1%", time: "01:23 PM", companion: frame)
+    row = backend.row(rect.y)
+    # Her chip is the run ending at the hoop's right wall — find it on the grid.
+    right = row.rindex(Mascot::WALL_R).not_nil!
+    left = row.rindex(Mascot::WALL_L, right).not_nil!
+    left.should eq(right - (Mascot::W - 2)) # the equator, where draw_row put it
+    row[right + 1].should eq('!')           # …and the borrowed badge cell beside it
+
+    args = {focus: "BODY", resource: "CPU 1%", time: "01:23 PM", companion: frame}
+    Chrome.status_bar_chip_at(rect, left, rect.y, **args).should eq(:companion)
+    Chrome.status_bar_chip_at(rect, right + 1, rect.y, **args).should eq(:companion)
+    # The clock to her left is not her, and neither is the edge past her.
+    Chrome.status_bar_chip_at(rect, left - 2, rect.y, **args).should_not eq(:companion)
+    Chrome.status_bar_chip_at(rect, right + 2, rect.y, **args).should be_nil
+  end
+
   it "keeps the ink layer the same shape as the art" do
     Mascot::INK.size.should eq(Mascot::H)
     Mascot::INK.each(&.size.should eq(Mascot::W))
+  end
+
+  # A step of the sweep that lands on a cell .draw refuses to tint is a step that paints
+  # NOTHING: the specular blinked out for the 400ms of it and the sweep read as stuttering,
+  # while the frame still compared unequal and cost a repaint. It happened because
+  # GLINT_PATH step 1 is the crown's left corner — role 'C', which the tint gate did not
+  # list — so the path and the gate have to be checked against each other rather than
+  # either one alone.
+  it "moves the specular to a different cell on every step of the sweep" do
+    pal = Mascot.palette(:info, Theme.bg)
+    lit = (0...Mascot::GLINT_PATH.size).map do |i|
+      backend = MemoryBackend.new(Mascot::W, Mascot::H)
+      Mascot.draw(Screen.new(backend), 0, 0, Mascot::Frame.new(glint: i), pal)
+      cells = [] of {Int32, Int32}
+      Mascot::H.times do |ry|
+        Mascot::W.times { |col| cells << {col, ry} if backend.fg_at(col, ry) == pal.glint }
+      end
+      cells
+    end
+    # Exactly one cell carries the specular on each step …
+    lit.each(&.size.should eq(1))
+    # … it is the one the path names …
+    lit.each_with_index { |cells, i| cells.first.should eq(Mascot::GLINT_PATH[i]) }
+    # … and no step repeats another, so the sweep is a walk and not a flicker.
+    lit.map(&.first).uniq!.size.should eq(Mascot::GLINT_PATH.size)
   end
 
   # She is a MISS, so she has lashes — on every pose, whichever way they lean. The brows
@@ -799,13 +1090,75 @@ describe Gori::Tui::Companion do
     it "never claims a continuation cell" do
       backend = MemoryBackend.new(80, 24)
       screen = Screen.new(backend)
+      badges = ['!'] + Companion::WORK.to_a
       Mascot::POSES.each do |pose|
-        Companion.draw(screen, body, Mascot::Frame.new(pose: pose, badge: '!'))
+        badges.each { |b| Companion.draw(screen, body, Mascot::Frame.new(pose: pose, badge: b)) }
       end
       rect = Companion.place(body).not_nil!
       (Mascot::H).times do |i|
         (0...80).each { |x| backend.cont_grid[rect.y + i][x].should be_false }
       end
+    end
+
+    # She paints ABOVE the tab body, so a press on her has to be answered before the body
+    # tier — and the box that answers it has to be the box that was painted, plate strips
+    # included, or the click either misses her edge or steals a cell she never drew on.
+    #
+    # Driven off the PAINTED grid rather than off the same arithmetic the hit rect uses:
+    # restating .place here would agree with a wrong answer as readily as a right one.
+    it "offers a click target over exactly the cells she paints" do
+      backend = MemoryBackend.new(80, 24)
+      Companion.draw(Screen.new(backend), body, Mascot::Frame.new(badge: '!'))
+      box = Companion.hit_rect(body).not_nil!
+      painted = [] of {Int32, Int32}
+      (body.y...body.bottom).each do |y|
+        row = backend.row(y)
+        (body.x...body.right).each { |x| painted << {x, y} if row[x] != ' ' }
+      end
+      painted.should_not be_empty
+      painted.each { |(x, y)| box.contains?(x, y).should be_true } # nothing drawn is unclickable
+      # …and nothing clickable is undrawn: the box is her plate, which .draw fills opaquely,
+      # so every cell of it is hers even where the glyph happens to be a space.
+      box.h.should eq(Mascot::H)
+      box.w.should eq(Mascot::W + 2)
+      # Her plate's own columns, from the drawing code's answer rather than from GUTTER.
+      rect = Companion.place(body).not_nil!
+      box.x.should eq(rect.x - 1)
+      box.right.should eq(rect.right + 1)
+      box.right.should be <= body.right # and never off the body's edge
+    end
+
+    # .draw paints TWO things, and the bubble is the wider of them, the one carrying text,
+    # and therefore the one a reader reaches for. A hit test that knew only about the
+    # sprite sent that press through to the tab underneath — a click that visibly lands on
+    # a speech bubble and selects the flow row behind it.
+    #
+    # Same shape as the sprite's: sweep the painted grid, not the arithmetic.
+    it "answers a press on her speech bubble too, and on nothing she did not paint" do
+      backend = MemoryBackend.new(80, 24)
+      frame = Mascot::Frame.new(badge: '!', bubble: "fuzzer: 3 hits on id")
+      Companion.draw(Screen.new(backend), body, frame)
+      painted = 0
+      (body.y...body.bottom).each do |y|
+        row = backend.row(y)
+        (body.x...body.right).each do |x|
+          next if row[x] == ' '
+          painted += 1
+          Companion.hit?(body, frame, x, y).should be_true
+        end
+      end
+      painted.should be > Mascot::W # the bubble is on the grid, not just the sprite
+
+      # …and the body keeps what she never touched: the cells LEFT of her on the sprite's
+      # own rows, which a union of the two boxes would have claimed (the bubble is
+      # right-aligned to her plate and sits above it).
+      rect = Companion.place(body).not_nil!
+      box = Companion.bubble_box(body, rect, frame.bubble.not_nil!).not_nil!
+      box.x.should be < rect.x - 1 # the union would have been strictly wider here
+      Companion.hit?(body, frame, box.x, rect.y).should be_false
+      # A frame with nothing to say gives the bubble's rows straight back.
+      Companion.hit?(body, Mascot::Frame.new, box.x + 2, box.y + 1).should be_false
+      Companion.hit?(body, frame, box.x + 2, box.y + 1).should be_true
     end
 
     # The bubble used to stop growing at 34 columns, so a notice was cut with an '…' on an
