@@ -989,10 +989,10 @@ end
 # inert for it, and only Sandbox/excludes (Layer 2, inside `Repeater::Sender`) could stop gori
 # replaying a captured request, cookies included, to an out-of-scope host the very same
 # invocation would have refused as a `--target`. Same gap and same fix as #406 gave
-# `gori run repeater`. `bind_from_scope_triple` is what `guard_outbound` is handed.
+# `gori run repeater`. `bind_from_scope_parts` is what `guard_outbound` is handed.
 module Gori::CLI::Run
-  def self.bind_from_scope_triple_for_spec(built : Gori::Repeater::FlowRequest::Built)
-    bind_from_scope_triple(built)
+  def self.bind_from_scope_parts_for_spec(built : Gori::Repeater::FlowRequest::Built)
+    bind_from_scope_parts(built)
   end
 end
 
@@ -1004,12 +1004,12 @@ end
 describe "gori run --bind-from — Layer-1 scope gate on the SEED's host" do
   it "judges the seed's own scheme/host/target, recovering the target from the raw bytes" do
     built = seed_built("GET /admin?q=1 HTTP/1.1\r\nHost: seed.test\r\n\r\n", "http://seed.test/admin?q=1")
-    Gori::CLI::Run.bind_from_scope_triple_for_spec(built).should eq({"http", "seed.test", "/admin?q=1"})
+    Gori::CLI::Run.bind_from_scope_parts_for_spec(built).should eq({"http", "seed.test", "/admin?q=1", 80})
     # An irregular request line must not degrade the gate to an empty path (the shape
     # `Outbound.request_target` exists for) — the seed's bytes are a CAPTURE, so gori did not
     # author them and cannot assume they are well-formed.
     doubled = seed_built("GET  /admin HTTP/1.1\r\nHost: seed.test\r\n\r\n", "http://seed.test/admin")
-    Gori::CLI::Run.bind_from_scope_triple_for_spec(doubled).should eq({"http", "seed.test", "/admin"})
+    Gori::CLI::Run.bind_from_scope_parts_for_spec(doubled).should eq({"http", "seed.test", "/admin", 80})
   end
 
   it "refuses an out-of-scope seed under a configured scope, and honours --allow-unscoped" do
@@ -1019,17 +1019,17 @@ describe "gori run --bind-from — Layer-1 scope gate on the SEED's host" do
       scope = Gori::Scope.load(store)
       scope.add("include", "host", "in.test") # seed.test is NOT in scope
       built = seed_built("GET /login HTTP/1.1\r\nHost: seed.test\r\n\r\n", "http://seed.test/login")
-      s, h, t = Gori::CLI::Run.bind_from_scope_triple_for_spec(built)
+      s, h, t, pt = Gori::CLI::Run.bind_from_scope_parts_for_spec(built)
 
       # Layer 1 (Gate::Configured) refuses the replay — this is what `guard_outbound` aborts on.
-      Gori::Outbound.cli(scope, false).check_request(s, h, t).blocked?.should be_true
+      Gori::Outbound.cli(scope, false).check_request(s, h, t, pt).blocked?.should be_true
       # ...and the operator waiver lets it through, exactly as it does for the sweep's target.
-      Gori::Outbound.cli(scope, true).check_request(s, h, t).blocked?.should be_false
+      Gori::Outbound.cli(scope, true).check_request(s, h, t, pt).blocked?.should be_false
 
       # An in-scope seed is never refused.
       ok = seed_built("GET /login HTTP/1.1\r\nHost: in.test\r\n\r\n", "http://in.test/login")
-      os, oh, ot = Gori::CLI::Run.bind_from_scope_triple_for_spec(ok)
-      Gori::Outbound.cli(scope, false).check_request(os, oh, ot).blocked?.should be_false
+      os, oh, ot, op = Gori::CLI::Run.bind_from_scope_parts_for_spec(ok)
+      Gori::Outbound.cli(scope, false).check_request(os, oh, ot, op).blocked?.should be_false
     ensure
       store.close
       File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")

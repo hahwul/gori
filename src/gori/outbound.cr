@@ -215,8 +215,13 @@ module Gori
     # ── layer 1: the up-front decision ───────────────────────────────────────────
 
     # The scope verdict for one target URL. Made ONCE, before anything is sent.
-    def check(url : String, host : String) : Verdict
-      decision, rule_id, excluded = evaluate(url, host)
+    #
+    # `url` is the ALLOWLIST spelling — port-free, the one every url-level include was written
+    # for. `port_url` is the same url WITH its port and is read by the EXCLUDE side only; pass
+    # nil (the default) when the caller holds a bare URL string and has no port to add. See
+    # `Outbound.exclude_url` for why the two sides differ.
+    def check(url : String, host : String, port_url : String? = nil) : Verdict
+      decision, rule_id, excluded = evaluate(url, host, port_url)
       blocked = case @gate
                 in Gate::Waived     then false
                 in Gate::Allowlist  then decision != IN_SCOPE
@@ -230,9 +235,12 @@ module Gori
       !check(url, host).blocked?
     end
 
-    # `check` against a request's scheme/host/target parts.
-    def check_request(scheme : String, host : String, target : String) : Verdict
-      check(Outbound.scope_url(scheme, host, target), host)
+    # `check` against a request's scheme/host/target parts. `port` is REQUIRED so a new caller
+    # cannot silently drop the EXCLUDE side's port again (#884) — pass the port the sender will
+    # actually DIAL, which is the same anchor `scope_url` uses for the host.
+    def check_request(scheme : String, host : String, target : String, port : Int32) : Verdict
+      check(Outbound.scope_url(scheme, host, target), host,
+        Outbound.exclude_url(scheme, host, target, port))
     end
 
     # Whether Layer 1 is enforced at all — for the log/audit line that records how a send
@@ -252,7 +260,7 @@ module Gori
     # minimize, Probe active), or nil to proceed. Sandbox mode AND explicit EXCLUDE rules
     # both stop it: a sweep's blast radius is wide enough that an operator's carve-out has
     # to hold, even under --allow-unscoped.
-    def sweep_block(scheme : String, host : String, target : String) : String?
+    def sweep_block(scheme : String, host : String, target : String, port : Int32) : String?
       refresh
       s = @scope
       return nil unless s
@@ -262,7 +270,15 @@ module Gori
       # sandbox on, an exclude match trips BOTH. Reporting sandbox there would tell an
       # operator who already has a matching include rule to "add a scope include rule",
       # which is advice that cannot work. Naming the exclude names the rule they can delete.
+      #
+      # Asked TWICE, and only the second call carries the port: an exclude naming `:8443` used
+      # to hold on the proxy and not here, so a sweep kept hammering a port the operator had
+      # carved out (#884). The allowlist below stays on the port-free url — see
+      # `Outbound.exclude_url`.
       return EXCLUDE_SWEEP_ERROR if s.excluded?(url, host)
+      if pu = Outbound.exclude_url(scheme, host, target, port)
+        return EXCLUDE_SWEEP_ERROR if s.excluded?(pu, host)
+      end
       s.sandbox_blocks?(url, host) ? SANDBOX_SWEEP_ERROR : nil
     end
 
@@ -270,11 +286,19 @@ module Gori
     # ALONE stops it — an EXCLUDE rule deliberately does not, mirroring the proxy path
     # (`Interceptor#sandbox_blocks?`): excludes are a lens/automation carve-out, not a
     # "never touch this again" order, and a human replaying one request has already decided.
-    def send_block(scheme : String, host : String, target : String) : String?
+    def send_block(scheme : String, host : String, target : String, port : Int32) : String?
       refresh
       s = @scope
       return nil unless s
-      s.sandbox_blocks?(Outbound.scope_url(scheme, host, target), host) ? SANDBOX_ERROR : nil
+      return SANDBOX_ERROR if s.sandbox_blocks?(Outbound.scope_url(scheme, host, target), host)
+      # The port-bearing half of the SAME sandbox decision, gated on `sandbox?` so an exclude
+      # still does not stop a hand-authored send on its own — `sandbox_blocks?` is
+      # `sandbox && !allowlisted?`, and `allowlisted?` already folds in the excludes it can
+      # see. This adds only the ones it could not: the rules that name a port (#884).
+      # Mirrors `Interceptor#sandbox_blocks?`, which splits the same way on the proxy path.
+      return nil unless s.sandbox?
+      pu = Outbound.exclude_url(scheme, host, target, port)
+      pu && s.excluded?(pu, host) ? SANDBOX_ERROR : nil
     end
 
     # ── lifetime ─────────────────────────────────────────────────────────────────
@@ -335,8 +359,9 @@ module Gori
     #
     # This was previously only done on MCP's `send_request` (`request_scope_url`); the sweep
     # and Repeater paths passed the raw target through, so hoisting it here is what makes the
-    # rule identical on all three surfaces. Port is omitted to match `Scope.request_url`'s
-    # origin-form convention (the scope lens keys on host, not port).
+    # rule identical on all three surfaces. `port` is omitted by DEFAULT and that is the
+    # ALLOWLIST spelling, unchanged — see `exclude_url` below for the one caller that passes it
+    # and why only the exclude side does.
     # Reduced with `Url.origin_path`, the LEXICAL split, rather than `URI.parse` — which
     # raises on exactly the targets a security tool is most likely to be handed. A
     # non-numeric or oversized port (`http://acme.test:abc/admin`, `:99999999999999999999`)
@@ -351,9 +376,25 @@ module Gori
     # the ACTIVE tools to be the lenient one. `origin_path` cannot raise, so it does not
     # degrade at all: it keeps path+query verbatim, fragment included — one more thing for
     # an exclude to match, never one fewer.
-    def self.scope_url(scheme : String, host : String, target : String) : String
+    def self.scope_url(scheme : String, host : String, target : String, port : Int32? = nil) : String
       target = Url.origin_path(target) if Store::FlowRow.absolute_form?(target)
-      Scope.request_url(scheme, host, target)
+      Gori::Url.request_url(scheme, host, target, port)
+    end
+
+    # The EXCLUDE spelling of `scope_url` — the same url WITH its port — or nil when there is
+    # no distinct one to ask about, which is every default-port target (#884).
+    #
+    # Two spellings and not one, for the reason `QL::URL_EXPR_NO_PORT` spells out: an INCLUDE
+    # is an allowlist entry and has never named a port (a `host` rule matches every port by
+    # construction), so giving it one would put every origin on :8443 outside a rule that names
+    # the host and path — Layer 1 would then refuse a target the operator scoped in. An EXCLUDE
+    # is the carve-out, it has nothing to lose by carrying the port, and widening it only ever
+    # refuses more. Before this the port reached NEITHER side here, so `exclude string ":8443"`
+    # was a rule the active tools could not act on at all.
+    def self.exclude_url(scheme : String, host : String, target : String, port : Int32?) : String?
+      return nil unless port
+      return nil if port == (scheme == "https" ? 443 : 80)
+      scope_url(scheme, host, target, port)
     end
 
     # ── internals ────────────────────────────────────────────────────────────────
@@ -361,9 +402,12 @@ module Gori
     # The scope's own reading of a URL, independent of the Gate: the allowlist test Probe
     # Active and the Sandbox gate share (≥1 INCLUDE matches, no EXCLUDE), plus the matched
     # include's rule id for the audit trail.
-    private def evaluate(url : String, host : String) : {String, Int64?, Bool}
+    private def evaluate(url : String, host : String, port_url : String?) : {String, Int64?, Bool}
       s = @scope
       return {UNSCOPED, nil, false} unless s && s.configured?
+      # The port-bearing EXCLUDE spelling, asked FIRST and only when there is a distinct one,
+      # so a default-port target pays nothing and the common path is the one it always was.
+      return {OUT_OF_SCOPE, nil, true} if port_url && s.excluded?(port_url, host)
       # `matches_url?` folds "no include matched" and "an EXCLUDE matched" into one false.
       # They need opposite remedies, so ask the exclude question separately rather than
       # letting the caller guess from a single out_of_scope.

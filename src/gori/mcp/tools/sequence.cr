@@ -36,7 +36,7 @@ module Gori
         # Gate on the plan's real request-target, not a bare `/`. A path-scoped include
         # (string/regex on `/api/...`) used to refuse an in-scope run that `gori run sequence`
         # accepted, because Layer 1 was asked about `https://host/` instead of the template.
-        sc = ob.check_request(origin.scheme, origin.host, plan.request_target)
+        sc = ob.check_request(origin.scheme, origin.host, plan.request_target, origin.port)
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "sq_#{@job_seq}"

@@ -659,8 +659,8 @@ module Gori
       # Sandbox mode + explicit exclude rules are still enforced per-request by
       # `Fuzz::Sender`/`Repeater::Sender` regardless of --allow-unscoped.
       private def self.guard_outbound(outbound : Gori::Outbound, scheme : String, host : String,
-                                      target : String, cmd : String) : Nil
-        verdict = outbound.check_request(scheme, host, target)
+                                      target : String, port : Int32, cmd : String) : Nil
+        verdict = outbound.check_request(scheme, host, target, port)
         return unless verdict.blocked?
         outbound.close
         abort "#{cmd}: #{host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
@@ -810,9 +810,9 @@ module Gori
       # `repeater_out_of_scope?` is for `gori run repeater`. The target comes from
       # `Outbound.request_target` — the one home for reading a request-target off raw bytes,
       # which recovers it from an irregular request line instead of gating an empty path.
-      private def self.bind_from_scope_triple(built : Repeater::FlowRequest::Built) : {String, String, String}
-        scheme, host, _port = Repeater::FlowRequest.parse_target(built.target)
-        {scheme, host, Gori::Outbound.request_target(built.bytes)}
+      private def self.bind_from_scope_parts(built : Repeater::FlowRequest::Built) : {String, String, String, Int32}
+        scheme, host, port = Repeater::FlowRequest.parse_target(built.target)
+        {scheme, host, Gori::Outbound.request_target(built.bytes), port}
       end
 
       # WHY a `--bind-from` seed replay may not go out, or nil to proceed — Layer 2, judged on
@@ -829,11 +829,15 @@ module Gori
       # `sequence`, which share this helper) replayed the FULL captured request — cookies and
       # Authorization included — to a host the operator had explicitly carved out.
       #
-      # Named rather than inlined for the same reason `bind_from_scope_triple` is: the decision
+      # Named rather than inlined for the same reason `bind_from_scope_parts` is: the decision
       # is spec-able without a live send.
+      #
+      # `port` is the seed's OWN dial port, not the sweep's — `bind_from_scope_parts` reads it
+      # off the capture's target for the same reason the host comes from there. It reaches the
+      # EXCLUDE side, so a carve-out that names a port stops the seed replay too (#884).
       private def self.bind_from_seed_block(outbound : Gori::Outbound, scheme : String,
-                                            host : String, target : String) : String?
-        outbound.sweep_block(scheme, host, target)
+                                            host : String, target : String, port : Int32) : String?
+        outbound.sweep_block(scheme, host, target, port)
       end
 
       # Replay flow `flow_id` through `Repeater::Sender` — the one extraction source — so its
@@ -870,11 +874,11 @@ module Gori
         # active request leaves gori without a scope decision; a replay is an active request.
         # `--allow-unscoped` still waives it, exactly as it does for the sweep.
         # Same gap, same shape, and the same fix as #406 gave `gori run repeater`.
-        gs, gh, gt = bind_from_scope_triple(built)
-        guard_outbound(outbound, gs, gh, gt, "#{cmd}: --bind-from")
+        gs, gh, gt, gp = bind_from_scope_parts(built)
+        guard_outbound(outbound, gs, gh, gt, gp, "#{cmd}: --bind-from")
         # Layer 2, BEFORE the send rather than leaving it to `Repeater::Sender` — see
         # `bind_from_seed_block` for the exclude this closes.
-        if err = bind_from_seed_block(outbound, gs, gh, gt)
+        if err = bind_from_seed_block(outbound, gs, gh, gt, gp)
           outbound.close
           abort "#{cmd}: --bind-from: #{err}"
         end

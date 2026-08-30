@@ -13,7 +13,8 @@ module Gori
       private def mine_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         engine, origin, total = build_mine_job(h, ob)
-        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
+        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
+          Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "mn_#{@job_seq}"

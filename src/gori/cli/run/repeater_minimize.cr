@@ -315,12 +315,12 @@ module Gori
         target = Gori::Outbound.request_target(text)
         # Layer 1 (include list): the configured project scope, waivable with --allow-unscoped —
         # mirrors fuzz/mine/sequence and MCP minimize's scope_refusal (#406).
-        verdict = outbound.check_request(scheme, host, target)
+        verdict = outbound.check_request(scheme, host, target, port)
         if verdict.blocked?
           abort "gori run repeater minimize: #{host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
         end
         # Layer 2 (Sandbox / exclude): applies even under --allow-unscoped.
-        if reason = outbound.send_block(scheme, host, target)
+        if reason = outbound.send_block(scheme, host, target, port)
           abort "gori run repeater minimize: #{reason}"
         end
         {scheme, host, port}

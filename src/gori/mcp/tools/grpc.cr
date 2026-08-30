@@ -41,7 +41,7 @@ module Gori
         end
         # The in-scope verdict that rides on the result, for the audit trail.
         sc = ob.check_request(parts.scheme, parts.host,
-          Gori::Protobuf::Reflection.path(Gori::Protobuf::Reflection::SERVICE_V1))
+          Gori::Protobuf::Reflection.path(Gori::Protobuf::Reflection::SERVICE_V1), parts.port)
         outcome = client.fetch
 
         if outcome.refused?

@@ -602,7 +602,7 @@ module Gori
         # permissive when the ⇧S display lens is off. AGGRESSIVE never widens this.
         # Gate on the port-less scope URL (check_request), not FlowRow#url — a non-default
         # port in the latter made string/regex includes miss every active probe on that origin.
-        return if @outbound.check_request(row.scheme, row.host, row.target).blocked?
+        return if @outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
         opts = active_opts
         Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless Probe.rule_disabled?(rule.info.id, @disabled) }
       rescue Channel::ClosedError

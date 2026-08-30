@@ -19,7 +19,8 @@ module Gori
         engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset = build_fuzz_job(h, ob)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
-        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host)
+        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
+          Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
         return scope_blocked(sc) if sc.blocked?
         if total && total > FUZZ_MAX_REQUESTS
           return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")

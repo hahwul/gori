@@ -86,13 +86,13 @@ module Gori
       # a reference to resolve — it is a byte the origin saw. The scope gate runs either way,
       # on the bytes that will actually go out.
       def refusal(bytes : Bytes) : String?
-        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(bytes)) if @evidence
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(bytes)))
+        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(bytes), @port) if @evidence
+        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(bytes)), @port)
       end
 
       def refusal(text : String) : String?
-        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(text)) if @evidence
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(text)))
+        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(text), @port) if @evidence
+        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(text)), @port)
       end
 
       # The first refusal across a whole send-group, or nil when every request may proceed.

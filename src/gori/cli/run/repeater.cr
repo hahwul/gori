@@ -453,7 +453,7 @@ module Gori
       # by adding an include rule).
       private def self.repeater_scope_verdict(outbound : Gori::Outbound, plan : Repeater::Plan) : Gori::Outbound::Verdict
         target = (bytes = plan.requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
-        outbound.check_request(plan.scheme, plan.host, target)
+        outbound.check_request(plan.scheme, plan.host, target, plan.port)
       end
 
       private def self.repeater_out_of_scope?(outbound : Gori::Outbound, plan : Repeater::Plan) : Bool

@@ -123,7 +123,7 @@ module Gori
           outbound.close
           abort "gori run mine: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
         end
-        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run mine")
+        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run mine")
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
           # invocation, so `--bind-from` replays one here. An unseeded `$NAME` ships literally

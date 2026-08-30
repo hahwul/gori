@@ -355,7 +355,7 @@ module Gori
           outbound.close
           abort "gori run fuzz: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
         end
-        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, "gori run fuzz")
+        guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run fuzz")
         # THE SIZE REFUSAL, and it has to be HERE — before the two things below that put real
         # requests on the wire. It used to be the first line of `run_fuzz_stream`, i.e. after
         # `--ac`'s CALIBRATION_SAMPLES synthetic sends and after `--bind-from`'s replay: a

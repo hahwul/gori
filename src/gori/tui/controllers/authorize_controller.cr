@@ -387,7 +387,7 @@ module Gori::Tui
       # Passive follows the browser, and a browser session reaches a great deal that is not the
       # engagement.
       if Outbound.allowlist(@host.session.scope)
-           .check_request(detail.row.scheme, detail.row.host, detail.row.target).blocked?
+           .check_request(detail.row.scheme, detail.row.host, detail.row.target, detail.row.port).blocked?
         @passive_skips[:out_of_scope] += 1
         host = detail.row.host
         if @passive_unscoped.size < UNSCOPED_REPORT_CAP && @passive_unscoped.add?(host)

@@ -246,7 +246,7 @@ module Gori
       # carry the unbound-binding rule too; that rule is gone (see `Env.unbound`), so every
       # refusal reaching here is a Sandbox one again.
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
-        sc = ob.check(request_scope_url(plan), plan.host)
+        sc = ob.check(request_scope_url(plan), plan.host, request_exclude_url(plan))
         return scope_blocked(sc) if sc.blocked?
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -913,7 +913,7 @@ module Gori
         # Anchor on the same scheme://host/TARGET url send_request uses (Outbound.scope_url).
         # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
         # WS repeater it was written to allow, while the identical send_request passed.
-        sc = ob.check(request_scope_url(plan), host)
+        sc = ob.check(request_scope_url(plan), host, request_exclude_url(plan))
         return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
@@ -1309,6 +1309,12 @@ module Gori
       # and Repeater paths get the same absolute-form handling this used to have alone.
       private def request_scope_url(plan : Repeater::Plan) : String
         Outbound.scope_url(plan.scheme, plan.host, request_target(plan.bytes))
+      end
+
+      # The same url WITH the plan's dial port, which the EXCLUDE side reads, or nil on a
+      # default port where there is no second spelling to ask about (#884).
+      private def request_exclude_url(plan : Repeater::Plan) : String?
+        Outbound.exclude_url(plan.scheme, plan.host, request_target(plan.bytes), plan.port)
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.

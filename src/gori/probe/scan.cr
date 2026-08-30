@@ -368,7 +368,7 @@ module Gori
       # Layer 1 on the same URL shape every other gate builds (port omitted). ONE home so
       # scan_flows / scan_repeaters cannot drift apart again.
       private def allows_row?(outbound : Outbound, row : Store::FlowRow) : Bool
-        !outbound.check_request(row.scheme, row.host, row.target).blocked?
+        !outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
       end
     end
   end

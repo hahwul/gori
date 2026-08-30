@@ -374,7 +374,7 @@ module Gori::Fuzz
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
       # hops — one accounting path, not two.
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes))
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes), @origin.port)
         @blocked += 1
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
@@ -416,7 +416,7 @@ module Gori::Fuzz
       # header lines for a header-only overlay to write. `Repeater::Sender#send_ws` draws the
       # line in the same place and for the same reason.
       wire = Gori::Env.overlay_slot(wire) if @slot_overlay
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire))
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
         @blocked += 1
         @blocked_reason ||= err
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
@@ -528,7 +528,7 @@ module Gori::Fuzz
       # scope decision is identical to the lone-send path (BEFORE the socket, per `ClientConn`).
       requests.each do |req|
         target = Gori::Outbound.request_target(@evidence ? req : Gori::Env.expand_bindings(req))
-        if err = @outbound.sweep_block(@origin.scheme, @origin.host, target)
+        if err = @outbound.sweep_block(@origin.scheme, @origin.host, target, @origin.port)
           @blocked += requests.size
           @blocked_reason ||= err
           return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
@@ -561,7 +561,7 @@ module Gori::Fuzz
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       return super if expanded.size < 2
 
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(expanded))
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(expanded), @origin.port)
         @blocked += jobs.size
         @blocked_reason ||= err
         return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
@@ -583,7 +583,7 @@ module Gori::Fuzz
       # code there and a block whose type has to be INFERRED cannot be typed inside it. The
       # explicit element type gives the compiler the answer without one.
       if w = warmup
-        if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(w))
+        if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(w), @origin.port)
           @blocked += jobs.size
           @blocked_reason ||= err
           return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
@@ -818,7 +818,7 @@ module Gori::Fuzz
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes))
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes), o.port)
         @blocked += 1
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
@@ -832,7 +832,7 @@ module Gori::Fuzz
     def send_ws(handshake : Bytes, frames : Array(WsFrame),
                 verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
       o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake))
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake), o.port)
         @blocked += 1
         @blocked_reason ||= err
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}

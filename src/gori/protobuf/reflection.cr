@@ -248,7 +248,7 @@ module Gori::Protobuf
         end
         # Layer 2, over BOTH paths for the reason `blocked_verdict` states.
         Reflection.scope_paths.each do |target_path|
-          if reason = @outbound.send_block(@scheme, @host, target_path)
+          if reason = @outbound.send_block(@scheme, @host, target_path, @port)
             return reason
           end
         end
@@ -266,7 +266,7 @@ module Gori::Protobuf
       # Fail-closed — the stricter of the two answers wins.
       def blocked_verdict : Gori::Outbound::Verdict?
         Reflection.scope_paths.each do |target_path|
-          verdict = @outbound.check_request(@scheme, @host, target_path)
+          verdict = @outbound.check_request(@scheme, @host, target_path, @port)
           return verdict if verdict.blocked?
         end
         nil

@@ -471,7 +471,7 @@ module Gori::Authorize
         # argument: `Outbound.cli` leaves an unconfigured project permissive, `Outbound.agent`
         # refuses it, and the TUI's passive path picks the strictest `Outbound.allowlist` of
         # its own accord.
-        if outbound.check_request(row.scheme, row.host, row.target).blocked?
+        if outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
           skipped << Skipped.new(row.id, row.method, row.url, :out_of_scope)
           next
         end

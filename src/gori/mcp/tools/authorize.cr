@@ -528,7 +528,7 @@ module Gori
       private def authorize_scope_blocked(skipped : Array(Authorize::Skipped), ob : Outbound) : Result
         first = skipped.first
         detail = store.get_flow(first.flow_id)
-        sc = detail ? ob.check_request(detail.row.scheme, detail.row.host, detail.row.target) : nil
+        sc = detail ? ob.check_request(detail.row.scheme, detail.row.host, detail.row.target, detail.row.port) : nil
         hosts = skipped.compact_map { |s| URI.parse(s.url).host rescue nil }.uniq!
         reason = if sc.nil?
                    "every selected flow is outside the project's configured scope"

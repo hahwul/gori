@@ -339,7 +339,7 @@ describe Gori::Protobuf::Reflection do
             scheme: "http", host: "127.0.0.1", port: origin.port, verify: false)
           # The v1 path alone WOULD pass this rule…
           Gori::Outbound.agent(scope, false)
-            .check_request("http", "127.0.0.1", Reflection.path(Reflection::SERVICE_V1))
+            .check_request("http", "127.0.0.1", Reflection.path(Reflection::SERVICE_V1), origin.port)
             .blocked?.should be_false
           # …but the fetch is still refused, because the v1alpha path is not covered.
           client.refusal.should_not be_nil
