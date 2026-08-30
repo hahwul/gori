@@ -562,6 +562,36 @@ describe Gori::Scope do
     end
   end
 
+  # #884. The live gate and the History lens are promised to be the same rule, and the port is
+  # where they both used to lose the TLS half: a CONNECT-tunnelled flow is stored origin-form,
+  # so URL_EXPR rebuilt a port-FREE url and a `:19316` rule matched only the plaintext row.
+  it "SQL filter matches a port rule on the origin-form (tunnelled) capture too" do
+    with_store do |store|
+      # same origin, same port, the two wire shapes gori captures
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 19316, method: "GET",
+        target: "http://127.0.0.1:19316/x", http_version: "HTTP/1.1",
+        head: "GET http://127.0.0.1:19316/x HTTP/1.1\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "https", host: "127.0.0.1", port: 19316, method: "GET",
+        target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "127.0.0.1")
+      scope.add("exclude", "string", ":19316")
+      scope.enable
+
+      store.search(scope.filter, 50).should be_empty
+
+      # ...and the live gate agrees with the lens, which is the whole promise of one rule.
+      scope.excluded?(Gori::Url.request_url("https", "127.0.0.1", "/x", 19316), "127.0.0.1")
+        .should be_true
+    end
+  end
+
   it "SQL filter recognises an UPPERCASE-scheme absolute-form target as absolute-form too" do
     with_store do |store|
       # RFC 3986 §3.1: URI schemes are case-insensitive. A case-SENSITIVE absolute-form

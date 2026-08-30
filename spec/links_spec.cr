@@ -79,7 +79,7 @@ describe Gori::Links do
     # — which carries no authority of its own — takes the host prefix every other non-absolute
     # target takes.
     #
-    # The two answers differ on exactly this target and that is the point: `label` is
+    # The two answers differ on exactly this target and that is the point (#884): `label` is
     # `host + target` juxtaposed, the raw reading `Url.location` promises, while `url` has to be
     # a URL — and `http://a.testhttpbin.org/x` was not one, it silently named the DIFFERENT host
     # `a.testhttpbin.org`. `FlowRow#url` now puts a `/` between the authority and any target

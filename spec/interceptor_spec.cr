@@ -282,8 +282,8 @@ describe "Gori::Interceptor direction + condition gates" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle # enable (default Both)
-      req_ok = -> { ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http") }
-      res_ok = -> { ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200) }
+      req_ok = -> { ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80) }
+      res_ok = -> { ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 200) }
 
       req_ok.call.should be_true
       res_ok.call.should be_true
@@ -301,8 +301,8 @@ describe "Gori::Interceptor direction + condition gates" do
   it "disabled → both gates closed regardless of direction" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
-      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_false
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 200).should be_false
     end
   end
 
@@ -311,8 +311,8 @@ describe "Gori::Interceptor direction + condition gates" do
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle
       ic.set_filter("method:POST")
-      ic.intercepts_request?(method: "POST", host: "acme.test", target: "/x", scheme: "http").should be_true
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_request?(method: "POST", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_true
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_false
     end
   end
 
@@ -321,9 +321,9 @@ describe "Gori::Interceptor direction + condition gates" do
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle
       ic.set_filter("status:>=500")
-      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 503).should be_true
-      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 503).should be_true
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 200).should be_false
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_false
     end
   end
 
@@ -347,8 +347,8 @@ describe "Gori::Interceptor direction + condition gates" do
       scope.add("include", "host", "acme.test")
       scope.enable
       ic.set_filter("method:GET")
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
-      ic.intercepts_request?(method: "GET", host: "evil.test", target: "/x", scheme: "http").should be_false # out of scope
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_true
+      ic.intercepts_request?(method: "GET", host: "evil.test", target: "/x", scheme: "http", port: 80).should be_false # out of scope
     end
   end
 end
@@ -385,10 +385,10 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
       scope.enable_sandbox
 
       # origin-form (HTTPS/CONNECT-style target: a bare path)
-      ic.sandbox_blocks?("http", "acme.test", "/x").should be_false
+      ic.sandbox_blocks?("http", "acme.test", "/x", 80).should be_false
 
       # absolute-form (plain-HTTP forward-proxy target: already the full URL)
-      ic.sandbox_blocks?("http", "acme.test", "http://acme.test/x").should be_false
+      ic.sandbox_blocks?("http", "acme.test", "http://acme.test/x", 80).should be_false
     end
   end
 
@@ -400,8 +400,57 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
       scope.add("include", "regex", "^http://acme\\.test/")
       scope.enable
 
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
-      ic.intercepts_request?(method: "GET", host: "acme.test", target: "http://acme.test/x", scheme: "http").should be_true
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80).should be_true
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "http://acme.test/x", scheme: "http", port: 80).should be_true
+    end
+  end
+
+  # #884 — the P1, and it failed OPEN. `curl -x` a plaintext origin and the request arrives
+  # ABSOLUTE-form, so its target carries `127.0.0.1:19316` and an exclude `string ":19316"`
+  # matched it (403). `curl -kx` the TLS origin on the SAME port and the request arrives
+  # ORIGIN-form ("/x"), the gate built a port-FREE `https://127.0.0.1/x`, the exclude missed,
+  # and the traffic the operator had explicitly carved out was FORWARDED. There was no way to
+  # express a port carve-out over TLS at all.
+  it "sandbox_blocks? honours a port exclude on BOTH transports" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      scope.add("include", "host", "127.0.0.1")
+      scope.add("exclude", "string", ":19316")
+      scope.enable
+      scope.enable_sandbox
+
+      # plaintext forward proxy: absolute-form target, the port is on the request line
+      ic.sandbox_blocks?("http", "127.0.0.1", "http://127.0.0.1:19316/x", 19316).should be_true
+      # CONNECT tunnel: origin-form target, the port comes from the tunnel
+      ic.sandbox_blocks?("https", "127.0.0.1", "/x", 19316).should be_true
+      # ...and the carve-out is the PORT, not the host: another port on it still passes
+      ic.sandbox_blocks?("https", "127.0.0.1", "/x", 19304).should be_false
+    end
+  end
+
+  # The mirror of the above, and the half that makes the split load-bearing: the port must NOT
+  # reach the INCLUDE side. A url-level include has never had a port dimension (Discover strips
+  # it, #407; `Outbound.scope_url` strips it), so an operator's `^https://acme\.test/` covers
+  # the origin on any port — and under the sandbox, "no longer matches" means BLOCKED.
+  it "scope_allows? matches a port-free include on a non-default port, and the exclude still carves it out" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "regex", "^https://acme\\.test/")
+      scope.enable
+
+      [443, 8443].each do |port|
+        ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x",
+          scheme: "https", port: port).should be_true
+      end
+
+      scope.add("exclude", "string", ":8443")
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x",
+        scheme: "https", port: 8443).should be_false
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x",
+        scheme: "https", port: 443).should be_true
     end
   end
 
@@ -425,7 +474,7 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
           ic.set_filter(query)
           ic.arms_ws_hold?("acme.test", to_server: true).should be_false
           ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
-            scheme: "http", payload: "anything".to_slice).should be_false
+            scheme: "http", port: 80, payload: "anything".to_slice).should be_false
         end
       end
     end
@@ -437,9 +486,9 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         ic.set_filter("proto:ws body:subscribe")
         ic.arms_ws_hold?("acme.test", to_server: true).should be_true
         ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
-          scheme: "http", payload: %({"op":"subscribe"}).to_slice).should be_true
+          scheme: "http", port: 80, payload: %({"op":"subscribe"}).to_slice).should be_true
         ic.intercepts_ws?(to_server: true, method: "GET", host: "acme.test", target: "/ws",
-          scheme: "http", payload: %({"op":"ping"}).to_slice).should be_false
+          scheme: "http", port: 80, payload: %({"op":"ping"}).to_slice).should be_false
       end
     end
 

@@ -45,11 +45,11 @@ class Gori::Proxy::H2::StreamGate
   private def sandbox_blocked_url(block : HeadRewrite::Block) : {String, String, String}?
     fields = block.fields
     authority = HeadCodec.pseudo_of(fields, ":authority") || @host
-    host, _ = Upstream.split_host_port(authority, @port)
+    host, port = Upstream.split_host_port(authority, @port)
     scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
     target = HeadCodec.pseudo_of(fields, ":path") || "/"
-    blocked = @interceptor.sandbox_blocks?(scheme, host, target) ||
-              (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target))
+    blocked = @interceptor.sandbox_blocks?(scheme, host, target, port) ||
+              (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
     blocked ? {scheme, host, target} : nil
   end
 

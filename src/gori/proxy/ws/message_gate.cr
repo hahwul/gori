@@ -284,7 +284,7 @@ module Gori::Proxy::WS
 
     private def holds?(payload : Bytes) : Bool
       @interceptor.intercepts_ws?(to_server: to_server?, method: @ctx.method, host: @ctx.host,
-        target: @ctx.target, scheme: @ctx.scheme, payload: payload)
+        target: @ctx.target, scheme: @ctx.scheme, port: @ctx.port, payload: payload)
     end
 
     private def start_hold(opcode : UInt8, payload : Bytes) : Gori::Interceptor::Item?

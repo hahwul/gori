@@ -829,6 +829,12 @@ module Gori
     # Class methods: they read the rule and nothing else, and `filter_sql` above is a class
     # method so the same assembly can run without an instance.
     private def self.rule_cond(rule : Rule) : {String, Array(DB::Any)}
+      # An EXCLUDE reads the URL WITH its port, an INCLUDE without it — `QL::URL_EXPR_NO_PORT`
+      # carries the whole argument, and `Interceptor`'s live gate splits the same way. In one
+      # line: a carve-out has to be able to name a port (it could not, over TLS, and that
+      # failed OPEN), and an allowlist entry never named one, so making it start to would put
+      # every non-default-port origin out of scope.
+      url_expr = rule.include? ? QL::URL_EXPR_NO_PORT : QL::URL_EXPR
       case rule.match_type
       when "host"
         host_cond(rule.pattern)
@@ -841,10 +847,10 @@ module Gori
         # lost by going through the function: `URL_EXPR` concatenates a fresh string per
         # row for the old `lower(…) LIKE` to fold and scan, so there was no index to give
         # up — and a literal % / _ in the pattern now needs no LIKE escaping at all.
-        {"gori_ci_contains(#{QL::URL_EXPR}, ?)", [rule.pattern] of DB::Any}
+        {"gori_ci_contains(#{url_expr}, ?)", [rule.pattern] of DB::Any}
       when "regex"
         # Case-SENSITIVE (no lower()) to match Rule#matches? + the shard's REGEXP.
-        {"#{QL::URL_EXPR} REGEXP ?", [rule.pattern] of DB::Any}
+        {"#{url_expr} REGEXP ?", [rule.pattern] of DB::Any}
       else
         {"0", [] of DB::Any}
       end

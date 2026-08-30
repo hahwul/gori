@@ -379,9 +379,36 @@ module Gori
 
     # Precise per-request block (ClientConn). Builds the scope URL only when the sandbox is on
     # — an off sandbox never inspects the URL — mirroring scope_allows?.
-    def sandbox_blocks?(scheme : String, host : String, target : String) : Bool
+    #
+    # `port` is REQUIRED, not defaulted: without it the EXCLUDE side read the two transports
+    # differently (#884). A plaintext forward-proxy request arrives ABSOLUTE-form, so its
+    # `target` carries `host:port` and an exclude rule naming a port matched it; a
+    # CONNECT-tunnelled request arrives origin-form and built a port-FREE URL, so the same rule
+    # silently skipped it and the excluded TLS port was FORWARDED — permissively. A default
+    # here would let the next caller re-open that hole without the compiler saying so.
+    def sandbox_blocks?(scheme : String, host : String, target : String, port : Int32) : Bool
       return false unless @scope.sandbox?
-      @scope.sandbox_blocks?(Scope.request_url(scheme, host, target), host)
+      @scope.sandbox_blocks?(Scope.request_url(scheme, host, target), host) ||
+        port_excluded?(scheme, host, target, port)
+    end
+
+    # Does an EXCLUDE rule match this request once the URL carries its port? The second half of
+    # every scope answer here, and the reason it is a separate question: the allowlist above is
+    # asked about the PORT-FREE url (`Scope.request_url`) because that is the only spelling a
+    # url-level include has ever been written in — Discover strips the port before asking
+    # (#407), `Outbound.scope_url` does the same for the active tools, and adding one would put
+    # every origin on :8443 outside an include that names the host and path. An exclude is the
+    # opposite shape: it is the operator's carve-out, it has no port dimension to lose, and
+    # widening it only ever blocks more. `QL::URL_EXPR` / `URL_EXPR_NO_PORT` split the SQL lens
+    # the same way, so History still describes exactly what this gate did.
+    #
+    # Skipped where the two urls are the SAME string and the allowlist test above already
+    # covered it: a default port (nothing to add), and an absolute-form target, which is
+    # returned verbatim by both builders because it already carries its own authority.
+    private def port_excluded?(scheme : String, host : String, target : String, port : Int32) : Bool
+      return false if port == (scheme == "https" ? 443 : 80)
+      return false if Gori::Url.absolute_form?(target)
+      @scope.excluded?(Gori::Url.request_url(scheme, host, target, port), host)
     end
 
     # Coarse HOST-level block for the CONNECT gate, made before any request exists.
@@ -400,11 +427,11 @@ module Gori
     # gets buffered at all (see `ClientConn`), so a condition asking about the body would have to
     # be answered before there is anything to answer it with.
     def intercepts_request?(*, method : String, host : String,
-                            target : String, scheme : String, head : Bytes? = nil) : Bool
+                            target : String, scheme : String, port : Int32, head : Bytes? = nil) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.response_only?
-      return false unless scope_allows?(scheme, host, target)
+      return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
         head: head))
     end
@@ -412,11 +439,11 @@ module Gori
     # Precise per-RESPONSE gate (same shape as the request gate). Skips when
     # requests-only; the condition can also test `status:` here (a response has one).
     def intercepts_response?(*, method : String, host : String, target : String,
-                             scheme : String, status : Int32, head : Bytes? = nil) : Bool
+                             scheme : String, port : Int32, status : Int32, head : Bytes? = nil) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.request_only?
-      return false unless scope_allows?(scheme, host, target)
+      return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
         status: status, head: head))
     end
@@ -436,12 +463,12 @@ module Gori
     #      ("inventing one is how a hold escapes scope").
     #   3. **The payload is in hand**, so `body:` can match — the one place it can.
     def intercepts_ws?(*, to_server : Bool, method : String, host : String, target : String,
-                       scheme : String, payload : Bytes) : Bool
+                       scheme : String, port : Int32, payload : Bytes) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if to_server ? dir.response_only? : dir.request_only?
       return false unless filter.mentions_ws?
-      return false unless scope_allows?(scheme, host, target)
+      return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
         proto: Proto::Kind::Ws, payload: payload))
     end
@@ -470,9 +497,10 @@ module Gori
     # Build the scope URL only when Scope is active (an inactive scope allows everything
     # without inspecting the URL), so a passing gate on an intercept-enabled/scope-off
     # setup still skips the interpolation.
-    private def scope_allows?(scheme : String, host : String, target : String) : Bool
+    private def scope_allows?(scheme : String, host : String, target : String, port : Int32) : Bool
       return true unless @scope.active?
-      @scope.in_scope_url?(Scope.request_url(scheme, host, target), host)
+      @scope.in_scope_url?(Scope.request_url(scheme, host, target), host) &&
+        !port_excluded?(scheme, host, target, port)
     end
 
     # --- proxy fiber side (BLOCKS until a decision) --------------------------

@@ -226,14 +226,12 @@ module Gori
       # rule stays in one place rather than being spelled a second time in SQL — where the
       # default-port and IPv6-bracket cases are precisely what a re-derivation gets wrong.
       def self.url_of(scheme : String, host : String, port : Int32, target : String) : String
-        return target if absolute_form?(target)
-        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
-        # `Url.url_path`, not `target`: a target that is neither absolute- nor origin-form
-        # (`OPTIONS *`, a schemeless `httpbin.org/x`) ran straight into the authority and this
-        # column named a host the flow never went to — and would not re-import.
-        path = Gori::Url.url_path(target)
-        default = scheme == "https" ? 443 : 80
-        port == default ? "#{scheme}://#{h}#{path}" : "#{scheme}://#{h}:#{port}#{path}"
+        # The rule itself is `Gori::Url.request_url` — the same one the live scope gate and
+        # `QL::URL_EXPR` build from, so History's url column, a `url:` query and a scope
+        # string/regex rule all read one string. It also carries the asterisk-form guard
+        # (`Url.url_path`): `OPTIONS *` used to render `https://host*`, which re-imports as a
+        # host of `host*` and, once the port is non-default, does not parse at all.
+        Gori::Url.request_url(scheme, host, target, port)
       end
     end
 

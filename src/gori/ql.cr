@@ -78,15 +78,45 @@ module Gori
     # dropped term.
     SCOPE_SHAPE_ONLY = ScopeLens.new(nil)
 
-    # The scope/QL-matching URL for a STORED flow: `scheme://host` + `target`, UNLESS
+    # The scope/QL-matching URL for a STORED flow: `scheme://authority` + `target`, UNLESS
     # `target` is already ABSOLUTE-FORM (case-insensitive `http://`/`https://` — the wire
     # shape a plain-HTTP forward-proxy request arrives in), in which case it already
     # carries scheme+authority and stands in for the whole URL as-is (mirrors
     # Store::FlowRow.absolute_form?'s Crystal-side check — kept case-insensitive in sync
     # by hand, one's SQL, one's Crystal). Shared by the `url~` field below and Scope's
     # string/regex rule matching (scope.cr) so both agree on every row.
+    #
+    # The ELSE arm is `Gori::Url.request_url` spelled in SQL, branch for branch, and each
+    # branch is there because the two transports disagreed without it (#884):
+    #   * the PORT, with the scheme default elided — an absolute-form target carries
+    #     `host:port` already, so `url:8443` matched a plaintext forward-proxy flow and
+    #     silently missed the CONNECT-tunnelled flow beside it on the same port. The same
+    #     asymmetry made a scope EXCLUDE on a port fail OPEN over TLS.
+    #   * the IPv6 BRACKETS, so a `::1` capture reads as `https://[::1]:8443/x`.
+    #   * the leading `/` for a target that is not origin-form (`OPTIONS *`).
+    # `FlowRow#url` builds the same string in Crystal, so the History url column, a `url:`
+    # query and a scope EXCLUDE now all read one spelling. Scope INCLUDES read
+    # `URL_EXPR_NO_PORT` below instead — see there for why the two cannot be one.
     URL_EXPR = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
-               "THEN target ELSE (scheme || '://' || host || target) END)"
+               "THEN target ELSE (scheme || '://' " \
+               "|| (CASE WHEN instr(host, ':') > 0 AND substr(host, 1, 1) <> '[' THEN '[' || host || ']' ELSE host END) " \
+               "|| (CASE WHEN port = (CASE WHEN scheme = 'https' THEN 443 ELSE 80 END) THEN '' ELSE ':' || port END) " \
+               "|| (CASE WHEN target = '' OR substr(target, 1, 1) = '/' THEN target ELSE '/' || target END)) END)"
+
+    # The same URL WITHOUT the port — what a scope INCLUDE is matched against
+    # (`Scope.rule_cond`), and the spelling every url-level rule in the wild was written for.
+    #
+    # A scope include is an allowlist entry, and gori's allowlist has never had a port
+    # dimension: a `host` rule matches the bare host on every port by construction, Discover
+    # strips the port before asking (#407), and `Outbound.scope_url` does the same for every
+    # active tool. So an operator's `include string "https://acme.test/api/"` means "that path
+    # on that host", and an origin on :8443 must not fall out of scope — under the sandbox that
+    # would BLOCK traffic the operator explicitly scoped in (it deadlocks `Tls::Tunnel`'s own
+    # #492-step-4 spec, which scopes a real h2 origin on an ephemeral port that way). The
+    # EXCLUDE side takes `URL_EXPR` instead, because a carve-out that cannot name a port is the
+    # fail-OPEN this split exists to close, and widening an exclude only ever blocks more.
+    URL_EXPR_NO_PORT = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+                       "THEN target ELSE (scheme || '://' || host || target) END)"
 
     # What one term compiles to: a SQL fragment plus the values bound into its `?`s.
     alias SqlTerm = {String, Array(DB::Any)}

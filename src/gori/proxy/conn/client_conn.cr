@@ -485,7 +485,7 @@ module Gori::Proxy
       # We record the attempt as an aborted flow (visible in History) and answer the client
       # a distinct 403 so a sandbox block never reads like an upstream failure. The scope
       # URL is built lazily inside the interceptor, only while the sandbox is on.
-      if (ic = @interceptor) && ic.sandbox_blocks?(scheme, host, gate_target)
+      if (ic = @interceptor) && ic.sandbox_blocks?(scheme, host, gate_target, port)
         record_blocked_request(sent_req, scheme, host, port, created_at)
         write_sandbox_block
         return false
@@ -539,7 +539,7 @@ module Gori::Proxy
       # falls through to the streaming path below, byte-exact.
       if (ic = @interceptor) && ic.intercepts_request?(
            method: sent_req.method, host: host, target: gate_target, scheme: scheme,
-           head: sent_head) && holdable_body_size?(req_framing, req_len, "request")
+           port: port, head: sent_head) && holdable_body_size?(req_framing, req_len, "request")
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
@@ -997,7 +997,7 @@ module Gori::Proxy
       # request hold does (see `holdable_body_size?`) and streams below, byte-exact.
       if (ic = @interceptor) && ic.intercepts_response?(
            method: sent_req.method, host: host, target: Codec::Http1.gate_target(sent_req),
-           scheme: scheme, status: resp.status, head: sent_resp_head) &&
+           scheme: scheme, port: port, status: resp.status, head: sent_resp_head) &&
          !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101 &&
          holdable_body_size?(resp_framing, resp_len, "response")
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,

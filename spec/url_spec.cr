@@ -73,6 +73,55 @@ describe Gori::Url do
     end
   end
 
+  describe ".request_url" do
+    # #884, and the failure direction was PERMISSIVE. A plaintext forward-proxy request
+    # arrives ABSOLUTE-form, so its target already carries `host:port` and a scope rule naming
+    # a port matched it. A CONNECT-tunnelled request arrives ORIGIN-form, and the URL built
+    # here used to be port-FREE — so the identical rule silently skipped it and the excluded
+    # TLS port was forwarded. Both transports now spell the same authority.
+    it "carries a non-default port for an origin-form target" do
+      Gori::Url.request_url("https", "127.0.0.1", "/x", 19316)
+        .should eq("https://127.0.0.1:19316/x")
+      Gori::Url.request_url("http", "127.0.0.1", "/x", 19316)
+        .should eq("http://127.0.0.1:19316/x")
+    end
+
+    # The two transports on the SAME port must produce the same authority, or a `:PORT` rule
+    # is still a coin flip. The plaintext side arrives absolute-form and is returned verbatim.
+    it "spells the same authority for the plaintext and the tunnelled request on one port" do
+      plaintext = Gori::Url.request_url("http", "127.0.0.1", "http://127.0.0.1:19316/x", 19316)
+      tunnelled = Gori::Url.request_url("https", "127.0.0.1", "/x", 19316)
+      plaintext.should eq("http://127.0.0.1:19316/x")
+      [plaintext, tunnelled].each { |u| u.should contain(":19316") }
+    end
+
+    # RFC 3986 §3.2.3: the scheme's default port is not part of the canonical form. Appending
+    # it would give every ordinary flow a bogus ":443"/":80" no operator would type.
+    it "elides the scheme's default port" do
+      Gori::Url.request_url("https", "acme.test", "/x", 443).should eq("https://acme.test/x")
+      Gori::Url.request_url("http", "acme.test", "/x", 80).should eq("http://acme.test/x")
+    end
+
+    it "does not double the port onto an absolute-form target" do
+      Gori::Url.request_url("http", "acme.test", "http://acme.test:8080/x", 8080)
+        .should eq("http://acme.test:8080/x")
+    end
+
+    it "brackets an IPv6 literal, which is stored bare" do
+      Gori::Url.request_url("https", "::1", "/x", 8443).should eq("https://[::1]:8443/x")
+      Gori::Url.request_url("https", "::1", "/x", 443).should eq("https://[::1]/x")
+    end
+
+    # `Scope.request_url` — the include side and `QL::URL_EXPR_NO_PORT` — is this arm, so it
+    # must stay byte-identical to the old `"#{scheme}://#{host}#{target}"`, unnormalised
+    # authority and all, or the live gate and the SQL lens describe different sets.
+    it "keeps the port-free spelling byte-identical for a caller with no port in hand" do
+      Gori::Url.request_url("https", "acme.test", "/x").should eq("https://acme.test/x")
+      Gori::Url.request_url("https", "::1", "/x").should eq("https://::1/x")
+      Gori::Url.request_url("https", "acme.test", "*").should eq("https://acme.test*")
+    end
+  end
+
   describe ".url_path" do
     # `OPTIONS *` (RFC 9112 §3.2.4) is the one request target no URI can spell. Gluing it
     # straight onto the authority produced `https://acme.test*`, which URI.parse reads as a
@@ -80,9 +129,33 @@ describe Gori::Url do
     # flow could not be re-imported from the URL its own surfaces printed.
     it "gives a non-origin-form target the slash that keeps it out of the authority" do
       Gori::Url.url_path("*").should eq("/*")
-      Gori::Url.url_path("httpbin.org/x").should eq("/httpbin.org/x")
       Gori::Url.url_path("/x").should eq("/x")
       Gori::Url.url_path("").should eq("")
+    end
+  end
+
+  # The delegating names kept for their existing call sites must answer identically, or the
+  # consolidation only moved the drift somewhere else.
+  it "answers the same through every name that survived" do
+    %w(http://h/x HTTP://h/x /x httpx://h/x 405\ Nope).each do |t|
+      Gori::Tui::Url.origin_path(t).should eq(Gori::Url.origin_path(t))
+      Gori::Store::FlowRow.absolute_form?(t).should eq(Gori::Url.absolute_form?(t))
+    end
+  end
+
+  # `FlowRow.url_of` IS this function now, so History's url column, a `url:` query and a scope
+  # string rule cannot drift apart again.
+  it "is what FlowRow.url_of builds" do
+    [
+      {"https", "127.0.0.1", 19316, "/x"},
+      {"https", "acme.test", 443, "/a?b=c"},
+      {"http", "acme.test", 8080, "/a"},
+      {"https", "::1", 8443, "/x"},
+      {"http", "acme.test", 8080, "http://other.test/x"},
+      {"https", "acme.test", 8443, "*"},
+    ].each do |(scheme, host, port, target)|
+      Gori::Store::FlowRow.url_of(scheme, host, port, target)
+        .should eq(Gori::Url.request_url(scheme, host, target, port))
     end
   end
 
@@ -96,19 +169,5 @@ describe Gori::Url do
     uri.host.should eq("acme.test")
     uri.port.should eq(8443)
     uri.path.should eq("/*")
-
-    # ...and on a default port, where the old spelling silently renamed the ORIGIN.
-    plain = Gori::Store::FlowRow.url_of("http", "a.test", 80, "httpbin.org/x")
-    plain.should eq("http://a.test/httpbin.org/x")
-    URI.parse(plain).host.should eq("a.test")
-  end
-
-  # The delegating names kept for their existing call sites must answer identically, or the
-  # consolidation only moved the drift somewhere else.
-  it "answers the same through every name that survived" do
-    %w(http://h/x HTTP://h/x /x httpx://h/x 405\ Nope).each do |t|
-      Gori::Tui::Url.origin_path(t).should eq(Gori::Url.origin_path(t))
-      Gori::Store::FlowRow.absolute_form?(t).should eq(Gori::Url.absolute_form?(t))
-    end
   end
 end

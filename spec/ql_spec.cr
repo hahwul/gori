@@ -25,6 +25,16 @@ private def capture(store, host, method, target, status = nil)
   id
 end
 
+# One flow on a non-default port, in each of the two wire shapes gori captures. The plaintext
+# forward-proxy request arrives ABSOLUTE-form (its target carries the authority); the
+# CONNECT-tunnelled one arrives ORIGIN-form. Both are the same origin on the same port.
+private def capture_on_port(store, scheme, host, port, target)
+  store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: scheme, host: host, port: port,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+end
+
 describe Gori::QL do
   it "compiles url: field filters" do
     f = Gori::QL.parse("url:shop.demo.test")
@@ -250,13 +260,92 @@ describe Gori::QL do
     end
   end
 
+  # #884. `url:` used to read the port only when the capture happened to be absolute-form —
+  # the plaintext forward-proxy shape — so `url:19316` found the http flow and silently missed
+  # the https flow beside it on the same port, while History's own url column printed the port
+  # for both. The same expression backs Scope's string/regex rules, where the miss was a
+  # fail-OPEN: an exclude naming a port did not hold over TLS.
+  it "url: matches a non-default port on BOTH wire shapes" do
+    tmp_store do |store|
+      capture_on_port(store, "http", "127.0.0.1", 19316, "http://127.0.0.1:19316/x") # plaintext, absolute-form
+      capture_on_port(store, "https", "127.0.0.1", 19316, "/x")                      # tunnelled, origin-form
+      capture_on_port(store, "https", "127.0.0.1", 443, "/x")                        # same host, default port
+
+      rows = store.search(Gori::QL.parse("url:19316"), 50)
+      rows.size.should eq(2)
+      rows.map(&.scheme).to_set.should eq({"http", "https"}.to_set)
+      rows.map(&.url).to_set.should eq({"http://127.0.0.1:19316/x", "https://127.0.0.1:19316/x"}.to_set)
+    end
+  end
+
+  # The other half of the same rule: a default port is NOT part of the canonical URL
+  # (RFC 3986 §3.2.3), so building the authority must not hand every ordinary flow a `:443`
+  # for `url:443` to match.
+  it "url: does not invent a default port" do
+    tmp_store do |store|
+      capture_on_port(store, "https", "acme.test", 443, "/x")
+      capture_on_port(store, "http", "acme.test", 80, "/y")
+
+      store.search(Gori::QL.parse("url:443"), 50).should be_empty
+      store.search(Gori::QL.parse("url:80"), 50).should be_empty
+      store.search(Gori::QL.parse("url:https://acme.test/x"), 50).size.should eq(1)
+    end
+  end
+
+  # An IPv6 host is stored BARE (the CONNECT/tunnel path strips the brackets), so the SQL
+  # authority has to put them back or `url:` reads `https://::1:8443/x` — a string no operator
+  # can type and no URL parser accepts.
+  it "url: brackets an IPv6 literal the way FlowRow#url does" do
+    tmp_store do |store|
+      capture_on_port(store, "https", "::1", 8443, "/x")
+      rows = store.search(Gori::QL.parse("url:[::1]:8443"), 50)
+      rows.map(&.url).should eq(["https://[::1]:8443/x"])
+    end
+  end
+
+  # The SQL/Crystal parity that both halves of the #884 split rest on: `URL_EXPR` must be the
+  # string `Gori::Url.request_url` builds WITH the port, and `URL_EXPR_NO_PORT` the string
+  # `Scope.request_url` builds without it. They are written twice — once in SQL, once in
+  # Crystal — so nothing but a test can hold them together.
+  it "URL_EXPR and URL_EXPR_NO_PORT are the two Crystal builders, row for row" do
+    tmp_store do |store|
+      rows = [
+        {"https", "127.0.0.1", 19316, "/x"},
+        {"https", "acme.test", 443, "/a?b=c"},
+        {"http", "acme.test", 8080, "/a"},
+        {"https", "::1", 8443, "/x"},
+        {"http", "acme.test", 8080, "http://other.test:8080/x"}, # absolute-form capture
+        {"https", "acme.test", 8443, "*"},                       # OPTIONS asterisk-form
+      ]
+      rows.each { |(scheme, host, port, target)| capture_on_port(store, scheme, host, port, target) }
+
+      rows.each do |(scheme, host, port, target)|
+        # `url~` compiles to URL_EXPR: an anchored exact regex matches iff SQLite built the
+        # very string the Crystal side builds.
+        with_port = Gori::Url.request_url(scheme, host, target, port)
+        store.search(Gori::QL.parse("url~^#{Regex.escape(with_port)}$"), 50)
+          .map(&.url).should eq([with_port])
+
+        # A scope INCLUDE compiles to URL_EXPR_NO_PORT, the port-free twin.
+        scope = Gori::Scope.load(store)
+        scope.rules.each { |r| scope.remove(r.id) }
+        scope.add("include", "regex", "^#{Regex.escape(Gori::Scope.request_url(scheme, host, target))}$")
+        scope.enable
+        store.search(scope.filter, 50).map(&.target).should contain(target)
+      end
+    end
+  end
+
   it "compiles the ~ operator to a REGEXP over text fields" do
     Gori::QL.parse("host~^api\\.").sql.should eq("(host REGEXP ?)")
     Gori::QL.parse("host~^api\\.").args.should eq(["^api\\."])
     Gori::QL.parse("path~\\.json$").sql.should eq("(target REGEXP ?)")
     Gori::QL.parse("url~^https").sql.should eq(
       "((CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
-      "THEN target ELSE (scheme || '://' || host || target) END) REGEXP ?)")
+      "THEN target ELSE (scheme || '://' " \
+      "|| (CASE WHEN instr(host, ':') > 0 AND substr(host, 1, 1) <> '[' THEN '[' || host || ']' ELSE host END) " \
+      "|| (CASE WHEN port = (CASE WHEN scheme = 'https' THEN 443 ELSE 80 END) THEN '' ELSE ':' || port END) " \
+      "|| (CASE WHEN target = '' OR substr(target, 1, 1) = '/' THEN target ELSE '/' || target END)) END) REGEXP ?)")
 
     body = Gori::QL.parse("body~secret\\d+")
     body.sql.should eq("(((request_body IS NOT NULL AND CAST(request_body AS TEXT) REGEXP ?) OR " \

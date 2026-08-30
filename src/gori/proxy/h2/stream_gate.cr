@@ -701,7 +701,8 @@ module Gori::Proxy::H2
       # The gate reads the HEAD even when the hold will carry a body: a `header:` term is a
       # question about the head on both protocols, and the body has not arrived yet anyway.
       return nil unless @interceptor.intercepts_request?(
-                          method: method, host: host, target: target, scheme: scheme, head: head)
+                          method: method, host: host, target: target, scheme: scheme, port: port,
+                          head: head)
       Held.new(request: true, stream_id: block.stream_id, method: method, target: target,
         host: host, port: port, scheme: scheme, refusal: edit_refusal(block))
     end
@@ -724,7 +725,7 @@ module Gori::Proxy::H2
       host, port = Upstream.split_host_port(ref.authority, @port)
       return nil unless @interceptor.intercepts_response?(
                           method: ref.method, host: host, target: ref.target,
-                          scheme: ref.scheme, status: status, head: head)
+                          scheme: ref.scheme, port: port, status: status, head: head)
       # h1's response Item carries "<status> <reason>"; h2 has no reason phrase (§8.3.2).
       Held.new(request: false, stream_id: block.stream_id, method: ref.method,
         target: status.to_s, host: host, port: port, scheme: ref.scheme,
