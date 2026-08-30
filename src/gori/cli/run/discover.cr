@@ -248,7 +248,7 @@ module Gori
               flush_discover(store, pending) if pending.size >= 200
             end
           when Discover::ProgressEvent then discover_progress(ev)
-          when Discover::DoneEvent     then discover_done(ev, pool_stats)
+          when Discover::DoneEvent     then discover_done(ev, engine, pool_stats)
           when Discover::ErrorEvent    then had_error = true; STDERR.puts "discover error: #{ev.message}"
           end
         end
@@ -296,7 +296,8 @@ module Gori
         STDERR.flush
       end
 
-      private def self.discover_done(ev : Discover::DoneEvent, pool_stats : Proc(Discover::PoolStats?)) : Nil
+      private def self.discover_done(ev : Discover::DoneEvent, engine : Discover::Engine,
+                                     pool_stats : Proc(Discover::PoolStats?)) : Nil
         STDERR.print "\r" if STDERR.tty?
         s = ev.stats
         STDERR.puts "done · #{s.found} found · #{s.sent} sent · #{ev.progress.errors} errors" \
@@ -310,6 +311,17 @@ module Gori
         if ev.budget_exhausted
           STDERR.puts "budget exhausted · #{ev.progress.queued} queued unexplored " \
                       "— raise or drop --max-requests to finish the sweep"
+        end
+        # The OTHER way a sweep stops short, and the one that had no line at all: the Layer-2
+        # gate re-reads the project scope mid-run, so a `scope add exclude …` in a second
+        # terminal cuts the traffic off within a second (#396) — correctly — and every
+        # candidate after it is dropped as a benign refusal, counted in neither `errors` nor
+        # `sent`. The run then read `done · 1 found · 105 sent · 0 errors`, exit 0, over a
+        # target it had barely touched. Read off the engine rather than the event for the
+        # reason `pool_stats` is: the counter is final exactly when this event arrives.
+        if (refused = engine.scope_refused) > 0
+          STDERR.puts "#{refused} candidate#{refused == 1 ? "" : "s"} refused by scope " \
+                      "— the sweep stopped early; this is not a clean result over the whole target"
         end
         # Handshakes actually paid for — the one thing the request counts above cannot show.
         # `dialed ≈ sent` means the origin closed after every response, which is the usual

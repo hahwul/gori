@@ -578,6 +578,18 @@ module Gori::Discover
     # whose every send failed still has `sent > 0`. Same counter, same name and same purpose
     # as `Miner::Engine#successful_sends`; see `wholly_refused_reason`.
     getter successful_sends : Int64 = 0_i64
+    # Candidates the per-URL Layer-2 gate refused in `send_with_retries` — a sweep CUT SHORT,
+    # in the shape `CappedBackend#refused` already carries for the request cap.
+    #
+    # A scope refusal is deliberately benign (`benign_error?`): it is a decision the operator
+    # asked for, not a failure of the run, so it inflates neither `errors` nor `sent`. That is
+    # right for the error count and wrong for the report, because it left the refusal counted
+    # NOWHERE. A mid-run `scope add exclude …` in a second terminal stops the traffic within
+    # `Outbound::RELOAD_INTERVAL` (#396, and it works) — and the run then ended
+    # `done · 1 found · 105 sent · 0 errors`, exit 0, with ~1000 wordlist candidates refused
+    # and nothing saying so. `budget_exhausted` already exists to stop a truncated sweep
+    # reading as a complete one; this is the same fact arriving by the other door.
+    getter scope_refused : Int32 = 0
     @pages : Int32
     @crawl_enqueued : Int32
     @calibrated_out : Int32
@@ -1688,6 +1700,12 @@ module Gori::Discover
       # while the run is in flight stops it here within that window — on every surface, not
       # only in the TUI where the `Scope` object happens to be shared live (#396).
       unless @scope.allowed?(Url.gate_url(p), p.host)
+        # Booked here rather than at the enqueue gates, and for the same reason the error
+        # facts above are: this is the one line every send passes, so one candidate is one
+        # count — no retry doubles it (the refusal returns before the loop) and no
+        # containment or path-confine drop, which are the run's own bounds and not a
+        # refusal, can be mistaken for one. See `scope_refused`.
+        @scope_refused += 1
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, SCOPE_REFUSED)
       end
       target = p.query ? "#{p.path}?#{p.query}" : p.path

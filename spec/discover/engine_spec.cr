@@ -149,6 +149,26 @@ private class DenyAfterFirstAsk < D::ScopePolicy
   end
 end
 
+# A scope that changes its mind MID-RUN — the shape `StoreScope#refresh` reaches when an
+# operator runs `gori run project scope add exclude …` in a second terminal while the sweep is
+# in flight (#396). The enqueue gates already said yes; `send_with_retries` is where the new
+# answer lands, and every candidate behind it is dropped.
+private class FlippableScope < Gori::Discover::ScopePolicy
+  property? denying : Bool = false
+
+  def allowed?(url : String, host : String) : Bool
+    !@denying
+  end
+
+  def boundary?(url : String, host : String) : Bool
+    true
+  end
+
+  def configured? : Bool
+    false
+  end
+end
+
 # The three sources `Engine#well_known?` routes through the soft-404 baseline — a document the
 # run GUESSED at a fixed origin path, as opposed to a link the target published.
 private def well_known_source?(f : Gori::Discover::Finding) : Bool
@@ -339,6 +359,53 @@ describe Gori::Discover::Engine do
         done.not_nil!.budget_exhausted.should be_false
         done.not_nil!.progress.queued.should eq(0)
       end
+    end
+  end
+
+  # The OTHER way a discover run stops short, and the one that had no number at all. #396 made
+  # the Layer-2 gate re-read the scope mid-run, which correctly cuts the traffic off within a
+  # second — but `StoreScope#allowed?` returning false makes `send_with_retries` return a
+  # BENIGN error, so the candidate inflated neither `errors` nor `sent` and was counted
+  # nowhere. A crawl entirely refused after its first probe reported
+  # `done · 1 found · 105 sent · 0 errors`, exit 0, with ~1000 wordlist candidates dropped and
+  # nothing saying the sweep had been cut short — while `budget_exhausted`, the precedent for
+  # exactly this, sat two lines away in the same summary.
+  describe "candidates refused by a mid-run scope change" do
+    it "counts every one of them" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1,
+        concurrency: 1, retries: 0)
+      words = (1..20).map { |i| "w#{i}" }
+      scope = FlippableScope.new
+      served = 0
+      backend = RouteBackend.new(->(_t : String) do
+        served += 1
+        # After the calibration probe and the first real candidate: the exclude rule lands.
+        scope.denying = true if served >= 2
+        notfound
+      end)
+      engine = D::Engine.new("http://t/", words, backend, cfg, scope)
+      done = nil.as(D::DoneEvent?)
+      engine.run { |ev| done = ev if ev.is_a?(D::DoneEvent) }
+      d = done.not_nil!
+      # Every candidate but the one that got through, and each counted ONCE — the refusal
+      # returns before the retry loop.
+      engine.scope_refused.should eq(words.size - 1)
+      # …and the reason the counter had to exist: nothing else in the report moves. Without it
+      # this run is indistinguishable from a complete sweep of a target that held nothing.
+      d.progress.errors.should eq(0)
+      d.stats.sent.should eq(2)
+      d.budget_exhausted.should be_false
+    end
+
+    # The control: a run nothing refuses reports zero, so the CLI's line stays silent on every
+    # ordinary sweep.
+    it "is zero when the scope refuses nothing" do
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 1,
+        concurrency: 1, retries: 0)
+      engine = D::Engine.new("http://t/", ["admin", "login"],
+        RouteBackend.new(->(_t : String) { notfound }), cfg, FlippableScope.new)
+      engine.run { |_ev| }
+      engine.scope_refused.should eq(0)
     end
   end
 
