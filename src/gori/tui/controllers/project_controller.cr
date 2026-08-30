@@ -123,7 +123,14 @@ module Gori::Tui
       true
     end
 
+    # A REFUSED step is inert; SETTLING one is not. `settle_subtab` drops the ACTIVITY text
+    # filter and `settle_activity_entry` re-reads page one, so `→` on the last chip used to
+    # throw away every page the operator had walked in (500 rows back to 200) and re-seat the
+    # cursor, by `clamp_act_sel`, on a different event — the exact "stale but in range" failure
+    # the id anchor exists to prevent, triggered by an arrow key that moves nothing. Peek
+    # first, so the strip's clamp costs nothing beyond not moving.
     def move_subtab(dir : Int32) : Nil
+      return unless @project_view.pane_can_advance?(dir)
       settle_subtab
       @project_view.pane_advance(dir) # clamps at both ends, like the chips read
       settle_activity_entry
@@ -229,8 +236,13 @@ module Gori::Tui
       when :activity
         @project_view.focus_pane(:activity)
         # The card's scroll gauge rides its right hairline, which `activity_row_at` excludes.
+        # BOTH branches page. This is the one Project list whose rows are a PAGE rather than
+        # the whole set, so a gauge grab that lands on the last loaded row has to pull the next
+        # one exactly as `↓` does — without it the gauge stopped dead at the end of page one
+        # while the keyboard walked straight past it.
         if row = @project_view.activity_gauge_row(rect, mx, my)
           @project_view.activity_select_at(row)
+          page_activity
         elsif idx = @project_view.activity_row_at(rect, mx, my)
           @project_view.activity_select_at(idx)
           page_activity

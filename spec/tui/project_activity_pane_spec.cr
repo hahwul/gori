@@ -610,4 +610,68 @@ describe "ProjectView ACTIVITY refresh (the data_version poll)" do
       view.activity_rows.first.message.should eq("flood #{flood - 1}")
     end
   end
+
+  # The catch-up above is what makes this necessary. `prepend_activity` runs on every poll for
+  # as long as the pane is open — and the capture-lock holder moves `data_version` every 3 s on
+  # an idle project — so the loaded list only ever GREW: a session left on this card while an
+  # agent worked retained every event that agent had ever written, and copied the whole array
+  # on the render fiber each time. Nothing is lost by capping it: the resume point moves up to
+  # the last row kept, so the trimmed tail pages straight back in.
+  it "caps the rows it keeps at the head, and pages the trimmed tail back in" do
+    tmp_store do |store, project|
+      200.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+
+      total = 200
+      # Bursts inside ACT_CATCHUP_PAGES, so every round folds in rather than reloading.
+      8.times do |t|
+        800.times { |i| store.insert_event("agent", "agent_action", "info", "burst #{t}-#{i}") }
+        total += 800
+        store.flush
+        view.refresh_activity(store)
+      end
+      total.should be > ProjectView::ACT_MAX_ROWS
+      view.activity_rows.size.should eq(ProjectView::ACT_MAX_ROWS)
+      # Newest-first still: the cap cut the TAIL, not the head the operator is watching.
+      view.activity_rows.first.message.should eq("burst 7-799")
+
+      # And the tail is only unloaded, not skipped: walking back down returns every event
+      # exactly once, in order.
+      while view.activity_more?
+        view.activity_select(view.activity_rows.size) # park at the end so nothing trims
+        view.activity_load_more(store)
+      end
+      ids = view.activity_rows.map(&.id)
+      ids.size.should eq(total)
+      ids.uniq.size.should eq(total)
+      ids.should eq(ids.sort.reverse)
+    end
+  end
+
+  # The cut is below the CURSOR, never at it. Trimming the row an operator parked on would do
+  # to the selection exactly what a reload does — hand `↵` a different event — which is the one
+  # thing the id anchor exists to prevent.
+  it "never trims the row the cursor is parked on" do
+    tmp_store do |store, project|
+      200.times { |i| store.insert_event("agent", "agent_action", "info", "old #{i}") }
+      store.flush
+      view = activity_view(store, project)
+      view.reload_activity(store)
+      view.activity_select(3)
+      parked = view.activity_selected_row.not_nil!
+
+      8.times do |t|
+        800.times { |i| store.insert_event("agent", "agent_action", "info", "burst #{t}-#{i}") }
+        store.flush
+        view.refresh_activity(store)
+      end
+
+      view.activity_selected_row.not_nil!.id.should eq(parked.id)
+      # Everything above it is still there — that growth is the operator's own parking, and
+      # cutting into it is what would move the cursor.
+      view.activity_rows.size.should be > ProjectView::ACT_MAX_ROWS
+    end
+  end
 end
