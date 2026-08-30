@@ -77,14 +77,20 @@ describe Gori::Links do
     # it MISSED `HTTP://host/x` (RFC 3986 §3.1 — schemes are case-insensitive) and CAUGHT a
     # schemeless `httpbin.org/x`. `Gori::Url.location` is the strict test now, so this target
     # — which carries no authority of its own — takes the host prefix every other non-absolute
-    # target takes, and `label` finally agrees with `url` (which has used `absolute_form?` all
-    # along and read `http://a.testhttpbin.org/x` while the label read `httpbin.org/x`).
-    it "prefixes the host on a schemeless 'http'-prefixed target, agreeing with #url" do
+    # target takes.
+    #
+    # The two answers differ on exactly this target and that is the point: `label` is
+    # `host + target` juxtaposed, the raw reading `Url.location` promises, while `url` has to be
+    # a URL — and `http://a.testhttpbin.org/x` was not one, it silently named the DIFFERENT host
+    # `a.testhttpbin.org`. `FlowRow#url` now puts a `/` between the authority and any target
+    # that is not origin-form (`Url.url_path`), the same guard that keeps `OPTIONS *` parseable.
+    it "prefixes the host on a schemeless 'http'-prefixed target, and keeps #url a URL" do
       with_store do |store|
         fid = insert_flow_row(store, host: "a.test", target: "httpbin.org/x")
         r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Flow, fid))
         r.label.should eq("GET a.testhttpbin.org/x")
-        r.url.should eq("http://a.testhttpbin.org/x")
+        r.url.should eq("http://a.test/httpbin.org/x")
+        URI.parse(r.url.not_nil!).host.should eq("a.test")
       end
     end
 

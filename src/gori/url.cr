@@ -56,6 +56,23 @@ module Gori
       absolute_form?(target) ? target : "#{host}#{target}"
     end
 
+    # `target` as the PATH component of a URL. Origin-form (`/path`) is already one and passes
+    # through, and so does an empty target (`https://host` is a URL; `https://host/` is a
+    # different one, and this is a derived column, not a request). Anything else — the
+    # asterisk-form of `OPTIONS *` (RFC 9112 §3.2.4), which no URI can spell, or a schemeless
+    # `httpbin.org/x` a peer put on the request line — gets the `/` that keeps it from running
+    # into the authority. Without it `FlowRow#url` named a DIFFERENT ORIGIN: `https://acme.test*`
+    # parses with a host of `acme.test*`, `https://acme.test:8443*` does not parse at all
+    # (`URI::Error: bad port`) so the flow could not be re-imported from its own exported URL,
+    # and `http://a.test` + `httpbin.org/x` read as the host `a.testhttpbin.org`.
+    #
+    # Deliberately NOT applied by `location` next door: that one is the LABEL, `host + target`
+    # juxtaposed verbatim, and its two specs pin that reading.
+    def self.url_path(target : String) : String
+      return target if target.empty? || target.starts_with?('/')
+      "/#{target}"
+    end
+
     # The scope/`url:`-matching URL of a LIVE request, from its parts. The Crystal-side twin of
     # `QL::URL_EXPR`, which builds the identical string in SQL for a STORED flow — so a `url:`
     # term means the same thing at a hold gate as it does in the History filter bar.

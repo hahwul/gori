@@ -73,6 +73,36 @@ describe Gori::Url do
     end
   end
 
+  describe ".url_path" do
+    # `OPTIONS *` (RFC 9112 §3.2.4) is the one request target no URI can spell. Gluing it
+    # straight onto the authority produced `https://acme.test*`, which URI.parse reads as a
+    # HOST of "acme.test*" — and `https://acme.test:8443*` it refuses outright — so such a
+    # flow could not be re-imported from the URL its own surfaces printed.
+    it "gives a non-origin-form target the slash that keeps it out of the authority" do
+      Gori::Url.url_path("*").should eq("/*")
+      Gori::Url.url_path("httpbin.org/x").should eq("/httpbin.org/x")
+      Gori::Url.url_path("/x").should eq("/x")
+      Gori::Url.url_path("").should eq("")
+    end
+  end
+
+  # The re-import gap this closed: the URL a surface prints for an `OPTIONS *` flow has to
+  # parse back to the host and port it came from. `https://acme.test:8443*` raised
+  # `URI::Error: bad port`, so the flow was dropped by every parser that re-reads a URL.
+  it "builds an OPTIONS * URL that parses back to its own authority" do
+    url = Gori::Store::FlowRow.url_of("https", "acme.test", 8443, "*")
+    url.should eq("https://acme.test:8443/*")
+    uri = URI.parse(url)
+    uri.host.should eq("acme.test")
+    uri.port.should eq(8443)
+    uri.path.should eq("/*")
+
+    # ...and on a default port, where the old spelling silently renamed the ORIGIN.
+    plain = Gori::Store::FlowRow.url_of("http", "a.test", 80, "httpbin.org/x")
+    plain.should eq("http://a.test/httpbin.org/x")
+    URI.parse(plain).host.should eq("a.test")
+  end
+
   # The delegating names kept for their existing call sites must answer identically, or the
   # consolidation only moved the drift somewhere else.
   it "answers the same through every name that survived" do

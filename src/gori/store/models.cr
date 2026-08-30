@@ -228,8 +228,12 @@ module Gori
       def self.url_of(scheme : String, host : String, port : Int32, target : String) : String
         return target if absolute_form?(target)
         h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        # `Url.url_path`, not `target`: a target that is neither absolute- nor origin-form
+        # (`OPTIONS *`, a schemeless `httpbin.org/x`) ran straight into the authority and this
+        # column named a host the flow never went to — and would not re-import.
+        path = Gori::Url.url_path(target)
         default = scheme == "https" ? 443 : 80
-        port == default ? "#{scheme}://#{h}#{target}" : "#{scheme}://#{h}:#{port}#{target}"
+        port == default ? "#{scheme}://#{h}#{path}" : "#{scheme}://#{h}:#{port}#{path}"
       end
     end
 
