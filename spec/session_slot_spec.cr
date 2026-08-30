@@ -148,6 +148,37 @@ describe Gori::SessionSlot do
       sent.should_not contain("victim=1")
       sent.scan(/Cookie:/).size.should eq(1)
     end
+
+    # The OTHER line view (`Rules#fold_line?` writes the same rule down for the Rewriter, whose
+    # header ops this one mirrors): an obs-fold continuation is part of the field ABOVE it, not
+    # a header of its own. Reachable here for the same reason the mixed-EOL cases above are — a
+    # send seam takes the operator's bytes verbatim, and malformed framing is the payload (P7).
+    it "reads an obs-fold continuation as part of the field above it, in both header ops" do
+      # remove: an "anonymous" slot that drops a folded Cookie used to leave ` b=2` behind as
+      # the first header line — half the credential still on the wire, in a head gori itself
+      # manufactured as malformed.
+      wire = "GET /a HTTP/1.1\r\nCookie: a=1;\r\n b=2\r\nX-Keep: 1\r\n\r\n".to_slice
+      String.new(Gori::SessionSlot.overlay_wire(wire, Slot.new("anon", remove_headers: ["Cookie"])))
+        .should eq("GET /a HTTP/1.1\r\nX-Keep: 1\r\n\r\n")
+
+      # set: the continuation answered the NAME test (`ln[0, ci].strip` erases the leading SP),
+      # so the slot's header was never added and `X-Note`'s value silently took it instead.
+      folded = "GET /a HTTP/1.1\r\nX-Note: hello\r\n X-Inner: folded\r\n\r\n".to_slice
+      String.new(Gori::SessionSlot.overlay_wire(folded, Slot.new("admin", set_headers: [{"X-Inner", "pwn"}])))
+        .should eq("GET /a HTTP/1.1\r\nX-Note: hello\r\n X-Inner: folded\r\nX-Inner: pwn\r\n\r\n")
+
+      # set on a folded field: the continuation is part of the value being replaced, so it goes
+      # with it — kept, a `Content-Length: 3` above a `\r\n 5` unfolds to `3 5` downstream.
+      cl = "POST /p HTTP/1.1\r\nContent-Length: 12\r\n 5\r\nX-Keep: 1\r\n\r\n".to_slice
+      String.new(Gori::SessionSlot.overlay_wire(cl, Slot.new("admin", set_headers: [{"Content-Length", "3"}])))
+        .should eq("POST /p HTTP/1.1\r\nContent-Length: 3\r\nX-Keep: 1\r\n\r\n")
+
+      # A HTAB-led continuation is the same continuation, and one directly under the START line
+      # continues no field at all — neither may be read as a header name.
+      tab = "GET /a HTTP/1.1\r\n\tX-Fold: orphan\r\nX-Fold: real\r\n\tmore\r\nX-Keep: 1\r\n\r\n".to_slice
+      String.new(Gori::SessionSlot.overlay_wire(tab, Slot.new("anon", remove_headers: ["X-Fold"])))
+        .should eq("GET /a HTTP/1.1\r\n\tX-Fold: orphan\r\nX-Keep: 1\r\n\r\n")
+    end
   end
 
   describe "#resolve_values" do

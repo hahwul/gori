@@ -344,34 +344,73 @@ module Gori
       join_head_lines(pairs)
     end
 
+    # Whether a `split_head_lines` entry is an obs-fold CONTINUATION — a line whose first byte
+    # is SP or HTAB. RFC 9112 §5.2 makes it part of the PREVIOUS field's value, never a header
+    # of its own, and that is the second line view one head carries: `split_head_lines` sees N
+    # lines where the field parser sees fewer fields. Kept in step with `Rules#fold_line?`,
+    # which the two ops below mirror — an overlay applied to a folded head used to
+    #
+    #   * SET a header into a continuation: ` X-Inner: folded` answered the name test
+    #     (`ln[0, ci].strip` erases the leading SP), so the slot's own header never reached the
+    #     wire and the field ABOVE it silently took the value instead;
+    #   * REMOVE a field and leave its continuation behind as the first header line — an
+    #     "anonymous" slot dropping a folded `Cookie` left half the credential on the wire, in
+    #     a head gori itself manufactured as malformed.
+    #
+    # First BYTE, not `starts_with?(' ')`: a captured header line can be invalid UTF-8 (obs-text
+    # in the value it continues), where char iteration answers about U+FFFD.
+    private def self.fold_line?(line : String) : Bool
+      return false if line.empty?
+      b = line.to_slice[0]
+      b == 0x20_u8 || b == 0x09_u8
+    end
+
     # Replace the value of every header named `name` (case-insensitive, original casing kept);
     # append it when absent (upsert). The start line and blank line are left untouched.
+    #
+    # An obs-fold continuation of the field being set is part of the VALUE being replaced, so it
+    # goes with it. One of any other field is carried through untouched, and is never tested for
+    # the name.
     private def self.head_set_header(head : String, name : String, value : String) : String
       target = name.downcase
       found = false
-      rewritten = split_head_lines(head).map_with_index do |(ln, term), i|
-        next({ln, term}) if i == 0 || ln.empty?
-        if (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
+      in_target = false
+      rewritten = [] of {String, String}
+      split_head_lines(head).each_with_index do |(ln, term), i|
+        if i == 0 || ln.empty?
+          in_target = false
+          rewritten << {ln, term}
+        elsif fold_line?(ln)
+          rewritten << {ln, term} unless in_target
+        elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
           found = true
-          {"#{ln[0, ci]}: #{value}", term}
+          in_target = true
+          rewritten << {"#{ln[0, ci]}: #{value}", term}
         else
-          {ln, term}
+          in_target = false
+          rewritten << {ln, term}
         end
       end
       found ? join_head_lines(rewritten) : head_add_header(head, name, value)
     end
 
-    # Drop every header line named `name` (case-insensitive). The start line and blank lines
-    # are always kept, so the head stays well-formed.
+    # Drop every header line named `name` (case-insensitive), and with it every obs-fold
+    # continuation of that field. The start line and blank lines are always kept, so the head
+    # stays well-formed.
     private def self.head_remove_header(head : String, name : String) : String
       target = name.downcase
       kept = [] of {String, String}
+      dropping = false
       split_head_lines(head).each_with_index do |(ln, term), i|
         if i == 0 || ln.empty?
+          dropping = false
           kept << {ln, term}
+        elsif fold_line?(ln)
+          kept << {ln, term} unless dropping # continues the field above, so it shares its fate
         elsif (ci = ln.index(':')) && ln[0, ci].strip.downcase == target
-          # drop this header, its own terminator with it
+          dropping = true # drop this header, its own terminator with it
         else
+          dropping = false
           kept << {ln, term}
         end
       end
