@@ -51,7 +51,14 @@ module Gori::Miner
       last = bytes.size - Canary::LEN
       i = 0
       while i <= last
-        if bytes.unsafe_fetch(i) == 0x67_u8 && bytes.unsafe_fetch(i + 1) == 0x71_u8 && canary_tail?(bytes, i + 2)
+        # `Slice(UInt8)#index` is memchr, so the bytes BETWEEN candidate starts are skipped by
+        # libc a word at a time instead of one comparison each in Crystal. Every response body
+        # of the run is walked here, and a `g` is ~2% of ordinary text — so 98% of the walk was
+        # a loop doing nothing but failing its first test.
+        break unless found = bytes.index(0x67_u8, i)
+        break if found > last
+        i = found
+        if bytes.unsafe_fetch(i + 1) == 0x71_u8 && canary_tail?(bytes, i + 2)
           into << String.new(bytes[i, Canary::LEN])
         end
         i += 1
@@ -79,16 +86,35 @@ module Gori::Miner
       words = 0
       lines = 0
       in_word = false
-      body.each do |b|
-        if b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8
+      ptr = body.to_unsafe
+      i = 0
+      n = body.size
+      while i < n
+        b = ptr[i]
+        # One table load instead of the four comparisons this byte used to fail in sequence.
+        # Every byte of every response body of the run passes through here, and the common
+        # byte — an ordinary letter mid-word — is the one that had to fail all four.
+        if SPACE.unsafe_fetch(b)
           in_word = false
           lines += 1 if b == 0x0a_u8
         elsif !in_word
           in_word = true
           words += 1
         end
+        i += 1
       end
       {words, lines}
+    end
+
+    # The whitespace set `count_metrics` splits words on — the same four bytes
+    # `Fuzz::Matcher` uses, as a 256-way lookup so the test is a load rather than a chain.
+    private SPACE = begin
+      t = StaticArray(Bool, 256).new(false)
+      t[0x20] = true
+      t[0x09] = true
+      t[0x0a] = true
+      t[0x0d] = true
+      t
     end
   end
 end

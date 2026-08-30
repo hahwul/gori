@@ -144,7 +144,11 @@ module Gori
     # Engine → consumer events. A union of records (matches Fuzz's pattern so a
     # Channel(Event) carries them without boxing). Progress is droppable (latest wins);
     # Baseline/Finding/Done/Error are never dropped.
-    record BaselineEvent, stable : Bool, warning : String?
+    # `warning` names a condition that DOWNGRADES this run's findings (the status varied, the
+    # endpoint echoes any input, a location had to be muted); `note` only reports how the run
+    # had to be calibrated — a location mined against a same-width control is a healthy mine,
+    # and every surface renders `warning` as a warning.
+    record BaselineEvent, stable : Bool, warning : String?, note : String? = nil
     record FindingEvent, finding : Finding
     record ProgressEvent, progress : Progress
     record DoneEvent, progress : Progress, stopped : Bool
@@ -174,9 +178,44 @@ module Gori
       end
 
       # A random name that almost certainly does not exist — for the per-location
-      # baseline control (does the app react to ANY unknown param here?).
-      def self.bogus_name : String
-        "zz#{Random::Secure.hex(5)}"
+      # baseline control (does the app react to ANY unknown param here?) and for the padding
+      # that keeps every probe of the run the same width as that control.
+      #
+      # `len` is the name's total byte length, because the control has to be able to say what
+      # a page does about the LENGTH of the names it is handed as distinct from how many of
+      # them there were (`Baseline::Reference#echo`). Odd lengths get one extra hex digit and
+      # are then trimmed, so the name is always exactly `len` bytes of `zz` + lower hex.
+      def self.bogus_name(len : Int32 = 12) : String
+        n = len.clamp(3, 128)
+        "zz#{Random::Secure.hex((n - 1) // 2)}"[0, n]
+      end
+
+      # `n` bogus names of exactly `len` bytes, GUARANTEED DISTINCT, from one CSPRNG draw.
+      #
+      # Two reasons this is not `n` calls to `bogus_name`. The names must be distinct: a
+      # control bucket that carries the same name twice is one parameter NARROWER than the
+      # probes measured against it, so on a page that reacts to how many parameters it was
+      # handed, every single probe then shows the extra row and the whole wordlist bisects to
+      # nothing (at the control length of 8 bytes — 3 random hex digits — a 128-wide bucket
+      # collides 0.05% of the time, a 1024-wide one 2.85%). And one draw, not `n`: a padded
+      # confirm round mints up to `bucket_size` of these BEFORE a byte goes on the wire, which
+      # is the same `getrandom`-per-name cost `fresh_batch` exists to avoid.
+      #
+      # The last `INDEX_DIGITS` hex digits carry the index, so distinctness is by construction
+      # rather than by luck. A name too short to hold them (len < 6) falls back to random and
+      # is unique only by chance — no caller asks for one.
+      INDEX_DIGITS = 3
+
+      def self.bogus_batch(n : Int32, len : Int32) : Array(String)
+        return [] of String if n <= 0
+        size = len.clamp(3, 128)
+        hex = (size - 1) // 2
+        raw = Random::Secure.random_bytes(hex * n)
+        Array(String).new(n) do |i|
+          name = "zz#{raw[i * hex, hex].hexstring}"[0, size]
+          next name if size < 2 + INDEX_DIGITS + 1
+          "#{name[0, size - INDEX_DIGITS]}#{(i % 4096).to_s(16).rjust(INDEX_DIGITS, '0')}"
+        end
       end
     end
 
