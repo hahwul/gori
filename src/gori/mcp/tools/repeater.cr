@@ -70,13 +70,22 @@ module Gori
       # Only when it FIRED. `summary` is the masked projection, so without this an author who
       # sent a live value reads a summary spelling it `$CTOK` with no statement anywhere that
       # the two are the same bytes — a silent substitution where a named report belonged.
-      private def emit_secrets_masked(j : JSON::Builder, raw : String, masked : String) : Nil
-        names = masked_names(raw, masked)
+      # The TARGET is read alongside the request because BOTH are projected through
+      # `mask_secrets` into the replies above, and reading only the request left a masking that
+      # fired on the target ALONE unreported — which is the silent substitution this report
+      # exists to prevent, not a case it was meant to skip. On a project whose `$SHOP` holds
+      # `https://shop.example`, `create_repeater{target:"https://shop.example"}` answered
+      # `"target":"$SHOP"` with nothing saying the two are the same bytes, and with the row
+      # holding the author's spelling — so an agent reading the reply back had no way to tell a
+      # display mask from a session that had actually been stored env-bound.
+      private def emit_secrets_masked(j : JSON::Builder, raw : String, masked : String,
+                                      target : String, masked_target : String) : Nil
+        names = (masked_names(raw, masked) + masked_names(target, masked_target)).uniq!.sort!
         return if names.empty?
         j.field("secrets_masked") { j.array { names.each { |n| j.string n } } }
         j.field "secrets_masked_note",
           "#{Env.token_list(names)} #{names.size == 1 ? "resolves" : "resolve"} to a value present in this " \
-          "request; the stored request keeps your bytes and only this result masks them"
+          "session's request or target; the stored session keeps your bytes and only this result masks them"
       end
 
       # The names `mask_secrets` rewrote in these bytes, so the reply can name them. gori no
@@ -305,7 +314,7 @@ module Gori
             # session no longer carries the absolute-form line, so this is the only record
             # that it was ever there.
             j.field "request_line_rewritten", true if rewrote_request_line
-            emit_secrets_masked(j, request, masked_request)
+            emit_secrets_masked(j, request, masked_request, target, masked_target)
             # How many frames were actually stored, so an agent authoring a multi-frame
             # sequence can assert on it rather than take the count on trust.
             j.field "ws_out_message_count", ws_count if ws_count
@@ -582,7 +591,7 @@ module Gori
             j.field "summary", summary
             j.field "position", existing.position
             j.field "ws_out_message_count", ws_count if ws_count
-            emit_secrets_masked(j, request, masked_request)
+            emit_secrets_masked(j, request, masked_request, target, masked_target)
             # `flow_id` is unchanged by this write, and it is not a label: the TUI turns it
             # into `RepeaterView#evidence?`, which suppresses `$NAME` expansion because a
             # capture's `$filter` is a byte and not a reference. Once these bytes are no
