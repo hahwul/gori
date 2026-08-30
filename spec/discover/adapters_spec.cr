@@ -62,7 +62,7 @@ describe Gori::Discover::StoreScope do
         scope = Gori::Scope.load(store)
         scope.add("include", "host", "acme.test")
         policy = D::StoreScope.new(scope)
-        policy.allowed?("https://acme.test/logout", "acme.test").should be_true
+        policy.allowed?("https://acme.test/logout", "acme.test", nil).should be_true
 
         # What `gori run project scope add exclude ...` in a second terminal does: it writes
         # to the SAME db, and nothing notifies the running job (P8 — the job pulls).
@@ -70,13 +70,36 @@ describe Gori::Discover::StoreScope do
 
         # Inside the window the run keeps its last-known rules — the deliberate tradeoff
         # DESIGN.md §7 records, since a per-send DB read is what P6 rules out.
-        policy.allowed?("https://acme.test/logout", "acme.test").should be_true
+        policy.allowed?("https://acme.test/logout", "acme.test", nil).should be_true
 
         sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
 
-        policy.allowed?("https://acme.test/logout", "acme.test").should be_false
+        policy.allowed?("https://acme.test/logout", "acme.test", nil).should be_false
         # Unrelated URLs are unaffected — the reload re-read the rules, it did not fail shut.
-        policy.allowed?("https://acme.test/users", "acme.test").should be_true
+        policy.allowed?("https://acme.test/users", "acme.test", nil).should be_true
+      end
+    end
+
+    # #884. `gate_url` drops the port for the INCLUDE side (#407) and used to drop it for the
+    # EXCLUDE side too, so `exclude string ":19316"` was a rule discover could not act on at
+    # all — the proxy blocked that port and the crawler kept probing it.
+    it "honours an EXCLUDE that names a PORT, on the exclude spelling only" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "string", "https://acme.test/api/")
+        scope.add("exclude", "string", ":19316")
+        policy = D::StoreScope.new(scope)
+
+        p8443 = D::Url.parse("https://acme.test:8443/api/v1").not_nil!
+        p19316 = D::Url.parse("https://acme.test:19316/api/v1").not_nil!
+
+        # The carve-out holds...
+        policy.allowed?(D::Url.gate_url(p19316), p19316.host, D::Url.exclude_url(p19316))
+          .should be_false
+        # ...and the port-free INCLUDE still covers every other non-default port, which is the
+        # half that must NOT move: `gate_url` is what makes an include portable across ports.
+        policy.allowed?(D::Url.gate_url(p8443), p8443.host, D::Url.exclude_url(p8443))
+          .should be_true
       end
     end
 
@@ -93,8 +116,8 @@ describe Gori::Discover::StoreScope do
         sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
         # The raise is swallowed and the rules loaded before it stay in force: Sandbox still
         # blocks an off-allowlist host rather than the run dying or allowing everything.
-        policy.allowed?("https://acme.test/s", "acme.test").should be_true
-        policy.allowed?("https://other.test/s", "other.test").should be_false
+        policy.allowed?("https://acme.test/s", "acme.test", nil).should be_true
+        policy.allowed?("https://other.test/s", "other.test", nil).should be_false
         scope.reload_attempts.should be > 0
       end
     end
@@ -114,11 +137,11 @@ describe Gori::Discover::StoreScope do
         sleep(Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds)
 
         # Layer 2 bites — that is the whole point of #396 …
-        policy.allowed?("http://t/logout", "t").should be_false
+        policy.allowed?("http://t/logout", "t", nil).should be_false
         # … while Layer 1 stays exactly as the surface settled it before the first byte, so an
         # ordinary link is still judged by same-origin rather than by an empty allowlist.
         policy.configured?.should be_false
-        policy.allowed?("http://t/users", "t").should be_true
+        policy.allowed?("http://t/users", "t", nil).should be_true
         # The live scope really did flip; only the policy's Layer-1 answer is pinned.
         scope.configured?.should be_true
       end

@@ -73,7 +73,7 @@ private class RecordingScope < D::ScopePolicy
   def initialize(@asked : Array(String))
   end
 
-  def allowed?(url : String, host : String) : Bool
+  def allowed?(url : String, host : String, exclude_url : String?) : Bool
     @asked << url
     true
   end
@@ -95,7 +95,7 @@ private class DenyExact < D::ScopePolicy
   def initialize(@deny : Set(String))
   end
 
-  def allowed?(url : String, host : String) : Bool
+  def allowed?(url : String, host : String, exclude_url : String?) : Bool
     !@deny.includes?(url)
   end
 
@@ -115,7 +115,7 @@ private class AllowExact < D::ScopePolicy
   def initialize(@allow : Set(String))
   end
 
-  def allowed?(url : String, host : String) : Bool
+  def allowed?(url : String, host : String, exclude_url : String?) : Bool
     @allow.includes?(url)
   end
 
@@ -136,7 +136,7 @@ private class DenyAfterFirstAsk < D::ScopePolicy
     @asked = Set(String).new
   end
 
-  def allowed?(url : String, host : String) : Bool
+  def allowed?(url : String, host : String, exclude_url : String?) : Bool
     @asked.add?(url)
   end
 
@@ -156,7 +156,7 @@ end
 private class FlippableScope < Gori::Discover::ScopePolicy
   property? denying : Bool = false
 
-  def allowed?(url : String, host : String) : Bool
+  def allowed?(url : String, host : String, exclude_url : String?) : Bool
     !@denying
   end
 

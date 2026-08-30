@@ -222,7 +222,13 @@ module Gori::Discover
       # gate-independent (`Outbound#evaluate`), so `unscoped?` is "no configured scope" and
       # `in_scope?` is "inside the include boundary" — the two questions this used to answer
       # by pulling the Scope out and re-running `configured?` / `matches_url?` by hand.
-      verdict = outbound.check(seed, host)
+      # Asked in the SAME two spellings `Engine`'s Layer 2 uses (`Url.gate_urls`), and that is
+      # a fix, not bookkeeping: `seed` carries its port, so the INCLUDE side used to be handed
+      # `https://acme.test:8443/api` while every url-level rule was written port-free — Layer 1
+      # falsely denied a legitimate non-default-port seed, which is the half of #407 the engine
+      # comment names but only Layer 2 ever got. The EXCLUDE side now reads the port (#884).
+      gate_seed, gate_excl = Url.gate_urls(seed)
+      verdict = outbound.check(gate_seed, host, gate_excl)
       # Only a genuinely absent project gets OpenScope. A project whose scope simply has no
       # RULES does not: `verdict.unscoped?` is true exactly when `Scope#configured?` is false,
       # and Sandbox is enabled independently of rules (`Scope#enable_sandbox`) — so discover

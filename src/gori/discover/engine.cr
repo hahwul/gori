@@ -15,15 +15,21 @@ module Gori::Discover
   # Injected scope policy — keeps the engine Store-free. `allowed?` is the excludes/sandbox
   # gate applied in EVERY containment mode; `boundary?` is the include-allowlist used only
   # for scope-aware containment; `configured?` gates the scope-aware → same-origin fallback.
+  #
+  # `allowed?` takes the URL TWICE, in its two spellings: `url` is `Url.gate_url` — port-free,
+  # because an INCLUDE has never had a port dimension (#407) — and `exclude_url` is
+  # `Url.exclude_url`, the same URL WITH its port, which only the EXCLUDE side reads, nil on a
+  # default port. Without the second one `exclude string ":8443"` held on the proxy and not
+  # here, so one scope described two different sets depending on which tool was asking (#884).
   abstract class ScopePolicy
-    abstract def allowed?(url : String, host : String) : Bool
+    abstract def allowed?(url : String, host : String, exclude_url : String?) : Bool
     abstract def boundary?(url : String, host : String) : Bool
     abstract def configured? : Bool
   end
 
   # Default policy (specs / unconfigured scope): nothing blocked, no include boundary.
   class OpenScope < ScopePolicy
-    def allowed?(url : String, host : String) : Bool
+    def allowed?(url : String, host : String, exclude_url : String?) : Bool
       true
     end
 
@@ -622,12 +628,13 @@ module Gori::Discover
           # blocked seed blocks everything derived from it, so the alternative is a run that
           # finishes with zero findings and no reason, which reads as "there is nothing
           # there" instead of "gori sent nothing" (P4).
-          # `gate_url`, not `normalize`: gori's scope model has no port dimension, so a
-          # port-bearing URL misses a host-qualified string/regex include/exclude and the
-          # seed check both falsely denies a legitimate non-default-port target and fails
-          # open on an exclude (#407). Report the normalized URL, but ASK the port-less one.
+          # `gate_url`, not `normalize`: a url-level INCLUDE has no port dimension, so a
+          # port-bearing URL misses a host-qualified string/regex rule and the seed check
+          # falsely denies a legitimate non-default-port target (#407). Report the normalized
+          # URL, ASK the port-less one — and hand the EXCLUDE side `exclude_url`, which is the
+          # port-bearing spelling the proxy has always been able to act on (#884).
           seed_norm = Url.normalize(sp)
-          @scope.allowed?(Url.gate_url(sp), sp.host) ? nil : "#{SEED_BLOCKED}: #{seed_norm}"
+          @scope.allowed?(Url.gate_url(sp), sp.host, Url.exclude_url(sp)) ? nil : "#{SEED_BLOCKED}: #{seed_norm}"
         end
       @seed_parts = sp || Url::Parts.new("http", "invalid.invalid", 80, "/", nil)
       # A path-scoped run (seed path deeper than "/") confines discovery to that subtree.
@@ -864,11 +871,13 @@ module Gori::Discover
     # #364). A blocked one is skipped silently rather than failing the run: unlike the seed,
     # the crawl is still meaningful without it.
     private def enqueue_well_known(url : String, source : Source) : Nil
-      # `url` is built from Url.origin(@seed_parts), so its host IS the seed's host. Gate on the
-      # PORT-LESS form (gate_url) — gori's scope has no port dimension, so a port-bearing URL
-      # misses a host-qualified string/regex rule (#407). `url` keeps its port for the Fetch.
-      gate = (p = Url.parse(url)) ? Url.gate_url(p) : url
-      return unless @scope.allowed?(gate, @seed_parts.host)
+      # `url` is built from Url.origin(@seed_parts), so its host IS the seed's host. Gate the
+      # INCLUDE side on the PORT-LESS form — a port-bearing URL misses a host-qualified
+      # string/regex include rule (#407) — and the EXCLUDE side on the port-bearing one, so a
+      # carve-out naming a port holds here as it does on the proxy (#884). `url` keeps its port
+      # for the Fetch either way.
+      gate, gate_excl = Url.gate_urls(url)
+      return unless @scope.allowed?(gate, @seed_parts.host, gate_excl)
       @frontier << Task.new(TaskKind::Fetch, url, 0, source)
     end
 
@@ -883,7 +892,7 @@ module Gori::Discover
       return if @dirs.includes?(dir)
       return unless p = Url.parse(dir)
       # Gate on the PORT-LESS form (#407), same as the seed and well-known checks.
-      return unless @scope.allowed?(Url.gate_url(p), @seed_parts.host)
+      return unless @scope.allowed?(Url.gate_url(p), @seed_parts.host, Url.exclude_url(p))
       @dirs << dir
       @frontier << Task.new(TaskKind::Calibrate, dir, 0, Source::Bruteforced, dir: dir, seed_only: true)
     end
@@ -1310,7 +1319,7 @@ module Gori::Discover
     # calibration, and this queues `calibrate_probes + extensions` real sends.
     private def enqueue_recalibration(dir : String) : Nil
       return unless p = Url.parse(dir)
-      return unless @scope.allowed?(Url.gate_url(p), p.host)
+      return unless @scope.allowed?(Url.gate_url(p), p.host, Url.exclude_url(p))
       @frontier.unshift(Task.new(TaskKind::Calibrate, dir, 0, Source::Bruteforced, dir: dir))
     end
 
@@ -1395,8 +1404,8 @@ module Gori::Discover
       return nil unless Headers.safe_url?(p)
       return nil unless confined?(p)
       url = Url.normalize(p)
-      gate = Url.gate_url(p)                          # port-less, matching every other Layer-2 consumer (see gate_url)
-      return nil unless @scope.allowed?(gate, p.host) # excludes/sandbox — every mode
+      gate = Url.gate_url(p)                                              # port-less INCLUDE spelling; the EXCLUDE side reads the port (see gate_url)
+      return nil unless @scope.allowed?(gate, p.host, Url.exclude_url(p)) # excludes/sandbox — every mode
       ok = case @config.containment
            in Containment::SameOrigin        then same_origin?(p)
            in Containment::HostAndSubdomains then same_or_subdomain?(p)
@@ -1465,7 +1474,7 @@ module Gori::Discover
     # catch it, but only after the candidate had been enqueued, retried `retries + 1` times
     # and counted as an error — so refuse it at the same place every other derived URL is.
     private def probe_allowed?(p : Url::Parts) : Bool
-      Headers.safe_url?(p) && confined?(p) && @scope.allowed?(Url.gate_url(p), p.host)
+      Headers.safe_url?(p) && confined?(p) && @scope.allowed?(Url.gate_url(p), p.host, Url.exclude_url(p))
     end
 
     private def same_origin?(p : Url::Parts) : Bool
@@ -1694,12 +1703,13 @@ module Gori::Discover
       # `enqueue_probes` and re-checked here so the two can never drift.
       #
       # `Url.gate_url`, not `Url.normalize`: the `dir + cand` concat is unnormalized, and the
-      # scope must be asked in the port-less form every other Layer-2 consumer uses — see
-      # `Url.gate_url`. The policy re-reads its rules on the schedule every other sweep uses
+      # INCLUDE side must be asked in the port-less form every allowlist consumer uses — see
+      # `Url.gate_url`; `Url.exclude_url` beside it is the port-bearing spelling only the
+      # carve-out reads. The policy re-reads its rules on the schedule every other sweep uses
       # (`StoreScope#allowed?`, throttled to `Outbound::RELOAD_INTERVAL`), so a scope edit made
       # while the run is in flight stops it here within that window — on every surface, not
       # only in the TUI where the `Scope` object happens to be shared live (#396).
-      unless @scope.allowed?(Url.gate_url(p), p.host)
+      unless @scope.allowed?(Url.gate_url(p), p.host, Url.exclude_url(p))
         # Booked here rather than at the enqueue gates, and for the same reason the error
         # facts above are: this is the one line every send passes, so one candidate is one
         # count — no retry doubles it (the refusal returns before the loop) and no

@@ -139,24 +139,46 @@ module Gori::Discover
       q ? "#{origin(p)}#{p.path}?#{q}" : "#{origin(p)}#{p.path}"
     end
 
-    # The string the SCOPE is asked about — deliberately NOT `normalize`.
+    # The string the scope's INCLUDE side is asked about — deliberately NOT `normalize`.
     #
-    # gori's scope model has no port dimension: `Scope.request_url` is
-    # `"#{scheme}://#{host}#{target}"` and the proxy splits host from port before asking
-    # (`client_conn.cr`), so every other Layer-2 consumer judges a port-LESS URL. `normalize`
-    # appends `:port` whenever it is not 80/443, so on a non-default port discover was asking
-    # about `http://acme.test:8080/logout` while a rule was written against
-    # `http://acme.test/logout` — and a host-qualified `string` or `regex` EXCLUDE therefore
-    # never matched. That is the exact rule the brute-forcer is supposed to obey, silently
-    # failing open on any `:8080`/`:8443` target.
+    # A url-level INCLUDE has no port dimension: `Scope.request_url` /
+    # `QL::URL_EXPR_NO_PORT` build `"#{scheme}://#{host}#{target}"` and the proxy splits host
+    # from port before asking (`client_conn.cr`), so every allowlist consumer judges a
+    # port-LESS URL. `normalize` appends `:port` whenever it is not 80/443, so on a non-default
+    # port discover was asking about `http://acme.test:8080/logout` while the rule was written
+    # against `http://acme.test/logout` — and a host-qualified `string` or `regex` rule
+    # therefore never matched (#407).
+    #
+    # The EXCLUDE side is `exclude_url` below and DOES carry the port (#884). Dropping it there
+    # too meant a carve-out naming a port held on the proxy and not here, which is the same
+    # rule describing two different sets — the opposite failure, and the permissive one.
     #
     # Kept as its own function rather than folded into `normalize` because the two answers
     # must differ: the crawl, the findings and the Sitemap rows all need the port (it is part
-    # of the resource's identity), and only the gate question drops it.
+    # of the resource's identity), and only the include question drops it.
     def self.gate_url(p : Parts) : String
       q = p.query
       base = "#{p.scheme}://#{p.host}#{p.path}"
       q ? "#{base}?#{q}" : base
+    end
+
+    # The EXCLUDE half of the gate question, or nil when there is no second spelling to ask.
+    #
+    # `gate_url` above drops the port because an INCLUDE has never had one — that is #407 and
+    # it still holds. But dropping it on the EXCLUDE side too meant `exclude string ":8443"`
+    # was a rule discover could not act on at all, and the proxy CAN act on it (#884), so the
+    # same scope described two different sets depending on which tool was looking. `normalize`
+    # is already exactly the port-bearing spelling, default port elided, that `FlowRow#url` and
+    # `Gori::Url.request_url` produce — so an exclude reads one string across every surface.
+    def self.exclude_url(p : Parts) : String?
+      default_port?(p.scheme, p.port) ? nil : normalize(p)
+    end
+
+    # `gate_url` + `exclude_url` for a caller holding only a URL STRING (the seed, a
+    # well-known document). An unparseable URL answers with itself and no exclude spelling,
+    # which is what every gate here already did with it.
+    def self.gate_urls(url : String) : {String, String?}
+      (p = parse(url)) ? {gate_url(p), exclude_url(p)} : {url, nil}
     end
 
     # EXACT identity — lowercase host, drop default port + fragment, sort query pairs, KEEP

@@ -186,6 +186,42 @@ describe Gori::Discover::Plan do
       end
     end
 
+    # #884 / the Layer-1 half of #407. The seed carries its port, and Layer 1 used to be handed
+    # that string verbatim while every url-level include is written port-free — so a discover
+    # run against a legitimate `:8443` target was refused as out of scope by the very rule that
+    # scoped it in, and the engine's own comment (`gate_url`) named the bug without fixing it
+    # on this side. The EXCLUDE side now reads the port instead.
+    it "judges the seed in the two spellings the engine's Layer 2 already used" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "string", "https://acme.test/api/")
+        ob = Gori::Outbound.agent(scope, false)
+
+        gate, excl = D::Url.gate_urls("https://acme.test:8443/api/v1")
+        ob.check(gate, "acme.test", excl).blocked?.should be_false
+        # ...and the port-bearing spelling on its own is what the include cannot match, which
+        # is exactly why Layer 1 must not be handed it.
+        ob.check("https://acme.test:8443/api/v1", "acme.test").blocked?.should be_true
+      end
+    end
+
+    it "refuses a seed an EXCLUDE carves out BY PORT" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", ":19316")
+        ob = Gori::Outbound.agent(scope, false)
+
+        gate, excl = D::Url.gate_urls("https://acme.test:19316/api")
+        v = ob.check(gate, "acme.test", excl)
+        v.blocked?.should be_true
+        v.excluded?.should be_true # names the rule to delete, not "add an include"
+
+        ok_gate, ok_excl = D::Url.gate_urls("https://acme.test:19304/api")
+        ob.check(ok_gate, "acme.test", ok_excl).blocked?.should be_false
+      end
+    end
+
     it "reads the user wordlist from config.user_wordlist on every surface" do
       # `--wordlist` and MCP's `wordlist` arg used to bypass the Config and be handed to
       # Wordlist.load separately, leaving config.user_wordlist nil on two surfaces out of
@@ -217,7 +253,7 @@ describe Gori::Discover::Plan do
           # keeps falling back to same-origin and boundary? is never consulted.
           policy.configured?.should be_false
           # And with Sandbox off, an ordinary rule-less run is bounded exactly as before.
-          policy.allowed?(seed, "acme.test").should be_true
+          policy.allowed?(seed, "acme.test", nil).should be_true
         end
       end
     end
@@ -233,7 +269,7 @@ describe Gori::Discover::Plan do
         [Gori::Outbound.agent(scope, false), Gori::Outbound.cli(scope, false),
          Gori::Outbound.interactive(scope)].each do |ob|
           D::Plan.build(D::PlanOptions.new(seed), ob).policy
-            .allowed?(seed, "acme.test").should be_false
+            .allowed?(seed, "acme.test", nil).should be_false
         end
       end
     end
@@ -278,7 +314,7 @@ describe Gori::Discover::Plan do
           # back to same-origin instead of blocking every hop off the seed.
           policy.configured?.should be_false
           # The hard gate survives the waiver.
-          policy.allowed?(seed, "acme.test").should be_true
+          policy.allowed?(seed, "acme.test", nil).should be_true
         end
 
         # The TUI is ALSO Layer-1 waived — for Reason::Interactive — and that must NOT
@@ -297,7 +333,7 @@ describe Gori::Discover::Plan do
         scope.add("include", "host", "other.test")
         scope.enable_sandbox
         policy = D::Plan.build(D::PlanOptions.new(seed), Gori::Outbound.cli(scope, true)).policy
-        policy.allowed?(seed, "acme.test").should be_false
+        policy.allowed?(seed, "acme.test", nil).should be_false
       end
     end
 

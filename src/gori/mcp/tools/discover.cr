@@ -16,7 +16,10 @@ module Gori
         plan = build_discover_plan(h, ob)
         # Matched on the SEED URL (path included), not its bare origin: a project scoped to
         # `https://acme.test/api/` should be crawlable from `https://acme.test/api/v1`.
-        sc = ob.check(plan.seed, plan.host)
+        # Two spellings: port-free for the include boundary (#407), port-bearing for the
+        # carve-out (#884) — the same pair `Discover::Plan.resolve_policy` asks.
+        gate_seed, gate_excl = Gori::Discover::Url.gate_urls(plan.seed)
+        sc = ob.check(gate_seed, plan.host, gate_excl)
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "ds_#{@job_seq}"

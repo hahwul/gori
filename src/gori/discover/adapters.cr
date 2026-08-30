@@ -32,9 +32,16 @@ module Gori::Discover
     # thousands of probes — kept going against a start-time snapshot (#396). Only the TUI was
     # exempt, and by accident: it shares its live `Scope` object, which its own data_version
     # poll reloads.
-    def allowed?(url : String, host : String) : Bool
+    # `url` is the port-FREE spelling every url-level INCLUDE was written for (#407);
+    # `exclude_url` is the same url WITH its port and is asked of the EXCLUDE side ONLY, and
+    # only when there is a distinct one (a default port has none). Before it, an
+    # `exclude string ":8443"` held on the proxy and not here, so one scope described two
+    # different sets depending on which tool was asking (#884). The sandbox test stays on the
+    # port-free url: it is `sandbox && !allowlisted?`, and the allowlist is the include side.
+    def allowed?(url : String, host : String, exclude_url : String?) : Bool
       refresh
-      !@scope.sandbox_blocks?(url, host) && !@scope.excluded?(url, host)
+      return false if @scope.sandbox_blocks?(url, host) || @scope.excluded?(url, host)
+      !(exclude_url && @scope.excluded?(exclude_url, host))
     end
 
     # Layer 1, whose only caller (`Engine#bounded_url`) asks it immediately after `allowed?`,

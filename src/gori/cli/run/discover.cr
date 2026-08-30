@@ -196,7 +196,10 @@ module Gori
       # a configured one refuses an out-of-scope seed unless --allow-unscoped); only the
       # sentence is ours.
       private def self.guard_discover_scope(plan : Discover::Plan, outbound : Gori::Outbound) : Nil
-        verdict = outbound.check(plan.seed, plan.host)
+        # The two spellings `Discover::Plan.resolve_policy` and the engine's Layer 2 both use:
+        # port-free for the include boundary (#407), port-bearing for the carve-out (#884).
+        gate_seed, gate_excl = Discover::Url.gate_urls(plan.seed)
+        verdict = outbound.check(gate_seed, plan.host, gate_excl)
         return unless verdict.blocked?
         abort "gori run discover: #{plan.seed} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
       end

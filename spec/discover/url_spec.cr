@@ -343,6 +343,29 @@ describe Gori::Discover::Url do
         U.parse("http://ev\r\nil.test/a").should be_nil
       end
 
+      # #884. `gate_url` is the INCLUDE spelling and stays port-free (#407); `exclude_url` is
+      # the EXCLUDE spelling and is `normalize` — the same string `FlowRow#url` and
+      # `Gori::Url.request_url` produce, so ONE exclude rule reads the same on every surface.
+      # nil on a default port, where there is no second spelling to spend a rule walk on.
+      it "gives the EXCLUDE side the port the INCLUDE side deliberately drops" do
+        p = U.parse("https://acme.test:19316/api/v1?q=1").not_nil!
+        U.gate_url(p).should eq("https://acme.test/api/v1?q=1")
+        U.exclude_url(p).should eq("https://acme.test:19316/api/v1?q=1")
+        U.exclude_url(p).should eq(Gori::Url.request_url("https", "acme.test", "/api/v1?q=1", 19316))
+
+        U.exclude_url(U.parse("https://acme.test/api").not_nil!).should be_nil
+        U.exclude_url(U.parse("http://acme.test/api").not_nil!).should be_nil
+        U.exclude_url(U.parse("https://acme.test:443/api").not_nil!).should be_nil
+      end
+
+      it "answers gate_urls from a URL string, and passes an unparseable one through" do
+        U.gate_urls("https://acme.test:19316/x")
+          .should eq({"https://acme.test/x", "https://acme.test:19316/x"})
+        U.gate_urls("https://acme.test/x").should eq({"https://acme.test/x", nil})
+        # Not a URL this module can read: the gates already judged such a string verbatim.
+        U.gate_urls("not a url").should eq({"not a url", nil})
+      end
+
       it "gives the URL ONE spelling across identity, the gate question and the finding" do
         # The reason this is repaired at parse and not in `build_get`: these five strings all
         # come off the same Parts, and a raw space left in any of them would make the scope
