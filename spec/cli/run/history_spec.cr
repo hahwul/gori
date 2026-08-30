@@ -120,6 +120,27 @@ describe "gori run history — CLI::Output rows" do
     txt.should contain("G·ET")
   end
 
+  # `ljust(7)` guarantees a separator only while the method is SHORTER than 7 — so the two
+  # most ordinary long methods in the registry ran flush into SCHEME and the row printed
+  # `#87    OPTIONShttps  api.demo.test …`, which nothing can split back apart.
+  it "keeps a space between a 7+-character METHOD and the SCHEME column" do
+    {"OPTIONS", "CONNECT", "PROPFIND", "VERSION-CONTROL", "M" * 40}.each do |method|
+      row = Gori::Store::FlowRow.new(
+        id: 87_i64, created_at: 0_i64, scheme: "https", method: method, host: "api.demo.test",
+        port: 443, target: "/", status: 204, size: 0_i64, state: Gori::Store::FlowState::Complete)
+      txt = Gori::CLI::Output.flow_row_text(row)
+      txt.should contain("#{method} https") # the method survives WHOLE, with a separator
+      txt.should_not contain("#{method}https")
+    end
+  end
+
+  it "still pads a short METHOD to its column, so the rows stay aligned" do
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,
+      target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    Gori::CLI::Output.flow_row_text(row).should contain("GET    https")
+  end
+
   it "term_safe leaves ordinary UTF-8 untouched but replaces control bytes" do
     Gori::CLI::Output.term_safe("api.test/π/데이터").should eq("api.test/π/데이터")
     Gori::CLI::Output.term_safe("a\tb\nc").should eq("a·b·c")

@@ -224,6 +224,18 @@ module Gori
         String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
       end
 
+      # A padded cell that is never flush against the one after it. `ljust(n)` alone guarantees
+      # a separator only while the value is SHORTER than the column: an HTTP method is an RFC
+      # 9110 token of any length, and at exactly 7 characters — `OPTIONS` and `CONNECT`, both
+      # registered and both routine (CORS preflight, tunnels) — the pad produced zero spaces
+      # and the row read `OPTIONShttps`, which neither an operator nor a script can split.
+      # The value stays WHOLE and the column grows by the one space it owes: unlike the TUI's
+      # fixed 8-cell clamp, a CLI listing has no geometry to defend, and truncating `PROPFIND`
+      # to buy a gap would lose information a script is reading this line for.
+      def self.pad_cell(s : String, width : Int32) : String
+        s.size < width ? s.ljust(width) : "#{s} "
+      end
+
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow, columns : Array({String, String})? = nil) : String
@@ -237,7 +249,7 @@ module Gori
         dur = row.duration_us.try { |us| " #{human_us(us)}" } || ""
         String.build do |io|
           io << '#' << row.id.to_s.ljust(6)
-          io << term_safe(row.method).ljust(7)
+          io << pad_cell(term_safe(row.method), 7)
           io << term_safe(row.scheme).ljust(6)
           io << loc
           io << "  -> " << status
@@ -713,7 +725,7 @@ module Gori
         String.build do |io|
           io << authorize_verdict_label(v)
           io << "  #" << (t.flow_id.try(&.to_s) || "-").ljust(6)
-          io << term_safe(t.method).ljust(7)
+          io << pad_cell(term_safe(t.method), 7)
           io << term_safe(t.url)
           # The count is the whole reason the headline is worth reading twice: which identities,
           # and how many of them, were served what the baseline was served.
