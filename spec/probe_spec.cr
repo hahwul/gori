@@ -868,6 +868,40 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  it "does not flag prose that merely NAMES a Python traceback, but flags a real one" do
+    with_store do |store|
+      # A tutorial ABOUT tracebacks reproduces the header in prose. Every other entry in
+      # ERROR_SIGNATURES already screens that shape; this one used to be the exception.
+      prose = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "<h2>Reading a Traceback (most recent call last)</h2>" \
+              "<p>This tutorial explains Python tracebacks.</p>")
+      codes_of(prose).should_not contain("error_stack_leak")
+      # Nor does the header JOIN to an unrelated example frame far down the page. (The page
+      # still trips the sibling `File "….py", line N` signature on its own — a separate,
+      # pre-existing pattern — so this asserts on the evidence label, not the code.)
+      far = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "Traceback (most recent call last) is the header Python prints. #{"x" * 200} " +
+              %(For example File "demo.py", line 3 shows a frame.))
+      far.select(&.code.==("error_stack_leak")).map(&.evidence).should_not contain("Python traceback")
+      # A real CPython dump — header plus its File/line frame — still fires.
+      trace = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "text/html",
+        body: %(Traceback (most recent call last):\n  File "/app/main.py", line 42, in <module>\n) +
+              "    boom()\nZeroDivisionError: division by zero")
+      trace.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("Python traceback")
+      # …including the `File "<stdin>", line N` form, which the sibling `.py`-only frame
+      # pattern does not cover, and the JSON-escaped form an API error response embeds.
+      stdin = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "text/html",
+        body: %(Traceback (most recent call last):\n  File "<stdin>", line 1, in <module>\nNameError: x))
+      stdin.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("Python traceback")
+      json = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "application/json",
+        body: %({"error":"Traceback (most recent call last):\\n  File \\"/srv/api/views.py\\", line 88"}))
+      json.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("Python traceback")
+    end
+  end
+
   it "does not flag unsafe-inline confined to style-src, but does for script-src" do
     with_store do |store|
       safe = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \

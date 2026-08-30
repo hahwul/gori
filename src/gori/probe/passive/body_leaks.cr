@@ -44,7 +44,17 @@ module Gori
         # `[^)]*` has always crossed newlines regardless of the flag. Check that before adding
         # `/m` to a fourth.
         ERROR_SIGNATURES = [
-          {/Traceback \(most recent call last\)/, "Python traceback"},
+          # A real CPython traceback is ALWAYS the header followed by its first `File "…",
+          # line N` frame, so the frame is required here — the header ALONE is prose (a
+          # tutorial, a changelog, a Q&A page NAMING the traceback), which is the same "not
+          # when merely named" screen every neighbour below already carries. The gap is
+          # bounded and `[\s\S]` rather than `.` under `/m`, both to keep the header and its
+          # frame adjacent (prose plus an unrelated example frame 200 chars later must not
+          # join) and to leave the DOTALL caveat above about `/m` untouched. `\\?"` admits the
+          # JSON-escaped form (`File \\"/app/x.py\\", line 42`), the shape an API error
+          # response embeds a traceback in — the `[^"]*` path already spans the backslashes
+          # of a Windows path either way.
+          {/Traceback \(most recent call last\):[\s\S]{0,40}?File \\?"[^"]*", line \d+/, "Python traceback"},
           # A real CPython frame (`File "x.py", line N`) — the exact shape, so a bare
           # "app.py:42" path reference (the old colon form's false positive) stays out.
           {/File "[^"]*\.py", line \d+/, "Python stack frame"},
