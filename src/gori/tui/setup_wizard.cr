@@ -298,7 +298,13 @@ module Gori::Tui
         # declined her still stage a non-default motion, which #finish would then persist —
         # materializing a "companion" section in settings.json for someone who said no. Settings
         # only omits that section while EVERY field is factory-default.
-        @companion_motion = @companion_motion == "calm" ? "lively" : "calm"
+        # CYCLES the three, in the order the settings view lists them, and rides
+        # Settings::COMPANION_MOTIONS so a fourth mode reaches the wizard by existing
+        # rather than by someone remembering this line.
+        modes = Settings::COMPANION_MOTIONS.to_a
+        i = modes.index(@companion_motion) || 0
+        step = key.left? ? -1 : 1
+        @companion_motion = modes[(i + step) % modes.size]
       end
     end
 
@@ -863,10 +869,10 @@ module Gori::Tui
     # Kept short enough to survive the 80-column case: the card is {w - 4, 84}.min, so an
     # 80-column terminal leaves ~59 columns of interior once her band is held back.
     private def companion_motion_recap : String
-      if @companion_motion == "calm"
-        "calm    (←/→ lively · adds winks and a glint)"
-      else
-        "lively  (←/→ calm · half the blinks, for SSH)"
+      case @companion_motion
+      when "calm"  then "calm    (←/→ · half the blinks, for SSH)"
+      when "still" then "still   (←/→ · she never moves on her own)"
+      else              "lively  (←/→ · winks, a glint, gestures)"
       end
     end
 

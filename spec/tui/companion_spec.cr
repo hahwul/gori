@@ -224,6 +224,63 @@ describe Gori::Tui::Companion do
     calm.should be < lively
   end
 
+  # The point of the mode, asserted as the number the run loop actually pays: not "she
+  # blinks less" but "she never reports a change at all". #compose is constant across every
+  # idle beat once the blink is gone, so this is the doze without the ninety-second wait —
+  # and it holds for a sweep far longer than SLEEP_AFTER, poking her the whole way so the
+  # doze is not what is being measured.
+  # Notices off isolates the axis: a bubble arriving or expiring IS a change something on
+  # screen shows, so it belongs to the speech tests, not to this one.
+  it "reports no change at all on still, however long she is awake" do
+    with_companion(true, "still", notices: false) do
+      companion = Companion.new(Notifications.new)
+      t0 = Time.instant
+      companion.tick(t0)
+      changed = (1..600).count do |i| # 2 minutes of AWAKE time
+        now = t0 + Companion::BEAT * i
+        companion.poke(now)
+        companion.tick(now)
+      end
+      changed.should eq(0)
+      companion.frame.not_nil!.pose.should eq(:idle)
+    end
+  end
+
+  # "still" is about motion she starts HERSELF. A result someone is waiting on is not that,
+  # so the face still reacts — the mode would otherwise be a second, quieter spelling of
+  # Notices off, which already exists.
+  it "still reacts to a result on still, minus the movement" do
+    with_companion(true, "still") do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      notes.push(:error, "upstream refused the connection")
+      poses = (1..4).map do |i|
+        companion.tick(t0 + Companion::BEAT * i)
+        companion.frame.not_nil!
+      end
+      poses.first.pose.should eq(:error)     # the face lands …
+      poses.map(&.shake).uniq.should eq([0]) # … and she does not flinch wearing it
+    end
+  end
+
+  # The mode was added to a predicate spelled `!= "calm"`, which is the same answer as
+  # `== "lively"` for exactly as long as there are two modes. Pinned as a property of the
+  # whole set rather than of the one new member.
+  it "counts only lively as lively" do
+    prev = Gori::Settings.companion_motion
+    begin
+      Gori::Settings::COMPANION_MOTIONS.each do |mode|
+        Gori::Settings.companion_motion = mode
+        Gori::Settings.companion_lively?.should eq(mode == "lively")
+        Gori::Settings.companion_still?.should eq(mode == "still")
+      end
+    ensure
+      Gori::Settings.companion_motion = prev
+    end
+  end
+
   # --- idle gestures --------------------------------------------------------
 
   # The feature itself — and it asserts the gestures arrive EARLY, not merely eventually.

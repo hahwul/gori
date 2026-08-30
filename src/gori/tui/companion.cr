@@ -396,6 +396,9 @@ module Gori::Tui
     # So flinch-back-flinch instead of left-right-still: same three beats, same read, and
     # every offset it emits is one .draw honours.
     private def shake_for(mood : Symbol) : Int32
+      # The one part of a REACTION "still" drops, because it is the one part that is
+      # literally movement — she keeps the ×_× face, she just does not flinch wearing it.
+      return 0 if Settings.companion_still?
       return 0 unless mood == :alarm
       case @beat - @mood_beat
       when 0, 2 then -1
@@ -422,8 +425,13 @@ module Gori::Tui
     end
 
     # One blink per window at a hashed offset, plus a double-blink in one window in four.
-    # On "calm" the window doubles, so she blinks half as often.
+    # On "calm" the window doubles, so she blinks half as often; on "still" there is no
+    # window at all. The blink is the LAST track to go, which is why it is the one that
+    # tells the three modes apart: with it gone #compose is constant across every idle
+    # beat, so #repaint answers false forever and a still Miss Ring costs the run loop
+    # nothing whatsoever — the doze, without the ninety-second wait.
     private def blink? : Bool
+      return false if Settings.companion_still?
       shift = Settings.companion_lively? ? BLINK_SHIFT : BLINK_SHIFT + 1
       h, off = window(shift, 1_u32)
       at = (h % 13).to_i
