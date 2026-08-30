@@ -708,11 +708,29 @@ describe Gori::Tui::Companion do
 
   # The bar placement is a SLICE of the body sprite, not a second art table — if these ever
   # disagree the two placements have drifted.
-  it "draws the bar chip from the body sprite's own middle row" do
+  # Every cell of the chip is a cell of the body sprite — the face from row 1, the mood
+  # badge from row 0 — so the two placements cannot drift into two art tables.
+  it "draws the bar chip from the body sprite's own cells" do
     Mascot::POSES.each do |pose|
-      frame = Mascot::Frame.new(pose: pose)
-      Mascot.bar_label(frame).should eq(Mascot.rows(frame)[1][0, Mascot::BAR_W])
+      {nil, '×', '!'}.each do |badge|
+        frame = Mascot::Frame.new(pose: pose, badge: badge)
+        rows = Mascot.rows(frame)
+        chip = Mascot.bar_label(frame)
+        chip[0, Mascot::W - 1].should eq(rows[1][0, Mascot::W - 1]) # the equator, verbatim
+        chip[Mascot::W - 1].should eq(rows[0][Mascot::W - 1])       # …and the badge cell
+      end
     end
+  end
+
+  # The chip is where a `placement: bar` reader learns her mood, and leaving that to a hue
+  # shift of one gold is the signal a washed-out terminal or a colourblind reader has least
+  # of. Sweeps the mood ladder end to end rather than pinning one glyph: what matters is
+  # that a reaction is legible in the chip AT ALL.
+  it "carries the mood badge into the bar chip" do
+    seen = [:info, :happy, :warn, :alarm].map do |mood|
+      Mascot.bar_label(Mascot::Frame.new(mood: mood, badge: mood == :info ? nil : 'x'))[Mascot::W - 1]
+    end
+    seen.uniq.size.should be > 1 # …a reaction is not the same chip as rest
   end
 
   # The chip run is ordered so the fixed-width clock anchors the right edge; a chip that

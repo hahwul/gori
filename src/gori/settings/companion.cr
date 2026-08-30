@@ -17,10 +17,11 @@ module Gori::Settings
   DEFAULT_COMPANION_MOTION  = "lively" # "lively" | "calm"
   DEFAULT_COMPANION_NOTICES = true
   # Where she sits. "body" is the 8x3 sprite in the tab body's bottom-right corner; "bar"
-  # is a 7-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
-  # middle row alone, so the face survives and only the crown and floor are dropped. The
-  # bar form occludes nothing and needs no speech bubble: the status row already carries
-  # the toast for exactly these notifications.
+  # is an 8-cell one-row chip in the status row, alongside CPU/MEM and the clock — her
+  # middle row plus the mood badge, so the face and the one glyph that says "something is
+  # wrong" both survive, and only the crown and floor are dropped. The bar form occludes
+  # nothing and needs no speech bubble: the status row already carries the toast for
+  # exactly these notifications.
   DEFAULT_COMPANION_PLACEMENT = "body" # "body" | "bar"
 
   # All read live at the tick/draw sites, so a save takes effect on the next frame.
