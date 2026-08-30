@@ -98,7 +98,16 @@ module Gori
       # underscore label. Callers that want a BETTER message for a specific shape still check
       # first (`Vars.unresolved` for `{{baseUrl}}`, `Oas`/`Postman`/`Insomnia`); this is the
       # backstop, not their replacement.
-      HOST_VALID = /\A(?:\[[A-Za-z0-9:.%_-]+\]|[A-Za-z0-9._~%-]+)\z/
+      #
+      # The reg-name half is `\p{L}\p{N}`, not `A-Za-z0-9`, because a host is not an ASCII
+      # thing: `URI.parse` copies an IDN authority through in whatever form the source wrote
+      # it, and gori CAPTURES and stores the Unicode form. An ASCII-only whitelist meant gori
+      # could not read its own HAR export back — `https://쇼핑몰.한국/…` exported fine and
+      # re-imported as a skipped, malformed entry, against `Export::Har`'s stated fixed point.
+      # It cost the homograph cases too (`ѕhop.demo.test`, a Cyrillic dze), which are evidence
+      # an operator imports a capture specifically to keep. The exclusions above are unchanged
+      # and still do the work: `{`, `}`, `,`, `;` and space are neither a letter nor a digit.
+      HOST_VALID = /\A(?:\[[A-Za-z0-9:.%_-]+\]|[\p{L}\p{N}._~%-]+)\z/
 
       def self.normalize_url(url : String) : String
         u = url.strip

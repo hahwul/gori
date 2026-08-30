@@ -1427,6 +1427,22 @@ describe Gori::Import::Builder do
       end
     end
 
+    # A host is not an ASCII thing. `URI.parse` copies an IDN authority through in whatever
+    # form the source wrote it and gori CAPTURES and stores the Unicode form, so an ASCII-only
+    # whitelist meant gori could not read its own HAR export back: the demo project's own
+    # U-label host exported fine and re-imported as a skipped malformed entry, against
+    # `Export::Har`'s stated export→import→export fixed point. The homograph host is the
+    # same bug, and it is evidence an operator imports a capture specifically to keep.
+    it "accepts a U-label IDN host and a homograph one, not just punycode" do
+      {
+        "https://쇼핑몰.한국/api/주문/9"      => "쇼핑몰.한국",
+        "https://ѕhop.demo.test/login" => "ѕhop.demo.test",
+        "https://münchen.de/x"         => "münchen.de",
+      }.each do |url, host|
+        Gori::Import::Builder.endpoint(url)[1].should eq(host)
+      end
+    end
+
     it "makes a file that is not a URL list fail AS one, rather than importing its punctuation" do
       urls = File.tempname("gori", ".txt")
       begin
