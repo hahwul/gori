@@ -57,16 +57,18 @@ Saved chains can call each other. A recursive definition fails that step with a 
 
 | Category | Examples |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all` (every byte, WAF-bypass style), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` (aliased `idn-encode` / `idn-decode`) |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` — a binary document rendered as JSON text |
-| **Token** | `jwt-decode` (header + payload; signature shown, not verified) |
+| **Token** | `jwt-decode` (header + payload; signature shown, not verified), and the signed-session-cookie readers `cookie-decode` (auto-detects the framework), `flask-decode` (itsdangerous), `django-decode` (`django.core.signing`), `rack-decode` (Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |
 | **Escape** | `html-escape` / `html-unescape`, `json-escape` / `json-unescape`, `unicode-escape` / `unicode-unescape`, `xml-escape` / `xml-unescape`, `c-string-escape` / `c-string-unescape`, `shell-escape`, `powershell-escape` |
 | **Text** | `rot13`, `rot47`, `upper`, `lower`, `reverse`, `homoglyph`, `typo` |
 
 `brotli-decompress` and `zstd-decompress` are decompress-only, and that is the shape of the dependency rather than an omission: gori links the brotli *decoder* library and wraps libzstd's decompressor, because what a proxy needs is to read what an origin sent. Both accept the `br` and `zstd` aliases a `Content-Encoding` spells them with, and both tolerate a truncated stream — the ordinary case for a body copied out of a capture-capped flow. A gori built with `-Dwithout_native_codecs` still knows the names, and says that is the build it is rather than reporting a typo.
+
+The four session-cookie readers decode the envelope and show what the cookie carries; they never verify a signature. Cracking the signing key, forging a cookie, and verifying one live are the [Cookie workbench](/guide/cookie/)'s job — this tab is the read-only half of it, reachable inside a chain.
 
 `msgpack-decode` and `cbor-decode` read a binary document somebody else wrote and render it as JSON — one direction, and the one that matters. The JSON is a *projection*, not a re-encoding: what JSON has no room for comes back named rather than folded away (`{"$bin": …}` for a byte string, `{"$tag": …}` for a CBOR tag, `{"$ext": …}` for a MessagePack extension, a decimal string for an integer too wide for a JSON number). A document that runs out of input renders what it read and marks the spot with `{"$partial": …}`, which is the ordinary case for a body the capture cap cut short. One ambiguity comes with the projection: a document whose own map key is literally `$bin` or `$tag` renders the shape a wrapper does — escaping every key in every body to defend against the one body that does this would make the common body harder to read.
 

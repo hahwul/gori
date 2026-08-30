@@ -34,20 +34,25 @@ engagement.
 
 ### Capture & Intercept
 - Capturing proxy for HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE
-- Intercept on HTTP/1.1 and HTTP/2, gRPC included: hold, edit, forward, or drop in flight — and per-message on WebSocket, opt in with `proto:ws`
+- Intercept on HTTP/1.1 and HTTP/2, gRPC included: hold, edit, forward, or drop in flight — and per-message on an HTTP/1.1 WebSocket, opt in with `proto:ws`
 - Searchable History of every flow, with a query language for filtering
 - Scope rules, hostname overrides, and match & replace
 
-### Replay, Fuzz & Convert
-- Replay workbench for crafting and re-sending requests (incl. WebSocket & gRPC)
+### Replay, Fuzz & Decode
+- Repeater workbench for crafting and re-sending requests (incl. WebSocket & gRPC)
 - Intruder-style Fuzzer with four attack modes
-- Convert pipeline for chained encode / decode / hash
+- Decoder pipeline for chained encode / decode / hash, including signed session cookies
 - Side-by-side Comparer for diffing two flows
-- Inline JWT / SAML / GraphQL decoding, hex view, and pretty-printing
+- Inline JWT / SAML / GraphQL / protobuf / MessagePack / CBOR decoding, hex view, and pretty-printing
+- Copy any request as cURL, Python, `fetch`, Go, httpie, or a CSRF PoC
 
 ### Discover & Scan
 - Prism passive & light-touch active vulnerability scanner
 - Param Miner for hidden-parameter discovery
+- Authorize matrix: replay one request under several identities to find broken access control
+- Sequencer for grading the randomness of session, CSRF, and reset tokens
+- Cookie workbench to verify, crack, and re-sign Flask / Rack / Django session cookies
+- OAST collector for confirming blind SSRF, XXE, and injection out of band
 - Findings triage with Markdown / JSON export
 
 ### Keyboard-first Workflow

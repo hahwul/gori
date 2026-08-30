@@ -105,7 +105,7 @@ gori run issues --format markdown --export report.md
 gori run issues --format sarif --export issues.sarif   # GitHub code scanning / CI 대시보드용
 ```
 
-TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#5-export-the-report)를 참고하세요.
+TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#export-the-report)를 참고하세요.
 
 ### 이슈 표시하기 (다중 선택) {#marking-issues-multi-select}
 

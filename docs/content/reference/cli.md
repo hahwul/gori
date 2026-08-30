@@ -168,7 +168,7 @@ Every row also carries `source` — where the flow came from (`proxy`, `repeater
 gori run show <flow-id> --format raw
 ```
 
-`--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or `curl` (a runnable `curl` command reproducing the request — the same text the TUI's `Space → Y` copies). `--request-only` / `--response-only` limit the output and do not apply to `har`; `curl` is the request, so `--response-only` is refused. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+`--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
 #### HAR export
 
@@ -1228,7 +1228,7 @@ When an export **does** carry one of those sections, `-o FILE` is created `0600`
 
 ### `gori settings tls-fingerprint`
 
-Prints the **JA3 and JA4 fingerprint of the ClientHello gori actually sends**, per destination — the offer an anti-bot stack (Cloudflare, Akamai, DataDome, PerimeterX) reads before it decides whether to challenge you. It is the check for the [`outbound_tls`](/reference/config/#outbound_tls) fingerprint fields: OpenSSL will only ever tell you what got *negotiated*, never what was offered, so without this the settings are unverifiable.
+Prints the **JA3 and JA4 fingerprint of the ClientHello gori actually sends**, per destination — the offer an anti-bot stack (Cloudflare, Akamai, DataDome, PerimeterX) reads before it decides whether to challenge you. It is the check for the [`outbound_tls`](/reference/config/#outbound-tls) fingerprint fields: OpenSSL will only ever tell you what got *negotiated*, never what was offered, so without this the settings are unverifiable.
 
 ```bash
 gori settings tls-fingerprint                    # every rule, plus the no-rule default

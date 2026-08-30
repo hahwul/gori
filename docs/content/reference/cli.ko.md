@@ -167,7 +167,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 `curl`(요청을 그대로 재현하는 실행 가능한 `curl` 명령 — TUI의 `Space → Y`가 복사하는 것과 같은 텍스트)입니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. `curl`은 요청이므로 `--response-only`는 거부됩니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…** 에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 두 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
 
 #### HAR 내보내기 {#har-export}
 
@@ -1168,7 +1168,7 @@ export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생
 | `statusline` | `command` | **`/bin/sh -c`** — `interval`초마다 |
 | `editor` | `command` | argv — `gori settings --edit`와 TUI의 `^E`에서 |
 
-앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 가장 날카로운 건 `statusline`입니다 — argv exec이 아니라 완전한 셸이고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다 — 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
+앞의 셋은 [프로세스 훅](/ko/guide/scripting/#프로세스-훅)입니다. 다섯 중 가장 날카로운 건 `statusline`입니다 — argv exec이 아니라 완전한 셸이고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다 — 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
 
 `export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
 
@@ -1194,7 +1194,7 @@ gori settings import: refused — the 5 entries listed above run a local command
 
 ### `gori settings tls-fingerprint` {#gori-settings-tls-fingerprint}
 
-gori가 **실제로 보내는 ClientHello의 JA3/JA4 지문**을 목적지별로 출력합니다 — Cloudflare·Akamai·DataDome·PerimeterX 같은 안티봇이 챌린지를 띄울지 판단할 때 읽는 바로 그 offer입니다. [`outbound_tls`](/ko/reference/config/#outbound_tls)의 지문 필드를 검증하는 수단입니다. OpenSSL은 *협상 결과*만 알려줄 뿐 무엇을 제안했는지는 알려주지 않으므로, 이 명령이 없으면 설정이 먹혔는지 확인할 방법이 없습니다.
+gori가 **실제로 보내는 ClientHello의 JA3/JA4 지문**을 목적지별로 출력합니다 — Cloudflare·Akamai·DataDome·PerimeterX 같은 안티봇이 챌린지를 띄울지 판단할 때 읽는 바로 그 offer입니다. [`outbound_tls`](/ko/reference/config/#outbound-tls)의 지문 필드를 검증하는 수단입니다. OpenSSL은 *협상 결과*만 알려줄 뿐 무엇을 제안했는지는 알려주지 않으므로, 이 명령이 없으면 설정이 먹혔는지 확인할 방법이 없습니다.
 
 ```bash
 gori settings tls-fingerprint                    # 모든 규칙 + 규칙 없음 기본값
