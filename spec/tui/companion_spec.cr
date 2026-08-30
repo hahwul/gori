@@ -416,10 +416,60 @@ describe Gori::Tui::Companion do
         end
         poses.first.should eq(peak)
         poses.last.should eq(settled)
-        # …and the switch is where REACT_PEAK says it is: beat 1 is the first drawn beat of
-        # the mood, so the settle starts at index REACT_PEAK - 1.
-        poses.index(settled).should eq(Companion::REACT_PEAK - 1)
+        # …and the switch is where REACT_PEAK says it is — ALL of it. #tick steps the beat
+        # clock before consuming the note, so the beat #apply_mood stamps is the beat that
+        # is about to be composed and the peak gets its full count. Consuming first (which
+        # is what this line pinned at REACT_PEAK - 1) stamped the beat BEFORE the drawn
+        # one, docking a beat off the peak and — the visible half — dropping the opening
+        # flinch of the shudder, whose whole script is three beats long.
+        poses.index(settled).should eq(Companion::REACT_PEAK)
       end
+    end
+  end
+
+  # The other end of the same bug, and the one an operator sees: a note lands mid-beat far
+  # more often than on one (the run loop polls several times per BEAT), and the beat gate
+  # skips the compose on those ticks. #tick still answered "changed" — so the run loop
+  # bought a full frame rebuild that repainted the PREVIOUS frame, and the bubble it was
+  # rebuilding FOR only appeared on the next beat. Asserts the pair: the frame the tick
+  # reports as changed is a frame that actually changed, and it already carries the note.
+  it "puts the note on the frame in the tick it lands, without a repaint that paints nothing" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      # A tick that falls INSIDE a beat, the way a 50ms run loop mostly does.
+      mid = t0 + 50.milliseconds
+      notes.push(:error, "upstream refused the connection")
+      before = companion.frame
+      companion.tick(mid).should be_true
+      companion.frame.should_not eq(before) # …and it is not the same frame redrawn
+      f = companion.frame.not_nil!
+      f.bubble.not_nil!.should contain("upstream")
+      f.mood.should eq(:alarm)
+      # Every remaining in-beat tick is silent again, which is what makes the one above a
+      # report of a change rather than a bare "something happened".
+      companion.tick(mid + 1.millisecond).should be_false
+    end
+  end
+
+  # "flinch-back-flinch", three beats. The first flinch is composed on the beat the note
+  # lands, so the frame that carries it is only ever drawn if the mood is stamped on the
+  # beat about to be composed — otherwise the sequence opens on the 0 and plays as a
+  # single twitch, which is what it did.
+  it "plays the whole shudder, opening on the flinch" do
+    with_companion(true) do
+      notes = Notifications.new
+      companion = Companion.new(notes)
+      t0 = Time.instant
+      companion.tick(t0)
+      notes.push(:error, "upstream refused the connection")
+      seen = (1..4).map do |i|
+        companion.tick(t0 + Companion::BEAT * i)
+        companion.frame.not_nil!.shake
+      end
+      seen.should eq([-1, 0, -1, 0])
     end
   end
 

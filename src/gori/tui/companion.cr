@@ -28,7 +28,7 @@ module Gori::Tui
   # engines push notes from their own fibers into channels that the MAIN fiber drains, so
   # a controller worker must never touch a Companion.
   class Companion
-    # Evaluation cadence. NOT the redraw cadence — see #advance.
+    # Evaluation cadence. NOT the redraw cadence — see #repaint.
     BEAT = 200.milliseconds
 
     # No key, no click, no note for this long and she falls asleep (and stops ticking).
@@ -159,6 +159,15 @@ module Gori::Tui
       @last_beat = nil.as(Time::Instant?)
       @last_poke = nil.as(Time::Instant?)
       @dozing = false
+      # Set by every writer that changes what #compose would return BETWEEN two beats: a
+      # note, a #say, a bubble/mood expiry, waking from a doze. Without it #tick answered
+      # "the drawn frame changed" for a frame it had not recomposed — the beat gate skips
+      # the compose on every tick that falls inside a beat, and the run loop polls several
+      # times per beat, so a note arriving mid-beat bought a full frame rebuild that
+      # repainted the PREVIOUS frame and only showed its bubble on the next beat, up to
+      # BEAT later. The same wasted repaint runner.cr's on-screen gate exists to prevent,
+      # arriving from the other end.
+      @restless = false
       @wake_until_beat = 0
       @settle_beat = -1
       @seen_id = @notes.latest_id # don't announce a backlog on enable
@@ -192,11 +201,19 @@ module Gori::Tui
         greet(now)
       end
       @last_poke ||= now
-      changed = consume_note(now)
-      changed = true if expire_bubble(now)
-      changed = true if expire_mood(now)
-      changed = true if advance(now)
-      changed
+      # THE BEAT CLOCK RUNS FIRST, then the state that reads it. #apply_mood stamps
+      # @mood_beat with the CURRENT beat and every arc measured from it counts from there
+      # — #pose_for's peak/settle and #shake_for's three-beat shudder both. Consuming a
+      # note BEFORE the clock had stepped to the beat that is about to be composed put
+      # every reaction one beat past its own beat 0: the shudder's opening flinch was
+      # never drawn at all (the frame carrying it is composed on the next beat, by which
+      # point the offset has already stepped to 0, so the "flinch, back, flinch" played
+      # as a single twitch), and the peak face held REACT_PEAK - 1 beats.
+      stepped = step_beat(now)
+      consume_note(now)
+      expire_bubble(now)
+      expire_mood(now)
+      repaint(stepped)
     end
 
     # Any sign of life re-arms the idle clock and wakes her if she had dozed off.
@@ -206,6 +223,7 @@ module Gori::Tui
       @dozing = false
       @last_beat = now
       @wake_until_beat = @beat + WAKE_BEATS
+      @restless = true # the startle is a different frame; draw it now, not a beat later
     end
 
     # Wake hook for the input path. Self-gated so a keystroke costs nothing at all while
@@ -233,12 +251,15 @@ module Gori::Tui
       @bubble_until = nil
       @mood = :info
       @mood_until = nil
+      @restless = false
       @seen_id = @notes.latest_id
     end
 
     # --- the beat clock ------------------------------------------------------
 
-    private def advance(now : Time::Instant) : Bool
+    # Step the beat, and report whether it moved — the one input that can change the frame
+    # on its own, since every idle track is a pure function of @beat.
+    private def step_beat(now : Time::Instant) : Bool
       return false if @dozing # asleep: the static frame is already drawn, do nothing
       if last = @last_beat
         # NOT `last + BEAT`: after a stall (a modal held open, the process suspended) she
@@ -250,6 +271,14 @@ module Gori::Tui
         @last_beat = now
       end
       check_doze(now)
+      true
+    end
+
+    # Recompose and diff. `stepped` is the beat clock's verdict, @restless is every other
+    # writer's; composing on neither is what keeps a still beat free.
+    private def repaint(stepped : Bool) : Bool
+      return false unless stepped || @restless
+      @restless = false
       next_frame = compose
       return false if next_frame == @frame
       @frame = next_frame
@@ -457,6 +486,7 @@ module Gori::Tui
       @bubble = GREETING
       @bubble_at = now
       @bubble_until = now + GREET_TTL
+      @restless = true
     end
 
     # Forget that this process has been greeted. A SPEC SEAM only — nothing in the app
@@ -481,21 +511,22 @@ module Gori::Tui
       @bubble_at = now
       @bubble_until = now + bubble_ttl(mood)
       apply_mood(mood, now)
+      @restless = true
       poke(now)
     end
 
-    private def consume_note(now : Time::Instant) : Bool
+    private def consume_note(now : Time::Instant) : Nil
       id = @notes.latest_id
-      return false if id <= @seen_id # empty, unchanged, or post-clear
+      return if id <= @seen_id # empty, unchanged, or post-clear
       @seen_id = id
-      return false unless note = @notes.latest
-      return false unless Settings.companion_notices?
+      return unless note = @notes.latest
+      return unless Settings.companion_notices?
       @bubble = condense(note.message)
       @bubble_at = now
       @bubble_until = now + bubble_ttl(mood_of(note.level))
       apply_mood(mood_of(note.level), now)
+      @restless = true
       poke(now) # a result is worth waking up for
-      true
     end
 
     private def mood_of(level : Symbol) : Symbol
@@ -535,22 +566,22 @@ module Gori::Tui
       end
     end
 
-    private def expire_bubble(now : Time::Instant) : Bool
-      return false unless until_ = @bubble_until
-      return false if now < until_
+    private def expire_bubble(now : Time::Instant) : Nil
+      return unless until_ = @bubble_until
+      return if now < until_
       @bubble = nil
       @bubble_at = nil
       @bubble_until = nil
-      true
+      @restless = true
     end
 
-    private def expire_mood(now : Time::Instant) : Bool
-      return false unless until_ = @mood_until
-      return false if now < until_
+    private def expire_mood(now : Time::Instant) : Nil
+      return unless until_ = @mood_until
+      return if now < until_
       @mood = :info
       @mood_until = nil
       @settle_beat = @beat + 1
-      true
+      @restless = true
     end
 
     # First line only, control bytes dropped, whitespace squeezed. The result is stored
