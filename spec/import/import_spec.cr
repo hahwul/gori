@@ -565,6 +565,27 @@ describe Gori::Import do
     end
   end
 
+  # `ParseResult` carries a skipped tally so `Import.import_file` can say WHY nothing landed
+  # instead of the opaque "no flows found". `Har.parse_file` raised its own message first, which
+  # made that branch dead for the format it matters most for: an all-malformed OpenAPI spec
+  # reported its count (the spec above) and an all-malformed HAR did not.
+  it "reports the skipped count when every HAR entry is malformed" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, {"log" => {"entries" => [
+        {"request" => {"method" => "GET", "url" => "", "headers" => [] of String}},
+        {"request" => {"method" => "GET", "url" => "not a url at all", "headers" => [] of String}},
+      ]}}.to_json)
+      with_store do |store|
+        expect_raises(Gori::Error, /all 2 entries were skipped as malformed/) do
+          Gori::Import.import_file(store, :har, har)
+        end
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "skips a malformed HAR entry (invalid base64 body) instead of aborting the whole import" do
     har = File.tempname("gori", ".har")
     begin

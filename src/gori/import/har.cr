@@ -40,7 +40,12 @@ module Gori
             skipped += 1
           end
         end
-        raise Gori::Error.new("no valid HAR entries in #{path}") if flows.empty?
+        # No raise on an empty result, deliberately. `Import.import_file` owns that message and
+        # says WHY nothing landed — "all N entries were skipped as malformed" — which is the
+        # whole reason `ParseResult` carries a tally. Raising here first made that branch dead
+        # for HAR, the format it matters most for: an operator with a 4000-entry file got "no
+        # valid HAR entries in <path>" and no count, while the same all-malformed OpenAPI spec
+        # got the tally. Every other parser already returns and lets `import_file` speak.
         ParseResult.new(flows, skipped)
       end
 
