@@ -88,3 +88,24 @@ describe "gori run decoder --format json" do
     json["output"].as_s.valid_encoding?.should be_true
   end
 end
+
+# `gori run decoder <chain>` where the chain is only separators. The DECISION and the
+# MESSAGE are split out of the abort for the same reason `list_leftover_error` is —
+# `abort` calls `exit` and cannot run in-process.
+describe "gori run decoder <chain>" do
+  it "proceeds for a chain that has converter tokens" do
+    Gori::CLI::Run.decoder_empty_chain_error("base64-decode").should be_nil
+    Gori::CLI::Run.decoder_empty_chain_error(" hex , url-encode ").should be_nil
+  end
+
+  it "refuses a chain that is only separators, which would echo the input back as a success" do
+    # `Chain.run` treats a zero-token spec as the IDENTITY, so `gori run decoder '>' hello`
+    # printed `hello` and exited 0 — a chain the operator typed wrong reported as a decode
+    # that worked. The MCP `decode` tool already refuses exactly this shape by name.
+    ["", ">", ",", "|", " > | , ", ">>"].each do |chain|
+      msg = Gori::CLI::Run.decoder_empty_chain_error(chain)
+      msg.should_not be_nil
+      msg.not_nil!.should contain("no converter tokens")
+    end
+  end
+end
