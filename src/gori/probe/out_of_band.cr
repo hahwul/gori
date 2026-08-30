@@ -111,6 +111,21 @@ module Gori
         end
       end
 
+      # Whether an out-of-band rule could plant anything in this project — i.e. whether a scan
+      # would be handed a minter at all. A surface that lists an OOB rule as ENABLED needs this
+      # to be able to say when the rule is nonetheless inert: with no session it plans nothing
+      # and sends nothing, so an empty active result reads as "no blind SSRF" when what it means
+      # is "never looked". The TUI's Rules sub-tab already badges that state ("needs OAST"); this
+      # is the same question asked from a headless surface.
+      #
+      # Deliberately `StoreMinter.build` rather than a bare `oast_sessions.empty?`: a row whose
+      # kind no longer parses, or that cannot be rebuilt into a provider, is not a session a
+      # payload can be minted against either — and a notice that disagreed with the scan it
+      # describes would be worse than no notice.
+      def self.available?(store : Store) : Bool
+        !StoreMinter.build(store).nil?
+      end
+
       # Persist one outstanding probe. THE writer — the TUI analyzer and the headless scan both
       # come through here, so the two cannot drift on what a plant records (they are separate
       # send loops that look like one, which is exactly how the verbatim-marking defect this

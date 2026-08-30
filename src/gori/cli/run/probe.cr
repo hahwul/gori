@@ -131,11 +131,17 @@ module Gori
           # in the words `gori run history` uses.
           Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run probe: #{n}" }
         end
+        # Read the Rules config HERE rather than letting the scan read it: the out-of-band
+        # notice below has to answer "is this rule enabled" off exactly the set the scan will
+        # gate on, and passing it down (`rules:`) keeps that to one read.
+        cfg = Probe::Scan::RuleConfig.load(store)
         # --active with no scope include rule (and no --allow-unscoped) probes NOTHING
         # (matches_url? requires ≥1 include) — warn so an empty active result isn't mistaken
         # for "clean".
         if active && !allow_unscoped && scope.include_count == 0
           STDERR.puts "gori run probe: --active has no scope include rules — active probes skipped (add a scope include rule or pass --allow-unscoped)"
+        elsif n = oob_unreachable_note(store, cfg, active)
+          STDERR.puts "gori run probe: #{n}"
         end
         groups, flow_n, repeater_n = begin
           ids = begin
@@ -152,7 +158,7 @@ module Gori
           scan_errors = [] of String
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
             verify_upstream: !insecure,
-            allow_unscoped: allow_unscoped, opts: opts, progress: probe_progress_meter(meter),
+            allow_unscoped: allow_unscoped, opts: opts, rules: cfg, progress: probe_progress_meter(meter),
             on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil })
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
           unless scan_errors.empty?
@@ -179,6 +185,28 @@ module Gori
           groups = groups.select { |g| scope.host_in_scope?(g.host) }
         end
         report_probe(groups, flow_n, repeater_n, format, query, min_sev, category, in_scope)
+      end
+
+      # The sentence an active scan owes an operator whose ENABLED out-of-band rules cannot run,
+      # or nil when there is nothing to say. An OOB rule only plants when the project has an OAST
+      # session to mint against, and the TUI's OAST tab is the ONLY surface that registers one —
+      # `gori run oast listen` and the MCP `oast_start` are ad-hoc, their registration dying with
+      # the process. So headless, `probe rules` lists the rule `[on]` and `--active` then sends
+      # nothing to any interaction server and says nothing about it: absence of a finding reads
+      # as "no blind SSRF" when it means "never looked". Same failure the --active scope warning
+      # above exists to prevent, so it reads the same way.
+      #
+      # Silent unless the scan would otherwise have probed: nothing to warn about on a passive
+      # run, on a rule the operator switched OFF, or under a degraded rule config (which skips
+      # ACTIVE wholesale and reports that instead — see Scan::RuleConfig).
+      private def self.oob_unreachable_note(store : Store, cfg : Probe::Scan::RuleConfig,
+                                            active : Bool) : String?
+        return nil unless active && !cfg.degraded
+        on = Probe::OOB_RULE_IDS.select { |id| Probe.rule_enabled?(id, cfg.disabled) }
+        return nil if on.empty? || Probe::OutOfBand.available?(store)
+        "#{on.join(", ")} #{on.size == 1 ? "is" : "are"} enabled but this project has no OAST " \
+        "session — out-of-band probes were NOT sent, so an empty result is not evidence of no " \
+        "blind SSRF (register a listener in the TUI's OAST tab, then `gori run oast resume ID`)"
       end
 
       private def self.report_probe(groups : Array(Probe::Group), flow_n : Int32, repeater_n : Int32,
