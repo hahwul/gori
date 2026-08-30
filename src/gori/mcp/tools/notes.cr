@@ -9,7 +9,15 @@ module Gori
         doc = Notes.load(store)
         Result.new(JSON.build do |j|
           j.object do
-            j.field "cur", doc.cur
+            # The current note's ID, not `Doc#cur`'s 0-based INDEX, which is what this used to
+            # publish under the name `cur`. Every other number in this payload is an id, and
+            # `get_note`/`update_note`/`delete_note` are id-addressed, so an index sitting there
+            # reads as one: on the demo project it was `{"cur":4}` while the current note was
+            # `id:5` — and `id:4` exists and is a different note. The CLI twin
+            # (`gori run notes --format json`) names its `id` and its (1-based) `index` on every
+            # row rather than leaving one bare number to be read either way.
+            # nil when `cur` addresses no note: `Notes.parse` accepts `{"cur":0,"notes":[]}`.
+            j.field "current_id", doc.notes[doc.cur]?.try(&.id)
             j.field "notes" do
               j.array do
                 doc.notes.each_with_index do |entry, idx|
@@ -127,7 +135,10 @@ module Gori
       # here rather than around one long block, so a new write tool cannot be added on the
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_notes_tools(j : JSON::Builder) : Nil
-        tool j, "list_notes", "List all project notes (markdown/text documents) with metadata like title and line count." { }
+        tool j, "list_notes",
+          "List all project notes (markdown/text documents) with metadata like title and line " \
+          "count. `current_id` is the id of the open note (null when there is none); every " \
+          "row's `current` says the same thing per note." { }
 
         tool j, "get_note", "Get the full text and metadata of a specific note by its database ID." do |s|
           s.field "id", intprop("database note ID"), required: true
