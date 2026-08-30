@@ -1369,7 +1369,9 @@ Detects how this `gori` binary was installed and updates accordingly:
 | pacman / AUR | Prints `yay` / `paru` / `pacman` guidance |
 | deb (dpkg) | Prints `apt` upgrade guidance |
 | rpm | Prints `dnf` / `yum` / `zypper` guidance |
-| Nix (`/nix/store`) | Prints `nix profile upgrade` / flake-update guidance; the store is read-only, so nothing is downloaded |
+| Nix (a store path) | Prints `nix profile upgrade` / flake-update guidance; the store is read-only, so nothing is downloaded |
+
+A store path is `/nix/store/…`, and also a relocated store — a rootless install keeps one under `~/.local/share/nix/root`, and `NIX_STORE_DIR` moves it anywhere. Off the default prefix it is the store-hash shape that identifies one, so a directory you happen to have called `nix/store` is still an ordinary binary install.
 
 Paths under `/usr/bin` or `/bin` are classified by package ownership (`pacman -Qo`, `dpkg-query -S`, `rpm -qf`). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, `/etc/os-release` (`ID` / `ID_LIKE`) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.
 

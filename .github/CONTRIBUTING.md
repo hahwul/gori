@@ -41,8 +41,10 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 - Never build or benchmark with `-Dpreview_mt` — gori assumes the single-threaded fiber
   scheduler.
 - If you change `shard.lock`, regenerate the Nix dependency set in the same commit:
-  `just nix-shards` runs `crystal2nix` and puts the result at `nix/shards.nix`. `just vu`
-  keeps `flake.nix`'s version in step with `shard.yml`.
+  `just nix-shards` runs `crystal2nix` and puts the result at `nix/shards.nix`, and
+  `just nix-shards-check` (which CI also runs) confirms the two agree — forget the
+  regeneration and the flake goes on building the old revisions without complaining.
+  `just vu` keeps `flake.nix`'s version in step with `shard.yml`.
 - Keep changes scoped and behavior-preserving unless the PR is explicitly a behavior
   change; note any intentional behavior change in the PR description.
 - Add a `CHANGELOG.md` line under `## Unreleased` for anything a user would notice, in

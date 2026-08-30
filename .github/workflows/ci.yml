@@ -13,6 +13,12 @@ on:
       # type-check would merge without the job that runs it ever waking up.
       - scripts/spec_shard.sh
       - scripts/bench_check.sh
+      # Generated from shard.lock, and checked against it by `build-crystal`. The
+      # lock is already listed above, which covers the drift that matters (a bump
+      # landing without the regeneration); this line covers the other direction —
+      # an edit to the generated file alone, which would otherwise merge with the
+      # job that reads it never waking up.
+      - nix/shards.nix
       # `docker/Dockerfile` is deliberately absent: nothing in this workflow
       # builds the image any more (see the note under `tests`), so listing it
       # would only wake the Crystal build and the spec matrix to test nothing
@@ -48,6 +54,18 @@ jobs:
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0
+      - name: Check nix/shards.nix against shard.lock
+        # The Nix flake builds from `nix/shards.nix`, which crystal2nix generates from
+        # shard.lock (`just nix-shards`). Nothing forced the regeneration, and skipping
+        # it fails silently in the worst way: the flake goes on linking the OLD
+        # revisions and `nix build` stays green, so the packaged binary stops matching
+        # the tree that produced it.
+        #
+        # No Nix job here to catch it — the flake pins its own compiler (nixpkgs is a
+        # Crystal release behind) and building that costs minutes on a cold runner. So
+        # this compares the two files directly instead: no Nix, no network, and it runs
+        # before `shards install` because it reads nothing out of `lib/`.
+        run: crystal run scripts/nix_shards_check.cr
       - name: Install native link dependencies
         # brotli/zstd are linked via `@[Link(pkg_config:)]` (proxy/codec), sqlite3
         # via the sqlite3 shard. The rest (openssl, yaml, gmp, pcre2, gc, zlib)

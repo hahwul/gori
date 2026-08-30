@@ -119,12 +119,14 @@ bottleneck every time.
 | Proxy benchmark | `just benchmark` |
 | Seed a demo project | `just seed-demo` (`scripts/seed_demo.cr`) |
 | Version consistency | `just vc` |
+| nix/shards.nix drift | `just nix-shards-check` (`scripts/nix_shards_check.cr`) |
 
 What CI gates, and what it does not:
 
 - **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts`,
-  and `scripts/bench_check.sh`. Format and bench are real gates — `just test` touches neither,
-  so a green suite is not a green CI.
+  `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (nix/shards.nix against shard.lock).
+  Format, bench and the shards gate are real gates — `just test` touches none of them, so a green
+  suite is not a green CI.
 - **Not gated:** ameba. It carries a large pre-existing backlog, mostly
   `Metrics/CyclomaticComplexity` in the TUI (the reasoning is in `.ameba.yml` and in the
   `# Still no ameba job` comment in `ci.yml`), so judge `just check` output on the files
@@ -205,7 +207,8 @@ written.
 ### Before you commit
 
 - `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
-  type-check it (`crystal build --no-codegen scripts/seed_demo.cr`) — nothing else compiles it.
+  type-check it — nothing else compiles most of it (`crystal build --no-codegen scripts/seed_demo.cr`;
+  `scripts/nix_shards_check.cr` is the exception, since `just check` and CI now run it).
 - **Format only the files you changed** (`crystal tool format <files>`). A whole-tree format
   rewrites 100+ unrelated files due to Crystal version drift.
 - Add or update specs mirroring the source you touched. `spec/spec_helper.cr` points
@@ -214,7 +217,7 @@ written.
 - A user-visible change gets its CHANGELOG line, in the shape above.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.
-- Changing `shard.lock` means regenerating `nix/shards.nix` (`just nix-shards`) in the same commit.
+- Changing `shard.lock` means regenerating `nix/shards.nix` (`just nix-shards`) in the same commit. CI enforces it (`just nix-shards-check`); skipping it is otherwise silent, since the flake keeps building the old revisions.
 
 ## Traps
 

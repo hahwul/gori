@@ -34,6 +34,15 @@ nix-shards:
     nix run nixpkgs#crystal2nix
     mv shards.nix nix/shards.nix
 
+# Verify nix/shards.nix still pins what shard.lock does — the check that makes the
+# recipe above mandatory rather than customary. Forgetting it is silent: the flake
+# keeps building the OLD revisions and `nix build` stays green. Reads the two files
+# directly, so unlike `nix-build` it needs neither Nix nor the network, which is why
+# CI can afford to run it on every PR.
+[group('build')]
+nix-shards-check:
+    crystal run scripts/nix_shards_check.cr
+
 # Nothing builds the image on a PR any more — ci.yml dropped its `build-docker`
 # job, and publish-ghcr.yml only runs on a push to `main` — so this recipe is the
 # pre-merge check that docker/Dockerfile still compiles.
@@ -125,13 +134,16 @@ test-mcp:
 test-settings:
     crystal spec spec/settings
 
-# Check code format and lint without changing files.
+# Check code format and lint without changing files, plus the shards.nix drift gate —
+# the point of that gate is that forgetting `just nix-shards` is silent, and a
+# pre-commit check a contributor runs is where silence has to end, not CI.
 # Paths are explicit and must stay in step with ci.yml's `format` job: bare
 # `crystal tool format` walks the whole working directory, so once `shards install`
 # has run it reformats `lib/` too — third-party code that is not ours to change.
 [group('development')]
 check:
     crystal tool format --check src spec bench scripts
+    crystal run scripts/nix_shards_check.cr
     lib/ameba/bin/ameba.cr
 
 # Auto-format code and fix lint issues.

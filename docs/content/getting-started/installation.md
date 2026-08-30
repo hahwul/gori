@@ -100,6 +100,11 @@ Or pin it as an input to a NixOS / home-manager configuration:
 
   # then, in your package list:
   #   inputs.gori.packages.${pkgs.system}.default
+
+  # or add the overlay once, and `pkgs.gori` works everywhere — no ${system} at
+  # each use site, and gori is built against the same nixpkgs as the rest of the
+  # configuration:
+  #   nixpkgs.overlays = [ inputs.gori.overlays.default ];
 }
 ```
 
