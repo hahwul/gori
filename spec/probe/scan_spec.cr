@@ -2,6 +2,10 @@ require "../spec_helper"
 
 # --- file-local harness (mirrors spec/probe_spec.cr's private with_store/capture_flow) ---
 
+# A key id shaped like a real one and NOT one of AWS's published documentation placeholders,
+# which `Secrets::PATTERNS` screens out (mirrors spec/probe_spec.cr's AWS_KEY_ID).
+private AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"
+
 private def with_store(&)
   path = File.tempname("gori-probe-scan", ".db")
   store = Gori::Store.open(path)
@@ -76,7 +80,7 @@ describe Gori::Probe::Scan do
       # so it must be found both before and after the fix.
       250.times do |k|
         payload = case k
-                  when  20 then "token=AKIAIOSFODNN7EXAMPLE"
+                  when  20 then "token=#{AWS_KEY_ID}"
                   when 240 then "token=xoxb-0123456789abcdef"
                   else          "frame#{k}"
                   end
@@ -101,7 +105,7 @@ describe Gori::Probe::Scan do
       # a pager that stops after its first batch loses it.
       (cap + 50).times do |k|
         payload = case k
-                  when 20, cap + 10 then "token=AKIAIOSFODNN7EXAMPLE"
+                  when 20, cap + 10 then "token=#{AWS_KEY_ID}"
                   when cap + 39     then "token=xoxb-0123456789abcdef"
                   else                   "frame#{k}"
                   end

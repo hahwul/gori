@@ -65,6 +65,12 @@ private class FlakyCorsBackend < Gori::Fuzz::Backend
   end
 end
 
+# A key id shaped exactly like a real one and deliberately NOT one of AWS's published
+# documentation placeholders (`AKIAIOSFODNN7EXAMPLE` and friends), which `Secrets::PATTERNS`
+# screens out — so a fixture standing in for a LEAKED key has to avoid them. Assembled from two
+# halves so secret-scanning push protection lets the fixture through.
+private AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"
+
 private def with_store(&)
   path = File.tempname("gori-probe", ".db")
   store = Gori::Store.open(path)
@@ -561,7 +567,7 @@ describe Gori::Probe::Analyzer do
         target: "/ws", status: 101, content_type: nil,
         req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
       fid = detail.row.id
-      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice) # secret frame
+      store.insert_ws_message(fid, "in", 1, "token=#{AWS_KEY_ID}".to_slice) # secret frame
       scope = Gori::Scope.load(store)
       feed = Channel(Gori::Store::FlowEvent).new(8)
       a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Passive, true)
@@ -595,7 +601,7 @@ describe Gori::Probe::Analyzer do
       # A burst of >WS_MSG_CAP(200) frames arrives with the secret in frame ~30 — the band a
       # last-200-window rescan would drop (window would be frames ~52..251).
       250.times do |k|
-        payload = k == 28 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        payload = k == 28 ? "token=#{AWS_KEY_ID}" : "frame#{k}"
         store.insert_ws_message(fid, "in", 1, payload.to_slice)
       end
       feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # one rescan must page the whole backlog
@@ -615,7 +621,7 @@ describe Gori::Probe::Analyzer do
       # A >WS_MSG_CAP backlog already exists before the FIRST scan (the live :updated was dropped
       # and catch_up picks it up late); the secret is in an OLD frame the last-window would skip.
       260.times do |k|
-        payload = k == 20 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        payload = k == 20 ? "token=#{AWS_KEY_ID}" : "frame#{k}"
         store.insert_ws_message(fid, "in", 1, payload.to_slice)
       end
       scope = Gori::Scope.load(store)
@@ -644,7 +650,7 @@ describe Gori::Probe::Analyzer do
       feed = Channel(Gori::Store::FlowEvent).new(8)
       a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Passive, true)
       a.start
-      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice)
+      store.insert_ws_message(fid, "in", 1, "token=#{AWS_KEY_ID}".to_slice)
       feed.send(Gori::Store::FlowEvent.new(fid, :updated))
       sleep 200.milliseconds
       a.stop
@@ -669,7 +675,7 @@ describe Gori::Probe::Analyzer do
       a.start
 
       # The secret rides a frame captured while the rule was OFF — nothing reads it.
-      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice)
+      store.insert_ws_message(fid, "in", 1, "token=#{AWS_KEY_ID}".to_slice)
       feed.send(Gori::Store::FlowEvent.new(fid, :updated))
       sleep 200.milliseconds
       store.probe_issues.find(&.code.== "secret_in_ws").should be_nil # rule is off — expected
@@ -899,6 +905,30 @@ describe "Gori::Probe::Passive (FP reduction)" do
         content_type: "application/json",
         body: %({"error":"Traceback (most recent call last):\\n  File \\"/srv/api/views.py\\", line 88"}))
       json.select(&.code.==("error_stack_leak")).map(&.evidence).should contain("Python traceback")
+    end
+  end
+
+  it "does not flag AWS's own published example key id, but flags a realistic one" do
+    with_store do |store|
+      # AWS ships this exact pair through its SigV4/CLI docs, so a page reproducing them is
+      # documenting AWS, not leaking a key — the same screen the Google client id and the
+      # Mapbox `pk.` token got. (Split so secret-scanning push protection lets the fixture by.)
+      example_id = "AKIA" + "IOSFODNN7EXAMPLE"
+      example_secret = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY"
+      docs = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "<pre>aws_access_key_id = #{example_id}\naws_secret_access_key = #{example_secret}</pre>")
+      codes_of(docs).should_not contain("secret_in_body")
+      # The IAM guide's second placeholder, and the ASIA temporary-credential twin.
+      iam = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "key id: " + "AKIA" + "I44QH8DHBEXAMPLE")
+      codes_of(iam).should_not contain("secret_in_body")
+      temp = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "key id: " + "ASIA" + "IOSFODNN7EXAMPLE")
+      codes_of(temp).should_not contain("secret_in_body")
+      # A key id that is NOT one of those placeholders is still a High.
+      real = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "aws_access_key_id = " + "AKIA" + "3ZQF7XKPL2WVNB6D")
+      real.find(&.code.==("secret_in_body")).not_nil!.evidence.should eq("AWS access key id")
     end
   end
 
@@ -1245,7 +1275,7 @@ describe "Gori::Probe::Passive (new patterns)" do
   it "flags a credential leaked in the response body (type only, never the value)" do
     with_store do |store|
       dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
-        body: %({"aws":"AKIAIOSFODNN7EXAMPLE"}))
+        body: %({"aws":"#{AWS_KEY_ID}"}))
       hit = dets.find(&.code.==("secret_in_body")).not_nil!
       hit.severity.should eq(Gori::Store::Severity::High)
       hit.evidence.should eq("AWS access key id")
@@ -2647,7 +2677,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
         req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
-      secret = "AKIAIOSFODNN7EXAMPLE"
+      secret = AWS_KEY_ID
       msgs = [
         Gori::Store::WsMessage.new(1_i64, detail.row.id, nil, 1_i64, "in", 1, "token=#{secret}".to_slice),
       ]
@@ -2668,7 +2698,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
         req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
-      secret = "AKIAIOSFODNN7EXAMPLE"
+      secret = AWS_KEY_ID
       # A protobuf-ish frame: field tags and lengths around an ASCII string field.
       payload = Bytes.new(secret.bytesize + 6)
       payload[0] = 0x0a_u8; payload[1] = secret.bytesize.to_u8
@@ -2689,7 +2719,7 @@ describe Gori::Probe, "WebSocket + Repeater sources" do
       head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
       detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
         req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
-      secret = "AKIAIOSFODNN7EXAMPLE"
+      secret = AWS_KEY_ID
       # opcode 8 = close: a control frame carries no application payload.
       close = [Gori::Store::WsMessage.new(3_i64, detail.row.id, nil, 1_i64, "in", 8, secret.to_slice)]
       Gori::Probe::Passive.analyze(detail, close).map(&.code).should_not contain("secret_in_ws")
@@ -2876,7 +2906,7 @@ describe "Gori::Probe::Passive (shared body decode)" do
       # Both must still fire when the body is gzip-encoded, proving the single shared inflate
       # (Context#decoded_body) feeds both getters correctly.
       plain = "<html><script>document.write(location.hash)</script>" \
-              "<p>key AKIAIOSFODNN7EXAMPLE here</p></html>"
+              "<p>key #{AWS_KEY_ID} here</p></html>"
       gz = IO::Memory.new
       Compress::Gzip::Writer.open(gz) { |w| w.write(plain.to_slice) }
       dets = analyze(store,
@@ -3122,7 +3152,7 @@ describe "Gori::Probe::Passive::Secrets (client-side shapes)" do
   # and a body carrying BOTH must report both — the JWT split must not swallow the real leak.
   it "still reports a High secret_in_body alongside the JWT note" do
     with_store do |store|
-      dets = analyze_js(store, "var k='AKIAIOSFODNN7EXAMPLE',t='#{JWT}';")
+      dets = analyze_js(store, "var k='#{AWS_KEY_ID}',t='#{JWT}';")
       sec = dets.find(&.code.== "secret_in_body").not_nil!
       sec.severity.should eq(Gori::Store::Severity::High)
       sec.evidence.should eq("AWS access key id")

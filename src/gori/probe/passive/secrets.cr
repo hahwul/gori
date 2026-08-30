@@ -11,7 +11,16 @@ module Gori
       # does not belong in this list however secret-looking it is — see JWT below.
       module Secrets
         PATTERNS = [
-          {/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, "AWS access key id"},
+          # The two key ids AWS itself publishes as documentation placeholders are screened out.
+          # `AKIAIOSFODNN7EXAMPLE` (and its `ASIA` temporary-credential twin) is the SigV4
+          # signing example carried verbatim through the AWS docs, the CLI guide and every
+          # tutorial quoting them, and `AKIAI44QH8DHBEXAMPLE` is the IAM guide's; a page
+          # reproducing one is documenting AWS, not leaking a key. This is the same retirement
+          # the Google client id and the Mapbox `pk.` token below got, narrowed to a fixed pair
+          # of world-known strings rather than a heuristic — a real key id is unscreened, and
+          # the example SECRET beside them (`wJalrXUtnFEMI/…EXAMPLEKEY`) is a shapeless 40-char
+          # blob that no pattern here ever matched.
+          {/\b(?:AKIA|ASIA)(?!IOSFODNN7EXAMPLE\b|I44QH8DHBEXAMPLE\b)[0-9A-Z]{16}\b/, "AWS access key id"},
           {/\bAIza[0-9A-Za-z_\-]{35}\b/, "Google API key"},
           {/\bgh[pousr]_[0-9A-Za-z]{36}\b/, "GitHub token"},
           {/\bgithub_pat_[0-9A-Za-z_]{22,}\b/, "GitHub fine-grained token"},
