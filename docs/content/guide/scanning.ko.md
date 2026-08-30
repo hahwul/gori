@@ -24,13 +24,18 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 | 범주 | 다루는 내용 |
 |----------|----------------|
-| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, 혼합 콘텐츠, 캐시 가능한 API 응답, JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
+| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, 혼합 콘텐츠, 캐시 가능한 API 응답, MIME 타입 혼동(`nosniff` 없이 스니핑 가능한 타입으로 나가는 HTML 본문, `text/html`로 제공되는 JSON), JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` 및 관련 쿠키 위생 |
 | `tech` | 기술 및 프로토콜 핑거프린트(Project 탭에도 표시) |
-| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임 |
+| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임, 클라이언트에 노출된 설정·진단 파일(`.env`, `.git/config`, `phpinfo()`, `.htpasswd`, `wp-config` 자격증명, Spring actuator env), 프로덕션에서 닿는 프레임워크 디버그 모드와 대화형 디버거(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), 그리고 쿠키·파라미터·hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET `BinaryFormatter`/ViewState, PHP) — 안전하지 않은 역직렬화 표면 |
 | `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; 액티브 origin 반사 |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
-| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송 — 액션은 POST라 unsafe/AGGRESSIVE 필요). GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록) |
+| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송 — 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(쿼리 파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 그리고 **대역 외** 로 확인하는 블라인드 SSRF — URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록) |
+
+액티브 룰 둘은 나머지와 다르게 동작하며, Rules 서브탭이 그 행에 그렇다고 적어 둡니다.
+
+- **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성** 으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요.
+- **대역 외 룰**(블라인드 SSRF)은 **활성이지만 작동하지 않는** 상태로 출하됩니다. 프로젝트에 등록된 OAST 리스너가 있어야만 페이로드를 찍어 보낼 수 있기 때문입니다. 이건 토글이 아니라 능력이라, 행에 `needs OAST` 배지가 붙고 리스너가 생기기 전까지는 그 요청 비용이 추정치에서 빠집니다.
 
 심각도는 `info`, `low`, `medium`, `high`, `critical` 순입니다. 헤드리스 `gori run probe`는 기본적으로 **패시브** 체크를 실행하며, `--active` 플래그를 추가하면 액티브 체크도 함께 수행합니다.
 
