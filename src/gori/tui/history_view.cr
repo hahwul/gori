@@ -1254,6 +1254,12 @@ module Gori::Tui
     # --- detail view ---------------------------------------------------------
 
     # settings:display — which detail pane opens first: request (default) or response.
+    #
+    # `response` means the RESPONSE pane on a socket too, and that is a deliberate change: it
+    # used to land on the transcript, because the transcript was what the :response slot drew.
+    # Special-casing a socket back to MESSAGES would rebuild the very ambiguity splitting the
+    # panes removed — "response" would again mean two different things depending on the flow —
+    # so a socket opens on the handshake the server sent and MESSAGES is one → away.
     private def initial_detail_pane : Symbol
       Settings.default_detail_pane == "response" ? :response : :request
     end
@@ -1385,23 +1391,16 @@ module Gori::Tui
       end
     end
 
-    # The synthetic log panes (FRAMES / EVENTS) and the decoded-protocol panes render
-    # as text and have no raw-byte hex view, unlike REQUEST/RESPONSE. The WebSocket
-    # MESSAGES pane reuses the :response slot but is also a synthetic transcript (its
-    # bytes live in the ws_messages table, NOT response_body), so it belongs here too —
-    # otherwise x/w would fall back to hex/reveal of the bare 101 handshake head.
+    # The synthetic log panes (MESSAGES / FRAMES / EVENTS) and the decoded-protocol panes
+    # render as text and have no raw-byte hex view, unlike REQUEST/RESPONSE. The WebSocket
+    # MESSAGES pane belongs here because its bytes live in the ws_messages table, NOT in
+    # response_body — otherwise x/w would fall back to hex/reveal of bytes this pane is not
+    # showing.
     private def log_pane? : Bool
-      return true if ws_messages_pane?
       case @detail_pane
-      when :frames, :events, :saml, :jwt, :graphql, :params then true
-      else                                                       false
+      when :messages, :frames, :events, :saml, :jwt, :graphql, :params then true
+      else                                                                  false
       end
-    end
-
-    # The :response pane renders the WebSocket message transcript (not the handshake
-    # bytes) for a 101 flow — a synthetic log with no raw-byte hex/reveal view.
-    private def ws_messages_pane? : Bool
-      @detail_pane == :response && !@detail_ws.nil?
     end
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
@@ -1780,12 +1779,6 @@ module Gori::Tui
         end
         {"COPY REQUEST AS", opts}
       when :response
-        # The WS MESSAGES pane reuses the :response slot but renders the transcript
-        # (ws_messages), NOT the bare 101 handshake that response_head/body still hold —
-        # offering head/body variants here would copy the handshake (the same leak x/w
-        # had before log_pane? gating). Empty list ⇒ copy_as falls back to the plain
-        # selection copy, which yields the visible transcript via detail_copy_text.
-        return {"COPY RESPONSE AS", [] of CopyMenu::Option} if ws_messages_pane?
         head = detail.response_head
         opts = if head
                  body = detail.response_body
@@ -2116,9 +2109,9 @@ module Gori::Tui
       detail = @detail
       return nil unless detail
       head, body = case @detail_pane
-                   when :response then ws_messages_pane? ? {nil, nil} : {detail.response_head, detail.response_body}
+                   when :response then {detail.response_head, detail.response_body}
                    when :request  then {detail.request_head, detail.request_body}
-                   else                {nil, nil} # frames/messages: no raw-bytes hex
+                   else                {nil, nil} # messages/frames/events: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
     end
@@ -2133,11 +2126,20 @@ module Gori::Tui
       io.to_slice
     end
 
-    # The detail sub-panes, in order: REQUEST → RESPONSE → decoded-protocol panes
-    # (SAML/JWT/GRAPHQL/PARAMS, each present only when the flow carries one) → EVENTS
-    # (sse) → FRAMES (intercepted h2). ←/→ walk this chain; Tab cycles it.
+    # The detail sub-panes, in order: REQUEST → RESPONSE → MESSAGES (a captured socket
+    # transcript) → decoded-protocol panes (SAML/JWT/GRAPHQL/PARAMS, each present only when the
+    # flow carries one) → EVENTS (sse) → FRAMES (intercepted h2). Everything after RESPONSE is
+    # conditional, so a plain HTTP flow still has exactly two. ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
+      # MESSAGES: the socket transcript, right after the handshake it belongs to, and a pane
+      # of its OWN rather than a relabelling of :response. The handshake response head is
+      # where the server says which subprotocol and which extensions (permessage-deflate) it
+      # accepted, plus any Set-Cookie it issued on the upgrade — taking the slot deleted all
+      # of that from the only surface an operator works a socket in, while `gori run show`
+      # kept printing it under its own heading. Two panes and two labels is what the
+      # mislabelling hazard actually asked for; hiding the head was never the fix.
+      panes << :messages if @detail_ws
       panes << :saml if @detail_saml                                     # decoded SAML XML (request/response)
       panes << :jwt unless @detail_jwts.empty?                           # located + decoded JWT(s)
       panes << :graphql if @detail_graphql || !@detail_graphql_ws.empty? # parsed GraphQL operation (body or WS frames)
@@ -2147,17 +2149,23 @@ module Gori::Tui
       panes
     end
 
-    # The chip label for a detail pane (the response pane shows WS messages for a
-    # 101-Switching flow; frames only exist for an intercepted h2 connection).
+    # The chip label for a detail pane (MESSAGES only for a flow with a captured socket
+    # transcript; frames only exist for an intercepted h2 connection).
     private def detail_pane_label(pane : Symbol) : String
       case pane
-      when :frames   then "FRAMES (h2)"
-      when :events   then "EVENTS (sse)"
-      when :saml     then "SAML"
-      when :jwt      then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
-      when :graphql  then "GRAPHQL"
-      when :params   then "PARAMS"
-      when :response then @detail_ws ? "MESSAGES" : "RESPONSE"
+      when :frames  then "FRAMES (h2)"
+      when :events  then "EVENTS (sse)"
+      when :saml    then "SAML"
+      when :jwt     then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
+      when :graphql then "GRAPHQL"
+      when :params  then "PARAMS"
+        # No `(N)` here, unlike JWT: a JWT set is fixed once the bytes are captured, while a live
+        # socket's total moves on every poll (`refresh_detail` does not early-return for one) —
+        # and the label's WIDTH places every chip to its right, so a count crossing 9→10 would
+        # shift the mode chips out from under a pointer already on its way to one. The total is
+        # inside the pane anyway, in `log_head`'s "showing the latest N of M".
+      when :messages then "MESSAGES"
+      when :response then "RESPONSE"
       else                "REQUEST"
       end
     end
@@ -2195,7 +2203,7 @@ module Gori::Tui
       set_detail_pane(panes[(i + 1) % panes.size])
     end
 
-    # ←/→ navigation: step one pane in `dir` (+1 forward REQ→RES→FRAMES, −1 back).
+    # ←/→ navigation: step one pane in `dir` (+1 forward along `detail_panes`, −1 back).
     # Returns false when it would step off an end — the Runner closes the detail on a
     # left-past-REQUEST (back to the list) and no-ops a right-past-FRAMES.
     def detail_pane_advance(dir : Int32) : Bool
@@ -2763,7 +2771,7 @@ module Gori::Tui
       end
     end
 
-    # Inverts render_detail's chip strip (the one-row REQUEST/RESPONSE/FRAMES band
+    # Inverts render_detail's chip strip (the one-row `detail_panes` band
     # at rect.y): each chip is " LABEL " (width label.size+2) from rect.x+1 with a
     # 1-col gap between. Returns the pane symbol whose chip is under (mx,my), else nil.
     def detail_pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
@@ -2787,7 +2795,7 @@ module Gori::Tui
       end
       hex = detail_hex?(@detail.not_nil!)
       dv = detail_view
-      ws = @reveal && !hex && !dv.binary
+      ws = reveal_active?(hex, dv)
       # status word + 1-col gap, then chips (same as render)
       start = x + 1 + detail_mode_status(hex, ws, dv).size + 1
       chips = detail_mode_chips(hex, ws, dv).map { |(id, label, _)| {id, label} }
@@ -2805,12 +2813,29 @@ module Gori::Tui
       dv.pretty ? "PRETTY" : "RAW"
     end
 
+    # Is reveal-whitespace actually SHOWING? The global `b` toggle is not the whole answer: hex
+    # and a binary placeholder both displace it, and on a synthetic log pane `reveal_lines`
+    # answers nil because there are no raw bytes behind the pane at all. Asked in one place
+    # because `render_detail` paints from it and `detail_mode_at` hit-tests from it, and a chip
+    # strip that disagrees with the body is the defect this pane already had: `b` on MESSAGES
+    # relabelled the strip RAW and lit ` b:raw ` over a body it had not touched.
+    private def reveal_active?(hex : Bool, dv : DetailView) : Bool
+      @reveal && !hex && !dv.binary && !log_pane?
+    end
+
     # Mode toggle chips for the detail strip: {id, label, lit}.
     private def detail_mode_chips(hex : Bool, ws : Bool, dv : DetailView) : Array({Symbol, String, Bool})
       if hex
         [{:hex, " ^X:text ", true}] of {Symbol, String, Bool}
       elsif ws
         [{:ws, " b:raw ", true}] of {Symbol, String, Bool}
+      elsif log_pane?
+        # A synthetic log (MESSAGES / FRAMES / EVENTS) and the decoded panes are gori's own text
+        # over rows or a projection — there are no raw bytes to dump and no body of the wire's to
+        # reflow, so all three keys are no-ops here (`toggle_detail_hex` self-gates on this same
+        # predicate, `reveal_lines` answers nil, `@pretty` is read only by the gRPC and plain-body
+        # branches). Offering the chips advertised three controls that did nothing.
+        [] of {Symbol, String, Bool}
       elsif dv.grpc
         # Before the plain `binary` arm, which offers hex alone: on a gRPC pane `p` is live
         # and switches each payload between the protobuf tree and its hex preview. The label
@@ -2841,14 +2866,11 @@ module Gori::Tui
       # Back-to-list affordance on the top border (← past REQUEST / esc → the list).
       Frame.list_back_hint(screen, rect)
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
-      # obvious there's more behind (←/→ walk REQUEST → RESPONSE → FRAMES).
+      # obvious there's more behind (←/→ walk `detail_panes`, in that order).
       x = render_detail_chips(screen, rect, strip_focused)
       hex = detail_hex?(detail)
       dv = detail_view
-      # A binary body is shown as a placeholder; the reveal-whitespace path renders raw
-      # bytes as text, so gate it off there too — otherwise `b` re-triggers the very
-      # cursor-desync corruption the placeholder exists to avoid. Pretty likewise n/a.
-      ws = @reveal && !hex && !dv.binary
+      ws = reveal_active?(hex, dv)
       nav = detail_navigable? ? "↑/↓←/→ · ⇧sel · y" : "↑/↓ scroll"
       # Status word + mode toggle chips (mouse + same chords as keys), then muted nav.
       x = screen.text(x + 1, rect.y, detail_mode_status(hex, ws, dv), Theme.muted) + 1
@@ -3204,19 +3226,24 @@ module Gori::Tui
     # Static pools for low-cardinality fields; `host:` is DISTINCT from the store
     # (capped + prefix-filtered) so a large History stays cheap to complete.
     #
-    # `scope:` completes from `QL::SCOPE_VALUES` — the field's whole vocabulary, kept beside the
-    # field rather than copied here, because the colour-rule overlay's pool reads the same list.
+    # The CLOSED-set fields complete from `QL`'s own vocabulary lists (`SCOPE_VALUES`,
+    # `SOURCE_VALUES`, `PROTO_VALUES`, `STUB_VALUES`) rather than from copies here, because the
+    # colour-rule overlay completes the same fields through `InterceptFilter.suggest_values` and
+    # a second copy is how the two came to offer different sets. The pools written out here are
+    # SAMPLES of open-ended fields (`status:`, `size:`, `dur:`) — no list can be their whole
+    # vocabulary, so there is nothing for a shared constant to be the truth of.
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
                when "scheme" then ["http", "https"]
-               when "proto"  then ["ws", "grpc", "sse", "http"]
+               when "proto"  then QL::PROTO_VALUES
                when "method" then METHOD_VAL
                when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
                when "host"   then host_values_for(prefix)
                when "size"   then [">10000", ">100000", "<1000"]
                when "scope"  then QL::SCOPE_VALUES
                when "src"    then QL::SOURCE_VALUES
+               when "stub"   then QL::STUB_VALUES
                when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end
@@ -3355,7 +3382,7 @@ module Gori::Tui
         head = log_head(frame_lines(frames, detail.h2_stream_id), @detail_frames_total, frames.size, "frames")
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
-      if @detail_pane == :response && (msgs = @detail_ws)
+      if @detail_pane == :messages && (msgs = @detail_ws)
         head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
@@ -3643,8 +3670,13 @@ module Gori::Tui
     # this was the third renderer of the same rows, and the one an operator actually reads
     # while working a socket. The facts are V7's; only this pane could not see them.
     #
-    # No `term_safe` pass: `Screen` maps a control byte to its own cell, and `^B` reveals
-    # whitespace across the whole detail view. Scrubbing here would take that choice away.
+    # No `term_safe` pass, and NOT because reveal covers it — `b` is inert on this pane
+    # (`reveal_lines` has no raw bytes behind a synthetic log, which is why `reveal_active?`
+    # stops offering the chip here). It is unnecessary: `Screen#cell` maps every control byte
+    # to a space of its own, so nothing a peer sends can move the terminal's cursor, and `wrap`
+    # scrubs invalid UTF-8 on the way in. An operator who needs the exact octets reads them from
+    # `gori run show --format json|raw` or MCP `get_flow`, which carry them base64 when they are
+    # not text — scrubbing them into the line here would only hide that they were ever there.
     private def ws_lines(msgs : Array(Store::WsMessage)) : Array(String)
       return ["(no websocket messages)"] if msgs.empty?
       msgs.map do |m|
@@ -3654,6 +3686,10 @@ module Gori::Tui
         if m.control?
           "#{prefix} #{m.control_detail}"
         elsif m.text?
+          # NOT scrubbed here, deliberately: a text-opcode frame is text because the peer SAID
+          # so, and a captured one may hold invalid UTF-8 — but `wrap`, the one seam every
+          # line in this pane passes through, already scrubs. Doing it twice would put the
+          # invariant in two places and leave the next reader unsure which one owns it.
           "#{prefix} #{String.new(m.payload)}"
         else
           "#{prefix} «binary #{m.payload.size}b»"

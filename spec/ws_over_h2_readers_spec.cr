@@ -166,7 +166,7 @@ describe "History detail MESSAGES pane" do
       view = Gori::Tui::HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane # REQUEST → MESSAGES (the pane exists only when there is a transcript)
+      2.times { view.toggle_pane } # REQUEST → RESPONSE → MESSAGES (offered only with a transcript)
 
       text = detail_pane_text(view, store)
       text.should contain("MESSAGES")
@@ -184,7 +184,7 @@ describe "History detail MESSAGES pane" do
       view = Gori::Tui::HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane
+      2.times { view.toggle_pane } # REQUEST → RESPONSE → MESSAGES
 
       text = detail_pane_text(view, store, cols: 120)
       text.should contain("MESSAGES")

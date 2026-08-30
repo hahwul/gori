@@ -43,9 +43,17 @@ module Gori::Tui
       store = @host.session.store
       key = store.setting(SavedViews::ACTIVE_KEY)
       if key.nil? || key.empty?
-        # Nobody has chosen yet — `default_view`, not nil. Not persisted here: the same answer
-        # is what `gori run history` and MCP compute, and writing it would take a store write on
-        # every first open (and fail on a read-only one) to record a decision nobody made.
+        # Nobody has chosen yet — `default_view`, not nil. Not persisted here: writing it would
+        # take a store write on every first open (and fail on a read-only one) to record a
+        # decision nobody made, and `SavedViews.active` computes the same fallback for the
+        # surface that asks (`gori run views` marks it ●).
+        #
+        # The headless LISTINGS deliberately do NOT apply it: `gori run history` and MCP
+        # `list_history` narrow only by an explicit `--view` / `view`. A lens the reader of the
+        # output cannot see is exactly what must not silently drop flows from a script's answer
+        # — the TUI can carry a standing one because the `v:` chip announces it on every frame.
+        # So the two surfaces DISAGREE about the row count on purpose; do not "fix" one to the
+        # other.
         @history.set_view(SavedViews.default_view(store))
         return nil
       end
@@ -907,7 +915,8 @@ module Gori::Tui
       @history.toggle_pane
     end
 
-    # ← / → in the detail view walk REQ → RES → FRAMES. Right past the last pane is a
+    # ← / → in the detail view walk `HistoryView#detail_panes`, whose tail is conditional on
+    # what the flow carries — so this must not name a fixed chain. Right past the last pane is a
     # no-op; left past the first (REQUEST) returns to the History list.
     def move_detail_pane(dir : Int32) : Nil
       moved = @history.detail_pane_advance(dir)

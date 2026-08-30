@@ -477,6 +477,24 @@ module Gori
     # would silently keep offering two spellings the day the field learns a third.
     SCOPE_VALUES = %w[in out]
 
+    # `proto:`'s WHOLE value vocabulary — the four application protocols and their TLS-qualified
+    # spellings, which `Proto.split_transport` peels off before `Proto::Kind.parse?` sees the
+    # rest. The plain form comes first in each pair: it is the broader answer, so `proto:w`
+    # completes to `ws` before `wss`.
+    #
+    # Here, beside the field, for `SCOPE_VALUES`' reason — but with one caveat the other pools
+    # do not have: `InterceptFilter` keeps its OWN, deliberately narrower `PROTO_VAL` for a hold
+    # gate, where `grpc`/`sse` are decided from a captured response's Content-Type that does not
+    # exist yet. This list is for the backends that answer over CAPTURED ROWS (History's bar and
+    # the colour-rule overlay); see `InterceptFilter.suggest_values`, which picks between the two.
+    PROTO_VALUES = %w[ws wss grpc grpcs sse sses http https]
+
+    # `stub:`'s two canonical spellings. `stub_cond` also takes yes/no/on/off/1/0, and a pool is
+    # deliberately not the place for every alias — it is the place for the answer a reader can
+    # type without checking. Beside the field for `SCOPE_VALUES`' reason: History's bar and the
+    # colour-rule overlay both complete this field, and it is a closed pair in both.
+    STUB_VALUES = %w[true false]
+
     # The fields the one-line hints SAMPLE, in the order that reads best on a bar. A hint gets one
     # terminal row and `FIELDS` has eighteen entries, so something has to choose; choosing once
     # here — with a spec pinning every entry against `FIELDS` — beats each widget choosing for

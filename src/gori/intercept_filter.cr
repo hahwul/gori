@@ -277,18 +277,50 @@ module Gori
     private def self.suggest_values(field : String, prefix : String, hosts : Array(String),
                                     fields : Array(String)) : Array(String)
       return [] of String if UNSUPPORTED_FIELDS.includes?(field) && !fields.includes?(field)
+      values = value_pool(field, hosts, row_backed?(fields))
+      return [] of String unless values
       p = prefix.downcase
-      values = case field
-               when "host"   then hosts
-               when "method" then METHOD_VAL
-               when "scheme" then SCHEME_VAL
-               when "status" then STATUS_VAL
-               when "proto"  then PROTO_VAL
-               when "scope"  then QL::SCOPE_VALUES
-               when "src"    then QL::SOURCE_VALUES
-               else               return [] of String
-               end
       values.select(&.downcase.starts_with?(p))
+    end
+
+    # The pool for one field, or nil when this field has no closed vocabulary to offer.
+    #
+    # `rows` says the CALLER's backend evaluates captured rows rather than a live message (see
+    # `row_backed?`), and two fields answer differently for the two:
+    #
+    #   proto:  a hold gate gets the narrow `PROTO_VAL`, for the reason written there. A colour
+    #           rule is matched against a captured response and so answers `proto:grpc` /
+    #           `proto:wss` perfectly — offering it only `ws`/`http` made that bar under-report
+    #           a vocabulary its own backend accepts.
+    #   stub:   row-backed ONLY. `stub` is not in this parser's `FIELDS`, so a hold-gate bar never
+    #           completes the name and can never reach these values; the colour-rule overlay does
+    #           (`Colormarker::USEFUL_FIELDS` is `QL::FIELDS`), and there it had the shape a closed
+    #           field must not have — the name completes, the value list is empty, and the field
+    #           reads as one that takes free text.
+    #
+    # Split from `suggest_values` because the two caller-dependent arms put that method over
+    # ameba's cyclomatic ceiling, and "which pool" is a different question from "may this caller
+    # complete this field at all".
+    private def self.value_pool(field : String, hosts : Array(String), rows : Bool) : Array(String)?
+      case field
+      when "host"   then hosts
+      when "method" then METHOD_VAL
+      when "scheme" then SCHEME_VAL
+      when "status" then STATUS_VAL
+      when "scope"  then QL::SCOPE_VALUES
+      when "src"    then QL::SOURCE_VALUES
+      when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
+      when "stub"   then rows ? QL::STUB_VALUES : nil
+      end
+    end
+
+    # Whether the CALLER's field pool is QL's whole vocabulary rather than a hold gate's subset —
+    # equivalently, whether its backend evaluates against CAPTURED ROWS. `UNSUPPORTED_FIELDS` is
+    # exactly the difference between the two lists, so this is the question `suggest_values`
+    # already asks per field, asked once for the pool as a whole. Derived rather than a flag,
+    # so a third caller cannot arrive without answering it.
+    private def self.row_backed?(fields : Array(String)) : Bool
+      UNSUPPORTED_FIELDS.any? { |f| fields.includes?(f) }
     end
 
     getter source : String

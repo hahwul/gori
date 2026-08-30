@@ -197,6 +197,28 @@ describe Gori::Tui::HistoryView do
     view.query_suggestions.should eq(["scope:out"])
   end
 
+  # `stub:` was the last field in QL::FIELDS that completed as a NAME and then offered no
+  # values — which reads as "this one takes free text" rather than as a closed pair.
+  it "completes the two values stub: takes" do
+    view = HistoryView.new
+    view.start_query
+    "stub:".each_char { |c| view.query_insert(c) }
+    view.query_suggestions.should eq(["stub:true", "stub:false"])
+  end
+
+  # `proto:` splits the transport off the application protocol, so `proto:wss` means the TLS
+  # socket specifically — a distinction the guide teaches and that this pool could not be used
+  # to find. The plain form stays first: it is the broader answer.
+  it "completes the TLS-qualified proto: spellings beside the plain ones" do
+    view = HistoryView.new
+    view.start_query
+    "proto:w".each_char { |c| view.query_insert(c) }
+    view.query_suggestions.should eq(["proto:ws", "proto:wss"])
+    view.query_backspace
+    view.query_insert('g')
+    view.query_suggestions.should eq(["proto:grpc", "proto:grpcs"])
+  end
+
   # A filter that never touches flows_fts must not pay for (or display) the backlog probe:
   # its answer is complete the moment the row commits.
   it "does not note the index backlog for a filter that doesn't read it" do
@@ -846,13 +868,138 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane # request -> response (= MESSAGES for a WS flow)
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE (the handshake) -> MESSAGES
 
       backend = MemoryBackend.new(80, 12)
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 12))
       backend.contains?("MESSAGES").should be_true
       backend.contains?("hello").should be_true
       backend.contains?("world").should be_true
+    end
+  end
+
+  # The socket transcript used to be RENDERED IN the :response slot, relabelled MESSAGES — so
+  # the handshake response head had no pane at all and the server's half of the negotiation
+  # (Sec-WebSocket-Protocol, Sec-WebSocket-Extensions: permessage-deflate, a Set-Cookie issued
+  # on the upgrade) was unreachable in the TUI. `gori run show` printed it under its own
+  # heading the whole time, which is the parity break: the headless surface carried evidence
+  # the interactive one had deleted.
+  it "keeps the WebSocket handshake RESPONSE reachable beside the MESSAGES transcript" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/ws", http_version: "HTTP/1.1",
+        head: "GET /ws HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 101,
+        head: ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+               "Sec-WebSocket-Protocol: graphql-transport-ws\r\n" \
+               "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n").to_slice))
+      store.insert_ws_message(id, "out", 1, "hello".to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      # Both chips are on the strip, and they are two different words.
+      strip = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(strip), Rect.new(0, 0, 120, 12))
+      strip.contains?("RESPONSE").should be_true
+      strip.contains?("MESSAGES").should be_true
+
+      view.toggle_pane # REQUEST -> RESPONSE: the handshake the server answered with
+      res = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(res), Rect.new(0, 0, 120, 12))
+      res.contains?("101 Switching Protocols").should be_true
+      res.contains?("permessage-deflate").should be_true
+      res.contains?("graphql-transport-ws").should be_true
+      res.contains?("hello").should be_false # the transcript is the NEXT pane, not this one
+
+      view.toggle_pane # RESPONSE -> MESSAGES: the frames, and not the handshake bytes
+      msg = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(msg), Rect.new(0, 0, 120, 12))
+      msg.contains?("hello").should be_true
+      msg.contains?("permessage-deflate").should be_false
+    end
+  end
+
+  # The half of the split that no other spec walks: on a socket flow the RESPONSE pane is an
+  # ordinary captured head again, so the controls a captured head has must be live on it. Pinned
+  # because every other WebSocket spec toggles straight past RESPONSE to MESSAGES — reinstating
+  # the old `:response`-is-a-log-pane behaviour would leave the whole suite green.
+  it "gives the WebSocket handshake RESPONSE the controls any captured head has" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "out", 1, "hello".to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # REQUEST -> RESPONSE
+
+      # ^X dumps the handshake's own bytes (a log pane refuses the toggle outright).
+      view.toggle_detail_hex
+      hex = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(hex), Rect.new(0, 0, 120, 12))
+      hex.contains?("48 54 54 50").should be_true # "HTTP" in the hex column
+      hex.contains?("HEX").should be_true
+      view.toggle_detail_hex
+
+      # …and copy-as offers the response variants, not the empty list a transcript gets.
+      title, opts = view.detail_copy_as_menu
+      title.should eq("COPY RESPONSE AS")
+      opts.should_not be_empty
+
+      # MESSAGES, one pane over, still refuses both: its bytes are not response_body.
+      view.toggle_pane
+      view.toggle_detail_hex
+      msg = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(msg), Rect.new(0, 0, 120, 12))
+      msg.contains?("hello").should be_true   # still the transcript, not a hex dump
+      msg.contains?("^X:hex").should be_false # …and the strip no longer advertises the key
+      view.detail_copy_as_menu[1].should be_empty
+    end
+  end
+
+  # `b` used to relabel the strip RAW and light ` b:raw ` on the MESSAGES pane while
+  # `reveal_lines` handed back nil — the chip row claiming a mode the body was not in.
+  it "does not claim reveal-whitespace on a pane that has no raw bytes" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "out", 1, "hello".to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE -> MESSAGES
+      view.reveal = true
+
+      backend = MemoryBackend.new(120, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 12))
+      backend.contains?("b:raw").should be_false
+      backend.contains?("hello").should be_true
+    end
+  end
+
+  # A text-opcode frame is text because the PEER said so, and a capture is free to hold one
+  # whose payload is not valid UTF-8. `wrap` is the seam that scrubs the whole pane, and this
+  # pins the property rather than the mechanism: raw invalid bytes must reach neither the
+  # width/search math nor the clipboard, wherever the scrub ends up living.
+  it "scrubs a text frame whose captured payload is not valid UTF-8" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "in", 1, Bytes[0x68, 0x69, 0xff, 0xfe, 0x21]) # "hi", two bad bytes, "!"
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE -> MESSAGES
+
+      backend = MemoryBackend.new(80, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      backend.contains?("hi\uFFFD\uFFFD!").should be_true
+      view.detail_copy_all.valid_encoding?.should be_true
     end
   end
 
@@ -877,7 +1024,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane # request -> MESSAGES
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE -> MESSAGES
 
       backend = MemoryBackend.new(120, 16)
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 120, 16))
@@ -923,7 +1070,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      2.times { view.toggle_pane } # REQUEST → MESSAGES → GRAPHQL (the pane list gained it)
+      3.times { view.toggle_pane } # REQUEST → RESPONSE → MESSAGES → GRAPHQL (the pane list gained it)
 
       backend = MemoryBackend.new(100, 16)
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
@@ -945,7 +1092,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      2.times { view.toggle_pane } # land on GRAPHQL
+      3.times { view.toggle_pane } # REQUEST → RESPONSE → MESSAGES → GRAPHQL
 
       backend = MemoryBackend.new(100, 16)
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
@@ -972,9 +1119,9 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      # Only REQUEST and MESSAGES exist, so two toggles come back to REQUEST — a GRAPHQL pane
-      # would have made this land somewhere else and would print its header.
-      3.times do
+      # Only REQUEST, RESPONSE and MESSAGES exist, so three toggles come back to REQUEST — a
+      # GRAPHQL pane would have made this land somewhere else and would print its header.
+      4.times do
         view.toggle_pane
         backend = MemoryBackend.new(100, 12)
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
@@ -1701,7 +1848,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane # request -> response (= MESSAGES for a WS flow)
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE (the handshake) -> MESSAGES
 
       # x (hex) must be a no-op on a synthetic transcript — never a hex dump of the
       # bare "HTTP/1.1 101" handshake (whose bytes hold neither "hello" nor "world").
