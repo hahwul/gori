@@ -270,6 +270,103 @@ module Gori
         !sub.nil? && !sub.empty? && !sub.starts_with?('-')
       end
 
+      # The one positional a command takes, or a clean refusal — the shape the rest of this
+      # surface already uses (`repeater minimize`, `notes delete`, `colormarker color rm`,
+      # `views add`, … all say "too many arguments (expected one …)").
+      #
+      # Four commands instead spelled `unknown_args { |b, a| x = (b + a).first? }`, which keeps
+      # the first token and DROPS the rest in silence: `gori run oast providers update 3 4
+      # --name=x` renamed provider 3, ignored 4, and exited 0 with a success line naming one
+      # provider — from which the operator cannot tell that the other was never touched. Same
+      # for `oast resume 1 2`, `grpc reflect URL1 URL2` and `grpc forget A B`. A dropped
+      # argument that leaves a SUCCESS status is the failure mode a scripted surface can least
+      # afford, which is why every other command here refuses it.
+      #
+      # Takes both halves of `unknown_args` for the reason the colormarker list documents: a
+      # bare word after `--` lands in `after`, and reading only `before` would lose it.
+      private def self.one_positional(before : Array(String), after : Array(String),
+                                      prefix : String, what : String) : String?
+        all = before + after
+        if msg = extra_positional_error(all, prefix, what)
+          abort msg
+        end
+        all.first?
+      end
+
+      # The same guard for the sites that keep the ARRAY (because they read `.first?` later, or
+      # feed it to a `||` that offers a flag as the other spelling). Six commands collected
+      # `before + after` and then read `positional.first?` with nothing in between, which drops
+      # a second token exactly as `(before + after).first?` does and is not caught by grepping
+      # for that shape: `gori run probe rules delete a b` deleted `a` and exited 0, and so did
+      # `project scope update 3 4 --host=x`, `session add x y`, `rewriter preset add p q`,
+      # `probe rules enable a b` and `probe mode passive active`. Four of those are mutations.
+      private def self.one_positional_list(before : Array(String), after : Array(String),
+                                           prefix : String, what : String) : Array(String)
+        all = before + after
+        if msg = extra_positional_error(all, prefix, what)
+          abort msg
+        end
+        all
+      end
+
+      # The decision and the message, split from the abort so a spec can drive both — the same
+      # split, for the same reason, as `list_leftover_error` and `two_targets_error`.
+      def self.extra_positional_error(all : Array(String), prefix : String, what : String) : String?
+        return nil if all.size <= 1
+        "#{prefix}: too many arguments (expected one #{what}, got: #{all.join(" ")})"
+      end
+
+      # `--db` and `--project` both name the target, so BOTH is not a preference to resolve —
+      # it is two answers to one question, and silently keeping one is the failure this
+      # surface is least able to survive.
+      #
+      # `--db` used to win without a word, so `gori run history --db "$DB" --project "$PROJ"`
+      # with a `$PROJ` that does not even exist read `$DB` and exited 0 — the project name the
+      # operator typed was never resolved, never checked, never mentioned. Harmless on a read;
+      # `history delete -q … --yes`, `history clear --yes` and `project delete` take the same
+      # pair of flags, and there the invisible winner decides which project gets emptied.
+      #
+      # A clean usage error rather than a warning, for the reason `import_source` gives about
+      # two source flags: zero or two+ is a usage error, and a script's STDERR is exactly what
+      # nobody reads.
+      #
+      # This IS a breaking change, and calling it a clarification would be dishonest: the old
+      # behaviour was deterministic and documented ("--db=PATH — wins over everything"), so a
+      # wrapper that pinned `--db` and passed a caller's `--project` through — `gr() { gori run
+      # "$@" --db "$GORI_DB"; }` — worked and now aborts. It is taken deliberately, because the
+      # same flag pair reaches `history delete --yes`, `history clear --yes` and `project
+      # delete`, where the invisible winner decides which project gets emptied; a wrapper is
+      # fixed by dropping one flag, and there is no equivalent repair for the wrong project.
+      # The guide and the CLI reference both say so now.
+      #
+      # `presence`, so a `--project=` / `--db=` with nothing after the `=` is not counted as an
+      # answer and the pair is left to the precedence below, resolving exactly as it did.
+      private def self.refuse_two_targets(project_name : String?, db_path : String?,
+                                          prefix : String = "gori run",
+                                          project_flag : String = "--project",
+                                          db_flag : String = "--db") : Nil
+        if msg = two_targets_error(project_name, db_path, prefix, project_flag, db_flag)
+          abort msg
+        end
+      end
+
+      # The sentence, split from the abort so a spec can pin both the condition and the
+      # wording — `refuse_two_targets` ends in `abort`, which a spec cannot drive. Same reason
+      # `colormarker_rule_row` and `view_row` are public.
+      #
+      # The flag NAMES are parameters, not literals, because `gori run diff` reaches the same
+      # resolver twice with `--from`/`--from-db` and `--to`/`--to-db` — it accepts neither
+      # `--project` nor `--db`, so a hard-coded sentence told the operator to fix flags they
+      # had not typed and could not type.
+      def self.two_targets_error(project_name : String?, db_path : String?,
+                                 prefix : String = "gori run",
+                                 project_flag : String = "--project",
+                                 db_flag : String = "--db") : String?
+        return nil unless project_name.try(&.presence) && db_path.try(&.presence)
+        "#{prefix}: pass #{db_flag} PATH or #{project_flag} NAME, not both " \
+        "(#{db_flag} names the database file directly, so #{project_flag} #{project_name.inspect} would be ignored)"
+      end
+
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
       # → exact dir slug → exact display name → unique id-prefix, all
       # case-insensitive) → else the most-recently-active project. Aborts when
@@ -279,6 +376,7 @@ module Gori
       # The default branch ANNOUNCES itself (see announce_default_project) — the whole
       # point of a default nobody typed is that it is invisible until it is wrong.
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
+        refuse_two_targets(project_name, db_path)
         if path = db_path
           abort "gori run: --db is not a readable file: #{path}" unless File.exists?(path) && !File.directory?(path)
           return Project.new(File.basename(File.dirname(path)), path)
@@ -331,6 +429,7 @@ module Gori
       # Capture creates-or-reopens its target (unlike reads, which require an
       # existing one). --db targets an explicit database file instead of a project.
       private def self.resolve_capture_project(project_name : String?, db_path : String?) : Project
+        refuse_two_targets(project_name, db_path, "gori run capture")
         if path = db_path
           # Catch the unopenable cases up front with a clean message — otherwise
           # SQLite raises a raw DB::ConnectionRefused backtrace deep in Session.open.
@@ -413,7 +512,67 @@ module Gori
         reapply_active_slot
         store
       rescue ex : DB::Error | SQLite3::Exception
-        abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+        abort "gori run: cannot open database #{project.db_path}: " \
+              "#{ex.message.presence || "not a valid SQLite database (or unreadable)"}" \
+              "#{open_failure_hint(ex, project.db_path, read_only)}"
+      end
+
+      # What to add after SQLite's own sentence, for the two failures that are NOT what the
+      # wrapper implies. Everything else keeps the wording it had, which is where a genuinely
+      # unreadable or non-SQLite file still lands.
+      #
+      # A LOCKED project. A write subcommand opens for write and `Store.open` migrates, so a
+      # peer holding the write lock (a TUI, a `gori run capture`, an MCP server) fails the open
+      # after `busy_timeout=5000` with the bare words "database is locked" — printed under
+      # "cannot open database <path>", which reads as a broken FILE. It is the opposite: the
+      # file is fine and the condition clears by itself. Matched on the message, not
+      # `SQLite3::Exception#code`, because this rescue also catches the `DB::Error` crystal-db
+      # wraps some driver failures in, which carries the text but no code. The strings are
+      # SQLite's own C-library constants, not locale-dependent.
+      #
+      # A READ-ONLY project, which cannot be recognised from the message at all: crystal-sqlite3
+      # rescues everything `sqlite3_open_v2` + the pragmas raise and re-raises a bare
+      # `DB::ConnectionRefused` — no message, NO cause (lib/sqlite3 connection.cr). So the
+      # commonest write failure of all reaches here indistinguishable from a corrupt file, and
+      # got told it was one: "not a valid SQLite database (or unreadable)" about a database that
+      # is perfectly valid and that the very same operator can still READ. Since the driver
+      # destroyed the reason, ask the filesystem for it — but only once the open has ALREADY
+      # failed, never as a pre-flight gate, so nothing that works today starts being refused by
+      # a `File::Info.writable?` that disagrees with the kernel (ACLs, a foreign mount).
+      #
+      # `read_only` opens are excluded because for them a non-writable file is not a fault.
+      # Public for the reason `two_targets_error` is: its only caller ends in `abort`.
+      def self.open_failure_hint(ex : Exception, db_path : String? = nil,
+                                 read_only : Bool = false) : String
+        msg = ex.message.to_s
+        # `read_only` gates BOTH message branches, not just the filesystem tail below. A
+        # read-only open can still surface either string — `Store.open` runs its pragmas before
+        # `apply_query_only` — and both sentences were wrong for it: "read it with a read-only
+        # subcommand" is what the operator just did, and "this subcommand writes" is false.
+        if msg.includes?("is locked")
+          return " — another gori (a TUI, a capture, or an MCP server) is writing to this project." \
+                 " Nothing is wrong with the file; retry." if read_only
+          return " — another gori (a TUI, a capture, or an MCP server) is writing to this project." \
+                 " Nothing is wrong with the file: retry, or read it with a read-only subcommand."
+        end
+        if !read_only && (msg.includes?("readonly") || msg.includes?("read-only"))
+          return " — this subcommand writes, and the file (or its directory) is not writable."
+        end
+        path = db_path
+        return "" unless path && File.exists?(path)
+        # The DIRECTORY, not just the file: a WAL database keeps `-wal` and `-shm` BESIDE it,
+        # so SQLite has to create them there — which is why a read-only directory defeats even
+        # a `read_only: true` open, while a read-only FILE in a writable directory reads fine.
+        # Both were verified on the binary. That asymmetry is the whole reason the two branches
+        # below ask different questions.
+        dir_writable = File::Info.writable?(File.dirname(path))
+        if read_only
+          return "" if dir_writable
+          return " — the DIRECTORY holding it is not writable, and SQLite's WAL mode must create" \
+                 " `-shm`/`-wal` beside the file even to READ it. Copy the project somewhere writable."
+        end
+        return "" if dir_writable && File::Info.writable?(path)
+        " — this subcommand writes, and the file (or its directory) is not writable."
       end
 
       # Does this QL string read `flows_fts`? Shape-only: no store, so it is safe to call

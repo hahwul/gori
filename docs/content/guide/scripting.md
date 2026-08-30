@@ -23,9 +23,13 @@ Each project is its own SQLite database. Read subcommands resolve one in this or
 
 | Selector | Meaning |
 |----------|---------|
-| `--db=PATH` | A specific database file — wins over everything |
+| `--db=PATH` | A specific database file |
 | `--project=NAME` | Match by short id, directory slug, display name, or unique id prefix (case-insensitive) |
 | *(neither)* | The most-recently-active project |
+
+The two selectors are alternatives, not a precedence: passing **both** is a usage error, not a
+silent win for `--db`. The same pair reaches destructive verbs (`history delete`, `history
+clear`, `project delete`), and there an invisible winner decides which project gets emptied.
 
 `gori run capture` differs on one point: it **creates or reopens** its target, where reads require a project that already exists.
 

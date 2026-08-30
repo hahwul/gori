@@ -175,6 +175,11 @@ module Gori
       # Discover WRITES findings, so an explicit --db is create-or-reopened (like capture);
       # without one it writes into an existing project (never silently creates a default).
       private def self.resolve_discover_project(project_name : String?, db_path : String?) : Project
+        # These two create-or-reopen their target, so they resolve it themselves rather than
+        # through `resolve_read_project` — which is where the guard lived, and why `--db X
+        # --project Y` went on silently discarding `--project` on the two subcommands that
+        # WRITE. Same question, same refusal, said before either branch is taken.
+        refuse_two_targets(project_name, db_path, "gori run discover")
         if path = db_path
           abort "gori run discover: --db is a directory, not a file: #{path}" if Dir.exists?(path)
           parent = File.dirname(path)

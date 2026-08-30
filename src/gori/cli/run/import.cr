@@ -87,6 +87,11 @@ module Gori
       # discover); without one it writes into an existing project (never silently
       # creates a default — use --db PATH or --project NAME for a brand-new target).
       private def self.resolve_import_project(project_name : String?, db_path : String?) : Project
+        # These two create-or-reopen their target, so they resolve it themselves rather than
+        # through `resolve_read_project` — which is where the guard lived, and why `--db X
+        # --project Y` went on silently discarding `--project` on the two subcommands that
+        # WRITE. Same question, same refusal, said before either branch is taken.
+        refuse_two_targets(project_name, db_path, "gori run import")
         if path = db_path
           abort "gori run import: --db is a directory, not a file: #{path}" if Dir.exists?(path)
           parent = File.dirname(path)

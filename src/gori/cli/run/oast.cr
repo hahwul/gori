@@ -184,6 +184,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         id : String? = nil
+        positional = [] of String
         name : String? = nil
         # Nilable sentinels, not defaults: on `update` a field the caller did not mention must
         # keep its stored value. Replacing the whole row instead would silently drop the
@@ -205,11 +206,28 @@ module Gori
           p.on("--enabled", "Turn the provider on") { enabled = true }
           p.on("--disabled", "Turn the provider off") { enabled = false }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id = (before + after).first? }
+          p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
+
+        # The two verbs share this parser but not its positional: `update` takes exactly one
+        # `<id>`, `add` takes NONE (its banner is `add --name=N [options]`). A stray token used
+        # to be collected and then simply never read, so `gori run oast providers add interactsh
+        # --name=x` created a provider and said nothing about the word it dropped. Branching
+        # here rather than inside `unknown_args` is what keeps each verb's sentence true — the
+        # shared callback could only ever have offered `add` an "expected one <id>" it does not
+        # accept even one of.
+        if update
+          if msg = extra_positional_error(positional, "gori run oast providers update", "<id>")
+            abort msg
+          end
+          id = positional.first?
+        elsif !positional.empty?
+          abort "gori run oast providers add: unexpected argument#{positional.size == 1 ? "" : "s"} " \
+                "#{positional.map(&.inspect).join(", ")} — `add` takes only flags (see --help)"
+        end
 
         # An unparseable kind would be stored verbatim and then never match a ProviderKind at
         # listen time — the provider would simply never fire. Refuse it here.
@@ -432,7 +450,7 @@ module Gori
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit the payload and each callback as a JSON line (same shape as MCP)") { json = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id_arg = (before + after).first? }
+          p.unknown_args { |before, after| id_arg = one_positional(before, after, "gori run oast resume", "<id>") }
           p.invalid_option { |f| abort "gori run oast resume: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast resume: missing value for #{f}" }
         end

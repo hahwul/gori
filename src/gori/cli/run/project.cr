@@ -500,7 +500,7 @@ module Gori
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match") { |v| pattern = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
+          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project scope update", "<id>") }
           p.invalid_option { |f| abort "gori run project scope update: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope update: missing value for #{f}" }
         end

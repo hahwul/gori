@@ -230,7 +230,7 @@ module Gori
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
+          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session add", "<name>") }
           p.invalid_option { |f| abort "gori run session add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run session add: missing value for #{f}" }
         end
@@ -352,7 +352,7 @@ module Gori
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
+          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session edit", "<name>") }
           p.invalid_option { |f| abort "gori run session edit: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run session edit: missing value for #{f}" }
         end

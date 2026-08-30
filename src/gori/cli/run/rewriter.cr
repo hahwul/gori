@@ -101,7 +101,7 @@ module Gori
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
+          p.unknown_args { |before, after| leftover = one_positional_list(before, after, "gori run rewriter preset add", "<preset-name>") }
           p.invalid_option { |f| abort "gori run rewriter preset add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter preset add: missing value for #{f}" }
         end
