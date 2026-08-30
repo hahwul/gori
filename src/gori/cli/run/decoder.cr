@@ -117,7 +117,9 @@ module Gori
               end
             end
             if final_bytes = result.output
-              rendered, render = Decoder.display(final_bytes, mode)
+              # `display_utf8`, not `display`: this rendering goes inside a JSON string, and
+              # `--output text` over binary would put raw bytes there — see its comment.
+              rendered, render = Decoder.display_utf8(final_bytes, mode)
               j.field "render", render.to_s.downcase
               j.field "output", rendered
             end

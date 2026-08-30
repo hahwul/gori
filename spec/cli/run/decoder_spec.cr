@@ -109,3 +109,15 @@ describe "gori run decoder <chain>" do
     end
   end
 end
+
+describe "gori run decoder --format json with --output text" do
+  it "keeps the document parseable when text is forced over binary bytes" do
+    binary = Base64.strict_encode(Bytes[0x00, 0xFF, 0xFE, 0x80])
+    json_str = Gori::CLI::Run.decoder_json_for_spec(
+      run_chain(binary, "base64-decode"), Gori::Decoder::RenderAs::Text)
+    json_str.valid_encoding?.should be_true
+    json = JSON.parse(json_str)
+    json["render"].as_s.should_not eq("text")
+    json["output"].as_s.valid_encoding?.should be_true
+  end
+end
