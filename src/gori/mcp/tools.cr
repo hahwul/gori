@@ -85,7 +85,7 @@ module Gori
       # repeater's request and it caps at MCP_REPEATER_REQUEST_MAX — so bytes past the cap
       # were unreachable from MCP entirely.
       record BodyChunkOptions, flow_id : Int64?, repeater_id : Int64?, offset : Int64,
-        limit : Int32, raw : Bool, part : String = "response" do
+        limit : Int32, raw : Bool, part : String = "response", include_sensitive : Bool = false do
         def request? : Bool
           part == "request"
         end

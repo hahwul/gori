@@ -177,6 +177,10 @@ module Gori
         return loaded if loaded.is_a?(Result)
         head, body = loaded
         stored = body || Bytes.new(0)
+        head_omitted = false
+        if options.request? && !options.include_sensitive
+          stored, head_omitted = drop_sensitive_head(stored)
+        end
         # A REQUEST part is stored wire bytes, not a content-encoded response entity: there is
         # nothing to decode and decoding would be a lie about what is on disk.
         decoded, decode_note = (options.raw || options.request?) ? {nil, nil} : Proxy::Codec::ContentDecode.decode(head, stored)
@@ -209,6 +213,14 @@ module Gori
             j.field "warning", "requested offset #{requested} is past the #{total}-byte body; clamped to the end" if offset_out_of_range
             j.field "returned_bytes", count
             j.field "total_bytes", total
+            if head_omitted
+              j.field "head_omitted", true
+              j.field "head_omitted_note",
+                "the request head carries a sensitive header (#{Serialize::SENSITIVE_HEADERS.to_a.sort.join(", ")}) " \
+                "and this tool pages the EXACT stored bytes, which cannot be redacted and stay bytes — the range " \
+                "below is the body alone. Pass include_sensitive:true to page the head too, or read it redacted " \
+                "from get_flow / get_repeater_context"
+            end
             j.field "representation", decoded ? "decoded" : "raw"
             j.field "decode_note", decode_note if decode_note
             if decode_capped
@@ -242,7 +254,27 @@ module Gori
         end
         offset = bounded_int_arg(h, "offset", 0_i64, min: 0_i64)
         limit = bounded_int_arg(h, "limit", 65_536_i64, min: 1_i64, max: 262_144_i64).to_i
-        BodyChunkOptions.new(flow_id, repeater_id, offset, limit, bool_arg(h, "raw", false), part)
+        BodyChunkOptions.new(flow_id, repeater_id, offset, limit, bool_arg(h, "raw", false), part,
+          bool_arg(h, "include_sensitive", false))
+      end
+
+      # A `part:"request"` payload is head+body wire bytes, and this tool pages them EXACTLY —
+      # `Serialize.emit_head_base64` states the rule those bytes fall under: "base64 is
+      # encoding, not redaction … redacting INSIDE the base64 is not an option — it would no
+      # longer be the bytes", so it withholds the byte-exact head unless `include_sensitive`.
+      # The same head reached here ungated: `get_flow` answered `authorization: [REDACTED]`
+      # while `get_response_body_chunk{flow_id, part:"request"}` on the same flow handed back
+      # the whole Bearer token, from a tool that had no `include_sensitive` argument at all.
+      #
+      # So the head is dropped rather than rewritten, and only when it actually carries one of
+      # `Serialize::SENSITIVE_HEADERS` — a request with nothing to withhold pages exactly as
+      # before. `offset`/`total_bytes`/`next_offset` then describe the body alone, which is why
+      # the omission is NAMED in the reply instead of shortening the payload silently.
+      private def drop_sensitive_head(bytes : Bytes) : {Bytes, Bool}
+        head, body = split_wire_request(bytes)
+        text = String.new(head).scrub
+        return {bytes, false} if Serialize.redact_head(text, false) == text
+        {body || Bytes.new(0), true}
       end
 
       # The bytes this chunk pages over: {head-for-decoding, payload}.
@@ -379,6 +411,7 @@ module Gori
           s.field "offset", intprop("zero-based byte offset (default 0)")
           s.field "limit", intprop("bytes to return (default 65536, max 262144)")
           s.field "raw", boolprop("page stored response bytes without content decoding (default false)")
+          s.field "include_sensitive", boolprop("part=\"request\": also page the message HEAD when it carries an Authorization/Cookie/Set-Cookie/API-key value. These are exact stored bytes, so the head is withheld rather than redacted (default false); the reply says so with head_omitted")
         end
 
         return unless @allow_actions
