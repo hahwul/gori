@@ -259,6 +259,18 @@ describe Gori::Export::Curl do
     Gori::Export::Curl.text("\r\n\r\n", "https://acme.test").should be_nil
   end
 
+  # A curl `-H` with nothing after the colon REMOVES the header (it is how you suppress one of
+  # curl's own defaults), so `-H 'X-Empty: '` sent no such field — measured against a raw
+  # listener on curl 8.7.1, the request went out with X-Empty absent while the Go, Python and
+  # fetch serializers of the same capture all put the empty field on the wire.
+  it "sends an empty-valued header with curl's `Name;` form instead of dropping it" do
+    cmd = curl_of("GET /x HTTP/1.1\r\nHost: h\r\nX-Empty:\r\nX-Blank:   \r\nX-Full: v\r\n\r\n", "http://h")
+    cmd.should contain("-H 'X-Empty;'")
+    cmd.should contain("-H 'X-Blank;'")
+    cmd.should_not contain("X-Empty: ")
+    cmd.should contain("-H 'X-Full: v'")
+  end
+
   describe "a body no shell argument can carry" do
     it "refuses a NUL-bearing body in a comment rather than sending a SHORTER one" do
       cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\nab\u{0}cd", "http://h")

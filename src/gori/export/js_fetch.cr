@@ -20,7 +20,7 @@ module Gori
         # path, which is exact.
         binary = !s.body.empty? && !s.body.valid_encoding?
         String.build do |b|
-          b << "fetch(" << jsstr(parts.url) << ", {\n"
+          b << "fetch(" << jsstr(Escape.percent_encode_non_ascii(parts.url)) << ", {\n"
           b << "  method: " << jsstr(parts.method.empty? ? "GET" : parts.method) << ",\n"
           unless s.headers.empty?
             # An object literal collapses a repeated header name to the last value. When the
@@ -41,7 +41,7 @@ module Gori
               b << "  // body is not valid UTF-8; sent as raw bytes so it is reproduced exactly.\n"
               b << "  body: new Uint8Array([" << s.body.to_slice.join(", ") << "]),\n"
             else
-              b << "  body: " << jsstr(s.body) << ",\n"
+              b << "  body: " << jstext(s.body) << ",\n"
             end
           end
           b << "})\n"
@@ -50,14 +50,27 @@ module Gori
         end
       end
 
-      # A JS double-quoted string, byte-safe with `\xNN` (a single code unit 0x00-0xFF). Used for
-      # header/URL text and for a body already known to be valid UTF-8 — a binary body takes the
-      # Uint8Array path in `code` instead, since a code unit >0x7f would not survive fetch's
-      # UTF-8 encoding of a string body.
+      # A JS double-quoted string, byte-safe with `\xNN` (a single code unit 0x00-0xFF). For the
+      # HEADERS and the method, where that is exactly right: a `Headers` value is a byte sequence
+      # and fetch puts each code unit on the wire as one byte. The URL and the body are TEXT the
+      # engine re-encodes, and take `jstext` / `Escape.percent_encode_non_ascii` instead.
       private def self.jsstr(s : String) : String
         String.build do |b|
           b << '"'
           s.to_slice.each { |byte| Escape.double_quoted_byte(b, byte) }
+          b << '"'
+        end
+      end
+
+      # A JS double-quoted string for text fetch RE-ENCODES as UTF-8 — the body. Character-wise
+      # (`Export::Escape.double_quoted_char`), because a `\xNN` per UTF-8 byte is one code unit
+      # each and fetch encodes each of those to two bytes: a 6-byte Korean body went out as 12,
+      # under a Content-Length of 12, so the endpoint received bytes the capture never sent. Only
+      # reached for a body that is valid UTF-8; one that is not takes the Uint8Array path above.
+      private def self.jstext(s : String) : String
+        String.build do |b|
+          b << '"'
+          s.each_char { |ch| Escape.double_quoted_char(b, ch) }
           b << '"'
         end
       end

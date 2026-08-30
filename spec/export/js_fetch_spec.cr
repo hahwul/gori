@@ -8,6 +8,29 @@ private def js(wire : String, target : String) : String
 end
 
 describe Gori::Export::JsFetch do
+  # A `\xNN` per UTF-8 byte is one code unit each, and fetch encodes each of those to two bytes:
+  # measured against a raw listener, a 6-byte Korean body went out as 12 bytes under a matching
+  # Content-Length, so the endpoint received bytes the capture never sent.
+  it "writes a non-ASCII body as characters, not as one \\xNN per UTF-8 byte" do
+    code = js("POST /a HTTP/1.1\r\nHost: h.test\r\nContent-Type: text/plain\r\n\r\n\u{c548}\u{b155}", "https://h.test")
+    code.should contain(%(body: "\u{c548}\u{b155}",))
+    code.should_not contain("\\xec")
+  end
+
+  # The URL is text the JS URL parser percent-encodes from the STRING's UTF-8, the same trap one
+  # field over: `/안` as three code units was fetched as `/%C3%AC%C2%95%C2%88`.
+  it "percent-encodes a non-ASCII URL so the URL parser cannot re-encode it" do
+    code = js("GET /\u{c548} HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    code.should contain("fetch(\"https://h.test/%EC%95%88\", {")
+  end
+
+  # A `Headers` value IS a byte sequence — fetch puts each code unit on the wire as one byte — so
+  # the byte-wise escape is right here and must not follow the body/URL.
+  it "keeps a non-ASCII header value byte-wise" do
+    code = js("GET /a HTTP/1.1\r\nHost: h.test\r\nX-K: \u{c548}\r\n\r\n", "https://h.test")
+    code.should contain(%("X-K": "\\xec\\x95\\x88",))
+  end
+
   it "emits a GET with method and no body" do
     code = js("GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
     code.should contain("fetch(\"https://h.test/a\", {")

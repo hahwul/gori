@@ -10,6 +10,35 @@ private def poc(wire : String, target : String) : String
 end
 
 describe Gori::Export::CsrfPoc do
+  # The fetch path carries the same text-vs-bytes rule `Export::JsFetch` does: a `\xNN` per UTF-8
+  # byte is a code unit each, which fetch re-encodes to two bytes, so the endpoint would receive a
+  # body the capture never sent — and the URL would name a different resource.
+  it "writes a non-ASCII fetch body and URL as text the engine re-encodes correctly" do
+    html = poc("PUT /\u{c548} HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n" \
+               "{\"a\":\"\u{c548}\"}", "https://h.test")
+    html.should contain("fetch(\"https://h.test/%EC%95%88\", {")
+    html.should contain("body: \"{\\\"a\\\":\\\"안\\\"}\",")
+    html.should_not contain("\\xec")
+  end
+
+  # `form_capable?` sends an EMPTY-bodied POST down the form path whatever its Content-Type,
+  # because a form can make that request — but only under `application/x-www-form-urlencoded` or
+  # `multipart/form-data`, the two enctypes a form has. Counting Content-Type as "carried by the
+  # enctype" there told the operator the demo relied on `application/json` when the browser was
+  # in fact sending urlencoded.
+  it "names Content-Type as dropped when the form's enctype cannot spell the captured one" do
+    html = poc("POST /api/logout HTTP/1.1\r\nHost: h.test\r\n" \
+               "Content-Type: application/json\r\nContent-Length: 0\r\n\r\n", "https://h.test")
+    html.should contain(%(<form action="https://h.test/api/logout" method="POST">))
+    html.should match(/CANNOT forge.*Content-Type/m)
+  end
+
+  it "still counts Content-Type as carried when the enctype does spell it" do
+    html = poc("POST /t HTTP/1.1\r\nHost: h.test\r\n" \
+               "Content-Type: application/x-www-form-urlencoded\r\n\r\na=1", "https://h.test")
+    html.should_not match(/CANNOT forge.*Content-Type/m)
+  end
+
   it "emits a self-submitting form for a urlencoded POST, dropping Cookie/Origin with a note" do
     html = poc("POST /transfer HTTP/1.1\r\nHost: bank.test\r\n" \
                "Content-Type: application/x-www-form-urlencoded\r\nCookie: sid=abc\r\n" \

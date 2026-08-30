@@ -116,7 +116,7 @@ module Gori
             notes << note
             next
           end
-          parts << "-H #{shell_quote("#{name}: #{value}")}"
+          parts << "-H #{shell_quote(header_item(name, value))}"
         end
         parts << data_argument(entity) unless entity.empty?
         # LAST, like `data_argument`'s refusal and for the same reason: a `#` comment swallows
@@ -124,6 +124,21 @@ module Gori
         # command it is annotating.
         parts.concat(notes)
         parts.join(" \\\n  ")
+      end
+
+      # One `-H` argument's text. `Name: value`, except when the capture's value is EMPTY: a
+      # curl header argument with nothing after the colon does not send that header, it REMOVES
+      # curl's own default for it, so `X-Empty:` on the wire came out as `-H 'X-Empty: '` and
+      # curl sent no such field at all. Measured against a raw listener on curl 8.7.1:
+      #
+      #   -H 'X-Empty: '   the header is absent from the request
+      #   -H 'X-Empty;'    X-Empty: goes out with an empty value
+      #
+      # `;` is curl's own spelling for "send this one empty", which is what the capture holds —
+      # and it is what stops this serializer disagreeing with the Go/Python/fetch ones, whose
+      # libraries put an empty value on the wire verbatim.
+      private def self.header_item(name : String, value : String) : String
+        value.empty? ? "#{name};" : "#{name}: #{value}"
       end
 
       # The refusal for a URL holding a NUL. The other end of the hole `nul_method_note` and
