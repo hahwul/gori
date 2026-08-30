@@ -1,6 +1,5 @@
 require "./rule"
 require "./secrets"
-require "../../ascii_bytes"
 
 module Gori
   module Probe
@@ -28,6 +27,22 @@ module Gori
         # registries (e.g. "config/routes.rb:15", "ActiveRecord::Base", "org.springframework
         # .boot", "System.ArgumentException") does NOT match — only an actual backtrace frame
         # or a `Type: message` / newline-`at` disclosure does. {pattern, evidence label}.
+        #
+        # The three line-anchored frames use `^` under `/m`, NOT the `(?:\n|\A)` spelling they
+        # were written with. The two mean the same thing — `^` under PCRE2_MULTILINE matches at
+        # the subject start and just after every `\n`, which is exactly where `\A` or a consumed
+        # `\n` leaves the cursor — but the alternation DEFEATS PCRE2's start optimization: with
+        # it the engine has no usable first-code-unit set and walks every offset, while `^` lets
+        # it memchr from newline to newline. Measured over a 64 KiB minified bundle (which has
+        # almost no newlines, i.e. the case the optimization should win biggest on): Node.js
+        # frame 239.9µs → 30.4µs, Spring trace 183.6µs → 24.5µs. Same shape as this file's
+        # per-pattern-literal note below: give PCRE something to skip on.
+        #
+        # Crystal's `m` sets PCRE2_DOTALL as well as PCRE2_MULTILINE, so it also makes `.` match
+        # a newline. Harmless for exactly these three: none of them contains a bare `.` — every
+        # dot is either escaped (`\.`) or inside a character class — and a negated class such as
+        # `[^)]*` has always crossed newlines regardless of the flag. Check that before adding
+        # `/m` to a fourth.
         ERROR_SIGNATURES = [
           {/Traceback \(most recent call last\)/, "Python traceback"},
           # A real CPython frame (`File "x.py", line N`) — the exact shape, so a bare
@@ -36,7 +51,7 @@ module Gori
           # Ruby backtrace frame: the `:in ` distinguishes a real frame from a config path.
           {/\.rb:\d+:in /, "Ruby backtrace frame"},
           {/\bat [\w.$]+\([\w]+\.java:\d+\)/, "Java stack frame"},
-          {/(?:\n|\A)\s+at [\w.$<>]+ \([^)]*:\d+:\d+\)/, "Node.js stack frame"},
+          {/^\s+at [\w.$<>]+ \([^)]*:\d+:\d+\)/m, "Node.js stack frame"},
           {/\bORA-\d{5}\b/, "Oracle error"},
           {/\bSQLSTATE\[/, "SQL error"},
           # A Java/.NET exception only counts as a disclosure when error-shaped: followed by a
@@ -44,7 +59,7 @@ module Gori
           {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)(?::|\r?\n\s*at )/, "Java exception"},
           # Require a real stack-frame shape (start-of-line `at …(` call site) like the sibling
           # Java/Node frames — a bare "…at org.springframework.Foo…" in prose must NOT match.
-          {/(?:\n|\A)\s*at org\.springframework\.[\w.$]{4,}\(/, "Spring framework trace"},
+          {/^\s*at org\.springframework\.[\w.$]{4,}\(/m, "Spring framework trace"},
           {/\bSystem\.[A-Z]\w+Exception(?::|\r?\n\s*at )/, ".NET exception"},
           # Rails: any ActiveRecord class, but only when error-shaped (`: message` / newline-
           # `at`), so a real error (RecordNotFound, Rollback, StatementInvalid, …) is caught
@@ -58,7 +73,7 @@ module Gori
           # A Go panic dump: the `goroutine N [state]:` header is the runtime's exact shape,
           # so a prose mention of "goroutine" does not match.
           {/\bgoroutine \d+ \[[\w ]+\]:/, "Go stack trace"},
-          {/(?:\n|\A)Stack trace:\s*(?:\n|#\d)/, "stack trace"},
+          {/^Stack trace:\s*(?:\n|#\d)/m, "stack trace"},
         ]
 
         # Alias for callers/tests that still reference BodyLeaks::SECRET_PATTERNS.
@@ -94,16 +109,24 @@ module Gori
         # safe — a guaranteed false positive on any uppercase markup.
         REL_NOOPENER = /\bno(?:opener|referrer)\b/i
 
-        # Allocation-free literal prefilters for the HTML sink checks, one per group, each a
-        # NECESSARY condition of every regex it guards: the five mixed-content/insecure-form
-        # patterns all end in `http://`, INLINE_JS_URI contains `javascript:`, and ANCHOR_BLANK
-        # contains `_blank`. All those regexes are /i, so the tests are ASCII case-INSENSITIVE
-        # byte scans (AsciiBytes wants an already-lowercase needle) — a case-sensitive
-        # `String#includes?` would have quietly stopped matching `HTTP://` and `_BLANK`.
-        # Held as constants so the slices are built once for the process, not per flow.
-        private HTTP_NEEDLE   = "http://".to_slice
-        private JS_URI_NEEDLE = "javascript:".to_slice
-        private BLANK_NEEDLE  = "_blank".to_slice
+        # Cheap gates for the HTML sink checks, each a NECESSARY condition of the regex(es) it
+        # guards: the five mixed-content/insecure-form patterns all contain `http://`, and
+        # ANCHOR_BLANK contains `_blank`. Both are /i, so these are too.
+        #
+        # These are REGEXES. They were `AsciiBytes.contains_ci?` byte scans, chosen over
+        # `String#includes?` because that one is case-SENSITIVE — but the interesting property
+        # was never allocation, it was scan speed, and `contains_ci?` is a naive O(hay·needle)
+        # walk just like `includes?`. Over the 200 KiB `client_body_text` these read, a clean
+        # page measured: `http://` 123.0µs → 56.9µs as a regex, `_blank` 91.3µs → 50.1µs. PCRE2
+        # memchr-skips a plain literal and an `/i` literal costs the same as a case-sensitive one,
+        # so the regex is both faster AND keeps the case-insensitivity that ruled `includes?` out.
+        #
+        # This is specific to a BODY-SIZED, already-scrubbed subject. `AsciiBytes` is still the
+        # right tool where the sibling rules use it — a Content-Type or a request target, where
+        # the input is short (so the naive scan never gets going) or possibly INVALID UTF-8, on
+        # which PCRE2 raises outright.
+        private HTTP_GATE  = /http:\/\//i
+        private BLANK_GATE = /_blank/i
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -161,26 +184,29 @@ module Gori
         # on a 120 KiB page that split reported the unhashed third-party <script> and stayed
         # silent about the plain-http one beside it. The larger text costs no extra decode (it
         # is one slice of the same shared buffer, already materialised for every HTML flow by
-        # the client-side rules), so only the SCAN grows — and each check now gates on an
-        # allocation-free literal first, which more than pays that back on a clean page.
+        # the client-side rules), so only the SCAN grows — and the checks whose own pattern
+        # cannot anchor gate on a cheap literal regex first, which pays that back on a clean page.
         #
         # The leak scans (private IP / error / secret) deliberately stay on the 64 KiB prefix:
         # that is the shared BODY_CAP every non-client rule works from, and widening a content
         # scan is a different, measurable trade from widening a tag scan.
         private def check_html_sinks(ctx : Context, acc : Array(Detection), text : String) : Nil
-          bytes = text.to_slice
-          check_mixed_content(ctx, acc, text) if ctx.scheme == "https" &&
-                                                 AsciiBytes.contains_ci?(bytes, HTTP_NEEDLE)
-          if AsciiBytes.contains_ci?(bytes, JS_URI_NEEDLE) && INLINE_JS_URI.matches?(text)
+          check_mixed_content(ctx, acc, text) if ctx.scheme == "https" && HTTP_GATE.matches?(text)
+          # INLINE_JS_URI runs UNGUARDED: it already opens on an attribute-name alternation that
+          # PCRE anchors well (55.4µs on the 200 KiB page), so the `javascript:` gate in front of
+          # it (105.4µs) was pure overhead — a prefilter in front of something that prefilters
+          # itself, which is the trap the gates above are sized against. ANCHOR_BLANK is the
+          # opposite case and keeps its gate: it opens on `<a`, so unguarded it costs 121.1µs.
+          if INLINE_JS_URI.matches?(text)
             acc << Detection.new("inline_js_uri", Category::CLIENT, ctx.host, ctx.url,
               "javascript: URL in an HTML attribute", Store::Severity::Low, nil, ctx.fid)
           end
-          flag_reverse_tabnabbing(ctx, acc, text) if AsciiBytes.contains_ci?(bytes, BLANK_NEEDLE)
+          flag_reverse_tabnabbing(ctx, acc, text) if BLANK_GATE.matches?(text)
         end
 
-        # The three cleartext-subresource findings on an HTTPS page. Reached only once the
-        # `http://` prefilter has passed, so a page with no cleartext URL at all pays one byte
-        # scan instead of five PCRE passes.
+        # The three cleartext-subresource findings on an HTTPS page. Reached only once HTTP_GATE
+        # has passed, so a page with no cleartext URL at all pays one literal PCRE pass (56.9µs
+        # on a 200 KiB page) instead of five structural ones.
         private def check_mixed_content(ctx : Context, acc : Array(Detection), text : String) : Nil
           if MIXED_ACTIVE.matches?(text) || MIXED_ACTIVE_LINK.matches?(text) || MIXED_ACTIVE_OBJECT.matches?(text)
             acc << Detection.new("mixed_content", Category::HEADERS, ctx.host, ctx.url,

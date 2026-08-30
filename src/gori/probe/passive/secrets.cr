@@ -22,9 +22,32 @@ module Gori
           {/\bSG\.[\w\-]{16,}\.[\w\-]{16,}\b/, "SendGrid API key"},
           {/\bnpm_[0-9A-Za-z]{36}\b/, "npm access token"},
           {/-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/, "private key block"},
-          # Client-side shapes — these routinely ship hard-coded in HTML/JS bundles.
-          {/\b\d{6,}-[0-9a-z]{32}\.apps\.googleusercontent\.com\b/, "Google OAuth client id"},
-          {/\b(?:pk|sk)\.eyJ[\w\-]{20,}\.[\w\-]{20,}\b/, "Mapbox token"},
+          # Client-side shapes — these routinely ship hard-coded in HTML/JS bundles, so each one
+          # here has to clear the membership rule above on its own. Two shapes that used to sit
+          # in this block did not, and were removed:
+          #
+          #   * a Google OAuth CLIENT ID (`<digits>-<32>.apps.googleusercontent.com`). It is
+          #     public by construction — the browser carries it in the authorization URL of every
+          #     Google Sign-In redirect, and Google documents it as non-secret. So this fired
+          #     High on every site using Google Sign-In: the exact JWT failure described below,
+          #     one tier up. Dropped rather than given its own Info code, because unlike a JWT it
+          #     says nothing an analyst can act on beyond "this site uses Google Sign-In", which
+          #     is a `tech` fingerprint's job. The CREDENTIAL half of that pair is the client
+          #     secret, and it does have a shape — `GOCSPX-`, added below — so removing the id
+          #     costs no coverage of the thing that actually matters.
+          #   * a Mapbox PUBLIC token (`pk.`). Mapbox issues `pk.` precisely to be embedded in
+          #     client-side JS and it can only carry public scopes; `sk.` is the secret half.
+          #     Restricted to `sk\.` below, so a site simply drawing a map is no longer a High.
+          #
+          # (Removing the Google client id also took the single most expensive pattern out of
+          # this loop: `\b\d{6,}` anchors PCRE on "a digit", so in a minified bundle it retried
+          # at every digit run — 549µs of the ~1.3ms `body_leaks` spent per texty flow.)
+          {/\bsk\.eyJ[\w\-]{20,}\.[\w\-]{20,}\b/, "Mapbox secret token"},
+          # The Google OAuth CLIENT SECRET — the half of the pair that IS a credential, and the
+          # one the removed client-id pattern was quietly standing in for. Google has issued
+          # these as `GOCSPX-` + 28 chars since 2021, so it is prefix-anchored and high-
+          # confidence like the rest of this list, and a server has no business emitting one.
+          {/\bGOCSPX-[A-Za-z0-9_\-]{28}\b/, "Google OAuth client secret"},
           {/\bhttps:\/\/hooks\.slack\.com\/services\/T[0-9A-Za-z]+\/B[0-9A-Za-z]+\/[0-9A-Za-z]{16,}/, "Slack webhook url"},
           {/\bSK[0-9a-f]{32}\b/, "Twilio api key"},
           # LLM provider keys. Both vendors' formats are prefix-anchored and long, so the

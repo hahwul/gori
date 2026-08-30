@@ -4621,6 +4621,34 @@ describe "Gori::Probe::Passive::Secrets (provider shapes)" do
         content_type: "application/json", body: body)).should contain("secret_in_body")
     end
   end
+
+  # The Google fixtures below are ASSEMBLED from parts rather than written as one literal.
+  # They are invented values, but GitHub's push protection matches the shapes on sight and
+  # rejects the push; splitting them keeps the raw file free of a contiguous match while the
+  # runtime strings the patterns see are exactly what a real response would carry.
+  private_google_client_id = "123456789012-" + ("abcdefghij0123456789abcdefghij01" + ".apps.googleusercontent.com")
+  private_google_secret = "GOCSPX" + "-" + "abcdefghijklmnopqrstuvwxyz12"
+
+  # Membership in PATTERNS means "a server has no business sending this to a browser". Two
+  # shapes that a site is SUPPOSED to publish were in it, and each fired High on every site
+  # using the product — the same failure the JWT split fixed one tier up.
+  it "does not flag shapes a site publishes to its own client on purpose" do
+    # A Google OAuth client id rides in the authorization URL of every Google Sign-In redirect.
+    private_hit.call(%(client_id: "#{private_google_client_id}")).should be_empty
+    # Mapbox `pk.` is the public token, documented as safe to embed in client-side JS.
+    private_hit.call("mapboxgl.accessToken = 'pk.eyJ1IjoiYWNtZXRlc3RpbmciLCJhIjoiY20wMDAwMDAwIn0.Zm9vYmFyYmF6cXV4MTIzNA';")
+      .should be_empty
+  end
+
+  # Dropping the public client id must not drop the pair's actual credential.
+  it "flags the Google OAuth client SECRET" do
+    private_hit.call(private_google_secret).should contain("Google OAuth client secret")
+  end
+
+  it "still flags the Mapbox SECRET token" do
+    private_hit.call("sk.eyJ1IjoiYWNtZXRlc3RpbmciLCJhIjoiY20wMDAwMDAwIn0.Zm9vYmFyYmF6cXV4MTIzNA")
+      .should contain("Mapbox secret token")
+  end
 end
 
 describe "Gori::Probe::Passive::JsScan (navigation + parsing sinks)" do
@@ -4655,6 +4683,56 @@ describe "Gori::Probe::Passive::JsScan (navigation + parsing sinks)" do
     private_pairs.call(%(o.innerHTML = location.hash;)).should_not be_empty
     private_pairs.call(%(document.write(document.URL);)).should_not be_empty
     private_pairs.call(%(o.innerHTML = "<b>static</b>";)).should be_empty
+  end
+
+  # `source_spans` no longer runs one scan per SOURCES entry: the nine entries sharing a
+  # `location.` / `document.` prefix are found by two factored scans and bucketed by their
+  # capture. Every label must still be reachable and still be reported under its own name —
+  # a mis-wired bucket would silently relabel a finding (or drop a source entirely) while the
+  # coarse "is it empty" assertions above stayed green.
+  it "reports every taint source under its own label" do
+    {
+      "location.hash"        => %(location.hash),
+      "location.search"      => %(location.search),
+      "location.href"        => %(location.href),
+      "document.URL"         => %(document.URL),
+      "document.documentURI" => %(document.documentURI),
+      "document.baseURI"     => %(document.baseURI),
+      "document.referrer"    => %(document.referrer),
+      "document.cookie"      => %(document.cookie),
+      "document.location"    => %(document.location),
+      "window.name"          => %(window.name),
+      "history.state"        => %(history.state),
+      "postMessage data"     => %(evt.data),
+      "web storage"          => %(localStorage.getItem("k")),
+    }.each do |label, expr|
+      pairs = private_pairs.call(%(o.innerHTML = #{expr};))
+      pairs.map(&.[0]).should contain(label)
+    end
+    # `location.pathname` shares the `location.href` bucket by design.
+    private_pairs.call(%(o.innerHTML = location.pathname;)).map(&.[0]).should contain("location.href")
+  end
+
+  # The factored scan splits SOURCES between SOURCE_SCANS (bucketed by capture) and
+  # SOLO_SOURCES (scanned individually). SOLO_SOURCES is derived, so this pins the invariant
+  # that makes deriving it correct: the two together cover every entry exactly once. A gap
+  # here is silent — the uncovered source's bucket just stays empty forever.
+  it "covers every SOURCES entry exactly once across the factored and solo scans" do
+    factored = [] of Int32
+    Gori::Probe::Passive::JsScan::SOURCE_SCANS.each do |(_, slots)|
+      slots.each_value { |i| factored << i }
+    end
+    covered = (factored + Gori::Probe::Passive::JsScan::SOLO_SOURCES).uniq.sort
+    covered.should eq((0...Gori::Probe::Passive::JsScan::SOURCES.size).to_a)
+    (factored & Gori::Probe::Passive::JsScan::SOLO_SOURCES).should be_empty
+  end
+
+  # SOURCES order is the priority with which a statement carrying several sources is labelled,
+  # and factoring must not quietly reorder it: `document.URL` (entry 4) outranks
+  # `document.cookie` (entry 8) no matter which one appears first in the text.
+  it "keeps SOURCES order as the label priority when a statement carries several sources" do
+    private_pairs.call(%(o.innerHTML = document.cookie + document.URL;))
+      .map(&.[0]).should contain("document.URL")
   end
 end
 
@@ -4788,6 +4866,34 @@ describe Gori::Probe::Passive::SerializedObject do
     end
   end
 
+  # The field name in the evidence must come from the tag that MATCHED, not from a whole-body
+  # substring test: a page can mention the JSF field in a script while the input actually
+  # carrying the blob is the ASP.NET one, and the finding then names the wrong framework.
+  it "labels the ViewState field from the matching tag, not from elsewhere in the body" do
+    with_store do |store|
+      body = %(<script>var k = "javax.faces.ViewState";</script>) \
+             %(<form><input type="hidden" name="__VIEWSTATE" value="/wEPDwUKLTEyMzQ1Njc4ZGQ=" /></form>)
+      hit = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        content_type: "text/html", body: body).find(&.code.==("serialized_object")).not_nil!
+      hit.evidence.not_nil!.should contain("__VIEWSTATE field")
+      hit.evidence.not_nil!.should_not contain("javax.faces")
+    end
+  end
+
+  # The gate is /i so a lowercase field is still seen, but it names the FIELDS rather than a
+  # bare `viewstate` substring — `viewState` is an everyday React/deck.gl prop name, and
+  # matching it would walk every such bundle through the backtracking tag scan.
+  it "sees a lowercase __viewstate field but ignores a plain viewState identifier" do
+    with_store do |store|
+      lower = %(<form><input type="hidden" name="__viewstate" value="/wEPDwUKLTEyMzQ1Njc4ZGQ=" /></form>)
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        content_type: "text/html", body: lower)).should contain("serialized_object")
+      spa = %(<html><body><script>const {viewState} = props; setViewState(viewState);</script></body></html>)
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        content_type: "text/html", body: spa)).should_not contain("serialized_object")
+    end
+  end
+
   it "does not flag an ENCRYPTED ViewState (opaque base64 that is not /wE — encryption is the fix)" do
     with_store do |store|
       body = %(<form><input type="hidden" name="__VIEWSTATE" value="AbCdEf0123456789+/xyz=" /></form>)
@@ -4819,6 +4925,18 @@ describe Gori::Probe::Passive::DebugModeExposed do
         body: "{}").find(&.code.==("debug_mode_exposed")).not_nil!
       hit.severity.should eq(Gori::Store::Severity::Medium)
       hit.evidence.not_nil!.should eq("Symfony profiler (X-Debug-Token header)")
+    end
+  end
+
+  # The one prefilter this rule keeps must be case-INSENSITIVE, because the pattern behind it
+  # is: a case-sensitive gate silently drops uppercased markup and loses a High RCE finding.
+  it "flags a Rails web-console page whose markup is uppercased" do
+    with_store do |store|
+      body = %(<HTML><BODY><DIV ID="CONSOLE-9F2A"></DIV></BODY></HTML>)
+      hit = analyze(store, resp_head: "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html\r\n\r\n",
+        status: 500, body: body).find(&.code.==("debug_mode_exposed")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::High)
+      hit.evidence.not_nil!.should eq("Rails web-console")
     end
   end
 

@@ -35,6 +35,11 @@ module Gori
 
         # DOM taint sources. Case-sensitive (JS identifiers are), each a fixed label used only
         # for a safe evidence string (never the tainted value itself).
+        # The order of this list is SEMANTIC, not cosmetic: `source_in_window` walks it and
+        # returns the FIRST entry with an occurrence in the window, so it is the priority with
+        # which a statement carrying several sources is labelled. `source_spans` fills these
+        # buckets with fewer scans than there are entries (see SOURCE_SCANS) but keeps this
+        # order, so the label a window reports is unchanged.
         SOURCES = [
           {/\blocation\.hash\b/, "location.hash"},
           {/\blocation\.search\b/, "location.search"},
@@ -60,6 +65,37 @@ module Gori
           # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
           # navigation — reported as DOM-XSS against the `location assignment` sink below.
         ] of {Regex, String}
+
+        # How `source_spans` actually walks the script. Nine of the SOURCES entries above share a
+        # literal prefix — `location.` (3) and `document.` (6) — and scanning them one pattern at
+        # a time re-walked the whole script once per entry for a prefix PCRE could have matched
+        # once. Each tuple is {regex with ONE capture group, index of the SOURCES entry each
+        # captured alternative belongs to}; an entry not named here is scanned on its own.
+        #
+        # This is NOT the "one big alternation" that was tried and rejected before (14 dissimilar
+        # patterns unioned measured SLOWER than 14 separate scans, 1.40ms vs 0.96ms). The
+        # difference is the shared LITERAL PREFIX: `\bdocument\.` still gives PCRE2 the anchor it
+        # skips on, so the 6-way factored scan costs what ONE of the six cost (67.5µs vs 6×67µs),
+        # while a union of patterns with nothing in common has no anchor left to use. Factor by a
+        # common prefix; do not union by convenience. Measured over the 256 KiB bundle fixture:
+        # the whole index build went 1009µs → 533µs.
+        #
+        # The captured alternative decides which SOURCES bucket a span lands in, so the resulting
+        # index is IDENTICAL to the one 14 separate scans produced — same buckets, same order,
+        # same spans — and `source_in_window`'s priority semantics are untouched.
+        SOURCE_SCANS = [
+          {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
+          {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
+           {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
+        ] of {Regex, Hash(String, Int32)}
+
+        # SOURCES entries no SOURCE_SCANS group covers, scanned individually. DERIVED, not
+        # written out: a hardcoded index list is a silent-failure shape here, because a new
+        # SOURCES entry that nobody remembers to add would leave its bucket permanently empty —
+        # that taint source simply stops producing pairs, with no compile error and no spec
+        # failure (a per-label spec enumerates the labels that exist, so it stays green too).
+        # Deriving it means the union always covers SOURCES by construction.
+        SOLO_SOURCES = (0...SOURCES.size).reject { |i| SOURCE_SCANS.any? { |(_, slots)| slots.each_value.includes?(i) } }
 
         # HTML/JS execution sinks. Each keys on a distinctive identifier so PCRE's first-byte
         # optimisation skips clean code fast (like body_leaks' per-pattern loop). Sinks whose
@@ -450,20 +486,37 @@ module Gori
         # WINDOW bytes per side and allocates nothing — and this runs once per sink occurrence.
         BOUNDS = {0x3Bu8, 0x7Bu8, 0x7Du8, 0x0Au8}
 
-        # Every taint SOURCE occurrence in the script, as BYTE spans, in SOURCES order. One
-        # `scan` per source pattern, once per script — the index `source_in_window` binary-searches
-        # instead of re-running the 14 patterns per sink occurrence. Sources with no occurrence are
-        # dropped, so a script carrying one source pays one entry, not fourteen; an empty result is
-        # exactly the old `SOURCES.any?` prefilter's "no source anywhere" verdict.
+        # Every taint SOURCE occurrence in the script, as BYTE spans, in SOURCES order. Scanned
+        # once per script — the index `source_in_window` binary-searches instead of re-running
+        # the source patterns per sink occurrence. Fewer scans than there are SOURCES entries:
+        # the ones sharing a literal prefix are found by the factored SOURCE_SCANS passes and
+        # bucketed by capture (see SOURCE_SCANS), the rest by SOLO_SOURCES. Sources with no
+        # occurrence are dropped, so a script carrying one source pays one entry, not thirteen;
+        # an empty result is exactly the old `SOURCES.any?` prefilter's "no source anywhere"
+        # verdict.
         #
         # `scan` yields NON-OVERLAPPING matches left to right, so within one entry both `begin` and
         # `end` are strictly increasing — the property `span_within?` binary-searches on.
         private def self.source_spans(code : String) : Array({Array({Int32, Int32}), String})
+          # One bucket per SOURCES entry, filled by the factored scans below and then emitted in
+          # SOURCES order. `scan` walks left to right and never overlaps, so appending in scan
+          # order leaves every bucket ascending in both begin and end — the property
+          # `span_within?` binary-searches on — and a bucket fed by several alternatives of one
+          # factored regex (location.href / location.pathname) inherits it as a subsequence.
+          buckets = Array(Array({Int32, Int32})).new(SOURCES.size) { [] of {Int32, Int32} }
+          SOURCE_SCANS.each do |(re, slot_of)|
+            code.scan(re) do |m|
+              next unless slot = slot_of[m[1]]?
+              buckets[slot] << {m.byte_begin(0), m.byte_end(0)}
+            end
+          end
+          SOLO_SOURCES.each do |slot|
+            re = SOURCES[slot][0]
+            code.scan(re) { |m| buckets[slot] << {m.byte_begin(0), m.byte_end(0)} }
+          end
           index = [] of {Array({Int32, Int32}), String}
-          SOURCES.each do |(re, label)|
-            spans = [] of {Int32, Int32}
-            code.scan(re) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
-            index << {spans, label} unless spans.empty?
+          buckets.each_with_index do |spans, slot|
+            index << {spans, SOURCES[slot][1]} unless spans.empty?
           end
           index
         end

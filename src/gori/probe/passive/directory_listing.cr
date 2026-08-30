@@ -20,10 +20,18 @@ module Gori
             Category::INFOLEAK)
         end
 
-        # Allocation-free prefilter: both markers below require this literal, and an ordinary HTML
-        # page never carries it, so the regex passes are skipped for essentially all traffic.
+        # Prefilter: both markers below require this literal, and an ordinary HTML page never
+        # carries it, so the structural regex passes are skipped for essentially all traffic.
         # Case-sensitive on purpose — both servers emit exactly this casing.
-        NEEDLE = "Index of /"
+        #
+        # A REGEX, not a `String` tested with `includes?` — the point is scan SPEED, not
+        # allocation. This gate runs on the body of every 2xx HTML response, and
+        # `String#includes?` is a naive byte search where PCRE2 memchrs a plain literal
+        # (~79µs vs ~19µs over a 64 KiB page). Same fix as the `includes?` prefilters removed
+        # from `debug_mode_exposed` / `sourcemap` / `serialized_object` / `exposed_config`.
+        # (`AsciiBytes` remains the right tool only for a SHORT or possibly-invalid-UTF-8
+        # subject, where PCRE2 would raise; a scrubbed body text is neither.)
+        NEEDLE = /Index of \//
 
         TITLE = /<title>\s*Index of \/[^<]*<\/title>/i
         # Second marker, any one of: the autoindex heading, Apache's parent link text, or the
@@ -40,7 +48,7 @@ module Gori
           # Only a served listing counts; a 403/404 error page can carry the same words.
           return unless (200..299).includes?(resp.status)
           text = ctx.body_text
-          return if text.nil? || !text.includes?(NEEDLE)
+          return if text.nil? || !NEEDLE.matches?(text)
           return unless TITLE.matches?(text)
           return unless STRUCTURE.any?(&.matches?(text))
           acc << Detection.new("directory_listing", Category::INFOLEAK, ctx.host, ctx.url,

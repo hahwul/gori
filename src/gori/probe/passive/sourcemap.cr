@@ -28,10 +28,15 @@ module Gori
         # `//# sourceMappingURL=…`, the legacy `//@` form, and the block-comment `/*# … */` form.
         # The value stops at whitespace, a quote, or a `*` (the block comment's terminator).
         MARKER = /\/[\/*][#@]\s*sourceMappingURL\s*=\s*([^\s'"*]+)/
-        # The regex opens on `//`, a byte pair that occurs constantly in a minified bundle (every
-        # URL, every regex literal), so PCRE's first-byte optimization can't skip ahead. This
-        # allocation-free literal test can, and a body without the word cannot match.
-        NEEDLE = "sourceMappingURL"
+        # MARKER opens on `//`, a byte pair that occurs constantly in a minified bundle (every
+        # URL, every regex literal), so PCRE's first-byte optimization can't skip ahead on it and
+        # a prefilter really does pay here. But the prefilter has to be a REGEX, not a
+        # `String#includes?`: over the 256 KiB `client_body_text` a JS bundle actually reaches,
+        # `includes?` measured 324.8µs — worse than running MARKER unguarded (96.9µs) — because
+        # it is a naive byte search, while PCRE2 memchr-skips a pure literal in 69.5µs. Same
+        # trap the `includes?` guards in `debug_mode_exposed` fell into; the fix is the same, and
+        # the two-stage structure is kept because here the second stage genuinely is the slow one.
+        NEEDLE = /sourceMappingURL/
 
         # The comment sits at the very END of a bundle, i.e. exactly where the shared body prefix
         # (Context::CLIENT_BODY_CAP) gets cut — the big production bundles that matter most would
@@ -52,11 +57,11 @@ module Gori
           return unless ctx.js?
           text = ctx.client_body_text
           return if text.nil? || text.empty?
-          if text.includes?(NEEDLE) && (m = MARKER.match(text))
+          if NEEDLE.matches?(text) && (m = MARKER.match(text))
             return emit(ctx, acc, m[1])
           end
           return unless tail = tail_text(ctx)
-          if tail.includes?(NEEDLE) && (m = MARKER.match(tail))
+          if NEEDLE.matches?(tail) && (m = MARKER.match(tail))
             emit(ctx, acc, m[1])
           end
         end
