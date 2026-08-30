@@ -47,7 +47,19 @@ class Gori::Proxy::H2::StreamGate
     authority = HeadCodec.pseudo_of(fields, ":authority") || @host
     host, port = Upstream.split_host_port(authority, @port)
     scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
-    target = HeadCodec.pseudo_of(fields, ":path") || "/"
+    # `:path` reduced to its origin form BEFORE either test, because `Url.request_url` returns
+    # an ABSOLUTE-form target VERBATIM — so a peer that spells `:path` as a full URL picks the
+    # string this gate evaluates, and both tests below then read the authority IT chose instead
+    # of either name gori knows. A stream on a connection to `evil.test` carrying
+    # `:path: https://acme.test/x` was allowed through by an `include string "https://acme.test/"`
+    # (and an `exclude` naming a port stopped matching, since `Interceptor#port_excluded?` skips
+    # an absolute-form target as already-authoritative). §8.3.1 wants a path-absolute here, but
+    # nothing rejects the other spelling and gori relays the head untouched, so the GATE is what
+    # has to be anchored. h1 cannot reach this: `resolve_forward`/`pinned_origin_head` rewrite an
+    # absolute-form request line to origin-form before `gate_target` is taken — see the second
+    # bullet of `pinned_origin_head`, which is this same finding on the other protocol. The wire
+    # bytes are untouched (P7); only the url the decision is made on changes.
+    target = Gori::Url.origin_path(HeadCodec.pseudo_of(fields, ":path") || "/")
     blocked = @interceptor.sandbox_blocks?(scheme, host, target, port) ||
               (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
     blocked ? {scheme, host, target} : nil

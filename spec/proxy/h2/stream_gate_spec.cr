@@ -1514,4 +1514,36 @@ describe Gori::Proxy::H2::StreamGate do
       rig.to_origin.should be_empty
     end
   end
+
+  it "refuses a stream whose :path is an ABSOLUTE URI naming an in-scope host on an out-of-scope connection" do
+    with_ic(intercept: false) do |ic, scope|
+      # `Scope.request_url` returns an absolute-form target VERBATIM, so a client that spells
+      # its `:path` as a full URL chooses the string the sandbox evaluates. h1 cannot reach
+      # this (`pinned_origin_head`/`resolve_forward` reduce an absolute-form request line to
+      # origin-form before the gate sees it); h2 relays `:path` untouched.
+      scope.add("include", "string", "https://acme.test/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, host: "evil.example.com")
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("https://acme.test/x", authority: "evil.example.com"))))
+      rig.to_origin.should be_empty
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::RstStream])
+    end
+  end
+
+  it "judges an absolute-form :path by the host it will DIAL, not the one the path names" do
+    with_ic(intercept: false) do |ic, scope|
+      # The mirror of the case above, so the reduction is anchoring the decision rather than
+      # blanket-refusing every absolute-form path: the connection IS in scope, the URL spelled
+      # into `:path` is not, and gori dials the connection's host — so this one goes through.
+      scope.add("include", "string", "https://api.example.com/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, host: "api.example.com")
+
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("https://evil.example.com/x"))))
+      rig.to_origin.map(&.frame_type).should eq([Frame::Type::Headers])
+      # The head goes on the wire byte-exact (P7) — only the gate's url was reduced.
+      head_of(rig.to_origin, 1_u32).should eq(request("https://evil.example.com/x"))
+    end
+  end
 end
