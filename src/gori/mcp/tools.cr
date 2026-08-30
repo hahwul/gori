@@ -444,6 +444,10 @@ module Gori
       # both/request/response — the intercept direction, and (minus `both`) the two sides a
       # probe rule and a diff pane name.
       INTERCEPT_DIRECTIONS = %w[both request response]
+      # The out-of-band provider kinds, for `oast_start`'s `provider` and the saved-provider
+      # tools' `kind` — one list, because they are one set and both readers run it through
+      # `Oast::ProviderKind.parse?`.
+      OAST_KINDS = Oast::ProviderKind.values.map(&.label)
 
       # Tools that work with no project store open.
       UNBOUND_SAFE = Set{

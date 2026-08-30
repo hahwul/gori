@@ -59,7 +59,8 @@ module Gori
 
         kind_s = str(h, "kind").try(&.strip).presence
         kind = kind_s ? Oast::ProviderKind.parse?(kind_s) : Oast::ProviderKind.parse?(existing.kind)
-        return err("unknown provider kind '#{kind_s}'", "INVALID_ARGUMENT", field: "kind") unless kind
+        return err("unknown provider kind '#{kind_s}' (expected #{OAST_KINDS.join("|")})",
+          "INVALID_ARGUMENT", field: "kind") unless kind
 
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host
@@ -119,7 +120,8 @@ module Gori
         # An unparseable kind would be stored verbatim and then never match a ProviderKind at
         # listen time — the provider would simply never fire. Refuse it here.
         kind = Oast::ProviderKind.parse?(kind_s)
-        return err("unknown provider kind '#{kind_s}'", "INVALID_ARGUMENT", field: "kind") unless kind
+        return err("unknown provider kind '#{kind_s}' (expected #{OAST_KINDS.join("|")})",
+          "INVALID_ARGUMENT", field: "kind") unless kind
         host = str(h, "host").try(&.strip).presence ||
                Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
         return err("'host' is required for #{kind.label} (it has no default preset)", "INVALID_ARGUMENT", field: "host") unless host
@@ -160,7 +162,7 @@ module Gori
         tool j, "oast_start",
           "Register an OAST listener and return {session_id, payload_url}. Default provider is " \
           "interactsh on a public server. Put payload_url in a target, then oast_poll for hits." do |s|
-          s.field "provider", enumprop("out-of-band provider to register with (default interactsh)", Oast::ProviderKind.values.map(&.label))
+          s.field "provider", enumprop("out-of-band provider to register with (default interactsh)", OAST_KINDS)
           s.field "server", strprop("provider server/base URL (default: the provider's public preset)")
           s.field "token", strprop("optional provider auth token")
         end
@@ -171,11 +173,10 @@ module Gori
         end
 
         tool j, "create_oast_provider",
-          "Save a project OAST provider for reuse. `kind` is interactsh|custom-http|" \
-          "webhook.site|BOAST|postbin; `host` defaults to that kind's public preset when " \
-          "it has one." do |s|
+          "Save a project OAST provider for reuse. `host` defaults to that kind's public " \
+          "preset when it has one." do |s|
           s.field "name", strprop("display name"), required: true
-          s.field "kind", strprop("provider kind (default interactsh)")
+          s.field "kind", enumprop("provider kind (default interactsh)", OAST_KINDS)
           s.field "host", strprop("server/base URL; required for kinds with no preset")
           s.field "token", strprop("optional provider auth token")
           s.field "enabled", boolprop("whether the provider is active (default true)")
@@ -188,7 +189,7 @@ module Gori
           "is not editable here." do |s|
           s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
           s.field "name", strprop("display name (default: unchanged)")
-          s.field "kind", strprop("provider kind (default: unchanged)")
+          s.field "kind", enumprop("provider kind (default: unchanged)", OAST_KINDS)
           s.field "host", strprop("server/base URL (default: unchanged)")
           s.field "token", strprop("provider auth token (default: unchanged — omit to KEEP the existing token)")
           s.field "enabled", boolprop("whether the provider is active (default: unchanged)")
