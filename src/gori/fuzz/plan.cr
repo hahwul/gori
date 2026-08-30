@@ -268,7 +268,7 @@ module Gori::Fuzz
     # Which positions this run percent-encodes for, and the encode itself. Exposed so a
     # surface can SAY so (the CLI notes it once, up front, and names `--no-encode`) and so
     # the TUI's request RECONSTRUCTION can reproduce the bytes the generator produced —
-    # `AutoEncode.none` when an explicit `--encode`/`processors`, `--no-encode`, or a
+    # `AutoEncode.none` when an explicit `--encode`, `--no-encode`, or a
     # template with no query/form position turned it off.
     getter auto_encode : AutoEncode
     # The `update_content_length` pass will REWRITE a Content-Length the operator authored —

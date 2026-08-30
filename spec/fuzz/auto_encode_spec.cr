@@ -117,9 +117,9 @@ describe "fuzz auto URL-encoding" do
     wire.should contain("GET /s?q=<script> HTTP/1.1")
   end
 
-  # An explicit pipeline is the operator saying what the bytes should be. It WINS and
-  # applies to every position (today's behaviour) — it is never stacked on top of the
-  # default, which would double-encode the `%3C` it just produced.
+  # An explicit `--encode` is the operator saying how the wire should SPELL the payload. It
+  # WINS and applies to every position — it is never stacked on top of the default, which
+  # would double-encode the `%3C` it just produced.
   it "an explicit --encode url still applies, exactly once" do
     procs = [F::Encode.new(:url).as(F::Processor)]
     wires(options(QUERY, ["a b"], processors: procs)).first.should contain("?q=a%20b ")
@@ -135,6 +135,42 @@ describe "fuzz auto URL-encoding" do
     procs = [F::Encode.new(:base64).as(F::Processor)]
     # `YWI=` — the trailing `=` proves nothing percent-encoded the base64 afterwards.
     wires(options(QUERY, ["ab"], processors: procs)).first.should contain("?q=YWI= ")
+  end
+
+  # …but the OTHER processors are not that statement, and the gate used to be
+  # `processors.empty?`: one `--prefix` turned the default off for the whole run and put the
+  # payload's own space on the request-target, where it ends the target and the origin reads
+  # the parameter as `P<img` — the very failure this default exists to stop — while the row
+  # still said `1 sent · 0 errors`.
+  it "keeps the default under a --prefix / --case / --hash pipeline (no Encode in it)" do
+    space = "<img src=x onerror=alert(1)>"
+    encoded = "P%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E"
+    prefixed = [F::Prefix.new("P").as(F::Processor)]
+    wire = wires(options(QUERY, [space], processors: prefixed)).first
+    wire.should contain("GET /s?q=#{encoded} HTTP/1.1")
+    wire.should_not contain("?q=P<img")
+    # …and the pipeline still ran: the prefix is there, and it reaches the positions the
+    # default leaves alone byte-verbatim.
+    wires(options(JSON_BODY, [space], processors: prefixed)).first.should contain(%({"q":"P#{space}"}))
+    # `--case` folds the payload, `--hash` replaces it with hex — neither says how the wire
+    # spells it, so both keep the default too (over hex the encode is simply a no-op).
+    folded = [F::Case.new(:upper).as(F::Processor)]
+    wires(options(QUERY, ["a b"], processors: folded)).first.should contain("?q=A%20B ")
+    hashed = [F::Hasher.new(:md5).as(F::Processor)]
+    wires(options(QUERY, ["ab"], processors: hashed)).first
+      .should contain("?q=187ef4436122d1cc2f40dc2b92f0eba0 ")
+  end
+
+  # An `Encode` ANYWHERE in the pipeline stands the default down, not only a last one:
+  # `--encode url --suffix '&x=1'` has already produced the `%3C` this must not wrap.
+  it "stands down for an Encode anywhere in the pipeline, not only the last step" do
+    procs = [F::Encode.new(:url).as(F::Processor), F::Suffix.new("&x=1").as(F::Processor)]
+    wire = wires(options(QUERY, ["<b>"], processors: procs)).first
+    wire.should contain("?q=%3Cb%3E&x=1 ")
+    wire.should_not contain("%253C")
+    # …and the same for a base64 run carrying a prefix.
+    mixed = [F::Prefix.new("v=").as(F::Processor), F::Encode.new(:base64).as(F::Processor)]
+    wires(options(QUERY, ["ab"], processors: mixed)).first.should contain("?q=dj1hYg== ")
   end
 
   # A per-position `§value¦chain§` is the same statement aimed at one position, so that

@@ -21,14 +21,25 @@ module Gori::Fuzz
   #
   # It does NOT act when the operator has already said what the bytes should be:
   #
-  #   * `--encode` / MCP `processors` — a run-wide pipeline over EVERY payload for EVERY
-  #     position (today's behaviour, kept: it wins, and wrapping it would double-encode
-  #     the very `%3C` it just produced);
+  #   * `--encode` (`Encode`, whatever the kind) — the one processor that names the SPELLING
+  #     the wire should carry, so it wins: wrapping `--encode url` would double-encode the
+  #     very `%3C` it just produced, and `--encode base64`'s `YWI=` is the operator asking
+  #     for that literal, which `--encode base64 --encode url` is how they say otherwise;
   #   * a per-position `§value¦chain§` — the same statement, aimed at one position;
   #   * `--no-encode` / MCP `no_encode:true` — the escape hatch, for a run whose payload IS
   #     the raw byte (HTTP parameter pollution with a bare `&`, a request-line CRLF probe).
   #     A dedicated flag, not `--verbatim`: that one is the Content-Length knob and means
   #     "do not resync framing", a different axis in the same command.
+  #
+  # The other processors are NOT that statement, and the gate used to be `processors.empty?` —
+  # so one `--prefix` turned the whole default off and re-opened the exact failure above:
+  # `--payloads '<img src=x onerror=alert(1)>' --prefix P` put `?x=P<img src=x onerror=alert(1)>`
+  # on the wire, where the payload's own space ENDS the request-target, the origin read the
+  # parameter as `P<img`, and the row still said `1 sent · 0 errors`. `--prefix` / `--suffix` /
+  # `--case` / `--hash` / `--regex-replace` say what the PAYLOAD is, not what the wire spells it
+  # as, and a payload still has to survive the position it is spliced into — so they keep the
+  # default now, and only an `Encode` in the pipeline stands it down. (`--hash`'s hex output and
+  # a `--case` over one are unreserved anyway: encoding them is a no-op, not a second encode.)
   #
   # AND FOR A PAYLOAD THAT IS ITSELF A PERCENT-ESCAPE, which is the case this default does not
   # serve. `%` is a reserved byte like any other, so `%00` goes out as `%2500` and reaches the
@@ -55,17 +66,18 @@ module Gori::Fuzz
     def initialize(@positions : Set(Int32))
     end
 
-    # The no-op: an explicit pipeline, `--no-encode`, or a template with no query/form
+    # The no-op: an explicit `--encode`, `--no-encode`, or a template with no query/form
     # position at all. Every non-fuzz caller of `Generator` gets this.
     def self.none : AutoEncode
       new(Set(Int32).new)
     end
 
-    # The decision, taken once per plan. `enabled` is the operator's escape hatch and
-    # `processors` their run-wide pipeline; a position carrying its own `¦chain` opts out
-    # individually.
+    # The decision, taken once per plan. `enabled` is the operator's escape hatch and an
+    # `Encode` anywhere in `processors` their spelling of the wire bytes (anywhere, not last:
+    # `--encode url --suffix '&x=1'` has already produced the `%3C` this must not wrap); a
+    # position carrying its own `¦chain` opts out individually.
     def self.build(template : Template, processors : Array(Processor), enabled : Bool) : AutoEncode
-      return none unless enabled && processors.empty?
+      return none unless enabled && processors.none? { |p| p.is_a?(Encode) }
       set = Set(Int32).new
       template.urlencoded_positions.each do |k|
         next unless (pos = template.positions[k]?) && pos.chain.empty?
