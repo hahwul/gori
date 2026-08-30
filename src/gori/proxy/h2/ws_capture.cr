@@ -201,6 +201,15 @@ module Gori::Proxy::H2
         return unless h.data?
         @assembling = WS::Relay.emit_pending(@assembling, @direction, @flow_id, @sink,
           @opcode, @shape)
+        # The marker stands in for a real frame at that frame's own position, so it carries
+        # that frame's opcode — which means an oversized TEXT/BINARY frame OPENS a message
+        # here exactly as `handle` does for one small enough to buffer. Without this the
+        # marker went out under the PREVIOUS message's opcode (the initial `OP_TEXT` on a
+        # fresh socket), so a 20 MiB BINARY frame was recorded as text on an h2 socket and as
+        # binary on an h1 one — and any CONT fragments after it inherited the stale opcode
+        # too. `Relay.pump` sets its `message_opcode` before it reaches its own oversized
+        # branch; the two reassemblers have to record identical facts about identical bytes.
+        @opcode = h.opcode if h.opcode != WS::OP_CONT
         marker = "#{WS::NOTICE_PREFIX}#{h.len}-byte WebSocket frame forwarded; " \
                  "too large to capture".to_slice
         @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, marker, h.shape)

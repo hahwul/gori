@@ -47,6 +47,18 @@ private def ws_in(opcode : UInt8, payload : String, fin : Bool = true) : Bytes
   WS.encode(opcode, payload.to_slice, mask: false, fin: fin)
 end
 
+# A server→client frame header advertising more than `WS::MAX_FRAME`, with no payload behind
+# it: the reader counts the advertised length off rather than buffering it, so the header alone
+# is the whole of what an oversized frame contributes to the transcript.
+private def oversized_header(opcode : UInt8, fin : Bool = true) : Bytes
+  len = Gori::Proxy::WS::MAX_FRAME + 16
+  io = IO::Memory.new
+  io.write_byte((fin ? 0x80_u8 : 0_u8) | opcode)
+  io.write_byte(0x7f_u8)
+  (0..7).each { |i| io.write_byte((len >> (56 - i * 8)).to_u8!) }
+  io.to_slice
+end
+
 private def cat(*parts : Bytes) : Bytes
   io = IO::Memory.new
   parts.each { |p| io.write(p) }
@@ -153,6 +165,27 @@ describe Gori::Proxy::H2::WsCapture do
     sink.frames.first.text.should eq("fragmented")
     sink.frames.first.shape.frames.should eq(2)
     sink.frames.first.shape.fin.should be_true
+  end
+
+  # A frame past `WS::MAX_FRAME` is too large to buffer, so its row is a marker — and a marker
+  # standing in for a real frame carries that frame's own opcode, exactly as the h1 pump's
+  # `forward_oversized_frame` does. It used to be written under the PREVIOUS message's opcode
+  # (`OP_TEXT` on a fresh socket), so a 16 MiB BINARY frame read as text over an RFC 8441
+  # socket and as binary over an HTTP/1.1 one, and the CONT fragments after it inherited the
+  # stale opcode too. Only the HEADER is fed: the reader counts the payload off as `@skip`.
+  it "records an oversized frame's marker under that frame's own opcode" do
+    sink = WsSink.new
+    a = open_socket(sink)
+    a.feed("in", data_frame(1_u32, 0_u8, oversized_header(WS::OP_BIN, fin: false)))
+
+    marker = sink.ws.find! { |r| r.text.includes?("too large to capture") }
+    marker.opcode.should eq(WS::OP_BIN.to_i)
+    # ... and the message that oversized fragment opened keeps that opcode to its FIN. The
+    # reader counts the advertised payload off before it parses again, so the CONT fragment
+    # has to arrive behind all of it.
+    a.feed("in", data_frame(1_u32, 0_u8, Bytes.new((Gori::Proxy::WS::MAX_FRAME + 16).to_i)))
+    a.feed("in", data_frame(1_u32, 0_u8, ws_in(WS::OP_CONT, "tail")))
+    sink.frames.map { |r| {r.opcode, r.text} }.should eq([{WS::OP_BIN.to_i, "tail"}])
   end
 
   # Control frames are the diagnostic half of a WebSocket transcript: a CLOSE carries the code
