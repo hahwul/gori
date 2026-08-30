@@ -60,6 +60,16 @@ module Gori
         end
       end
 
+      # One tag as one TSV line. The memo is folded the way the TREE view already folds it
+      # (`term_safe`, which is why a multi-line tag reads there as `# multi·line`): a tag is
+      # free text — typed here, or set from the TUI or MCP — and printed raw, a newline in it
+      # split one tag across two physical lines while a tab invented a fourth column, either
+      # of which desyncs host+path from the memo for anything reading this output. There is no
+      # `--format json` on --list to fall back to.
+      private def self.sitemap_tag_row(host : String, path : String, tag : String) : String
+        "#{CLI::Output.term_safe(host)}#{CLI::Output.term_safe(path)}\t#{CLI::Output.term_safe(tag)}"
+      end
+
       # Validate the write-side flags and set (or clear) the tag. Split out of cmd_sitemap_tag
       # to keep it under the cyclomatic-complexity bar. Takes the parsed values as ARGUMENTS:
       # in place they are assigned inside OptionParser blocks, so Crystal keeps them nilable
