@@ -43,9 +43,12 @@ module Gori
           p.invalid_option { |f| abort "gori run sitemap tag: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run sitemap tag: missing value for #{f}" }
         end
+        # Both forms this parser serves, because a stray word is as likely on the read as on
+        # the write: naming only the write flags told a `--list acme.test` operator to pass
+        # --path and --tag, neither of which --list even reads.
         parse_no_positionals(parser, args, "gori run sitemap tag",
-          "pass the node as --host H --path P and the memo as --tag TEXT — quote it, a memo with " \
-          "spaces is one argument")
+          "pass the node as --host H --path P and the memo as --tag TEXT (quote a memo with " \
+          "spaces); --list narrows with --host H")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: list)
         begin

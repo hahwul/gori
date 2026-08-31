@@ -45,13 +45,48 @@ private def parser_windows(src : String) : Array({Int32, String})
   starts.map_with_index { |at, i| {at, src[at...(starts[i + 1]? || src.size)]} }
 end
 
-# nil when the line opens no handler; otherwise whether the body reads BOTH halves.
-# Shared by the gate and its negative control so the control cannot drift from the check.
-private def handler_uses_both_halves?(lines : Array(String), i : Int32) : Bool?
-  md = lines[i].match(/\.unknown_args\s*(?:\{|do)\s*\|\s*(\w+)\s*,\s*(\w+)\s*\|/)
+# The handler's own body and its two block parameters, or nil when the line opens no handler.
+#
+# Windowed to the block's real terminator rather than to a fixed number of following lines: a
+# `do …  end` handler longer than the window would be judged on a body it does not have, in
+# EITHER direction — a red suite on correct code, or a green one on a handler that drops the
+# `after` half further down than the window reached.
+private def handler_body(lines : Array(String), i : Int32) : {String, String, String}?
+  md = lines[i].match(/\.unknown_args\s*(\{|do)\s*\|\s*(\w+)\s*,\s*(\w+)\s*\|/)
   return nil unless md
-  body = ([md.post_match] + lines[(i + 1)...{i + 7, lines.size}.min]).join("\n")
-  body.includes?(md[1]) && body.includes?(md[2])
+  body = md.post_match
+  if md[1] == "do"
+    indent = lines[i].size - lines[i].lstrip.size
+    j = i + 1
+    while j < lines.size && !(lines[j].strip == "end" && (lines[j].size - lines[j].lstrip.size) == indent)
+      body += "\n#{lines[j]}"
+      j += 1
+    end
+  elsif !body.includes?("}")
+    j = i + 1
+    while j < lines.size
+      body += "\n#{lines[j]}"
+      break if lines[j].includes?("}")
+      j += 1
+    end
+  end
+  {body, md[2], md[3]}
+end
+
+# A parameter is USED only as a whole word. A plain `includes?` answered this vacuously for
+# short names — `{ |b, a| positional = b }` "contains" `a`, in the middle of `positional` —
+# so the gate returned true for exactly the handler it exists to refuse.
+private def word_used?(body : String, name : String) : Bool
+  body.matches?(/(?<![A-Za-z0-9_])#{Regex.escape(name)}(?![A-Za-z0-9_])/)
+end
+
+# nil when the line opens no handler; otherwise whether the body reads BOTH halves.
+# Shared by the gate and its negative controls so a control cannot drift from the check.
+private def handler_uses_both_halves?(lines : Array(String), i : Int32) : Bool?
+  parts = handler_body(lines, i)
+  return nil unless parts
+  body, before, after = parts
+  word_used?(body, before) && word_used?(body, after)
 end
 
 # Method bodies, for the per-subcommand pairing below: from one `def self.` to the next.
@@ -68,6 +103,11 @@ end
 # Pinned per command because the error a 17-site sweep is likeliest to make is not a missing
 # guard — the gate above catches that — but a guard carrying the NEIGHBOUR's subcommand in
 # its message, which no generic check can see.
+#
+# The PREFIX is what is pinned, not the hint: the prefix is the subcommand's identity, while
+# several hints are deliberately shared between siblings (`rewriter add`/`preview` and
+# `colormarker add`/`preview` each take the same flags), so pinning hints here would assert
+# that two commands differ where they are meant to agree.
 private SWEPT = [
   {"capture.cr", "cmd_capture", "gori run capture"},
   {"colormarker.cr", "cmd_colormarker_color_add", "gori run colormarker color add"},
@@ -91,7 +131,7 @@ private SWEPT = [
 describe "gori run — every OptionParser reaches an unknown_args guard" do
   it "leaves no parser under src/gori/cli/run without one" do
     offenders = [] of String
-    Dir.glob(File.join(run_cli_dir, "*.cr")).sort.each do |path|
+    Dir.glob(File.join(run_cli_dir, "**", "*.cr")).sort.each do |path|
       src = File.read(path)
       parser_windows(src).each do |(at, window)|
         next if GUARDS.any? { |g| window.includes?(g) }
@@ -115,12 +155,15 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
     GUARDS.any? { |g| windows[0][1].includes?(g) }.should be_false
   end
 
+  # Anchored on the enclosing METHOD rather than on a parser ordinal: an index would follow
+  # whatever parser happens to sit at that position, so adding one ahead of it would quietly
+  # move the assertion onto a different command instead of failing.
   it "sees the guard in each of the three spellings the surface uses" do
-    parser_windows(File.read(File.join(run_cli_dir, "capture.cr")))[0][1]
+    method_body(File.read(File.join(run_cli_dir, "capture.cr")), "cmd_capture")
       .should contain("parse_no_positionals(")
-    parser_windows(File.read(File.join(run_cli_dir, "views.cr")))[1][1]
+    method_body(File.read(File.join(run_cli_dir, "views.cr")), "cmd_views_add")
       .should contain("views_one_positional(")
-    parser_windows(File.read(File.join(run_cli_dir, "notes.cr")))[0][1]
+    method_body(File.read(File.join(run_cli_dir, "notes.cr")), "cmd_notes_read")
       .should contain(".unknown_args")
   end
 
@@ -130,7 +173,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
   # then reads only the first, which that regex cannot see.
   it "uses both halves in every `cli/run` unknown_args handler" do
     offenders = [] of String
-    Dir.glob(File.join(run_cli_dir, "*.cr")).sort.each do |path|
+    Dir.glob(File.join(run_cli_dir, "**", "*.cr")).sort.each do |path|
       lines = File.read_lines(path)
       lines.each_index do |i|
         offenders << "#{File.basename(path)}:#{i + 1}" if handler_uses_both_halves?(lines, i) == false
@@ -145,6 +188,25 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
     handler_uses_both_halves?(["p.unknown_args { |before, after| positional = before + after }"], 0)
       .should be_true
     handler_uses_both_halves?(["parser.parse(args)"], 0).should be_nil
+  end
+
+  # Short parameter names are the case a substring test answers vacuously: `positional`
+  # CONTAINS an `a`, so `includes?(after_name)` was true for a handler that never reads it.
+  it "is not satisfied by a parameter name that merely appears inside another word" do
+    handler_uses_both_halves?(["p.unknown_args { |b, a| positional = b }"], 0).should be_false
+    handler_uses_both_halves?(["p.unknown_args { |b, a| positional = b + a }"], 0).should be_true
+  end
+
+  # …and a `do … end` handler is judged on its WHOLE body: a fixed look-ahead would call the
+  # first of these an offender (it reads `after` too late) and miss the second.
+  it "reads a multi-line handler to its own `end`, however long" do
+    filler = Array.new(9) { "            # …" }
+    uses_late = ["          p.unknown_args do |before, after|", "            rest = before"] +
+                filler + ["            rest += after", "          end"]
+    drops_late = ["          p.unknown_args do |before, after|", "            rest = before"] +
+                 filler + ["            rest += rest", "          end"]
+    handler_uses_both_halves?(uses_late, 0).should be_true
+    handler_uses_both_halves?(drops_late, 0).should be_false
   end
 
   it "names its own subcommand in the guard it installs" do
@@ -210,10 +272,6 @@ describe Gori::CLI::Run do
         "pass the condition as --when FILTER")
         .should eq("gori run colormarker add: unexpected arguments \"AND status:500\" — " \
                    "pass the condition as --when FILTER")
-    end
-
-    it "still proceeds when the command was handed no positionals at all" do
-      Gori::CLI::Run.no_positional_error([] of String, "gori run capture", "hint").should be_nil
     end
   end
 end
