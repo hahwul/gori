@@ -62,8 +62,12 @@ module Gori
     # Equal to `ContentDecode::MAX_OUT` on purpose (this is the same ceiling seen from the
     # other side), which used to make `truncated` unreachable for a compressed body: the
     # inflate stopped AT the ceiling and `size > MAX_BYTES` was then false by one byte. The
-    # native decoders now stop one buffer PAST their cap (see `Brotli.decode_full`), so a body
-    # that really had more to give lands above this and is reported as cut.
+    # native decoders answer that by overshooting their cap by up to one buffer (see
+    # `Brotli.decode_full`) — but `ContentDecode` now trims its own return back to `max_out`,
+    # so `cut` can no longer fire on a DECODED body at all. `decode_full`'s `complete` reports
+    # that cut instead (the same trim sets it false), which is why `truncated` below reads
+    # three sources rather than this one. `cut` still covers the undecoded fallback, where
+    # `bytes` is the stored body and can exceed this ceiling on its own.
     MAX_BYTES = 32 * 1024 * 1024
 
     # What the caller shows and what the Runner spawns against.
