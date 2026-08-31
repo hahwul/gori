@@ -14,6 +14,17 @@ module Gori
       DB_NAME     = "results.db"
       STALE_AFTER = 24.hours
 
+      # Ceiling on what ONE run may spool. The pane is bounded by FuzzerResultWindow and the
+      # queue by Persistence, but nothing bounded the disk: with `keep_bodies: :all` a cluster
+      # bomb writes every response body it gets, and the first thing to notice used to be a
+      # full home directory. Past this the archive is declared unavailable — the same outcome
+      # a saturated queue already produces — and the authorized sweep runs on (P6).
+      BYTE_BUDGET = 2_i64 * 1024 * 1024 * 1024
+
+      # How long `close` may hold its caller (usually the render fiber) waiting for a reaper
+      # batch to leave SQLite.
+      CLEANUP_DEADLINE = 2.seconds
+
       getter directory : String?
 
       def initialize(@root : String = File.join(Paths.home_dir, "spool"))
@@ -27,10 +38,11 @@ module Gori
 
       # Starts one isolated temporary run. Session ids are intentionally stripped: a spool DB
       # has no corresponding fuzz_sessions row and must never claim a durable project relation.
-      def start(meta : SavedRunMeta, initial_status : String = "running") : Run
+      def start(meta : SavedRunMeta, initial_status : String = "running",
+                byte_budget : Int64 = BYTE_BUDGET) : Run
         raise Gori::Error.new("fuzz spool is closed") if @closed
         persistence = Persistence.new(store, temporary_meta(meta), initial_status: initial_status)
-        run = Run.new(store, persistence)
+        run = Run.new(store, persistence, byte_budget)
         @runs << run
         run
       end
@@ -41,9 +53,12 @@ module Gori
       # by one unbounded DELETE transaction.
       def delete(run : Run) : Bool
         return true unless @runs.includes?(run)
-        run.close
+        drained = run.close
         @runs.delete(run)
-        start_cleanup(run.run_id) if @store
+        # Only once its writer is out. A reaper DELETE racing a batch still in flight would
+        # remove rows the writer is about to re-insert, and leave the run behind anyway; the
+        # directory teardown in `close` reclaims it instead.
+        start_cleanup(run.run_id) if @store && drained
         true
       rescue ex
         ::Log.warn { "could not schedule fuzz spool cleanup: #{ex.message}" }
@@ -57,11 +72,20 @@ module Gori
         return if @closed
         @closed = true
         @cleanup_cancelled = true
-        @runs.each(&.close)
-        while @cleanup_workers > 0
+        drained = @runs.map(&.close).all?
+        deadline = Time.instant + CLEANUP_DEADLINE
+        while @cleanup_workers > 0 && Time.instant < deadline
           sleep 1.millisecond
         end
-        @store.try(&.close)
+        # Only when nothing is inside the database any more. Past the deadline a writer or a
+        # reaper batch is still there, and closing SQLite under it raises in a fiber whose
+        # only recovery is a log line. The tree is unlinked below either way: POSIX keeps the
+        # open files alive until that fiber lets go, and nothing else can reach them.
+        if drained && @cleanup_workers == 0
+          @store.try(&.close)
+        else
+          ::Log.warn { "fuzz spool closed while a writer was still running; its database is unlinked, not closed" }
+        end
       ensure
         if directory = @directory
           FileUtils.rm_rf(directory)
@@ -75,7 +99,8 @@ module Gori
         getter accepted_bytes = 0_i64
         getter accepted_rows = 0_i64
 
-        protected def initialize(@store : Store, @persistence : Persistence)
+        protected def initialize(@store : Store, @persistence : Persistence,
+                                 @byte_budget : Int64 = BYTE_BUDGET)
         end
 
         def run_id : Int64
@@ -101,9 +126,17 @@ module Gori
         def append(result : Result) : Bool
           return false if failed? || finished?
           row = Persistence.write_row(result)
+          bytes = Persistence.row_bytes(row)
+          # Charged BEFORE the queue so the budget bounds what reaches the disk rather than
+          # what already got there. Aborting is what makes the refusal visible: `error` is the
+          # reason the run reports, and `failed?` stops every later append at the first line.
+          if @accepted_bytes + bytes > @byte_budget
+            @persistence.abort(reason: "fuzz spool budget exhausted (#{@byte_budget // (1024 * 1024)} MiB)")
+            return false
+          end
           return false unless @persistence.try_append(row)
           @accepted_rows += 1
-          @accepted_bytes += Persistence.row_bytes(row)
+          @accepted_bytes += bytes
           true
         end
 
@@ -123,7 +156,8 @@ module Gori
           @persistence.abort(sent, matched, errors, finished_at, reason)
         end
 
-        def close : Nil
+        # False when the writer is still inside the Store — see `Persistence#close`.
+        def close : Bool
           @persistence.close
         end
 

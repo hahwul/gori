@@ -42,6 +42,43 @@ describe Gori::Fuzz::Spool do
     end
   end
 
+  it "refuses rows past the run's byte budget and reports the reason once" do
+    with_spool_root do |root|
+      spool = Gori::Fuzz::Spool.new(root)
+      # A budget one row wide: the first append fits, the second is what the ceiling exists
+      # to stop. The pane and the queue were already bounded; the DISK was not, and with
+      # `keep_bodies: :all` a cluster bomb writes every response body it gets.
+      first = spool_result(1_i64, Bytes[0x47, 0xff])
+      budget = Gori::Fuzz::Persistence.row_bytes(Gori::Fuzz::Persistence.write_row(first))
+      run = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+        "https://budget.test", "sniper", 2_i64), byte_budget: budget)
+
+      run.append(first).should be_true
+      run.append(spool_result(2_i64, Bytes[0x47, 0xfe])).should be_false
+      run.failed?.should be_true
+      run.error.not_nil!.should contain("budget exhausted")
+      # Refused, not silently dropped: the run can never claim to be a complete archive.
+      run.append(spool_result(3_i64, Bytes[0x47, 0xfd])).should be_false
+      run.accepted_rows.should eq(1)
+      spool.close
+    end
+  end
+
+  it "closes without waiting out a writer that is still inside the database" do
+    with_spool_root do |root|
+      spool = Gori::Fuzz::Spool.new(root)
+      run = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+        "https://teardown.test", "sniper", 1_i64))
+      run.append(spool_result(1_i64, Bytes[0x47, 0xff])).should be_true
+      # Never finished — close has to abort the stream itself rather than block on a terminal
+      # that is never coming. On the Runner fiber this is a repaint that does not happen.
+      directory = spool.directory.not_nil!
+      elapsed = Time.measure { spool.close }
+      elapsed.should be < Gori::Fuzz::Spool::CLEANUP_DEADLINE
+      Dir.exists?(directory).should be_false
+    end
+  end
+
   it "opens one private Store lazily and isolates multiple run handles by run id" do
     with_spool_root do |root|
       spool = Gori::Fuzz::Spool.new(root)

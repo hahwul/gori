@@ -29,6 +29,12 @@ module Gori
       BATCH_BYTES        = 8_i64 * 1024 * 1024
       MAX_QUEUED_BATCHES = 4
 
+      # How long `close` may wait for the worker to leave its queue. The caller is often the
+      # TUI's render fiber, and the worker can be inside a commit against a database another
+      # process holds — an open-ended wait there is a frozen UI, so the wait is bounded and
+      # the caller is told whether it actually drained.
+      CLOSE_TIMEOUT = 2.seconds
+
       # Fixed scalar values, nullable-field presence bits and variable-field length slots. The
       # variable payload below is counted byte-for-byte; this conservative fixed allowance keeps
       # the transaction bound deterministic without pretending to reproduce SQLite's varints.
@@ -95,11 +101,21 @@ module Gori
 
       # Teardown barrier for an owner such as Spool. An unfinished stream is aborted; a finish
       # already in flight is allowed to settle before its Store can be closed underneath it.
-      def close : Nil
+      #
+      # Returns whether the worker actually left. False means it is STILL RUNNING against the
+      # Store, so the owner must not close that Store — it has to outlive the fiber or be
+      # abandoned with the files it holds.
+      def close(within : Time::Span = CLOSE_TIMEOUT) : Bool
         abort unless terminal?
-        return unless @worker_started && !@worker_stopped
-        @worker_done.receive
+        return true unless @worker_started && !@worker_stopped
+        select
+        when @worker_done.receive
+          true
+        when timeout(within)
+          false
+        end
       rescue Channel::ClosedError
+        true
       end
 
       # Live-engine path. It never waits for the Store writer or for this Persistence queue.

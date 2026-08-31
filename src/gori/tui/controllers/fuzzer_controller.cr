@@ -23,6 +23,14 @@ module Gori::Tui
     CONFIRM_THRESHOLD = 1000 # confirm before a run larger than this (or unknown size)
     DRAIN_CAP         =  512 # bounded per-tick drain so a fast run can't starve render
 
+    # How long a close gesture may hold the RENDER fiber waiting for a worker to leave.
+    # A worker can sit inside an in-flight request whose own timeout outlives any close, so
+    # an open-ended wait here is a frozen TUI — no repaint, no input, not even ^C. Past the
+    # deadline we let go: the view is already detached, the per-tick `drain_events` keeps
+    # unblocking a producer parked on a send, `end_worker` still reclaims it, and the spool's
+    # directory teardown is what actually reclaims the bytes.
+    QUIESCE_DEADLINE = 2.seconds
+
     # Store work happens on fibers, but view/Jobs/toast mutations stay on the Runner fiber.
     # Carry view identity + generation so a completion cannot land on a later run.
     record SaveDone, view : FuzzerView, generation : Int64, job_id : Int32,
@@ -30,7 +38,11 @@ module Gori::Tui
     record LoadDone, view : FuzzerView, generation : Int64, job_id : Int32,
       session_id : Int64, automatic : Bool, run : Store::FuzzRunRecord?,
       rows : Array(Fuzz::Result), error : String?
-    alias IoEvent = SaveDone | LoadDone
+    # The run fiber's one report that the temporary archive stopped accepting rows. Sent at
+    # the FIRST rejection, not at the end: a rejected append makes the whole run unsaveable,
+    # and learning that after a 100k-request sweep is learning it too late to act on.
+    record SpoolLost, view : FuzzerView, generation : Int64, reason : String
+    alias IoEvent = SaveDone | LoadDone | SpoolLost
 
     private class ResultIoCancelled < Exception
     end
@@ -49,6 +61,10 @@ module Gori::Tui
       @spool_runs = {} of FuzzerView => Fuzz::Spool::Run
       @workers = Hash(FuzzerView, Int32).new(0)
       @cancelled_views = Set(FuzzerView).new
+      # Views whose close outran QUIESCE_DEADLINE. They stay cancelled until their last
+      # worker leaves, and `end_worker` drops both references then — holding one for the
+      # project's lifetime would pin that view's whole 64 MiB result window.
+      @release_pending = Set(FuzzerView).new
       @closing = false
       @host.session.store.fuzz_sessions.each do |rec|
         view = FuzzerView.new
@@ -1018,9 +1034,18 @@ module Gori::Tui
 
     private def apply_io_event(event : IoEvent) : Nil
       case event
-      when SaveDone then apply_save_done(event)
-      when LoadDone then apply_load_done(event)
+      when SaveDone  then apply_save_done(event)
+      when LoadDone  then apply_load_done(event)
+      when SpoolLost then apply_spool_lost(event)
       end
+    end
+
+    # The archive died mid-sweep. The run itself is untouched — this only says ⇧S is gone,
+    # while it can still be acted on rather than only mourned.
+    private def apply_spool_lost(event : SpoolLost) : Nil
+      return unless @fuzzers.any?(&.view.same?(event.view))
+      return unless event.view.run_generation == event.generation
+      @host.status("complete fuzz archive unavailable — #{event.reason}")
     end
 
     private def apply_save_done(event : SaveDone) : Nil
@@ -1173,35 +1198,53 @@ module Gori::Tui
         @workers[view] = remaining
       else
         @workers.delete(view)
+        # A close that gave up waiting left this view cancelled on purpose, so the worker
+        # now leaving would keep reading its own cancellation. It has left; drop it.
+        @cancelled_views.delete(view) if @release_pending.delete(view)
       end
     end
 
-    # Keep draining while a producer may be blocked on a terminal/result send. The Store and
-    # temp spool are closed only after every captured fiber has left its ensure block.
-    private def quiesce_view(view : FuzzerView) : Nil
+    # Keep draining while a producer may be blocked on a terminal/result send, so the Store
+    # and temp spool are closed only after every captured fiber has left its ensure block —
+    # but only until QUIESCE_DEADLINE. False means a worker outlived it and the caller must
+    # NOT treat this view as reclaimed.
+    private def quiesce_view(view : FuzzerView) : Bool
+      deadline = Time.instant + QUIESCE_DEADLINE
       while @workers[view] > 0
+        return false if Time.instant >= deadline
         drain_events
         sleep 1.millisecond
       end
       while drain_events
       end
+      true
     end
 
     # One ownership exit for explicit close and peer reconciliation. Cancellation remains in
     # the set only while a worker can observe it; retaining a closed view here would retain its
     # entire 64 MiB result window for the rest of the project lifetime.
     private def release_view_resources(view : FuzzerView, cancel : Bool) : Nil
+      drained = true
       if cancel
         @cancelled_views.add(view)
         view.request_stop
-        quiesce_view(view)
+        drained = quiesce_view(view)
       end
       if spool_run = @spool_runs.delete(view)
         @spool.delete(spool_run)
       end
     ensure
-      @workers.delete(view)
-      @cancelled_views.delete(view)
+      # Only when nothing of this view is still running. A worker past the deadline still
+      # decrements @workers and still reads @cancelled_views on its way out, so clearing
+      # either here would put a live fiber back on the uncancelled path; `end_worker`
+      # finishes the job instead.
+      if drained
+        @workers.delete(view)
+        @cancelled_views.delete(view)
+      else
+        @release_pending.add(view)
+        @host.status("fuzz session closed — a worker is still winding down in the background")
+      end
     end
 
     # Focus a fuzz sub-tab by persisted id (notification "jump to result").
@@ -1277,9 +1320,12 @@ module Gori::Tui
       @spool_runs[v] = spool_run if spool_run
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
+      io_events = @fuzz_io_events
+      generation = v.run_generation
       calibrate = v.config.auto_calibrate?
       done_sent = false
       error_sent = false
+      spool_lost = false
       begin_worker(v)
       spawn(name: "gori-fuzz") do
         engine.calibrate_baseline if calibrate
@@ -1292,8 +1338,16 @@ module Gori::Tui
             end
           when Fuzz::ResultEvent
             # Temp persistence is non-blocking. A saturated/full spool becomes unavailable,
-            # but the authorized sweep and bounded display continue (P6).
-            spool_run.try(&.append(ev.result))
+            # but the authorized sweep and bounded display continue (P6). Say so at the FIRST
+            # rejection: from here the run can no longer be saved whole, and the operator who
+            # only learns that from "complete archive unavailable" at the end has already
+            # spent the sweep. Reported through the IO channel because the status line, like
+            # every view mutation, belongs to the Runner fiber.
+            if (run = spool_run) && !spool_lost && !run.append(ev.result)
+              spool_lost = true
+              io_events.send(SpoolLost.new(v, generation,
+                run.error || "the temporary archive stopped accepting results"))
+            end
             events.send({v, ev})
           when Fuzz::ErrorEvent
             error_sent = true
@@ -1719,7 +1773,12 @@ module Gori::Tui
           @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
         end
       end
-      until @workers.empty?
+      # Bounded for the same reason quiesce_view is: this runs on the Runner fiber as the
+      # project closes, and a sweep parked in an in-flight request must not hold the whole
+      # TUI. What is left after the deadline is torn down by the spool's own directory
+      # teardown, and by `reap_stale_directories` on the next start if this process dies.
+      deadline = Time.instant + QUIESCE_DEADLINE
+      until @workers.empty? || Time.instant >= deadline
         drain_events
         sleep 1.millisecond
       end
@@ -1727,6 +1786,7 @@ module Gori::Tui
       end
       @spool_runs.clear
       @cancelled_views.clear
+      @release_pending.clear
       @workers.clear
       @spool.close
     end
