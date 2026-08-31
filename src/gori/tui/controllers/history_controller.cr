@@ -417,7 +417,12 @@ module Gori::Tui
         return "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs" if @history.preview_focus != :list
         return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · space cmds · esc tabs"
       end
-      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{follow} follow · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
+      # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
+      # it deletes the project's whole History, and a destructive chord whose only
+      # advertisement is the space menu is precisely the arrangement 0edc3c5b called out in
+      # Probe. `d` stays unnamed — one row, and this line is already the longest on the tab.
+      clear = Hotkeys.binding_label(reg, "history.clear", "⇧X")
+      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{follow} follow · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

@@ -888,7 +888,12 @@ module Gori::Tui
         return "i identities · p passive · Send to Authorize from History to begin#{passive}"
       end
       return "↑/↓ request · ⇥ identity · ^X stop#{passive} · space cmds" if running?
-      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · space cmds"
+      # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
+      # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
+      # front of an operator watching one go out. Resolved through the keymap so a rebind
+      # reaches the hint; the rest of this line is still literal, as its siblings are.
+      clear = Hotkeys.binding_label(@host.session.registry, "authorize.clear", "⇧X")
+      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · #{clear} clear · space cmds"
     end
   end
 end

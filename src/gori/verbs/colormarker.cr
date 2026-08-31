@@ -51,6 +51,11 @@ module Gori
       # The scope half, the same shape the Rewriter's carries: a rule lives EITHER in this
       # project or in the global library every project reads. The default-flip is offered only
       # for a global rule, because a project rule has no default to flip — `x` IS its state.
+      # Its ⇧X reads as "…everywhere": the shifted form of the `x` that flips the same rule in
+      # THIS project (`colormarker.toggle`, above). In the four clear-all scopes ⇧X is the wipe
+      # chord instead (`history.clear`, `probe.clear`, `authorize.clear`, `activity.clear`) —
+      # deliberate cross-scope reuse, and invisible to `Conflicts.overlap?`, which is `a == b`
+      # on the scope. This tab has no clear-all verb for it to be confused with.
       on_global_rule = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :colormarker && ctx.colormarker_rule_list_focused? && ctx.colormarker_global_rule_selected?
       end

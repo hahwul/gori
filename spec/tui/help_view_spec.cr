@@ -21,13 +21,39 @@ describe Gori::Tui::HelpView do
     backend.contains?("DECODER").should be_true # the Decoder tab cheat-sheet
   end
 
-  it "documents the direct History deletion shortcuts" do
+  # NOT `item.key`. An Item carrying a `verb_id` has its key column REPLACED by
+  # `Gori::Hotkeys.binding_label` in `build_rows`, so the literal in SECTIONS is only the fallback
+  # for a registry-less render — asserting it passes just as happily when the verb is bound to
+  # something else entirely, which makes it a spec about a string rather than about the sheet.
+  # These read the resolved label, with "" as the fallback so a miss is empty rather than
+  # accidentally equal to the literal it was meant to check.
+  it "documents the direct History deletion shortcuts, resolved from the live keymap" do
+    registry = Gori::Verbs.registry
     history = HelpView::SECTIONS.find { |(title, _)| title == "HISTORY" }.not_nil![1]
-    delete = history.find { |item| item.verb_id == "history.delete" }.not_nil!
-    clear = history.find { |item| item.verb_id == "history.clear" }.not_nil!
+    history.find { |item| item.verb_id == "history.delete" }.should_not be_nil
+    history.find { |item| item.verb_id == "history.clear" }.should_not be_nil
 
-    delete.key.should eq("d")
-    clear.key.should eq("⇧X")
+    Gori::Hotkeys.binding_label(registry, "history.delete", "").should eq("d")
+    Gori::Hotkeys.binding_label(registry, "history.clear", "").should eq("⇧X")
+  end
+
+  # ⇧X is the clear-all chord in four scopes and only History has a section of its own, so the
+  # other three are named in OTHER TABS rows whose key column is the TAB NAME — no verb_id to
+  # resolve through, which makes those chord names hand-written literals that a rebind cannot
+  # follow. The pairing is what this checks: the row names the key the registry actually binds.
+  # (Authorize had no row at all until this rollout, though TAB_SECTION already pointed its
+  # Shortcuts popup at the section.)
+  it "names the clear-all chord in every tab that has one" do
+    registry = Gori::Verbs.registry
+    other = HelpView::SECTIONS.find { |(title, _)| title == "OTHER TABS" }.not_nil![1]
+    {"Probe" => "probe.clear", "Authorize" => "authorize.clear", "  activity" => "activity.clear"}
+      .each do |label, verb_id|
+        row = other.find { |item| item.key == label }
+        row.should_not be_nil, "OTHER TABS has no #{label} row"
+        chord = Gori::Hotkeys.binding_label(registry, verb_id, "")
+        chord.should eq("⇧X"), verb_id
+        row.not_nil!.desc.should contain(chord), "the #{label} row does not name #{verb_id}'s #{chord}"
+      end
   end
 
   describe "the Query page" do

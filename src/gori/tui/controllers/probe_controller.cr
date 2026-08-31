@@ -121,7 +121,13 @@ module Gori::Tui
       elsif @probe.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{mode} mode · #{filt} filter · space cmds"
       else
-        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{mode} mode · #{filt} filter · space cmds"
+        # `clear` sits with `d delete` rather than at the tail: this is the hint 0edc3c5b named
+        # as the gap ("no Probe hint ever named this one"), so the key that empties the tab is
+        # stated beside the one that removes a row, not left to be the first token a narrow
+        # terminal cuts. Resolved here rather than beside `mode`/`filt` above, because this is
+        # the only branch that names it and the others render just as often.
+        clear = Hotkeys.binding_label(reg, "probe.clear", "⇧X")
+        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
       end
     end
 

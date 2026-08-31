@@ -84,14 +84,32 @@ module Gori
         "probe.delete-selected", "Delete issue", "Delete the selected issue",
         Verb::Scope::Probe, [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.probe_delete; nil }
 
-      # NO bare chord. This wipes every Probe issue in the project, and it used to answer a
-      # single `x` — one chip to the right, on the Rules sub-tab, `x` is a harmless enable
-      # toggle. Two meanings that far apart do not belong on the same unmodified letter, and
-      # no Probe hint ever named this one, so the destructive reading was the unadvertised
-      # one. It keeps its space-menu entry under `X` (the menu is the deliberate path for a
-      # :danger verb) and stays reachable from the palette; the confirm still gates it.
+      # ⇧X — the one chord every "wipe this tab" verb answers, each in its own scope:
+      # `history.clear`, `authorize.clear` and `activity.clear` are the siblings, and `X` is
+      # the space-menu key in all four.
+      #
+      # This is NOT the bare `x` coming back. 0edc3c5b took the wipe off an UNMODIFIED letter,
+      # and both halves of its objection were about that: one chip to the right, on the Rules
+      # sub-tab, `x` is a harmless enable toggle, and no Probe hint ever named the destructive
+      # reading — so of the two meanings the unadvertised one was the dangerous one. A shifted
+      # chord answers both. It shares no key with that toggle, which has since moved out of
+      # reach structurally as well (the Rules sub-tab reports `Verb::Scope::ProbeRules` from
+      # `ProbeController#command_scope`, so its `x` and this scope's ⇧X can never resolve on
+      # the same keystroke), and it is advertised in the two places the bare key never was:
+      # the Help sheet's Probe row and this list's body hint. The space-menu entry therefore
+      # stays exactly where 0edc3c5b put it, the palette still reaches the verb, and the
+      # confirm still gates it — the chord is added to that shape, not traded against it.
+      #
+      # ⇧X and not ⇧C: bare `x` is bound in none of the four clear-all scopes, while bare `c`
+      # is live in all of them — here it is `probe.dismiss-selected`, the most-pressed key on
+      # this list. A project wipe does not belong one shift above it.
+      #
+      # `Chord.new("x", shift: true)`, NOT `Chord.new("X")`: `Keybind.from_event` normalises a
+      # typed capital to shift+lowercase, so the capital spelling never fires. `menu_key` skips
+      # shift chords, hence the explicit mnemonic.
       r.register Verb::Definition.new(
         "probe.clear", "Clear issues", "Delete all Probe issues for this project", Verb::Scope::Probe,
+        [Verb::Chord.new("x", shift: true)],
         mnemonic: 'X', group: :danger) { |ctx| ctx.probe_clear; nil }
 
       r.register Verb::Definition.new(

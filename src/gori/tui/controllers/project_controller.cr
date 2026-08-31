@@ -67,7 +67,12 @@ module Gori::Tui
         if @project_view.activity_querying?
           "type to filter · ↵ keep · esc clear"
         else
-          "↑/↓ select · ↵ open · s source · l level · a actor · / filter · space cmds · esc sub-tabs"
+          # The one pane on this tab with a destructive key, and the only hint here that names
+          # one. Resolved through the keymap (the rest of this method is literal, because no
+          # other pane key is rebindable-and-dangerous) so a rebind reaches the line that
+          # advertises it.
+          clear = Hotkeys.binding_label(@host.session.registry, "activity.clear", "⇧X")
+          "↑/↓ select · ↵ open · s source · l level · a actor · / filter · #{clear} clear · space cmds · esc sub-tabs"
         end
       when :settings
         settings_hint
@@ -624,7 +629,7 @@ module Gori::Tui
         # ↵ included: it is the second chord on `activity.open` (the shape `discover.open-flow`
         # already uses), so it reaches the verb through the keymap and stays rebindable rather
         # than being a hard-coded twin the Hotkeys editor cannot see.
-        return false # ↵/o, s, l, c, /, r (activity.* verbs), space (menu), Global chords
+        return false # ↵/o, s, l, a, /, r, ⇧X (activity.* verbs), space (menu), Global chords
       end
       true
     end
@@ -663,7 +668,7 @@ module Gori::Tui
       @host.status("could not read more of the event feed — see gori.log")
     end
 
-    # --- ACTIVITY verbs (s/l/c///r via the keymap + the pane's action menu) ---
+    # --- ACTIVITY verbs (`s` `l` `a` `/` `r` `⇧X` via the keymap + the pane's action menu) ---
     def activity_filter_source : Nil
       @project_view.focus_pane(:activity)
       @project_view.activity_cycle_source

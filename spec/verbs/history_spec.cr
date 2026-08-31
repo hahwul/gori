@@ -129,13 +129,18 @@ describe "Gori::Verbs.register_history" do
 
     it "binds direct destructive shortcuts while preserving the danger menu keys" do
       # Bare `d` deletes from the list even though Space→d remains Discover; the explicit
-      # menu mnemonic keeps the two actions distinct there. Shift-X wipes the tab, matching
-      # Probe's clear mnemonic without reclaiming Comparer's `C`.
+      # menu mnemonic keeps the two actions distinct there. ⇧X wipes the tab — the chord and
+      # the menu letter every clear-all verb in the app now spells the same way (the family is
+      # asserted as a set in spec/verbs/activity_spec.cr).
+      #
+      # `C` is not available for either half: this tab spends it on the column editor, and the
+      # other `C` in the registry is Send to Comparer.
       r["history.delete"].chords.should eq([Gori::Verb::Chord.new("d")])
       r["history.delete"].menu_key.should eq('D')
-      r["history.clear"].chords.should eq([Gori::Verb::Chord.new("x", shift: true)])
+      r["history.clear"].chords.should eq([shift_chord('X')])
       r["history.clear"].menu_key.should eq('X')
       r["probe.clear"].menu_key.should eq('X')
+      r["history.columns"].menu_key.should eq('C')
       r["repeater.compare"].menu_key.should eq('C')
       r["history.clear"].menu_key.should_not eq(r["repeater.compare"].menu_key)
       r["detail.delete"].chords.should be_empty # the shortcut is list-only

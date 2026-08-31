@@ -22,6 +22,22 @@ Gori::Settings.warning_io = nil
 
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
+# The chord a SHIFTED letter actually produces, built the way the TUI builds it rather than
+# spelled by hand. `Verb::Chord.new("X")` looks like ⇧X, satisfies an equality assertion
+# perfectly, and never fires: `Keybind.from_event` normalises a typed capital to
+# shift+lowercase, so nothing ever asks the keymap for a chord whose key is "X". Asserting a
+# declaration against a hand-written twin of itself is what let a dead binding ship once
+# already (see the note in spec/verbs/activity_spec.cr), so every shift-letter assertion in
+# the suite should round-trip through the real event path — this is that path.
+def shift_chord(letter : Char) : Gori::Verb::Chord
+  # `.not_nil!` rather than a fallback: from_event returns nil for an event it cannot name, and
+  # a helper that quietly substituted a hand-built chord there would reintroduce exactly the
+  # blind spot it exists to close.
+  Gori::Tui::Keybind.from_event(
+    Termisu::Event::Key.new(Termisu::Input::Key.from_char(letter.downcase),
+      Termisu::Input::Modifier::Shift, char: letter.upcase)).not_nil!
+end
+
 # The scope decision for a spec that is exercising something OTHER than the scope gate
 # (payload generation, host overrides, engine plumbing). `Gori::Outbound` is a required
 # constructor argument on every active sender — that is the whole point of the seam — so

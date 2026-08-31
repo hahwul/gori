@@ -66,10 +66,19 @@ module Gori
         Verb::Scope::Authorize, [Verb::Chord.new("d")],
         available: queued, mnemonic: 'd', group: :danger) { |ctx| ctx.authorize_remove; nil }
 
-      # Menu-only + 'X', the house shape for "wipe this tab" (history.clear, probe.clear).
+      # ⇧X + the menu key 'X', the house shape for "wipe this tab" — `history.clear`,
+      # `probe.clear` and `activity.clear` answer the same chord, each gated to its own scope.
+      # Bare `x` is bound nowhere in Authorize, so the shifted key has no unmodified neighbour
+      # to be mistyped from. `^X` above it is the run STOP — a different modifier, and `Chord`
+      # equality carries the modifiers, so the two never collide; reaching for one and getting
+      # the other costs nothing either way, because `AuthorizeController#clear` refuses while a
+      # run is in flight and says "^X to stop it first", which is the key the operator wanted.
+      # Spelled Chord.new("x", shift: true), NEVER Chord.new("X") — from_event
+      # normalises a typed capital to shift+lowercase, so the capital spelling never fires;
+      # menu_key skips shift chords, hence the explicit mnemonic.
       r.register Verb::Definition.new(
         "authorize.clear", "Clear", "Empty the request queue and its results",
-        Verb::Scope::Authorize,
+        Verb::Scope::Authorize, [Verb::Chord.new("x", shift: true)],
         available: queued, mnemonic: 'X', group: :danger) { |ctx| ctx.authorize_clear; nil }
 
       register_send_to_authorize(r)

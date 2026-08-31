@@ -721,7 +721,7 @@ gori settings tls-fingerprint shop.example.com
 | **HOST OVERRIDES** | 프로젝트별 접속 맵 |
 | **ENV** | 아웃바운드 요청을 위한 프로젝트별 `$KEY` 변수. [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/#environment-variables) 참고 |
 | **PROJECT SETTINGS** | scope 렌즈 + **샌드박스** 토글, 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream), 그리고 gRPC [`.proto` 스키마](#proto-schema) 경로 |
-| **ACTIVITY** | 이 프로젝트에 **누가 무엇을** 바꿨는지 — 추가 전용 이벤트 피드를 최신순으로. 설정 변경(스코프 규칙, 샌드박스, host override, `$KEY` 변수, rewrite 규칙, 네트워크 고정)은 어디서 바꾸든 기록되고, 각 행이 그것을 만든 **주체**(`tui` · `cli` · `agent`)를 밝힙니다. 백그라운드 작업 결과와 에이전트 툴 호출도 함께 들어옵니다. `s` source, `l` level, `a` actor, `/` 텍스트로 필터하고 `↵`로 이벤트가 가리키는 플로우·세션을 열며, `⇧C`로 피드를 비웁니다(에이전트 감사 기록도 함께 사라지므로 먼저 확인을 묻습니다 — 소문자 `c`는 다른 곳과 똑같이 캡처 토글로 남겨 두려고 shift를 씁니다). 알림을 띄우지 *않고* 실패한 훅이나 세션 바인딩이 보이는 곳입니다 |
+| **ACTIVITY** | 이 프로젝트에 **누가 무엇을** 바꿨는지 — 추가 전용 이벤트 피드를 최신순으로. 설정 변경(스코프 규칙, 샌드박스, host override, `$KEY` 변수, rewrite 규칙, 네트워크 고정)은 어디서 바꾸든 기록되고, 각 행이 그것을 만든 **주체**(`tui` · `cli` · `agent`)를 밝힙니다. 백그라운드 작업 결과와 에이전트 툴 호출도 함께 들어옵니다. `s` source, `l` level, `a` actor, `/` 텍스트로 필터하고 `↵`로 이벤트가 가리키는 플로우·세션을 열며, `⇧X`로 피드를 비웁니다(에이전트 감사 기록도 함께 사라지므로 먼저 확인을 묻습니다). `⇧X`는 History·Probe 이슈·Authorize 큐를 비우는 키와 같으며, 각각 자기 탭 안에서만 동작합니다. 소문자 `c`는 다른 곳과 똑같이 캡처 토글로 남습니다. 알림을 띄우지 *않고* 실패한 훅이나 세션 바인딩이 보이는 곳입니다 |
 
 스코프 규칙과 호스트 오버라이드는 스크립트로도 다룰 수 있습니다: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-project)에 있습니다.
 

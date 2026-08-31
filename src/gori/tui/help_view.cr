@@ -231,12 +231,20 @@ module Gori::Tui
       {"OTHER TABS", [
         Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t mark · g fold · ⇧S scope · space → T tag"),
         Item.new("Issues", "list: t mark · ⇧T all · ⇧arrows range · notes: i/↵ edit · x line · y copy · space cmds"),
-        Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"),
+        Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · ⇧X clear issues · space cmds"),
+        # Authorize had no row at all while `TAB_SECTION` pointed its Shortcuts popup here — so
+        # the one tab whose keys are `^R`/`⇧R`/`^X` and nothing an operator can guess opened on
+        # a section that never named it.
+        Item.new("Authorize", "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · ⇧X clear queue"),
         Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),
         # No pane inventory: the chip strip names all six on screen, no sibling row lists sub-panes,
         # and the parenthetical was what pushed this row past `HelpPopupOverlay::MAX_W` when the
         # sixth pane arrived — it would have broken again at the seventh. Keys only, like the rest.
         Item.new("Project", "←/→ sub-tab · ↓/↵ enter · desc: i/↵ edit · x line · y copy · space cmds"),
+        # ACTIVITY is a Project sub-tab, so its keys hang off the row above rather than earning
+        # a section — but `⇧X` there deletes the durable audit trail, which is the one key on
+        # this tab that must be named somewhere the operator can read before pressing it.
+        Item.new("  activity", "s source · l level · a actor · / filter · ↵ open · ⇧X clear the feed"),
         Item.new("Intercept", "↵/e edit · f fwd · d drop · ⇧F all · c catch · / condition · i on/off"),
       ]},
       {"DECODER", [
@@ -293,11 +301,13 @@ module Gori::Tui
     # for the "I'm here, what can I press" moment, and landing on GLOBAL every time would
     # make the operator scroll for the answer they came with.
     #
-    # The six tabs with no section of their own share OTHER TABS, which holds exactly one
-    # row each; :help itself is absent so opening from Help lands at the top (the whole
-    # sheet is already what that tab shows). A spec pins every Chrome::TABS symbol either
-    # here or deliberately out, and pins every title named here against SECTIONS — a typo'd
-    # title would otherwise silently degrade to "open at the top".
+    # The tabs with no section of their own share OTHER TABS, one row each — plus a second,
+    # indented row under Project for its ACTIVITY sub-tab, which is where the one destructive
+    # key on that tab lives. :target is the one entry here with no row of its own yet; :help is
+    # absent from this table entirely so opening from Help lands at the top (the whole sheet is
+    # already what that tab shows). A spec pins every Chrome::TABS symbol either here or
+    # deliberately out, and pins every title named here against SECTIONS — a typo'd title would
+    # otherwise silently degrade to "open at the top".
     TAB_SECTION = {
       :history     => "HISTORY",
       :repeater    => "REPEATER",
