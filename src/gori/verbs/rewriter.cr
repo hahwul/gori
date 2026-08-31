@@ -49,7 +49,8 @@ module Gori
         Verb::Scope::Rewriter, available: has_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.rewriter_toggle; nil }
       r.register Verb::Definition.new(
         "rewriter.delete", "Delete rule", "Delete the selected rule (confirms first)",
-        Verb::Scope::Rewriter, [Verb::Chord.new("d")], available: has_rule, mnemonic: 'd', section: :rules) { |ctx| ctx.rewriter_delete; nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("d")], available: has_rule, mnemonic: 'd', section: :rules,
+        group: :danger) { |ctx| ctx.rewriter_delete; nil }
       r.register Verb::Definition.new(
         "rewriter.move-up", "Move up", "Move the selected rule earlier in apply order",
         Verb::Scope::Rewriter, [Verb::Chord.new("k", shift: true)], available: has_rule, mnemonic: 'u', section: :rules) { |ctx| ctx.rewriter_move(-1); nil }

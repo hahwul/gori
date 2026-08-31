@@ -76,7 +76,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "oast.delete-provider", "Delete provider", "Delete the selected provider (keeps its callback history)",
-        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'd') { |ctx| ctx.oast_delete_provider; nil }
+        Verb::Scope::OastProviders, [] of Verb::Chord, mnemonic: 'd', group: :danger) { |ctx| ctx.oast_delete_provider; nil }
 
       # --- cross-tab: insert / copy a fresh OAST payload (gated on an active listener) ---
       insert_avail = ->(tab : Symbol) {

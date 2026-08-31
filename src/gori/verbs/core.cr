@@ -178,7 +178,8 @@ module Gori
         Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
       r.register Verb::Definition.new(
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
-        Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule) { |ctx| ctx.scope_delete_rule; nil }
+        Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule,
+        group: :danger) { |ctx| ctx.scope_delete_rule; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # Was `hidden: true` (the menu only ever showed "Copy description"); now that

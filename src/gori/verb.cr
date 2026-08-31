@@ -140,8 +140,14 @@ module Gori
       # exactly as they do today (one flat group).
       getter section : Symbol
       # The SEMANTIC band this verb sits in within whatever section shows it —
-      # :view / :send / :triage / :copy / :scope / :danger (see
-      # Tui::SpaceMenu::GROUP_LABELS). Orthogonal to `section`, which is a FOCUS-AREA
+      # :view / :send / :triage / :copy / :scope / :danger / :wipe (see
+      # Tui::SpaceMenu::GROUP_LABELS). The last two are a SEVERITY axis for verbs that
+      # permanently destroy stored data: :danger deletes the SELECTED item(s) and may
+      # ride a bare letter (the established `d`), while :wipe empties a whole
+      # tab/project store and must answer a MODIFIED chord — ⇧X across the app (#899),
+      # never a bare letter (registry_sweep_spec enforces the chord rule). Verbs that
+      # only clear a text selection, marks, or scratch editor state are NOT destructive
+      # and stay out of both. Orthogonal to `section`, which is a FOCUS-AREA
       # axis: `section` answers "which pane is focused" (and a section's verbs only
       # appear when that pane IS focused), while `group` answers "what kind of action
       # is this" and never gates visibility. The single-region scopes — History's Body

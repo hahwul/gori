@@ -110,7 +110,7 @@ module Gori
       r.register Verb::Definition.new(
         "probe.clear", "Clear issues", "Delete all Probe issues for this project", Verb::Scope::Probe,
         [Verb::Chord.new("x", shift: true)],
-        mnemonic: 'X', group: :danger) { |ctx| ctx.probe_clear; nil }
+        mnemonic: 'X', group: :wipe) { |ctx| ctx.probe_clear; nil }
 
       r.register Verb::Definition.new(
         "probe.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Probe,
@@ -158,7 +158,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.delete", "Delete issue", "Delete this issue", Verb::Scope::ProbeDetail,
-        [Verb::Chord.new("d")]) { |ctx| ctx.probe_delete; nil }
+        [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.probe_delete; nil }
 
       # --- Rules sub-tab (Verb::Scope::ProbeRules) ---
       # Nav (↑/↓, j/k) + Esc→strip are controller-claimed; these are the actions. edit/delete are
@@ -182,7 +182,8 @@ module Gori
         mnemonic: 'e', available: probe_custom) { |ctx| ctx.probe_rule_edit; nil }
       r.register Verb::Definition.new(
         "probe-rules.delete", "Delete custom rule", "Delete the selected custom rule",
-        Verb::Scope::ProbeRules, [Verb::Chord.new("d")], available: probe_custom) { |ctx| ctx.probe_rule_delete; nil }
+        Verb::Scope::ProbeRules, [Verb::Chord.new("d")], available: probe_custom,
+        group: :danger) { |ctx| ctx.probe_rule_delete; nil }
     end
   end
 end

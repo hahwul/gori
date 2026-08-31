@@ -44,7 +44,7 @@ module Gori
       r.register Verb::Definition.new(
         "issues.delete", "Delete issue", "Delete the selected issue (or every marked one)",
         Verb::Scope::Issues, [Verb::Chord.new("d")],
-        available: issues_targets) { |ctx| ctx.issues_delete; nil }
+        available: issues_targets, group: :danger) { |ctx| ctx.issues_delete; nil }
 
       # Severity/status from the LIST, so re-triaging a set is one pass: mark five, pick
       # "False positive" once. Same ExecContext methods as the detail-scope pair below —
@@ -178,7 +178,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "issue.delete", "Delete issue", "Delete this issue", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("d")]) { |ctx| ctx.issues_delete; nil }
+        [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.issues_delete; nil }
 
       r.register Verb::Definition.new(
         "issue.status-up", "Advance status", "Cycle triage status forward (open→confirmed→fp→resolved)",

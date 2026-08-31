@@ -31,7 +31,8 @@ module Gori
         Verb::Scope::Colormarker, [Verb::Chord.new("x")], available: on_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.delete", "Delete rule", "Delete the selected rule (confirms first)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, mnemonic: 'd', section: :rules) { |ctx| ctx.colormarker_delete; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, mnemonic: 'd', section: :rules,
+        group: :danger) { |ctx| ctx.colormarker_delete; nil }
       # "Move up/down" reads like cosmetics on the Rewriter, where rules compose and order is a
       # tiebreak. Here the FIRST enabled match paints the row and the rest are never consulted,
       # so a move changes which rule wins — the descriptions say so.
@@ -79,7 +80,8 @@ module Gori
         Verb::Scope::Colormarker, available: on_color, mnemonic: 'e', section: :colors) { |ctx| ctx.colormarker_color_edit; nil }
       r.register Verb::Definition.new(
         "colormarker.color-delete", "Delete colour", "Delete the selected custom colour (confirms first)",
-        Verb::Scope::Colormarker, available: on_color, mnemonic: 'd', section: :colors) { |ctx| ctx.colormarker_color_delete; nil }
+        Verb::Scope::Colormarker, available: on_color, mnemonic: 'd', section: :colors,
+        group: :danger) { |ctx| ctx.colormarker_color_delete; nil }
     end
   end
 end

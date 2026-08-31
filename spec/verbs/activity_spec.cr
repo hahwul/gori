@@ -38,12 +38,14 @@ describe "Gori::Verbs.register_activity" do
     r["activity.clear"].chords.should_not contain(shift_chord('C'))
     r["activity.clear"].chords.should_not contain(Gori::Verb::Chord.new("x"))
     r["activity.clear"].menu_key.should eq('X')
-    r["activity.clear"].group.should eq(:danger)
+    r["activity.clear"].group.should eq(:wipe)
   end
 
   # One chord, four scopes — History, Probe, Authorize and this pane all spell the wipe the
   # same way, and all four hang the space menu off `X`. Read from the registry rather than
-  # restated per file, so a fifth clear-all verb that picks its own letter fails HERE.
+  # restated per file, so a fifth clear-all verb that picks its own letter fails HERE. The
+  # `:wipe` band (distinct from a selection-delete's `:danger`) is what makes that same
+  # convention legible straight off the registry — see registry_sweep_spec's chord rule.
   it "spells the wipe the way every other clear-all verb does" do
     {"history.clear"   => Gori::Verb::Scope::Body,
      "probe.clear"     => Gori::Verb::Scope::Probe,
@@ -53,7 +55,7 @@ describe "Gori::Verbs.register_activity" do
       r[id].scope.should eq(scope), id
       r[id].chords.should eq([shift_chord('X')]), id
       r[id].menu_key.should eq('X'), id
-      r[id].group.should eq(:danger), id
+      r[id].group.should eq(:wipe), id
       # The letter under the shift is free in each of those scopes — that is the property that
       # made ⇧X the right key, and it is the one a later bare-`x` binding would quietly break.
       r.select { |v| v.scope == scope && v.chords.includes?(Gori::Verb::Chord.new("x")) }
