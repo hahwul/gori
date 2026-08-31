@@ -37,17 +37,21 @@ module Gori
           elsif runs.empty?
             puts "No saved fuzz runs."
           else
-            runs.each do |run|
-              count = counts[run.id]? || 0_i64
-              proto = run.websocket? ? "WS" : (run.http2? ? "H2" : "H1")
-              session = run.session_id.try { |id| " session:#{id}" } || ""
-              puts "##{run.id}  [#{run.status}] [#{proto}]  #{run.mode}  #{run.matched}/#{run.sent} hit  " \
-                   "#{count} rows#{session}  → #{CLI::Output.term_safe(run.target)}"
-            end
+            runs.each { |run| puts fuzz_saved_run_line(run, counts[run.id]? || 0_i64) }
           end
         ensure
           store.close
         end
+      end
+
+      # One listing row. Extracted so the transport chip has a testable seam: `proto_label`
+      # is the record's, shared with the TUI picker, and a legacy snapshot has to read LEGACY
+      # here rather than the `[H1]` its defaulted columns would otherwise assert.
+      private def self.fuzz_saved_run_line(run : Store::FuzzRunRecord, stored : Int64) : String
+        session = run.session_id.try { |id| " session:#{id}" } || ""
+        "##{run.id}  [#{run.status}] [#{run.proto_label}]  #{run.mode}  " \
+        "#{run.matched}/#{run.sent} hit  #{stored} rows#{session}  " \
+        "→ #{CLI::Output.term_safe(run.target)}"
       end
 
       private def self.cmd_fuzz_saved_show(args : Array(String)) : Nil
@@ -165,7 +169,10 @@ module Gori
         when :jsonl
           rows.each { |row| puts CLI::Output.fuzz_row_json(Fuzz::Persistence.result(row)) }
         else
-          puts "fuzz run ##{run.id} · #{run.status} · #{run.mode} · #{run.sent} sent · #{run.matched} hit · #{run.errors} errors"
+          # The transport chip the listing and the TUI picker draw, so a LEGACY run says so
+          # here too — this is the command the picker's own refusal sends the operator to.
+          puts "fuzz run ##{run.id} · #{run.status} · #{run.proto_label} · #{run.mode} · " \
+               "#{run.sent} sent · #{run.matched} hit · #{run.errors} errors"
           rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row)) }
           STDERR.puts "showing #{offset + 1}-#{offset + rows.size} of #{total}" unless rows.empty?
         end
@@ -218,7 +225,13 @@ module Gori
           j.field "id", run.id
           j.field "session_id", run.session_id
           j.field "created_at", run.created_at
+          # The `*_iso` twins MCP's `saved_fuzz_run` emits. Without them a script correlating
+          # `gori run fuzz list --format json` against `list_fuzz_runs` cannot compare the two
+          # feeds as strings — the same gap `CLI::Output.flow_row_fields` documents closing for
+          # History, reintroduced here by a new emitter.
+          j.field "created_at_iso", CLI::Output.iso_time_utc(run.created_at)
           j.field "finished_at", run.finished_at
+          j.field "finished_at_iso", run.finished_at.try { |t| CLI::Output.iso_time_utc(t) }
           j.field "target", run.target.scrub
           j.field "mode", run.mode.scrub
           j.field "total", run.total
@@ -233,7 +246,7 @@ module Gori
           j.field "surface", run.surface.try(&.scrub)
           j.field "source_ref", run.source_ref.try(&.scrub)
           j.field "snapshot_version", run.snapshot_version
-          j.field "legacy", run.snapshot_version == 0
+          j.field "legacy", run.legacy_snapshot?
           j.field "stored_results", stored_results
         end
       end

@@ -48,6 +48,66 @@ describe Gori::Tui::ConfirmDialog do
     dlg.render(Screen.new(backend), Rect.new(0, 0, 10, 3))
     backend.contains?("X").should be_false
   end
+
+  # The card caps at 60 columns and insets each message line by 3 either side, so a line past
+  # 54 columns used to be handed to `Screen#text` and CLIPPED with '…'. Every one of #897's
+  # two-line confirms ran past it and lost its second clause — `CLOSE FUZZER` drew "…private
+  # temporary spool, and eve…" and dropped "ry saved run are deleted.", which is the only
+  # warning that closing a fuzz sub-tab destroys every permanently saved run.
+  it "wraps a long message line instead of clipping its tail" do
+    dlg = ConfirmDialog.new("CLOSE FUZZER",
+      "Close fuzz session?\nIts template/config, private temporary spool, " \
+      "and every saved run are deleted.")
+    backend = render_dialog(dlg, 120, 24)
+    backend.contains?("Its template/config, private temporary spool, and").should be_true
+    # The clause that names the consequence survives on the next row, whole — not an
+    # ellipsis where the verb was.
+    backend.contains?("every saved run are deleted.").should be_true
+    backend.contains?("…").should be_false
+  end
+
+  # `overlay_box`'s doc claims IDENTICAL sizing to render. Wrapping adds lines, so the card
+  # has to grow with them — otherwise the extra rows land on the frame or below it.
+  it "grows the card to hold every wrapped line" do
+    short = ConfirmDialog.new("T", "one line")
+    long = ConfirmDialog.new("T",
+      "a sentence deliberately far longer than the fifty-four columns this card can draw on one row")
+    area = Rect.new(0, 0, 120, 24)
+    long.overlay_box(area).h.should be > short.overlay_box(area).h
+
+    backend = MemoryBackend.new(120, 24)
+    long.render(Screen.new(backend), area)
+    box = long.overlay_box(area)
+    # Every drawn message row sits inside the card, above the button row.
+    drawn = (box.y + 2...box.bottom - 3).count { |y| !backend.row(y)[box.x + 3, box.w - 6].blank? }
+    drawn.should be >= 2
+  end
+
+  # Measured in terminal COLUMNS, not characters. A Hangul syllable is two cells, so 40 of
+  # them are 80 columns and have to wrap even though the character count is well under the
+  # budget — a character-counted wrap would hand `Screen#text` a line it then clips.
+  it "wraps on drawn width, not character count" do
+    dlg = ConfirmDialog.new("T", "한" * 40)
+    backend = render_dialog(dlg, 120, 24)
+    backend.contains?("…").should be_false
+    box = dlg.overlay_box(Rect.new(0, 0, 120, 24))
+    rows = (box.y + 2...box.bottom - 3).count { |y| backend.row(y).includes?("한") }
+    rows.should be >= 2
+  end
+
+  # A single token wider than the card is cut, not ellipsised: an over-long word in a confirm
+  # is a URL / project name / payload, and its tail is the half that identifies it.
+  it "hard-splits a word wider than the card" do
+    word = "A" * 120
+    dlg = ConfirmDialog.new("T", word)
+    backend = render_dialog(dlg, 120, 24)
+    backend.contains?("…").should be_false
+    box = dlg.overlay_box(Rect.new(0, 0, 120, 24))
+    drawn = (box.y + 2...box.bottom - 3).sum do |y|
+      backend.row(y)[box.x + 3, box.w - 6].count('A')
+    end
+    drawn.should eq(120)
+  end
 end
 
 # ConfirmDialog is the archetype the Overlay seam was modelled on, and the only modal

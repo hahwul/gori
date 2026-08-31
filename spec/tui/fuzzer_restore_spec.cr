@@ -136,6 +136,39 @@ describe "FuzzerController saved-run restore" do
     end
   end
 
+  # The row bound above evicts; THIS one projects. A single row past the window's 64 MiB
+  # ceiling is kept as bounded metrics — its payload cut to a 64 KiB preview ending in
+  # `… [display truncated]` — and `projected?` is the bit that says so. The restore builds its
+  # window on a reader fiber and used to hand the VIEW its `rows` rather than the window, so an
+  # already-projected row (now small) was silently re-admitted as a full one. Every guard keyed
+  # on `result_display_truncated?` then went quiet: the request pane reconstructed from the
+  # template — splicing the PREVIEW payload — and `Send to Repeater` seeded those bytes as the
+  # request the archive holds in full.
+  it "keeps a display-projected row marked as projected after restoring it" do
+    with_fuzz_restore_project do |host, sessions|
+      store = host.session.store
+      # Payload alone past FuzzerResultWindow::BYTE_CAP, so dropping the blobs cannot get the
+      # row under the ceiling and `bounded_metrics` is the only way it fits.
+      huge = "z" * (Gori::Tui::FuzzerResultWindow::BYTE_CAP + 1_i64).to_i
+      run = store.insert_fuzz_run(sessions[0], "https://huge.test", "sniper", 1_i64,
+        status: "saving", surface: "tui")
+      store.insert_fuzz_results(run, [Gori::Store::FuzzResultWrite.new(0_i64,
+        %(["#{huge}"]), nil, 200, 0_i64, 0, 0, 1_i64, nil, true, false, nil)]).should be_true
+      store.finish_fuzz_run(run, 1_i64, 1_i64, 0_i64, "done").should be_true
+
+      controller = FuzzerController.new(host)
+      drain_until(controller) { controller.current_view.not_nil!.saved_run_id == run }
+
+      view = controller.current_view.not_nil!
+      row = view.selected_result.not_nil!
+      view.result_display_truncated?(row).should be_true
+      # The payload on screen is the preview, so the request must NOT be rebuilt from it.
+      view.result_request(row).display_omitted.should be_true
+      controller.result_selected?.should be_false
+      controller.stop_all
+    end
+  end
+
   it "releases cancellation ownership after an explicit tab close" do
     with_fuzz_restore_project do |host, _sessions|
       controller = FuzzerController.new(host)
@@ -171,6 +204,63 @@ describe "FuzzerController saved-run restore" do
 
       view.saved_run_id.should be_nil
       view.result_count.should eq(0)
+    end
+  end
+
+  # `archive_failed?` shipped with no reader anywhere. The spool's failure was announced once,
+  # on the run-start status line, and the completion toast overwrote it — after which a sweep
+  # that can never be saved looked exactly like one that can, and the only difference left was
+  # a ⇧S that quietly did nothing. The pane's own count line is where that belongs.
+  it "says on the results line that a run has no archive to save" do
+    with_fuzz_restore_project do |host, _sessions|
+      controller = FuzzerController.new(host)
+      view = controller.current_view.not_nil!
+      view.begin_run(1_i64)
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p"], nil, 200, 1_i64, 1, 1,
+        1_i64, nil, true, false, nil))
+
+      view.finish_run("done", archive_ready: true)
+      view.archive_failed?.should be_false
+      view.results_count_label.should_not contain("archive")
+
+      view.finish_run("done", archive_ready: false)
+      view.archive_failed?.should be_true
+      view.results_count_label.should contain("archive unavailable")
+      # …and the footer must not offer the key that cannot fire on it.
+      view.focus_pane(:results)
+      view.results_saveable?.should be_false
+      controller.body_hint(:body).should_not contain("save")
+      controller.stop_all
+    end
+  end
+
+  # An unavailable verb is never dispatched, so a footer that names ⇧S in a state the gate
+  # refuses promises a key that does NOTHING — no dialog, no status line. That is every state
+  # but one: a finished, non-empty, not-yet-saved run. It was worst right after a save and
+  # right after a restore, where the pane already says `saved #N` and the key still looked live.
+  it "names ⇧S only while the save verb would actually fire" do
+    with_fuzz_restore_project do |host, sessions|
+      controller = FuzzerController.new(host)
+      view = controller.current_view.not_nil!
+      view.focus_pane(:results)
+
+      # No results yet — nothing to save.
+      view.results_saveable?.should be_false
+      controller.body_hint(:body).should_not contain("save")
+
+      view.begin_run(1_i64)
+      view.append_result(Gori::Fuzz::Result.new(0_i64, ["p"], nil, 200, 1_i64, 1, 1,
+        1_i64, nil, true, false, nil))
+      view.finish_run("done")
+      view.results_saveable?.should be_true
+      controller.body_hint(:body).should contain("save")
+
+      run = seed_saved_fuzz_run(host.session.store, sessions[0], "done-already")
+      controller.load_saved_run(run, replace_unsaved: true)
+      drain_until(controller) { view.saved_run_id == run }
+      view.results_saveable?.should be_false
+      controller.body_hint(:body).should_not contain("save")
+      controller.stop_all
     end
   end
 end

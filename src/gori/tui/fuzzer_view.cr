@@ -1097,13 +1097,26 @@ module Gori::Tui
                        records : Array(Store::FuzzResultRecord)) : Nil
       window = FuzzerResultWindow.new
       records.each { |record| window.append(Fuzz::Persistence.result(record)) }
-      load_saved_run(run, window.rows.to_a)
+      load_saved_run(run, window)
+    end
+
+    # The production restore path. It takes the WINDOW the reader fiber filled, not its rows:
+    # `adopt` carries the projection marks across, and re-appending already-projected rows
+    # would drop them (see `FuzzerResultWindow#adopt`).
+    def load_saved_run(run : Store::FuzzRunRecord, window : FuzzerResultWindow) : Nil
+      @run_generation += 1
+      @result_window.adopt(window)
+      apply_saved_run(run)
     end
 
     def load_saved_run(run : Store::FuzzRunRecord, rows : Array(Fuzz::Result)) : Nil
       @run_generation += 1
       @result_window.clear
       rows.each { |row| @result_window.append(row) }
+      apply_saved_run(run)
+    end
+
+    private def apply_saved_run(run : Store::FuzzRunRecord) : Nil
       @run_result_count = run.sent
       @run_matched_count = run.matched
       @run_error_count = run.errors
@@ -2918,8 +2931,15 @@ module Gori::Tui
       else
         extra = req > result_count ? " · #{req} requests" : ""
         window = results_windowed? ? " · showing #{retained_result_count}" : ""
+        # The one STANDING statement that this run cannot be saved. `archive_failed?` was
+        # written with no reader at all: the spool's failure was announced once, on the
+        # run-start status line, and the completion toast then overwrote it — so a sweep whose
+        # archive died read exactly like one that can still be promoted, and the only remaining
+        # difference was a ⇧S that quietly does nothing. Beside `saved ##{id}` because the two
+        # answer the same question and are mutually exclusive (a failed archive is never Saved).
+        archive = archive_failed? ? " · archive unavailable" : ""
         saved = @saved_run_id.try { |id| " · saved ##{id}" } || ""
-        "#{result_count} sent#{extra} · #{matched_count} hit#{window}#{saved}"
+        "#{result_count} sent#{extra} · #{matched_count} hit#{window}#{archive}#{saved}"
       end
     end
 
@@ -3315,6 +3335,20 @@ module Gori::Tui
       "(reconstructed from the template — this row's request was not retained; keep_bodies: #{keep_bodies})"
     end
 
+    # What the two detail panes say for a row the BOUNDED DISPLAY dropped. Deliberately NOT
+    # phrased as "not retained": `FuzzerResultWindow` projects a row past its 64 MiB ceiling
+    # down to metrics, and the run kept every byte — they are in the spool, and in the archive
+    # once ⇧S has run. One definition per pane, because the request half was already written
+    # out twice (the detail pane and the seed note the Repeater/Comparer carry) and a third
+    # copy is how the two come to word one fact differently.
+    def self.display_omitted_request_note : String
+      "(request unavailable in the bounded display — exact fields remain in the saved archive)"
+    end
+
+    def self.display_omitted_response_note : String
+      "(response unavailable in the bounded display — exact bytes remain in the saved archive)"
+    end
+
     # The second half of that sentence, for a rebuild whose template runs a command. Separate
     # from `reconstruction_note` because it is a DIFFERENT fact — not "these bytes were not
     # kept" but "these bytes are missing a step" — and because a row can be a reconstruction
@@ -3398,7 +3432,7 @@ module Gori::Tui
     # the detail pane shows.
     def result_request_note(r : Fuzz::Result) : String?
       if result_display_truncated?(r)
-        return "(request unavailable in the bounded display — exact fields remain in the saved archive)"
+        return FuzzerView.display_omitted_request_note
       end
       return nil unless r.request.nil?
       note = FuzzerView.reconstruction_note(run_policy[2])
@@ -3436,7 +3470,7 @@ module Gori::Tui
     private def detail_request_lines(r : Fuzz::Result) : Array(String)
       req = result_request(r)
       if req.display_omitted
-        return ["(request unavailable in the bounded display — exact fields remain in the saved archive)"]
+        return [FuzzerView.display_omitted_request_note]
       end
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
       lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
@@ -3462,9 +3496,21 @@ module Gori::Tui
       # The send failed, so there is no response to retain — say THAT, not the retention
       # policy. Fuzz::Engine builds a refused/failed Result with an empty head (engine.cr,
       # the scope/sandbox path), and Matcher#present returns nil for it under every
-      # keep_bodies setting, so this branch is the only place the reason can surface.
+      # keep_bodies setting, so this branch is the only place the reason can surface. FIRST,
+      # ahead of the display check below: a row can be both (a payload big enough to project
+      # is still a payload that can fail to send), and why it failed outranks where its bytes
+      # went.
       if err = r.error
         return ["(send failed: #{err})"]
+      end
+      # The DISPLAY window dropped this row's bytes, the run did not — the third answer this
+      # pane did not have. `FuzzerResultWindow` projects a row over its 64 MiB ceiling to
+      # metrics only while the archive still holds every byte, so reporting it as "not
+      # retained by this run" tells the operator the evidence does not exist at the moment ⇧S
+      # is about to save it. `detail_request_lines` has always drawn the distinction
+      # (`ResultRequest#display_omitted`); this pane read a nil `head` as the retention policy.
+      if result_display_truncated?(r)
+        return [FuzzerView.display_omitted_response_note]
       end
       head = r.head
       return ["(response not retained by this run)"] unless head

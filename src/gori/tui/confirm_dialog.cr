@@ -18,6 +18,12 @@ module Gori::Tui
   # ALSO used outside the Runner, by ProjectPicker, which drives it as a plain state +
   # rendering object through its own `:confirm` mode and ignores the Overlay hooks.
   class ConfirmDialog < Overlay
+    # The card's own ceiling, and the inset `render` leaves on either side of a message line
+    # (3 columns each). Named because `display_lines` has to know the drawable width BEFORE
+    # `overlay_box` can size the card to it.
+    MAX_WIDTH  = 60
+    TEXT_INSET =  6
+
     # The card's heading (`DELETE ISSUE`), NOT the shell's focus badge — that is `title`
     # below, which is the constant "CONFIRM" for every confirmation.
     getter heading : String
@@ -117,11 +123,12 @@ module Gori::Tui
       @selected == :confirm
     end
 
-    # Centered card over `area` (the body rect). Multi-line messages split on
-    # '\n'; the card sizes to the widest of message / title / button row.
+    # Centered card over `area` (the body rect). The card sizes to the widest of
+    # message / title / button row.
     def render(screen : Screen, area : Rect) : Nil
-      lines = @message.split('\n')
-      return if area.w < 18 || area.h < lines.size + 6
+      return if area.w < 18
+      lines = display_lines(area)
+      return if area.h < lines.size + 6
       box = overlay_box(area)
       Frame.card(screen, box, @heading, border: Theme.border_focus)
 
@@ -134,17 +141,92 @@ module Gori::Tui
     # Inverts render's centering math: the centered card rect for `area`. Pure;
     # IDENTICAL sizing to render (caller guards on area.w/area.h being too small).
     def overlay_box(area : Rect) : Rect
-      lines = @message.split('\n')
       # Empty when render would decline to draw (same guard as render): a click then
       # falls through dismiss_zone?/!contains? and closes instead of acting on a
       # phantom box (e.g. firing the destructive button on an undrawn modal).
-      return Rect.new(area.x, area.y, 0, 0) if area.w < 18 || area.h < lines.size + 6
+      return Rect.new(area.x, area.y, 0, 0) if area.w < 18
+      lines = display_lines(area)
+      return Rect.new(area.x, area.y, 0, 0) if area.h < lines.size + 6
       content = {longest(lines), @heading.size + 2, button_row_width}.max
       h = lines.size + 6
-      w = (content + 6).clamp(16, {area.w - 2, 60}.min)
+      w = (content + TEXT_INSET).clamp(16, {area.w - 2, MAX_WIDTH}.min)
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       Rect.new(x, y, w, h)
+    end
+
+    # The message as it will actually be DRAWN: split on '\n', then WRAPPED to the widest
+    # line this card can hold.
+    #
+    # `render` used to hand each `\n`-delimited line straight to `Screen#text`, which CLIPS at
+    # `box.w - 6` and appends '…'. The card caps at 60 columns, so any message line past 54
+    # lost its tail — and a confirmation's tail is where the consequence lives. All three of
+    # #897's two-line messages ran past it, and each lost exactly the clause that said what
+    # would happen: `CLOSE FUZZER` drew "Its template/config, private temporary spool, and
+    # eve…" and dropped "ry saved run are deleted." — the only warning an operator gets that
+    # `^W` destroys every run ⇧S promoted into the project.
+    #
+    # Wrapping HERE and not at each call site is the point: a hand-wrapped sentence is correct
+    # until someone edits it, and this is the third message to acquire the same bug. `render`
+    # and `overlay_box` share this one definition, so the card's height still matches what is
+    # drawn into it — the invariant `overlay_box`'s doc already claims.
+    private def display_lines(area : Rect) : Array(String)
+      width = {area.w - 2, MAX_WIDTH}.min - TEXT_INSET
+      lines = [] of String
+      @message.split('\n') { |line| wrap_line(line, width, lines) }
+      lines
+    end
+
+    # Greedy word wrap measured in terminal COLUMNS, not characters, so a CJK message wraps
+    # where it is drawn rather than where its character count happens to land.
+    private def wrap_line(line : String, width : Int32, into : Array(String)) : Nil
+      if width <= 0 || Screen.display_width(line) <= width
+        into << line
+        return
+      end
+      current = [] of String
+      current_w = 0
+      line.split(' ') do |word|
+        parts = hard_split(word, width)
+        parts.each_with_index do |part, i|
+          pw = Screen.display_width(part)
+          if current.empty?
+            current << part
+            current_w = pw
+          elsif current_w + 1 + pw <= width
+            current << part
+            current_w += 1 + pw
+          else
+            into << current.join(' ')
+            current = [part]
+            current_w = pw
+          end
+          # A hard-split chunk fills the line by construction; its remainder starts the next.
+          next if i == parts.size - 1
+          into << current.join(' ')
+          current = [] of String
+          current_w = 0
+        end
+      end
+      into << current.join(' ') unless current.empty?
+    end
+
+    # One word wider than the whole line, cut at grapheme-cluster starts. Cut rather than
+    # clipped: an over-long token is usually a URL, a project name or a payload, and its tail
+    # is the half that identifies it. `Screen.column_for` floors to a cluster start, so a wide
+    # glyph is never split down the middle; the `{cut, 1}.max` keeps a single glyph wider than
+    # the budget from looping forever.
+    private def hard_split(word : String, width : Int32) : Array(String)
+      return [word] if Screen.display_width(word) <= width
+      parts = [] of String
+      rest = word
+      while Screen.display_width(rest) > width
+        cut = {Screen.column_for(rest, width), 1}.max
+        parts << rest[0, cut]
+        rest = rest[cut..]
+      end
+      parts << rest unless rest.empty?
+      parts
     end
 
     private def longest(lines : Array(String)) : Int32
