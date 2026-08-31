@@ -105,9 +105,19 @@ module Gori
       # Live-engine path. It never waits for the Store writer or for this Persistence queue.
       def append(result : Result) : Bool
         return false unless accepting?
-        append_live(self.class.write_row(result))
+        try_append(self.class.write_row(result))
       rescue ex
         fail_save(ex.message || "could not serialize a fuzz result")
+        false
+      end
+
+      # Prebuilt live row seam used by the TUI spool so conversion and byte accounting share
+      # one object. Unlike append(row) below, this remains strictly nonblocking.
+      def try_append(row : Store::FuzzResultWrite) : Bool
+        return false unless accepting?
+        append_live(row)
+      rescue ex
+        fail_save(ex.message || "could not queue a fuzz result")
         false
       end
 

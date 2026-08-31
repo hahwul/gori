@@ -141,7 +141,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `project_info` | Flow / issue counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_repeater_context` | Repeater workbench state and saved sessions |
-| `list_fuzz_runs` / `get_fuzz_run` | List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, so retained BLOBs are not loaded. `include_content:true` returns at most 25 rows with byte/decode-bounded redacted request/wire/response previews; `include_sensitive:true` opts into capped exact raw bytes. Run metadata labels pre-current snapshots as `legacy:true` |
+| `list_fuzz_runs` / `get_fuzz_run` | List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, including `result_index`, so retained BLOBs are not loaded. `include_content:true` returns at most 25 rows from SQLite-capped prefixes: `max_head_bytes` (default 16 KiB, max 64 KiB) bounds heads and `max_body_bytes` (default 2 KiB, max 64 KiB) bounds decoded bodies/raw samples. Full source sizes plus head/source/decode truncation flags say what was omitted; `include_sensitive:true` opts into exact capped prefixes, never uncapped bytes. Run metadata labels pre-current snapshots as `legacy:true` |
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 

@@ -69,6 +69,19 @@ describe "gori run fuzz saved runs" do
     parsed = JSON.parse(partial.to_s).as_a
     parsed.size.should eq(1)
     parsed[0]["index"].as_i64.should eq(7)
+
+    calls = 0
+    encoder = ->(result : Gori::Fuzz::Result) do
+      calls += 1
+      raise "encoder failed" if calls == 2
+      Gori::CLI::Output.fuzz_row_json(result)
+    end
+    encoded = IO::Memory.new
+    guarded = Gori::CLI::Output::FuzzArrayStream.new(encoded, encoder)
+    guarded.append(row)
+    expect_raises(Exception, "encoder failed") { guarded.append(row) }
+    guarded.close
+    JSON.parse(encoded.to_s).as_a.size.should eq(1)
   end
 
   it "neutralizes every dynamic one-line fuzz-row string" do

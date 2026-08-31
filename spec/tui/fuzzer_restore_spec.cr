@@ -43,6 +43,19 @@ private def seed_saved_fuzz_run(store : Gori::Store, session_id : Int64, label :
   run
 end
 
+class Gori::Tui::FuzzerController
+  def owned_result_resources_for_spec : {Int32, Int32, Int32}
+    {@spool_runs.size, @cancelled_views.size, @workers.size}
+  end
+
+  def attach_finished_spool_for_spec(view : Gori::Tui::FuzzerView) : Nil
+    run = @spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+      "https://detached.test", "sniper", 0_i64))
+    run.finish(0_i64, 0_i64, 0_i64, "done").should be_true
+    @spool_runs[view] = run
+  end
+end
+
 private def drain_until(controller : FuzzerController, &done : -> Bool)
   200.times do
     controller.drain_events
@@ -119,6 +132,31 @@ describe "FuzzerController saved-run restore" do
       view.retained_result_count.should eq(Gori::Tui::FuzzerResultWindow::ROW_CAP)
       view.results_windowed?.should be_true
       view.results_count_label.should contain("showing 5000")
+      controller.stop_all
+    end
+  end
+
+  it "releases cancellation ownership after an explicit tab close" do
+    with_fuzz_restore_project do |host, _sessions|
+      controller = FuzzerController.new(host)
+      controller.close_tab
+      controller.count.should eq(0)
+      controller.owned_result_resources_for_spec.should eq({0, 0, 0})
+      controller.stop_all
+    end
+  end
+
+  it "releases a finished private spool when a peer deletes the session" do
+    with_fuzz_restore_project do |host, sessions|
+      controller = FuzzerController.new(host)
+      view = controller.current_view.not_nil!
+      controller.attach_finished_spool_for_spec(view)
+      controller.owned_result_resources_for_spec[0].should eq(1)
+
+      host.session.store.delete_fuzz_session(sessions[0]).should be_true
+      controller.reconcile
+      controller.count.should eq(0)
+      controller.owned_result_resources_for_spec.should eq({0, 0, 0})
       controller.stop_all
     end
   end

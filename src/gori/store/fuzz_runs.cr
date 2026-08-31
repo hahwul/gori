@@ -16,6 +16,17 @@ module Gori
       "extracted, NULL AS request, NULL AS response_head, NULL AS response_body, position, " \
       "incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, " \
       "NULL AS wire, ws_close_code, ws_frames_in"
+    # Same positional record projection, but each BLOB is a SQL-capped prefix followed by its
+    # full nullable size. The prefix limits are bound parameters in request/head/body/wire order.
+    FUZZ_RESULT_PREVIEW_COLS =
+      "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
+      "extracted, CASE WHEN request IS NULL THEN NULL WHEN LENGTH(request) = 0 THEN request ELSE substr(request, 1, ?) END, " \
+      "CASE WHEN response_head IS NULL THEN NULL WHEN LENGTH(response_head) = 0 THEN response_head ELSE substr(response_head, 1, ?) END, " \
+      "CASE WHEN response_body IS NULL THEN NULL WHEN LENGTH(response_body) = 0 THEN response_body ELSE substr(response_body, 1, ?) END, " \
+      "position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, " \
+      "resent_count, CASE WHEN wire IS NULL THEN NULL WHEN LENGTH(wire) = 0 THEN wire ELSE substr(wire, 1, ?) END, " \
+      "ws_close_code, ws_frames_in, LENGTH(request), LENGTH(response_head), " \
+      "LENGTH(response_body), LENGTH(wire)"
 
     def insert_fuzz_run(session_id : Int64?, target : String, mode : String, total : Int64?, *,
                         created_at : Int64 = now_us, status : String = "running",
@@ -183,11 +194,42 @@ module Gori
     end
 
     def get_fuzz_result(run_id : Int64, idx : Int64) : FuzzResultRecord?
-      @db.query("SELECT #{FUZZ_RESULT_COLS} FROM fuzz_results WHERE run_id = ? AND idx = ? LIMIT 1",
-        run_id, idx) do |rs|
-        return read_fuzz_result(rs) if rs.move_next
+      get_fuzz_result_projection(FUZZ_RESULT_COLS, run_id, idx)
+    end
+
+    # Indexed metrics lookup that does not cross any retained BLOB over the SQLite boundary.
+    def get_fuzz_result_summary(run_id : Int64, idx : Int64) : FuzzResultRecord?
+      get_fuzz_result_projection(FUZZ_RESULT_SCALAR_COLS, run_id, idx)
+    end
+
+    # One bounded content row. Full nullable sizes travel beside SQL-capped byte prefixes so a
+    # caller can preserve NULL versus X'' and report truncation without reading the remainder.
+    def get_fuzz_result_preview(run_id : Int64, idx : Int64, request_max : Int32,
+                                response_head_max : Int32, response_body_max : Int32,
+                                wire_max : Int32) : FuzzResultPreview?
+      validate_fuzz_preview_limits(request_max, response_head_max, response_body_max, wire_max)
+      @db.query("SELECT #{FUZZ_RESULT_PREVIEW_COLS} FROM fuzz_results " \
+                "WHERE run_id = ? AND idx = ? ORDER BY id LIMIT 1",
+        request_max, response_head_max, response_body_max, wire_max, run_id, idx) do |rs|
+        return read_fuzz_result_preview(rs) if rs.move_next
       end
       nil
+    end
+
+    def each_fuzz_result_preview_page(run_id : Int64, limit : Int32, offset : Int64,
+                                      request_max : Int32, response_head_max : Int32,
+                                      response_body_max : Int32, wire_max : Int32,
+                                      matched_only : Bool = false,
+                                      &block : FuzzResultPreview ->) : Nil
+      raise ArgumentError.new("limit must be positive") if limit <= 0
+      raise ArgumentError.new("offset must be non-negative") if offset < 0
+      validate_fuzz_preview_limits(request_max, response_head_max, response_body_max, wire_max)
+      matched = matched_only ? " AND matched = 1" : ""
+      @db.query("SELECT #{FUZZ_RESULT_PREVIEW_COLS} FROM fuzz_results WHERE run_id = ?#{matched} " \
+                "ORDER BY idx, id LIMIT ? OFFSET ?",
+        request_max, response_head_max, response_body_max, wire_max, run_id, limit, offset) do |rs|
+        rs.each { block.call(read_fuzz_result_preview(rs)) }
+      end
     end
 
     def fuzz_result_count(run_id : Int64, matched_only : Bool = false) : Int64
@@ -246,6 +288,58 @@ module Gori
       delete_fuzz_run_result(id, allow_active: allow_active).deleted?
     end
 
+    # Bounded child cleanup for the private temporary spool. Permanent project deletion above
+    # remains atomic; this path deliberately yields one small transaction at a time so deleting
+    # one completed spool run cannot starve another tab's live persistence queue.
+    def cleanup_fuzz_run_batch(id : Int64, row_limit : Int32 = 128,
+                               byte_limit : Int64 = 8_i64 * 1024 * 1024, *,
+                               allow_active : Bool = false) : FuzzRunCleanupBatch
+      raise ArgumentError.new("row_limit must be positive") if row_limit <= 0
+      raise ArgumentError.new("byte_limit must be positive") if byte_limit <= 0
+      outcome = FuzzRunCleanupBatch.new(false, false)
+      committed = exec_task_ok ->(c : DB::Connection) {
+        current = c.query_one?("SELECT status FROM fuzz_runs WHERE id = ?", id, as: String)
+        if current.nil?
+          outcome = FuzzRunCleanupBatch.new(true, true)
+        elsif !allow_active && current.in?("running", "saving")
+          outcome = FuzzRunCleanupBatch.new(false, false)
+        else
+          ids = [] of Int64
+          bytes = 0_i64
+          c.query("SELECT id, 128 + LENGTH(payloads) + " \
+                  "COALESCE(LENGTH(error), 0) + COALESCE(LENGTH(extracted), 0) + " \
+                  "COALESCE(LENGTH(request), 0) + COALESCE(LENGTH(response_head), 0) + " \
+                  "COALESCE(LENGTH(response_body), 0) + COALESCE(LENGTH(chain_error), 0) + " \
+                  "COALESCE(LENGTH(grpc_message), 0) + COALESCE(LENGTH(wire), 0) " \
+                  "FROM fuzz_results WHERE run_id = ? ORDER BY id LIMIT ?", id, row_limit) do |rs|
+            rs.each do
+              row_id = rs.read(Int64)
+              row_bytes = rs.read(Int64)
+              break if !ids.empty? && bytes + row_bytes > byte_limit
+              ids << row_id
+              bytes += row_bytes
+            end
+          end
+
+          deleted = 0_i64
+          unless ids.empty?
+            placeholders = Array.new(ids.size, "?").join(',')
+            c.exec("DELETE FROM fuzz_results WHERE run_id = ? AND id IN (#{placeholders})",
+              args: [id.as(DB::Any)] + ids.map(&.as(DB::Any)))
+            deleted = c.scalar("SELECT changes()").as(Int64)
+          end
+          remaining = c.query_one("SELECT EXISTS(SELECT 1 FROM fuzz_results WHERE run_id = ?)",
+            id, as: Int64) != 0
+          unless remaining
+            c.exec("DELETE FROM fuzz_runs WHERE id = ?", id)
+          end
+          outcome = FuzzRunCleanupBatch.new(true, !remaining, deleted)
+        end
+        nil
+      }
+      committed ? outcome : FuzzRunCleanupBatch.new(false, false)
+    end
+
     private def active_fuzz_run?(c : DB::Connection, run_id : Int64) : Bool
       status = c.query_one?("SELECT status FROM fuzz_runs WHERE id = ?", run_id, as: String)
       return false unless status
@@ -301,27 +395,51 @@ module Gori
       after_id = 0_i64
       loop do
         matched = matched_only ? " AND matched = 1" : ""
-        page = [] of FuzzResultRecord
+        count = 0
+        last_idx = 0_i64
+        last_id = 0_i64
         if idx = after_idx
           @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
                     "AND (idx > ? OR (idx = ? AND id > ?)) ORDER BY idx, id LIMIT ?",
             run_id, idx, idx, after_id, batch_size) do |rs|
-            rs.each { page << read_fuzz_result(rs) }
+            rs.each do
+              row = read_fuzz_result(rs)
+              count += 1
+              last_idx = row.idx
+              last_id = row.id
+              block.call(row)
+            end
           end
         else
           @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
                     "ORDER BY idx, id LIMIT ?",
             run_id, batch_size) do |rs|
-            rs.each { page << read_fuzz_result(rs) }
+            rs.each do
+              row = read_fuzz_result(rs)
+              count += 1
+              last_idx = row.idx
+              last_id = row.id
+              block.call(row)
+            end
           end
         end
-        break if page.empty?
-        page.each { |row| block.call(row) }
-        break if page.size < batch_size
-        last = page.last
-        after_idx = last.idx
-        after_id = last.id
+        break if count < batch_size
+        after_idx = last_idx
+        after_id = last_id
       end
+    end
+
+    private def get_fuzz_result_projection(columns : String, run_id : Int64,
+                                           idx : Int64) : FuzzResultRecord?
+      @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ? AND idx = ? ORDER BY id LIMIT 1",
+        run_id, idx) do |rs|
+        return read_fuzz_result(rs) if rs.move_next
+      end
+      nil
+    end
+
+    private def validate_fuzz_preview_limits(*limits : Int32) : Nil
+      raise ArgumentError.new("fuzz preview limits must be positive") if limits.any?(&.<= 0)
     end
 
     private def read_fuzz_run(rs : DB::ResultSet) : FuzzRunRecord
@@ -340,6 +458,11 @@ module Gori
         rs.read(Int32?), rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(String?),
         rs.read(Int32?), rs.read(String?), rs.read(Int32) != 0, rs.read(Int32),
         rs.read(Bytes?), rs.read(Int32?), rs.read(Int32?))
+    end
+
+    private def read_fuzz_result_preview(rs : DB::ResultSet) : FuzzResultPreview
+      row = read_fuzz_result(rs)
+      FuzzResultPreview.new(row, rs.read(Int64?), rs.read(Int64?), rs.read(Int64?), rs.read(Int64?))
     end
   end
 end

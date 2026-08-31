@@ -75,4 +75,31 @@ describe "Gori::Store fuzz parent/status transactions" do
       first.fuzz_result_count(run).should eq(0_i64)
     end
   end
+
+  it "cleans a temporary run in bounded committed batches" do
+    with_two_fuzz_stores do |first, _second|
+      run = first.insert_fuzz_run(nil, "http://cleanup", "sniper", 5_i64, status: "saving")
+      rows = Array.new(5) do |i|
+        Gori::Store::FuzzResultWrite.new(i.to_i64, %(["p#{i}"]), nil, 200, 100_i64,
+          1, 1, 1_i64, nil, false, false, nil, Bytes.new(100, i.to_u8))
+      end
+      first.insert_fuzz_results(run, rows).should be_true
+      first.finish_fuzz_run(run, 5_i64, 0_i64, 0_i64, "done").should be_true
+
+      batch = first.cleanup_fuzz_run_batch(run, row_limit: 2, byte_limit: 10_000_i64)
+      batch.ok.should be_true
+      batch.done.should be_false
+      batch.deleted_results.should eq(2_i64)
+      first.get_fuzz_run(run).should_not be_nil
+      first.fuzz_result_count(run).should eq(3_i64)
+
+      first.cleanup_fuzz_run_batch(run, row_limit: 2, byte_limit: 10_000_i64).done.should be_false
+      last = first.cleanup_fuzz_run_batch(run, row_limit: 2, byte_limit: 10_000_i64)
+      last.ok.should be_true
+      last.done.should be_true
+      last.deleted_results.should eq(1_i64)
+      first.get_fuzz_run(run).should be_nil
+      first.fuzz_result_count(run).should eq(0_i64)
+    end
+  end
 end

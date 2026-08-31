@@ -61,7 +61,7 @@ module Gori::Tui
       words_hist : Array(Int32), words_min : Int32, words_max : Int32,
       time_hist : Array(Int32), time_min : Int64, time_max : Int64
 
-    @results : Array(Fuzz::Result)
+    @results : Deque(Fuzz::Result)
 
     STATUS_MAX_ROWS =  6 # ≤ this many distinct codes → per-code bars; else collapse to classes
     DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
@@ -89,7 +89,7 @@ module Gori::Tui
 
     PANE_ORDER = [:target, :template, :config, :results]
 
-    def initialize
+    def initialize(@result_window : FuzzerResultWindow = FuzzerResultWindow.new)
       @name = nil
       @target = ""
       @tcx = 0
@@ -147,7 +147,6 @@ module Gori::Tui
       # (mode + sets + marker count) changes, so the summary row never rebuilds sources each frame.
       @run_count_cache = nil.as(Int64?)
       @run_count_sig = ""
-      @result_window = FuzzerResultWindow.new
       @results = @result_window.rows
       @results_rev = 0_i64 # bumped on every @results mutation — the DIST cache key
       @run_result_count = 0_i64
@@ -1016,6 +1015,10 @@ module Gori::Tui
       @result_window.bytes
     end
 
+    def result_display_truncated?(result : Fuzz::Result) : Bool
+      @result_window.projected?(result.index)
+    end
+
     def results_windowed? : Bool
       result_count > retained_result_count
     end
@@ -1094,7 +1097,7 @@ module Gori::Tui
                        records : Array(Store::FuzzResultRecord)) : Nil
       window = FuzzerResultWindow.new
       records.each { |record| window.append(Fuzz::Persistence.result(record)) }
-      load_saved_run(run, window.rows)
+      load_saved_run(run, window.rows.to_a)
     end
 
     def load_saved_run(run : Store::FuzzRunRecord, rows : Array(Fuzz::Result)) : Nil
@@ -1976,18 +1979,20 @@ module Gori::Tui
       nil
     end
 
-    private def sorted_results : Array(Fuzz::Result)
+    private def sorted_results : Indexable(Fuzz::Result)
+      # The default index view reads the live deque directly: no copy per streamed result.
+      return @results unless copies_results?
       if cached = reusable_sorted_cache
         return cached
       end
-      rows = @matched_only ? @results.select(&.matched?) : @results
+      rows = @matched_only ? @results.select(&.matched?) : @results.to_a
       sorted =
         case @sort
         when :status then rows.sort_by { |r| r.status || -1 }
         when :length then rows.sort_by(&.length)
         when :words  then rows.sort_by(&.words)
         when :time   then rows.sort_by(&.duration_us)
-        else              rows # :index — the live @results order (uncopied; read-only here)
+        else              rows
         end
       @sorted_cache = sorted
       @sorted_cache_rev = @results_rev
@@ -3299,7 +3304,8 @@ module Gori::Tui
     # covered by `Result#chain_error`, which reports what happened on the WIRE — where the hook
     # ran fine — so without carrying it here the pane would show untransformed bytes, with a
     # Content-Length computed to match them, and say nothing.
-    record ResultRequest, bytes : Bytes, reconstructed : Bool, chain_withheld : Bool = false
+    record ResultRequest, bytes : Bytes, reconstructed : Bool, chain_withheld : Bool = false,
+      display_omitted : Bool = false
 
     # The one sentence every surface uses for a reconstruction — kept next to the record so
     # the detail pane, the copy buffer and the Repeater seed cannot word it differently, and
@@ -3332,6 +3338,9 @@ module Gori::Tui
     # template does not capture can still differ. Hence the flag — closeness is the
     # consolation, saying so is the fix.
     def result_request(r : Fuzz::Result) : ResultRequest
+      if result_display_truncated?(r)
+        return ResultRequest.new(Bytes.empty, false, false, true)
+      end
       if sent = r.request
         return ResultRequest.new(sent, false)
       end
@@ -3388,6 +3397,9 @@ module Gori::Tui
     # controller stamps it on the Repeater seed so "Send to Repeater" carries the same caveat
     # the detail pane shows.
     def result_request_note(r : Fuzz::Result) : String?
+      if result_display_truncated?(r)
+        return "(request unavailable in the bounded display — exact fields remain in the saved archive)"
+      end
       return nil unless r.request.nil?
       note = FuzzerView.reconstruction_note(run_policy[2])
       # Carried on the SEED and the Comparer chip too, not only in the detail pane: those two
@@ -3423,6 +3435,9 @@ module Gori::Tui
 
     private def detail_request_lines(r : Fuzz::Result) : Array(String)
       req = result_request(r)
+      if req.display_omitted
+        return ["(request unavailable in the bounded display — exact fields remain in the saved archive)"]
+      end
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
       lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
       lines.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld

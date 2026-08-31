@@ -1187,6 +1187,23 @@ module Gori::Tui
       end
     end
 
+    # One ownership exit for explicit close and peer reconciliation. Cancellation remains in
+    # the set only while a worker can observe it; retaining a closed view here would retain its
+    # entire 64 MiB result window for the rest of the project lifetime.
+    private def release_view_resources(view : FuzzerView, cancel : Bool) : Nil
+      if cancel
+        @cancelled_views.add(view)
+        view.request_stop
+        quiesce_view(view)
+      end
+      if spool_run = @spool_runs.delete(view)
+        @spool.delete(spool_run)
+      end
+    ensure
+      @workers.delete(view)
+      @cancelled_views.delete(view)
+    end
+
     # Focus a fuzz sub-tab by persisted id (notification "jump to result").
     def reveal_session(id : Int64) : Nil
       if idx = @fuzzers.index { |t| t.db_id == id }
@@ -1481,7 +1498,7 @@ module Gori::Tui
         fresh = store.get_fuzz_run(id)
         if !cancelled && fresh && fresh.session_id == session_id
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
-            fresh, window.rows.dup, nil))
+            fresh, window.rows.to_a, nil))
         else
           message = cancelled ? "saved-run load cancelled" : "saved fuzz run ##{id} was deleted while it loaded"
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
@@ -1543,13 +1560,16 @@ module Gori::Tui
     # Send to Repeater): no run yet, or a filter that hides every row, means no request
     # to hand over.
     def result_selected? : Bool
-      !current_view.try(&.selected_result).nil?
+      return false unless view = current_view
+      return false unless result = view.selected_result
+      !view.result_display_truncated?(result)
     end
 
     # The selected result as a Repeater-ready request; nil when nothing is selected.
     def selected_repeater_seed : RepeaterSeed?
       return nil unless v = current_view
       return nil unless r = v.selected_result
+      return nil if v.result_display_truncated?(r)
       FuzzerController.repeater_seed_for(v, r)
     end
 
@@ -1563,6 +1583,7 @@ module Gori::Tui
     def comparer_slot : ComparerSlot?
       return nil unless v = current_view
       return nil unless r = v.selected_result
+      return nil if v.result_display_truncated?(r)
       FuzzerController.comparer_slot_for(v, r)
     end
 
@@ -1668,14 +1689,9 @@ module Gori::Tui
         return
       end
       was_running = tab.view.running?
-      @cancelled_views.add(tab.view)
-      tab.view.request_stop # halt a running sweep before detaching its view (the run fiber polls this)
-      quiesce_view(tab.view)
+      release_view_resources(tab.view, cancel: true)
       # Finish the job NOW: once the view leaves @fuzzers, no later event may own its spinner.
       @host.jobs.finish(tab.view.job_id, :stopped, "closed") if was_running
-      if spool_run = @spool_runs.delete(tab.view)
-        @spool.delete(spool_run)
-      end
       # The store reports whether the DELETE committed. The tab leaves the list either way —
       # the operator asked to close it — but a rolled-back batch leaves the saved session on
       # disk, so it reappears on the next project open. Saying so is the difference between a
@@ -1710,6 +1726,8 @@ module Gori::Tui
       while drain_events
       end
       @spool_runs.clear
+      @cancelled_views.clear
+      @workers.clear
       @spool.close
     end
 
@@ -1749,8 +1767,21 @@ module Gori::Tui
         @fuzzers << FuzzerTab.new(view, row.flow_id, row.id)
       end
 
+      removed = [] of FuzzerTab
       @fuzzers.reject! do |tab|
-        (id = tab.db_id) && !by_id.has_key?(id) && !fuzz_tab_locked?(tab)
+        drop = if id = tab.db_id
+                 !by_id.has_key?(id) && !fuzz_tab_locked?(tab)
+               else
+                 false
+               end
+        removed << tab if drop
+        drop
+      end
+      removed.each do |tab|
+        release_view_resources(tab.view, cancel: false)
+        if id = tab.db_id
+          @auto_load_considered.delete(id)
+        end
       end
 
       @fuzzers.sort_by! do |tab|

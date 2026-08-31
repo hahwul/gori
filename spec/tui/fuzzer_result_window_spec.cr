@@ -26,6 +26,12 @@ describe Gori::Tui::FuzzerResultWindow do
     window.bytes.should be <= charge + 10_i64
   end
 
+  it "evicts in stable order after many post-cap appends" do
+    window = Gori::Tui::FuzzerResultWindow.new(3, 10_000_i64)
+    100.times { |i| window.append(window_result(i.to_i64)) }
+    window.rows.map(&.index).should eq([97_i64, 98_i64, 99_i64])
+  end
+
   it "keeps an individually oversized result as metrics only" do
     row = window_result(9_i64, 500, matched: true)
     metadata = Gori::Tui::FuzzerResultWindow.result_bytes(
@@ -41,6 +47,22 @@ describe Gori::Tui::FuzzerResultWindow do
     kept.head.should be_nil
     kept.body.should be_nil
     kept.wire.should be_nil
+  end
+
+  it "bounds oversized scalar text and marks the display projection" do
+    row = Gori::Fuzz::Result.new(12_i64, ["p" * 500], nil, 500, 0_i64, 0, 0,
+      1_i64, "e" * 500, false, false, "x" * 500)
+    window = Gori::Tui::FuzzerResultWindow.new(10,
+      Gori::Fuzz::Persistence::ROW_METADATA_BYTES + 80_i64)
+    window.append(row).should eq(0)
+
+    window.rows.size.should eq(1)
+    window.bytes.should be <= Gori::Fuzz::Persistence::ROW_METADATA_BYTES + 80_i64
+    window.projected?(12_i64).should be_true
+    window.rows.first.payloads.join.bytesize.should be <= 80
+    window.rows.first.payloads.join.should contain("display truncated")
+    window.clear
+    window.projected?(12_i64).should be_false
   end
 
   it "saves every spooled row rather than only the bounded display window" do

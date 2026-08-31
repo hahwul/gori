@@ -200,7 +200,15 @@ module Gori
           row.response_head.try { |head| response.write(head) }
           row.response_body.try { |body| response.write(body) }
           bytes = response.to_slice
-          puts CLI::Output.term_safe_multiline(bytes.empty? ? "(not retained)" : String.new(bytes))
+          response_text =
+            if row.response_head.nil? && row.response_body.nil?
+              "(not retained)"
+            elsif bytes.empty?
+              "(retained empty response)"
+            else
+              String.new(bytes)
+            end
+          puts CLI::Output.term_safe_multiline(response_text)
         end
       end
 

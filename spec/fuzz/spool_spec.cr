@@ -145,6 +145,31 @@ describe Gori::Fuzz::Spool do
     end
   end
 
+  it "interleaves bounded cleanup with another live spool run" do
+    with_spool_root do |root|
+      spool = Gori::Fuzz::Spool.new(root)
+      first = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+        "https://large.test", "sniper", 260_i64))
+      260.times do |i|
+        first.append(spool_result((i % 256).to_i64, Bytes.new(256, (i % 256).to_u8))).should be_true
+        Fiber.yield
+      end
+      first.finish(260_i64, 0_i64, 0_i64, "done").should be_true
+      spool.delete(first).should be_true
+
+      second = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+        "https://live.test", "sniper", 32_i64))
+      32.times do |i|
+        second.append(spool_result(i.to_i64, Bytes[0x47, i.to_u8])).should be_true
+        Fiber.yield
+      end
+      second.finish(32_i64, 0_i64, 0_i64, "done").should be_true
+      second.written.should eq(32_i64)
+      second.failed?.should be_false
+      spool.close
+    end
+  end
+
   it "closes SQLite before removing the whole directory and is idempotent" do
     with_spool_root do |root|
       spool = Gori::Fuzz::Spool.new(root)

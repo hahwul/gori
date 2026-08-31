@@ -2,11 +2,13 @@
 # stream in, every one forces a redraw, and the results pane plus the open detail pane are both
 # redrawn in full each time.
 #
-# Two shapes that used to scale with the whole result set rather than the visible rows:
+# Three shapes that used to scale with the whole result set rather than the visible rows:
 #   * matched_count — a rev-keyed memo whose key bumped on every appended result, so the full
 #     count(&.matched?) scan over the 5,000-row benchmark ran on every frame of a live run.
 #   * the detail pane's selection spans — rebuilt once per DRAWN ROW inside the row loop, then
-#     all but the matching line discarded.
+#     all but the matching line discarded;
+#   * post-cap result eviction — Array#shift moved all 5,000 retained pointers per append; the
+#     bounded window now uses a Deque and removes its head in O(1).
 #
 # Build: crystal build bench/fuzz_view_frame_bench.cr -o bin/fuzz_view_frame_bench --release
 # Run:   bin/fuzz_view_frame_bench
@@ -53,6 +55,12 @@ end
 # Detail open on a LARGE response with a selection spanning the whole body. This is the shape
 # the per-row span rebuild punished: highlight_spans emits one tuple per selected line, and it
 # used to run once per DRAWN ROW, so the cost was rows x selected-lines per frame.
+POST_CAP_WINDOW = begin
+  window = FuzzerResultWindow.new
+  RESULT_BENCH_ROWS.times { |i| window.append(result(i, false)) }
+  window
+end
+
 BIG_SEL = begin
   v = FuzzerView.new
   v.load_request("https://api.example.com", "GET /big HTTP/1.1\r\nHost: api.example.com\r\n\r\n", false, "")
@@ -82,6 +90,7 @@ Benchmark.ips do |x|
     DETAIL.append_result(result(0, false))
     DETAIL.render(screen, rect)
   end
+  x.report("window, post-cap append only    ") { POST_CAP_WINDOW.append(result(0, false)) }
   x.report("results pane, idle (render only)") { FULL.render(screen, rect) }
   x.report("detail, 3000-line selection    ") { BIG_SEL.render(screen, rect) }
 end

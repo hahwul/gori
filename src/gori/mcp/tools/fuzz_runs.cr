@@ -43,11 +43,20 @@ module Gori
         include_content = bool_arg(h, "include_content", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
         body_cap = clamp(optional_int_arg(h, "max_body_bytes"), BODY_PREVIEW_BYTES, Serialize::MAX_TEXT)
+        head_cap = clamp(optional_int_arg(h, "max_head_bytes"),
+          Serialize::SAVED_HEAD_PREVIEW_BYTES, Serialize::MAX_TEXT)
+        message_source_cap = head_cap + Serialize::SAVED_SOURCE_BYTES + 4
         if idx = optional_int_arg(h, "result_index")
           return err("result_index must be non-negative", "INVALID_ARGUMENT", field: "result_index") if idx < 0
-          row = store.get_fuzz_result(run_id, idx)
+          if include_content
+            preview = store.get_fuzz_result_preview(run_id, idx, message_source_cap,
+              head_cap + 1, Serialize::SAVED_SOURCE_BYTES, message_source_cap)
+            return not_found("no result #{idx} in saved fuzz run #{run_id}") unless preview
+            return saved_fuzz_result_detail(run, preview, include_sensitive, body_cap, head_cap)
+          end
+          row = store.get_fuzz_result_summary(run_id, idx)
           return not_found("no result #{idx} in saved fuzz run #{run_id}") unless row
-          return saved_fuzz_result_detail(run, row, include_content, include_sensitive, body_cap)
+          return saved_fuzz_result_detail(run, row)
         end
 
         offset = clamp_nonneg(optional_int_arg(h, "offset"))
@@ -63,9 +72,18 @@ module Gori
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run_id)) }
             j.field("results") do
               j.array do
-                returned = each_saved_fuzz_result(run_id, offset, limit, matched_only,
-                  include_content) do |row|
-                  Serialize.saved_fuzz_result(j, row, include_content, include_sensitive, body_cap)
+                if include_content
+                  store.each_fuzz_result_preview_page(run_id, limit, offset,
+                    message_source_cap, head_cap + 1, Serialize::SAVED_SOURCE_BYTES,
+                    message_source_cap, matched_only) do |preview|
+                    Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap)
+                    returned += 1
+                  end
+                else
+                  store.each_fuzz_result_summary_page(run_id, limit, offset, matched_only) do |row|
+                    Serialize.saved_fuzz_result(j, row)
+                    returned += 1
+                  end
                 end
               end
             end
@@ -78,37 +96,25 @@ module Gori
         end)
       end
 
-      # Stream one explicit Store page into the response builder. OFFSET is resolved by SQLite,
-      # not by decoding every skipped BLOB in Crystal; only the current row is resident. Metrics
-      # use the scalar projection, while content remains hard-capped at 25 rows.
-      private def each_saved_fuzz_result(run_id : Int64, offset : Int32, limit : Int32,
-                                         matched_only : Bool, include_content : Bool,
-                                         &block : Store::FuzzResultRecord ->) : Int32
-        returned = 0
-        if include_content
-          store.each_fuzz_result_page(run_id, limit, offset, matched_only) do |row|
-            block.call(row)
-            returned += 1
+      private def saved_fuzz_result_detail(run : Store::FuzzRunRecord,
+                                           row : Store::FuzzResultRecord) : Result
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
+            j.field("result") { Serialize.saved_fuzz_result(j, row) }
           end
-        else
-          store.each_fuzz_result_summary_page(run_id, limit, offset, matched_only) do |row|
-            block.call(row)
-            returned += 1
-          end
-        end
-        returned
+        end)
       end
 
       private def saved_fuzz_result_detail(run : Store::FuzzRunRecord,
-                                           row : Store::FuzzResultRecord,
-                                           include_content : Bool,
+                                           preview : Store::FuzzResultPreview,
                                            include_sensitive : Bool,
-                                           body_cap : Int32) : Result
+                                           body_cap : Int32, head_cap : Int32) : Result
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
             j.field("result") do
-              Serialize.saved_fuzz_result(j, row, include_content, include_sensitive, body_cap)
+              Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap)
             end
           end
         end)
@@ -148,7 +154,7 @@ module Gori
         end
 
         tool j, "get_fuzz_run",
-          "Get one permanent fuzz run and page every stored result. Metrics use a scalar-only projection, so retained request/response BLOBs are not loaded. Set include_content:true for at most 25 redacted content rows; add include_sensitive:true to receive exact raw request/wire bytes (base64, capped by max_body_bytes). result_index selects one exact full row." do |s|
+          "Get one permanent fuzz run and page every stored result. Metrics, including result_index, use a scalar-only projection. Set include_content:true for at most 25 SQLite-capped content rows; max_head_bytes and max_body_bytes bound redacted previews before retained BLOBs enter the process. include_sensitive:true adds exact capped prefix bytes and never bypasses those limits." do |s|
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")
@@ -156,7 +162,8 @@ module Gori
           s.field "matched_only", boolprop("only matcher hits (default false)")
           s.field "include_content", boolprop("include request/wire/response content summaries (default false)")
           s.field "include_sensitive", boolprop("include unredacted exact raw request/wire/head base64 when content is requested (default false)")
-          s.field "max_body_bytes", intprop("per-content inline cap (default 2048, max #{Serialize::MAX_TEXT})")
+          s.field "max_body_bytes", intprop("decoded body/raw inline cap (default 2048, max #{Serialize::MAX_TEXT})")
+          s.field "max_head_bytes", intprop("request/response head inline cap (default #{Serialize::SAVED_HEAD_PREVIEW_BYTES}, max #{Serialize::MAX_TEXT})")
         end
 
         return unless @allow_actions

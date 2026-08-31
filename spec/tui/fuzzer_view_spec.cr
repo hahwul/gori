@@ -982,6 +982,22 @@ describe Gori::Tui::FuzzerView do
       seed.tls_preset.should eq("chrome")
     end
 
+    it "refuses to reconstruct a request from scalar text truncated by the display window" do
+      cap = Gori::Fuzz::Persistence::ROW_METADATA_BYTES + 80_i64
+      view = FuzzerView.new(FuzzerResultWindow.new(10, cap))
+      view.load_request("http://h:80", marked, false, "")
+      view.focus_pane(:results)
+      view.append_result(Gori::Fuzz::Result.new(7_i64, ["z" * 500], nil, 200,
+        0_i64, 0, 0, 1_i64, "e" * 500, false, false, nil))
+
+      row = view.selected_result.not_nil!
+      view.result_display_truncated?(row).should be_true
+      request = view.result_request(row)
+      request.display_omitted.should be_true
+      request.bytes.should be_empty
+      view.result_request_note(row).not_nil!.should contain("exact fields remain")
+    end
+
     it "hands a non-UTF-8 payload byte to the Repeater verbatim instead of U+FFFD" do
       view = FuzzerView.new
       view.load_request("http://h:80", marked, false, "")

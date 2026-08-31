@@ -221,6 +221,83 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "bounds indexed content at SQLite and preserves empty BLOBs" do
+    with_store do |store|
+      run_id = store.insert_fuzz_run(nil, "http://bounded.test", "sniper", 2_i64,
+        surface: "mcp")
+      request = "GET / HTTP/1.1\r\nX-Large: #{"r" * 200_000}\r\n\r\nbody"
+      response_head = "HTTP/1.1 200 OK\r\nX-Large: #{"h" * 200_000}\r\n\r\n"
+      row = Gori::Store::FuzzResultWrite.new(0_i64, %(["p"]), 0, 200, 0_i64,
+        0, 0, 1_i64, nil, true, false, nil, request.to_slice,
+        response_head.to_slice, Bytes.empty, wire: request.to_slice)
+      large_body = Bytes.new(Gori::MCP::Serialize::SAVED_SOURCE_BYTES * 2, 0x62_u8)
+      large = Gori::Store::FuzzResultWrite.new(1_i64, %(["large"]), 0, 200,
+        large_body.size.to_i64, 1, 1, 1_i64, nil, false, false, nil,
+        "GET /large HTTP/1.1\r\n\r\n".to_slice, response_head.to_slice, large_body)
+      store.insert_fuzz_results(run_id, [row, large]).should be_true
+      store.finish_fuzz_run(run_id, 2_i64, 1_i64, 0_i64, "done").should be_true
+
+      summary = store.get_fuzz_result_summary(run_id, 0_i64).not_nil!
+      summary.request.should be_nil
+      summary.response_head.should be_nil
+      summary.response_body.should be_nil
+      summary.wire.should be_nil
+
+      preview = store.get_fuzz_result_preview(run_id, 0_i64, 65, 33, 65, 65).not_nil!
+      preview.row.request.not_nil!.size.should eq(65)
+      preview.request_size.should eq(request.bytesize.to_i64)
+      preview.request_truncated?.should be_true
+      preview.response_head_size.should eq(response_head.bytesize.to_i64)
+      preview.response_body_size.should eq(0_i64)
+      preview.row.response_body.not_nil!.should be_empty
+      large_preview = store.get_fuzz_result_preview(run_id, 1_i64, 65, 33, 65, 65).not_nil!
+      large_preview.row.response_body.not_nil!.size.should eq(65)
+      large_preview.response_body_size.should eq(large_body.size.to_i64)
+      large_preview.response_body_truncated?.should be_true
+
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      metrics = call_json(tools, "get_fuzz_run", {
+        run_id: run_id, result_index: 0,
+      }.to_json)["result"]
+      metrics["request"]?.should be_nil
+
+      content = call_json(tools, "get_fuzz_run", {
+        run_id: run_id, result_index: 0, include_content: true,
+        max_head_bytes: 32, max_body_bytes: 16,
+      }.to_json)["result"]
+      content["request"]["head_truncated"].as_bool.should be_true
+      content["request"]["size"].as_i64.should eq(request.bytesize.to_i64)
+      content["response_head_truncated"].as_bool.should be_true
+      content["response_head_size"].as_i64.should eq(response_head.bytesize.to_i64)
+      empty = content["response_body"]
+      empty["source_size"].as_i.should eq(0)
+      empty["text"].as_s.should eq("")
+      empty["truncated"].as_bool.should be_false
+    end
+  end
+
+  it "redacts a sensitive first line in malformed saved heads" do
+    with_store do |store|
+      run_id = store.insert_fuzz_run(nil, "http://malformed.test", "sniper", 1_i64)
+      request = "Authorization: first-secret\r\n folded-request-secret\r\n\r\nbody"
+      wire = "Cookie: wire-secret\n folded-wire-secret\n\nbody"
+      response_head = "Set-Cookie: response-secret\r folded-response-secret\r\r"
+      row = Gori::Store::FuzzResultWrite.new(0_i64, %(["p"]), 0, 200, 0_i64,
+        0, 0, 1_i64, nil, true, false, nil, request.to_slice,
+        response_head.to_slice, Bytes.empty, wire: wire.to_slice)
+      store.insert_fuzz_results(run_id, [row]).should be_true
+      store.finish_fuzz_run(run_id, 1_i64, 1_i64, 0_i64, "done").should be_true
+
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      result = call_json(tools, "get_fuzz_run", {
+        run_id: run_id, result_index: 0, include_content: true,
+      }.to_json)["result"]
+      result["request"]["head"].as_s.should eq("Authorization: [REDACTED]\r\n [REDACTED]\r\n\r\n")
+      result["wire"]["head"].as_s.should eq("Cookie: [REDACTED]\n [REDACTED]\n\n")
+      result["response_head"].as_s.should eq("Set-Cookie: [REDACTED]\r [REDACTED]\r\r")
+    end
+  end
+
   it "redacts CR-only and obs-fold credentials in every saved head plus trailers" do
     with_store do |store|
       run_id = store.insert_fuzz_run(nil, "http://saved.test", "sniper", 1_i64)

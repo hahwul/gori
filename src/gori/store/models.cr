@@ -1368,6 +1368,13 @@ module Gori
       end
     end
 
+    # Internal bounded cleanup progress used by the private temporary spool. `done` means the
+    # parent is gone (or was already absent); false leaves it terminal and retryable.
+    record FuzzRunCleanupBatch,
+      ok : Bool,
+      done : Bool,
+      deleted_results : Int64 = 0_i64
+
     # One persisted fuzz sweep. `status` is running/saving while rows are arriving, then
     # done | budget_exhausted | stopped | error; save_failed marks an incomplete snapshot.
     struct FuzzRunRecord
@@ -1473,6 +1480,41 @@ module Gori
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil,
                      @ws_close_code = nil, @ws_frames_in = nil)
+      end
+    end
+
+    # A bounded saved-result content projection. `row` carries capped prefixes in its four
+    # nullable BLOB fields; the matching full sizes preserve SQL NULL versus X'' and let a
+    # serializer say exactly which prefixes were cut without ever fetching the remainder.
+    struct FuzzResultPreview
+      getter row : FuzzResultRecord
+      getter request_size : Int64?
+      getter response_head_size : Int64?
+      getter response_body_size : Int64?
+      getter wire_size : Int64?
+
+      def initialize(@row, @request_size, @response_head_size, @response_body_size, @wire_size)
+      end
+
+      def request_truncated? : Bool
+        prefix_truncated?(@row.request, @request_size)
+      end
+
+      def response_head_truncated? : Bool
+        prefix_truncated?(@row.response_head, @response_head_size)
+      end
+
+      def response_body_truncated? : Bool
+        prefix_truncated?(@row.response_body, @response_body_size)
+      end
+
+      def wire_truncated? : Bool
+        prefix_truncated?(@row.wire, @wire_size)
+      end
+
+      private def prefix_truncated?(prefix : Bytes?, full_size : Int64?) : Bool
+        return false unless full_size
+        prefix.nil? || prefix.size.to_i64 < full_size
       end
     end
 

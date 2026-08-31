@@ -16,7 +16,7 @@ private def build_v23_fuzz_db(path : String) : {DB::Database, Int64}
 end
 
 describe "fuzz snapshot schema V25" do
-  it "migrates V23 through V24/V25 without blessing legacy rows or retaining old compaction bytes" do
+  it "migrates V23 through V24/V25 without blessing legacy rows or guessing at empty evidence" do
     path = File.tempname("gori-fuzz-v25", ".db")
     db, session = build_v23_fuzz_db(path)
     store = nil.as(Gori::Store?)
@@ -33,10 +33,11 @@ describe "fuzz snapshot schema V25" do
         ids[surface] = db.scalar("SELECT last_insert_rowid()").as(Int64)
       end
 
-      # V24 compacted the first three columns to X'' but accidentally left wire behind.
+      # This is also the shape V24 compaction produced, but it is indistinguishable from
+      # genuinely retained empty evidence. Migration must preserve it rather than guess.
       db.exec("INSERT INTO fuzz_results (run_id, idx, payloads, request, response_head, response_body, wire) " \
               "VALUES (1, 0, '[]', X'', X'', X'', X'AABB')")
-      # Near misses are not the old marker and must remain byte-for-byte unchanged.
+      # Every nil/empty/non-empty combination must remain byte-for-byte unchanged.
       db.exec("INSERT INTO fuzz_results (run_id, idx, payloads, request, response_head, response_body, wire) " \
               "VALUES (1, 1, '[]', X'', X'', NULL, X'CC')")
       db.exec("INSERT INTO fuzz_results (run_id, idx, payloads, request, response_head, response_body, wire) " \
@@ -67,11 +68,15 @@ describe "fuzz snapshot schema V25" do
       db.query_one(
         "SELECT TYPEOF(request), TYPEOF(response_head), TYPEOF(response_body), TYPEOF(wire) " \
         "FROM fuzz_results WHERE idx = 0", as: {String, String, String, String})
-        .should eq({"null", "null", "null", "null"})
+        .should eq({"blob", "blob", "blob", "blob"})
+      db.query_one(
+        "SELECT LENGTH(request), LENGTH(response_head), LENGTH(response_body), LENGTH(wire) " \
+        "FROM fuzz_results WHERE idx = 0", as: {Int64, Int64, Int64, Int64})
+        .should eq({0_i64, 0_i64, 0_i64, 2_i64})
       db.query_one(
         "SELECT TYPEOF(request), TYPEOF(response_head), TYPEOF(response_body), TYPEOF(wire) " \
         "FROM fuzz_results WHERE idx = 2", as: {String, String, String, String})
-        .should eq({"null", "null", "null", "null"})
+        .should eq({"blob", "blob", "blob", "null"})
       db.query_one(
         "SELECT TYPEOF(request), TYPEOF(response_head), TYPEOF(response_body), TYPEOF(wire) " \
         "FROM fuzz_results WHERE idx = 1", as: {String, String, String, String})

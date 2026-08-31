@@ -1213,17 +1213,13 @@ module Gori
       # came from the never-finished V1 path and cannot be safely auto-restored. The surface is
       # the only durable provenance V24 recorded, so only its three known values are backfilled.
       #
-      # V24 compaction wrote X'' to request/response_head/response_body and did not clear wire.
-      # That exact three-empty-BLOB shape is unambiguous: ordinary writes preserve nil versus
-      # empty per field and therefore do not make all three empty as a deletion marker. Normalize
-      # only that old marker, and clear wire with it so a compacted snapshot retains no request.
+      # Do NOT infer compaction from three empty BLOBs. V24's temporary compactor produced that
+      # shape, but a genuinely retained empty request/head/body has the same durable bytes and
+      # migration may not guess which evidence to erase. Re-running current compact clears all
+      # four nullable byte columns explicitly; schema migration remains byte-preserving.
       V25 = [
         "ALTER TABLE fuzz_runs ADD COLUMN snapshot_version INTEGER NOT NULL DEFAULT 0",
         "UPDATE fuzz_runs SET snapshot_version = 1 WHERE surface IN ('tui', 'cli', 'mcp')",
-        "UPDATE fuzz_results SET request = NULL, response_head = NULL, response_body = NULL, wire = NULL " \
-        "WHERE TYPEOF(request) = 'blob' AND LENGTH(request) = 0 " \
-        "AND TYPEOF(response_head) = 'blob' AND LENGTH(response_head) = 0 " \
-        "AND TYPEOF(response_body) = 'blob' AND LENGTH(response_body) = 0",
       ]
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,

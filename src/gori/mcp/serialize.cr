@@ -19,8 +19,10 @@ module Gori
     # UTF-8 (capped), base64 otherwise (capped). Byte-exact bodies are gori's own
     # repeater/export job; MCP trades fidelity for a token budget the model can read.
     module Serialize
-      MAX_TEXT = 64 * 1024 # cap on inlined decoded text
-      MAX_B64  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
+      MAX_TEXT                 = 64 * 1024 # cap on inlined decoded text
+      MAX_B64                  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
+      SAVED_HEAD_PREVIEW_BYTES = 16 * 1024
+      SAVED_SOURCE_BYTES       = 1024 * 1024 # encoded/chunk-framed input read from SQLite
 
       # Header names whose VALUES carry credentials/session material. Redacted to
       # [REDACTED] in read-tool output (get_flow, get_repeater_context content)
@@ -62,7 +64,6 @@ module Gori
         bytes = text.to_slice
         buffer = IO::Memory.new(bytes.size)
         pos = 0
-        line_index = 0
         headers_done = false
         sensitive_continuation = false
 
@@ -82,7 +83,7 @@ module Gori
           end
           line = bytes[pos, stop - pos]
 
-          if line_index == 0 || headers_done
+          if headers_done
             buffer.write(line)
           elsif line.empty?
             headers_done = true
@@ -98,6 +99,8 @@ module Gori
             colon = line.index(0x3a_u8)
             sensitive_continuation = false
             if colon && sensitive_header?(String.new(line[0, colon]).scrub)
+              # A malformed head may begin directly with Authorization/Cookie rather than a
+              # request/status line. Fail closed on that header-shaped first line too.
               buffer.write(line[0, colon])
               buffer << ": [REDACTED]"
               sensitive_continuation = true
@@ -107,7 +110,6 @@ module Gori
           end
           buffer.write(bytes[stop, term_stop - stop]) if term_stop > stop
           pos = term_stop
-          line_index += 1
         end
         String.new(buffer.to_slice)
       end
@@ -510,68 +512,105 @@ module Gori
         end
       end
 
-      # One saved result. Metrics are identical to live fuzz_results; content is opt-in and
-      # sensitive raw message bytes require include_sensitive.
-      def self.saved_fuzz_result(j : JSON::Builder, row : Store::FuzzResultRecord,
-                                 include_content : Bool = false,
-                                 include_sensitive : Bool = false,
-                                 body_cap : Int32 = 2048) : Nil
-        result = Fuzz::Persistence.result(row)
+      # Scalar-only saved result. The Store projection behind this overload never selects a
+      # retained BLOB, including the indexed result_index path.
+      def self.saved_fuzz_result(j : JSON::Builder, row : Store::FuzzResultRecord) : Nil
+        j.object { fuzz_result_fields(j, Fuzz::Persistence.result(row)) }
+      end
+
+      # Bounded saved content. Prefix bytes and their full nullable SQL lengths travel together,
+      # so output caps never require fetching the remainder and X'' remains distinct from NULL.
+      def self.saved_fuzz_result(j : JSON::Builder, preview : Store::FuzzResultPreview,
+                                 include_sensitive : Bool, body_cap : Int32,
+                                 head_cap : Int32) : Nil
+        row = preview.row
         j.object do
-          fuzz_result_fields(j, result)
-          if include_content
-            emit_saved_message(j, "request", row.request, include_sensitive, body_cap)
-            emit_saved_message(j, "wire", row.wire, include_sensitive, body_cap)
-            emit_saved_head(j, "response_head", row.response_head, include_sensitive)
-            # `incomplete` also covers timeout/early close, not only gori's capture cap; the
-            # metric projection already names the reason, so do not mislabel every short body
-            # as source-truncated here.
-            emit_body(j, "response_body", row.response_head, row.response_body,
-              false, body_cap, include_sensitive: include_sensitive)
-            if include_sensitive && (body = row.response_body)
-              cut = body.size > body_cap
-              sample = cut ? body[0, body_cap] : body
-              j.field "response_body_raw_base64", Base64.strict_encode(sample)
-              j.field "response_body_raw_truncated", cut
-            end
+          fuzz_result_fields(j, Fuzz::Persistence.result(row))
+          emit_saved_message(j, "request", row.request, preview.request_size,
+            include_sensitive, body_cap, head_cap)
+          emit_saved_message(j, "wire", row.wire, preview.wire_size,
+            include_sensitive, body_cap, head_cap)
+          emit_saved_head(j, "response_head", row.response_head,
+            preview.response_head_size, include_sensitive, head_cap)
+          # `incomplete` also covers timeout/early close, not only gori's capture cap; the
+          # metric projection already names the reason, so do not mislabel every short body
+          # as source-truncated here.
+          emit_body(j, "response_body", row.response_head, row.response_body,
+            false, body_cap, include_sensitive: include_sensitive,
+            source_size: preview.response_body_size,
+            source_truncated: preview.response_body_truncated?, preserve_empty: true)
+          if include_sensitive && (size = preview.response_body_size)
+            body = row.response_body || Bytes.empty
+            sample_size = {body.size, body_cap}.min
+            sample = body[0, sample_size]
+            j.field "response_body_raw_base64", Base64.strict_encode(sample)
+            j.field "response_body_raw_truncated", sample_size.to_i64 < size
           end
         end
       end
 
       private def self.emit_saved_head(j : JSON::Builder, field_name : String, head : Bytes?,
-                                       include_sensitive : Bool) : Nil
-        unless head
+                                       full_size : Int64?, include_sensitive : Bool,
+                                       head_cap : Int32) : Nil
+        unless size = full_size
           j.field field_name, nil
           return
         end
-        raw = String.new(head)
-        j.field field_name, redact_head(text(raw), include_sensitive)
-        emit_head_base64(j, field_name, head, include_sensitive)
-        j.field "#{field_name}_size", head.size
+        bytes = head || Bytes.empty
+        sample_size = {bytes.size, head_cap}.min
+        sample = bytes[0, sample_size]
+        truncated = sample_size.to_i64 < size
+        j.field field_name, redact_head(text(String.new(sample)), include_sensitive)
+        if include_sensitive
+          j.field "#{field_name}_base64", Base64.strict_encode(sample)
+          j.field "#{field_name}_base64_truncated", truncated
+        end
+        j.field "#{field_name}_size", size
+        j.field "#{field_name}_truncated", true if truncated
       end
 
       private def self.emit_saved_message(j : JSON::Builder, field_name : String, bytes : Bytes?,
-                                          include_sensitive : Bool, body_cap : Int32) : Nil
-        unless bytes
+                                          full_size : Int64?, include_sensitive : Bool,
+                                          body_cap : Int32, head_cap : Int32) : Nil
+        unless size = full_size
           j.field field_name, nil
           return
         end
-        boundary = Env.head_body_boundary(bytes)
-        head = bytes[0, boundary]
-        body = boundary < bytes.size ? bytes[boundary, bytes.size - boundary] : Bytes.empty
+        prefix = bytes || Bytes.empty
+        source_truncated = prefix.size.to_i64 < size
+        separator = Env.head_body_separator(prefix)
+        boundary = separator.try { |(offset, width)| offset + width }
+        head_complete = boundary ? boundary <= head_cap : !source_truncated && prefix.size <= head_cap
+        head_size = head_complete ? (boundary || prefix.size) : {prefix.size, head_cap}.min
+        head = prefix[0, head_size]
+
         j.field field_name do
           j.object do
-            j.field "size", bytes.size
-            raw_head = String.new(head)
-            j.field "head", redact_head(text(raw_head), include_sensitive)
-            emit_head_base64(j, "head", head, include_sensitive)
-            emit_body(j, "body", head, body, false, body_cap,
-              include_sensitive: include_sensitive)
+            j.field "size", size
+            j.field "source_truncated", true if source_truncated
+            j.field "head", redact_head(text(String.new(head)), include_sensitive)
+            j.field "head_truncated", true unless head_complete
             if include_sensitive
-              cut = bytes.size > body_cap
-              sample = cut ? bytes[0, body_cap] : bytes
-              j.field "raw_base64", Base64.strict_encode(sample)
-              j.field "raw_truncated", cut
+              j.field "head_base64", Base64.strict_encode(head)
+              j.field "head_base64_truncated", true unless head_complete
+            end
+
+            if head_complete && boundary
+              body = boundary < prefix.size ? prefix[boundary, prefix.size - boundary] : Bytes.empty
+              body_size = {size - boundary, 0_i64}.max
+              emit_body(j, "body", head, body, false, body_cap,
+                include_sensitive: include_sensitive, source_size: body_size,
+                source_truncated: body.size.to_i64 < body_size, preserve_empty: true)
+            else
+              j.field "body", nil
+              j.field "body_unavailable", true unless head_complete
+            end
+
+            if include_sensitive
+              raw_size = {prefix.size, body_cap}.min
+              raw = prefix[0, raw_size]
+              j.field "raw_base64", Base64.strict_encode(raw)
+              j.field "raw_truncated", raw_size.to_i64 < size
             else
               j.field "raw_redacted", true
             end
@@ -931,8 +970,9 @@ module Gori
       # controls trailer credentials just like it controls ordinary head fields.
       def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
                          wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false,
-                         include_sensitive : Bool = false) : Nil
-        if body.nil? || body.empty?
+                         include_sensitive : Bool = false, source_size : Int64? = nil,
+                         source_truncated : Bool = false, preserve_empty : Bool = false) : Nil
+        if body.nil? || (body.empty? && !preserve_empty)
           j.field field_name, nil
           return
         end
@@ -956,12 +996,16 @@ module Gori
             j.field "encoding", valid ? "text" : "base64"
             j.field "binary", true unless valid
             j.field "size", bytes.size
+            j.field "source_size", source_size if source_size
+            j.field "source_truncated", true if source_truncated
+            j.field "size_is_lower_bound", true if source_truncated || decode_truncated
             if omit
               # body_mode:none — the caller asked for shape only.
               j.field "omitted", true
-              j.field "truncated", wire_truncated || decode_truncated
+              j.field "truncated", wire_truncated || source_truncated || decode_truncated
             else
-              emit_body_payload(j, s, sample, valid, cut || wire_truncated || decode_truncated)
+              emit_body_payload(j, s, sample, valid,
+                cut || wire_truncated || source_truncated || decode_truncated)
             end
             # `truncated` (above) is true for either cause (back-compat); these two fields
             # distinguish a capture-time cut from a decode/de-chunk prefix cap.
@@ -970,7 +1014,7 @@ module Gori
             j.field "note", note if note
             # Finding trailers requires walking to the 0-chunk. Once the preview cap stopped
             # the chunk walk, doing that second full-body pass defeats the bound.
-            emit_trailers(j, head, body, include_sensitive) unless cut
+            emit_trailers(j, head, body, include_sensitive) unless cut || source_truncated
           end
         end
       end

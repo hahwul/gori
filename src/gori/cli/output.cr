@@ -310,15 +310,19 @@ module Gori
         @first = true
         @closed = false
 
-        def initialize(@io : IO)
+        def initialize(@io : IO,
+                       @encoder : Proc(Fuzz::Result, String) = ->(result : Fuzz::Result) { Output.fuzz_row_json(result) })
           @io << '['
           @io.flush
         end
 
         def append(result : Fuzz::Result) : Nil
           raise IO::Error.new("fuzz JSON array is already closed") if @closed
+          # Build a complete JSON value before emitting its separator. If encoding raises, close
+          # can still terminate the previous valid prefix rather than producing `[...,]`.
+          encoded = @encoder.call(result)
           @io << ',' unless @first
-          @io << Output.fuzz_row_json(result)
+          @io << encoded
           @io.flush
           @first = false
         end

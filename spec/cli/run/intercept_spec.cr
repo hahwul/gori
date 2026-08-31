@@ -356,15 +356,17 @@ describe "Gori::MCP::Serialize.held_head_and_body" do
     opened["body_preview"].as_s.should contain("eyJhbGciOi")
   end
 
-  # `redact_head` skips line 0 (an HTTP start line) and stops at the first blank line (the end
-  # of an HTTP header block). A WebSocket message has neither, so both exemptions are holes.
-  it "redacts the FIRST line and lines after a blank one, which redact_head does not" do
+  # A WebSocket message has no head/body boundary, so it also redacts header-shaped payload
+  # lines after a blank one. The HTTP rule now fails closed on a sensitive first line too (a
+  # malformed captured head may have no start line), but still stops at its blank boundary.
+  it "redacts first-line credentials and keeps the message-only after-blank rule" do
     first = Gori::MCP::Serialize.redact_message_lines("cookie: sid=secret\nx: 1", false)
     first.should_not contain("sid=secret")
     after = Gori::MCP::Serialize.redact_message_lines("hello\n\nauthorization: Bearer secret", false)
     after.should_not contain("Bearer secret")
-    # The HTTP head rule is untouched — it still exempts both, because an HTTP head has both.
-    Gori::MCP::Serialize.redact_head("cookie: sid=secret\nx: 1", false).should contain("sid=secret")
+    Gori::MCP::Serialize.redact_head("cookie: sid=secret\nx: 1", false).should_not contain("sid=secret")
+    Gori::MCP::Serialize.redact_head("hello\n\nauthorization: Bearer secret", false)
+      .should contain("Bearer secret")
   end
 
   it "keeps an HTTP row on head_preview" do

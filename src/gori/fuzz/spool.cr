@@ -20,6 +20,8 @@ module Gori
         @directory = nil.as(String?)
         @store = nil.as(Store?)
         @runs = [] of Run
+        @cleanup_workers = 0
+        @cleanup_cancelled = false
         @closed = false
       end
 
@@ -34,16 +36,18 @@ module Gori
       end
 
       # Remove one replaced/saved run without tearing down the controller's shared temp Store.
-      # Settle its worker first; the typed Store delete then removes every captured BLOB in one
-      # transaction. NotFound is idempotent success (a prior cleanup already won).
+      # Detach immediately, then reap bounded child batches on a fiber. The shared writer can
+      # interleave another tab's live batches between those commits instead of being monopolized
+      # by one unbounded DELETE transaction.
       def delete(run : Run) : Bool
         return true unless @runs.includes?(run)
         run.close
-        result = @store.try(&.delete_fuzz_run_result(run.run_id, allow_active: true))
-        ok = result.nil? || result.status.in?(Store::FuzzRunDeleteStatus::Deleted,
-          Store::FuzzRunDeleteStatus::NotFound)
-        @runs.delete(run) if ok
-        ok
+        @runs.delete(run)
+        start_cleanup(run.run_id) if @store
+        true
+      rescue ex
+        ::Log.warn { "could not schedule fuzz spool cleanup: #{ex.message}" }
+        false
       end
 
       # Idempotent teardown. Abort first so each Persistence worker leaves its queue and no
@@ -52,7 +56,11 @@ module Gori
       def close : Nil
         return if @closed
         @closed = true
+        @cleanup_cancelled = true
         @runs.each(&.close)
+        while @cleanup_workers > 0
+          sleep 1.millisecond
+        end
         @store.try(&.close)
       ensure
         if directory = @directory
@@ -91,8 +99,9 @@ module Gori
         end
 
         def append(result : Result) : Bool
+          return false if failed? || finished?
           row = Persistence.write_row(result)
-          return false unless @persistence.append(result)
+          return false unless @persistence.try_append(row)
           @accepted_rows += 1
           @accepted_bytes += Persistence.row_bytes(row)
           true
@@ -124,6 +133,27 @@ module Gori
                         &block : Store::FuzzResultRecord ->) : Nil
           raise Gori::Error.new("finish the fuzz spool run before reading it") unless finished?
           @store.each_fuzz_result(run_id, batch_size, &block)
+        end
+      end
+
+      private def start_cleanup(run_id : Int64) : Nil
+        store = @store || return
+        @cleanup_workers += 1
+        spawn(name: "gori-fuzz-spool-cleanup") do
+          loop do
+            break if @cleanup_cancelled
+            batch = store.cleanup_fuzz_run_batch(run_id, allow_active: true)
+            unless batch.ok
+              ::Log.warn { "fuzz spool run ##{run_id} cleanup stopped; directory teardown will remove it" }
+              break
+            end
+            break if batch.done
+            Fiber.yield
+          end
+        rescue ex
+          ::Log.warn { "fuzz spool run ##{run_id} cleanup failed: #{ex.message}" }
+        ensure
+          @cleanup_workers -= 1
         end
       end
 
