@@ -20,7 +20,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "hostoverride.delete-entry", "Delete host override", "Remove the selected host override",
-        Verb::Scope::HostOverrides, [Verb::Chord.new("d")], available: have_entry) { |ctx| ctx.hostov_delete_entry; nil }
+        Verb::Scope::HostOverrides, [Verb::Chord.new("d")], available: have_entry, group: :danger) { |ctx| ctx.hostov_delete_entry; nil }
     end
   end
 end

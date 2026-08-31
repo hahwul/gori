@@ -58,11 +58,12 @@ module Gori::Tui
     } of Symbol => String
 
     # The semantic bands a bucket is subdivided into, in RENDER ORDER — read top-to-
-    # bottom / left-to-right, so the order is the reading order and :danger lands last
-    # (a destructive key is never the neighbour of the key above it by accident).
+    # bottom / left-to-right, so the order is the reading order and the destructive
+    # bands land last, in severity order (a destructive key is never the neighbour of
+    # the key above it by accident, and the widest blast radius sits at the very end).
     # A verb's Verb::Definition#group picks its band; :none-tagged verbs are not
     # subdivided at all (see #split_semantic).
-    GROUP_ORDER = [:view, :send, :triage, :copy, :scope, :danger]
+    GROUP_ORDER = [:view, :send, :triage, :copy, :scope, :danger, :wipe]
 
     GROUP_LABELS = {
       :view   => "VIEW",   # inspect / filter / display toggles — changes what you SEE
@@ -70,7 +71,8 @@ module Gori::Tui
       :triage => "TRIAGE", # mark, tag, file, link, promote — engagement bookkeeping
       :copy   => "COPY",   # copy out (clipboard / copy-as)
       :scope  => "SCOPE",  # scope lens + scope membership
-      :danger => "DANGER", # deletes and clears
+      :danger => "DANGER", # permanently deletes the SELECTED item(s) — a flow, a rule, a var
+      :wipe   => "WIPE",   # empties the whole tab/project store — the ⇧X verbs (#899)
     } of Symbol => String
 
     # Below this many interior rows a column is too stubby to be worth splitting into,

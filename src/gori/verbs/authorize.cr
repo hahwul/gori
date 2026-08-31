@@ -79,7 +79,7 @@ module Gori
       r.register Verb::Definition.new(
         "authorize.clear", "Clear", "Empty the request queue and its results",
         Verb::Scope::Authorize, [Verb::Chord.new("x", shift: true)],
-        available: queued, mnemonic: 'X', group: :danger) { |ctx| ctx.authorize_clear; nil }
+        available: queued, mnemonic: 'X', group: :wipe) { |ctx| ctx.authorize_clear; nil }
 
       register_send_to_authorize(r)
     end

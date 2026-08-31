@@ -23,7 +23,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "env.delete-var", "Delete env var", "Remove the selected environment variable",
-        Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var) { |ctx| ctx.env_delete_var; nil }
+        Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var, group: :danger) { |ctx| ctx.env_delete_var; nil }
 
       r.register Verb::Definition.new(
         "env.edit-prefix", "Change prefix", "Edit the token prefix used for $KEY substitution (applies globally)",

@@ -78,7 +78,7 @@ module Gori
         # typed capital to shift+lowercase, so the capital spelling never fires (the same note
         # `comparer.cr`, `authorize.cr`, `core.cr`, `diff.cr` and `issues.cr` all carry).
         Verb::Scope::ProjectActivity, [Verb::Chord.new("x", shift: true)],
-        mnemonic: 'X', group: :danger) { |ctx| ctx.activity_clear; nil }
+        mnemonic: 'X', group: :wipe) { |ctx| ctx.activity_clear; nil }
 
       r.register Verb::Definition.new(
         "activity.refresh", "Refresh feed",

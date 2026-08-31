@@ -549,7 +549,7 @@ describe Gori::Tui::SpaceMenu do
     # Nothing clipped: the first and last entries of the LAST band are both on screen,
     # which is only possible once a second column exists.
     backend.contains?("Open flow detail").should be_true # first band (VIEW)
-    backend.contains?("Clear history").should be_true    # last band (DANGER)
+    backend.contains?("Clear history").should be_true    # last band (WIPE)
     backend.contains?("▼").should be_false               # …and no scrolling was needed
 
     # Every band header that renders has at least one of its entries on the SAME row or

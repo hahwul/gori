@@ -198,7 +198,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
         Verb::Scope::Body, [Verb::Chord.new("x", shift: true)],
-        available: in_history, mnemonic: 'X', group: :danger) { |ctx| ctx.history_clear; nil }
+        available: in_history, mnemonic: 'X', group: :wipe) { |ctx| ctx.history_clear; nil }
 
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
@@ -837,6 +837,7 @@ module Gori
       register_activity(r)
       register_read_edit(r)
       r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
+      r.validate_chords!    # …and on a same-scope chord collision or dead capital, on every OS profile
       r
     end
   end

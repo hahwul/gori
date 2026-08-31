@@ -1903,6 +1903,72 @@ describe Gori::Verb do
         reg.register(Definition.new("dup", "B", "", Gori::Verb::Scope::Global) { |_| nil })
       end
     end
+
+    describe "#validate_chords!" do
+      it "passes on the shipped registry (the guarantee itself)" do
+        Gori::Verbs.registry.validate_chords! # raises on any violation
+      end
+
+      it "raises on two verbs claiming the same chord in the same scope" do
+        reg = Registry.new
+        reg.register(Definition.new("a", "A", "d", Gori::Verb::Scope::Body, [Chord.new("g")]) { |_| nil })
+        reg.register(Definition.new("b", "B", "d", Gori::Verb::Scope::Body, [Chord.new("g")]) { |_| nil })
+        expect_raises(Gori::Error, /chord collision.*'g'.*a.*b.*Body/) do
+          reg.validate_chords!
+        end
+      end
+
+      it "allows the SAME chord in DIFFERENT scopes (deliberate shadowing)" do
+        reg = Registry.new
+        reg.register(Definition.new("a", "A", "d", Gori::Verb::Scope::Body, [Chord.new("g")]) { |_| nil })
+        reg.register(Definition.new("b", "B", "d", Gori::Verb::Scope::Sitemap, [Chord.new("g")]) { |_| nil })
+        reg.validate_chords! # must not raise — lookup resolves the scope before Global
+      end
+
+      it "does NOT skip hidden verbs — a collision on a hidden nav primitive still raises" do
+        reg = Registry.new
+        reg.register(Definition.new("nav", "Nav", "d", Gori::Verb::Scope::Body,
+          [Chord.new("down")], hidden: true) { |_| nil })
+        reg.register(Definition.new("other", "Other", "d", Gori::Verb::Scope::Body,
+          [Chord.new("down")]) { |_| nil })
+        expect_raises(Gori::Error, /chord collision.*'down'/) do
+          reg.validate_chords!
+        end
+      end
+
+      it "catches a collision that only exists on a NON-native OS profile" do
+        # The verb's base chords are collision-free, but a Windows override makes two
+        # verbs land on the same chord — a check that read only `verb.chords` would miss it.
+        reg = Registry.new
+        reg.register(Definition.new("a", "A", "d", Gori::Verb::Scope::Body, [Chord.new("g")]) { |_| nil })
+        reg.register(Definition.new("b", "B", "d", Gori::Verb::Scope::Body, [Chord.new("h")]) { |_| nil })
+        win = Gori::Verb::OsProfile::Os::Windows
+        original = Gori::Verb::OsProfile::OVERRIDES[win]
+        begin
+          Gori::Verb::OsProfile::OVERRIDES[win] = {"b" => [Chord.new("g")]}
+          expect_raises(Gori::Error, /chord collision.*'g'.*Windows/) do
+            reg.validate_chords!
+          end
+        ensure
+          Gori::Verb::OsProfile::OVERRIDES[win] = original
+        end
+      end
+
+      it "rejects a dead capital-letter chord (never fires — normalised to shift+lowercase)" do
+        reg = Registry.new
+        reg.register(Definition.new("cap", "Cap", "d", Gori::Verb::Scope::Body, [Chord.new("X")]) { |_| nil })
+        expect_raises(Gori::Error, /dead capital chord.*'X'.*cap/) do
+          reg.validate_chords!
+        end
+      end
+
+      it "accepts the correct spelling of a capital chord (shift + lowercase)" do
+        reg = Registry.new
+        reg.register(Definition.new("cap", "Cap", "d", Gori::Verb::Scope::Body,
+          [Chord.new("x", shift: true)]) { |_| nil })
+        reg.validate_chords! # shift-x fires; must not raise
+      end
+    end
   end
 
   describe "handler execution" do

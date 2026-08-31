@@ -63,6 +63,47 @@ module Gori
         end
       end
 
+      # Fail fast on a same-scope CHORD collision, the keybinding sibling of
+      # #validate_menu_keys!. Keymap.build is a plain hash assignment per scope, so a
+      # second verb claiming a chord SILENTLY SHADOWS the first — the shadowed binding
+      # has no other symptom (Verb::Conflicts only ever checks a USER rebind from the
+      # hotkey editor; nothing ran against the shipped defaults). Three deliberate
+      # divergences from the menu-key sweep:
+      #   • HIDDEN verbs are included. A hidden verb has no menu row but absolutely has
+      #     chords (body.up/body.down own the arrow keys); skipping them would blind
+      #     the check to the nav primitives.
+      #   • All three OS profiles are swept via Keymap.effective_chords, because
+      #     OsProfile.overrides_for SUBSTITUTES chords per verb — a collision can exist
+      #     on a profile this binary wasn't built for.
+      #   • Conflicts.detect is NOT reused: that path answers "is this one proposed
+      #     user chord free?" and its allowances belong to the editor. This is a strict
+      #     boot-time sweep over defaults. Cross-scope reuse stays legal here too
+      #     (lookup resolves the active scope before the Global fallback, and gori
+      #     ships such shadows deliberately — see Conflicts' comment).
+      # Also rejects a DEAD capital-letter chord: Keybind.from_event normalises a typed
+      # capital to shift+lowercase, so Chord.new("X") can never fire — a warning half a
+      # dozen verb-file comments have been standing in for until now.
+      def validate_chords! : Nil
+        OsProfile::Os.each do |os|
+          seen = Hash(Scope, Hash(Chord, String)).new { |h, k| h[k] = {} of Chord => String }
+          each do |v|
+            Keymap.effective_chords(v, os).each do |chord|
+              if chord.key.size == 1 && chord.key[0].ascii_uppercase?
+                raise Gori::Error.new(
+                  "dead capital chord: '#{chord.label}' on #{v.id} in #{v.scope} can never fire " \
+                  "(Keybind.from_event normalises a typed capital to shift+lowercase — " \
+                  "spell it Chord.new(#{chord.key.downcase.inspect}, shift: true))")
+              end
+              if prior = seen[v.scope][chord]?
+                raise Gori::Error.new(
+                  "chord collision: '#{chord.label}' claimed by both #{prior} and #{v.id} in #{v.scope} (#{os} profile)")
+              end
+              seen[v.scope][chord] = v.id
+            end
+          end
+        end
+      end
+
       # Raise on the first key collision among `verbs` (one displayable view's worth).
       private def check_menu_keys!(scope : Scope, section : Symbol, verbs : Array(Definition)) : Nil
         seen = {} of Char => String
