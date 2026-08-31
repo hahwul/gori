@@ -32,12 +32,19 @@ describe "Gori::Verbs.register_probe" do
         r[id].scope.should eq(Gori::Verb::Scope::Probe)
         r[id].chords.should eq([Gori::Verb::Chord.new(key)])
       end
-      # `probe.clear` deliberately claims NO chord. It deletes every issue in the project, and
-      # it used to answer a bare `x` — the same unmodified letter that is a harmless enable
-      # toggle one sub-tab to the right, and one that no Probe hint ever named. It keeps a
-      # space-menu handle so the action stays reachable by key, just not by reflex.
-      r["probe.clear"].chords.should be_empty
+      # `probe.clear` answers ⇧X — the chord every clear-all verb in the app answers, each in
+      # its own scope. NOT a bare `x`: that is what 0edc3c5b took away, because on the Rules
+      # sub-tab one chip over `x` is a harmless enable toggle and no Probe hint ever named the
+      # destructive reading. The shift is the whole difference, so it is asserted through
+      # `Keybind.from_event` rather than against a hand-written chord — `Chord.new("X")`
+      # satisfies an equality assertion perfectly and never fires.
+      r["probe.clear"].chords.should eq([shift_chord('X')])
+      r["probe.clear"].chords.should_not contain(Gori::Verb::Chord.new("x"))
       r["probe.clear"].menu_key.should eq('X')
+      # The bare `x` it is a shift away from lives in a DIFFERENT scope, so the two can never
+      # resolve on one keystroke (`ProbeController#command_scope` answers ProbeRules there).
+      r["probe-rules.toggle"].scope.should eq(Gori::Verb::Scope::ProbeRules)
+      r["probe-rules.toggle"].chords.should eq([Gori::Verb::Chord.new("x")])
 
       r["probe.open"].chords.first.should eq(Gori::Verb::Chord.new("enter"))
       r["probe.open"].menu_key.should eq('v') # 'o' is reserved for open-evidence

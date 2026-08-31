@@ -142,7 +142,7 @@ gori에는 다중 세션을 다루는 별도 장치가 없습니다. 환경 변�
 | `↑` / `↓` | 요청 간 이동 |
 | `⇥` | 선택한 요청의 아이덴티티 간 이동 |
 | `PgUp` / `PgDn` | 상세 패널 스크롤 |
-| `Space` → `X` | Clear — 큐와 결과를 모두 비움(메뉴 전용) |
+| `⇧X` | Clear — 큐와 모든 아이덴티티의 결과를 비움(먼저 확인을 묻습니다). `Space` → `X`도 같은 동작이며, `⇧X`는 History·Probe·프로젝트 ACTIVITY 피드에서도 같은 clear-all 키입니다 |
 
 **History**나 **Sitemap**에서 `Space` → **Send to Authorize**로 요청을 이 탭에 넣습니다.
 

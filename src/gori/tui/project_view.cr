@@ -1252,7 +1252,7 @@ module Gori::Tui
         page = store.events_recent(ACT_PAGE, before, source: @act_source,
           levels: ProjectView.act_level_set(@act_level), actor: @act_actor, query: filter_query)
       end
-      # The head is gone (a peer's ⇧C, a retention sweep) or sits further back than the walk
+      # The head is gone (a peer's ⇧X, a retention sweep) or sits further back than the walk
       # goes. Either way page one is the only honest starting point left.
       reload_activity(store)
     end
@@ -2843,7 +2843,7 @@ module Gori::Tui
       # re-reads from the newest end, which THROWS AWAY every window already walked back — the
       # opposite of what an operator following this line wants. `↓` is what extends the scan
       # (`page_activity` fires on a cursor already at the end, which an empty list always is).
-      # `⇧C` is not offered either: that key empties the feed.
+      # `⇧X` is not offered either: that key empties the feed.
       # NOT named `out`: `out` is a Crystal keyword, and `screen.text(…, out, …)` parses as an
       # out-param (the same trap `Store#ids_matching` documents).
       way = activity_more? ? "↓ looks further back · space clears the filters" : "s/l cycle back to all · space clears the filters"

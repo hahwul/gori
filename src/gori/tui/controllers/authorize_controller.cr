@@ -694,8 +694,29 @@ module Gori::Tui
       @host.status("authorize: removed — #{@view.size} left")
     end
 
+    # The one clear-all verb that used to go straight through. It was menu-only when it was
+    # written, and the space menu is itself a deliberate act — but ⇧X made it one keystroke,
+    # and the other three (`history_clear`, `probe_clear`, `activity_clear`) have always asked
+    # first. A shared chord has to mean a shared contract, or the tab an operator learns the
+    # gesture on is not the tab it costs them something on.
+    #
+    # HAND-WRAPPED: `ConfirmDialog` splits on '\n' and nothing else and caps the card at 60
+    # columns, so a line written as prose is truncated (the note on `activity_clear`). The
+    # count is named because "the queue" understates what goes with it — every identity's
+    # result for every request, which is the work the tab exists to produce.
     def clear : Nil
       return @host.status("a run is in flight — ^X to stop it first") if running?
+      n = @view.size
+      return @host.status("authorize: nothing to clear") if n <= 0
+      @host.confirm("CLEAR AUTHORIZE",
+        "Empty the queue of #{n} request#{n == 1 ? "" : "s"}?\n\n" \
+        "Every identity's result goes with them.\n" \
+        "This can't be undone.",
+        confirm_label: "clear", danger: true) { clear_now }
+    end
+
+    # The wipe itself, past the confirm.
+    private def clear_now : Nil
       @view.clear
       # The dedup set and the cap notice go with the queue. The cap's own advice is "clear it to
       # keep going", and leaving the keys behind made that false: every endpoint already seen
@@ -888,7 +909,12 @@ module Gori::Tui
         return "i identities · p passive · Send to Authorize from History to begin#{passive}"
       end
       return "↑/↓ request · ⇥ identity · ^X stop#{passive} · space cmds" if running?
-      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · space cmds"
+      # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
+      # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
+      # front of an operator watching one go out. Resolved through the keymap so a rebind
+      # reaches the hint; the rest of this line is still literal, as its siblings are.
+      clear = Hotkeys.binding_label(@host.session.registry, "authorize.clear", "⇧X")
+      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · #{clear} clear · space cmds"
     end
   end
 end

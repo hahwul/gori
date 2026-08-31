@@ -69,9 +69,15 @@ module Gori
       # `s` keeps the mnemonic the save half had, now meaning "which scope".
       #
       # The default-flip is offered only for a global rule, because a project rule has no
-      # default to flip: `x` IS its state. Both gate on a selected rule for the reason
-      # `rewriter_rule_selected?` documents — the menu must not act on a row the operator
-      # cannot see from the `extract` / `bindings` sub-tabs.
+      # default to flip: `x` IS its state, and its ⇧X reads as "…everywhere". In the four
+      # clear-all scopes ⇧X is the wipe chord instead (`history.clear`, `probe.clear`,
+      # `authorize.clear`, `activity.clear`) — deliberate cross-scope reuse, and invisible to
+      # `Conflicts.overlap?`, which is `a == b` on the scope. This tab has no clear-all verb
+      # for it to be confused with.
+      #
+      # Both gate on a selected rule for the reason `rewriter_rule_selected?` documents — the
+      # menu must not act on a row the operator cannot see from the `extract` / `bindings`
+      # sub-tabs.
       global_rule = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :rewriter && ctx.rewriter_rule_list_focused? && ctx.rewriter_global_rule_selected?
       end

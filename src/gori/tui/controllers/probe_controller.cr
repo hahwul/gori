@@ -97,6 +97,17 @@ module Gori::Tui
       reg = @host.session.registry
       mode = Hotkeys.binding_label(reg, "probe.mode", "m")
       filt = Hotkeys.binding_label(reg, "probe.filter", "/")
+      # Named in EVERY list state, not just the default one. `command_scope` answers
+      # `Scope::Probe` for the mode-off list and for both preview focuses as well (only the
+      # Rules sub-tab and an open detail leave it), so `probe.clear` is one keystroke away in
+      # all four — and naming it in one would have rebuilt the exact gap 0edc3c5b found, an
+      # unadvertised destructive key, in the other three.
+      #
+      # In the default branch it sits with `d delete` so the danger pair reads together. That
+      # is NOT free: the line is the longest on the tab and a narrow terminal clips the right
+      # end, so the eleven columns come out of `mode`/`filter` — which the space menu still
+      # names. The wipe is the one that has to be legible without opening anything.
+      clear = Hotkeys.binding_label(reg, "probe.clear", "⇧X")
       if rules_tab?
         # `↵/e edit`, matching every other rule list — ↵ no longer toggles here (see
         # verbs/probe.cr). Edit and delete are named ONLY when they can fire: both are gated
@@ -115,13 +126,13 @@ module Gori::Tui
       elsif @probe.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @probe.mode.off?
-        "#{mode} enable scanning · #{filt} filter · space cmds · esc tabs"
+        "#{mode} enable scanning · #{filt} filter · #{clear} clear · space cmds · esc tabs"
       elsif @probe.preview_enabled? && @probe.preview_focus == :preview
-        "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
+        "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
       elsif @probe.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{mode} mode · #{filt} filter · space cmds"
+        "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
       else
-        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{mode} mode · #{filt} filter · space cmds"
+        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
       end
     end
 
@@ -389,7 +400,11 @@ module Gori::Tui
     end
 
     def probe_clear : Nil
-      return if @probe.empty?
+      # A toast, not a silent return. While this was menu-only the empty case was self-evident
+      # — you were looking at the list you had just opened a menu over. ⇧X is pressed without
+      # that, and an advertised key that answers with nothing at all reads as a key that
+      # failed. `activity_clear` says the same thing for the same reason.
+      return @host.status("probe: nothing to clear") if @probe.empty?
       @host.confirm("CLEAR ISSUES", "Delete ALL Probe issues for this project?\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         @probe.clear(@host.session.store)

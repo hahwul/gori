@@ -188,8 +188,13 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("d")],
         available: history_targets, mnemonic: 'D', group: :danger) { |ctx| ctx.history_delete; nil }
 
-      # Shift-X clears the whole project History after confirmation. `X` remains the space-menu
-      # key, matching Probe's clear action and avoiding Comparer's `C`.
+      # ⇧X clears the whole project History after confirmation, and `X` remains the space-menu
+      # key. One chord and one letter for every "wipe this tab" verb in the app: `probe.clear`,
+      # `authorize.clear` and `activity.clear` spell both the same way in their own scopes. `X`
+      # over `C` because Comparer holds `C` (Send to Comparer) and this tab's `C` is the column
+      # editor; ⇧X over ⇧C because bare `x` is bound in none of the four clear-all scopes while
+      # bare `c` is live in all of them (`capture.toggle`), and a project wipe does not belong
+      # one shift from the most-pressed triage key.
       r.register Verb::Definition.new(
         "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
         Verb::Scope::Body, [Verb::Chord.new("x", shift: true)],
