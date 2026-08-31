@@ -558,7 +558,8 @@ module Gori
           p.invalid_option { |f| abort "gori run probe rules add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run probe rules add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run probe rules add",
+          "pass the rule as --title TEXT and --pattern P — quote them, a value with spaces is one argument")
 
         t = title
         abort "gori run probe rules add: --title is required" if t.nil? || t.empty?

@@ -565,7 +565,8 @@ module Gori
           p.invalid_option { |f| abort "gori run intercept #{action}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run intercept #{action}: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run intercept #{action}",
+          "`intercept #{action}` takes no positional arguments; the project is named with --project")
 
         status, detail = enqueue_intercept(project_name, db_path, "toggle", arg: enable ? "true" : "false")
         emit_intercept_ack(status, detail, format)

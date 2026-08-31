@@ -34,7 +34,8 @@ module Gori
           p.invalid_option { |f| abort "gori run capture: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run capture: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run capture",
+          "pass the project as --project NAME and the bind address as --listen/--port")
 
         Paths.ensure_dirs
         # The process-only override layer, not the persisted global: Session.open reads

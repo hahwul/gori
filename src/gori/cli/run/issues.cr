@@ -114,7 +114,8 @@ module Gori
           p.invalid_option { |f| abort "gori run issues create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run issues create",
+          "pass the title as --title TEXT — quote it, a title with spaces is one argument")
 
         abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
 

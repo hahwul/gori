@@ -35,51 +35,10 @@ describe Gori::CLI::Run do
     end
   end
 
-  # A source check, the same shape (and for the same reason) as `list_leftovers_spec`'s: the
-  # defect is an ABSENCE, and an absence cannot be caught by grepping for a spelling. Every
-  # `OptionParser` in the repeater CLI must reach an `unknown_args` handler, whether it
-  # installs one itself (the sites that take a positional) or hands the parser to
-  # `parse_no_positionals` (the sites that take none) — without either, the leftovers never
-  # reach any guard at all.
-  #
-  # Scoped to these two files rather than all of `cli/run`: 30-odd parsers elsewhere are still
-  # missing theirs (`project scope add -p zzz.test STRAY` adds the rule and says nothing), and
-  # a repo-wide gate here would be a red suite standing in for a sweep nobody has done.
-  it "routes every repeater OptionParser through an unknown_args guard" do
-    dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
-    offenders = [] of String
-    {"repeater.cr", "repeater_minimize.cr"}.each do |name|
-      src = File.read(File.join(dir, name))
-      # Window each block from its `OptionParser.new` to the NEXT one — anchoring on the
-      # `parse(` call instead let a block that spells its parse differently (or returns early)
-      # swallow the rest of the file, so a LATER block's handler satisfied the check for one
-      # that had none: the gate going green on exactly the drift it exists to catch.
-      starts = [] of Int32
-      pos = 0
-      while at = src.index("OptionParser.new do |", pos)
-        starts << at
-        pos = at + 1
-      end
-      starts.each_with_index do |at, i|
-        window = src[at...(starts[i + 1]? || src.size)]
-        next if window.includes?(".unknown_args") || window.includes?("parse_no_positionals(")
-        offenders << "#{name}@#{src[0, at].count('\n') + 1}"
-      end
-    end
-    offenders.should be_empty
-  end
-
-  # …and the gate has to actually select things, or it is a check that never looked: strip the
-  # guard from one window and it must fail. Pinned on the shape rather than on a count, so a
-  # new parser in either file does not have to update a magic number.
-  it "would catch a parser with neither guard" do
-    src = <<-CR
-      parser = OptionParser.new do |p|
-        p.on("--a", "") { }
-      end
-      parser.parse(args)
-      CR
-    src.includes?(".unknown_args").should be_false
-    src.includes?("parse_no_positionals(").should be_false
-  end
+  # The source gate that used to sit here — every `OptionParser` in these two files must
+  # reach an `unknown_args` handler — was scoped to `repeater.cr`/`repeater_minimize.cr`
+  # because ~30 parsers elsewhere under `cli/run` were still missing theirs, and a repo-wide
+  # gate would have been a red suite standing in for a sweep nobody had done. That sweep has
+  # since happened, so the gate is repo-wide and lives in `unknown_args_sweep_spec.cr`, which
+  # covers these two files along with every other one.
 end

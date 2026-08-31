@@ -640,7 +640,8 @@ module Gori
           p.invalid_option { |f| abort "gori run oast listen: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast listen: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run oast listen",
+          "pass the provider as --provider KIND and its base URL as --server URL")
 
         kind = Oast::ProviderKind.parse?(provider)
         unless kind
