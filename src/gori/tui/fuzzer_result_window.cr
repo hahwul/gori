@@ -57,11 +57,38 @@ module Gori::Tui
       @projected_indices.includes?(index)
     end
 
+    # Take over another window's contents, PROJECTION MARKS INCLUDED.
+    #
+    # The saved-run restore builds its window on a background fiber and hands the result to
+    # the view. Re-`append`ing those rows into the view's own window loses `projected?`: a row
+    # that was projected is now small, so nothing re-marks it — and `projected?` is the bit
+    # that tells the detail panes the bytes are in the ARCHIVE rather than absent, and that
+    # keeps `Send to Repeater` from seeding the 64 KiB preview (`… [display truncated]` and
+    # all) as if it were the request. Mutates in place rather than swapping the object,
+    # because `FuzzerView` aliases `rows` at construction.
+    def adopt(other : FuzzerResultWindow) : Nil
+      return if other.same?(self) # `clear` first would otherwise wipe what it is copying
+      clear
+      other.rows.each { |row| @rows << row }
+      other.charges.each { |charge| @charges << charge }
+      other.projected_indices.each { |index| @projected_indices.add(index) }
+      @bytes = other.bytes
+    end
+
     def clear : Nil
       @rows.clear
       @charges.clear
       @projected_indices.clear
       @bytes = 0_i64
+    end
+
+    # For `adopt` alone — the parallel bookkeeping `rows` needs to survive the handover.
+    protected def charges : Deque(Int64)
+      @charges
+    end
+
+    protected def projected_indices : Set(Int64)
+      @projected_indices
     end
 
     def self.result_bytes(result : Fuzz::Result) : Int64

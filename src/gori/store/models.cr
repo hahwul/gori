@@ -1402,6 +1402,24 @@ module Gori
                      @sni = nil, @tls_preset = nil, @websocket = false,
                      @surface = nil, @source_ref = nil, @snapshot_version = 0)
       end
+
+      # This run predates the V24 snapshot columns, so `http2` / `websocket` / `sni` /
+      # `tls_preset` are the migration's DEFAULTS and not observations: they say "never
+      # recorded", not "HTTP/1.1". The TUI picker and the CLI listing both render a
+      # one-word transport chip off exactly those columns, and only the picker checked
+      # this — the CLI printed `[H1]`, asserting a protocol the row never carried, on the
+      # very command the picker's own refusal ("inspect it with `gori run fuzz show`")
+      # points the operator at. One definition on the record, so the two cannot drift again.
+      def legacy_snapshot? : Bool
+        @snapshot_version == 0
+      end
+
+      # The transport chip every listing surface draws for this run.
+      def proto_label : String
+        return "LEGACY" if legacy_snapshot?
+        return "WS" if websocket?
+        http2? ? "H2" : "H1"
+      end
     end
 
     # Input row for a bounded bulk insert. It deliberately mirrors Fuzz::Result without

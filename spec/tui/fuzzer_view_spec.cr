@@ -175,6 +175,30 @@ describe Gori::Tui::FuzzerView do
       view.append_result(fuzz_result(0, 200, 1200)) # succeeded, but keep_bodies dropped it
       view.detail_plain_lines.first.should contain("response not retained")
     end
+
+    # The DISPLAY window dropped the bytes, the RUN did not. `FuzzerResultWindow` projects a
+    # row past its byte ceiling down to metrics, and the spool (and, after ⇧S, the archive)
+    # still holds every byte — so "not retained by this run" tells the operator the evidence
+    # does not exist at the moment gori is about to save it. The request pane has always drawn
+    # the distinction (`display_omitted`); this pane read a nil head as the retention policy
+    # and had no third answer.
+    it "names the bounded display, not the retention policy, for a projected row" do
+      cap = Gori::Fuzz::Persistence::ROW_METADATA_BYTES + 80_i64
+      view = FuzzerView.new(FuzzerResultWindow.new(10, cap))
+      view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.focus_pane(:results)
+      view.append_result(Gori::Fuzz::Result.new(4_i64, ["z" * 500], nil, 200,
+        4_i64, 1, 1, 1_i64, nil, true, false, nil,
+        "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice,
+        "GET / HTTP/1.1\r\n\r\n".to_slice))
+
+      row = view.selected_result.not_nil!
+      view.result_display_truncated?(row).should be_true
+      line = view.detail_plain_lines.first
+      line.should contain("bounded display")
+      line.should contain("saved archive")
+      line.should_not contain("not retained by this run")
+    end
   end
 
   # Round 8 — the h2 `:status` in the row's leftmost column is 200 by definition for every
@@ -996,6 +1020,39 @@ describe Gori::Tui::FuzzerView do
       request.display_omitted.should be_true
       request.bytes.should be_empty
       view.result_request_note(row).not_nil!.should contain("exact fields remain")
+    end
+
+    # …and it must still refuse after a RESTORE. `start_saved_run_load` fills its own window on
+    # a reader fiber and hands it over; the production path used to hand over `window.rows.to_a`
+    # instead, and an already-projected row is small — so nothing re-marked it and every guard
+    # keyed on `result_display_truncated?` went quiet. What the operator got was not a blank:
+    # `result_request` fell through to the template reconstruction, which splices the 64 KiB
+    # PREVIEW payload (`… [display truncated]` and all), and `Send to Repeater` seeded that as
+    # the request the row had recorded.
+    it "keeps a projected row refused after a saved run is restored from its window" do
+      cap = Gori::Fuzz::Persistence::ROW_METADATA_BYTES + 80_i64
+      window = FuzzerResultWindow.new(10, cap)
+      window.append(Gori::Fuzz::Result.new(3_i64, ["z" * 500], nil, 200, 0_i64, 0, 0,
+        1_i64, nil, true, false, nil))
+      window.projected?(3_i64).should be_true
+
+      run = Gori::Store::FuzzRunRecord.new(5_i64, 2_i64, 3_i64, 4_i64, "https://h",
+        "sniper", 1_i64, 1_i64, 1_i64, 0_i64, "done", false, nil, nil, false, "tui", "r", 1)
+      view = FuzzerView.new
+      view.load_saved_run(run, window)
+
+      row = view.selected_result.not_nil!
+      view.result_display_truncated?(row).should be_true
+      view.result_request(row).display_omitted.should be_true
+      seed = FuzzerController.repeater_seed_for(view, row)
+      seed.request_text.should be_empty
+      seed.note.not_nil!.should contain("exact fields remain")
+
+      # The Array overload is the compatibility seam for focused specs and CANNOT carry the
+      # mark — pinned here so the production path is never quietly pointed back at it.
+      plain = FuzzerView.new
+      plain.load_saved_run(run, window.rows.to_a)
+      plain.result_display_truncated?(plain.selected_result.not_nil!).should be_false
     end
 
     it "hands a non-UTF-8 payload byte to the Repeater verbatim instead of U+FFFD" do

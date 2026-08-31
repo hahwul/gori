@@ -508,7 +508,7 @@ module Gori
           j.field "surface", text(run.surface)
           j.field "source_ref", text(run.source_ref)
           j.field "snapshot_version", run.snapshot_version
-          j.field "legacy", run.snapshot_version == 0
+          j.field "legacy", run.legacy_snapshot?
         end
       end
 

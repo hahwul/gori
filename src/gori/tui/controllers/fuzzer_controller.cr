@@ -35,9 +35,11 @@ module Gori::Tui
     # Carry view identity + generation so a completion cannot land on a later run.
     record SaveDone, view : FuzzerView, generation : Int64, job_id : Int32,
       run_id : Int64, written : Int64, error : String?
+    # `window`, not its rows: `FuzzerResultWindow` carries which rows it projected to
+    # metrics-only, and that bit does not survive being re-appended into another window.
     record LoadDone, view : FuzzerView, generation : Int64, job_id : Int32,
       session_id : Int64, automatic : Bool, run : Store::FuzzRunRecord?,
-      rows : Array(Fuzz::Result), error : String?
+      window : FuzzerResultWindow, error : String?
     # The run fiber's one report that the temporary archive stopped accepting rows. Sent at
     # the FIRST rejection, not at the end: a rejected append makes the whole run unsaveable,
     # and learning that after a 100k-request sweep is learning it too late to act on.
@@ -179,6 +181,7 @@ module Gori::Tui
       y = Hotkeys.binding_label(reg, "fuzzer.copy", "y")
       run = Hotkeys.binding_label(reg, "fuzz.run", "^R")
       stop = Hotkeys.binding_label(reg, "fuzz.stop", "^X")
+      save_key = Hotkeys.binding_label(reg, "fuzz.save-results", "⇧S")
       # One phrasing for the marker trio, shared with the Repeater's request footer. This
       # used to name `^A` in both modes and `^K` in INSERT only, and `^T` nowhere.
       params = Hotkeys.binding_label(reg, "fuzz.automark", "^A")
@@ -210,10 +213,20 @@ module Gori::Tui
         else
           "i/↵ edit · #{read_common} · #{marks} · ^F find · ^O config · #{run} run · ↹ pane · esc tabs"
         end
-      when :config  then config_hint(v, run)
-      when :results then "↑/↓ select · ↵ detail · o sort · m matched · v dist · ⇧S save · #{run} run · #{stop} stop · space cmds · ↹ pane"
-      when :detail  then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
-      else               "↹/esc tabs"
+      when :config then config_hint(v, run)
+      when :results
+        # ⇧S only while the verb would actually fire. `fuzz.save-results` is gated on
+        # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
+        # while a save/load is in flight, with no results, and once the run has been saved or
+        # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
+        # said nothing while this line kept promising it. That also made the controller's own
+        # "fuzz results already saved as run #N" refusal unreachable through the binding.
+        # Named off the same predicate the gate reads, not a second copy of its conditions.
+        save = v.results_saveable? ? " · #{save_key} save" : ""
+        "↑/↓ select · ↵ detail · o sort · m matched · v dist#{save} · " \
+        "#{run} run · #{stop} stop · space cmds · ↹ pane"
+      when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
+      else              "↹/esc tabs"
       end
     end
 
@@ -1070,7 +1083,7 @@ module Gori::Tui
     private def apply_load_done(event : LoadDone) : Nil
       ok = event.error.nil? && !event.run.nil?
       @host.jobs.finish(event.job_id, ok ? :done : :error,
-        ok ? "#{event.rows.size} results" : (event.error || "load failed"))
+        ok ? "#{event.window.rows.size} results" : (event.error || "load failed"))
       # A failed automatic read is retryable on the next navigation. The id stays claimed
       # while work is in flight, so repeated navigation cannot launch duplicate readers.
       @auto_load_considered.delete(event.session_id) if event.automatic && !ok
@@ -1080,8 +1093,11 @@ module Gori::Tui
         if old = @spool_runs.delete(event.view)
           @spool.delete(old)
         end
-        event.view.load_saved_run(run, event.rows)
-        shown = event.rows.size.to_i64 < run.sent ? " · showing #{event.rows.size}" : ""
+        event.view.load_saved_run(run, event.window)
+        # Off the VIEW, not the handover window: this sentence claims what the pane is
+        # showing, so it has to be counted where the pane reads.
+        shown_rows = event.view.retained_result_count
+        shown = shown_rows.to_i64 < run.sent ? " · showing #{shown_rows}" : ""
         @host.status("loaded fuzz run ##{run.id} · #{run.status} · #{run.mode} · " \
                      "#{run.sent} results#{shown} · #{run.target}")
       else
@@ -1517,7 +1533,7 @@ module Gori::Tui
       end
       run = @host.session.store.get_fuzz_run(id)
       return @host.status("saved fuzz run ##{id} is gone") unless run && run.session_id == session_id
-      return @host.status("legacy fuzz run ##{id} has incomplete transport context — inspect it with `gori run fuzz show`") if run.snapshot_version == 0
+      return @host.status("legacy fuzz run ##{id} has incomplete transport context — inspect it with `gori run fuzz show`") if run.legacy_snapshot?
       return @host.status("saved fuzz run ##{id} is still #{run.status}") if run.status.in?("running", "saving")
       @auto_load_considered.add(session_id)
       start_saved_run_load(tab, run)
@@ -1552,15 +1568,15 @@ module Gori::Tui
         fresh = store.get_fuzz_run(id)
         if !cancelled && fresh && fresh.session_id == session_id
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
-            fresh, window.rows.to_a, nil))
+            fresh, window, nil))
         else
           message = cancelled ? "saved-run load cancelled" : "saved fuzz run ##{id} was deleted while it loaded"
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
-            nil, [] of Fuzz::Result, message))
+            nil, FuzzerResultWindow.new, message))
         end
       rescue ex
         completions.send(LoadDone.new(view, generation, job, session_id, automatic, nil,
-          [] of Fuzz::Result, "could not load fuzz run ##{id}: #{ex.message}"))
+          FuzzerResultWindow.new, "could not load fuzz run ##{id}: #{ex.message}"))
       ensure
         end_worker(view)
       end

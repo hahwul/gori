@@ -10,6 +10,21 @@ module Gori::CLI::Run
   def self.fuzz_saved_mode_for_spec(mode : Fuzz::Mode, requested : Int32?, effective : Int32?) : String
     fuzz_saved_mode(mode, requested, effective)
   end
+
+  def self.fuzz_saved_run_json_for_spec(run : Store::FuzzRunRecord, stored : Int64) : String
+    JSON.build { |json| fuzz_saved_run_json(json, run, stored) }
+  end
+
+  def self.fuzz_saved_run_line_for_spec(run : Store::FuzzRunRecord, stored : Int64) : String
+    fuzz_saved_run_line(run, stored)
+  end
+end
+
+private def saved_run(snapshot : Int32 = 1, http2 : Bool = false, websocket : Bool = false,
+                      finished : Int64? = 1_700_000_002_500_000_i64) : Gori::Store::FuzzRunRecord
+  Gori::Store::FuzzRunRecord.new(7_i64, 3_i64, 1_700_000_001_250_000_i64, finished,
+    "https://h.test", "sniper", 4_i64, 4_i64, 2_i64, 0_i64, "done", http2,
+    nil, nil, websocket, "tui", "tui:3:1", snapshot)
 end
 
 describe "gori run fuzz saved runs" do
@@ -95,5 +110,47 @@ describe "gori run fuzz saved runs" do
     text.should_not contain('\n')
     text.should_not contain("BAD\rOVERWRITE")
     text.should contain("BAD·OVERWRITE·NEXT")
+  end
+
+  # A `snapshot_version = 0` row predates the V24 transport columns, so `http2`/`websocket`
+  # are the migration's DEFAULTS, not observations. Both listing surfaces draw a one-word
+  # transport chip off them, and only the TUI picker checked this — the CLI printed `[H1]`,
+  # asserting HTTP/1.1 about a run whose protocol was never recorded, on the very command
+  # the picker's refusal points the operator at.
+  it "labels a legacy snapshot's transport as LEGACY rather than asserting H1" do
+    saved_run(snapshot: 0).proto_label.should eq("LEGACY")
+    saved_run(snapshot: 0, http2: true).proto_label.should eq("LEGACY")
+    saved_run(snapshot: 1).proto_label.should eq("H1")
+    saved_run(snapshot: 1, http2: true).proto_label.should eq("H2")
+    saved_run(snapshot: 1, websocket: true).proto_label.should eq("WS")
+    saved_run(snapshot: 1, websocket: true, http2: true).proto_label.should eq("WS")
+
+    # …and the LISTING has to read it off the record rather than re-deriving it. This is the
+    # line the TUI picker's refusal sends the operator to, and it used to print `[H1]`.
+    Gori::CLI::Run.fuzz_saved_run_line_for_spec(saved_run(snapshot: 0), 3_i64)
+      .should contain("[LEGACY]")
+    Gori::CLI::Run.fuzz_saved_run_line_for_spec(saved_run(snapshot: 1, http2: true), 3_i64)
+      .should contain("[H2]")
+  end
+
+  # The key sets of the two saved-run feeds, pinned against each other — the same discipline
+  # `spec/cli/run/history_spec.cr` keeps for flow rows. `gori run fuzz list --format json`
+  # carried the raw unix micros and no RFC3339 twin while `list_fuzz_runs` emitted both, so a
+  # script correlating the two could not compare them as strings.
+  it "emits the same saved-run field set as MCP's list_fuzz_runs" do
+    run = saved_run
+    cli = JSON.parse(Gori::CLI::Run.fuzz_saved_run_json_for_spec(run, 4_i64)).as_h
+    mcp = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.saved_fuzz_run(j, run, 4_i64) }).as_h
+    cli.keys.sort.should eq(mcp.keys.sort)
+    cli.each { |key, value| value.should eq(mcp[key]) }
+    cli["created_at_iso"].as_s.should eq("2023-11-14T22:13:21.250Z")
+    cli["finished_at_iso"].as_s.should eq("2023-11-14T22:13:22.500Z")
+  end
+
+  it "emits a null finished_at_iso for a run that never finished" do
+    cli = JSON.parse(Gori::CLI::Run.fuzz_saved_run_json_for_spec(
+      saved_run(finished: nil), 0_i64)).as_h
+    cli["finished_at"].raw.should be_nil
+    cli["finished_at_iso"].raw.should be_nil
   end
 end

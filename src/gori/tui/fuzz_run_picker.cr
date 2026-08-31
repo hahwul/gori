@@ -102,7 +102,7 @@ module Gori::Tui
       bg = active ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
       screen.cell(box.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
-      proto = row.snapshot_version == 0 ? "LEGACY" : (row.websocket? ? "WS" : (row.http2? ? "H2" : "H1"))
+      proto = row.proto_label
       label = "##{row.id}  #{row.status.upcase} · #{proto} · #{row.mode}"
       stats = "#{row.matched}/#{row.sent} hit"
       sx = box.right - 2 - stats.size
