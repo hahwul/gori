@@ -34,6 +34,7 @@ private def seed_fuzz(store : Gori::Store, target : String, results : Int32 = 3)
       "HTTP/1.1 200 OK\r\n\r\n".to_slice,
       ("BIGRESPONSE" * 500).to_slice)
   end
+  store.finish_fuzz_run(run, results.to_i64, 0_i64, 0_i64, "done").should be_true
   store.flush
   {sid, run}
 end
@@ -45,6 +46,31 @@ private def counts(store : Gori::Store) : {Int64, Int64, Int64}
 end
 
 describe "deleting a Fuzz session" do
+  it "atomically refuses an active child run" do
+    fuzz_store do |store|
+      sid = store.insert_fuzz_session("http://active.test/", "GET / HTTP/1.1\r\n\r\n",
+        false, nil, "{}", nil, 0)
+      run = store.insert_fuzz_run(sid, "http://active.test/", "sniper", 1_i64)
+      store.insert_fuzz_result(run, 0_i64, %(["x"]), 200, 1_i64, 1, 1, 1_i64,
+        nil, false, nil)
+
+      store.delete_fuzz_session(sid).should be_false
+      counts(store).should eq({1_i64, 1_i64, 1_i64})
+
+      store.finish_fuzz_run(run, 1_i64, 0_i64, 0_i64, "done").should be_true
+      store.delete_fuzz_session(sid).should be_true
+      counts(store).should eq({0_i64, 0_i64, 0_i64})
+    end
+  end
+
+  it "answers false for an unknown session without affecting live rows" do
+    fuzz_store do |store|
+      seed_fuzz(store, "http://kept.test/", results: 1)
+      store.delete_fuzz_session(99_999_i64).should be_false
+      counts(store).should eq({1_i64, 1_i64, 1_i64})
+    end
+  end
+
   it "takes its runs and results with it" do
     fuzz_store do |store|
       sid, _run = seed_fuzz(store, "http://a.test/")

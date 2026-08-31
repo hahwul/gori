@@ -43,13 +43,12 @@ module Gori::Tui
     # attracts unsolicited third-party scanner traffic, the poller ingests it every
     # POLL_INTERVAL for as long as the listener lives, and each interaction costs one CbRow
     # holding the FULL raw_request and raw_response. Unbounded, that is the only buffer in the
-    # TUI a third party can grow (Notifications::CAP 100, Jobs::CAP 50, FuzzerView::RESULT_CAP
-    # 5000 are all bounded).
+    # TUI a third party can grow (Notifications::CAP 100 and Jobs::CAP 50 are bounded; Fuzzer
+    # results are operator-triggered and intentionally retain the complete run).
     #
     # This is a VIEW WINDOW, not a destructive trim: every evicted row is still in the
     # `oast_callbacks` table, and `reload` re-forms the window over the newest CALLBACK_CAP of
-    # them. Lower than FuzzerView's 5000 because a fuzz row keeps bodies only for matches while
-    # every OAST row carries both raw sides in full — 2000 is ~2-4 MiB of live interactions and
+    # them. Every OAST row carries both raw sides in full — 2000 is ~2-4 MiB of live interactions and
     # is two orders of magnitude past the few dozen callbacks a real assessment produces, so
     # the operator's own evidence never reaches it; only a flood does.
     CALLBACK_CAP = 2000

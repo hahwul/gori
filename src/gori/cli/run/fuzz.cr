@@ -27,6 +27,16 @@ module Gori
         tls_preset : String? = nil
 
       private def self.cmd_fuzz(args : Array(String)) : Nil
+        case args.first?
+        when "save"   then cmd_fuzz_execute(args[1..], save_results: true)
+        when "list"   then cmd_fuzz_saved_list(args[1..])
+        when "show"   then cmd_fuzz_saved_show(args[1..])
+        when "delete" then cmd_fuzz_saved_delete(args[1..])
+        else               cmd_fuzz_execute(args)
+        end
+      end
+
+      private def self.cmd_fuzz_execute(args : Array(String), save_results : Bool = false) : Nil
         db_path : String? = nil
         project_name : String? = nil
         flow_id : Int64? = nil
@@ -71,8 +81,9 @@ module Gori
         ws_http_only = false
         positional = [] of String
 
+        command = save_results ? "gori run fuzz save" : "gori run fuzz"
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run fuzz [<flow-id>] [options]   (mark positions with §…§)"
+          p.banner = "Usage: #{command} [<flow-id>] [options]   (mark positions with §…§)"
           p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
           p.on("--repeater=ID", "Seed the template from a saved repeater session (ids from `gori run repeater list`). A WebSocket session seeds its handshake AND its outbound frames — mark positions in the frames and each variation runs one full RFC 6455 session") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
           p.on("--request=FILE", "Read a raw HTTP request (may contain §…§) as the template") { |v| request_file = v }
@@ -196,16 +207,20 @@ module Gori
         # exclusive seed — every pair is refused so a caller cannot silently get one ignored.
         sources_given = [request_file != nil, flow_id != nil, repeater_id != nil].count(true)
         abort "gori run fuzz: pick ONE template source — --flow, --repeater, --request (or a <flow-id>)" if sources_given > 1
+        abort "gori run fuzz: <flow-id> and --flow/--repeater/--request cannot be combined" if positional.size == 1 && sources_given > 0
+        # Resolve the bare captured-flow source BEFORE deciding whether a project is in play.
+        # `fuzz save 42` uses the default project exactly like legacy `fuzz 42`; treating 42 as
+        # project-less here refused the primary documented save form.
+        flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
         # A project-less run (--request/stdin with no --project/--db) is DELIBERATELY outside any
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if record_policy != :none && !(flow_id || repeater_id || project_name || db_path)
-          abort "gori run fuzz: --record-history needs a project — this run has none (--request/stdin " \
-                "without --project/--db). Pass --project NAME or --db PATH to say where the flows go."
+        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_name || db_path)
+          feature = save_results ? "fuzz save" : "--record-history"
+          abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
+                "without --project/--db). Pass --project NAME or --db PATH to say where the results go."
         end
-        abort "gori run fuzz: <flow-id> and --flow/--repeater/--request cannot be combined" if positional.size == 1 && sources_given > 0
-        flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
 
         # Named project / --db always hydrates, even when `--request` is the template:
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
@@ -281,16 +296,8 @@ module Gori
 
         # `--record-history` retains each Result's rendered request/response bytes so they can be
         # written as flows — the retention axis both the matcher and the run config gate on.
-        matcher.keep_bodies = record_policy
-        # …and retention meets `--format json`'s end-of-run buffer: that path holds every SHOWN
-        # row until the sweep finishes, and those rows now carry their request + response bytes
-        # (up to `Body::CAPTURE_READ_MAX` each) instead of just metadata. `jsonl` streams row by
-        # row and pays nothing, so name it rather than silently growing the heap.
-        if record_policy != :none && format == :json
-          STDERR.puts "gori run fuzz: note: --format json buffers every row until the run ends, and " \
-                      "--record-history makes each row carry its request/response bytes — use " \
-                      "--format jsonl to stream instead"
-        end
+        # JSON and JSONL both stream rows now; neither adds a second full-run Result buffer.
+        matcher.keep_bodies = save_results ? :all : record_policy
 
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
@@ -301,7 +308,7 @@ module Gori
           sources: sources, processors: processors, auto_encode: auto_encode,
           config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
             retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
-            keep_bodies: record_policy, keep_alive: keep_alive, max_requests: max_requests,
+            keep_bodies: (save_results ? :all : record_policy), keep_alive: keep_alive, max_requests: max_requests,
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,
             race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
             ws_idle: ws_idle,
@@ -368,25 +375,38 @@ module Gori
         # what hands the engine over and calibrates.
         total = fuzz_preflight(plan.engine, outbound, mode, race, origin.scheme, origin.host, origin.port, force,
           plan.tls_preset)
-        # A store held open across the sweep ONLY when recording — each matched/all Result is
-        # written as a flow as it arrives (#749). Opened here, after the plan proved the target
-        # is valid, so a refused run never touches the DB.
-        record_store = record_policy == :none ? nil : open_store(resolve_read_project(project_name, db_path))
+        # One writable project handle serves optional History recording and permanent result
+        # storage. Opened only after every preflight/refusal, so a run that never sends does not
+        # create an empty saved-run row.
+        write_store = (record_policy == :none && !save_results) ? nil : open_store(resolve_read_project(project_name, db_path))
+        saved = nil.as(Fuzz::Persistence?)
         # Calibration SENDS, so it belongs inside the block that releases the read
-        # connection — a raise in there would otherwise leak it.
+        # connection — a raise in there would otherwise leak it. The permanent row is created
+        # only after binding/calibration succeeds: neither step is part of the sweep, and a
+        # refusal there must not strand a run forever in `running`.
         begin
           # Session bindings: seed the in-memory table before the sweep rather than after
           # every row of it. See CLI::Run.seed_bindings. An unseeded `$NAME` is not refused —
           # it ships literally (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
           plan.engine.calibrate_baseline if auto_cal
+          if save_results && (s = write_store)
+            saved_mode = fuzz_saved_mode(mode, race, plan.engine.race_count)
+            saved = Fuzz::Persistence.new(s, Fuzz::SavedRunMeta.new(nil,
+              "#{origin.scheme}://#{origin.host}:#{origin.port}", saved_mode, total,
+              http2: http2, sni: sni, tls_preset: plan.tls_preset,
+              websocket: plan.websocket?, surface: "cli",
+              source_ref: flow_id.try { |id| "flow:#{id}" } ||
+                          repeater_id.try { |id| "repeater:#{id}" }))
+          end
           run_fuzz_stream(plan.engine, total, race, origin.scheme, origin.host, origin.port, format,
             fail_if_no_matches, plan.pool, max_requests, plan.config.reframe_grpc?,
-            record_store: record_store, record_policy: record_policy, http2: http2,
-            websocket: plan.websocket?)
+            record_store: record_policy == :none ? nil : write_store,
+            record_policy: record_policy, http2: http2, websocket: plan.websocket?,
+            saved: saved)
         ensure
           outbound.close
-          record_store.try(&.close)
+          write_store.try(&.close)
         end
       end
 
@@ -707,7 +727,8 @@ module Gori
                                        max_requests : Int64? = nil,
                                        reframe_grpc : Bool = false,
                                        record_store : Store? = nil, record_policy : Symbol = :none,
-                                       http2 : Bool = false, websocket : Bool = false) : Nil
+                                       http2 : Bool = false, websocket : Bool = false,
+                                       saved : Fuzz::Persistence? = nil) : Nil
         matched = 0
         errored = 0
         recorded = 0
@@ -718,49 +739,85 @@ module Gori
         # over-report the error count and flip the exit code of a clean run.
         shown = 0
         had_error = false
-        buffer = [] of Fuzz::Result
-        # `--format json` buffers every row and prints once after the drain, so a bare SIGINT
-        # threw the whole sweep away. Stopping the engine instead makes `engine.run` return
-        # normally, and the emit below then covers the interrupted path too.
+        saved_terminal = false
+        last_progress = nil.as(Fuzz::Progress?)
         interrupted = Run.install_interrupt_trap("fuzz-interrupt",
           "interrupted — stopping and emitting what completed…") { engine.stop }
-        engine.run do |ev|
-          case ev
-          when Fuzz::ProgressEvent then fuzz_progress(ev, total)
-          when Fuzz::ResultEvent
-            r = ev.result
-            # Record BEFORE the emit gate: a recorded flow is evidence whether or not this row
-            # is printed (a matched-only listing still records `all`). Bounded by MAX so an
-            # `all` sweep of a huge set cannot grow the DB without end — the drop is announced.
-            if (rs = record_store) && Fuzz::HistoryRecord.records?(record_policy, r, websocket)
-              if recorded >= Fuzz::HistoryRecord::MAX
-                record_truncated = true
-              else
-                # The failure is REPORTED, once. A silent `rescue nil` here would print
-                # "recorded 0 flows" at the end of a run whose every write hit a locked or
-                # read-only DB, and an operator who asked for evidence would get neither the
-                # evidence nor a reason.
-                fid = Fuzz::HistoryRecord.record(rs, r, scheme: scheme, host: host, port: port, http2: http2,
-                  source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli,
-                  websocket: websocket) do |ex|
-                  unless record_failed
-                    record_failed = true
-                    STDERR.puts "gori run fuzz: could not record to History: #{ex.message} (further record errors suppressed)"
+        # The array writer opens before the engine starts and closes from ensure. Rows are emitted
+        # one at a time (no Result buffer), while interrupt/setup exceptions still leave `[]` or
+        # a valid partial array on stdout.
+        json_stream = format == :json ? CLI::Output::FuzzArrayStream.new(STDOUT) : nil
+        begin
+          engine.run do |ev|
+            case ev
+            when Fuzz::ProgressEvent
+              last_progress = ev.progress
+              fuzz_progress(ev, total)
+            when Fuzz::ResultEvent
+              r = ev.result
+              saved.try(&.append(r))
+              # Record BEFORE the emit gate: a recorded flow is evidence whether or not this row
+              # is printed (a matched-only listing still records `all`). Bounded by MAX so an
+              # `all` sweep of a huge set cannot grow the DB without end — the drop is announced.
+              if (rs = record_store) && Fuzz::HistoryRecord.records?(record_policy, r, websocket)
+                if recorded >= Fuzz::HistoryRecord::MAX
+                  record_truncated = true
+                else
+                  # The failure is REPORTED, once. A silent `rescue nil` here would print
+                  # "recorded 0 flows" at the end of a run whose every write hit a locked or
+                  # read-only DB, and an operator who asked for evidence would get neither the
+                  # evidence nor a reason.
+                  fid = Fuzz::HistoryRecord.record(rs, r, scheme: scheme, host: host, port: port, http2: http2,
+                    source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli,
+                    websocket: websocket) do |ex|
+                    unless record_failed
+                      record_failed = true
+                      STDERR.puts "gori run fuzz: could not record to History: #{ex.message} (further record errors suppressed)"
+                    end
                   end
+                  recorded += 1 if fid
                 end
-                recorded += 1 if fid
               end
+              if emit_fuzz_result(r, format, json_stream)
+                shown += 1
+                matched += 1 if r.matched?
+                errored += 1 if r.error && !r.matched?
+              end
+            when Fuzz::DoneEvent
+              last_progress = ev.progress
+              saved_terminal = true
+              saved.try(&.finish(ev.progress.sent, ev.progress.matched, ev.progress.errors,
+                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error)))
+              fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?, reframe_grpc)
+            when Fuzz::ErrorEvent
+              # The engine follows setup errors with Done. Defer the terminal write to that
+              # event so `error` cannot be immediately overwritten by `done`.
+              had_error = true
+              STDERR.puts "fuzz error: #{ev.message}"
             end
-            if emit_fuzz_result(r, format, buffer)
-              shown += 1
-              matched += 1 if r.matched?
-              errored += 1 if r.error && !r.matched?
+          end
+        ensure
+          # A broken stdout pipe must not strand a durable row in `running`: close the JSON
+          # document first, but put persistence in the nested ensure so it still finalizes when
+          # that close itself raises.
+          begin
+            json_stream.try(&.close)
+          ensure
+            unless saved_terminal
+              p = last_progress
+              saved.try(&.finish(p.try(&.sent) || 0_i64, p.try(&.matched) || 0_i64,
+                p.try(&.errors) || (had_error ? 1_i64 : 0_i64),
+                interrupted.call ? "stopped" : "error"))
             end
-          when Fuzz::DoneEvent  then fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?, reframe_grpc)
-          when Fuzz::ErrorEvent then had_error = true; STDERR.puts "fuzz error: #{ev.message}"
           end
         end
-        puts CLI::Output.fuzz_array_json(buffer) if format == :json
+        if persist = saved
+          if persist.failed?
+            STDERR.puts "gori run fuzz save: NOT saved: #{persist.error}"
+          else
+            STDERR.puts "saved fuzz run ##{persist.run_id} · #{persist.written} result#{persist.written == 1 ? "" : "s"}"
+          end
+        end
         # STDERR so STDOUT stays the result rows/JSON alone. `get_flow <id>` (History) reads the
         # recorded flows; `record_history: matched` pairs the flow set with the shown rows.
         if record_store
@@ -779,13 +836,18 @@ module Gori
         # Before the exit rules below, which would otherwise report a cut-short run as a plain
         # "no matches". See `Run.report_interrupted`.
         Run.report_interrupted(shown, "row", "emitted") if interrupted.call
-        exit 1 if had_error
+        exit 1 if had_error || saved.try(&.failed?)
         exit 3 if fail_if_no_matches && matched == 0
         # A run where NOTHING matched and every send errored (target down, scope-blocked, TLS
         # failure) is a failure, not a clean "no matches" — so a scripted caller can tell the two
         # apart even without --fail-if-no-matches. The errored rows are now shown too (below),
         # matching the TUI which renders every result. (#410)
         exit 1 if matched == 0 && errored > 0
+      end
+
+      private def self.fuzz_saved_mode(mode : Fuzz::Mode, requested_race : Int32?,
+                                       effective_race : Int32?) : String
+        requested_race ? "race ×#{effective_race || requested_race}" : mode.label
       end
 
       # Resolve + announce the request count; gate huge/unknown runs behind --force.
@@ -932,7 +994,8 @@ module Gori
       # Prints/buffers a result; returns true when it was emitted. Errored sends are shown too
       # (the row helpers render "ERR" + the message / `error` field), so a headless run has the
       # same visibility as the TUI — a scope-block or a dead target is no longer silently dropped.
-      private def self.emit_fuzz_result(r : Fuzz::Result, format : Symbol, buffer : Array(Fuzz::Result)) : Bool
+      private def self.emit_fuzz_result(r : Fuzz::Result, format : Symbol,
+                                        json_stream : CLI::Output::FuzzArrayStream?) : Bool
         # A re-sent row is shown even when it neither matched nor errored: it is the one row of
         # the run whose request reached the origin twice, and dropping it here would put the
         # duplicate back where it was — invisible outside the connections summary. A row whose
@@ -944,7 +1007,7 @@ module Gori
         return false unless r.matched? || r.error || r.retried? || r.resent? || r.incomplete? || r.chain_error
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
-        when :json  then buffer << r
+        when :json  then json_stream.try(&.append(r))
         else             puts CLI::Output.fuzz_row_text(r)
         end
         true

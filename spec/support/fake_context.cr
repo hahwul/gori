@@ -412,6 +412,20 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:fuzz_stop)
   end
 
+  def fuzz_save_results : Nil
+    rec(:fuzz_save_results)
+  end
+
+  def fuzz_run_history : Nil
+    rec(:fuzz_run_history)
+  end
+
+  property fuzzer_results_saveable : Bool = false
+
+  def fuzzer_results_saveable? : Bool
+    @fuzzer_results_saveable
+  end
+
   def fuzz_new : Nil
     rec(:fuzz_new)
   end

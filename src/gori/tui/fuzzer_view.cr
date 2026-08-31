@@ -31,6 +31,7 @@ require "../jwt"
 require "../graphql"
 require "../form_data"
 require "./subtab_clone"
+require "./fuzzer_result_window"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -41,7 +42,15 @@ module Gori::Tui
   # Config is edited in-pane with a small command line (no modal overlay): type e.g.
   # `mode clusterbomb`, `list a,b,c`, `match status:200,500`, `concurrency 50`.
   class FuzzerView
-    RESULT_CAP = 5000 # ring cap on retained result rows (metrics are cheap; bodies kept only for matched)
+    enum ResultIoState
+      Idle
+      Spooling
+      Ready
+      Saving
+      Loading
+      Saved
+      Failed
+    end
 
     # Aggregated result distribution for the DIST sidebar. Raw numbers only — bakes no
     # Color, so a theme switch needs no cache rebuild (colours resolve live at draw).
@@ -51,6 +60,8 @@ module Gori::Tui
       len_hist : Array(Int32), len_min : Int64, len_max : Int64,
       words_hist : Array(Int32), words_min : Int32, words_max : Int32,
       time_hist : Array(Int32), time_min : Int64, time_max : Int64
+
+    @results : Deque(Fuzz::Result)
 
     STATUS_MAX_ROWS =  6 # ≤ this many distinct codes → per-code bars; else collapse to classes
     DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
@@ -78,7 +89,7 @@ module Gori::Tui
 
     PANE_ORDER = [:target, :template, :config, :results]
 
-    def initialize
+    def initialize(@result_window : FuzzerResultWindow = FuzzerResultWindow.new)
       @name = nil
       @target = ""
       @tcx = 0
@@ -107,9 +118,9 @@ module Gori::Tui
       # completes it. (In the Repeater a marker IS complete on its own — hence the default.)
       @editor.chain_peek_hint = "^Q edit · ^O sets"
       @last_synced_config = "" # last store config blob applied (reconcile equality)
-      @config = Fuzz::Config.new(keep_bodies: :matched)
+      @config = Fuzz::Config.new(keep_bodies: :all)
       @sets = [] of SetSpec
-      @matcher = Fuzz::Matcher.new(keep_bodies: :matched)
+      @matcher = Fuzz::Matcher.new(keep_bodies: :all)
       # CONFIG pane state — a calm, single-axis summary (no text field, no caret). @cfg_row
       # is the row cursor (↑/↓) over the payload-set rows + Add + Mode + Advanced + Run;
       # all text entry lives in the Set / Advanced overlays. @cfg_scroll windows the sets.
@@ -136,8 +147,11 @@ module Gori::Tui
       # (mode + sets + marker count) changes, so the summary row never rebuilds sources each frame.
       @run_count_cache = nil.as(Int64?)
       @run_count_sig = ""
-      @results = [] of Fuzz::Result
+      @results = @result_window.rows
       @results_rev = 0_i64 # bumped on every @results mutation — the DIST cache key
+      @run_result_count = 0_i64
+      @run_matched_count = 0_i64
+      @run_error_count = 0_i64
       # The template snapshot the CURRENT run's results were generated from — the RESULT
       # detail must reconstruct each request against this, not the live @editor buffer,
       # which the user may have edited (adding/removing §…§ markers) since the run.
@@ -171,6 +185,7 @@ module Gori::Tui
       # payload dangling off the end of the frame, under a Content-Length resynced to cover it.
       @run_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
       @pending_grpc_fields = nil.as(Fuzz::GrpcFieldTemplate?)
+      @pending_websocket = false
       # `Fuzz::Plan#rewrites_content_length?` as of the last plan build, plus the
       # `@editor.edits` revision it was computed at — an edit to the template invalidates
       # the answer, and a stale "your CL is being rewritten" is worse than none.
@@ -215,10 +230,10 @@ module Gori::Tui
       #
       # NOTE on matched_count: during a live run @results_rev bumps per appended result, so
       # this key never hits and the count(&.matched?) scan does run every frame. Maintaining
-      # the count incrementally in append_result instead was tried and benched at RESULT_CAP
+      # the count incrementally instead was tried and benched at 5,000 rows
       # (bench/fuzz_view_frame_bench.cr) — no measurable difference, the frame is dominated by
       # cell drawing. Left as a memo rather than trade a self-correcting recompute for state
-      # that three mutation sites must keep in sync for no gain.
+      # that several mutation sites must keep in sync for no gain.
       @matched_count_cache = 0
       @matched_count_rev = -1_i64
       @sorted_cache = nil.as(Array(Fuzz::Result)?)
@@ -228,6 +243,21 @@ module Gori::Tui
       @sorted_cache_at = Time.instant # see SORT_REFRESH
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
+      @run_started_at = 0_i64
+      @run_status = ""
+      @run_target = ""
+      @run_http2 = false
+      @run_sni = nil.as(String?)
+      @run_mode = ""
+      @run_tls_preset = nil.as(String?)
+      @run_websocket = false
+      @run_max_requests = nil.as(Int64?)
+      @saved_run_id = nil.as(Int64?)
+      @failed_save_run_id = nil.as(Int64?)
+      @result_io_state = ResultIoState::Idle
+      @load_return_state = ResultIoState::Idle
+      @loaded_saved_run = false
+      @run_generation = 0_i64
       @job_id = 0
       @stop_requested = false
       @detail_pane = :response
@@ -407,7 +437,11 @@ module Gori::Tui
       apply_config_json(src.config_json)
       @name = SubtabClone.copy_name(src.name)
       @dirty = true
-      @results.clear
+      @result_window.clear
+      @run_result_count = 0_i64
+      @run_matched_count = 0_i64
+      @run_error_count = 0_i64
+      @result_io_state = ResultIoState::Idle
       @results_rev += 1
       @sel = 0
       @scroll = 0
@@ -891,7 +925,12 @@ module Gori::Tui
     end
 
     def begin_run(total : Int64?) : Nil
-      @results.clear
+      @run_generation += 1
+      @result_window.clear
+      @run_result_count = 0_i64
+      @run_matched_count = 0_i64
+      @run_error_count = 0_i64
+      @result_io_state = ResultIoState::Spooling
       @run_template = @pending_template         # freeze the template these results are rendered against
       @run_policy = @pending_policy             # ...and the CL knobs + retention its generator ran under
       @run_auto_encode = @pending_auto_encode   # ...and the positions it percent-encoded for
@@ -913,44 +952,207 @@ module Gori::Tui
       @running = true
       @stop_requested = false
       @run_total = total
+      @run_started_at = Time.utc.to_unix_ms * 1000_i64
+      @run_status = "running"
+      @run_target = target_origin
+      @run_http2 = @http2
+      @run_sni = sni_override
+      @run_mode = @config.race_count.try { |n| "race ×#{n.clamp(2, Fuzz::Engine::MAX_RACE_SIZE)}" } || @config.mode.label
+      @run_tls_preset = @config.tls_preset
+      @run_websocket = @pending_websocket
+      @run_max_requests = @config.max_requests
+      @saved_run_id = nil
+      @failed_save_run_id = nil
+      @loaded_saved_run = false
       @progress = Fuzz::Progress.new(0_i64, total, 0_i64, 0_i64)
       clear_detail_decode # a new run reuses request indices → drop the old decode cache
     end
 
-    def finish_run : Nil
+    def finish_run(status : String? = nil, archive_ready : Bool = true) : Nil
       @running = false
+      if value = status
+        @run_status = value
+      end
+      @result_io_state = archive_ready ? ResultIoState::Ready : ResultIoState::Failed
+    end
+
+    def terminal_status(progress : Fuzz::Progress, stopped : Bool, errored : Bool = false) : String
+      Fuzz.terminal_status(progress, stopped, @run_max_requests, errored)
     end
 
     def apply_progress(p : Fuzz::Progress) : Nil
       @progress = p
+      @run_result_count = {@run_result_count, p.sent}.max
+      @run_matched_count = {@run_matched_count, p.matched}.max
+      @run_error_count = {@run_error_count, p.errors}.max
     end
 
     def append_result(r : Fuzz::Result) : Nil
-      @results << r
-      if @results.size > RESULT_CAP
-        @results.shift
-        # Only the raw index view (no filter, no re-sort) shifts 1:1 with @results, so only
-        # there does pinning selection/scroll by -1 keep the same logical rows. In a
-        # matched-only or re-sorted view the evicted (usually unmatched) front row isn't at
-        # this position — @sel should stay put (the render clamp bounds it); a blind -1 there
-        # would retarget the open detail to a different result.
-        if @sort == :index && !@matched_only
-          @sel -= 1 if @sel > 0
-          @scroll -= 1 if @scroll > 0
-        end
+      @run_result_count += 1
+      @run_matched_count += 1 if r.matched?
+      @run_error_count += 1 if r.error
+      evicted = @result_window.append(r)
+      if evicted > 0 && @sort == :index && !@matched_only
+        @sel = {@sel - evicted, 0}.max
+        @scroll = {@scroll - evicted, 0}.max
       end
-      @results_rev += 1 # grow AND ring-evict both bump (size is pinned once full)
+      @results_rev += 1
     end
 
-    def matched_count : Int32
-      return @matched_count_cache if @matched_count_rev == @results_rev
-      @matched_count_cache = @results.count(&.matched?)
-      @matched_count_rev = @results_rev
-      @matched_count_cache
+    def matched_count : Int64
+      {@run_matched_count, @progress.try(&.matched) || 0_i64}.max
     end
 
-    def result_count : Int32
+    def result_count : Int64
+      {@run_result_count, @progress.try(&.sent) || 0_i64}.max
+    end
+
+    def retained_result_count : Int32
       @results.size
+    end
+
+    def retained_result_bytes : Int64
+      @result_window.bytes
+    end
+
+    def result_display_truncated?(result : Fuzz::Result) : Bool
+      @result_window.projected?(result.index)
+    end
+
+    def results_windowed? : Bool
+      result_count > retained_result_count
+    end
+
+    def results_saveable? : Bool
+      !@running && @result_io_state == ResultIoState::Ready && @saved_run_id.nil? && result_count > 0
+    end
+
+    def saving_results? : Bool
+      @result_io_state == ResultIoState::Saving
+    end
+
+    def loading_results? : Bool
+      @result_io_state == ResultIoState::Loading
+    end
+
+    def archive_failed? : Bool
+      @result_io_state == ResultIoState::Failed
+    end
+
+    def saved_run_id : Int64?
+      @saved_run_id
+    end
+
+    def failed_save_run_id : Int64?
+      @failed_save_run_id
+    end
+
+    def run_generation : Int64
+      @run_generation
+    end
+
+    # Claim the result pane for one async history load. A second load or a new run advances
+    # the token again, so an older completion cannot overwrite the later choice.
+    def reserve_result_load : Int64
+      @load_return_state = @result_io_state
+      @result_io_state = ResultIoState::Loading
+      @run_generation += 1
+    end
+
+    def fail_result_load : Nil
+      @result_io_state = @load_return_state
+    end
+
+    def begin_results_save : Nil
+      @result_io_state = ResultIoState::Saving
+    end
+
+    def finish_results_save(id : Int64?, failed_id : Int64? = nil) : Nil
+      @result_io_state = id ? ResultIoState::Saved : ResultIoState::Ready
+      @saved_run_id = id
+      @failed_save_run_id = failed_id
+      @loaded_saved_run = false if id
+    end
+
+    def saved_run_meta(session_id : Int64?) : Fuzz::SavedRunMeta
+      Fuzz::SavedRunMeta.new(session_id, @run_target, @run_mode, @run_total,
+        created_at: @run_started_at, http2: @run_http2, sni: @run_sni,
+        tls_preset: @run_tls_preset, websocket: @run_websocket, surface: "tui",
+        source_ref: "tui:#{session_id}:#{@run_started_at}")
+    end
+
+    def saved_run_counters : {Int64, Int64, Int64, String}
+      progress = @progress
+      sent = {progress.try(&.sent) || 0_i64, @run_result_count}.max
+      matched = {progress.try(&.matched) || 0_i64, @run_matched_count}.max
+      errors = {progress.try(&.errors) || 0_i64, @run_error_count}.max
+      status = @run_status.empty? ? "done" : @run_status
+      {sent, matched, errors, status}
+    end
+
+    # Compatibility seam for focused view specs and small direct callers. Production restore
+    # performs this conversion in the background and calls the Result overload with a bounded
+    # window, so large saved runs are never materialized here.
+    def load_saved_run(run : Store::FuzzRunRecord,
+                       records : Array(Store::FuzzResultRecord)) : Nil
+      window = FuzzerResultWindow.new
+      records.each { |record| window.append(Fuzz::Persistence.result(record)) }
+      load_saved_run(run, window.rows.to_a)
+    end
+
+    def load_saved_run(run : Store::FuzzRunRecord, rows : Array(Fuzz::Result)) : Nil
+      @run_generation += 1
+      @result_window.clear
+      rows.each { |row| @result_window.append(row) }
+      @run_result_count = run.sent
+      @run_matched_count = run.matched
+      @run_error_count = run.errors
+      @results_rev += 1
+      @run_total = run.total
+      @progress = Fuzz::Progress.new(run.sent, run.total, run.matched, run.errors)
+      @run_started_at = run.created_at
+      @run_status = run.status
+      @run_target = run.target
+      @run_http2 = run.http2?
+      @run_sni = run.sni
+      @run_mode = run.mode
+      @run_tls_preset = run.tls_preset
+      @run_websocket = run.websocket?
+      @saved_run_id = run.id
+      @failed_save_run_id = nil
+      @loaded_saved_run = true
+      @result_io_state = ResultIoState::Saved
+      @running = false
+      @sel = 0
+      @scroll = 0
+      @focus = :results
+      @detail_lines_cache = nil
+      @detail_source_lines = nil
+      @detail_lines_key = nil
+      @detail_styled_cache = nil
+      @detail_styled_key = nil
+      clear_detail_decode
+    end
+
+    def forget_saved_run(id : Int64) : Nil
+      if @failed_save_run_id == id
+        @failed_save_run_id = nil
+        return
+      end
+      return unless @saved_run_id == id
+      if @loaded_saved_run
+        @run_generation += 1
+        @result_window.clear
+        @run_result_count = 0_i64
+        @run_matched_count = 0_i64
+        @run_error_count = 0_i64
+        @results_rev += 1
+        @progress = nil
+        @run_total = nil
+      end
+      @saved_run_id = nil
+      @loaded_saved_run = false
+      @result_io_state = ResultIoState::Idle
     end
 
     # --- config pane (calm summary) ------------------------------------------
@@ -1253,6 +1455,7 @@ module Gori::Tui
       # non-retained row instead of splicing a typed payload into a template that has no
       # position for it. nil for every run that named no field, which is every run there was.
       @pending_grpc_fields = plan.grpc_fields
+      @pending_websocket = plan.websocket?
       # The template declares a Content-Length that disagrees with its own body BEFORE any
       # payload is substituted — so the auto-resync is about to rewrite framing the operator
       # authored deliberately, on every variation, and the sweep would report a clean
@@ -1396,6 +1599,25 @@ module Gori::Tui
     def target_origin : String
       scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(@target))
       "#{scheme}://#{host}:#{port}"
+    end
+
+    # Transport context frozen with the result set. The session editor may have changed since
+    # the run (and a loaded historical run intentionally does not overwrite it), so actions on
+    # a selected result must never read the live target/protocol fields.
+    def result_target_origin : String
+      @run_target.empty? ? target_origin : @run_target
+    end
+
+    def result_http2? : Bool
+      @run_http2
+    end
+
+    def result_sni : String?
+      @run_sni
+    end
+
+    def result_tls_preset : String?
+      @run_tls_preset
     end
 
     private def build_source(s : SetSpec) : Fuzz::PayloadSource
@@ -1734,17 +1956,16 @@ module Gori::Tui
     SORT_REFRESH = 250.milliseconds
 
     # The memo keys on @results_rev, which bumps on EVERY appended result, so during a live
-    # run it never hit and the rebuild below ran once per frame. Measured at RESULT_CAP (5000
-    # rows): sort_by(:status) 615µs / 2.54MB per call, sort_by(:length) 378µs / 2.54MB,
+    # run it never hit and the rebuild below ran once per frame. Measured at 5,000 rows:
+    # sort_by(:status) 615µs / 2.54MB per call, sort_by(:length) 378µs / 2.54MB,
     # matched-only select 49µs / 502kB — against a whole results-pane frame of ~239µs
     # (bench/fuzz_view_frame_bench.cr). At 20 fps that is ~50 MB/s of garbage, and the
     # allocation is the part that matters (AGENTS.md: allocation-shaped wins are real, CPU
     # micro-optimisations usually are not).
     #
-    # Throttled rather than maintained incrementally: results also RING-EVICT at RESULT_CAP,
-    # so keeping a sorted array correct means three mutation sites staying in sync — the same
-    # trade the matched_count note above declined. A sorted list of a streaming run
-    # re-ordering 20 times a second is unreadable anyway; four times is plenty.
+    # Throttled rather than maintained incrementally so every results mutation still has one
+    # source of truth. A sorted list of a streaming run re-ordering 20 times a second is
+    # unreadable anyway; four times is plenty.
     #
     # The throttle applies only when the view COPIES. With the default `:index` and no
     # matched-only filter `rows` IS @results, so the cached array is the live one, new rows
@@ -1758,18 +1979,20 @@ module Gori::Tui
       nil
     end
 
-    private def sorted_results : Array(Fuzz::Result)
+    private def sorted_results : Indexable(Fuzz::Result)
+      # The default index view reads the live deque directly: no copy per streamed result.
+      return @results unless copies_results?
       if cached = reusable_sorted_cache
         return cached
       end
-      rows = @matched_only ? @results.select(&.matched?) : @results
+      rows = @matched_only ? @results.select(&.matched?) : @results.to_a
       sorted =
         case @sort
         when :status then rows.sort_by { |r| r.status || -1 }
         when :length then rows.sort_by(&.length)
         when :words  then rows.sort_by(&.words)
         when :time   then rows.sort_by(&.duration_us)
-        else              rows # :index — the live @results order (uncopied; read-only here)
+        else              rows
         end
       @sorted_cache = sorted
       @sorted_cache_rev = @results_rev
@@ -2694,7 +2917,9 @@ module Gori::Tui
         "running #{p ? p.sent : 0}/#{@run_total || "?"}#{extra} · #{matched_count} hit"
       else
         extra = req > result_count ? " · #{req} requests" : ""
-        "#{result_count} sent#{extra} · #{matched_count} hit"
+        window = results_windowed? ? " · showing #{retained_result_count}" : ""
+        saved = @saved_run_id.try { |id| " · saved ##{id}" } || ""
+        "#{result_count} sent#{extra} · #{matched_count} hit#{window}#{saved}"
       end
     end
 
@@ -2849,8 +3074,8 @@ module Gori::Tui
       return y0 if groups.empty?
       total = d.codes.sum(&.[1]) + d.err
       maxc = groups.max_of?(&.[1]) || 1
-      label_w = 4                      # "200 " / "5xx " / "ERR "
-      num_w = {total.to_s.size, 4}.min # right-aligned count column (≤ RESULT_CAP digits)
+      label_w = 4             # "200 " / "5xx " / "ERR "
+      num_w = total.to_s.size # right-aligned count column; result retention is unbounded
       bar_w = {inner.w - label_w - num_w - 1, 1}.max
       y = y0
       groups.each_with_index do |(label, count, code), i|
@@ -3079,7 +3304,8 @@ module Gori::Tui
     # covered by `Result#chain_error`, which reports what happened on the WIRE — where the hook
     # ran fine — so without carrying it here the pane would show untransformed bytes, with a
     # Content-Length computed to match them, and say nothing.
-    record ResultRequest, bytes : Bytes, reconstructed : Bool, chain_withheld : Bool = false
+    record ResultRequest, bytes : Bytes, reconstructed : Bool, chain_withheld : Bool = false,
+      display_omitted : Bool = false
 
     # The one sentence every surface uses for a reconstruction — kept next to the record so
     # the detail pane, the copy buffer and the Repeater seed cannot word it differently, and
@@ -3112,6 +3338,9 @@ module Gori::Tui
     # template does not capture can still differ. Hence the flag — closeness is the
     # consolation, saying so is the fix.
     def result_request(r : Fuzz::Result) : ResultRequest
+      if result_display_truncated?(r)
+        return ResultRequest.new(Bytes.empty, false, false, true)
+      end
       if sent = r.request
         return ResultRequest.new(sent, false)
       end
@@ -3168,6 +3397,9 @@ module Gori::Tui
     # controller stamps it on the Repeater seed so "Send to Repeater" carries the same caveat
     # the detail pane shows.
     def result_request_note(r : Fuzz::Result) : String?
+      if result_display_truncated?(r)
+        return "(request unavailable in the bounded display — exact fields remain in the saved archive)"
+      end
       return nil unless r.request.nil?
       note = FuzzerView.reconstruction_note(run_policy[2])
       # Carried on the SEED and the Comparer chip too, not only in the detail pane: those two
@@ -3203,6 +3435,9 @@ module Gori::Tui
 
     private def detail_request_lines(r : Fuzz::Result) : Array(String)
       req = result_request(r)
+      if req.display_omitted
+        return ["(request unavailable in the bounded display — exact fields remain in the saved archive)"]
+      end
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
       lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
       lines.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld
@@ -3232,7 +3467,7 @@ module Gori::Tui
         return ["(send failed: #{err})"]
       end
       head = r.head
-      return ["(response not retained — only matched results keep the response)"] unless head
+      return ["(response not retained by this run)"] unless head
       # `Result#body` is retained in its captured wire form. Read the response pane through
       # the same decoded-entity seam as the Fuzzer matcher, at the same output ceiling, so the
       # body on screen agrees with the row's decoded length/word/line metrics without changing

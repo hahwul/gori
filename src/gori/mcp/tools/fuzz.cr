@@ -16,7 +16,9 @@ module Gori
 
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset = build_fuzz_job(h, ob)
+        save_results = bool_arg(h, "save_results", false)
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests =
+          build_fuzz_job(h, ob, save_results)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
@@ -29,9 +31,16 @@ module Gori
         id = "fz_#{@job_seq}"
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
           optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
-          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
+          effective_max_requests, Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
         fjob.websocket = !ws_frames.nil?
+        if save_results
+          fjob.persistence = Fuzz::Persistence.new(store,
+            Fuzz::SavedRunMeta.new(nil, audit.target, mode_label, total,
+              created_at: audit.started_at_ms * 1000_i64, http2: http2,
+              sni: effective_sni, tls_preset: tls_preset, websocket: fjob.websocket?,
+              surface: "mcp", source_ref: id))
+        end
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
         # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
         # `fuzz_config` applies, so a second accessor on the plan would only be a second place
@@ -83,6 +92,7 @@ module Gori
             j.field "total", total
             j.field "status", "running"
             j.field "record_history", fjob.record_history.to_s
+            emit_fuzz_save_state(j, fjob)
             # WHICH HANDSHAKE this run's results came from — absent when no override was in
             # play. Named on the START echo and on every `fuzz_status` so a result set read
             # later still says which side of a fingerprint A/B it is.
@@ -142,6 +152,10 @@ module Gori
         Log.error(exception: ex) { "fuzz job #{fjob.id} crashed" }
         fjob.error_msg ||= ex.message || "internal fuzz job error"
       ensure
+        # Keep status :running until the final batch + summary commit. Project switching is
+        # gated by that state, so this ordering prevents the writer from following @store to a
+        # different project between the last event and the flush.
+        finish_fuzz_persistence(fjob, fjob.status == :running ? :error : fjob.status)
         finalize_job(fjob)
       end
 
@@ -151,16 +165,22 @@ module Gori
         case ev
         when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
         when Fuzz::ResultEvent
+          # Permanent storage is deliberately independent of the selective/capped live cache.
+          # A write failure is absorbed by Persistence and never stops outbound traffic.
+          fjob.persistence.try(&.append(ev.result))
           flow_id = maybe_record_fuzz_flow(fjob, ev.result)
           store_fuzz_result(fjob, ev.result, flow_id)
         when Fuzz::DoneEvent
           apply_fuzz_progress(fjob, ev.progress)
-          fjob.status = terminal_status(fjob.status, ev.stopped, fjob.sent, fjob.total)
+          terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped)
+          finish_fuzz_persistence(fjob, terminal)
+          fjob.status = terminal
           fjob.ended_at_ms = Time.utc.to_unix_ms
         when Fuzz::ErrorEvent
-          fjob.status = :error
+          # Engine setup failures are followed by Done. Keep the job logically running until
+          # that event supplies final counters and flushes persistence; then land :error.
+          fjob.terminal_error = true
           fjob.error_msg = ev.message
-          fjob.ended_at_ms ||= Time.utc.to_unix_ms
         end
       rescue ex
         # Bounded logging — see `FuzzJob#drain_errors`. This rescue is on the per-EVENT
@@ -171,7 +191,7 @@ module Gori
           Log.error(exception: ex) { "fuzz job #{fjob.id} drain error" }
           Log.error { "fuzz job #{fjob.id}: further drain errors suppressed" } if fjob.drain_errors == DRAIN_LOG_CAP
         end
-        fjob.status = :error if fjob.status == :running
+        fjob.terminal_error = true
         fjob.error_msg ||= ex.message || "internal fuzz drain error"
       end
 
@@ -217,6 +237,46 @@ module Gori
         return nil unless total && caller_cap && caller_cap > 0 && caller_cap < total
         "max_requests (#{caller_cap}) is below the #{total} candidate total; " \
         "the run will stop at the budget before checking every candidate"
+      end
+
+      # MCP job state and its permanent row use the same engine-owned verdict as CLI/TUI.
+      # Progress.requests (not payload count) is the max_requests budget unit, and a nil total
+      # remains incomplete when that wire budget was reached.
+      private def fuzz_terminal_status(fjob : FuzzJob, progress : Fuzz::Progress,
+                                       stopped : Bool) : Symbol
+        case Fuzz.terminal_status(progress, stopped, fjob.audit.max_requests,
+          fjob.terminal_error?)
+        when "done"             then :done
+        when "budget_exhausted" then :budget_exhausted
+        when "stopped"          then :stopped
+        else                         :error
+        end
+      end
+
+      private def finish_fuzz_persistence(fjob : FuzzJob, status : Symbol) : Nil
+        return if fjob.persistence_finished?
+        if persistence = fjob.persistence
+          persistence.finish(fjob.sent, fjob.matched, fjob.errors, status.to_s)
+        end
+        fjob.persistence_finished = true
+      end
+
+      # Optional fields: a default ephemeral job keeps its historical response shape.
+      private def emit_fuzz_save_state(j : JSON::Builder, fjob : FuzzJob) : Nil
+        persistence = fjob.persistence
+        return unless persistence
+        j.field "save_results", true
+        j.field "run_id", persistence.run_id if persistence.run_id > 0
+        j.field "save_status",
+          if persistence.failed?
+            "save_failed"
+          elsif fjob.persistence_finished?
+            fjob.status.to_s
+          else
+            "running"
+          end
+        j.field "saved_results", persistence.written
+        j.field "save_error", Serialize.text(persistence.error) if persistence.error
       end
 
       private def apply_fuzz_progress(fjob : FuzzJob, p : Fuzz::Progress) : Nil
@@ -341,6 +401,7 @@ module Gori
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
             j.field "record_history", fjob.record_history.to_s
+            emit_fuzz_save_state(j, fjob)
             j.field("tls_preset", fjob.tls_preset) if fjob.tls_preset
             j.field "recorded_flows", fjob.recorded_flows
             j.field "history_truncated", fjob.history_truncated?
@@ -393,6 +454,7 @@ module Gori
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?
             j.field "history_truncated", fjob.history_truncated?
+            emit_fuzz_save_state(j, fjob)
           end
         end)
       end
@@ -417,7 +479,7 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?}
+      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?}
         text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -448,6 +510,13 @@ module Gori
           end
           use_h2 = false
         end
+        effective_sni = str(h, "sni") || src_sni
+        config = fuzz_config(h, mode, src_tls_preset)
+        matcher = fuzz_matcher(h)
+        if save_results
+          config.keep_bodies = :all
+          matcher.keep_bodies = :all
+        end
         options = Fuzz::PlanOptions.new(text,
           # A `flow_id` template is CAPTURED evidence; a `template` string is the caller's
           # draft. See `Fuzz::PlanOptions#evidence?`.
@@ -461,7 +530,7 @@ module Gori
           # two: `auto:true` finds the position, and an agent that then sends `<script>` was
           # producing a corrupt request line, not a test. `no_encode:true` is the way out.
           auto_encode: !bool_arg(h, "no_encode", false),
-          config: fuzz_config(h, mode, src_tls_preset), matcher: fuzz_matcher(h),
+          config: config, matcher: matcher,
           # Defense-in-depth alongside the job-start Layer-1 check: that check only covers
           # the origin once, not a path a template mutates per-request. The Outbound re-reads
           # the scope periodically, so a mid-run EXCLUDE / Sandbox toggle stops the sweep.
@@ -470,7 +539,7 @@ module Gori
           # `Fuzz::PlanOptions` and the CLI have always carried it; MCP's only route to it was
           # create_repeater{sni} → send_request{repeater_id}, i.e. not a sweep at all.
           # An explicit `sni` wins; otherwise the source's own (a repeater session's stored SNI).
-          sni: str(h, "sni") || src_sni,
+          sni: effective_sni,
           overrides: HostOverrides.load(store),
           ws_messages: ws_messages)
         plan = Fuzz::Plan.build(options, ob)
@@ -479,7 +548,9 @@ module Gori
         # from a `repeater_id` cannot otherwise tell whether its frames were picked up.
         {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks,
          plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
-         plan.tls_preset}
+         plan.tls_preset,
+         plan.engine.race_count.try { |n| "race ×#{n}" } || mode.label,
+         effective_sni, config.max_requests}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -1208,6 +1279,7 @@ module Gori
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
+          s.field "save_results", boolprop("persist EVERY result permanently in this project, including full rendered request, final wire request, response head and response body. Independent of record_history and of the bounded live-job cache. The start/status/results replies include run_id + save_status; inspect it later with list_fuzz_runs/get_fuzz_run.")
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body (default true). Set FALSE to send your template's declared value verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
           s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
           s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")

@@ -129,6 +129,74 @@ describe "Gori::Store.compact" do
     end
   end
 
+  it "measures and NULLs all four fuzz capture BLOBs, including wire" do
+    with_project do |path|
+      run = 0_i64
+      store = Gori::Store.open(path)
+      begin
+        run = store.insert_fuzz_run(nil, "http://fuzz", "sniper", 3_i64, status: "saving")
+        store.insert_fuzz_results(run, [
+          Gori::Store::FuzzResultWrite.new(
+            0_i64, %(["all"]), nil, 200, 100_000_i64, 1, 1, 1_i64, nil, false,
+            false, nil, big_body(10_000), big_body(20_000), big_body(30_000),
+            wire: big_body(40_000)),
+          Gori::Store::FuzzResultWrite.new(
+            1_i64, %(["wire"]), nil, 200, 5_000_i64, 1, 1, 1_i64, nil, false,
+            false, nil, wire: big_body(5_000)),
+          Gori::Store::FuzzResultWrite.new(
+            2_i64, %(["empty"]), nil, 200, 0_i64, 0, 0, 1_i64, nil, false,
+            false, nil, Bytes.empty, Bytes.empty, Bytes.empty, wire: Bytes.empty),
+        ]).should be_true
+        store.finish_fuzz_run(run, 3_i64, 0_i64, 0_i64, "done").should be_true
+      ensure
+        store.close
+      end
+
+      Gori::Store.measure(path).fuzz_bytes.should eq(105_000_i64)
+      Gori::Store.compact(path, Gori::Store::CompactPlan.new(fuzz_bodies: true)).not_nil!
+      Gori::Store.measure(path).fuzz_bytes.should eq(0_i64)
+
+      store = Gori::Store.open(path)
+      begin
+        rows = store.fuzz_results(run, limit: 10)
+        rows.size.should eq(3)
+        rows.each do |row|
+          {row.request, row.response_head, row.response_body, row.wire}
+            .should eq({nil, nil, nil, nil})
+        end
+        rows[0].length.should eq(100_000_i64) # scalar projection survives compaction
+        store.@db.query_one(
+          "SELECT TYPEOF(request), TYPEOF(response_head), TYPEOF(response_body), TYPEOF(wire) " \
+          "FROM fuzz_results WHERE run_id = ? AND idx = 2", run,
+          as: {String, String, String, String}).should eq({"null", "null", "null", "null"})
+      ensure
+        store.close
+      end
+    end
+  end
+
+  it "measures pre-V24 fuzz BLOBs even though the wire column is absent" do
+    path = File.tempname("gori-compact-v23", ".db")
+    begin
+      DB.open("sqlite3:#{path}") do |db|
+        Gori::Store::Schema::MIGRATIONS[0...23].each do |statements|
+          statements.each { |sql| db.exec(sql) }
+        end
+        db.exec("PRAGMA user_version = 23")
+        db.exec("INSERT INTO fuzz_runs (created_at, target, mode, status) " \
+                "VALUES (1, 'http://old', 'sniper', 'done')")
+        run = db.scalar("SELECT last_insert_rowid()").as(Int64)
+        db.exec("INSERT INTO fuzz_results (run_id, idx, payloads, request, response_head, response_body) " \
+                "VALUES (?, 0, '[]', X'0102', X'030405', X'06')", run)
+      end
+      Gori::Store.measure(path).fuzz_bytes.should eq(6_i64)
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "refuses (returns nil) when another live instance holds the capture lock" do
     with_project do |path|
       store = Gori::Store.open(path)

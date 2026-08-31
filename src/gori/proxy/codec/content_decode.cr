@@ -53,6 +53,7 @@ module Gori::Proxy::Codec
     # Kept as a second entry point rather than a wider `decode` return so the many callers
     # that only want {bytes, note} stay untouched.
     def self.decode_full(head : Bytes?, body : Bytes?, max_out : Int32 = MAX_OUT) : {Bytes?, String?, Bool}
+      max_out = 0 if max_out < 0
       return {nil, nil, true} if body.nil? || body.empty? || head.nil?
       # Zero-alloc gate before the head String: `encoding_headers` only ever populates its
       # lists from a `content-encoding` / `transfer-encoding` header, and BOTH names contain
@@ -80,7 +81,7 @@ module Gori::Proxy::Codec
       # A chunked wire form that never reached its terminating 0-chunk is cut, exactly like a
       # compressed stream that never ended — same fact, same report. `chunked` is the FINAL
       # transfer coding (the outermost layer), so undoing it first keeps the chain in order.
-      entity, complete, notes = te_chunked ? dechunk_step(body) : {body, true, [] of String}
+      entity, complete, notes = te_chunked ? dechunk_step(body, max_out) : {body, true, [] of String}
       # Both header families list their codings in the order they were APPLIED; decode from
       # the outermost (last-listed) inward.
       encodings.reverse_each do |enc|
@@ -93,17 +94,20 @@ module Gori::Proxy::Codec
       {entity, notes.empty? ? nil : notes.join(" · "), complete}
     end
 
-    # The de-chunk step as {entity, reached the 0-chunk, the note for it}.
-    private def self.dechunk_step(body : Bytes) : {Bytes, Bool, Array(String)}
-      complete = chunked_complete?(body)
-      {dechunk(body), complete, [complete ? "de-chunked" : "de-chunked (stream truncated)"]}
+    # The de-chunk step as {bounded entity, reached the 0-chunk without hitting the output
+    # cap, the note for it}. Chunk framing can amplify too: a saved preview must not copy a
+    # multi-megabyte entity merely because it was not compressed.
+    private def self.dechunk_step(body : Bytes, max_out : Int32) : {Bytes, Bool, Array(String)}
+      entity, wire_complete, capped = dechunk_bounded(body, max_out)
+      complete = wire_complete && !capped
+      {entity, complete, [complete ? "de-chunked" : "de-chunked (stream truncated)"]}
     end
 
     # Did a chunked wire body reach its terminating 0-chunk? False for a stream cut
     # mid-chunk, ended at EOF, or carrying a malformed size line — the same tolerant walk
     # `dechunk` does, asked for its verdict rather than its bytes.
     def self.chunked_complete?(body : Bytes) : Bool
-      !scan_chunks(body) { }.nil?
+      !scan_chunks(body) { true }.nil?
     end
 
     # Zero-alloc necessary-condition gate: does the head carry a content/transfer-encoding
@@ -221,8 +225,8 @@ module Gori::Proxy::Codec
     # no surface can report a truncated decode as a finished one.
     private def self.inflate(data : Bytes, enc : String, max_out : Int32) : {Bytes?, String?, Bool}
       case enc
-      when "gzip", "x-gzip" then partial_note(gunzip(data, max_out), "gzip")
-      when "deflate"        then partial_note(inflate_deflate(data, max_out), "deflate")
+      when "gzip", "x-gzip" then partial_note(bound_output(gunzip(data, max_out), max_out), "gzip")
+      when "deflate"        then partial_note(bound_output(inflate_deflate(data, max_out), max_out), "deflate")
       when "br"
         return {nil, "compressed: br — decoder not built in", true} unless Brotli::AVAILABLE
         # `decode_full`, never the one-value `decode`: both FFI decoders DO report their own
@@ -232,10 +236,10 @@ module Gori::Proxy::Codec
         # was reported "decoded: br", the clean note, on every surface: the History note, the
         # `decode_truncated` field in `--format json`, and Probe, for which an encoded body
         # that never finished is the whole point of the scan.
-        partial_note(Brotli.decode_full(data, max_out), "br")
+        partial_note(bound_output(Brotli.decode_full(data, max_out), max_out), "br")
       when "zstd"
         return {nil, "compressed: zstd — decoder not built in", true} unless Zstd::AVAILABLE
-        partial_note(Zstd.decode_full(data, max_out), "zstd")
+        partial_note(bound_output(Zstd.decode_full(data, max_out), max_out), "zstd")
       else
         {nil, "compressed: #{enc} — decode unsupported", true}
       end
@@ -260,6 +264,14 @@ module Gori::Proxy::Codec
       bytes, clean = result
       return {nil, "decode error (#{enc}): no output — not a #{enc} stream, or cut before its first byte", false} if bytes.empty? && !clean
       {bytes, clean ? "decoded: #{enc}" : "decoded: #{enc} (stream truncated)", clean}
+    end
+
+    # Native decoders drain in fixed-size buffers and may return one buffer past max_out. Keep
+    # that slack inside the decoder, not in every saved preview that consumes it.
+    private def self.bound_output(result : {Bytes, Bool}, max_out : Int32) : {Bytes, Bool}
+      bytes, clean = result
+      return result if bytes.size <= max_out
+      {bytes[0, max_out], false}
     end
 
     # Does a note from `decode`/`decode_full` report a coding that did NOT come off?
@@ -308,11 +320,15 @@ module Gori::Proxy::Codec
       clean = true
       begin
         while (n = reader.read(buf)) > 0
-          out.write(buf[0, n])
-          if out.bytesize >= max_out
+          remaining = max_out - out.bytesize
+          if n > remaining
+            out.write(buf[0, remaining]) if remaining > 0
             clean = false
             break
           end
+          out.write(buf[0, n])
+          # When output lands exactly on max_out, loop once more: EOF means it was an exact-size
+          # complete stream; another byte means this is a bounded prefix.
         end
       rescue
         # truncated/corrupt stream — return the partial we managed to decode
@@ -327,8 +343,31 @@ module Gori::Proxy::Codec
     # Public so the Match&Replace body path can rewrite the entity, not the wire form.
     def self.dechunk(body : Bytes) : Bytes
       out = IO::Memory.new
-      scan_chunks(body) { |chunk| out.write(chunk) }
+      scan_chunks(body) do |chunk|
+        out.write(chunk)
+        true
+      end
       out.to_slice
+    end
+
+    # Bounded de-chunk for decoded previews. The Bool pair is {reached 0-chunk, cap reached};
+    # the scanner stops as soon as one byte beyond the caller's visible preview is known to
+    # exist, so it never walks the remainder or its trailers.
+    private def self.dechunk_bounded(body : Bytes, max_out : Int32) : {Bytes, Bool, Bool}
+      out = IO::Memory.new
+      capped = false
+      trailer_pos = scan_chunks(body) do |chunk|
+        remaining = max_out - out.bytesize
+        if chunk.size > remaining
+          out.write(chunk[0, remaining]) if remaining > 0
+          capped = true
+          false
+        else
+          out.write(chunk)
+          true
+        end
+      end
+      {out.to_slice, !trailer_pos.nil?, capped}
     end
 
     # Walk a chunked wire body, yielding each chunk's data span, and return the offset just
@@ -337,7 +376,7 @@ module Gori::Proxy::Codec
     #
     # One scanner for `dechunk` and `trailers` so the two can never disagree about where the
     # chunk data ends and the trailer section starts.
-    private def self.scan_chunks(body : Bytes, & : Bytes ->) : Int32?
+    private def self.scan_chunks(body : Bytes, & : Bytes -> Bool) : Int32?
       pos = 0
       while pos < body.size
         eol = index_of(body, 0x0a_u8, pos)
@@ -350,7 +389,7 @@ module Gori::Proxy::Codec
         return nil if size.nil? || size < 0                                # malformed size line
         return pos if size == 0                                            # terminating chunk — the trailer section starts here
         avail = {size, body.size - pos}.min
-        yield body[pos, avail]
+        return nil unless yield body[pos, avail]
         return nil if avail < size # truncated mid-chunk
         pos += size
         # Skip the chunk-data terminator byte-accurately: an OPTIONAL CR then the LF.
@@ -385,7 +424,7 @@ module Gori::Proxy::Codec
     # treats a trailer as a header is itself the test, so the projection must not decide it.
     # Tolerant like `dechunk` — an unterminated trailer section yields what was recovered.
     def self.trailers(body : Bytes) : Array({String, String})
-      pos = scan_chunks(body) { } || return NO_TRAILERS
+      pos = scan_chunks(body) { true } || return NO_TRAILERS
       out = [] of {String, String}
       while pos < body.size && out.size < MAX_TRAILERS
         stop = index_of(body, 0x0a_u8, pos) || body.size

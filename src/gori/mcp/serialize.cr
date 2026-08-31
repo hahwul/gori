@@ -19,8 +19,10 @@ module Gori
     # UTF-8 (capped), base64 otherwise (capped). Byte-exact bodies are gori's own
     # repeater/export job; MCP trades fidelity for a token budget the model can read.
     module Serialize
-      MAX_TEXT = 64 * 1024 # cap on inlined decoded text
-      MAX_B64  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
+      MAX_TEXT                 = 64 * 1024 # cap on inlined decoded text
+      MAX_B64                  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
+      SAVED_HEAD_PREVIEW_BYTES = 16 * 1024
+      SAVED_SOURCE_BYTES       = 1024 * 1024 # encoded/chunk-framed input read from SQLite
 
       # Header names whose VALUES carry credentials/session material. Redacted to
       # [REDACTED] in read-tool output (get_flow, get_repeater_context content)
@@ -52,23 +54,64 @@ module Gori
 
       # Replace the value of any sensitive header line in a raw HTTP head/request
       # with [REDACTED], leaving names, the request/status line, and the body
-      # untouched. Line endings are preserved. Returns `text` verbatim when
-      # `include_sensitive` is set or the text has nothing header-shaped.
+      # untouched. CRLF, bare LF and bare CR terminators are all preserved byte-for-byte.
+      # An obs-fold continuation of a sensitive field is sensitive too: redacting only the
+      # first line leaves the credential in `Authorization:\r\n Bearer secret` untouched.
+      # Returns `text` verbatim when `include_sensitive` is set or the text has nothing
+      # header-shaped.
       def self.redact_head(text : String, include_sensitive : Bool) : String
         return text if include_sensitive || !text.includes?(':')
+        bytes = text.to_slice
+        buffer = IO::Memory.new(bytes.size)
+        pos = 0
         headers_done = false
-        text.split('\n').map_with_index do |line, i|
-          next line if i.zero? || headers_done # request/status line, then body
-          if line.chomp.empty?                 # blank line ends the header block
-            headers_done = true
-            next line
+        sensitive_continuation = false
+
+        while pos < bytes.size
+          stop = pos
+          while stop < bytes.size && !bytes[stop].in?(0x0a_u8, 0x0d_u8)
+            stop += 1
           end
-          colon = line.index(':')
-          next line unless colon
-          name = line[0, colon]
-          next line unless sensitive_header?(name)
-          "#{name}: [REDACTED]#{"\r" if line.ends_with?('\r')}"
-        end.join('\n')
+          term_stop = stop
+          if term_stop < bytes.size
+            if bytes[term_stop] == 0x0d_u8 && term_stop + 1 < bytes.size &&
+               bytes[term_stop + 1] == 0x0a_u8
+              term_stop += 2
+            else
+              term_stop += 1
+            end
+          end
+          line = bytes[pos, stop - pos]
+
+          if headers_done
+            buffer.write(line)
+          elsif line.empty?
+            headers_done = true
+            sensitive_continuation = false
+          elsif line[0].in?(0x20_u8, 0x09_u8) && sensitive_continuation
+            indent = 0
+            while indent < line.size && line[indent].in?(0x20_u8, 0x09_u8)
+              indent += 1
+            end
+            buffer.write(line[0, indent])
+            buffer << "[REDACTED]"
+          else
+            colon = line.index(0x3a_u8)
+            sensitive_continuation = false
+            if colon && sensitive_header?(String.new(line[0, colon]).scrub)
+              # A malformed head may begin directly with Authorization/Cookie rather than a
+              # request/status line. Fail closed on that header-shaped first line too.
+              buffer.write(line[0, colon])
+              buffer << ": [REDACTED]"
+              sensitive_continuation = true
+            else
+              buffer.write(line)
+            end
+          end
+          buffer.write(bytes[stop, term_stop - stop]) if term_stop > stop
+          pos = term_stop
+        end
+        String.new(buffer.to_slice)
       end
 
       # nil-tolerant redact_head, for the optional heads of a Pending/errored flow.
@@ -353,84 +396,225 @@ module Gori
       # --- fuzz result (metrics only — no raw bodies; full detail stays behind
       # get_flow/send_request, shrinking the injected-content surface) -----------
       def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
+        j.object { fuzz_result_fields(j, r, flow_id) }
+      end
+
+      # Field-only form so permanent saved rows can add their optional content without
+      # duplicating the live-job metric projection.
+      def self.fuzz_result_fields(j : JSON::Builder, r : Fuzz::Result,
+                                  flow_id : Int64? = nil) : Nil
+        j.field "index", r.index
+        # Did the MATCHER accept this row? Always emitted, unlike the exception flags below,
+        # because the stored set is not matched-only: `store_fuzz_result` also keeps a row
+        # that FAILED — an errored send, a `¦chain` that could not run, a re-send, a retry or
+        # a truncated response. Without this bit a "matched and
+        # resent" row and an "unmatched, resent" row are the same shape, so an agent reading
+        # `fuzz_results` as its findings counted requests the matcher had rejected.
+        j.field "matched", r.matched?
+        # payloads can come from a caller-supplied wordlist FILE (arbitrary bytes) and
+        # `extracted` is a regex capture out of the RESPONSE body — both are outside-origin.
+        j.field("payloads") { j.array { r.payloads.each { |p| j.string text(p) } } }
+        j.field "position", r.position
+        j.field "status", r.status
+        j.field "length", r.length
+        j.field "words", r.words
+        j.field "lines", r.lines
+        j.field "duration_us", r.duration_us
+        j.field "error", text(r.error)
+        # A declared `¦chain` that could not run on this payload — it went out UNTRANSFORMED.
+        # Emitted only when set, so an agent never reads a clean row for a request that sent a
+        # different test than asked. `error` stays the network/send failure; this is distinct.
+        j.field "chain_error", text(r.chain_error) if r.chain_error
+        # The gRPC CALL's outcome, from the response's `grpc-status`/`grpc-message` trailers.
+        # `status` above is 200 for EVERY gRPC response, so without these an agent fuzzing an
+        # authz bypass read `200` on the granted and the denied calls alike — the result set
+        # carried no bit that separated them, and the only recovery was record_history:"all"
+        # plus a get_flow per row. Emitted only when the response carried them, so a
+        # non-gRPC run's rows are unchanged. `text()`: grpc-message is origin-chosen bytes.
+        if gs = r.grpc_status
+          j.field "grpc_status", gs
+          j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+        end
+        j.field "grpc_message", text(r.grpc_message) if r.grpc_message
+        # The WebSocket SESSION's outcome, for the same reason the gRPC pair above exists:
+        # `status` is 101 for every successful handshake, so a sweep whose payloads all made
+        # the origin close with `1008 Policy Violation` was indistinguishable from one it
+        # accepted. `ws_frames_in` counts the INBOUND frames gori kept (its own `[gori]`
+        # advisory rows excluded) — `length` is those payloads concatenated and cannot tell
+        # one long answer from many short ones. Emitted only when the row carried them, so an
+        # HTTP run's results are unchanged.
+        if fi = r.ws_frames_in
+          j.field "ws_frames_in", fi
+        end
+        if cc = r.ws_close_code
+          j.field "ws_close_code", cc
+        end
+        j.field "extracted", text(r.extracted)
+        # This variation's request reached the origin TWICE: the keep-alive pool found its
+        # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when
+        # true — it is an exception, and a `false` on every row would bury the one that is
+        # not. This is where an agent reads it; before, a re-send appeared nowhere but the
+        # CLI's own connections summary.
+        j.field "retried", true if r.retried?
+        # The `--retries` config re-sent this variation after a network error — DISTINCT from
+        # `retried` above (a keep-alive pool re-send). Emitted only when it happened, with the
+        # count, so an agent can tell a POST that finally stuck on try 3 from a clean single send.
+        if r.resent?
+          j.field "resent", true
+          j.field "resent_count", r.resent_count
+        end
+        # The captured response is SHORT — the origin closed early, the read deadline fired, or
+        # gori hit its capture ceiling — so `length`/`words`/`lines` above describe a fragment,
+        # not the whole response. Emitted only when it happened (like `chain_error`), with the
+        # SAME three-way sentence `CLI::Run.incomplete_reason` gives the Repeater, so an agent
+        # never reads one flow's truncation worded two different ways. That classifier keys off
+        # the raw captured body, which a metrics-only fuzz row keeps only under keep_bodies: an
+        # unmatched, body-dropped row still names the closed/timeout cause correctly, just not
+        # the ceiling one — the body itself is the only evidence for the ceiling, per the
+        # classifier's own doc. A synthetic Repeater::Result carries the body + timing across.
+        if r.incomplete?
+          j.field "incomplete", true
+          j.field "incomplete_reason",
+            CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+        end
+        # Present when record_history recorded this result as a History flow —
+        # fetch its full request/response with get_flow (headers redacted).
+        j.field "flow_id", flow_id if flow_id
+      end
+
+      # Permanent fuzz-run metadata. `stored_results` is supplied by the caller so list/get
+      # can use the same stable projection.
+      def self.saved_fuzz_run(j : JSON::Builder, run : Store::FuzzRunRecord,
+                              stored_results : Int64) : Nil
         j.object do
-          j.field "index", r.index
-          # Did the MATCHER accept this row? Always emitted, unlike the exception flags below,
-          # because the stored set is not matched-only: `store_fuzz_result` also keeps a row
-          # that FAILED — an errored send, a `¦chain` that could not run, a re-send, a retry or
-          # a truncated response. Without this bit a "matched and
-          # resent" row and an "unmatched, resent" row are the same shape, so an agent reading
-          # `fuzz_results` as its findings counted requests the matcher had rejected.
-          j.field "matched", r.matched?
-          # payloads can come from a caller-supplied wordlist FILE (arbitrary bytes) and
-          # `extracted` is a regex capture out of the RESPONSE body — both are outside-origin.
-          j.field("payloads") { j.array { r.payloads.each { |p| j.string text(p) } } }
-          j.field "position", r.position
-          j.field "status", r.status
-          j.field "length", r.length
-          j.field "words", r.words
-          j.field "lines", r.lines
-          j.field "duration_us", r.duration_us
-          j.field "error", text(r.error)
-          # A declared `¦chain` that could not run on this payload — it went out UNTRANSFORMED.
-          # Emitted only when set, so an agent never reads a clean row for a request that sent a
-          # different test than asked. `error` stays the network/send failure; this is distinct.
-          j.field "chain_error", text(r.chain_error) if r.chain_error
-          # The gRPC CALL's outcome, from the response's `grpc-status`/`grpc-message` trailers.
-          # `status` above is 200 for EVERY gRPC response, so without these an agent fuzzing an
-          # authz bypass read `200` on the granted and the denied calls alike — the result set
-          # carried no bit that separated them, and the only recovery was record_history:"all"
-          # plus a get_flow per row. Emitted only when the response carried them, so a
-          # non-gRPC run's rows are unchanged. `text()`: grpc-message is origin-chosen bytes.
-          if gs = r.grpc_status
-            j.field "grpc_status", gs
-            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          j.field "id", run.id
+          j.field "session_id", run.session_id
+          j.field "created_at", run.created_at
+          j.field "created_at_iso", unix_micros_iso(run.created_at)
+          j.field "finished_at", run.finished_at
+          j.field "finished_at_iso", run.finished_at.try { |t| unix_micros_iso(t) }
+          j.field "target", text(run.target)
+          j.field "mode", text(run.mode)
+          j.field "total", run.total
+          j.field "sent", run.sent
+          j.field "matched", run.matched
+          j.field "errors", run.errors
+          j.field "status", text(run.status)
+          j.field "stored_results", stored_results
+          j.field "http2", run.http2?
+          j.field "sni", text(run.sni)
+          j.field "tls_preset", text(run.tls_preset)
+          j.field "websocket", run.websocket?
+          j.field "surface", text(run.surface)
+          j.field "source_ref", text(run.source_ref)
+          j.field "snapshot_version", run.snapshot_version
+          j.field "legacy", run.snapshot_version == 0
+        end
+      end
+
+      # Scalar-only saved result. The Store projection behind this overload never selects a
+      # retained BLOB, including the indexed result_index path.
+      def self.saved_fuzz_result(j : JSON::Builder, row : Store::FuzzResultRecord) : Nil
+        j.object { fuzz_result_fields(j, Fuzz::Persistence.result(row)) }
+      end
+
+      # Bounded saved content. Prefix bytes and their full nullable SQL lengths travel together,
+      # so output caps never require fetching the remainder and X'' remains distinct from NULL.
+      def self.saved_fuzz_result(j : JSON::Builder, preview : Store::FuzzResultPreview,
+                                 include_sensitive : Bool, body_cap : Int32,
+                                 head_cap : Int32) : Nil
+        row = preview.row
+        j.object do
+          fuzz_result_fields(j, Fuzz::Persistence.result(row))
+          emit_saved_message(j, "request", row.request, preview.request_size,
+            include_sensitive, body_cap, head_cap)
+          emit_saved_message(j, "wire", row.wire, preview.wire_size,
+            include_sensitive, body_cap, head_cap)
+          emit_saved_head(j, "response_head", row.response_head,
+            preview.response_head_size, include_sensitive, head_cap)
+          # `incomplete` also covers timeout/early close, not only gori's capture cap; the
+          # metric projection already names the reason, so do not mislabel every short body
+          # as source-truncated here.
+          emit_body(j, "response_body", row.response_head, row.response_body,
+            false, body_cap, include_sensitive: include_sensitive,
+            source_size: preview.response_body_size,
+            source_truncated: preview.response_body_truncated?, preserve_empty: true)
+          if include_sensitive && (size = preview.response_body_size)
+            body = row.response_body || Bytes.empty
+            sample_size = {body.size, body_cap}.min
+            sample = body[0, sample_size]
+            j.field "response_body_raw_base64", Base64.strict_encode(sample)
+            j.field "response_body_raw_truncated", sample_size.to_i64 < size
           end
-          j.field "grpc_message", text(r.grpc_message) if r.grpc_message
-          # The WebSocket SESSION's outcome, for the same reason the gRPC pair above exists:
-          # `status` is 101 for every successful handshake, so a sweep whose payloads all made
-          # the origin close with `1008 Policy Violation` was indistinguishable from one it
-          # accepted. `ws_frames_in` counts the INBOUND frames gori kept (its own `[gori]`
-          # advisory rows excluded) — `length` is those payloads concatenated and cannot tell
-          # one long answer from many short ones. Emitted only when the row carried them, so an
-          # HTTP run's results are unchanged.
-          if fi = r.ws_frames_in
-            j.field "ws_frames_in", fi
+        end
+      end
+
+      private def self.emit_saved_head(j : JSON::Builder, field_name : String, head : Bytes?,
+                                       full_size : Int64?, include_sensitive : Bool,
+                                       head_cap : Int32) : Nil
+        unless size = full_size
+          j.field field_name, nil
+          return
+        end
+        bytes = head || Bytes.empty
+        sample_size = {bytes.size, head_cap}.min
+        sample = bytes[0, sample_size]
+        truncated = sample_size.to_i64 < size
+        j.field field_name, redact_head(text(String.new(sample)), include_sensitive)
+        if include_sensitive
+          j.field "#{field_name}_base64", Base64.strict_encode(sample)
+          j.field "#{field_name}_base64_truncated", truncated
+        end
+        j.field "#{field_name}_size", size
+        j.field "#{field_name}_truncated", true if truncated
+      end
+
+      private def self.emit_saved_message(j : JSON::Builder, field_name : String, bytes : Bytes?,
+                                          full_size : Int64?, include_sensitive : Bool,
+                                          body_cap : Int32, head_cap : Int32) : Nil
+        unless size = full_size
+          j.field field_name, nil
+          return
+        end
+        prefix = bytes || Bytes.empty
+        source_truncated = prefix.size.to_i64 < size
+        separator = Env.head_body_separator(prefix)
+        boundary = separator.try { |(offset, width)| offset + width }
+        head_complete = boundary ? boundary <= head_cap : !source_truncated && prefix.size <= head_cap
+        head_size = head_complete ? (boundary || prefix.size) : {prefix.size, head_cap}.min
+        head = prefix[0, head_size]
+
+        j.field field_name do
+          j.object do
+            j.field "size", size
+            j.field "source_truncated", true if source_truncated
+            j.field "head", redact_head(text(String.new(head)), include_sensitive)
+            j.field "head_truncated", true unless head_complete
+            if include_sensitive
+              j.field "head_base64", Base64.strict_encode(head)
+              j.field "head_base64_truncated", true unless head_complete
+            end
+
+            if head_complete && boundary
+              body = boundary < prefix.size ? prefix[boundary, prefix.size - boundary] : Bytes.empty
+              body_size = {size - boundary, 0_i64}.max
+              emit_body(j, "body", head, body, false, body_cap,
+                include_sensitive: include_sensitive, source_size: body_size,
+                source_truncated: body.size.to_i64 < body_size, preserve_empty: true)
+            else
+              j.field "body", nil
+              j.field "body_unavailable", true unless head_complete
+            end
+
+            if include_sensitive
+              raw_size = {prefix.size, body_cap}.min
+              raw = prefix[0, raw_size]
+              j.field "raw_base64", Base64.strict_encode(raw)
+              j.field "raw_truncated", raw_size.to_i64 < size
+            else
+              j.field "raw_redacted", true
+            end
           end
-          if cc = r.ws_close_code
-            j.field "ws_close_code", cc
-          end
-          j.field "extracted", text(r.extracted)
-          # This variation's request reached the origin TWICE: the keep-alive pool found its
-          # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when
-          # true — it is an exception, and a `false` on every row would bury the one that is
-          # not. This is where an agent reads it; before, a re-send appeared nowhere but the
-          # CLI's own connections summary.
-          j.field "retried", true if r.retried?
-          # The `--retries` config re-sent this variation after a network error — DISTINCT from
-          # `retried` above (a keep-alive pool re-send). Emitted only when it happened, with the
-          # count, so an agent can tell a POST that finally stuck on try 3 from a clean single send.
-          if r.resent?
-            j.field "resent", true
-            j.field "resent_count", r.resent_count
-          end
-          # The captured response is SHORT — the origin closed early, the read deadline fired, or
-          # gori hit its capture ceiling — so `length`/`words`/`lines` above describe a fragment,
-          # not the whole response. Emitted only when it happened (like `chain_error`), with the
-          # SAME three-way sentence `CLI::Run.incomplete_reason` gives the Repeater, so an agent
-          # never reads one flow's truncation worded two different ways. That classifier keys off
-          # the raw captured body, which a metrics-only fuzz row keeps only under keep_bodies: an
-          # unmatched, body-dropped row still names the closed/timeout cause correctly, just not
-          # the ceiling one — the body itself is the only evidence for the ceiling, per the
-          # classifier's own doc. A synthetic Repeater::Result carries the body + timing across.
-          if r.incomplete?
-            j.field "incomplete", true
-            j.field "incomplete_reason",
-              CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
-          end
-          # Present when record_history recorded this result as a History flow —
-          # fetch its full request/response with get_flow (headers redacted).
-          j.field "flow_id", flow_id if flow_id
         end
       end
 
@@ -486,11 +670,13 @@ module Gori
           j.field "error", text(detail.error)
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_head_base64(j, "request_head", detail.request_head, include_sensitive)
-          emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?, body_cap, body_omit)
+          emit_body(j, "request_body", detail.request_head, detail.request_body,
+            detail.request_body_truncated?, body_cap, body_omit, include_sensitive)
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
-          emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?, body_cap, body_omit)
+          emit_body(j, "response_body", detail.response_head, detail.response_body,
+            detail.response_body_truncated?, body_cap, body_omit, include_sensitive)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
@@ -780,35 +966,55 @@ module Gori
       # `cap` bounds the inlined text/base64 (default MAX_TEXT); `omit` returns
       # metadata only (encoding/size, omitted:true) with NO body bytes — for a
       # caller that wants just the shape and will page bytes via
-      # get_response_body_chunk. Both default to today's behavior.
+      # get_response_body_chunk. Both default to today's behavior. `include_sensitive`
+      # controls trailer credentials just like it controls ordinary head fields.
       def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
-                         wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false) : Nil
-        if body.nil? || body.empty?
+                         wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false,
+                         include_sensitive : Bool = false, source_size : Int64? = nil,
+                         source_truncated : Bool = false, preserve_empty : Bool = false) : Nil
+        if body.nil? || (body.empty? && !preserve_empty)
           j.field field_name, nil
           return
         end
-        decoded, note = Proxy::Codec::ContentDecode.decode(head, body)
+        # Decode/de-chunk only one byte beyond what can be emitted. That byte is enough to
+        # distinguish an exact-cap body from an amplified preview, without inflating a 20 MiB
+        # gzip or copying a giant chunked entity before slicing it back to 2 KiB.
+        inline_cap = {cap, 0}.max
+        preview_cap = inline_cap < Int32::MAX ? inline_cap + 1 : inline_cap
+        decoded, note, decode_complete = Proxy::Codec::ContentDecode.decode_full(head, body, preview_cap)
         bytes = decoded || body
-        s = String.new(bytes)
+        cut = bytes.size > inline_cap
+        sample = cut ? bytes[0, inline_cap] : bytes
+        # Construct a String only AFTER the byte cap. For a cut through a multibyte codepoint
+        # this prefix is treated as binary rather than allocating/validating the full body.
+        s = String.new(sample)
         valid = s.valid_encoding?
+        decoded_applied = !decoded.nil? && !Proxy::Codec::ContentDecode.decode_failed?(note)
+        decode_truncated = !decode_complete || (decoded_applied && cut)
         j.field field_name do
           j.object do
             j.field "encoding", valid ? "text" : "base64"
             j.field "binary", true unless valid
             j.field "size", bytes.size
+            j.field "source_size", source_size if source_size
+            j.field "source_truncated", true if source_truncated
+            j.field "size_is_lower_bound", true if source_truncated || decode_truncated
             if omit
               # body_mode:none — the caller asked for shape only.
               j.field "omitted", true
-              j.field "truncated", wire_truncated
+              j.field "truncated", wire_truncated || source_truncated || decode_truncated
             else
-              emit_body_payload(j, s, bytes, valid, cap, wire_truncated)
+              emit_body_payload(j, s, sample, valid,
+                cut || wire_truncated || source_truncated || decode_truncated)
             end
-            # `truncated` (above) is true for either cause (back-compat); `wire_truncated`
-            # disambiguates a capture-time cut (data gone at source, not just the display
-            # cap) so the caller knows whether more is recoverable. Branch-independent.
+            # `truncated` (above) is true for either cause (back-compat); these two fields
+            # distinguish a capture-time cut from a decode/de-chunk prefix cap.
             j.field "wire_truncated", true if wire_truncated
+            j.field "decode_truncated", true if decode_truncated
             j.field "note", note if note
-            emit_trailers(j, head, body)
+            # Finding trailers requires walking to the 0-chunk. Once the preview cap stopped
+            # the chunk walk, doing that second full-body pass defeats the bound.
+            emit_trailers(j, head, body, include_sensitive) unless cut || source_truncated
           end
         end
       end
@@ -819,7 +1025,8 @@ module Gori
       # 0-chunk, so `X-T: gotcha` after it appeared nowhere while the origin's `Trailer:`
       # announcement was echoed — which reads as "the origin sent none". Whether a target
       # treats a trailer as a header is itself a test, so they stay a separate list.
-      def self.emit_trailers(j : JSON::Builder, head : Bytes?, body : Bytes?) : Nil
+      def self.emit_trailers(j : JSON::Builder, head : Bytes?, body : Bytes?,
+                             include_sensitive : Bool = false) : Nil
         trailers = Proxy::Codec::ContentDecode.trailers(head, body)
         return if trailers.empty?
         j.field "trailers" do
@@ -827,9 +1034,15 @@ module Gori
             trailers.each do |(name, value)|
               j.object do
                 j.field "name", text(name)
-                # A trailer value is remote bytes like any response header — same lossy
-                # contract, same base64 escape hatch (see `emit_lossy_text`).
-                emit_lossy_text(j, "value", value)
+                if sensitive_header?(name) && !include_sensitive
+                  # Base64 is encoding, not redaction: do not emit an exact alternate beside
+                  # the redacted trailer value.
+                  j.field "value", "[REDACTED]"
+                else
+                  # A trailer value is remote bytes like any response header — same lossy
+                  # contract, same base64 escape hatch (see `emit_lossy_text`).
+                  emit_lossy_text(j, "value", value)
+                end
               end
             end
           end
@@ -849,17 +1062,14 @@ module Gori
         j.field "#{field_name}_lossy", true
       end
 
-      # Emit the (possibly capped) body bytes as text or base64. byte_slice can
-      # sever a multi-byte codepoint at the cap → scrub the partial tail so the
-      # JSON line stays valid UTF-8.
+      # Emit bytes that were already capped before String/base64 construction.
       private def self.emit_body_payload(j : JSON::Builder, s : String, bytes : Bytes,
-                                         valid : Bool, cap : Int32, wire_truncated : Bool) : Nil
-        cut = bytes.size > cap
-        j.field "truncated", cut || wire_truncated
+                                         valid : Bool, truncated : Bool) : Nil
+        j.field "truncated", truncated
         if valid
-          j.field "text", cut ? s.byte_slice(0, cap).scrub : s
+          j.field "text", s
         else
-          j.field "base64", Base64.strict_encode(cut ? bytes[0, cap] : bytes)
+          j.field "base64", Base64.strict_encode(bytes)
         end
       end
     end

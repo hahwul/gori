@@ -293,10 +293,11 @@ describe "Gori::Verbs.register_history" do
 
     it "gates the Fuzzer-scope actions on the Fuzzer tab" do
       ctx = on(:fuzzer)
-      {"fuzz.run"      => :fuzz_run,
-       "fuzz.stop"     => :fuzz_stop,
-       "fuzz.new"      => :fuzz_new,
-       "fuzz.automark" => :fuzz_automark,
+      {"fuzz.run"         => :fuzz_run,
+       "fuzz.stop"        => :fuzz_stop,
+       "fuzz.run-history" => :fuzz_run_history,
+       "fuzz.new"         => :fuzz_new,
+       "fuzz.automark"    => :fuzz_automark,
        # ^K / ^T. Verbs since the Fuzzer's `chord_action` stopped claiming them — which is
        # what kept them off the space menu and out of the keymap while their four siblings
        # were here all along.
@@ -313,6 +314,15 @@ describe "Gori::Verbs.register_history" do
         r[id].available?(on(:repeater)).should be_false
         verb_intents(r, id).should eq([intent])
       end
+    end
+
+    it "gates permanent result saving on a completed result set" do
+      ctx = on(:fuzzer)
+      r["fuzz.save-results"].available?(ctx).should be_false
+      ctx.fuzzer_results_saveable = true
+      r["fuzz.save-results"].available?(ctx).should be_true
+      r["fuzz.save-results"].chords.should eq([Gori::Verb::Chord.new("s", shift: true)])
+      verb_intents(r, "fuzz.save-results").should eq([:fuzz_save_results])
     end
 
     it "gates 'Send to Repeater' on a selected result, not just the Fuzzer tab" do

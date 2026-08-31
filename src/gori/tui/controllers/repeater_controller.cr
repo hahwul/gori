@@ -1595,9 +1595,9 @@ module Gori::Tui
     # No source flow_id — the request is the seed; same persistence path as ^N.
     # `name` is an optional sub-tab chip label (e.g. the Miner param that was injected).
     def repeater_from_request(target : String, request_text : String, http2 : Bool, sni : String?,
-                              name : String? = nil) : Nil
+                              name : String? = nil, tls_preset : String? = nil) : Nil
       view = RepeaterView.new
-      view.restore(target, request_text, http2, true, sni: sni || "")
+      view.restore(target, request_text, http2, true, sni: sni || "", tls_preset: tls_preset)
       # restore leaves focus on :target (placeholder-friendly); a fully-built request
       # from Miner should land in the editor so the user can send immediately.
       view.focus_pane(:request)

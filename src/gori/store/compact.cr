@@ -86,7 +86,13 @@ class Gori::Store
       end
       h2 = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM h2_frames")
       ws = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM ws_messages WHERE repeater_id IS NULL")
-      fuzz = sum_len(db, "SELECT COALESCE(SUM(COALESCE(LENGTH(request), 0) + COALESCE(LENGTH(response_head), 0) + COALESCE(LENGTH(response_body), 0)), 0) FROM fuzz_results")
+      # Keep the V1 columns and V24's `wire` in separate guarded aggregates: measure opens
+      # projects read-only without migrating them, so one missing V24 column must not zero the
+      # reclaim estimate for the three older BLOBs that are present.
+      fuzz = sum_len(db, "SELECT COALESCE(SUM(COALESCE(LENGTH(request), 0) + " \
+                         "COALESCE(LENGTH(response_head), 0) + " \
+                         "COALESCE(LENGTH(response_body), 0)), 0) FROM fuzz_results") +
+             sum_len(db, "SELECT COALESCE(SUM(LENGTH(wire)), 0) FROM fuzz_results")
       CompactStats.new(db_bytes, resp, req, h2, ws, fuzz, flows)
     ensure
       db.close
@@ -177,9 +183,9 @@ class Gori::Store
     end
   end
 
-  # Runs the chosen removals on `conn` inside the caller's transaction. Blobs are
-  # emptied to X'' (keeping the row + its projection columns) rather than the
-  # column nulled, so `*_body_truncated` reads as "captured but dropped".
+  # Runs the chosen removals on `conn` inside the caller's transaction. Flow bodies are
+  # emptied to X'' so their truncation flags still mean "captured but dropped"; nullable
+  # fuzz captures become NULL because no equivalent truncation projection exists there.
   private def self.apply_plan(conn : DB::Connection, plan : CompactPlan) : Nil
     if plan.response_bodies
       conn.exec("UPDATE flows SET response_body = X'', response_body_truncated = 1 " \
@@ -221,10 +227,13 @@ class Gori::Store
       conn.exec("DELETE FROM ws_messages WHERE repeater_id IS NULL")
     end
     if plan.fuzz_bodies
-      # Drop the per-result captured bytes but keep status/length/words/lines/
-      # matched/extracted — the fuzzer table stays useful, just without payloads.
-      conn.exec("UPDATE fuzz_results SET request = X'', response_head = X'', response_body = X'' " \
-                "WHERE (COALESCE(LENGTH(request), 0) + COALESCE(LENGTH(response_head), 0) + COALESCE(LENGTH(response_body), 0)) > 0")
+      # Drop every captured request representation as one unit, including the post-rule wire
+      # request. NULL is the honest nullable-column spelling for "not retained"; it also keeps
+      # an intentionally captured empty BLOB distinct until the operator chooses compaction.
+      conn.exec("UPDATE fuzz_results SET request = NULL, response_head = NULL, " \
+                "response_body = NULL, wire = NULL " \
+                "WHERE request IS NOT NULL OR response_head IS NOT NULL " \
+                "OR response_body IS NOT NULL OR wire IS NOT NULL")
     end
     if keep = plan.keep_flows
       prune_old_flows(conn, keep)
