@@ -61,7 +61,9 @@ module Gori
           p.invalid_option { |f| abort "gori run rewriter preset list: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter preset list: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run rewriter preset list",
+          "`preset list` takes no positional arguments; to install one use " \
+          "`gori run rewriter preset add <name>`")
 
         presets = Gori::RulePresets.all
         if format == :json
@@ -251,7 +253,8 @@ module Gori
           p.invalid_option { |f| abort "gori run rewriter extract add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter extract add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run rewriter extract add",
+          "pass the binding as --name NAME and --selector SEL")
 
         kind = Gori::ExtractKind.parse?(kind_s) ||
                abort("gori run rewriter extract add: invalid --kind '#{kind_s}' (cookie|header|regex|position|jsonpath)")
@@ -355,7 +358,8 @@ module Gori
           p.invalid_option { |f| abort "gori run rewriter bindings: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter bindings: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run rewriter bindings",
+          "`rewriter bindings` takes no positional arguments; the project is named with --project")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         begin
@@ -570,7 +574,9 @@ module Gori
           p.invalid_option { |f| abort "gori run rewriter add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run rewriter add",
+          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
+          "with spaces is one argument")
 
         abort "gori run rewriter add: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)
@@ -805,7 +811,9 @@ module Gori
           p.invalid_option { |f| abort "gori run rewriter preview: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run rewriter preview: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run rewriter preview",
+          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
+          "with spaces is one argument")
 
         abort "gori run rewriter preview: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)

@@ -85,7 +85,8 @@ module Gori
           p.invalid_option { |f| abort "gori run colormarker color add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker color add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run colormarker color add",
+          "pass the colour as --name NAME and --hex #rrggbb")
         abort "gori run colormarker color add: --name is required" if name.strip.empty?
         abort "gori run colormarker color add: --hex is required" if hex.strip.empty?
         if err = Settings.add_colormarker_color(name, hex)
@@ -329,7 +330,8 @@ module Gori
           p.invalid_option { |f| abort "gori run colormarker add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run colormarker add",
+          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments")
 
         abort "gori run colormarker add: --when is required" if (f = filter).nil?
         # The engine owns what is legal, so the CLI, the TUI form and MCP cannot disagree.
@@ -584,7 +586,8 @@ module Gori
           p.invalid_option { |f| abort "gori run colormarker preview: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker preview: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run colormarker preview",
+          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments")
         abort "gori run colormarker preview: --when is required" if (f = filter).nil?
         if reason = Colormarker.unusable_reason(f)
           abort "gori run colormarker preview: #{reason}"

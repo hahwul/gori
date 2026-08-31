@@ -571,7 +571,8 @@ module Gori
           p.invalid_option { |f| abort "gori run project scope add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope add: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run project scope add",
+          "pass the pattern as --pattern P, with --kind include|exclude and --type host|string|regex")
 
         abort "gori run project scope add: --pattern is required" if (pat = pattern).nil? || pat.empty?
         abort "gori run project scope add: invalid kind '#{kind}' (must be include or exclude)" unless kind.in?(Scope::KINDS)
@@ -775,7 +776,8 @@ module Gori
           p.invalid_option { |f| abort "gori run project sandbox #{action}: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project sandbox #{action}: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run project sandbox #{action}",
+          "`sandbox #{action}` takes no positional arguments; the project is named with --project")
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)

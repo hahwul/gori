@@ -147,7 +147,9 @@ module Gori
           p.invalid_option { |f| abort "gori run decoder list: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run decoder list: missing value for #{f}" }
         end
-        parser.parse(args)
+        parse_no_positionals(parser, args, "gori run decoder list",
+          "`decoder list` takes no positional arguments; to run a value through a chain use " \
+          "`gori run decoder <chain> [input]`")
 
         registry = Decoder.shared_registry
         if format == :json
