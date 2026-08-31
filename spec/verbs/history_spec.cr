@@ -127,21 +127,18 @@ describe "Gori::Verbs.register_history" do
       end
     end
 
-    it "keeps the destructive list verbs menu-only, on capitals that don't shadow a chord" do
-      # 'x' is select-line and 'c' is compare in the same Body COMMON view, so delete/clear
-      # take capitals. A lowercase mnemonic here would silently shadow one of those.
-      #
-      # WHICH capitals matters: `X` wipes the tab and `D` deletes the row, matching Probe's
-      # `probe.clear` / `probe.delete-selected`. History had them inverted — `X` was one flow
-      # here and every issue one tab over — and `C` collided with Send to Comparer, which is
-      # `C` in both the Repeater and the Fuzzer.
-      r["history.delete"].chords.should be_empty
+    it "binds direct destructive shortcuts while preserving the danger menu keys" do
+      # Bare `d` deletes from the list even though Space→d remains Discover; the explicit
+      # menu mnemonic keeps the two actions distinct there. Shift-X wipes the tab, matching
+      # Probe's clear mnemonic without reclaiming Comparer's `C`.
+      r["history.delete"].chords.should eq([Gori::Verb::Chord.new("d")])
       r["history.delete"].menu_key.should eq('D')
-      r["history.clear"].chords.should be_empty
+      r["history.clear"].chords.should eq([Gori::Verb::Chord.new("x", shift: true)])
       r["history.clear"].menu_key.should eq('X')
-      r["probe.clear"].menu_key.should eq('X')      # the pairing this now follows
-      r["repeater.compare"].menu_key.should eq('C') # and the letter it stopped colliding with
+      r["probe.clear"].menu_key.should eq('X')
+      r["repeater.compare"].menu_key.should eq('C')
       r["history.clear"].menu_key.should_not eq(r["repeater.compare"].menu_key)
+      r["detail.delete"].chords.should be_empty # the shortcut is list-only
       r["history.probe-active"].menu_key.should eq('A')
       verb_intents(r, "history.probe-active").should eq([:probe_active_selected])
     end

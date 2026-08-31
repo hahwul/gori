@@ -181,24 +181,19 @@ module Gori
         "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
         Verb::Scope::Body, available: history_targets, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_selected; nil }
 
-      # Delete the selected flow (confirm-gated). Menu-only — L3 destructive; 'X' is free
-      # across Body COMMON (lowercase 'x' is select-line). Mirrors probe.delete-selected.
+      # Delete the selected/marked flows after confirmation. Bare `d` is the direct shortcut;
+      # the explicit `D` menu key keeps Space→d assigned to Discover.
       r.register Verb::Definition.new(
-        "history.delete", "Delete flow", "Delete the selected flow from History (asks first)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'D', group: :danger) { |ctx| ctx.history_delete; nil }
+        "history.delete", "Delete flow", "Delete the selected or marked flows from History (asks first)",
+        Verb::Scope::Body, [Verb::Chord.new("d")],
+        available: history_targets, mnemonic: 'D', group: :danger) { |ctx| ctx.history_delete; nil }
 
-      # Wipe the project's entire History (confirm-gated). Menu-only; 'C' is free across
-      # Body COMMON (lowercase 'c' is compare). Available whenever History has any rows.
-      # `X` wipes THIS TAB, `D` deletes the selected row — the pairing `probe.clear` (X) and
-      # `probe.delete-selected` (d) already had, and the one History inverted: it read `X` as
-      # delete-one and `C` as clear-all, so `X` meant "one flow" here and "every issue" one
-      # tab over, both in the danger group. `C` also collided with `Send to Comparer`, which
-      # is `C` in the Repeater and the Fuzzer — the Repeater→History move being the most
-      # travelled in the app, that letter went from "make a diff" to "wipe the capture".
-      # `d` cannot take delete here: it is `history.discover`, which fires outbound traffic.
+      # Shift-X clears the whole project History after confirmation. `X` remains the space-menu
+      # key, matching Probe's clear action and avoiding Comparer's `C`.
       r.register Verb::Definition.new(
         "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
-        Verb::Scope::Body, available: in_history, mnemonic: 'X', group: :danger) { |ctx| ctx.history_clear; nil }
+        Verb::Scope::Body, [Verb::Chord.new("x", shift: true)],
+        available: in_history, mnemonic: 'X', group: :danger) { |ctx| ctx.history_clear; nil }
 
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
