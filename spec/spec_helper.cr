@@ -27,8 +27,13 @@ Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 # perfectly, and never fires: `Keybind.from_event` normalises a typed capital to
 # shift+lowercase, so nothing ever asks the keymap for a chord whose key is "X". Asserting a
 # declaration against a hand-written twin of itself is what let a dead binding ship once
-# already (see the note in spec/verbs/activity_spec.cr), so every shift-letter assertion in
-# the suite should round-trip through the real event path — this is that path.
+# already (see the note in spec/verbs/activity_spec.cr), so an assertion that the SHIFT is
+# right wants the real event path — this is it.
+#
+# Not yet swept through the suite: the ⇧J/⇧K/⇧F/⇧E/⇧T assertions in the sitemap, diff, oast,
+# sequencer, comparer and issues specs still build their chords by hand. Those are reorder and
+# navigation verbs, where a dead binding is visible the first time anyone presses the key; the
+# four clear-all verbs are the ones where it would not be. Prefer this helper in new specs.
 def shift_chord(letter : Char) : Gori::Verb::Chord
   # `.not_nil!` rather than a fallback: from_event returns nil for an event it cannot name, and
   # a helper that quietly substituted a hand-built chord there would reintroduce exactly the

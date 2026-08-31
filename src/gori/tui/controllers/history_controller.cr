@@ -413,15 +413,20 @@ module Gori::Tui
         return "#{nav} · ⇧arrows select · #{dy} copy · ↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
-      if @history.preview_enabled?
-        return "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs" if @history.preview_focus != :list
-        return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · space cmds · esc tabs"
-      end
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
       # it deletes the project's whole History, and a destructive chord whose only
       # advertisement is the space menu is precisely the arrangement 0edc3c5b called out in
-      # Probe. `d` stays unnamed — one row, and this line is already the longest on the tab.
+      # Probe. `d` stays unnamed — one row, and these lines are already the longest on the tab.
+      #
+      # Named in BOTH preview branches as well, not just the default one: `history.clear` is
+      # `Scope::Body` gated on `in_history`, so the preview pane being up changes nothing about
+      # what ⇧X does. A hint that names it only when the preview is off would advertise the key
+      # in one of the list's three states and hide it in the other two.
       clear = Hotkeys.binding_label(reg, "history.clear", "⇧X")
+      if @history.preview_enabled?
+        return "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs" if @history.preview_focus != :list
+        return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · #{clear} clear · space cmds · esc tabs"
+      end
       "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{follow} follow · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
     end
 

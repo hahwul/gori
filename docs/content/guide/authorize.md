@@ -142,7 +142,7 @@ The tab keeps a live readout of what passive has actually done (`N seen · M que
 | `↑` / `↓` | Move between requests |
 | `⇥` | Move between the selected request's identities |
 | `PgUp` / `PgDn` | Scroll the detail pane |
-| `Space` → `X` | Clear — empty the queue and its results (menu only) |
+| `⇧X` | Clear — empty the queue and every identity's results (asks first). `Space` → `X` does the same; `⇧X` is the clear-all key in History, Probe and the Project ACTIVITY feed too |
 
 From **History** or **Sitemap**, `Space` → **Send to Authorize** queues a request here.
 

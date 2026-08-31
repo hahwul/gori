@@ -109,8 +109,14 @@ private class AuthorizeFakeHost
   def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
   end
 
+  # Records before running, so a spec can ask whether a destructive path went THROUGH a
+  # confirm, not just whether it did the work. `action.call` keeps every existing example's
+  # behaviour (the dialog is not the thing under test there).
+  getter confirms = [] of {String, String}
+
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
+    @confirms << {title, message}
     action.call
   end
 
@@ -587,6 +593,41 @@ describe Gori::Tui::AuthorizeController do
         c.view.any_requests?.should be_false
         c.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up)).should be_true
         host.focus_requests.should eq([:menu])
+      end
+    end
+  end
+
+  # `#clear` was the one clear-all verb in the app that wiped without asking. It was written
+  # menu-only, where opening the menu is itself the deliberate act; `⇧X` made it one keystroke
+  # and put it in the same family as History, Probe and ACTIVITY, all of which have always
+  # confirmed. The chord and the contract have to arrive together — an operator who learns
+  # "⇧X asks first" on three tabs must not find the fourth is the one that does not.
+  describe "#clear" do
+    it "goes through a danger confirm before emptying the queue" do
+      with_authorize_controller do |c, host, session|
+        c.seed_flows([seed_capture(session.store, "/orders", "session=A")])
+        c.view.any_requests?.should be_true
+
+        c.clear
+        # The prompt was raised, and it NAMES what goes — not just "the queue", which
+        # understates the identity results that go with it.
+        host.confirms.size.should eq(1)
+        title, message = host.confirms.first
+        title.should eq("CLEAR AUTHORIZE")
+        message.should contain("1 request")
+        message.should contain("identity")
+        # …and the fake host runs the action, so the wipe itself still happened.
+        c.view.any_requests?.should be_false
+      end
+    end
+
+    # No prompt for a no-op, and not silence either: ⇧X is advertised in the body hint now, so
+    # a key that answers with nothing at all reads as a key that failed.
+    it "says so instead of prompting when the queue is already empty" do
+      with_authorize_controller do |c, host, _|
+        c.clear
+        host.confirms.should be_empty
+        host.statuses.last.should contain("nothing to clear")
       end
     end
   end

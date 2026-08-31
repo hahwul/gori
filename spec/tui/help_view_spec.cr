@@ -35,6 +35,13 @@ describe Gori::Tui::HelpView do
 
     Gori::Hotkeys.binding_label(registry, "history.delete", "").should eq("d")
     Gori::Hotkeys.binding_label(registry, "history.clear", "").should eq("⇧X")
+
+    # The literal still gets ONE assertion, because it is still reachable code: `HelpView.new`
+    # takes an optional registry and `shortcut_rows(nil)` renders `item.key` verbatim. It is
+    # asserted here as "agrees with the resolved label", not on its own — a bare `eq("⇧X")` is
+    # what let this spec pass while the chord moved.
+    HelpView.shortcut_rows(nil).find(&.b.includes?("clear all History flows"))
+      .not_nil!.a.should eq(Gori::Hotkeys.binding_label(registry, "history.clear", ""))
   end
 
   # ⇧X is the clear-all chord in four scopes and only History has a section of its own, so the
