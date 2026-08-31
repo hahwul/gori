@@ -9,6 +9,9 @@ abstract class Gori::Verb::ExecContext
   abstract def issues_open : Nil
   abstract def issue_close : Nil
   abstract def issues_delete : Nil
+  # ⇧X — delete EVERY issue in the project (after a confirm). The whole-tab wipe the
+  # clear-all family shares (#899); `issues_delete` is the selection-delete beside it.
+  abstract def issues_clear : Nil
 
   # --- multi-select marks (the History list's rule, #442) ---
   # The effective target set every BATCH-capable Issues verb acts on:

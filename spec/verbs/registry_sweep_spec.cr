@@ -92,8 +92,8 @@ describe "Gori::Verbs.registry (every verb)" do
     r["probe.delete"].group.should eq(r["probe.delete-selected"].group)
   end
 
-  it "tags the four ⇧X store-wipes as :wipe, so the convention reads off the registry" do
-    %w[history.clear probe.clear authorize.clear activity.clear].each do |id|
+  it "tags the five ⇧X store-wipes as :wipe, so the convention reads off the registry" do
+    %w[history.clear probe.clear authorize.clear activity.clear issues.clear].each do |id|
       r[id].group.should eq(:wipe)
     end
   end

@@ -112,6 +112,8 @@ gori run issues --format sarif --export issues.sarif   # for GitHub code scannin
 
 In the TUI, `⇧E` asks for the format and then the destination path. See [Export the report](/playbooks/triage-and-report/#5-export-the-report) for what a SARIF result carries.
 
+`⇧X` (or `Space` → `X`) clears the tab: every issue in the project, with its notes, CVSS score and evidence links. It asks first and names the total — which is the whole project, not the rows a filter is showing and not the marked set, so it is the one issues key that ignores both. `⇧X` is the same clear-all key History, Probe, Authorize and the ACTIVITY feed answer, each in its own tab.
+
 ### Marking issues (multi-select)
 
 The list marks the same way History does. Press `t` to **mark** the issue under the cursor and step down, so a run of `t` marks consecutive rows. `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.

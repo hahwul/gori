@@ -101,8 +101,15 @@ class FakeHost
   def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
   end
 
+  # Recorded BEFORE the action runs, so a spec can ask whether a destructive path went through
+  # a prompt at all and what that prompt SAID — the two halves of a wipe's contract that a
+  # "did the rows go" assertion cannot see. `action.call` keeps every existing caller's
+  # behaviour: the dialog is not what those examples are about.
+  getter confirms = [] of {String, String}
+
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
+    @confirms << {title, message}
     action.call
   end
 

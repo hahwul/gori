@@ -46,6 +46,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issues_delete
   end
 
+  def issues_clear : Nil
+    issues_controller.issues_clear
+  end
+
   # The ONE resolver every batch-capable Issues verb calls: the marks if any are set, else
   # the cursor row — and just the open issue when the detail is up, which is pinned to one
   # (the plural of IssuesView#target_issue's own precedence).

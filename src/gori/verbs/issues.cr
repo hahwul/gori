@@ -46,6 +46,36 @@ module Gori
         Verb::Scope::Issues, [Verb::Chord.new("d")],
         available: issues_targets, group: :danger) { |ctx| ctx.issues_delete; nil }
 
+      # ⇧X — the whole-tab wipe, in the fifth scope that has one. `history.clear`,
+      # `probe.clear`, `authorize.clear` and `activity.clear` are the siblings (#899), `X` is
+      # the space-menu letter in all five, and `:wipe` is the band that makes the family
+      # readable straight off the registry — a selection-delete like `issues.delete` above is
+      # `:danger` and may ride a bare letter; a store-emptier may not.
+      #
+      # This tab was left out of that rollout, which is the whole reason the chord is here.
+      # The gesture shipped as "one chord clears a tab", and the one tab holding hand-written
+      # writeups answered nothing at all — a key that silently does nothing on one member of
+      # an advertised family teaches that it might do nothing on any of them, which is the
+      # opposite of what a wipe key has to be trusted for.
+      #
+      # Bare `x` is free in this scope, as the convention requires: it means "Select line" in
+      # Scope::IssuesDetail one ↵ away (read_edit.cr), never in the LIST, so the two can no
+      # more resolve on one keystroke than Probe's ⇧X and its Rules-sub-tab `x` can. ⇧E
+      # (export) and ⇧T (mark all) are this scope's other shifted letters; neither is
+      # destructive, so neither is a slip away from one that is.
+      #
+      # NOT mark-aware, deliberately: `d` is the verb that acts on a marked set, and a wipe
+      # that quietly meant "the marks" on some presses and "everything" on others would be a
+      # second meaning on the app's one destructive chord. The confirm names the total.
+      #
+      # `Chord.new("x", shift: true)`, NOT `Chord.new("X")`: `Keybind.from_event` normalises a
+      # typed capital to shift+lowercase, so the capital spelling never fires (`validate_chords!`
+      # raises on one at boot since #902). `menu_key` skips shift chords, hence the mnemonic.
+      r.register Verb::Definition.new(
+        "issues.clear", "Clear issues", "Delete ALL issues for this project (asks first)",
+        Verb::Scope::Issues, [Verb::Chord.new("x", shift: true)],
+        mnemonic: 'X', group: :wipe) { |ctx| ctx.issues_clear; nil }
+
       # Severity/status from the LIST, so re-triaging a set is one pass: mark five, pick
       # "False positive" once. Same ExecContext methods as the detail-scope pair below —
       # they resolve through selected_issue_ids, so there is one implementation and no

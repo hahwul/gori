@@ -67,8 +67,8 @@ module Gori
         available: queued, mnemonic: 'd', group: :danger) { |ctx| ctx.authorize_remove; nil }
 
       # ⇧X + the menu key 'X', the house shape for "wipe this tab" — `history.clear`,
-      # `probe.clear` and `activity.clear` answer the same chord, each gated to its own scope.
-      # Bare `x` is bound nowhere in Authorize, so the shifted key has no unmodified neighbour
+      # `probe.clear`, `activity.clear` and `issues.clear` answer the same chord, each gated to
+      # its own scope. Bare `x` is bound nowhere in Authorize, so the shifted key has no unmodified neighbour
       # to be mistyped from. `^X` above it is the run STOP — a different modifier, and `Chord`
       # equality carries the modifiers, so the two never collide; reaching for one and getting
       # the other costs nothing either way, because `AuthorizeController#clear` refuses while a

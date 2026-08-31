@@ -64,8 +64,8 @@ module Gori
       # project wipe one shift away from the most-pressed triage key in the app, which is the
       # arrangement to avoid rather than the one to settle for.
       #
-      # ⇧X is what the other three "wipe this tab" verbs answer — `history.clear`,
-      # `probe.clear`, `authorize.clear` — and `X` is the space-menu key in all four. Bare `x`
+      # ⇧X is what every other "wipe this tab" verb answers — `history.clear`, `probe.clear`,
+      # `authorize.clear`, `issues.clear` — and `X` is the space-menu key in all of them. Bare `x`
       # is bound in none of those scopes, so the shifted key has no same-pane neighbour at all;
       # here it cost `activity.clear-filters` its 'x' menu letter, which moved to 'N' above.
       #

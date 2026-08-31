@@ -100,7 +100,7 @@ module Gori
       # stays exactly where 0edc3c5b put it, the palette still reaches the verb, and the
       # confirm still gates it — the chord is added to that shape, not traded against it.
       #
-      # ⇧X and not ⇧C: bare `x` is bound in none of the four clear-all scopes, while bare `c`
+      # ⇧X and not ⇧C: bare `x` is bound in none of the clear-all scopes, while bare `c`
       # is live in all of them — here it is `probe.dismiss-selected`, the most-pressed key on
       # this list. A project wipe does not belong one shift above it.
       #

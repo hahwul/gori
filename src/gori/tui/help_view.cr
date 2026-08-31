@@ -230,7 +230,11 @@ module Gori::Tui
       ]},
       {"OTHER TABS", [
         Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t mark · g fold · ⇧S scope · space → T tag"),
-        Item.new("Issues", "list: t mark · ⇧T all · ⇧arrows range · notes: i/↵ edit · x line · y copy · space cmds"),
+        # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
+        # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
+        # it can be read before it is pressed. Marks make that sharper here than anywhere else,
+        # since `d` acts on the marked set and this one does not.
+        Item.new("Issues", "list: t mark · ⇧T all · ⇧arrows range · ⇧X clear · notes: i/↵ edit · x line · y copy · space cmds"),
         Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · ⇧X clear issues · space cmds"),
         # Authorize had no row at all while `TAB_SECTION` pointed its Shortcuts popup here — so
         # the one tab whose keys are `^R`/`⇧R`/`^X` and nothing an operator can guess opened on

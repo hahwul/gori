@@ -70,9 +70,10 @@ module Gori
       # `s` keeps the mnemonic the save half had, now meaning "which scope".
       #
       # The default-flip is offered only for a global rule, because a project rule has no
-      # default to flip: `x` IS its state, and its ⇧X reads as "…everywhere". In the four
-      # clear-all scopes ⇧X is the wipe chord instead (`history.clear`, `probe.clear`,
-      # `authorize.clear`, `activity.clear`) — deliberate cross-scope reuse, and invisible to
+      # default to flip: `x` IS its state, and its ⇧X reads as "…everywhere". In the clear-all
+      # scopes ⇧X is the wipe chord instead — every verb in the registry's `:wipe` band
+      # (`history.clear`, `probe.clear`, `authorize.clear`, `activity.clear`, `issues.clear`) —
+      # deliberate cross-scope reuse, and invisible to
       # `Conflicts.overlap?`, which is `a == b` on the scope. This tab has no clear-all verb
       # for it to be confused with.
       #

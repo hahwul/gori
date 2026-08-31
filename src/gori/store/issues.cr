@@ -111,6 +111,25 @@ module Gori
       }
     end
 
+    # Every issue in the project, links and all — the Issues tab's ⇧X wipe. Returns whether
+    # the write committed, like the two deletes above.
+    #
+    # The same two tables `delete_issue_one` touches, UNQUALIFIED, rather than a
+    # `delete_issues(issues.map(&.id))`: that would read the whole list back through the
+    # reader only to name in `IN (…)` chunks exactly the rows an unqualified DELETE already
+    # covers — and it would race, wiping the set as it was READ while the confirm was open
+    # rather than the set that is there when the operator says yes.
+    #
+    # `owner_kind = 'issue'` is the complete link cascade: `LinkOwnerKind` is Issue|Note and
+    # an issue is never a `ref_kind`, so no row in the table points AT what this drops.
+    def clear_issues : Bool
+      exec_task_ok ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE owner_kind = 'issue'")
+        c.exec("DELETE FROM issues")
+        nil
+      }
+    end
+
     # One issue's cascade, on an OPEN connection (no transaction of its own) — the shared
     # body of the singular and batch deletes.
     private def delete_issue_one(c : DB::Connection, id : Int64) : Nil
