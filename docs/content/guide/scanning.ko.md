@@ -112,6 +112,8 @@ gori run issues --format sarif --export issues.sarif   # GitHub code scanning / 
 
 TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#export-the-report)를 참고하세요.
 
+`⇧X`(또는 `Space` → `X`)는 탭을 비웁니다 — 프로젝트의 모든 이슈를 노트·CVSS 점수·증거 링크까지 함께. 먼저 확인을 묻고 총 개수를 밝히며, 그 개수는 필터가 보여주는 행도 표시(mark)한 집합도 아닌 **프로젝트 전체**입니다. `⇧X`는 History·Probe·Authorize·ACTIVITY 피드가 각자의 탭에서 답하는 그 clear-all 키와 같습니다.
+
 ### 이슈 표시하기 (다중 선택) {#marking-issues-multi-select}
 
 History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이슈를 **표시(mark)**하고 아래로 한 칸 이동하므로, `t`를 연달아 누르면 연속된 행이 표시됩니다. `Shift-↑` / `Shift-↓`는 시작점에서 연속 범위를 확장하고, `Shift-T`는 현재 필터가 보여주는 전부를 표시하며, `Esc`는 표시를 모두 해제합니다. 표시된 행은 거터 막대가 굵어지고, 필터 줄에 `3 marked` 카운트가 실시간으로 표시됩니다.

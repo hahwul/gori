@@ -577,6 +577,20 @@ module Gori::Tui
       true
     end
 
+    # ⇧X: every issue in the project, past the controller's confirm. Returns whether the write
+    # committed — on a rollback NOTHING local is touched, the same contract `delete_ids` keeps,
+    # so a busy project leaves the list (and its marks) exactly as they were to retry.
+    #
+    # `clear_marks`, not `unmark_ids`: there is no surviving row for a mark to point at, and
+    # the anchor has to go with them or the next ⇧arrow would sweep from a stale one.
+    def clear(store : Store) : Bool
+      return false unless store.clear_issues
+      close_detail
+      clear_marks
+      reload(store)
+      true
+    end
+
     # --- notes READ/INS (inline editor) ---
     def start_notes_edit : Nil
       enter_notes_insert!

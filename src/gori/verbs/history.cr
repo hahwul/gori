@@ -190,9 +190,9 @@ module Gori
 
       # ⇧X clears the whole project History after confirmation, and `X` remains the space-menu
       # key. One chord and one letter for every "wipe this tab" verb in the app: `probe.clear`,
-      # `authorize.clear` and `activity.clear` spell both the same way in their own scopes. `X`
-      # over `C` because Comparer holds `C` (Send to Comparer) and this tab's `C` is the column
-      # editor; ⇧X over ⇧C because bare `x` is bound in none of the four clear-all scopes while
+      # `authorize.clear`, `activity.clear` and `issues.clear` spell both the same way in their
+      # own scopes. `X` over `C` because Comparer holds `C` (Send to Comparer) and this tab's `C`
+      # is the column editor; ⇧X over ⇧C because bare `x` is bound in none of those scopes while
       # bare `c` is live in all of them (`capture.toggle`), and a project wipe does not belong
       # one shift from the most-pressed triage key.
       r.register Verb::Definition.new(

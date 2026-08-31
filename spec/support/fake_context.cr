@@ -886,6 +886,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:issues_delete)
   end
 
+  def issues_clear : Nil
+    rec(:issues_clear)
+  end
+
   # Issues multi-select, mirroring the History pair above: `issue_marks` is settable state
   # (the query half) and `selected_issue` the cursor row, with the effective target set
   # derived exactly as the Runner's is — marks if any, else the cursor. Both default to empty

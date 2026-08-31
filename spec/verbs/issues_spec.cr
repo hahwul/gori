@@ -100,6 +100,31 @@ describe "Gori::Verbs.register_issues" do
       end
     end
 
+    # The tab-wipe. Asserted through `Keymap#lookup` on the chord a shift+X event actually
+    # produces, not against a hand-written twin of the declaration: `Chord.new("X")` satisfies
+    # every equality assertion here and never fires, which is how a dead binding shipped once
+    # before. `spec/verbs/activity_spec.cr` holds the family-wide version of this — the one
+    # that fails when a SIXTH clear-all verb picks its own letter.
+    it "wipes the tab on ⇧X, the chord every clear-all verb answers" do
+      r["issues.clear"].scope.should eq(Gori::Verb::Scope::Issues)
+      r["issues.clear"].chords.should eq([shift_chord('X')])
+      r["issues.clear"].menu_key.should eq('X')
+      r["issues.clear"].group.should eq(:wipe) # not :danger — that band is the selection-delete
+      r["issues.delete"].group.should eq(:danger)
+      verb_intents(r, "issues.clear").should eq([:issues_clear])
+
+      km = Gori::Verb::Keymap.build(r)
+      km.lookup(shift_chord('X'), Gori::Verb::Scope::Issues).should eq("issues.clear")
+      # The letter under the shift is free in the LIST — the property that makes ⇧X safe here —
+      # while one ↵ away it is Select line, in a scope this chord can never resolve in.
+      km.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::Issues).should be_nil
+      km.lookup(Gori::Verb::Chord.new("x"), Gori::Verb::Scope::IssuesDetail).should eq("issue.select-line")
+      # And the tab's other two shifted letters keep theirs: a wipe must not be a slip away
+      # from either the export or mark-all, both of which sit under the same hand.
+      km.lookup(shift_chord('E'), Gori::Verb::Scope::Issues).should eq("issues.export-key")
+      km.lookup(shift_chord('T'), Gori::Verb::Scope::Issues).should eq("issues.mark-all")
+    end
+
     it "keeps the mark chords clear of the list's own bindings, and of the detail's `t`" do
       keymap = Gori::Verb::Keymap.build(r)
       issues = Gori::Verb::Scope::Issues

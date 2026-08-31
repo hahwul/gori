@@ -41,25 +41,26 @@ describe "Gori::Verbs.register_activity" do
     r["activity.clear"].group.should eq(:wipe)
   end
 
-  # One chord, four scopes — History, Probe, Authorize and this pane all spell the wipe the
-  # same way, and all four hang the space menu off `X`. Read from the registry rather than
-  # restated per file, so a fifth clear-all verb that picks its own letter fails HERE. The
-  # `:wipe` band (distinct from a selection-delete's `:danger`) is what makes that same
-  # convention legible straight off the registry — see registry_sweep_spec's chord rule.
+  # One chord, five scopes — History, Probe, Authorize, the Issues list and this pane all spell
+  # the wipe the same way, and all five hang the space menu off `X`.
+  #
+  # Enumerated from the `:wipe` BAND, not from a list of ids restated here. The four-id literal
+  # this replaces claimed a sixth member picking its own letter would fail here, and it could
+  # not: a hand-written list only ever checks itself. The Issues tab was the proof — it had no
+  # clear verb at all while the family was advertised app-wide as "one chord clears a tab", so
+  # ⇧X there did nothing and no spec in the suite could notice. Membership is pinned below so
+  # a verb dropping OUT of the band is a failure rather than a silently shorter loop.
   it "spells the wipe the way every other clear-all verb does" do
-    {"history.clear"   => Gori::Verb::Scope::Body,
-     "probe.clear"     => Gori::Verb::Scope::Probe,
-     "authorize.clear" => Gori::Verb::Scope::Authorize,
-     "activity.clear"  => Gori::Verb::Scope::ProjectActivity,
-    }.each do |id, scope|
-      r[id].scope.should eq(scope), id
-      r[id].chords.should eq([shift_chord('X')]), id
-      r[id].menu_key.should eq('X'), id
-      r[id].group.should eq(:wipe), id
+    wipes = r.select(&.group.==(:wipe))
+    wipes.map(&.id).sort!.should eq(
+      %w[activity.clear authorize.clear history.clear issues.clear probe.clear])
+    wipes.each do |v|
+      v.chords.should eq([shift_chord('X')]), v.id
+      v.menu_key.should eq('X'), v.id
       # The letter under the shift is free in each of those scopes — that is the property that
       # made ⇧X the right key, and it is the one a later bare-`x` binding would quietly break.
-      r.select { |v| v.scope == scope && v.chords.includes?(Gori::Verb::Chord.new("x")) }
-        .map(&.id).should be_empty, "bare `x` is bound in #{scope}, under #{id}'s shift"
+      r.select { |o| o.scope == v.scope && o.chords.includes?(Gori::Verb::Chord.new("x")) }
+        .map(&.id).should be_empty, "bare `x` is bound in #{v.scope}, under #{v.id}'s shift"
     end
   end
 
@@ -67,22 +68,18 @@ describe "Gori::Verbs.register_activity" do
   # asks on a keypress, so a chord spelled in a way `Keybind.from_event` never produces —
   # `Chord.new("X")` — is dead here and nowhere else: every assertion above would still pass.
   # Bare `c` rides along because it is the reason the letter is ⇧X and not ⇧C: it is LIVE in
-  # all four scopes — `capture.toggle` by Global fallback in three, and `probe.dismiss-selected`
-  # shadowing it on the Probe list — so ⇧C would have put a project wipe one shift above a key
-  # that does something harmless and frequent. Asserted as "resolves, and never to the wipe"
+  # every one of those scopes — `capture.toggle` by Global fallback in four, and
+  # `probe.dismiss-selected` shadowing it on the Probe list — so ⇧C would have put a project
+  # wipe one shift above a key that does something harmless and frequent. Asserted as "resolves, and never to the wipe"
   # rather than to one id, because which harmless verb answers it is not the point.
-  it "dispatches ⇧X to the right wipe in each of the four scopes" do
+  it "dispatches ⇧X to the right wipe in every scope that has one" do
     km = Gori::Verb::Keymap.build(Gori::Verbs.registry)
     x = shift_chord('X')
-    {Gori::Verb::Scope::Body            => "history.clear",
-     Gori::Verb::Scope::Probe           => "probe.clear",
-     Gori::Verb::Scope::Authorize       => "authorize.clear",
-     Gori::Verb::Scope::ProjectActivity => "activity.clear",
-    }.each do |scope, id|
-      km.lookup(x, scope).should eq(id)
-      under_c = km.lookup(Gori::Verb::Chord.new("c"), scope)
-      under_c.should_not be_nil, "bare `c` is unbound in #{scope}"
-      under_c.should_not eq(id)
+    r.select(&.group.==(:wipe)).each do |v|
+      km.lookup(x, v.scope).should eq(v.id)
+      under_c = km.lookup(Gori::Verb::Chord.new("c"), v.scope)
+      under_c.should_not be_nil, "bare `c` is unbound in #{v.scope}"
+      under_c.should_not eq(v.id)
     end
 
     # And the two scopes that spend ⇧X on "Enable/disable everywhere" keep it: the reuse is

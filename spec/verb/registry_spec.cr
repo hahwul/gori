@@ -828,6 +828,10 @@ private class FakeContext < ExecContext
     @calls << :issues_delete
   end
 
+  def issues_clear : Nil
+    @calls << :issues_clear
+  end
+
   # Issues multi-select — the same marks-else-cursor rule as the History pair above.
   property issue_marks = [] of Int64
   property selected_issue : Int64? = nil

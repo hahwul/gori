@@ -71,6 +71,12 @@ module Gori::Tui
       filt = Hotkeys.binding_label(reg, "issues.filter", "/")
       nnew = Hotkeys.binding_label(reg, "issues.new", "n")
       y = Hotkeys.binding_label(reg, "issue.copy", "y")
+      # Named in every state the chord can FIRE from, which is every list state — `command_scope`
+      # answers Scope::Issues for the marks state and both preview focuses too, and only an open
+      # detail (or the `/` bar, which claims every key) leaves it. Naming it in the default branch
+      # alone would rebuild the gap #899 closed elsewhere: a destructive key nothing on screen
+      # advertises, in the three states an operator actually triages from.
+      clear = Hotkeys.binding_label(reg, "issues.clear", "⇧X")
       if @issues.detail_open?
         if @issues.notes_insert_mode?
           "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
@@ -82,16 +88,20 @@ module Gori::Tui
       elsif @issues.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
-        "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
+        "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
       elsif @issues.mark_count > 0
         # Marks re-point what `space` acts on AND take over esc (handle_body_key shadows
         # issues.leave while a set is live), so the standing "esc tabs" hint would be wrong.
+        #
+        # `clear ALL` in capitals, and `esc drops marks` spelled out, because this is the one
+        # state where the two words mean different sets: `space`/`d` act on the marks, ⇧X does
+        # not — it wipes the project. A bare "clear" here would read as "clear the marked ones".
         mark = Hotkeys.binding_label(reg, "issues.mark-toggle", "t")
-        "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · esc clears"
+        "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · #{clear} clear ALL · esc drops marks"
       elsif @issues.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
       else
-        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
       end
     end
 
@@ -536,6 +546,35 @@ module Gori::Tui
           next
         end
         @host.status("issue deleted: #{name}")
+      end
+    end
+
+    # ⇧X — the whole-tab wipe, in the family History, Probe, Authorize and the ACTIVITY feed
+    # already share (#899). This tab was the one clear-all-shaped list left out of that
+    # rollout, so the chord an operator learns as "clears this tab" answered nothing here.
+    #
+    # The count comes from the STORE, never `@issues.empty?`: that answers for the FILTERED
+    # list, so `/ severity:critical` matching nothing would have turned a project holding 40
+    # issues into a "nothing to clear" toast — the one reading of this key that would be a
+    # lie. It is also the number the confirm names, so the gate and the prompt cannot
+    # disagree, and it is read at PRESS time, so a peer's writes since the last reload count.
+    #
+    # An empty project gets a toast rather than a dialog, the way `probe_clear` and
+    # `activity_clear` answer theirs: an advertised key that opens a dialog over nothing reads
+    # as busywork, and one that answers with silence reads as a key that failed.
+    #
+    # Deliberately NOT mark-aware. With three rows marked `d` deletes those three and this
+    # deletes everything — so the confirm says ALL and names the total, which is the number
+    # that differs from the mark count the operator is looking at.
+    def issues_clear : Nil
+      n = @host.session.store.count_issues
+      return @host.status("issues: nothing to clear") if n <= 0
+      @host.confirm("CLEAR ISSUES",
+        "Delete ALL #{n} issue#{n == 1 ? "" : "s"} for this project?\n" \
+        "Their notes, CVSS scores and evidence links go too.\nThis can't be undone.",
+        confirm_label: "clear", danger: true) do
+        ok = @issues.clear(@host.session.store)
+        @host.status(ok ? "issues cleared" : "issues NOT cleared (project busy) — every issue is still there")
       end
     end
 
