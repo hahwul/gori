@@ -188,6 +188,8 @@ module Gori
         {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, curl/python/fetch/go/httpie, or a CSRF PoC)"},
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
+        {"repeater move", "Rearrange the sub-tab strip: move a session to a tab number (--to N) or one place (--up/--down)"},
+        {"repeater delete", "Delete saved repeater sessions by id (needs --yes)"},
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
         {"diff", "Retest report: diff two projects at endpoint scale (--from/--to, text/json/md)"},
         {"intercept", "Inspect/drive a live TUI's paused intercept queue (list, forward, drop, edit, …)"},

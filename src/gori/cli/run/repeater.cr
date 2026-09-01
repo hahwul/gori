@@ -13,6 +13,11 @@ module Gori
                         "client's hello, not a byte-exact JA3 match — `gori settings tls-fingerprint " \
                         "HOST --preset NAME` prints what actually goes out. Empty value = no override"
 
+      # `gori run repeater [list|create|send|minimize|h2|move|delete] …`, or a bare flow id /
+      # `--flow` for the one-shot resend.
+      #
+      # Matched on argv[0] only, so a subcommand name is never confused with the flow id the
+      # bare form takes.
       private def self.cmd_repeater(args : Array(String)) : Nil
         sub = args.first?
         if sub == "list"
@@ -29,6 +34,12 @@ module Gori
           return
         elsif sub == "h2"
           cmd_repeater_h2fields(args[1..])
+          return
+        elsif sub == "move"
+          cmd_repeater_move(args[1..])
+          return
+        elsif sub == "delete"
+          cmd_repeater_delete(args[1..])
           return
         end
 
@@ -177,9 +188,13 @@ module Gori
           if format == :json
             puts(JSON.build do |j|
               j.array do
-                repeaters.each do |r|
+                repeaters.each_with_index do |r, i|
                   j.object do
                     j.field "id", r.id
+                    # Both numbers, named. `position` is the ordering COLUMN; `tui_index` is
+                    # what the TUI paints on the sub-tab chip, which is the number the
+                    # operator reads and the one MCP's repeater replies carry.
+                    j.field "tui_index", i + 1
                     j.field "position", r.position
                     j.field "name", r.name || "Untitled"
                     j.field "tags", r.tags
@@ -201,7 +216,11 @@ module Gori
             if repeaters.empty?
               puts "No repeater sessions in the workbench."
             else
-              repeaters.each do |r|
+              # The chip number leads the line, so `6` here and `6:` on the TUI strip are the
+              # same tab — the mapping #904 was filed about. The database id follows it,
+              # because that is what every command and every MCP tool actually takes.
+              width = repeaters.size.to_s.size
+              repeaters.each_with_index do |r, i|
                 name = r.name || "Untitled"
                 h2 = r.http2? ? "H2" : "H1"
                 # The fingerprint is APPENDED, and only when set, so a workbench with no
@@ -210,10 +229,176 @@ module Gori
                 # that a stored preset is visible ("`repeater list` and the TUI chip both name
                 # a browser") — a claim that was not true of this listing.
                 tls = r.tls_preset.try { |t| "  tls:#{t}" } || ""
-                puts "##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}#{tls}"
+                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}#{tls}"
               end
             end
           end
+        ensure
+          store.close
+        end
+      end
+
+      # `gori run repeater move <id> --to N | --up | --down` — rearrange the sub-tab strip.
+      #
+      # `--to` takes the 1-based TAB NUMBER, the same one `repeater list` prints and the TUI
+      # paints on the chip; `<id>` is the database id, as everywhere else on this surface.
+      # That split is deliberate: a destination that is stale merely misplaces this session,
+      # while a stale SELECTOR would act on a different one.
+      #
+      # An open TUI picks the new order up on its own — its reconcile poll re-sorts by
+      # {position, id} whenever a peer commits.
+      private def self.cmd_repeater_move(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        to : Int32? = nil
+        dir = 0
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run repeater move <repeater-id> (--to N | --up | --down)"
+          p.on("--to=N", "Move to this 1-based tab number (the number `repeater list` prints)") do |v|
+            to = v.to_i32? || abort("gori run repeater move: invalid --to '#{v}' (expected a 1-based tab number)")
+          end
+          p.on("--up", "Move one place toward tab 1") { dir = -1 }
+          p.on("--down", "Move one place toward the end") { dir = 1 }
+          p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run repeater move: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater move: missing value for #{f}" }
+          # Through the helper IN the sink, not twenty lines below it: a bare
+          # `positional = before + after` here reads fine and drops every token after the
+          # first, which is the shape `list_leftovers_spec`'s source gate exists to catch.
+          p.unknown_args do |before, after|
+            positional = one_positional_list(before, after, "gori run repeater move", "<repeater-id>")
+          end
+        end
+        parser.parse(args)
+
+        id_s = positional.first? || abort("gori run repeater move: <repeater-id> is required\n#{parser}")
+        id = id_s.to_i64? || abort("gori run repeater move: invalid repeater id '#{id_s}'")
+
+        # Two answers to one question. Choosing one silently is how a tab lands somewhere
+        # nobody asked for — the same refusal MCP's `move_repeater` makes.
+        abort "gori run repeater move: pass --to or --up/--down, not both" if to && dir != 0
+        abort "gori run repeater move: pass one of --to N, --up or --down\n#{parser}" if to.nil? && dir == 0
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          rows = store.repeaters_meta
+          from = rows.index { |r| r.id == id }
+          abort "gori run repeater move: no repeater session ##{id} (see `gori run repeater list`)" unless from
+          from += 1
+
+          target =
+            if t = to
+              # REFUSED, not clamped: a clamp would move the session somewhere other than
+              # where the command named and still exit 0.
+              abort "gori run repeater move: --to #{t} is outside this workbench (1-#{rows.size})" unless 1 <= t <= rows.size
+              t
+            else
+              t2 = from + dir
+              abort "gori run repeater move: session ##{id} is already at the #{dir < 0 ? "start" : "end"} " \
+                    "of the workbench (tab #{from} of #{rows.size})" unless 1 <= t2 <= rows.size
+              t2
+            end
+
+          moved = target != from
+          if moved
+            ids = rows.map(&.id)
+            ids.delete_at(from - 1)
+            ids.insert(target - 1, id)
+            abort "gori run repeater move: NOT moved (project busy or unwritable); the order is unchanged" unless store.set_repeater_positions(ids)
+          end
+
+          if format == :json
+            puts({"id" => id, "from_index" => from, "to_index" => target, "moved" => moved}.to_json)
+          elsif moved
+            puts "Repeater session ##{id} moved from tab #{from} to tab #{target}."
+          else
+            puts "Repeater session ##{id} is already tab #{target}."
+          end
+        ensure
+          store.close
+        end
+      end
+
+      # `gori run repeater delete <id> [<id>…] --yes` — close saved sessions headlessly.
+      #
+      # `--yes` is required because there is no undo: a session's request bytes, its stored
+      # WebSocket frames and any issue link pointing at it go with it. Unknown ids refuse the
+      # WHOLE command before the first delete, so a typo cannot destroy the eight that did
+      # exist and report the ninth as skipped.
+      private def self.cmd_repeater_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        yes = false
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run repeater delete <repeater-id> [<repeater-id>…] --yes"
+          p.on("-y", "--yes", "Confirm the deletion (required)") { yes = true }
+          p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run repeater delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater delete: missing value for #{f}" }
+          p.unknown_args { |before, after| positional = before + after }
+        end
+        parser.parse(args)
+
+        abort "gori run repeater delete: at least one <repeater-id> is required\n#{parser}" if positional.empty?
+        ids = positional.map do |tok|
+          tok.to_i64? || abort("gori run repeater delete: invalid repeater id '#{tok}'")
+        end
+        ids = ids.uniq
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          rows = store.repeaters_mcp
+          by_id = rows.index_by(&.id)
+          missing = ids.reject { |i| by_id.has_key?(i) }
+          abort "gori run repeater delete: no repeater session #{missing.join(", ")} — nothing was deleted " \
+                "(see `gori run repeater list`)" unless missing.empty?
+
+          unless yes
+            abort "gori run repeater delete: refusing to delete #{ids.size} session#{ids.size == 1 ? "" : "s"} " \
+                  "without --yes; this cannot be undone"
+          end
+
+          # The tab number each id HAS, taken once before the first delete — every later tab
+          # shifts down, so a number read mid-batch would be relative to a different strip.
+          tab_of = {} of Int64 => Int32
+          rows.each_with_index { |r, i| tab_of[r.id] = i + 1 }
+
+          deleted = [] of {Int64, String, Int32}
+          failed = [] of Int64
+          ids.each do |i|
+            was = tab_of[i]
+            if store.delete_repeater(i)
+              deleted << {i, by_id[i].name || "Untitled", was}
+            else
+              failed << i
+            end
+          end
+          gone = deleted.map { |(i, _, _)| i }.to_set
+          store.set_repeater_positions(rows.reject { |r| gone.includes?(r.id) }.map(&.id))
+
+          if format == :json
+            puts({
+              "deleted"   => deleted.map { |(i, n, was)| {"id" => i, "name" => n, "was_tui_index" => was} },
+              "failed"    => failed,
+              "remaining" => rows.size - deleted.size,
+            }.to_json)
+          else
+            deleted.each { |(i, n, was)| puts "Deleted repeater session ##{i} (tab #{was}, #{n})." }
+            STDERR.puts "NOT deleted (project busy or unwritable): #{failed.join(", ")}" unless failed.empty?
+          end
+          exit 1 unless failed.empty?
         ensure
           store.close
         end
@@ -383,7 +568,7 @@ module Gori
           end
           tls_preset = Settings.tls_preset_normalize(tls_preset)
 
-          pos = store.repeaters_meta.size
+          pos = store.next_repeater_position
 
           # The REQUEST, the TARGET and the SNI are all stored as authored. Same seam and same
           # reason as `MCP::Tools#stored_request`: `mask_secrets` here rewrote an author's live

@@ -114,6 +114,19 @@ module Gori
       list
     end
 
+    # The position a NEW tab appends at: one past the highest in use — the same
+    # `COALESCE(MAX(position), -1) + 1` every other ordered table here computes
+    # (`color_rules`, `match_rules`, `display_columns`).
+    #
+    # Every caller used to pass the row COUNT instead, which is the same number only while
+    # the space is dense — and it was not, because nothing renumbered after a close. A
+    # workbench left holding positions {0, 5, 9} handed the next tab position 3, dropping it
+    # into the MIDDLE of a strip the operator had arranged. `set_repeater_positions` keeps the
+    # space dense from here on; this makes an already-sparse project append correctly too.
+    def next_repeater_position : Int32
+      @db.scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM repeaters").as(Int64).to_i32
+    end
+
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
     def insert_repeater(target : String, request : Bytes, http2 : Bool,
@@ -161,6 +174,36 @@ module Gori
     def set_repeater_tags(id : Int64, tags : String?) : Bool
       exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE repeaters SET tags = ?, updated_at = ? WHERE id = ?", tags, now_us, id)
+        nil
+      }
+    end
+
+    # Renumber the workbench DENSELY, in the given order: `ids[0]` becomes position 0 and so
+    # on. The only writer of `position` other than `insert_repeater`.
+    #
+    # ONE batch, deliberately. A half-applied reorder is a scrambled strip and nothing else
+    # would repair it — `position` had no UPDATE at all until this method, so a partial write
+    # would be the workbench's permanent order.
+    #
+    # Renumbering rather than shifting one row is also a REPAIR. `insert_repeater`'s callers
+    # pass the row COUNT as the new position, so closing a tab left a gap and the next insert
+    # landed on a value a live row already held; `ORDER BY position, id` then broke the tie by
+    # id, which SQLite REUSES (see `delete_repeater`). The strip stayed deterministic, but the
+    # column stopped meaning "rank". Every caller here hands the full ordered id list, so it
+    # does.
+    #
+    # Ids not present in `repeaters` are simply not matched by their UPDATE — the caller
+    # decides whether an unknown id is an error, because a reorder and a post-delete
+    # renumbering want opposite answers.
+    #
+    # Returns whether the write committed (false = store busy/locked/closing), like the two
+    # label writes above.
+    def set_repeater_positions(ids : Array(Int64)) : Bool
+      exec_task_ok ->(c : DB::Connection) {
+        ts = now_us
+        ids.each_with_index do |id, i|
+          c.exec("UPDATE repeaters SET position = ?, updated_at = ? WHERE id = ?", i, ts, id)
+        end
         nil
       }
     end
