@@ -21,6 +21,10 @@ module Gori
       # --- action / write tools (gated) ---------------------------------------
 
       private def send_request(h) : Result
+        # FIRST, ahead of every other read: the one refusal whose entire value is its
+        # position in this method. See `send_source_conflict`.
+        conflict = send_source_conflict(h)
+        return conflict if conflict
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
         include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
@@ -105,7 +109,7 @@ module Gori
           sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers, sc, built, wire, http2, flow_precedence_ignored(h), body_cap, body_omit, applied_rules, plan.h2_fields,
+          include_sensitive_headers, sc, built, wire, http2, body_cap, body_omit, applied_rules, plan.h2_fields,
           request_line_rewritten, plan.websocket?, unbound_overlay,
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
@@ -118,13 +122,87 @@ module Gori
         Result.new(ex.message || "invalid request arguments", is_error: true)
       end
 
-      # The request-shaping fields that a flow_id/repeater_id source overrode
-      # (precedence: replaying a captured flow or a saved repeater ignores
-      # url/method/headers/body/raw). Empty unless a source id is set alongside one
-      # of them — so the caller can SEE what was dropped.
-      private def flow_precedence_ignored(h) : Array(String)
-        return [] of String unless present?(h, "flow_id") || present?(h, "repeater_id")
-        {"url", "method", "headers", "body", "body_base64", "raw", "raw_base64"}.select { |f| present?(h, f) }.to_a
+      # The two arguments that name a request gori has ALREADY stored. Exactly one may be given.
+      SEND_SOURCE_ARGS = %w[flow_id repeater_id]
+
+      # The arguments that DEFINE the request bytes. A stored source carries every one of them
+      # already, so naming one beside a source describes a second, different request.
+      # `verbatim`, `http2`, `sni`, `tls_preset`, `reframe_grpc`, `timeout_ms`, `insecure` and
+      # `keep_request_line` are deliberately NOT here: each one modifies how the stored request
+      # is sent, which is exactly what a per-send override is for. (`keep_request_line` is read
+      # only by the `flow_id` branch, as its own schema text says — it combines with a source
+      # without describing a different request, which is the line this constant draws.)
+      SEND_SHAPING_ARGS = %w[url method headers body body_base64 raw raw_base64 h2_fields]
+
+      # The refusal for a `send_request` whose arguments describe more than one request, or nil
+      # when they describe exactly one. Returned before anything is read, built, recorded or
+      # dialled.
+      #
+      # This used to be a REPORT: the stored source won the precedence, the send went out, and
+      # `ignored_fields` + `precedence_warning` named the dropped arguments in the reply. On a
+      # GET that is merely confusing. On the state-changing request an agent was trying to
+      # REPLACE — a saved POST it meant to re-aim at a harmless path with a harmless body — the
+      # stored request executes for real a second time, and the explanation arrives after the
+      # side effect (#906). A warning cannot un-create the resource it describes.
+      #
+      # So it is a refusal, which costs the caller one round-trip and zero requests, and it is
+      # the rule every neighbouring pair already follows: `flow_id` + `repeater_id` here,
+      # `fuzz_start`'s "pass ONE template source", `gori run fuzz`'s "<flow-id> and
+      # --flow/--repeater/--request cannot be combined". Refusing is also the direction that
+      # stays open: a later release may choose to APPLY overrides onto a stored source
+      # (`gori run repeater <flow-id> -H/-b/--target` already does), and a caller written
+      # against the refusal keeps working. The reverse is not true — teaching agents that the
+      # pair means "my overrides are ignored" and later honouring them silently re-aims live
+      # traffic.
+      private def send_source_conflict(h) : Result?
+        sources = SEND_SOURCE_ARGS.select { |f| present?(h, f) }
+        return nil if sources.empty?
+        # `describes?` and not `present?` — see its own comment. An `url: ""` from a client
+        # that fills every declared property names no request, and refusing it would make this
+        # gate fire on a call that means exactly one thing.
+        shaping = SEND_SHAPING_ARGS.select { |f| describes?(h, f) }
+        return nil if sources.size == 1 && shaping.empty?
+        err(send_conflict_message(sources, shaping), "INVALID_ARGUMENT",
+          # The SOURCE, never one of the overrides, and this is the one field on the refusal
+          # with a safety argument behind it. `field` is what a client rendering a single
+          # argument tells the model to remove — and removing an override is the resolution
+          # that RE-SENDS the stored request, which is the side effect this whole gate exists
+          # to prevent. Dropping the source sends what the caller described instead, which is
+          # inert if the caller was wrong.
+          field: sources.first,
+          # BOTH halves, always: the two-source branch used to return before `shaping` was
+          # computed, so `{flow_id, repeater_id, url, body}` was refused twice, for a
+          # different reason each time.
+          details: JSON.parse({"conflicting_fields" => sources + shaping}.to_json))
+      end
+
+      # The sentence for `send_source_conflict`: what was named, that nothing was sent, and
+      # the way out — which is NOT one sentence for both conflicts. An `h2_fields` caller is
+      # deliberately bypassing the h1 text carrier (a duplicate pseudo, a leading-space value),
+      # so telling it to "describe the request with url/method/headers/body" prescribes the
+      # one carrier that cannot hold its test.
+      private def send_conflict_message(sources : Array(String), shaping : Array(String)) : String
+        named =
+          if sources.size > 1
+            "two stored requests (#{sources.join(" + ")})"
+          else
+            "the request stored under #{sources.first}"
+          end
+        named += ", and #{shaping.size == 1 ? "an argument that describes" : "arguments that describe"} " \
+                 "another (#{shaping.join(", ")})" unless shaping.empty?
+        remedy =
+          if shaping.includes?("h2_fields")
+            "Drop #{sources.join(" and ")} and pass url + h2_fields to send the field-native request."
+          elsif shaping.empty?
+            "Pass whichever one you meant."
+          else
+            "Either drop #{shaping.join(", ")} to send #{sources.first} as stored, or drop " \
+            "#{sources.join(" and ")} and describe the request yourself with url/method/headers/body. " \
+            "#{sources.first == "flow_id" ? "get_flow" : "get_repeater_context"} returns the stored " \
+            "bytes to start from — pass include_sensitive:true and follow `request_read_more` if it " \
+            "is capped, or you will rebuild a redacted or truncated copy of them."
+          end
+        "this call names #{named}. NOTHING was sent. #{remedy}"
       end
 
       # The bytes that actually reach the origin, as head text.
@@ -460,7 +538,13 @@ module Gori
           return bool_arg(h, "auto_content_length", false)
         end
         if present?(h, "repeater_id") && (id = int(h, "repeater_id")) && (rec = store.get_repeater(id))
-          return rec.auto_content_length?
+          # …unless THIS send was verbatim, which sent with the resync off (`send_plan_options`).
+          # A saved row is meant to reproduce the request whose response is stored beside it, so
+          # inheriting the source tab's `auto_cl: true` here would hand the operator a tab that
+          # re-frames a deliberately-wrong `Content-Length: 3` to the body's real length the
+          # first time the TUI or `gori run repeater send` replays it — a different request than
+          # the one on record.
+          return rec.auto_content_length? && !RequestBuilder.verbatim?(h)
         end
         false
       end
@@ -705,8 +789,7 @@ module Gori
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, wire : Bytes,
-                                   http2 : Bool,
-                                   ignored : Array(String), body_cap : Int32, body_omit : Bool,
+                                   http2 : Bool, body_cap : Int32, body_omit : Bool,
                                    applied_rules : Bool = false,
                                    h2_fields : Array({String, String})? = nil,
                                    request_line_rewritten : Bool = false,
@@ -742,11 +825,6 @@ module Gori
               j.field "websocket_note",
                 "this request is a WebSocket upgrade; send_request performed the HTTP round-trip only " \
                 "(the response is the handshake). Use send_websocket with a repeater_id for the framed exchange."
-            end
-            unless ignored.empty?
-              j.field("ignored_fields") { j.array { ignored.each { |f| j.string f } } }
-              j.field "precedence_warning",
-                "flow_id takes precedence; #{ignored.join(", ")} #{ignored.size == 1 ? "was" : "were"} ignored"
             end
             j.field "recorded_flow_id", recorded_flow_id
             if repeater_id && repeater_id > 0
@@ -1137,11 +1215,16 @@ module Gori
       # `:scheme` that disagrees with the connection, a duplicate `:method`, an out-of-order or
       # unknown pseudo, `:protocol` and a leading-space value are all sendable, none of which
       # the h1-text carrier can hold (F7/F8/F11). It cannot ride with a stored source
-      # (flow_id/repeater_id replay their own bytes).
+      # (flow_id/repeater_id replay their own bytes) — `send_source_conflict` refuses that pair
+      # before `send_request` reaches this, which is why there is no second check here.
       private def field_native_plan_options(h) : Repeater::PlanOptions
-        if present?(h, "flow_id") || present?(h, "repeater_id")
-          raise Gori::Error.new("h2_fields cannot be combined with flow_id or repeater_id")
-        end
+        # Read for its REFUSAL, not its value: a field list is already the exact message, so
+        # there is no normalization here for `verbatim` to switch off. But it is a declared
+        # argument on this tool, and leaving the only branch that never reads it meant
+        # `{h2_fields, verbatim:"yes"}` sent with `isError:false` while `{raw, verbatim:"yes"}`
+        # was refused by name — one argument, two answers, which is the whole complaint this
+        # method's caller was fixed for.
+        RequestBuilder.verbatim?(h)
         fields = parse_h2_fields(h)
         scheme, host, port = RequestBuilder.origin(h)
         Repeater::PlanOptions.new(
@@ -1155,10 +1238,11 @@ module Gori
       # The option set plus "did gori rewrite the stored request line?" — the second half is
       # not derivable from `PlanOptions`, and `send_request` has to report it (see the
       # `flow_id` branch below).
+      #
+      # Exactly one of the three branches below applies: `send_source_conflict` has already
+      # refused a call that named two of them (#906), so the ordering here selects rather than
+      # arbitrates.
       private def send_plan_options(h) : {Repeater::PlanOptions, Bool}
-        if present?(h, "flow_id") && present?(h, "repeater_id")
-          raise Gori::Error.new("pass only one of flow_id or repeater_id")
-        end
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
         timeout = send_timeout(h)
         # Read up front, not inside the `flow_id` branch that uses it: an argument validated in
@@ -1169,6 +1253,17 @@ module Gori
         # parity gap this builder exists to prevent. Default false — see
         # `Repeater::PlanOptions#reframe_grpc?`.
         reframe_grpc = bool_arg(h, "reframe_grpc", false)
+        # And that gap is exactly what `verbatim` was, until #906: read only inside the `raw`
+        # branch, so `send_request{repeater_id, verbatim:true}` expanded `$NAME` and resynced
+        # Content-Length anyway — where `gori run repeater send --verbatim` and
+        # `send_websocket{repeater_id, verbatim}` (one screen up in this very file) have always
+        # honoured it on a stored session. Hoisted so all three branches read the SAME answer.
+        #
+        # `RequestBuilder.verbatim?` and not `bool_arg`: it is the one reading of "these bytes
+        # are literal", and it also treats `raw_base64` as verbatim, since encoding octets IS
+        # saying they are the message. Reading the argument a second time here let the builder
+        # and this gate disagree about the same call.
+        verbatim = RequestBuilder.verbatim?(h)
         # Honor the project's host overrides on the direct-dial path (parity with the live
         # proxy). nil/empty is behaviorally identical to no override.
         overrides = HostOverrides.load(store)
@@ -1183,9 +1278,20 @@ module Gori
           end
           # Respect the repeater's auto-Content-Length setting (the TUI Repeater does):
           # only recompute CL when it's on, so a deliberately hand-set CL is preserved.
+          #
+          # The three `verbatim` flags are `CLI::Run::Repeater.session_plan_options`, because
+          # this is the same act, and the cost of dropping the flag here was the request's
+          # PAYLOAD rather than its destination: a session whose stored body IS
+          # `{"$where":"1==1"}` was sent with the value of a project env var substituted into
+          # it — reported as a clean send of bytes the operator never wrote — or refused
+          # outright, naming a variable nobody had typed.
           return {Repeater::PlanOptions.new([rec.request], default_target: rec.target,
             http2: bool_arg(h, "http2", rec.http2?), sni: send_sni(h, rec.sni),
-            auto_content_length: rec.auto_content_length?, verify: verify,
+            expand_request: !verbatim,
+            # The h2 half of the same promise — see the `raw` branch below and
+            # `PlanOptions#preserve_field_case?`.
+            preserve_field_case: verbatim,
+            auto_content_length: !verbatim && rec.auto_content_length?, verify: verify,
             reframe_grpc: reframe_grpc, tls_preset: send_tls_preset(h, rec.tls_preset),
             timeout: timeout, overrides: overrides), false}
         end
@@ -1238,8 +1344,13 @@ module Gori
           # The flags stay because they are NOT implied: `expand_request: false` is also what
           # keeps `downgrade_request_line` off this path, and an `HTTP/2` version line in a
           # capture is the operator's to replay.
+          # A capture is replayed byte-exact WITHOUT the flag — `expand_request` and
+          # `auto_content_length` are already off below — so field case is the only thing
+          # `verbatim` is left to promise here, and only on h2, where `H2Engine` otherwise
+          # lowercases every name. Wiring it means the argument is never accepted and dropped
+          # on either stored-source path (#906); it cannot loosen an h1 replay.
           {Repeater::PlanOptions.new([flow.bytes], default_target: flow.target,
-            expand_request: false, evidence: true,
+            expand_request: false, evidence: true, preserve_field_case: verbatim,
             auto_content_length: false, reframe_grpc: reframe_grpc,
             http2: bool_arg(h, "http2", flow.http2), sni: send_sni(h, flow.sni), verify: verify,
             tls_preset: send_tls_preset(h),
@@ -1250,11 +1361,6 @@ module Gori
           # pre-resolved and the bytes are taken verbatim (a second `Env.expand_wire` would
           # double-expand a `$KEY` whose value itself looks like a token).
           built = RequestBuilder.build(h)
-          # ONE reading of "these bytes are literal", `RequestBuilder`'s — which also treats
-          # `raw_base64` as verbatim, since encoding octets IS saying they are the message.
-          # Reading `verbatim` again through `bool_arg` here let the builder and this gate
-          # disagree about the same call.
-          verbatim = RequestBuilder.verbatim?(h)
           {Repeater::PlanOptions.new([built.bytes], expand_request: false,
             auto_content_length: false, reframe_grpc: reframe_grpc,
             # The h2 half of the verbatim promise: `verbatim` means the bytes ARE the message, so
@@ -1358,8 +1464,13 @@ module Gori
           "`flow_id` to resend a captured flow byte-exact, `repeater_id` to execute " \
           "a saved HTTP repeater (use send_websocket for WS repeaters), OR give an " \
           "absolute `url` with optional method/headers/body, or a verbatim `raw` request. " \
-          "When `flow_id` or `repeater_id` is set, url/method/headers/body/raw are ignored (and " \
-          "reported in `ignored_fields` with a precedence_warning). The result " \
+          "A stored source is EXCLUSIVE: `flow_id`/`repeater_id` passed together with " \
+          "url/method/headers/body/body_base64/raw/raw_base64/h2_fields (or with each other) is " \
+          "REFUSED as INVALID_ARGUMENT — `details.conflicting_fields` names them — and NOTHING is " \
+          "sent, because those arguments describe a second, different request. To edit a stored " \
+          "request, read it with get_flow/get_repeater_context and send it back through url/raw. " \
+          "Per-send modifiers (http2, sni, tls_preset, verbatim, timeout_ms, insecure, " \
+          "reframe_grpc) DO combine with a source, and keep_request_line with flow_id. The result " \
           "always includes `effective_request` (the scheme/host/port/method/target/" \
           "http_version actually sent). " \
           "Host + Content-Length are auto-added when omitted on the url path. " \
@@ -1378,7 +1489,7 @@ module Gori
           s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and is NOT $VAR-expanded")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no $VAR expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send 'raw' EXACTLY as given: no $VAR expansion and no bare-LF→CRLF promotion in the head (default false). Use for desync/smuggling tests where a bare LF header terminator IS the payload")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion, no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")

@@ -178,6 +178,31 @@ describe "MCP flow seeds carry PROVENANCE" do
     end
   end
 
+  # #906: `fuzz_start` refuses two template sources ("This used to return on the FIRST of
+  # template → flow_id → repeater_id"); mine and sequence were left returning on the first,
+  # so the flow seed was dropped in silence on two tools that make real outbound requests —
+  # while `gori run mine` / `gori run sequence` abort on the identical pair. Refused BEFORE a
+  # job exists, so there is nothing to stop afterwards.
+  it "mine_start and sequence_start refuse two template sources instead of picking one" do
+    port = HTML_ORIGIN_PORT
+    with_store do |store|
+      tools = tools_for(store)
+      id = insert_flow(store, port, ODATA_HEAD + "Host: 127.0.0.1:#{port}\r\n\r\n")
+      seed = {"flow_id" => id, "template" => "GET /other HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+              "url" => "http://127.0.0.1:#{port}", "max_requests" => 1, "allow_unscoped" => true}
+      text, err = call_raw(tools, "mine_start", seed.to_json)
+      err.should be_true
+      text.should contain("pass ONE template source")
+      text.should contain("template + flow_id")
+
+      text, err = call_raw(tools, "sequence_start",
+        seed.merge({"cookie" => "sid", "count" => 1}).to_json)
+      err.should be_true
+      text.should contain("pass ONE template source")
+      call_json(tools, "list_jobs", "{}")["jobs"].as_a.should be_empty
+    end
+  end
+
   # The other half of the same bit, and the one that silently changes what a whole sweep
   # measures: `expand_wire` re-terminates a head with CRLF. A bare LF between header lines is
   # itself a front-end/back-end desync primitive, so promoting it does not merely tidy the

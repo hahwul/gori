@@ -202,7 +202,17 @@ module Gori
       # is a CAPTURE, a `template` string is a draft. `gori run sequence --flow` has carried it
       # since #556 and MCP did not, so a token-randomness sweep seeded from a captured login
       # was refused for a `$` in the capture, or ran against a head silently re-terminated.
+      #
+      # ONE seed only, for the reason `mine_template_source` and `fuzz_template_source` state:
+      # returning on the FIRST of template → flow_id swept the template and never said the flow
+      # seed was dropped, where `gori run sequence` aborts on the same pair (#906).
       private def sequence_request_source(h) : {Bytes, String?, Bool, Bool}
+        given = [] of String
+        given << "template" if str(h, "template").try(&.presence)
+        given << "flow_id" if optional_int_arg(h, "flow_id")
+        if given.size > 1
+          raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be swept")
+        end
         if t = str(h, "template")
           return {t.to_slice, nil, false, false} unless t.strip.empty?
         end

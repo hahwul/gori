@@ -2171,6 +2171,92 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `gori run repeater send --verbatim` and `send_websocket{repeater_id, verbatim}` have both
+    # honoured this on a stored session; `send_request{repeater_id}` read the argument nowhere,
+    # so a stored `$where` NoSQL payload was substituted (or refused for an unbound name) and
+    # the reply reported a clean send of bytes the operator never wrote (#906).
+    it "sends a repeater_id replay verbatim: no $VAR expansion, no CL resync" do
+      with_store do |store|
+        Gori::Env.save_project(store, [{"where", "SUBSTITUTED"}])
+        sink = Channel(Bytes).new(1)
+        port = start_mcp_recording_origin(sink)
+        # Content-Length deliberately disagrees with the body: under verbatim it must survive.
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: %(POST /q HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nContent-Length: 3\r\n\r\n{"$where":"1==1"}).to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"verbatim":true,"allow_unscoped":true}}})
+        drive(store, call, verify_upstream: false)
+        got = String.new(sink.receive)
+        got.should contain(%({"$where":"1==1"}))
+        got.should_not contain("SUBSTITUTED")
+        got.should contain("Content-Length: 3")
+      end
+    end
+
+    # h2 lowercases every field name (RFC 9113 §8.2.1), which is the one normalization a flow
+    # replay still applies — everything else on that path is already byte-exact. The RECORDED
+    # head is the evidence: it is written from the encoded wire before the dial, so a dead port
+    # is enough.
+    it "keeps a captured field's case on an h2 flow replay under verbatim" do
+      with_store do |store|
+        seed = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
+          method: "GET", target: "/c", http_version: "HTTP/1.1",
+          head: "GET /c HTTP/1.1\r\nHost: 127.0.0.1:1\r\nX-Case-Probe: v\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
+        heads = {true, false}.map do |verbatim|
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{seed},"http2":true,"verbatim":#{verbatim},"allow_unscoped":true}}})
+          id = tool_payload(drive(store, call)[0])["recorded_flow_id"].as_i64
+          String.new(store.get_flow(id).not_nil!.request_head)
+        end
+        heads[0].should contain("X-Case-Probe")
+        heads[1].should contain("x-case-probe")
+      end
+    end
+
+    # The other half of `expand_request: !verbatim` on this path: the head pass is also what
+    # promotes a bare LF to CRLF, and a bare-LF header terminator is the desync primitive the
+    # flag exists to deliver. Only the $VAR and Content-Length halves had examples.
+    it "keeps a bare-LF head terminator on a repeater_id replay under verbatim" do
+      with_store do |store|
+        sink = Channel(Bytes).new(1)
+        port = start_mcp_recording_origin(sink)
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "GET /lf HTTP/1.1\nHost: 127.0.0.1:#{port}\n\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"verbatim":true,"allow_unscoped":true}}})
+        drive(store, call, verify_upstream: false)
+        String.new(sink.receive).should_not contain("\r\n")
+      end
+    end
+
+    it "promotes a bare-LF head on a repeater_id replay without verbatim" do
+      with_store do |store|
+        sink = Channel(Bytes).new(1)
+        port = start_mcp_recording_origin(sink)
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "GET /lf HTTP/1.1\nHost: 127.0.0.1:#{port}\n\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
+        drive(store, call, verify_upstream: false)
+        String.new(sink.receive).should contain("\r\n")
+      end
+    end
+
+    it "expands $VARs on a repeater_id replay without verbatim" do
+      with_store do |store|
+        Gori::Env.save_project(store, [{"where", "SUBSTITUTED"}])
+        sink = Channel(Bytes).new(1)
+        port = start_mcp_recording_origin(sink)
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: %(POST /q HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nContent-Length: 17\r\n\r\n{"$where":"1==1"}).to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
+        drive(store, call, verify_upstream: false)
+        String.new(sink.receive).should contain("SUBSTITUTED")
+      end
+    end
+
     it "allows an explicit unaudited send and an explicit sensitive-header response" do
       with_store do |store|
         port = start_mcp_http_origin("ok", "Set-Cookie: session=visible\r\n")
@@ -2317,21 +2403,166 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "reports ignored_fields + effective_request when flow_id overrides url/method" do
+    # #906. The precedence used to be a REPORT: the stored request went out and
+    # `ignored_fields` explained afterwards which overrides had been dropped — which, for a
+    # state-changing repeater an agent meant to re-aim, is a second real execution announced
+    # after the fact. It is a refusal now, and these four assert the refusal is COMPLETE:
+    # no History row, and the one-shot origin still unconsumed.
+    it "refuses repeater_id + request overrides without sending anything" do
+      with_store do |store|
+        port = start_mcp_http_origin("only-one-response")
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "POST /orders HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nContent-Length: 2\r\n\r\n{}".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"url":"http://127.0.0.1:#{port}/harmless","method":"GET","body":"replacement","allow_unscoped":true}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        sc = resp["result"]["structuredContent"]
+        sc["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        fields = sc["details"]["conflicting_fields"].as_a.map(&.as_s)
+        fields.should eq(["repeater_id", "url", "method", "body"])
+        # The SOURCE, not the override — removing the override is what re-sends the stored POST.
+        sc["field"].as_s.should eq("repeater_id")
+        # Nothing reached the wire: no History row, and the origin's single response is still
+        # there for the send that follows.
+        store.recent_flows(10).should be_empty
+        ok = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
+        tool_payload(drive(store, ok, verify_upstream: false)[0])["status"].as_i.should eq(200)
+      end
+    end
+
+    it "refuses flow_id + url/method before the send and records no flow" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
           method: "GET", target: "/seed", http_version: "HTTP/1.1",
           head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://ignored.test/x","method":"POST","allow_unscoped":true}}})
-        p = tool_payload(drive(store, call)[0]) # send fails fast (127.0.0.1:1), payload still carries the fields
-        p["effective_request"]["host"].as_s.should eq("127.0.0.1")
-        p["effective_request"]["target"].as_s.should eq("/seed")
-        p["effective_request"]["method"].as_s.should eq("GET") # from the flow, not the ignored POST
-        ignored = p["ignored_fields"].as_a.map(&.as_s)
-        ignored.should contain("url")
-        ignored.should contain("method")
-        p["precedence_warning"].as_s.should contain("flow_id")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://elsewhere.test/x","method":"POST","allow_unscoped":true}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        sc = resp["result"]["structuredContent"]
+        sc["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        sc["details"]["conflicting_fields"].as_a.map(&.as_s).should eq(["flow_id", "url", "method"])
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("NOTHING was sent")
+        text.should contain("get_flow")
+        # The seed flow is the only row — no outbound request was recorded.
+        store.recent_flows(10).map(&.id).should eq([id])
+      end
+    end
+
+    it "refuses flow_id + repeater_id as a conflict naming both" do
+      with_store do |store|
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
+          method: "GET", target: "/seed", http_version: "HTTP/1.1",
+          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        rid = store.insert_repeater(target: "http://127.0.0.1:1",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{fid},"repeater_id":#{rid},"allow_unscoped":true}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        sc = resp["result"]["structuredContent"]
+        sc["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        sc["details"]["conflicting_fields"].as_a.map(&.as_s).should eq(["flow_id", "repeater_id"])
+        store.recent_flows(10).map(&.id).should eq([fid])
+      end
+    end
+
+    it "refuses h2_fields beside a stored source with the same coded conflict" do
+      with_store do |store|
+        rid = store.insert_repeater(target: "http://127.0.0.1:1",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"h2_fields":[[":method","GET"]],"allow_unscoped":true}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        sc = resp["result"]["structuredContent"]
+        sc["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        sc["details"]["conflicting_fields"].as_a.map(&.as_s).should eq(["repeater_id", "h2_fields"])
+        store.recent_flows(10).should be_empty
+      end
+    end
+
+    # Per-send MODIFIERS are the other half of the contract: they still combine with a source,
+    # so the refusal above cannot be implemented by refusing everything. The session is stored
+    # as h2 and the origin speaks h1 ONLY, so a 200 is proof `http2:false` was threaded through
+    # — not merely that the call was allowed past the gate.
+    it "still honours per-send modifiers alongside repeater_id" do
+      with_store do |store|
+        port = start_mcp_http_origin("modifier-ok")
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice,
+          http2: true, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"http2":false,"timeout_ms":5000,"insecure":true,"allow_unscoped":true}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["status"].as_i.should eq(200)
+        p["effective_request"]["http_version"].as_s.should eq("HTTP/1.1")
+        p.as_h.has_key?("ignored_fields").should be_false
+      end
+    end
+
+    # An argument that names nothing is not a second request. A client filling every declared
+    # property of the schema sends these beside the one argument it means.
+    it "does not read an empty url/headers/body as a conflicting override" do
+      with_store do |store|
+        port = start_mcp_http_origin("empty-args-ok")
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"url":"","headers":{},"raw_base64":"","allow_unscoped":true}}})
+        tool_payload(drive(store, call, verify_upstream: false)[0])["status"].as_i.should eq(200)
+      end
+    end
+
+    # `field` is what a client rendering a single argument tells the model to remove, and
+    # removing an override re-sends the stored request — the side effect the gate exists to
+    # prevent. So it names the SOURCE, and both halves of a doubled conflict are reported at
+    # once rather than over two round trips.
+    it "points `field` at the source and reports both halves of a doubled conflict" do
+      with_store do |store|
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
+          method: "GET", target: "/seed", http_version: "HTTP/1.1",
+          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        rid = store.insert_repeater(target: "http://127.0.0.1:1",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{fid},"repeater_id":#{rid},"url":"http://x.test/","body":"b","allow_unscoped":true}}})
+        sc = drive(store, call)[0]["result"]["structuredContent"]
+        sc["field"].as_s.should eq("flow_id")
+        sc["details"]["conflicting_fields"].as_a.map(&.as_s).should eq(["flow_id", "repeater_id", "url", "body"])
+      end
+    end
+
+    # The h1 text carrier cannot hold what an h2_fields caller is testing, so "describe the
+    # request with url/method/headers/body" is the wrong way out of THAT conflict.
+    it "points an h2_fields conflict at url + h2_fields, not at the h1 carrier" do
+      with_store do |store|
+        rid = store.insert_repeater(target: "http://127.0.0.1:1",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"h2_fields":[[":method","GET"]],"allow_unscoped":true}}})
+        text = drive(store, call)[0]["result"]["content"][0]["text"].as_s
+        text.should contain("url + h2_fields")
+        text.should_not contain("url/method/headers/body")
+      end
+    end
+
+    # `verbatim` sent with auto-Content-Length OFF, so the tab it saves has to record that or
+    # the saved row re-frames the deliberate mismatch on its first replay.
+    it "saves a verbatim send's repeater with auto Content-Length off" do
+      with_store do |store|
+        port = start_mcp_http_origin("saved")
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "POST /q HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nContent-Length: 3\r\n\r\nlonger-body".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"verbatim":true,"save_as_repeater":true,"allow_unscoped":true}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        saved = store.get_repeater(p["saved_repeater_id"].as_i64).not_nil!
+        saved.auto_content_length?.should be_false
+        String.new(saved.request).should contain("Content-Length: 3")
       end
     end
 
