@@ -127,9 +127,11 @@ module Gori
 
       # The arguments that DEFINE the request bytes. A stored source carries every one of them
       # already, so naming one beside a source describes a second, different request.
-      # `verbatim`, `keep_request_line`, `http2`, `sni`, `tls_preset`, `reframe_grpc`,
-      # `timeout_ms` and `insecure` are deliberately NOT here: each one modifies how the stored
-      # request is sent, which is exactly what a per-send override is for.
+      # `verbatim`, `http2`, `sni`, `tls_preset`, `reframe_grpc`, `timeout_ms`, `insecure` and
+      # `keep_request_line` are deliberately NOT here: each one modifies how the stored request
+      # is sent, which is exactly what a per-send override is for. (`keep_request_line` is read
+      # only by the `flow_id` branch, as its own schema text says — it combines with a source
+      # without describing a different request, which is the line this constant draws.)
       SEND_SHAPING_ARGS = %w[url method headers body body_base64 raw raw_base64 h2_fields]
 
       # The refusal for a `send_request` whose arguments describe more than one request, or nil
@@ -154,33 +156,53 @@ module Gori
       # traffic.
       private def send_source_conflict(h) : Result?
         sources = SEND_SOURCE_ARGS.select { |f| present?(h, f) }
-        if sources.size > 1
-          return send_conflict_error(
-            "pass only one of flow_id or repeater_id — they name different stored requests and " \
-            "only one can be sent. NOTHING was sent.",
-            field: sources[1], fields: sources)
-        end
-        return nil unless source = sources.first?
-        shaping = SEND_SHAPING_ARGS.select { |f| present?(h, f) }
-        return nil if shaping.empty?
-        send_conflict_error(
-          "#{source} sends the request already stored under that id; #{shaping.join(", ")} " \
-          "#{shaping.size == 1 ? "describes" : "describe"} a different one, so this call names two " \
-          "requests. NOTHING was sent. Either drop #{shaping.join(", ")} to send #{source} as " \
-          "stored, or drop #{source} and describe the request yourself with url/method/headers/body " \
-          "(#{source == "flow_id" ? "get_flow" : "get_repeater_context"} returns the stored bytes to " \
-          "start from).",
-          field: shaping.first, fields: sources + shaping)
+        return nil if sources.empty?
+        # `describes?` and not `present?` — see its own comment. An `url: ""` from a client
+        # that fills every declared property names no request, and refusing it would make this
+        # gate fire on a call that means exactly one thing.
+        shaping = SEND_SHAPING_ARGS.select { |f| describes?(h, f) }
+        return nil if sources.size == 1 && shaping.empty?
+        err(send_conflict_message(sources, shaping), "INVALID_ARGUMENT",
+          # The SOURCE, never one of the overrides, and this is the one field on the refusal
+          # with a safety argument behind it. `field` is what a client rendering a single
+          # argument tells the model to remove — and removing an override is the resolution
+          # that RE-SENDS the stored request, which is the side effect this whole gate exists
+          # to prevent. Dropping the source sends what the caller described instead, which is
+          # inert if the caller was wrong.
+          field: sources.first,
+          # BOTH halves, always: the two-source branch used to return before `shaping` was
+          # computed, so `{flow_id, repeater_id, url, body}` was refused twice, for a
+          # different reason each time.
+          details: JSON.parse({"conflicting_fields" => sources + shaping}.to_json))
       end
 
-      # One shape for both refusals: the sentence in `text`, the argument names a caller can
-      # branch on without string-matching in `details.conflicting_fields`, and `field` naming
-      # the one to remove first, so a client that renders only `field` still points somewhere
-      # actionable.
-      private def send_conflict_error(message : String, field : String,
-                                      fields : Array(String)) : Result
-        err(message, "INVALID_ARGUMENT", field: field,
-          details: JSON.parse({"conflicting_fields" => fields}.to_json))
+      # The sentence for `send_source_conflict`: what was named, that nothing was sent, and
+      # the way out — which is NOT one sentence for both conflicts. An `h2_fields` caller is
+      # deliberately bypassing the h1 text carrier (a duplicate pseudo, a leading-space value),
+      # so telling it to "describe the request with url/method/headers/body" prescribes the
+      # one carrier that cannot hold its test.
+      private def send_conflict_message(sources : Array(String), shaping : Array(String)) : String
+        named =
+          if sources.size > 1
+            "two stored requests (#{sources.join(" + ")})"
+          else
+            "the request stored under #{sources.first}"
+          end
+        named += ", and #{shaping.size == 1 ? "an argument that describes" : "arguments that describe"} " \
+                 "another (#{shaping.join(", ")})" unless shaping.empty?
+        remedy =
+          if shaping.includes?("h2_fields")
+            "Drop #{sources.join(" and ")} and pass url + h2_fields to send the field-native request."
+          elsif shaping.empty?
+            "Pass whichever one you meant."
+          else
+            "Either drop #{shaping.join(", ")} to send #{sources.first} as stored, or drop " \
+            "#{sources.join(" and ")} and describe the request yourself with url/method/headers/body. " \
+            "#{sources.first == "flow_id" ? "get_flow" : "get_repeater_context"} returns the stored " \
+            "bytes to start from — pass include_sensitive:true and follow `request_read_more` if it " \
+            "is capped, or you will rebuild a redacted or truncated copy of them."
+          end
+        "this call names #{named}. NOTHING was sent. #{remedy}"
       end
 
       # The bytes that actually reach the origin, as head text.
@@ -516,7 +538,13 @@ module Gori
           return bool_arg(h, "auto_content_length", false)
         end
         if present?(h, "repeater_id") && (id = int(h, "repeater_id")) && (rec = store.get_repeater(id))
-          return rec.auto_content_length?
+          # …unless THIS send was verbatim, which sent with the resync off (`send_plan_options`).
+          # A saved row is meant to reproduce the request whose response is stored beside it, so
+          # inheriting the source tab's `auto_cl: true` here would hand the operator a tab that
+          # re-frames a deliberately-wrong `Content-Length: 3` to the body's real length the
+          # first time the TUI or `gori run repeater send` replays it — a different request than
+          # the one on record.
+          return rec.auto_content_length? && !RequestBuilder.verbatim?(h)
         end
         false
       end
@@ -1190,6 +1218,13 @@ module Gori
       # (flow_id/repeater_id replay their own bytes) — `send_source_conflict` refuses that pair
       # before `send_request` reaches this, which is why there is no second check here.
       private def field_native_plan_options(h) : Repeater::PlanOptions
+        # Read for its REFUSAL, not its value: a field list is already the exact message, so
+        # there is no normalization here for `verbatim` to switch off. But it is a declared
+        # argument on this tool, and leaving the only branch that never reads it meant
+        # `{h2_fields, verbatim:"yes"}` sent with `isError:false` while `{raw, verbatim:"yes"}`
+        # was refused by name — one argument, two answers, which is the whole complaint this
+        # method's caller was fixed for.
+        RequestBuilder.verbatim?(h)
         fields = parse_h2_fields(h)
         scheme, host, port = RequestBuilder.origin(h)
         Repeater::PlanOptions.new(
@@ -1435,7 +1470,7 @@ module Gori
           "sent, because those arguments describe a second, different request. To edit a stored " \
           "request, read it with get_flow/get_repeater_context and send it back through url/raw. " \
           "Per-send modifiers (http2, sni, tls_preset, verbatim, timeout_ms, insecure, " \
-          "reframe_grpc, keep_request_line) DO combine with a source. The result " \
+          "reframe_grpc) DO combine with a source, and keep_request_line with flow_id. The result " \
           "always includes `effective_request` (the scheme/host/port/method/target/" \
           "http_version actually sent). " \
           "Host + Content-Length are auto-added when omitted on the url path. " \

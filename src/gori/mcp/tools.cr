@@ -1659,6 +1659,22 @@ module Gori
         !v.raw.nil?
       end
 
+      # `present?`, minus the values that name nothing: an empty string, an empty object, an
+      # empty array. A client that fills every declared property of a schema sends `url: ""`
+      # and `headers: {}` beside the two arguments it actually means, and a gate reading those
+      # as "the caller passed url" refuses a call that says exactly one thing. It is also the
+      # reading two neighbours already give the same shape — `RequestBuilder.verbatim?` treats
+      # `raw_base64: ""` as absent, `fuzz_template_source` a blank `template` — so a gate on
+      # `present?` and a builder on `.presence` would disagree about one call.
+      private def describes?(h, key : String) : Bool
+        return false unless v = h[key]?
+        case raw = v.raw
+        when Nil                 then false
+        when String, Array, Hash then !raw.empty?
+        else                          true
+        end
+      end
+
       # Error text for a REQUIRED integer id that didn't coerce: distinguishes a
       # genuinely absent arg from one that was supplied but isn't an integer (e.g.
       # 1.9 or "oops"), so the caller isn't told "missing" for a value it did send.

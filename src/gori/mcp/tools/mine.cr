@@ -272,7 +272,18 @@ module Gori
       # a CAPTURE, a `template` string is a draft. `gori run mine --flow` has carried it since
       # #556 and MCP did not, so an agent mining a captured OData request had the run refused
       # for a `$filter` nobody typed, and a bare-LF captured head was promoted to CRLF.
+      #
+      # ONE seed only, the refusal `fuzz_template_source` already carries and `gori run mine`
+      # aborts on. Returning on the FIRST of template → flow_id mined the template and never
+      # said the flow seed was dropped — on a tool that makes real outbound requests, and
+      # against a CLI sibling that refuses the identical pair (#906).
       private def mine_template_source(h) : {String, String?, Bool, Bool}
+        given = [] of String
+        given << "template" if str(h, "template").try(&.presence)
+        given << "flow_id" if optional_int_arg(h, "flow_id")
+        if given.size > 1
+          raise FuzzArgError.new("pass ONE template source, got #{given.join(" + ")} — they describe different requests and only one can be mined")
+        end
         if t = str(h, "template")
           return {t, nil, false, false} unless t.strip.empty?
         end
