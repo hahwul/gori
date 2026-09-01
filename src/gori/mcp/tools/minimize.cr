@@ -134,6 +134,9 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "repeater_id", id
+            # The number the operator reads off the sub-tab chip, beside the id this tool
+            # takes — the same pair every repeater reply carries (see `repeater_tui_index`).
+            repeater_tui_index(id).try { |n| j.field "tui_index", n }
             j.field "aborted", report.aborted
             j.field "note", report.note
             j.field "sends", report.sends

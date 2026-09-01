@@ -161,7 +161,7 @@ module Gori::Tui
     end
 
     def filter_fields : Array(String)
-      %w[tag name host method]
+      %w[tag name host method status]
     end
 
     # The filter bar occupies a body row whenever the strip is up (from the first session),
@@ -172,7 +172,8 @@ module Gori::Tui
 
     # The searchable projection of a session for the in-memory matcher (TUI-free).
     private def filter_subject(v : RepeaterView) : Repeater::SubtabFilter::Subject
-      Repeater::SubtabFilter::Subject.new(v.name, v.summary(200), v.target, v.request_method, v.tags)
+      Repeater::SubtabFilter::Subject.new(v.name, v.summary(200), v.target, v.request_method,
+        v.tags, v.status_token)
     end
 
     # One Subject per open session, in chip order (the base's filter projection hook).

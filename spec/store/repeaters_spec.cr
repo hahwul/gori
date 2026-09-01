@@ -72,6 +72,49 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 
+  it "renumbers the workbench densely in the given order" do
+    with_store do |store|
+      a = store.insert_repeater("https://a.test", "a".to_slice, false, true, nil, 0)
+      b = store.insert_repeater("https://b.test", "b".to_slice, false, true, nil, 1)
+      c = store.insert_repeater("https://c.test", "c".to_slice, false, true, nil, 2)
+
+      store.set_repeater_positions([c, a, b]).should be_true
+      store.repeaters.map(&.id).should eq([c, a, b])
+      store.repeaters.map(&.position).should eq([0, 1, 2])
+    end
+  end
+
+  it "repairs a sparse, COLLIDING position space (the shape a close used to leave)" do
+    with_store do |store|
+      # Positions {0, 5, 5}: what the workbench looked like after closes, because
+      # `insert_repeater`'s callers passed the row COUNT and nothing renumbered.
+      a = store.insert_repeater("https://a.test", "a".to_slice, false, true, nil, 0)
+      b = store.insert_repeater("https://b.test", "b".to_slice, false, true, nil, 5)
+      c = store.insert_repeater("https://c.test", "c".to_slice, false, true, nil, 5)
+
+      store.set_repeater_positions(store.repeaters.map(&.id))
+      store.repeaters.map(&.position).should eq([0, 1, 2])
+      store.repeaters.map(&.id).should eq([a, b, c])
+    end
+  end
+
+  it "appends past the HIGHEST position in use, not the row count" do
+    with_store do |store|
+      # A sparse space is exactly where `repeaters_meta.size` put a new tab in the MIDDLE.
+      store.insert_repeater("https://a.test", "a".to_slice, false, true, nil, 0)
+      store.insert_repeater("https://b.test", "b".to_slice, false, true, nil, 9)
+      store.next_repeater_position.should eq(10)
+
+      last = store.insert_repeater("https://c.test", "c".to_slice, false, true, nil,
+        store.next_repeater_position)
+      store.repeaters.last.id.should eq(last)
+    end
+  end
+
+  it "starts from 0 on an empty workbench" do
+    with_store { |store| store.next_repeater_position.should eq(0) }
+  end
+
   it "starts a fresh tab with no persisted response (V11 columns NULL)" do
     with_store do |store|
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)

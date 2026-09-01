@@ -135,6 +135,11 @@ module Gori
         "create_extract_rule", "update_extract_rule", "delete_extract_rule", "set_extract_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
+        # The bulk siblings and the reorder. `move_repeater` is here for the same reason
+        # `move_color_rule` is: order is what the operator navigates by, so an agent that
+        # rearranges the strip has changed something the human will notice and should be able
+        # to trace.
+        "move_repeater", "create_repeaters", "delete_repeaters", "update_repeaters",
         "oast_start", "oast_stop", "oast_resume", "oast_release",
         "add_scope_rule", "delete_scope_rule", "set_scope_enabled", "set_sandbox",
         "set_env_var", "delete_env_var",
@@ -234,6 +239,15 @@ module Gori
       DISCOVER_MAX_DEPTH       =          12
 
       MCP_REPEATER_REQUEST_MAX = 16 * 1024
+
+      # Caps for `get_repeater_context{include_response_body}`. Same numbers `list_fuzz_runs`
+      # uses for its own inlined bodies, so a caller does not have to learn two budgets.
+      # `MCP_REPEATER_BODY_ROWS` bounds how many rows of one page get a BLOB read at all —
+      # `repeaters_mcp` leaves `response_body` out on purpose, and a 500-row listing that
+      # hydrated every one of them would be the `get_flow`-vs-`flow_row` mistake at scale.
+      MCP_REPEATER_BODY_DEFAULT = 2 * 1024
+      MCP_REPEATER_BODY_MAX     = 64 * 1024
+      MCP_REPEATER_BODY_ROWS    = 10
 
       # Ceiling on concurrently-live OAST listening sessions (each holds an Oast::Http
       # socket until oast_stop). Bounds the leak from an agent that starts sessions and
@@ -1096,6 +1110,10 @@ module Gori
         when "create_repeater"           then gated { create_repeater(h) }
         when "update_repeater"           then gated { update_repeater(h) }
         when "delete_repeater"           then gated { delete_repeater(h) }
+        when "move_repeater"             then gated { move_repeater(h) }
+        when "create_repeaters"          then gated { create_repeaters(h) }
+        when "delete_repeaters"          then gated { delete_repeaters(h) }
+        when "update_repeaters"          then gated { update_repeaters(h) }
         when "create_issue"              then gated { create_issue(h) }
         when "update_issue"              then gated { update_issue(h) }
         when "probe_dismiss"             then gated { probe_dismiss(h) }
@@ -1575,6 +1593,42 @@ module Gori
         # caller who wrote a number that it passed an object.
         arr = raw.as_a? || return [str_entry(raw, key)]
         arr.map { |v| str_entry(v, key) }
+      end
+
+      # A list-of-IDS argument, in the shapes a caller reaches for: a real array of integers,
+      # a JSON-encoded array, a bare id, or a comma list. Built on `str_list`, so the leniency
+      # about the CONTAINER is the same one every other list argument here gives.
+      #
+      # Strict about the ENTRIES, though: a non-integer is NAMED and raises rather than being
+      # dropped. Silently skipping one would act on a smaller selection than the caller asked
+      # for and report it as complete — which, on the tools that take this, is a delete.
+      # Callers rescue `Gori::Error` and return the message as INVALID_ARGUMENT.
+      #
+      # Duplicates are collapsed, order preserved: a caller that names one id twice means one
+      # object, and leaving the repeat in would double every per-id line of the report.
+      private def id_list_arg(h, key : String) : Array(Int64)
+        ids = [] of Int64
+        seen = Set(Int64).new
+        str_list(h, key).each do |entry|
+          entry.split(',').each do |tok|
+            t = tok.strip
+            next if t.empty?
+            id = t.to_i64? || raise Gori::Error.new(
+              "invalid #{key.inspect} entry #{t.inspect} (expected an integer id)")
+            next if seen.includes?(id)
+            seen << id
+            ids << id
+          end
+        end
+        ids
+      end
+
+      # The schema for an `id_list_arg` property: the `oneOf` that advertises all three
+      # accepted shapes. One builder, so a second list-of-ids argument cannot advertise a
+      # different grammar from the one `id_list_arg` actually reads.
+      private def id_list_prop(description : String) : JSON::Any
+        JSON.parse(%({"description":#{description.to_json},"oneOf":) +
+                   %([{"type":"array","items":{"type":"integer"}},{"type":"integer"},{"type":"string"}]}))
       end
 
       # A `*_base64` argument decoded into the exact bytes it names, as a String (Crystal

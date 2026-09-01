@@ -101,6 +101,19 @@ class Gori::Tui::RepeaterView
     (@editor.first_nonblank_line || "").strip.split(' ').first? || ""
   end
 
+  # The last send's outcome as the sub-tab filter's `status:` token — the LIVE one, off
+  # `@result`, which is the response this session is showing. Read through
+  # `SubtabFilter::Subject.status_token` so this and the stored-row projection
+  # (`Subject.from_row`, used headlessly by MCP) cannot spell the same session differently.
+  def status_token : String
+    res = @result
+    return "unsent" unless res
+    # `res.head`, NOT `res.response.try(&.status)`: `restore` rebuilds the Result with
+    # `response: nil` (the parsed RawResponse is not persisted), so reading the parsed object
+    # answered "unsent" for a reopened tab that was plainly showing a 403.
+    Repeater::SubtabFilter::Subject.status_token(res.error, res.head)
+  end
+
   # Replace the request body (e.g. from the external editor); marks dirty so the
   # tab persists + the cross-session reconcile won't clobber it.
   def replace_request(text : String) : Nil

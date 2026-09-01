@@ -1,5 +1,7 @@
 require "uri"
 require "../filter_ast"
+require "../store"
+require "../proxy/codec/http1"
 
 module Gori
   module Repeater
@@ -45,19 +47,98 @@ module Gori
     class SubtabFilter
       # Completable field names (canonical forms shown in the filter guidance row).
       # Aliases host/target and method/verb share value pools below.
-      FIELDS = %w[tag name host target method verb]
+      FIELDS = %w[tag name host target method verb status]
+
+      # The non-numeric `status:` values, so the completion pool can offer them beside the
+      # codes actually present. Words, never digits, so neither can shadow a real code.
+      STATUS_WORDS = %w[error unsent]
 
       # Common HTTP methods suggested even when no open session uses them yet.
       METHODS = %w[GET POST PUT PATCH DELETE HEAD OPTIONS CONNECT TRACE]
 
       # The searchable projection of one Repeater session. Kept free of TUI types so the
       # matcher is pure + unit-testable; the controller builds these from its views.
+      # `status` is the last send's outcome as ONE lowercase token: the status code
+      # ("404"), `error` when the send itself failed, or `unsent` when this session has
+      # never been sent. A String rather than an `Int32?` because those are three answers to
+      # one question the operator asks in one field — `status:4` for every 4xx, and matching
+      # by PREFIX (below) is what makes that spelling work. A nil would have needed its own
+      # word anyway, and the two words cannot collide with a code.
       record Subject,
         name : String?,
         summary : String,
         target : String,
         method : String,
-        tags : Array(String)
+        tags : Array(String),
+        status : String = "" do
+        # The projection of a PERSISTED row, for the headless surfaces (MCP `get_repeater_context`).
+        #
+        # The TUI builds its subjects from the live `RepeaterView` instead, because a dirty
+        # editor's bytes are not the row's — but both must reach the SAME shape or the
+        # operator's `/` filter and an agent's `filter` argument would answer differently
+        # about one session. Everything here is derived exactly as `RepeaterView` derives it:
+        # `summary`/`request_method` off the first non-blank request line, `tags` through
+        # `Tags.parse`, `status` off the stored response head.
+        def self.from_row(r : Store::RepeaterRecord) : Subject
+          request = String.new(r.request)
+          new(name: r.name, summary: summary_of(request), target: r.target,
+            method: method_of(request), tags: Tags.parse(r.tags),
+            status: Subject.row_status(r))
+        end
+
+        # "METHOD /path" off the first non-blank request line — the label `RepeaterView#summary`
+        # derives for a tab with no stored name, and therefore the label the strip paints.
+        # Public because a caller holding request BYTES and no row yet needs the same answer
+        # (`create_repeaters` naming a session it is about to insert); a second derivation
+        # there would be a second answer to "what is this tab called".
+        def self.summary_of(request : String) : String
+          line = first_nonblank_line(request)
+          parts = line.split(' ')
+          s = "#{parts[0]?} #{parts[1]?}".strip
+          s.empty? ? line : s
+        end
+
+        # The leading METHOD token, for `method:`.
+        def self.method_of(request : String) : String
+          first_nonblank_line(request).split(' ').first? || ""
+        end
+
+        # `scrub`, because a repeater request is seeded from a capture without one and
+        # `split`/`downcase` on invalid UTF-8 raises — which would fail the WHOLE listing
+        # over one bad row. Lossless for a filter match.
+        def self.first_nonblank_line(request : String) : String
+          request.scrub.each_line.find { |l| !l.strip.empty? }.try(&.strip) || ""
+        end
+
+        # The ONE spelling of the `status:` token, from the two facts every surface has: the
+        # send's error (if any) and the response HEAD bytes.
+        #
+        # The head, and not a parsed status object, is what both callers can actually supply.
+        # `RepeaterView#restore` rebuilds its `Repeater::Result` with `response: nil` on
+        # purpose — the parsed `RawResponse` is not persisted — so a live view asked for
+        # `result.response.try(&.status)` answers `unsent` for a session that plainly shows a
+        # 403 in its response pane. Reading the head is the one question both a reopened tab
+        # and a stored row can answer, so it is the only one this asks.
+        #
+        # `error` beats a head: a session that answered 200 and was then re-sent into a
+        # connection refusal keeps the old head (`update_repeater_response` writes both), and
+        # the news is the failure.
+        def self.status_token(error : String?, head : Bytes?) : String
+          return "error" if error && !error.empty?
+          return "unsent" if head.nil? || head.empty?
+          begin
+            Proxy::Codec::Http1.parse_response_head(head).status.to_s
+          rescue
+            # Bytes we hold and cannot read. NOT "unsent" — something answered — and not a
+            # code, because there is none to name.
+            "error"
+          end
+        end
+
+        protected def self.row_status(r : Store::RepeaterRecord) : String
+          status_token(r.response_error, r.response_head)
+        end
+      end
 
       private record Term, kind : Symbol, text : String, negate : Bool
 
@@ -155,6 +236,7 @@ module Gori
           when "name"           then return Term.new(:name, value, negate)
           when "host", "target" then return Term.new(:target, value, negate)
           when "method", "verb" then return Term.new(:method, value, negate)
+          when "status"         then return Term.new(:status, value, negate)
           end
         end
         # Unrecognised prefix or bare token → free text (name/summary/target/tags).
@@ -178,6 +260,12 @@ module Gori
           seen = Set(String).new(from_sess.map(&.downcase))
           static = METHODS.select { |m| m.downcase.starts_with?(p) && !seen.includes?(m.downcase) }
           from_sess + static
+        when "status"
+          # Codes actually present first, then the two words for gaps — the same
+          # observed-then-static shape `method` uses.
+          from_sess = collect_prefix(p, subjects.map(&.status).reject(&.empty?))
+          seen = Set(String).new(from_sess)
+          from_sess + STATUS_WORDS.select { |w| w.starts_with?(p) && !seen.includes?(w) }
         else
           [] of String
         end
@@ -208,6 +296,10 @@ module Gori
               when :name   then (s.name || "").downcase.includes?(t.text)
               when :target then s.target.downcase.includes?(t.text)
               when :method then s.method.downcase.includes?(t.text)
+                # PREFIX, not substring: `status:4` has to mean "every 4xx", and `includes?`
+                # would also hand it 204 and 400-through-a-404. The one field here whose
+                # values have positional meaning.
+              when :status then s.status.starts_with?(t.text)
               else              free_text(t.text, s)
               end
         t.negate ? !hit : hit
