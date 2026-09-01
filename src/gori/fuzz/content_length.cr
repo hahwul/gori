@@ -46,7 +46,17 @@ module Gori::Fuzz
         # request return the input unchanged, so we never build a head String or run the
         # chunked scan on this (dominant) path — only when actually adding a header.
         return {bytes, 0, 0} unless add_when_missing && body_len > 0
-        return {bytes, 0, 0} if chunked?(bytes, sep, eol)
+        # ANY `Transfer-Encoding`, not merely a chunked-FINAL one — and the difference is the
+        # whole point on this path. `chunked?` answers the framing question the REWRITE path
+        # below needs (RFC 7230 §3.3.1: is the final coding chunked), so it reads
+        # `Transfer-Encoding: chunked, gzip` as NOT chunked, and a TE line whose codings are
+        # split across two headers only by its first. Inventing a Content-Length beside either
+        # would hand the origin a CL+TE pair — the canonical smuggling primitive — that the
+        # operator never wrote, on every request of the sweep. Adding is not correcting: a
+        # header gori makes up has to clear a higher bar than one it recomputes.
+        # `FlowRequest.resync_content_length` refuses on exactly these terms (any
+        # `transfer-encoding:` line, added or existing), and the two are the same rule.
+        return {bytes, 0, 0} if transfer_encoding?(bytes, sep)
         # The insertion goes in at `sep`, so everything from the head/body separator on has
         # moved by the line it added (its own eol + name + digits).
         return {append_cl(bytes, sep, sep_w, body_start, body_len, eol), sep,
@@ -249,6 +259,33 @@ module Gori::Fuzz
         break if e == a # blank line ends the head
         if te = transfer_encoding_last(bytes, a, e)
           return te == "chunked"
+        end
+        a = nl + 1
+      end
+      false
+    end
+
+    # Does the head carry ANY `Transfer-Encoding` header, whatever its codings say?
+    #
+    # The question the ADD path asks, and deliberately NOT `chunked?`'s: that one decides
+    # whether the message is chunked-FRAMED, which is the right test for leaving an existing
+    # Content-Length alone, and the wrong one for inventing a new one beside a header that
+    # already claims the framing. Same LF tokenization as `chunked?` (see there for why a
+    # bare-LF-separated header must count as its own line here too).
+    private def self.transfer_encoding?(bytes : Bytes, sep : Int32) : Bool
+      a = 0
+      while a < sep
+        nl = a
+        while nl < sep && bytes[nl] != 0x0a_u8
+          nl += 1
+        end
+        e = nl
+        e -= 1 if e > a && bytes[e - 1] == 0x0d_u8
+        break if e == a # blank line ends the head
+        colon = colon_of(bytes, a, e)
+        if colon > a
+          ns, ne = trim_range(bytes, a, colon)
+          return true if name_eq_ci?(bytes, ns, ne, "transfer-encoding")
         end
         a = nl + 1
       end

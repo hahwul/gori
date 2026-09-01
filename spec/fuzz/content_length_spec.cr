@@ -7,6 +7,38 @@ private alias F = Gori::Fuzz
 # specs pin the exact wire bytes, because the whole point of a smuggling/desync primitive is
 # that ONE hidden byte changes how a downstream parser frames the message.
 describe F::ContentLength do
+  # ADDING a header is held to a higher bar than recomputing one, and `Transfer-Encoding` is
+  # where the two come apart. `chunked?` answers "is the FINAL coding chunked" (RFC 7230
+  # §3.3.1), which is right for leaving an existing Content-Length alone — but it reads
+  # `chunked, gzip` as NOT chunked and looks only at the FIRST TE header, so using it to gate
+  # the ADD path would let gori invent a Content-Length beside a TE line. That pair is the
+  # canonical CL+TE smuggling primitive, and here it would be one the operator never wrote,
+  # manufactured on every request of a sweep. `FlowRequest.resync_content_length` refuses on
+  # any `transfer-encoding:` line; this is the same rule in the fuzz module.
+  describe "add_when_missing beside a Transfer-Encoding" do
+    it "adds nothing to a TE-framed body, whatever the codings say" do
+      # Each of these has a body and NO Content-Length, so only the TE line stands between it
+      # and an invented header. The last two are exactly what `chunked?` answers `false` for.
+      {
+        "POST /a HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nZ\r\n0\r\n\r\n",
+        "POST /b HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked, gzip\r\n\r\n1\r\nZ\r\n0\r\n\r\n",
+        "POST /c HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nZ\r\n0\r\n\r\n",
+        # A bare-LF-terminated TE line, the shape the head scan tokenizes on LF to catch.
+        "POST /d HTTP/1.1\r\nHost: t\nTransfer-Encoding: chunked, gzip\r\n\r\n1\r\nZ\r\n0\r\n\r\n",
+      }.each do |req|
+        out = String.new(F::ContentLength.sync(req.to_slice, add_when_missing: true))
+        out.should eq(req)                                # byte-identical: nothing was invented
+        out.downcase.should_not contain("content-length") # …and specifically not this
+      end
+    end
+
+    it "still adds one to a body that declares no framing at all" do
+      req = "POST /e HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\n\r\n{\"k\":1}"
+      String.new(F::ContentLength.sync(req.to_slice, add_when_missing: true))
+        .should contain("Content-Length: 7\r\n")
+    end
+  end
+
   describe "duplicate Content-Length (a desync primitive must survive the resync)" do
     it "leaves a bare-LF-hidden second Content-Length byte-intact (only the first is rewritten)" do
       # The second `Content-Length: 100` is terminated by a BARE LF, so a CRLF-only line split

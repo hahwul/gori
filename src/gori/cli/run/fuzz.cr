@@ -151,7 +151,7 @@ module Gori
           # The Repeater's `--verbatim` and Intercept's `update_content_length:false` by the
           # same name and for the same reason: a CL/CL-TE desync template is the payload, and
           # recomputing its Content-Length swept a different request than the one written.
-          p.on("--verbatim", "Send the template's Content-Length as written — no auto-resync after payload substitution (for CL / CL-TE desync payloads)") { update_cl = false }
+          p.on("--verbatim", "Send the template's Content-Length as written — no auto-resync after payload substitution, and none added to a body that declares none (for CL / CL-TE desync payloads)") { update_cl = false }
           # The mirror image of `--verbatim`, for the OTHER length declaration in the same
           # request. Default off, and the note below still fires for a run that leaves a
           # prefix stale — see `Fuzz::Config#reframe_grpc?` for why the default is that way.
@@ -346,6 +346,7 @@ module Gori
         end
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
+        warn_fuzz_unframed_body(plan)
         note_fuzz_auto_encode(plan)
         note_fuzz_grpc_fields(plan)
         note_fuzz_ws_ignored(plan)
@@ -482,6 +483,21 @@ module Gori
         return unless plan.rewrites_content_length?
         STDERR.puts "gori run fuzz: note: the template's Content-Length disagrees with its own body " \
                     "and is being recomputed on every request — pass --verbatim to send it as written"
+      end
+
+      # The template has a body that NOTHING frames, and --verbatim is what left it that way.
+      # An HTTP/1.1 origin reads such a request as having a zero-length body (a request body has
+      # no close-delimited form), so every payload spliced into it would be scored against a
+      # request the origin never read a body from. The remedy is the OPPOSITE direction to
+      # `warn_fuzz_content_length`'s — drop the flag rather than pass it — so this gets its own
+      # sentence rather than reusing that one.
+      private def self.warn_fuzz_unframed_body(plan : Fuzz::Plan) : Nil
+        return unless plan.unframed_body?
+        STDERR.puts "gori run fuzz: warning: the template has a body but declares neither " \
+                    "Content-Length nor chunked Transfer-Encoding, and --verbatim leaves it that " \
+                    "way — an HTTP/1.1 origin reads that as a zero-length body, so the payloads " \
+                    "go out unread. Drop --verbatim to have gori frame it, or declare the header " \
+                    "in the template"
       end
 
       # The run percent-encodes for its query / form positions. Said once, up front, naming

@@ -372,6 +372,24 @@ module Gori
       property? follow_redirects : Bool
       property max_redirects : Int32
       property? update_content_length : Bool # recompute CL after body substitution
+      # ADD a Content-Length when the template carries a body and declares none — the other
+      # half of what `update_content_length` means, and only ever read while that knob is on
+      # (`Generator` gates every `ContentLength.sync` call behind it).
+      #
+      # DEFAULT TRUE, which is what the Repeater's ^L / `auto_content_length` has always done
+      # (`FlowRequest.resync_content_length`'s own `add_if_missing` defaults true). It used to
+      # default false, and the gap was silent: a template with a body and no `Content-Length` —
+      # hand-authored, or seeded from a capture or a repeater session that never carried one —
+      # went out with the body on the wire and nothing framing it, so an HTTP/1.1 origin read a
+      # ZERO-LENGTH body. A request body has no close-delimited form (`Connection: close`
+      # delimits a RESPONSE), so there is no second reading. The SAME request replayed from the
+      # Repeater tab worked, because that surface adds the header — and every payload of the
+      # sweep was scored against a request the origin never read a body from.
+      #
+      # Turning it off is spelled by turning `update_content_length` off — `--verbatim`, or
+      # `^O ▸ Advanced ▸ Auto Content-Length` — which is what a deliberately unframed or
+      # mis-framed request wants. `Plan#unframed_body?` reports that combination so a surface
+      # can say the body will not be framed rather than let it go quiet again.
       property? add_content_length_when_missing : Bool
       # Recompute the gRPC 5-byte length prefix after a payload is spliced into a gRPC
       # message body — the opt-in inverse of the `grpc_stale` notice, and DEFAULT FALSE.
@@ -464,7 +482,7 @@ module Gori
                      @follow_redirects : Bool = false,
                      @max_redirects : Int32 = 5,
                      @update_content_length : Bool = true,
-                     @add_content_length_when_missing : Bool = false,
+                     @add_content_length_when_missing : Bool = true,
                      @reframe_grpc : Bool = false,
                      @auto_calibrate : Bool = false,
                      @keep_bodies : Symbol = :matched,

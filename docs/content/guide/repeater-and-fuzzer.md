@@ -116,7 +116,9 @@ The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save
 
 ### Framing a Sweep
 
-`Content-Length` is recomputed after every payload is spliced in, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`) turns that off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test.
+`Content-Length` is recomputed after every payload is spliced in, and one is **added** when the template carries a body but declares no length at all, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`, or turning off **Auto Content-Length** on the Fuzzer's ADVANCED card) turns both halves off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test.
+
+That second half matters more than it sounds: an HTTP/1.1 request body has no close-delimited form, so a body with neither `Content-Length` nor a chunked `Transfer-Encoding` is read by the origin as a **zero-length body** — the payloads go out unread while every row still reports a status. When `--verbatim` leaves a template in exactly that shape, gori says so before the first send rather than letting the run go quiet.
 
 A gRPC template carries a second length declaration — the 5-byte prefix in front of each message — and it gets the opposite default: gori leaves it exactly as the payload left it, and says so once at the end of the run (`2 of 3 requests left it stale`, `grpc_stale_prefix` in MCP `fuzz_status`). That is the right answer when a deliberately-wrong prefix is what you are testing, and the wrong one when you are sweeping an ordinary unary call and every request is being rejected at the framing layer. `--reframe-grpc` (MCP `reframe_grpc: true`, or the **gRPC reframe (unary)** toggle on the Fuzzer's ADVANCED card) recomputes it per request. It is off by default on all three surfaces, and it only touches a single message: a client-streaming body, a `grpc-web-text` body, and a seed whose framing was already broken are left alone and still reported.
 
