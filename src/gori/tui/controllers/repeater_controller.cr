@@ -2535,18 +2535,18 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter?     then view.enter_request_insert!
-      when c == 'i'       then view.enter_request_insert!
-      when word_step?(ev)                  then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
-      when key.up?, key.lower_k?           then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
-      when key.down?, key.lower_j?         then view.request_read_move(1, 0, selecting: selecting)
-      when key.left?, key.lower_h?         then view.request_read_move(0, -1, selecting: selecting)
-      when key.right?, key.lower_l?        then view.request_read_move(0, 1, selecting: selecting)
-      when key.page_up?   then view.request_read_page(-1, selecting: selecting)
-      when key.page_down? then view.request_read_page(1, selecting: selecting)
-      when key.home?      then view.edit_home(selecting)
-      when key.end?       then view.edit_end(selecting)
-      when c == 'x'       then view.pane_select_line
+      when key.enter?               then view.enter_request_insert!
+      when c == 'i'                 then view.enter_request_insert!
+      when word_step?(ev)           then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
+      when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
+      when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
+      when key.left?, key.lower_h?  then view.request_read_move(0, -1, selecting: selecting)
+      when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)
+      when key.page_up?             then view.request_read_page(-1, selecting: selecting)
+      when key.page_down?           then view.request_read_page(1, selecting: selecting)
+      when key.home?                then view.edit_home(selecting)
+      when key.end?                 then view.edit_end(selecting)
+      when c == 'x'                 then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # y copy, Global c/i/s, …
       end
@@ -2565,9 +2565,9 @@ module Gori::Tui
       when key.down?, key.lower_j?  then view.pane_advance(1)
       when key.left?, key.lower_h?  then view.target_read_move(-1, selecting: selecting)
       when key.right?, key.lower_l? then view.target_read_move(1, selecting: selecting)
-      when key.home?  then view.target_home(selecting)
-      when key.end?   then view.target_end(selecting)
-      when c == 'x'   then view.pane_select_line
+      when key.home?                then view.target_home(selecting)
+      when key.end?                 then view.target_end(selecting)
+      when c == 'x'                 then view.pane_select_line
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false
       end
@@ -2622,7 +2622,7 @@ module Gori::Tui
       # was transcript-specific: `resp_drawn_source` reports a decoration offset of 0 for a
       # transcript (only DIFF has one), so the caret columns are the row's own columns.
       case
-      when key.enter?              then repeater_send
+      when key.enter?               then repeater_send
       when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
       when key.down?, key.lower_j?  then resp_nav_step(view, 1, 0, selecting, nav)
       when key.left?, key.lower_h?  then resp_nav_step(view, 0, -1, selecting, nav)
