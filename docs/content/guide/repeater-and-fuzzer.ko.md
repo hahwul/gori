@@ -96,7 +96,9 @@ ffuf 스타일 matcher와 filter로 status, size, words, lines, 왕복 시간(`-
 
 ### 스윕의 프레이밍 {#framing-a-sweep}
 
-`Content-Length`는 페이로드가 삽입될 때마다 다시 계산되므로 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--verbatim`(MCP `update_content_length: false`)은 이 계산을 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다.
+`Content-Length`는 페이로드가 삽입될 때마다 다시 계산되고, 템플릿에 본문은 있는데 길이 선언이 아예 없으면 **추가**되므로, 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--verbatim`(MCP `update_content_length: false`, 또는 Fuzzer ADVANCED 카드의 **Auto Content-Length** 끄기)은 이 두 가지를 모두 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다.
+
+뒤쪽 절반은 들리는 것보다 중요합니다. HTTP/1.1 요청 본문에는 연결 종료로 경계를 잡는 형태가 없어서, `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 **길이 0인 본문**으로 읽습니다 — 페이로드는 읽히지 않은 채 나가는데 모든 행은 여전히 상태 코드를 보고합니다. `--verbatim`이 템플릿을 바로 그 형태로 남기는 경우, gori는 실행이 조용히 지나가게 두지 않고 첫 전송 전에 이를 알려줍니다.
 
 gRPC 템플릿에는 두 번째 길이 선언 — 각 메시지 앞의 5바이트 접두사 — 이 있으며, 기본값은 반대입니다. gori는 페이로드가 남긴 그대로 두고, 실행이 끝날 때 한 번 알려줍니다(`2 of 3 requests left it stale`, MCP `fuzz_status`의 `grpc_stale_prefix`). 의도적으로 잘못된 접두사를 테스트할 때는 이것이 맞는 동작이지만, 평범한 단항 호출을 스윕하는데 모든 요청이 프레이밍 계층에서 거부된다면 원하는 동작이 아닙니다. `--reframe-grpc`(MCP `reframe_grpc: true`, 또는 Fuzzer ADVANCED 카드의 **gRPC reframe (unary)** 토글)는 요청마다 접두사를 다시 계산합니다. 세 표면 모두 기본값은 꺼짐이며, 단일 메시지에만 적용됩니다. 클라이언트 스트리밍 본문, `grpc-web-text` 본문, 그리고 이미 프레이밍이 깨진 시드는 그대로 두고 여전히 보고합니다.
 

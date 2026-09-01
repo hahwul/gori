@@ -191,6 +191,10 @@ module Gori::Tui
       # the answer, and a stale "your CL is being rewritten" is worse than none.
       @cl_rewrite = false
       @cl_rewrite_rev = -1
+      # …and `Fuzz::Plan#unframed_body?`, revision-scoped for the same reason: it is a claim
+      # about THIS template buffer, and an edit that adds a Content-Length must retract it.
+      @unframed_body = false
+      @unframed_body_rev = -1
       @sel = 0
       @scroll = 0
       @sort = :index
@@ -1476,6 +1480,10 @@ module Gori::Tui
       # up front and names `--verbatim`; this is the same fact pointed at the toggle.
       @cl_rewrite = plan.rewrites_content_length?
       @cl_rewrite_rev = @editor.edits
+      # The other framing fact, and the one that costs a whole run when it goes unsaid: the
+      # template has a body nothing frames, so the origin reads it as zero-length.
+      @unframed_body = plan.unframed_body?
+      @unframed_body_rev = @editor.edits
       {plan.engine, nil}
     rescue ex : Fuzz::PlanError
       {nil, fuzz_plan_error(ex)}
@@ -1601,6 +1609,21 @@ module Gori::Tui
     CL_REWRITE_NOTE = "the template's Content-Length disagrees with its own body and is " \
                       "being recomputed on every request — turn off ^O ▸ Advanced ▸ " \
                       "Auto Content-Length to send it as written"
+
+    # True when the LAST plan built off this exact template buffer was going to put a body on
+    # the wire that nothing frames. Revision-scoped like `rewrites_content_length?` above, so
+    # typing the missing header retracts the claim instead of leaving a stale warning on screen.
+    def unframed_body? : Bool
+      @unframed_body && @editor.edits == @unframed_body_rev
+    end
+
+    # `gori run fuzz`'s warning for the same fact, with this surface's remedy. The remedy points
+    # the OPPOSITE way to `CL_REWRITE_NOTE`'s — turn the toggle ON — so the two never share a
+    # sentence, and a run that somehow reported both would read as the contradiction it is.
+    UNFRAMED_BODY_NOTE = "the template has a body but declares neither Content-Length nor " \
+                         "chunked Transfer-Encoding, and Auto Content-Length is off — the " \
+                         "origin will read a zero-length body. Turn on ^O ▸ Advanced ▸ " \
+                         "Auto Content-Length, or declare the header yourself"
 
     # Whether the run targets HTTP/2 — for Probe's synthetic RepeaterRecord (see
     # FuzzerController#probe_scan_fuzz_result), which needs to know the protocol
@@ -2861,16 +2884,34 @@ module Gori::Tui
         else
           "↳ run size unknown"
         end
-      # The two things a run's SIZE now depends on besides the payload sets: the wire cap
-      # (retries + redirect hops charge it, so it is not the same number as the estimate
-      # above) and whether the framing the operator authored is about to be rewritten.
-      cl = rewrites_content_length?
       if cap = @config.max_requests
+        # The wire cap: retries and redirect hops charge it, so it is not the same number as
+        # the estimate above.
         text += "#{text.empty? ? "↳" : " ·"} cap #{Fmt.count(cap)}"
       end
-      text += "#{text.empty? ? "↳" : " ·"} CL recomputed" if cl
+      text = run_summary_framing(text)
       return if text.empty?
-      screen.text(inner.x, y, text, cl ? Theme.yellow : Theme.muted, Theme.bg, width: {inner.w, 1}.max)
+      screen.text(inner.x, y, text, run_summary_tint, Theme.bg, width: {inner.w, 1}.max)
+    end
+
+    # `text` plus whatever this run's FRAMING is about to do to the body — appended here rather
+    # than inline above so the summary row keeps one job per method.
+    #
+    # Two facts, mutually exclusive by construction (a rewrite needs a declared Content-Length,
+    # an unframed body needs none), so the row never carries both. The unframed one belongs on
+    # this row and not only on the run-start status line, because that line is transient — the
+    # next fuzz event overwrites it — while this is the durable read-out, and it is the fact
+    # that costs the whole run rather than one header.
+    private def run_summary_framing(text : String) : String
+      text += "#{text.empty? ? "↳" : " ·"} body UNFRAMED" if unframed_body?
+      text += "#{text.empty? ? "↳" : " ·"} CL recomputed" if rewrites_content_length?
+      text
+    end
+
+    # …and its colour, ordered by cost: an unframed body means the origin read nothing at all.
+    private def run_summary_tint : Color
+      return Theme.red if unframed_body?
+      rewrites_content_length? ? Theme.yellow : Theme.muted
     end
 
     # One Sets row. In per-position modes (pp) it carries a marker-coloured swatch + →N

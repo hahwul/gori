@@ -346,6 +346,68 @@ describe Gori::Fuzz::Plan do
         .rewrites_content_length?.should be_false
     end
   end
+
+  # The OTHER half of what "Auto Content-Length" means, and the half that was missing.
+  #
+  # A template with a body and no `Content-Length` used to go out unframed: the body was on the
+  # wire with nothing declaring it, so an HTTP/1.1 origin read a ZERO-LENGTH body (a request
+  # body has no close-delimited form) and every payload was scored against a request the origin
+  # never read a body from. The Repeater's ^L has always added the header
+  # (`FlowRequest.resync_content_length`, `add_if_missing: true`), so the SAME request replayed
+  # one tab over worked — which is exactly what kept this invisible.
+  describe "add_content_length_when_missing" do
+    # A POST with a JSON body and no Content-Length: the shape a repeater session or a
+    # hand-authored template carries when nobody typed the header.
+    unframed_tpl = "POST /m HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n" \
+                   "Connection: close\r\n\r\n{\"k\":\"§S§\"}"
+    src = [F::InlineList.new(["ab"])] of F::PayloadSource
+
+    it "frames a body the template declared no length for" do
+      plan = F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test",
+        sources: src), ungated)
+      String.new(plan.generator.baseline_request).should contain("Content-Length: 9\r\n")
+    end
+
+    # …and does NOT call that a rewrite. `rewrites_content_length?`'s sentence is "your declared
+    # Content-Length disagrees with your body", which is a lie about a template that declared
+    # none — so the fact is computed off the no-add rendering, never off `baseline_request`.
+    it "does not report an added header as a rewrite of one the operator authored" do
+      F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test", sources: src),
+        ungated).rewrites_content_length?.should be_false
+    end
+
+    it "reports an unframed body when the knob is off, and leaves the request unframed" do
+      plan = F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test",
+        sources: src, config: F::Config.new(update_content_length: false)), ungated)
+      plan.unframed_body?.should be_true
+      String.new(plan.generator.baseline_request).should_not contain("Content-Length")
+    end
+
+    # Nothing to warn about when gori frames it, when the template frames it itself (a declared
+    # length, or chunked — which `ContentLength.sync` leaves alone by design), or when there is
+    # no body at all to frame.
+    it "stays quiet when the body is framed, self-framed, or absent" do
+      declared = "POST /y HTTP/1.1\r\nHost: t.test\r\nContent-Length: 1\r\n\r\n§S§"
+      chunked = "POST /c HTTP/1.1\r\nHost: t.test\r\nTransfer-Encoding: chunked\r\n\r\n" \
+                "1\r\n§S§\r\n0\r\n\r\n"
+      # A TE whose FINAL coding is not chunked. `ContentLength.chunked?` answers false for it
+      # (that is the RFC 7230 §3.3.1 framing question), so gating on that predicate would both
+      # invent a Content-Length beside the TE header and, here, tell the operator the template
+      # "declares neither" — while pointing them at the toggle that manufactures the CL+TE pair.
+      te_multi = "POST /t HTTP/1.1\r\nHost: t.test\r\nTransfer-Encoding: chunked, gzip\r\n\r\n" \
+                 "1\r\n§S§\r\n0\r\n\r\n"
+      bodiless = "GET /z?q=§S§ HTTP/1.1\r\nHost: t.test\r\n\r\n"
+      F::Plan.build(F::PlanOptions.new(unframed_tpl, target: "http://t.test", sources: src),
+        ungated).unframed_body?.should be_false
+      # …and the self-framed / bodiless shapes stay quiet even under the knob that would
+      # otherwise leave a body unframed, because none of them has an unframed body.
+      {declared, chunked, te_multi, bodiless}.each do |tpl|
+        F::Plan.build(F::PlanOptions.new(tpl, target: "http://t.test", sources: src,
+          config: F::Config.new(update_content_length: false)), ungated)
+          .unframed_body?.should be_false
+      end
+    end
+  end
 end
 
 # PROVENANCE, on the `--mark` step of `Plan.build`.

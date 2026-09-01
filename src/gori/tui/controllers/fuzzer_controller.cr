@@ -1390,13 +1390,27 @@ module Gori::Tui
       ensure
         end_worker(v)
       end
-      # The CL note rides the run-start line, the way `gori run fuzz` prints it on stderr
-      # before the first send: once, up front, naming the switch that turns it off. Silent
-      # rewriting is the half that bites even an operator who does not want the switch —
-      # they typed `Content-Length: 5`, the pane still says 5, and the wire carried 37.
-      note = v.rewrites_content_length? ? " · note: #{FuzzerView::CL_REWRITE_NOTE}" : ""
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{note}")
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}")
+    end
+
+    # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it
+    # on stderr before the first send: once, up front, naming the switch that decides it.
+    #
+    # At most ONE of the two, and they are mutually exclusive by construction: a rewrite needs a
+    # declared Content-Length and an unframed body needs none. The warning is checked first
+    # because it is the one that costs the whole run — the origin reads no body at all, so every
+    # row is a status for a request the payload never reached. The rewrite note is the quieter
+    # half but bites the same way: they typed `Content-Length: 5`, the pane still says 5, and
+    # the wire carried 37.
+    private def framing_note(v : FuzzerView) : String
+      if v.unframed_body?
+        " · warning: #{FuzzerView::UNFRAMED_BODY_NOTE}"
+      elsif v.rewrites_content_length?
+        " · note: #{FuzzerView::CL_REWRITE_NOTE}"
+      else
+        ""
+      end
     end
 
     def fuzz_stop : Nil

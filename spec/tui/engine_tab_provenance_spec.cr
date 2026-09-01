@@ -417,6 +417,68 @@ describe "Fuzzer tab — Content-Length (T2)" do
     end
   end
 
+  # The half of "Auto Content-Length" the Repeater's ^L always had and this tab did not: a
+  # template with a body and NO Content-Length at all.
+  #
+  # The knob only ever REWROTE a declared header, so a body nobody framed went out with nothing
+  # declaring it — and an HTTP/1.1 origin reads that as a ZERO-LENGTH body, a request body
+  # having no close-delimited form. The same request replayed one tab over worked, because the
+  # Repeater ADDS the header (`FlowRequest.resync_content_length`, `add_if_missing: true`),
+  # which is exactly what kept this invisible. `RecordingOrigin` frames the body off
+  # Content-Length like any origin, so `bodies` below is what the server actually read.
+  it "frames a body the template declared no length for, and says so when the toggle is off" do
+    origin = RecordingOrigin.new
+    begin
+      with_scope do |scope|
+        tmpl = "POST /m HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n" \
+               "Content-Type: application/json\r\nConnection: close\r\n\r\n{\"moduleCode\":\"§c§\"}"
+
+        on = drafted_fuzzer("http://127.0.0.1:#{origin.port}", tmpl)
+        on.apply_set(nil, SetSpec.new(:list, "ZZ"))
+        run_fuzz(on, scope).should be_nil
+        on.unframed_body?.should be_false # gori frames it, so there is nothing to warn about
+
+        off = drafted_fuzzer("http://127.0.0.1:#{origin.port}", tmpl)
+        snap = off.advanced_snapshot
+        off.apply_advanced(AdvancedSnapshot.new(
+          conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+          max_requests: snap.max_requests, race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
+          keep_alive: snap.keep_alive, update_cl: false, reframe_grpc: snap.reframe_grpc,
+          m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+          f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
+        off.apply_set(nil, SetSpec.new(:list, "ZZ"))
+        run_fuzz(off, scope).should be_nil
+        off.unframed_body?.should be_true # …and the run-start line says so rather than going quiet
+      end
+      origin.count.should eq(2)
+      # What the ORIGIN read, which is the whole point: the framed run delivered the payload,
+      # the unframed one delivered nothing at all — under an otherwise identical 200.
+      origin.bodies[0].should eq(%({"moduleCode":"ZZ"}))
+      origin.bodies[1].should eq("")
+    ensure
+      origin.close
+    end
+  end
+
+  it "retracts the unframed-body claim when the template is edited" do
+    with_scope do |scope|
+      tmpl = "POST /a HTTP/1.1\r\nHost: t.test\r\nContent-Type: application/json\r\n\r\n{\"k\":\"§v§\"}"
+      view = drafted_fuzzer("http://t.test", tmpl)
+      snap = view.advanced_snapshot
+      view.apply_advanced(AdvancedSnapshot.new(
+        conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        max_requests: snap.max_requests, race: snap.race, follow: snap.follow, calibrate: snap.calibrate,
+        keep_alive: snap.keep_alive, update_cl: false, reframe_grpc: snap.reframe_grpc,
+        m_status: snap.m_status, m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex))
+      view.apply_set(nil, SetSpec.new(:list, "ZZ"))
+      view.build_engine(false, scope, nil)[0].should_not be_nil
+      view.unframed_body?.should be_true
+      view.toggle_http2 # any edit to the buffer bumps TextArea#edits
+      view.unframed_body?.should be_false
+    end
+  end
+
   it "round-trips the toggle and the cap through the snapshot and through config JSON" do
     view = drafted_fuzzer("http://t.test", "GET /?x=1 HTTP/1.1\r\nHost: t.test\r\n\r\n")
     snap = view.advanced_snapshot

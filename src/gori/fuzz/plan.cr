@@ -3,6 +3,7 @@ require "../env"
 require "../host_overrides"
 require "../outbound"
 require "../repeater/flow_request"
+require "./content_length"
 require "./engine"
 require "./generator"
 require "./grpc_fields"
@@ -277,6 +278,19 @@ module Gori::Fuzz
     # request so a surface can say it ONCE, up front, and name the flag that turns it off.
     # False when the knob is already off, or when the declared length was correct anyway.
     getter? rewrites_content_length : Bool
+    # The template carries a body that NOTHING will frame: it declares no `Content-Length` and
+    # no chunked `Transfer-Encoding`, and this run will not add one either (`--verbatim` / the
+    # Auto Content-Length toggle is off). An HTTP/1.1 origin reads a request with no framing
+    # header as having a ZERO-LENGTH body — a request body has no close-delimited form — so
+    # every payload spliced into that body is scored against a request the origin never read it
+    # from, and the run reports statuses for a test it did not run.
+    #
+    # A NOTE and not a refusal, for the reason `ws_ignored_knobs` gives: an unframed request is
+    # a legitimate thing to send on purpose, and refusing a run over it would be hostile. What
+    # is not legitimate is sending it by accident and being told nothing, which is what happened
+    # while `add_content_length_when_missing` defaulted false (see there). The remedy this one
+    # names is the OPPOSITE of `rewrites_content_length?`'s: turn the knob ON, not off.
+    getter? unframed_body : Bool
     # The marked WebSocket script, or nil for an ordinary HTTP sweep. `template` above stays the
     # HANDSHAKE template in either case — it is part 0 of the script's position space — so a
     # surface reading `plan.template` keeps its type and its meaning.
@@ -311,6 +325,7 @@ module Gori::Fuzz
                    @http2 : Bool, @request_target : String,
                    @mark_matches : Array({String, Int32}), @pool : Pool? = nil,
                    @rewrites_content_length : Bool = false,
+                   @unframed_body : Bool = false,
                    @shadowed_marks : Array(String) = [] of String,
                    @auto_encode : AutoEncode = AutoEncode.none,
                    @ws_script : WsScript? = nil,
@@ -536,10 +551,27 @@ module Gori::Fuzz
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
         pool: sender.pool,
         rewrites_content_length: config.update_content_length? &&
-                                 generator.baseline_request != generator.baseline_raw,
+                                 ContentLength.sync(generator.baseline_raw, false) != generator.baseline_raw,
+        unframed_body: unframed_body?(config, generator.baseline_raw),
         shadowed_marks: shadowed_marks, auto_encode: auto_encode,
         ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
         tls_preset: sender.tls_preset)
+    end
+
+    # Will this run put an UNFRAMED body on the wire? See `Plan#unframed_body?`.
+    #
+    # Asked through `ContentLength.sync` itself rather than by re-scanning the head here: the
+    # two renderings differ EXACTLY when the add path would have fired, and that path's
+    # condition — a non-empty body, no `Content-Length`, not chunked — is the question. One home
+    # for the rule, so a head spelling that module handles (a bare-LF separator, the mixed
+    # `\n\r\n`, a `Transfer-Encoding` that only the last coding makes chunked) cannot be judged
+    # one way by the framing check and another by the pass that does the framing.
+    #
+    # The guard comes first so the healthy default (both knobs on, gori frames it) pays no
+    # render at all — this runs once per plan build, but `baseline_raw` can be a large capture.
+    private def self.unframed_body?(config : Config, raw : Bytes) : Bool
+      return false if config.update_content_length? && config.add_content_length_when_missing?
+      ContentLength.sync(raw, true) != ContentLength.sync(raw, false)
     end
 
     # A payload a field's DECLARATION cannot hold, refused before the first dial — the nil-guard

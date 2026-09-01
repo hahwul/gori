@@ -57,6 +57,12 @@ module Gori::Tui
       # and recomputing its Content-Length sweeps a different request than the one written.
       # ON is the old (and right) default for an ordinary sweep whose payload changed the
       # body length; OFF sends the header exactly as the template declares it.
+      #
+      # ON also ADDS the header to a body that declares none, which is what makes this the
+      # Repeater's ^L rather than half of it (`Fuzz::Config#add_content_length_when_missing`).
+      # OFF therefore leaves such a body UNFRAMED, and an origin reads it as zero-length —
+      # `Plan#unframed_body?` is what says so on the run-start line instead of letting it go
+      # quiet.
       {:update_cl, "Auto Content-Length", :toggle},
       # The SECOND length declaration a gRPC request carries — the 5-byte prefix in front of
       # the message — and deliberately the OPPOSITE default to the row above it (DESIGN.md §7,
