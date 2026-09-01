@@ -127,7 +127,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `preview_color_rule` | How many recent flows a colour condition would MATCH, and how many it would actually PAINT once the rules resolving ahead of it are counted |
 | `grpc_schema` | What `.proto` schema this project renders captured gRPC through, and where each piece came from — a descriptor-set file or a reflection fetch. Sends nothing |
 | `list_rules` | List the Match & Replace rules applied to the project in apply order — global rules first, then the project's own (`scope` filters to one) |
-| `list_env` | Project env tokens available to `$KEY` substitution (values redacted) |
+| `list_env` | Project env tokens available to `$KEY` substitution (values redacted). Each row also carries `length` and, when the value already begins with one, `scheme` — enough to tell whether a header should read `Bearer $KEY` or just `$KEY`, without the value |
 | `list_host_overrides` | The host to IP dial map in force for this project |
 | `list_session_slots` | The project's [session slots](/guide/authorize/#session-slots-one-list-two-readers) — named identities, each a header overlay plus the extract rules whose bound values belong to it — and which one is ACTIVE (header values redacted) |
 | `list_oast_providers` | Configured OAST providers and which one is active |
@@ -140,7 +140,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `discover_status` / `discover_results` | Progress and findings of a Discover run |
 | `project_info` | Flow / issue counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
-| `get_repeater_context` | Repeater workbench state and saved sessions |
+| `get_repeater_context` | Repeater workbench state and saved sessions. Every session reports **both** ids — `db_id`, which every repeater tool takes, and `tui_index`, the 1-based number the TUI paints on its sub-tab chip (`6:POST /api`) — so an agent and the operator name the same tab. `filter` takes the same sub-tab language the TUI's `/` does (`tag:` `name:` `host:` `method:` `status:`, `-` negates, bare words search), ANDed with `query`. `include_content` adds the request head and, per credential header, an `env_headers` shape (`Authorization: Bearer $AUTH`) that names the wiring without the secret; `include_response_body` inlines the stored last response body |
 | `list_fuzz_runs` / `get_fuzz_run` | List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, including `result_index`, so retained BLOBs are not loaded. `include_content:true` returns at most 25 rows from SQLite-capped prefixes: `max_head_bytes` (default 16 KiB, max 64 KiB) bounds heads and `max_body_bytes` (default 2 KiB, max 64 KiB) bounds decoded bodies/raw samples. Full source sizes plus head/source/decode truncation flags say what was omitted; `include_sensitive:true` opts into exact capped prefixes, never uncapped bytes. Run metadata labels pre-current snapshots as `legacy:true` |
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
@@ -151,7 +151,10 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | ------ | --------- |
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent — off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
-| `create_repeater` / `update_repeater` / `delete_repeater` | Manage Repeater sessions |
+| `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest |
+| `create_repeaters` | Seed a tab from each of several captured flows — the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
+| `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only — `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
+| `move_repeater` | Rearrange the sub-tab strip — `to_index` for an absolute tab number, `direction` for a one-step nudge. An open TUI picks the new order up on its own |
 | `minimize_repeater` | Shrink a Repeater request to the smallest form that still reproduces the response |
 | `create_issue` / `update_issue` / `delete_issue` | Record, update, and remove issues |
 | `add_link` / `remove_link` | Attach or detach an issue's / note's evidence pointer |
@@ -191,6 +194,18 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | Arm or disarm the catch, set its condition query, and choose which leg it holds |
 
 > Action tools are capped for safety: fuzz, mine, sequence, discover, and authorize jobs are limited in total requests, concurrency, and stored results. An authorize run's cap counts `flows × identities`, and a selection over it is refused up front rather than truncated into a run that would report "enforced" for flows it never sent. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
+
+## From a Spec to Repeater Tabs
+
+`import_flows` reads OpenAPI/Swagger (JSON or YAML) and joins `servers[0].url` with each operation path, so the base-path assembly is already done. Getting from a spec to a strip of tabs is three calls:
+
+```
+import_flows{kind: "oas", path: "openapi.yaml"}
+list_history{query: "src:import"}          → the flow ids
+create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
+```
+
+`create_repeaters` checks every flow exists before it creates the first session, seeds each one through the same path a single `create_repeater{flow_id}` uses, and appends them in the order given. Rearrange afterwards with `move_repeater`, and prune with `delete_repeaters`.
 
 ## Live Intercept
 

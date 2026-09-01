@@ -135,6 +135,36 @@ module Gori
         end)
       end
 
+      # `query` (substring) and `filter` (the sub-tab language) applied together — both must
+      # match, the way `list_history{view}` ANDs with its own `query` rather than replacing it.
+      private def repeater_narrow(rows : Array(Store::RepeaterRecord), rx : Regex?,
+                                  filter : Repeater::SubtabFilter?) : Array(Store::RepeaterRecord)
+        if rx
+          rows = rows.select do |r|
+            # scrub: target/name/request can be invalid UTF-8 (seeded from a captured request
+            # without scrubbing); an unscrubbed matches? raises and fails the WHOLE response
+            # whenever a query meets any such repeater. Scrub is lossless for a filter match.
+            r.target.scrub.matches?(rx) ||
+              r.name.try(&.scrub.matches?(rx)) ||
+              String.new(r.request).scrub.matches?(rx)
+          end
+        end
+        return rows unless (f = filter) && !f.empty?
+        rows.select { |r| f.matches?(Repeater::SubtabFilter::Subject.from_row(r)) }
+      end
+
+      # The `filter` argument, compiled by the ONE matcher the TUI's `/` uses, or the Result
+      # that refuses it. An unparseable filter is REPORTED — a listing that answered "no such
+      # sessions" for a syntax error would read as a finding about the workbench.
+      private def repeater_filter_arg(text : String) : Repeater::SubtabFilter | Result
+        Repeater::SubtabFilter.parse(text)
+      rescue ex
+        err("invalid 'filter': #{ex.message}. Fields are " \
+            "#{Repeater::SubtabFilter::FIELDS.map { |x| "#{x}:" }.join(" ")}; " \
+            "a bare word searches name/summary/target/tags",
+          "QUERY_SYNTAX", field: "filter")
+      end
+
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
         repeater_id = int(h, "id")
@@ -147,26 +177,34 @@ module Gori
         offset = clamp_nonneg(req_off)
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
+        include_response_body = bool_arg(h, "include_response_body", false)
+        req_body_cap = optional_int_arg(h, "max_body_bytes")
+        body_cap = clamp(req_body_cap, MCP_REPEATER_BODY_DEFAULT, MCP_REPEATER_BODY_MAX)
 
-        all_repeaters = store.repeaters_mcp
+        # The sub-tab filter the operator types into the TUI's `/`, over the SAME grammar
+        # (`tag:` `name:` `host:`/`target:` `method:`/`verb:` `status:`, `-` to negate, bare
+        # words as free text). ANDed with `query` rather than replacing it, the way
+        # `list_history{view}` is ANDed with its own — two narrowings are two narrowings.
+        filter_str = str(h, "filter").try(&.strip).presence
+        filter = filter_str.try { |f| repeater_filter_arg(f) }
+        return filter if filter.is_a?(Result)
+
+        ordered = store.repeaters_mcp
+        # The chip number is a rank in the WHOLE workbench, so it is taken here — before the
+        # id lookup, the query and the filter each narrow the list. Deriving it from the
+        # returned page instead would renumber the tabs a filter happened to keep, which is
+        # exactly what the TUI's own strip refuses to do (`Chrome.chip_zones`: a filtered
+        # strip reads 2, 5, 7).
+        tui_index = {} of Int64 => Int32
+        ordered.each_with_index { |r, i| tui_index[r.id] = i + 1 }
+
+        all_repeaters = ordered
         if repeater_id && !all_repeaters.any? { |r| r.id == repeater_id }
           return not_found("no repeater with id #{repeater_id}")
         end
         all_repeaters = all_repeaters.select { |r| r.id == repeater_id } if repeater_id
 
-        filtered_repeaters = if rx = query_rx
-                               all_repeaters.select do |r|
-                                 # scrub: target/name/request can be invalid UTF-8 (seeded from a
-                                 # captured request without scrubbing); an unscrubbed matches? raises
-                                 # and fails the WHOLE list_repeaters response whenever a query filter
-                                 # meets any such repeater. Scrub is lossless for a filter match.
-                                 r.target.scrub.matches?(rx) ||
-                                   r.name.try(&.scrub.matches?(rx)) ||
-                                   String.new(r.request).scrub.matches?(rx)
-                               end
-                             else
-                               all_repeaters
-                             end
+        filtered_repeaters = repeater_narrow(all_repeaters, query_rx, filter)
 
         total_count = filtered_repeaters.size
         paginated_repeaters = if offset >= filtered_repeaters.size
@@ -174,6 +212,16 @@ module Gori
                               else
                                 filtered_repeaters[offset, Math.min(limit, filtered_repeaters.size - offset)]
                               end
+
+        # Response bodies are the one field on this tool that costs a BLOB read per row
+        # (`repeaters_mcp` deliberately leaves `response_body` out), so they are hydrated for
+        # a bounded head of the page and the shortfall is NAMED. Silently dropping them for
+        # rows 11+ would read as "those tabs have no body".
+        body_ids = if include_response_body
+                     paginated_repeaters.first(MCP_REPEATER_BODY_ROWS).map(&.id).to_set
+                   else
+                     Set(Int64).new
+                   end
 
         Result.new(JSON.build do |j|
           j.object do
@@ -207,11 +255,28 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             emit_clamp(j, req_off, offset, req_lim, limit)
+            # A filter string whose every term was dropped narrows NOTHING, and a listing that
+            # answered "here is everything" while the caller believed it had filtered is the
+            # shape `ql_explain` was fixed for. Named, not silently applied.
+            if (f = filter) && f.empty? && (fs = filter_str) && !fs.empty?
+              j.field "filter_ignored", true
+              j.field "filter_ignored_note",
+                "filter #{fs.inspect} produced no usable term, so it narrowed nothing — these are ALL " \
+                "the project's sessions. Fields are #{Repeater::SubtabFilter::FIELDS.map { |x| "#{x}:" }.join(" ")}"
+            end
+            if include_response_body && paginated_repeaters.size > body_ids.size
+              j.field "response_bodies_omitted", paginated_repeaters.size - body_ids.size
+              j.field "response_bodies_omitted_note",
+                "last_response_body is hydrated for the first #{MCP_REPEATER_BODY_ROWS} rows of a page only " \
+                "(each is a separate BLOB read) — narrow with id/filter, or page, to read the rest"
+            end
             j.field "has_more", offset + paginated_repeaters.size < total_count
             j.field "sessions" do
               j.array do
                 paginated_repeaters.each do |r|
-                  emit_repeater_session(j, r, include_content, include_sensitive)
+                  emit_repeater_session(j, r, include_content, include_sensitive,
+                    tui_index: tui_index[r.id]?,
+                    response_body_cap: body_ids.includes?(r.id) ? body_cap : nil)
                 end
               end
             end
@@ -231,9 +296,17 @@ module Gori
 
       private def emit_repeater_session(j : JSON::Builder, r : Store::RepeaterRecord,
                                         include_content : Bool = false,
-                                        include_sensitive : Bool = false) : Nil
+                                        include_sensitive : Bool = false,
+                                        tui_index : Int32? = nil,
+                                        response_body_cap : Int32? = nil) : Nil
         j.object do
           j.field "db_id", r.id
+          # The number the operator reads off the sub-tab chip ("6:POST /api"), beside the id
+          # every tool here takes. Both, always, because holding one and needing the other is
+          # the round trip this field exists to remove — and because acting on the wrong tab
+          # is how an audit trail gets polluted. `position` below is the ORDERING COLUMN, not
+          # a rank: it is what sorts the strip, not what the chip says.
+          j.field "tui_index", tui_index if tui_index
           j.field "position", r.position
           # target/name/tags/sni are seeded from a captured request without scrubbing, so
           # they can carry invalid UTF-8 into the JSON-RPC line (see Serialize.text).
@@ -254,6 +327,20 @@ module Gori
             emit_capped_text(j, "request", Serialize.redact_head(String.new(r.request), include_sensitive),
               raw: r.request, include_sensitive: include_sensitive,
               read_more: %(get_response_body_chunk(repeater_id: #{r.id}, part: "request", offset: …)))
+            # What the credential headers are WIRED to, with the credentials still withheld —
+            # `redact_head` above blanks `Authorization: Bearer $AUTH` and a live token
+            # identically, so without this the operator cannot confirm an env binding without
+            # asking for the secret. See `Serialize.env_header_shapes`.
+            shapes = Serialize.env_header_shapes(r_request_text)
+            unless shapes.empty?
+              j.field("env_headers") do
+                j.array do
+                  shapes.each do |(name, shape)|
+                    j.object { j.field "name", name; j.field "shape", shape }
+                  end
+                end
+              end
+            end
           end
 
           if Repeater::WsEngine.upgrade_request?(r_request_text)
@@ -314,6 +401,44 @@ module Gori
               Serialize.emit_head_base64(j, "last_response_head", head, include_sensitive)
             end
           end
+          emit_repeater_response_body(j, r, head, response_body_cap, include_sensitive) if response_body_cap
+        end
+      end
+
+      # The stored last response BODY, capped and decoded — so "why did tab 6 answer 500?" is
+      # one call instead of three.
+      #
+      # Its own BLOB read (`get_repeater_full`), because `repeaters_mcp` leaves `response_body`
+      # out on purpose and a listing must not start pulling megabytes; the caller decides which
+      # rows get one and the tool names the ones it skipped.
+      #
+      # Decoded like `get_response_body_chunk`, through the same `ContentDecode` and reported
+      # with the same `representation`/`decode_note` words, so the inline preview and the paged
+      # read describe the same bytes the same way.
+      private def emit_repeater_response_body(j : JSON::Builder, r : Store::RepeaterRecord,
+                                              head : Bytes?, cap : Int32,
+                                              include_sensitive : Bool) : Nil
+        full = store.get_repeater_full(r.id)
+        body = full.try(&.response_body)
+        # Distinguishes "never sent / no body" from "omitted": the caller ASKED for a body
+        # here, so silence would be the only reading left and it is the wrong one.
+        return j.field "last_response_body_absent", true if body.nil? || body.empty?
+
+        decoded, note = Proxy::Codec::ContentDecode.decode(head, body)
+        bytes = decoded || body
+        text = String.new(bytes)
+        emit_capped_text(j, "last_response_body", text,
+          raw: bytes, include_sensitive: include_sensitive,
+          read_more: %(get_response_body_chunk(repeater_id: #{r.id}, part: "response", offset: …)),
+          cap: cap)
+        j.field "last_response_body_representation", decoded ? "decoded" : "raw"
+        j.field "last_response_body_decode_note", note if note
+        # `emit_capped_text` names a cursor only when it CUT. A body that fits but is not
+        # UTF-8 was still altered — scrubbed — and the caller needs the same pointer to read
+        # the bytes as bytes.
+        unless text.valid_encoding? || text.bytesize > cap
+          j.field "last_response_body_read_more",
+            %(get_response_body_chunk(repeater_id: #{r.id}, part: "response", offset: …))
         end
       end
 
@@ -334,12 +459,13 @@ module Gori
       # same silence in a different shape.
       private def emit_capped_text(j : JSON::Builder, field : String, text : String, *,
                                    raw : Bytes? = nil, include_sensitive : Bool = false,
-                                   read_more : String? = nil) : Nil
-        cut = text.bytesize > MCP_REPEATER_REQUEST_MAX
+                                   read_more : String? = nil,
+                                   cap : Int32 = MCP_REPEATER_REQUEST_MAX) : Nil
+        cut = text.bytesize > cap
         # Compare and cut by BYTES (the cap is a byte budget), then scrub — a slice
         # through a multi-byte UTF-8 sequence would otherwise emit invalid UTF-8 into
         # the JSON-RPC stream, which must be well-formed UTF-8 over the stdio transport.
-        j.field field, cut ? text.byte_slice(0, MCP_REPEATER_REQUEST_MAX).scrub : text.scrub
+        j.field field, cut ? text.byte_slice(0, cap).scrub : text.scrub
         if cut
           j.field "#{field}_truncated", true
           j.field "#{field}_total_bytes", text.bytesize
@@ -419,13 +545,19 @@ module Gori
           "The Repeater workbench state. Defaults to metadata only so request headers, WebSocket " \
           "payloads, response headers, and the live TUI editor snapshot are not copied into the " \
           "model context. Set include_content=true only when those bytes are necessary. Supports " \
-          "single-id lookup, pagination, and query filtering." do |s|
-          s.field "id", intprop("return one repeater database id")
+          "single-id lookup, pagination, and filtering. Every session reports BOTH ids: 'db_id', " \
+          "which every repeater tool takes, and 'tui_index', the 1-based number the TUI paints on " \
+          "its sub-tab chip — the number the operator says out loud. tui_index shifts whenever a " \
+          "session is created, deleted or moved, so read it fresh; db_id is the durable address." do |s|
+          s.field "id", intprop("return one repeater DATABASE id (not a tui_index)")
           s.field "limit", intprop("max rows to return (default 50, max 500)")
           s.field "offset", intprop("start row (default 0)")
-          s.field "query", strprop("filter repeaters by name or target URL (case-insensitive substring match)")
-          s.field "include_content", boolprop("include request text, WebSocket payloads, response head, and live TUI repeater snapshot (default false; may expose secrets)")
+          s.field "query", strprop("case-insensitive SUBSTRING match over a session's name, target URL and stored request bytes. For a field query (tags, host, method, last status) use 'filter' — both may be passed and both must match")
+          s.field "filter", strprop("the same sub-tab filter language the TUI's `/` takes, matched in memory: #{Repeater::SubtabFilter::FIELDS.map { |f| "#{f}:" }.join(" ")}, `-` before a term negates it, and a bare word searches name/summary/target/tags. `status:` is the LAST send's outcome as one token — a code (`status:404`, and `status:4` matches every 4xx by prefix), `status:error`, or `status:unsent`. ANDed with 'query' when both are given")
+          s.field "include_content", boolprop("include request text, WebSocket payloads, response head, the env-binding shape of each credential header, and the live TUI repeater snapshot (default false; may expose secrets)")
           s.field "include_sensitive", boolprop("with include_content, return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
+          s.field "include_response_body", boolprop("also inline each session's stored last response BODY, decoded and capped (default false). Its own BLOB read per row, so it is hydrated for the first #{MCP_REPEATER_BODY_ROWS} rows of a page and the rest are reported as omitted — pass 'id' or narrow with 'filter' to read one. Page past the cap with get_response_body_chunk")
+          s.field "max_body_bytes", intprop("cap for each inlined response body (default #{MCP_REPEATER_BODY_DEFAULT}, max #{MCP_REPEATER_BODY_MAX})")
         end
       end
     end

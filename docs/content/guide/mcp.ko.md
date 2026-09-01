@@ -127,7 +127,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지** |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 아무것도 보내지 않습니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
-| `list_env` | `$KEY` 치환에 쓰이는 프로젝트 env 토큰(값은 가려짐) |
+| `list_env` | `$KEY` 치환에 쓰이는 프로젝트 env 토큰(값은 가려짐). 행마다 `length`와, 값이 스킴으로 시작할 때 `scheme`도 싣는다 — 헤더를 `Bearer $KEY`로 써야 하는지 그냥 `$KEY`로 써야 하는지, 값 없이 판단할 수 있을 만큼 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
 | `list_session_slots` | 프로젝트의 [세션 슬롯](/ko/guide/authorize/#session-slots-one-list-two-readers) — 이름 붙은 신원 각각이 헤더 오버레이 하나와 그 값을 묶어 주는 extract 규칙들로 이루어집니다 — 그리고 어느 쪽이 ACTIVE인지(헤더 값은 가려짐) |
 | `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |
@@ -140,7 +140,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `discover_status` / `discover_results` | Discover 실행의 진행 상황과 결과 |
 | `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
-| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션 |
+| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣는다 — 모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`) — 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부른다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶인다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $AUTH`)을 준다. `include_response_body`는 저장된 마지막 응답 본문을 인라인한다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
@@ -150,7 +150,10 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 |------|---------|
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$KEY` 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다 — 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
-| `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 관리 |
+| `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매긴다 |
+| `create_repeaters` | 캡처된 flow 여러 개에서 탭을 하나씩 시드 — OpenAPI 임포트의 두 번째 단계(아래 참고). 첫 세션을 만들기 전에 모든 flow의 존재를 확인한다 |
+| `delete_repeaters` / `update_repeaters` | 일괄 닫기, 일괄 재라벨(태그와 이름 접사만 — 요청 바이트를 쓰는 건 `update_repeater`다). 둘 다 필터가 아니라 명시적 id만 받는다: 먼저 `get_repeater_context{filter}`로 좁혀서, 읽은 집합과 작용한 집합이 같게. 삭제는 `confirm:true`가 필요하고, 모르는 id 하나면 호출 전체를 거절한다 |
+| `move_repeater` | 서브탭 스트립을 재배치 — 절대 탭 번호는 `to_index`, 한 칸 이동은 `direction`. 열려 있는 TUI가 알아서 새 순서를 반영한다 |
 | `minimize_repeater` | Repeater 요청을 같은 응답이 재현되는 최소 형태로 줄임 |
 | `create_issue` / `update_issue` / `delete_issue` | 이슈 기록, 갱신, 삭제 |
 | `add_link` / `remove_link` | 이슈나 노트의 증거 포인터 연결 / 해제 |
@@ -189,6 +192,18 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
 > 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
+
+## 스펙에서 Repeater 탭으로 {#from-a-spec-to-repeater-tabs}
+
+`import_flows`는 OpenAPI/Swagger(JSON·YAML)를 읽고 `servers[0].url`을 각 오퍼레이션 경로와 합쳐 준다. 베이스 경로를 손으로 붙일 일이 없다는 뜻이고, 스펙에서 탭 한 줄까지는 호출 세 번이다.
+
+```
+import_flows{kind: "oas", path: "openapi.yaml"}
+list_history{query: "src:import"}          → flow id들
+create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
+```
+
+`create_repeaters`는 첫 세션을 만들기 전에 모든 flow의 존재를 확인하고, `create_repeater{flow_id}` 하나가 쓰는 것과 같은 경로로 각각을 시드한 뒤, 준 순서대로 덧붙인다. 순서는 `move_repeater`로 바꾸고, 정리는 `delete_repeaters`로 한다.
 
 ## 라이브 인터셉트 {#live-intercept}
 

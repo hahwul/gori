@@ -559,21 +559,11 @@ module Gori
         end
       end
 
-      # The flow ids to replay, in the order given. Accepts a real array, a JSON-encoded array
-      # (LLM clients stringify), a bare id, and a comma list — the shapes a caller reaches for
-      # — but a non-integer entry is NAMED rather than dropped: silently skipping one would
-      # replay a smaller selection than the one asked for and report it as complete.
+      # The flow ids to replay, in the order given — through the shared `id_list_arg`, which
+      # is this reader lifted into `tools.cr` so the repeater bulk tools cannot grow a second
+      # grammar for the same shape.
       private def authorize_flow_ids(h) : Array(Int64)
-        ids = [] of Int64
-        str_list(h, "flow_ids").each do |entry|
-          entry.split(',').each do |tok|
-            t = tok.strip
-            next if t.empty?
-            ids << (t.to_i64? || raise Gori::Error.new(
-              "invalid 'flow_ids' entry #{t.inspect} (expected an integer flow id)"))
-          end
-        end
-        ids
+        id_list_arg(h, "flow_ids")
       end
 
       # The explicit identity set as the JSON text `Authorize.parse_json` reads — the SAME
@@ -686,15 +676,12 @@ module Gori
         end
       end
 
-      # The `flow_ids` schema. An array of integers is the shape to reach for; a single id and
-      # a comma-list string are accepted because a caller with one flow writes one flow (the
-      # same leniency `str_list` gives every other list argument on this surface).
+      # The `flow_ids` schema, through the shared `id_list_prop` — the same `oneOf` every
+      # list-of-ids argument advertises, kept beside the reader that honours it.
       private def authorize_flow_ids_prop : JSON::Any
-        desc = "captured flow ids to replay, in the order given (ids come from list_history). " \
-               "An array of integers, a single integer, or a comma list. Combined with 'query' " \
-               "when both are passed; at least one of the two is required."
-        JSON.parse(%({"description":#{desc.to_json},"oneOf":) +
-                   %([{"type":"array","items":{"type":"integer"}},{"type":"integer"},{"type":"string"}]}))
+        id_list_prop("captured flow ids to replay, in the order given (ids come from list_history). " \
+                     "An array of integers, a single integer, or a comma list. Combined with 'query' " \
+                     "when both are passed; at least one of the two is required.")
       end
 
       # The `identities` schema: an array of identity objects, or the same array as a JSON

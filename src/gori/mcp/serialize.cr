@@ -36,6 +36,122 @@ module Gori
         SENSITIVE_HEADERS.includes?(name.strip.downcase)
       end
 
+      # The auth schemes a credential header may carry in FRONT of its secret. Kept verbatim
+      # by `env_header_shapes`, because "is the scheme already inside `$AUTH`, or do I write
+      # `Bearer $AUTH`?" is precisely the question that projection exists to answer — and a
+      # scheme keyword is a registered IANA name, not a secret.
+      AUTH_SCHEMES = {"bearer", "basic", "digest", "token", "apikey", "negotiate", "ntlm",
+                      "hoba", "mutual", "vapid", "scram-sha-1", "scram-sha-256",
+                      "aws4-hmac-sha256"}
+
+      # `{name, shape}` for every sensitive header in a request head: the header's value with
+      # everything that is NOT an env reference, a cookie name or an auth scheme collapsed to
+      # `…`.
+      #
+      # It exists because `redact_head` cannot tell the two apart. A repeater row stores what
+      # the author typed (see `MCP::Tools#stored_request`), so a session wired to an env var
+      # holds the literal bytes `Authorization: Bearer $AUTH` — and `redact_head` blanks that
+      # to `[REDACTED]` exactly as it blanks a live token. The operator then cannot confirm
+      # which key is wired into a request without asking for `include_sensitive`, i.e. without
+      # asking for the secret. This is the additive answer:
+      #
+      #     Authorization: Bearer $AUTH     ← env-bound, and readable
+      #     Authorization: Bearer …         ← a literal credential, and still withheld
+      #     Cookie: _test=$TEST; sid=…
+      #
+      # Nothing here weakens `redact_head`; the redacted head is still what `request` carries.
+      # Three classes of byte survive, and only three: an env token (a REFERENCE, whose name
+      # `list_env` already publishes), a cookie NAME (an identifier every response and every
+      # script already sees), and a scheme keyword. Every other run becomes `…`, including a
+      # value gori simply does not recognise.
+      #
+      # `Env.mask_secrets` runs first, so a session that stored a LIVE value whose bytes match
+      # a registered var reads back as that var's name — the same projection `create_repeater`
+      # already applies to `summary`/`target`, and it is reported there by `secrets_masked`.
+      def self.env_header_shapes(head : String) : Array({String, String})
+        # `shapes`, not `out`: `out` is a Crystal keyword (C-binding out-parameters), so
+        # `return out unless …` parses as one and fails to compile.
+        shapes = [] of {String, String}
+        return shapes unless head.includes?(':')
+        head.scrub.each_line.each_with_index do |raw, i|
+          line = raw.chomp
+          break if line.empty? # end of the head; the body is not header-shaped
+          next if i.zero?      # the request line
+          colon = line.index(':')
+          next unless colon
+          name = line[0...colon]
+          next unless sensitive_header?(name)
+          value = line[(colon + 1)..].strip
+          next if value.empty?
+          masked = Env.mask_secrets(value)
+          shape = cookie_header?(name) ? cookie_shape(masked) : scheme_shape(masked)
+          shapes << {name.strip, shape}
+        end
+        shapes
+      end
+
+      private def self.cookie_header?(name : String) : Bool
+        n = name.strip.downcase
+        n == "cookie" || n == "set-cookie"
+      end
+
+      # Is the WHOLE string one env token? Asked through `Env.token_regions`, the one scanner
+      # that owns the `$NAME` grammar (and the `$$` escape) — a second regex here would be a
+      # second answer to "is this a reference", and the wrong answer prints a secret.
+      private def self.env_token?(s : String) : Bool
+        regions = Env.token_regions(s)
+        regions.size == 1 && regions[0][0] == 0 && regions[0][1] == s.size
+      end
+
+      # A whitespace-delimited credential header: keep scheme keywords and env references,
+      # collapse every other run.
+      private def self.scheme_shape(value : String) : String
+        parts = value.split(/\s+/).reject(&.empty?)
+        return "…" if parts.empty?
+        kept = parts.map do |tok|
+          if env_token?(tok) || AUTH_SCHEMES.includes?(tok.downcase)
+            tok
+          else
+            "…"
+          end
+        end
+        collapse(kept).join(' ')
+      end
+
+      # A cookie header: `name=value` pairs. The NAME is kept (identifiers, not secrets, and
+      # naming which cookie is wired is the whole point); the value only when it is entirely
+      # an env reference.
+      private def self.cookie_shape(value : String) : String
+        pairs = value.split(';').map(&.strip).reject(&.empty?)
+        return "…" if pairs.empty?
+        pairs.map { |pair|
+          eq = pair.index('=')
+          next "…" unless eq
+          key = pair[0...eq]
+          val = pair[(eq + 1)..]
+          next "…" unless cookie_name?(key)
+          "#{key}=#{env_token?(val) ? val : "…"}"
+        }.join("; ")
+      end
+
+      # RFC 6265 cookie-name shape, length-capped. A name that is not token-shaped is not the
+      # identifier this projection assumes it is, so it is withheld with its value.
+      private def self.cookie_name?(key : String) : Bool
+        return false if key.empty? || key.size > 64
+        key.each_char.all? { |c| c.ascii_alphanumeric? || "!#$%&'*+-.^_`|~".includes?(c) }
+      end
+
+      # Runs of `…` become one `…`: three unrecognised tokens in a row are one unreadable
+      # value, and printing `… … …` would suggest a structure the reader cannot check.
+      private def self.collapse(parts : Array(String)) : Array(String)
+        kept = [] of String
+        parts.each do |p|
+          next if p == "…" && kept.last? == "…"
+          kept << p
+        end
+        kept
+      end
+
       # Every string that ORIGINATED OUTSIDE gori — a captured request target/host, a
       # response header, a regex-extracted fuzz capture, a crawled URL — must pass through
       # here before it reaches JSON::Builder. The stdio JSON-RPC transport carries UTF-8

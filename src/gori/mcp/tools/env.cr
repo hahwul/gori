@@ -18,10 +18,34 @@ module Gori
               j.object do
                 j.field "key", key
                 j.field "value", include_sensitive ? val : "[REDACTED]"
+                # Two facts about the value that are not the value.
+                #
+                # `[REDACTED]` alone leaves one question a caller cannot answer without asking
+                # for the secret: does `$AUTH` already CARRY its scheme, or does the header
+                # have to read `Bearer $AUTH`? Getting that wrong sends `Bearer Bearer …` or a
+                # bare token, and both look like an auth bug at the target rather than a
+                # spelling mistake here.
+                #
+                # `scheme` is a registered IANA keyword, `length` is a size. Deliberately NOT
+                # `Bindings.mask_preview`, which shows first-4/last-4 — right for the TUI's own
+                # binding rows, but this contract has always been "no value bytes", and a
+                # preview would weaken it for every caller that never asked.
+                j.field "length", val.bytesize
+                env_value_scheme(val).try { |sc| j.field "scheme", sc }
               end
             end
           end
         end)
+      end
+
+      # The auth scheme an env value already carries, if any — the leading token, when it is
+      # one of the schemes a credential header uses and something follows it. Read off the
+      # shared `Serialize::AUTH_SCHEMES`, the same list `env_header_shapes` keeps verbatim, so
+      # the two answers about one value cannot drift.
+      private def env_value_scheme(value : String) : String?
+        head, sep, rest = value.strip.partition(' ')
+        return nil if sep.empty? || rest.strip.empty?
+        Serialize::AUTH_SCHEMES.includes?(head.downcase) ? head : nil
       end
 
       private def set_env_var(h) : Result
@@ -61,7 +85,11 @@ module Gori
         tool j, "list_env",
           "List the project's env vars (used for $KEY substitution in outbound requests — see " \
           "send_request/send_websocket). Values are [REDACTED] by default (a project env var is " \
-          "exactly the kind of place a credential/token lives); pass include_sensitive:true to see them." do |s|
+          "exactly the kind of place a credential/token lives); pass include_sensitive:true to see them. " \
+          "Each row also carries 'length' and, when the value already begins with one, 'scheme' " \
+          "(Bearer/Basic/…) — enough to tell whether a header should read \"Bearer $KEY\" or just " \
+          "\"$KEY\", without the value. To see which key a saved request is actually wired to, read " \
+          "get_repeater_context{include_content:true}'s env_headers." do |s|
           s.field "include_sensitive", boolprop("return actual values instead of [REDACTED] (default false)")
         end
 

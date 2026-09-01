@@ -525,7 +525,7 @@ module Gori
           http2: http2,
           auto_cl: auto_cl,
           flow_id: flow_id,
-          position: store.repeaters_meta.size.to_i32,
+          position: store.next_repeater_position,
           # The SNI the send actually used, so re-sending the saved row reproduces the same
           # ClientHello. Through the effective value above, not a hard-coded nil / arg-only
           # read that silently dropped the source's SNI.
@@ -749,7 +749,12 @@ module Gori
                 "flow_id takes precedence; #{ignored.join(", ")} #{ignored.size == 1 ? "was" : "were"} ignored"
             end
             j.field "recorded_flow_id", recorded_flow_id
-            j.field "saved_repeater_id", repeater_id if repeater_id && repeater_id > 0
+            if repeater_id && repeater_id > 0
+              j.field "saved_repeater_id", repeater_id
+              # Where the new tab landed in the strip, so `save_as_repeater` does not have to
+              # be followed by a listing to find out what the operator will call it.
+              repeater_tui_index(repeater_id).try { |n| j.field "saved_repeater_tui_index", n }
+            end
             unless result.ok?
               kind = network_error_kind(result.error)
               # `Serialize.text`: a send failure quotes bytes the ORIGIN chose (a malformed
@@ -940,6 +945,7 @@ module Gori
           j.object do
             emit_scope(j, sc)
             j.field "repeater_id", repeater_id
+            repeater_tui_index(repeater_id).try { |n| j.field "tui_index", n }
             j.field "upgraded", result.upgraded?
             j.field "duration_us", result.duration_us
             j.field "close_code", result.close_code if result.close_code
