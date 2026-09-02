@@ -627,7 +627,7 @@ module Gori::Tui
     def mine_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
-      @host.status("stopping…")
+      @host.status("stopping…", :busy)
     end
 
     # --- async (run loop) ---
@@ -669,7 +669,7 @@ module Gori::Tui
         msg = "Miner: #{ev.message} on #{v.summary}"
         log_event(v, :error, msg)
         push_mine_notification(v, :error, msg)
-        @host.status("miner error: #{ev.message}") if v.config.notify.posts_notification?(0, error: true)
+        @host.status("miner error: #{ev.message}", :error) if v.config.notify.posts_notification?(0, error: true)
       end
     end
 

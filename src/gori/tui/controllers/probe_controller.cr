@@ -337,7 +337,7 @@ module Gori::Tui
           # into the notification center (#127). Still logged to the #124 event feed
           # (the AI firehose logs freely; only the human center suppresses it).
           @host.session.store.insert_event("probe", "error", "error", "Probe: #{ev.message}", goto_tab: "probe")
-          @host.status("probe error: #{ev.message}")
+          @host.status("probe error: #{ev.message}", :error)
         when Probe::CompleteEvent
           # A manual "Run active scan" in Always mode came back clean — the analyzer only emits
           # this when the operator asked to be told either way, so it always posts to the tray.

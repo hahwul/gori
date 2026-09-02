@@ -287,6 +287,9 @@ module Gori::Tui
       # placement also writes to it, so the two are resolved by recency rather than by a
       # fixed precedence — see #companion_notice for why a fixed one is wrong.
       @toast_at = nil.as(Time::Instant?)
+      # The last toast set WITH a kind (see `status(message, kind)`), paired with its text so
+      # the glyph only ever decorates that message.
+      @toast_kinded = nil.as({String, Symbol}?)
       @outcome = :running # :running | :quit | :back
       # {configured port, port we actually got} when the bind fell back at startup because the
       # configured one was taken; nil when the proxy got what it asked for. A RUNTIME note the
@@ -2162,29 +2165,28 @@ module Gori::Tui
       end
     end
 
-    # Glyph prefixes for the status strip, matched against the message TEXT. That coupling is
-    # the thing to know about this method: it is the one place where changing a toast's wording
-    # silently changes its appearance. `fuzz error:` was renamed `fuzzer error:` (one noun per
-    # engine, across both its channels) and the ✗ quietly stopped appearing — nothing failed,
-    # the mark was simply gone. `ERROR_PREFIXES` now carries every engine so the next one
-    # inherits the mark instead of needing a line here.
-    ERROR_PREFIXES = [
-      "repeater error:", "ws repeater error:", "fuzz:",
-      "fuzzer error:", "discover error:", "miner error:", "sequencer error:", "probe error:",
-    ]
-    BUSY_PREFIXES = ["sending →", "ws sending →", "fuzzing ", "fuzz running", "stopping"]
-    DONE_PREFIXES = ["sent →", "ws sent:", "Fuzzer:"]
-
+    # The status strip's glyph — spinner / ✓ / ✗ — comes from the KIND the producer passed to
+    # `status(message, kind)`, never from the message text. This used to match English
+    # prefixes (`"fuzzer error:"`, `"sent →"`) against the toast, and it was the one place
+    # where rewording a toast silently changed its appearance: `fuzz error:` became `fuzzer
+    # error:` and the ✗ just stopped appearing. A kind survives a reword, and survives the
+    # message being drawn in another language. The kind is keyed to the message it was set
+    # with, so any of the raw `@toast = …` writes that never name a kind draw plain.
     private def format_status_message(message : String?) : String?
       return nil unless message
-      if BUSY_PREFIXES.any? { |p| message.starts_with?(p) }
-        "#{SPINNER[@spinner_frame % SPINNER.size]} #{message}"
-      elsif DONE_PREFIXES.any? { |p| message.starts_with?(p) }
-        "✓ #{message}"
-      elsif ERROR_PREFIXES.any? { |p| message.starts_with?(p) }
-        "✗ #{message}"
-      else
-        message
+      Runner.decorate_status(message, @toast_kinded, SPINNER[@spinner_frame % SPINNER.size].to_s)
+    end
+
+    # The strip line for `message`: led by `spinner` / ✓ / ✗ when `kinded` names this same
+    # message, verbatim otherwise. Class-level and pure so the rule is spec-able — `Runner.new`
+    # owns a terminal and appears nowhere under spec/.
+    def self.decorate_status(message : String, kinded : {String, Symbol}?, spinner : String) : String
+      kind = kinded && kinded[0] == message ? kinded[1] : :plain
+      case kind
+      when :busy  then "#{spinner} #{message}"
+      when :done  then "✓ #{message}"
+      when :error then "✗ #{message}"
+      else             message
       end
     end
 
@@ -2866,6 +2868,13 @@ module Gori::Tui
     def status(message : String) : Nil
       @toast = message
       @toast_at = Time.instant
+    end
+
+    # A toast with a status-strip glyph: `:busy` (spinner), `:done` (✓) or `:error` (✗). See
+    # `format_status_message` for why the glyph is a kind and not a prefix of the text.
+    def status(message : String, kind : Symbol) : Nil
+      @toast_kinded = {message, kind}
+      status(message)
     end
 
     def open_palette : Nil

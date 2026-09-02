@@ -1224,7 +1224,11 @@ module Gori::Tui
           probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
         note = record_note ? " · #{record_note}" : ""
-        @host.status(result.ok? ? "sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{note}" : "repeater error: #{result.error}#{note}")
+        if result.ok?
+          @host.status("sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{note}", :done)
+        else
+          @host.status("repeater error: #{result.error}#{note}", :error)
+        end
         applied = true
       end
       while pair = nonblocking_ws_result
@@ -1241,11 +1245,11 @@ module Gori::Tui
         end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
-          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
+          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}", :done)
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           probe_scan_ws_repeater(id, result, tab.flow_id, view) if id
         else
-          @host.status("ws repeater error: #{result.error}")
+          @host.status("ws repeater error: #{result.error}", :error)
         end
         applied = true
       end
@@ -1828,7 +1832,7 @@ module Gori::Tui
       end
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
-      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…")
+      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy)
       # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` above is the
       # assembled DRAFT; this is the message, with the send seam's two passes applied (the
       # `$NAME` binding pass and the active session slot's header overlay). The History
@@ -2005,7 +2009,7 @@ module Gori::Tui
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
       # the repeater session already keeps, and a flow row would hold a handshake and nothing else.
-      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…#{unrecorded_note("WebSocket")}")
+      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…#{unrecorded_note("WebSocket")}", :busy)
       spawn(name: "gori-ws-repeater") do
         result = plan.send_ws(messages, Repeater::WsEngine::DEFAULT_IDLE, keep_key)
         select

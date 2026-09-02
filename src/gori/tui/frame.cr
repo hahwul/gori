@@ -326,7 +326,7 @@ module Gori::Tui
     def self.toggle_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                           chord : String, name : String, on : Bool) : Int32
       text = " #{chord}:#{name} "
-      x = right_edge - text.size
+      x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       screen.text(x, y, text, on ? Theme.text_bright : Theme.muted, on ? Theme.accent_bg : Theme.bg)
       x
@@ -343,7 +343,7 @@ module Gori::Tui
                          chord : String, name : String, fg : Color, bg : Color,
                          attr : Attribute = Attribute::None) : Int32
       text = " #{chord}:#{name} "
-      x = right_edge - text.size
+      x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       screen.text(x, y, text, fg, bg, attr)
       x
@@ -365,7 +365,7 @@ module Gori::Tui
     def self.mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                         insert : Bool) : Int32
       text = mode_badge_label(insert)
-      x = right_edge - text.size
+      x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       if insert
         screen.text(x, y, text, Theme.text_bright, Theme.accent_bg)
@@ -394,16 +394,16 @@ module Gori::Tui
                             min_x : Int32, insert : Bool) : Bool
       return false if my != y
       text = mode_badge_label(insert)
-      x = right_edge - text.size
+      x = right_edge - Screen.draw_width(text)
       return false if x < min_x
-      mx >= x && mx < x + text.size
+      mx >= x && mx < x + Screen.draw_width(text)
     end
 
     # Left edge after a `mode_badge` — the right_edge for whatever chains further left of it.
     # Mirrors `mode_badge`'s own return, unchanged edge and all, so a hit-test can follow the
     # chain past the mode chip the way the Repeater's ` ^K:MARK ` is drawn past it.
     def self.mode_badge_edge(right_edge : Int32, min_x : Int32, insert : Bool) : Int32
-      x = right_edge - mode_badge_label(insert).size
+      x = right_edge - Screen.draw_width(mode_badge_label(insert))
       x < min_x ? right_edge : x
     end
 
@@ -415,7 +415,7 @@ module Gori::Tui
       edge = right_edge
       badges.each do |(_, chord, name)|
         text = " #{chord}:#{name} "
-        x = edge - text.size
+        x = edge - Screen.draw_width(text)
         next if x < min_x # `next`, not `break` — see right_badge_hit
         edge = x
       end
@@ -433,7 +433,7 @@ module Gori::Tui
     def self.action_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
                           chord : String, name : String, ready : Bool) : Int32
       text = " #{chord}:#{name} "
-      x = right_edge - text.size
+      x = right_edge - Screen.draw_width(text)
       return right_edge if x < min_x
       if ready
         screen.text(x, y, text, Theme.ink_on(Theme.focus_gold), Theme.focus_gold, Attribute::Bold)
@@ -459,8 +459,8 @@ module Gori::Tui
       x = start_x
       chips.each do |(id, label)|
         break if limit && x + Screen.draw_width(label) > limit
-        return id if mx >= x && mx < x + label.size
-        x += label.size + 1
+        return id if mx >= x && mx < x + Screen.draw_width(label)
+        x += Screen.draw_width(label) + 1
       end
       nil
     end
@@ -483,9 +483,9 @@ module Gori::Tui
       edge = right_edge
       badges.each do |(id, chord, name)|
         text = " #{chord}:#{name} "
-        x = edge - text.size
+        x = edge - Screen.draw_width(text)
         next if x < min_x
-        return id if mx >= x && mx < x + text.size
+        return id if mx >= x && mx < x + Screen.draw_width(text)
         edge = x
       end
       nil

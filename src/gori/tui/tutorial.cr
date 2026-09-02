@@ -71,13 +71,16 @@ module Gori::Tui
     # did before she existed — see #companion_band.
     COMPANION_BAND = Companion::GUTTER + Mascot::W + 1
 
-    # Fake palette rows used by the palette lesson + practice overlay.
+    # Fake palette rows used by the palette lesson + practice overlay: sigil, label, and the
+    # fake tab index the row switches to (nil = the row only closes the palette). The action
+    # rides its own slot so the label is free to be reworded or translated without the
+    # practice step's "Go to …" quietly turning into a no-op.
     PALETTE_ROWS = [
-      {"»", "Go to Repeater"},
-      {"≡", "Settings: Theme"},
-      {"×", "Quit gori"},
-      {"→", "Go to History"},
-      {"?", "Open Help"},
+      {"»", "Go to Repeater", 4},
+      {"≡", "Settings: Theme", nil},
+      {"×", "Quit gori", nil},
+      {"→", "Go to History", 2},
+      {"?", "Open Help", 6},
     ]
 
     # Fake space-menu rows (mnemonic key + label).
@@ -678,10 +681,10 @@ module Gori::Tui
       end
     end
 
-    private def filtered_palette : Array({String, String})
+    private def filtered_palette : Array({String, String, Int32?})
       q = @pal_query.downcase
       return PALETTE_ROWS if q.empty?
-      PALETTE_ROWS.select { |(_, label)| label.downcase.includes?(q) }
+      PALETTE_ROWS.select { |(_, label, _)| label.downcase.includes?(q) }
     end
 
     private def run_overlay_selection : Nil
@@ -689,10 +692,9 @@ module Gori::Tui
         rows = filtered_palette
         if row = rows[@pal_sel]?
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
-          case row[1]
-          when "Go to Repeater" then @p_tab = 4; mark_switch
-          when "Go to History"  then @p_tab = 2; mark_switch
-          when "Open Help"      then @p_tab = 6; mark_switch
+          if tab = row[2]
+            @p_tab = tab
+            mark_switch
           end
         end
       end
@@ -1211,7 +1213,7 @@ module Gori::Tui
     private def render_footer(screen : Screen, w : Int32, h : Int32) : Nil
       hint = footer_hint
       hy = h - 2
-      screen.text({(w - hint.size) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
+      screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
 
       by = h - 1
       prev_l = prev_btn_label
@@ -1505,7 +1507,7 @@ module Gori::Tui
       render_request_pane(screen, pane, true, insert: insert, typed: typed, flow: 0)
 
       kh = insert ? "INS · type · esc → READ" : "READ · i or ↵ → INS"
-      screen.text(shell.x + {(shell.w - kh.size) // 2, 0}.max, shell.bottom - 1, kh, Theme.muted, Theme.bg)
+      screen.text(shell.x + {(shell.w - Screen.draw_width(kh)) // 2, 0}.max, shell.bottom - 1, kh, Theme.muted, Theme.bg)
     end
 
     private def render_practice(screen : Screen, box : Rect) : Nil
@@ -1635,7 +1637,7 @@ module Gori::Tui
 
       unless keyhint.empty?
         kh = " #{keyhint} "
-        screen.text(rect.x + {(rect.w - kh.size) // 2, 0}.max, rect.y + 1, kh,
+        screen.text(rect.x + {(rect.w - Screen.draw_width(kh)) // 2, 0}.max, rect.y + 1, kh,
           Theme.ink_on(Theme.accent), Theme.accent, attr: Attribute::Bold)
       end
     end
@@ -1646,8 +1648,9 @@ module Gori::Tui
       cx = x
       TABS.each_with_index do |name, i|
         label = " #{name} "
-        break if cx + label.size > x + w
-        @tab_hits << {Rect.new(cx, y, label.size, 1), i}
+        lw = Screen.draw_width(label)
+        break if cx + lw > x + w
+        @tab_hits << {Rect.new(cx, y, lw, 1), i}
         if i == active
           bg = focused ? Theme.focus_gold : Theme.accent_bg
           fg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright

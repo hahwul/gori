@@ -665,13 +665,13 @@ module Gori::Tui
         # answers are still in hand. Keep SAVE_FAILED_SHORT's tail in step with the string
         # `finish` builds; that is the only one that reaches here (`skip`'s never renders,
         # see there).
-        err = SAVE_FAILED_SHORT if err.size > w
-        screen.text({(w - err.size) // 2, 0}.max, h - 1, err, Theme.red, Theme.bg)
+        err = SAVE_FAILED_SHORT if Screen.draw_width(err) > w
+        screen.text({(w - Screen.draw_width(err)) // 2, 0}.max, h - 1, err, Theme.red, Theme.bg)
         return
       end
       hints = footer_hints
-      hint = hints.find { |s| s.size <= w } || hints.last
-      screen.text({(w - hint.size) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
+      hint = hints.find { |s| Screen.draw_width(s) <= w } || hints.last
+      screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
     end
 
     # This step's key hints, widest first; `render_footer` takes the first that fits.
@@ -882,7 +882,7 @@ module Gori::Tui
       screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
       recap_labels = ["Proxy (global)", "Theme", "Miss Ring", "Shortcuts"]
-      vx = ix + recap_labels.max_of(&.size) + 2 # +2 = min visible gap before the value column
+      vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
       recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
       recap(screen, box, ix, vx, y, "Miss Ring", @companion_enabled ? "on · #{@companion_motion}" : "off"); y += 1

@@ -89,6 +89,15 @@ module Gori::Tui
     abstract def active_tab : Symbol # read the active tab (Repeater reconcile gates on it)
     abstract def focus : Symbol      # read the focus model (:menu | :subtabs | :body)
 
+    # A toast WITH a status-strip glyph: `:busy` (spinner), `:done` (✓) or `:error` (✗) — see
+    # `Runner#format_status_message` for why the glyph is a kind on the call and not a prefix
+    # of the text. CONCRETE with a plain-toast fallback for the same reason `subtab_find_focused?`
+    # below is: the spec doubles that `include Host` should not each have to restate it.
+    # Runner overrides it.
+    def status(message : String, kind : Symbol) : Nil
+      status(message)
+    end
+
     # The strip's ⌕ affordance is the current stop — one step LEFT of the first chip, inside
     # `:subtabs` focus. CONCRETE, not abstract: nine spec files `include Host` to drive a
     # controller, and `false` is the right answer for every one of them. Runner overrides.
