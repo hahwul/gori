@@ -68,6 +68,22 @@ describe "status-strip wording" do
     end
     offenders.should be_empty
   end
+
+  it "tells a new session to EDIT, not to type — its fields open in READ" do
+    # `^N` lands on a field in READ mode on every tab that has one, so a line telling the
+    # operator to `type` names a gesture that does nothing — and on the Fuzzer, whose field
+    # holds a URL, the digits fired the global `nav.posN` tab jump and walked the operator off
+    # the session they had just made. `repeater_new` had it right ("edit the request &
+    # target"); the fuzzer's line promised the mode it does not open in.
+    offenders = [] of String
+    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+      File.read(path).lines.each_with_index do |line, i|
+        next unless line.matches?(/(status|toast)\(.*"new [^"]*\btype\b/)
+        offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
+      end
+    end
+    offenders.should be_empty
+  end
 end
 
 # `Runner#format_status_message` prefixes the strip with a spinner / ✓ / ✗ by MATCHING THE

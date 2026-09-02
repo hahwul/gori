@@ -24,6 +24,16 @@ module Gori::Tui
     MAX_WIDTH  = 60
     TEXT_INSET =  6
 
+    # Rows the card spends on itself around the message: the two borders, a blank under the
+    # heading, a blank over the buttons, the button row, and a blank under it.
+    CHROME_H = 6
+
+    # …and the fewest it can be drawn in at all: the top border (which carries the heading),
+    # the button row at `bottom - 3`, and the bottom border. Under this there is nowhere to put
+    # the buttons that is not a border, so `render` declines and `handle_key` refuses to
+    # commit — see `drawn?`.
+    MIN_H = 4
+
     # The card's heading (`DELETE ISSUE`), NOT the shell's focus badge — that is `title`
     # below, which is the constant "CONFIRM" for every confirmation.
     getter heading : String
@@ -33,6 +43,21 @@ module Gori::Tui
                    @confirm_label : String = "confirm", @cancel_label : String = "cancel",
                    @danger : Bool = true)
       @selected = :cancel # safe default
+      # "The last frame did not REFUSE to draw me" — not "a frame has run". The shell draws
+      # before it reads a key, so this is never stale there; starting it false instead would
+      # make every non-rendering driver (the spec harness, ProjectPicker's own ladder) unable
+      # to answer a card that is in fact on screen.
+      @drawn = true
+    end
+
+    # Did the last frame actually put this card on screen? A terminal too short for even
+    # `MIN_H` gets no card at all, and the only cue left is the shell's `CONFIRM` focus badge —
+    # which names no action, no target and no consequence. ProjectPicker already refuses to ARM
+    # a delete it cannot draw ("a delete you cannot read is a delete you cannot have
+    # confirmed"); this is the same rule one step later, where a RESIZE after arming can also
+    # reach it, and it covers every confirm the Runner raises rather than that one open site.
+    def drawn? : Bool
+      @drawn
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -77,12 +102,15 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.escape?, key.n?            then :cancel
-      when ConfirmDialog.affirmative?(ev) then :commit
+      when key.escape?, key.n? then :cancel
+      when ConfirmDialog.affirmative?(ev)
+        # An answer to a question nobody could read is not an answer. `n`/esc stay open to a
+        # window this short — cancelling costs a keystroke, committing costs the data.
+        @drawn ? :commit : :stay
       when key.left?, key.right?, key.tab?, key.back_tab?
         move
         :stay
-      when key.enter? then confirm_selected? ? :commit : :cancel
+      when key.enter? then confirm_selected? && @drawn ? :commit : :cancel
       else                 :stay
       end
     end
@@ -126,16 +154,28 @@ module Gori::Tui
     # Centered card over `area` (the body rect). The card sizes to the widest of
     # message / title / button row.
     def render(screen : Screen, area : Rect) : Nil
-      return if area.w < 18
-      lines = display_lines(area)
-      return if area.h < lines.size + 6
+      @drawn = false
       box = overlay_box(area)
+      return if box.empty?
+      @drawn = true
       Frame.card(screen, box, @heading, border: Theme.border_focus)
-
-      lines.each_with_index do |line, i|
+      fitted_lines(display_lines(area), box).each_with_index do |line, i|
         screen.text(box.x + 3, box.y + 2 + i, line, Theme.text, Theme.panel, width: box.w - 6)
       end
       render_buttons(screen, box)
+    end
+
+    # The message rows this box can actually hold, and what goes in them. A card that fits
+    # spends `CHROME_H` and draws every line; a shorter one spends the blank above the buttons
+    # first and then CLIPS — the tail of the message is folded into the last visible row so
+    # `Screen#text` ellipsises it, because "there is more of this sentence" is exactly what the
+    # operator has to know before answering. Refusing to draw at all (what this did) left a
+    # destructive modal holding every key with nothing on screen naming it.
+    private def fitted_lines(lines : Array(String), box : Rect) : Array(String)
+      room = {box.h - (CHROME_H - 1), 0}.max
+      return lines if lines.size <= room
+      return [] of String if room == 0
+      lines[0, room - 1] + [lines[(room - 1)..].join(' ')]
     end
 
     # Inverts render's centering math: the centered card rect for `area`. Pure;
@@ -144,11 +184,14 @@ module Gori::Tui
       # Empty when render would decline to draw (same guard as render): a click then
       # falls through dismiss_zone?/!contains? and closes instead of acting on a
       # phantom box (e.g. firing the destructive button on an undrawn modal).
-      return Rect.new(area.x, area.y, 0, 0) if area.w < 18
+      return Rect.new(area.x, area.y, 0, 0) if area.w < 18 || area.h < MIN_H
       lines = display_lines(area)
-      return Rect.new(area.x, area.y, 0, 0) if area.h < lines.size + 6
       content = {longest(lines), @heading.size + 2, button_row_width}.max
-      h = lines.size + 6
+      # The roomy height, capped by what there IS. The card used to demand its full height and
+      # draw nothing at all below it — on an 80×12 terminal (body 6 rows) `⇧X Clear history`
+      # armed a modal that showed no heading, no count and no warning, and `y` still wiped the
+      # project's whole History. It degrades instead; `fitted_lines` spends the shortfall.
+      h = {lines.size + CHROME_H, area.h}.min
       w = (content + TEXT_INSET).clamp(16, {area.w - 2, MAX_WIDTH}.min)
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2

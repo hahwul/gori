@@ -237,3 +237,68 @@ describe "ConfirmDialog — Overlay contract" do
     ran.should eq(0)
   end
 end
+
+# A confirmation the operator cannot READ is the failure mode this card exists to prevent, and
+# it had one: `render` demanded `lines.size + 6` rows and drew NOTHING below that, while
+# `handle_key` went on answering. Reproduced live on an 80x12 terminal (`layout.body` = 6 rows)
+# — `⇧X Clear history` showed no heading, no count and no "This can't be undone", and `y` still
+# deleted all 143 flows. The card degrades now, and refuses to be answered when it cannot.
+describe "ConfirmDialog on a short pane" do
+  # 80x12 is inside `Layout.usable?` (40x8), so this is a size the app renders at.
+  it "still draws the heading, the buttons and as much of the message as fits" do
+    dlg = ConfirmDialog.new("CLEAR HISTORY",
+      "Delete ALL 143 History flows for this project?\nThis can't be undone.",
+      confirm_label: "clear")
+    backend = render_dialog(dlg, 76, 6) # `layout.body` on an 80x12 terminal
+    backend.contains?("CLEAR HISTORY").should be_true
+    backend.contains?("clear").should be_true
+    backend.contains?("cancel").should be_true
+    # The message is CLIPPED, not dropped — and the ellipsis is what says there is more of it.
+    backend.contains?("Delete ALL 143 History flows").should be_true
+    backend.contains?("…").should be_true
+  end
+
+  # Between `MIN_H` and the message's own height the card keeps what it can afford: the
+  # heading in its border and the two buttons. Losing the sentence is a cost; losing the card
+  # is the defect.
+  it "keeps the card down to MIN_H" do
+    dlg = ConfirmDialog.new("CLEAR HISTORY", "Delete ALL 143 History flows?", confirm_label: "clear")
+    (ConfirmDialog::MIN_H..7).each do |h|
+      backend = render_dialog(dlg, 76, h)
+      backend.contains?("CLEAR HISTORY").should be_true # (h=#{h})
+      backend.contains?("clear").should be_true         # (h=#{h})
+      backend.contains?("cancel").should be_true        # (h=#{h})
+    end
+  end
+
+  # Under MIN_H there is nowhere to put the buttons that is not a border, so the card declines
+  # — and then the answer has to decline with it. `n`/esc stay live: cancelling an unreadable
+  # confirm costs a keystroke, committing one costs the data.
+  it "refuses to commit while it is not on screen, and stays up so a resize can rescue it" do
+    dlg = ConfirmDialog.new("CLEAR HISTORY", "Delete ALL 143 History flows?", confirm_label: "clear")
+    short = Rect.new(0, 0, 76, ConfirmDialog::MIN_H - 1)
+    dlg.render(Screen.new(MemoryBackend.new(76, 8)), short)
+    dlg.drawn?.should be_false
+
+    y = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
+    dlg.handle_key(y).should eq(:stay)
+    dlg.select_confirm
+    dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:cancel)
+    # esc still gets the operator out of a modal they cannot read.
+    dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
+
+    # A taller window puts the card back, and the same key is then a real answer.
+    dlg.render(Screen.new(MemoryBackend.new(76, 24)), Rect.new(0, 0, 76, 18))
+    dlg.drawn?.should be_true
+    dlg.handle_key(y).should eq(:commit)
+  end
+
+  # `overlay_box`'s doc promises IDENTICAL sizing to render, and the click path reads it: a box
+  # for a card that was not drawn would put the destructive button under a phantom cell.
+  it "reports an empty box exactly when it declines to draw" do
+    dlg = ConfirmDialog.new("T", "m")
+    dlg.overlay_box(Rect.new(0, 0, 76, ConfirmDialog::MIN_H - 1)).empty?.should be_true
+    dlg.overlay_box(Rect.new(0, 0, 17, 24)).empty?.should be_true
+    dlg.overlay_box(Rect.new(0, 0, 76, ConfirmDialog::MIN_H)).empty?.should be_false
+  end
+end

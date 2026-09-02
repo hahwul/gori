@@ -330,3 +330,52 @@ describe "Gori::Tui::OastController — the callback buffer is a bounded window"
     end
   end
 end
+
+# The CALLBACKS table lays PROTO / METHOD / SOURCE out from constants and anchors PROVIDER to
+# the pane's right edge, with DESTINATION filling the middle. None of the header labels carried
+# a `width:`, and the row's DESTINATION cell was floored at six columns whatever was left — so
+# on a narrow pane the right-anchored run started LEFT of the fixed one and the three overwrote
+# each other. Live, at 70 columns: `DESTINATIPROVIDER`. At 52 and under the header ran straight
+# through the card's right border, and the row's provider ate the source IP
+# (`203.0.1Demo OAST (oast.…`) — in the one tab whose whole job is evidence.
+private def callbacks_pane_at(controller : OastController, w : Int32, h : Int32) : Array(String)
+  backend = MemoryBackend.new(w, h)
+  controller.render_body(Screen.new(backend), Rect.new(0, 0, w, h), :body)
+  (0...h).map { |y| backend.row(y) }
+end
+
+describe "Gori::Tui::OastController — the CALLBACKS table on a narrow pane" do
+  it "never fuses or overwrites two column runs, and never leaves the card" do
+    with_oast_controller do |controller, _host, _session, sid|
+      flood(controller, sid, 2)
+      # 40 is `Layout.usable?`'s floor; by 90 every column has its own room. Everything
+      # between is where the two variable-width runs used to collide.
+      (40..90).each do |w|
+        rows = callbacks_pane_at(controller, w, 20)
+        hdr = rows.index(&.includes?("PROTO"))
+        hdr.should_not be_nil # (w=#{w}) the table really rendered
+        head = rows[hdr.not_nil!]
+        # The tell for the collision: PROVIDER drawn ON the DESTINATION label. Either label
+        # may be dropped or clipped by width, but neither may be spelled through the other.
+        head.should_not contain("PROVIDERTINATION")    # (w=#{w})
+        head.should_not contain("DESTINATIONPROVIDER") # (w=#{w})
+        head.should_not contain("SOURCPROVIDER")       # (w=#{w})
+        # …and nothing on any row may reach the pane's last column, which is the card border.
+        rows.each { |r| r[w - 1].should_not eq('D') } # (w=#{w})
+      end
+    end
+  end
+
+  # The other half: none of this may cost a column on a pane that has the room.
+  it "still lays out every column once the pane is wide enough" do
+    with_oast_controller do |controller, _host, _session, sid|
+      flood(controller, sid, 2)
+      head = callbacks_pane_at(controller, 120, 20).find(&.includes?("PROTO")).not_nil!
+      %w[PROTO METHOD SOURCE DESTINATION PROVIDER].each_cons(2) do |(a, b)|
+        head.index(a).not_nil!.should be < head.index(b).not_nil!
+      end
+      row = callbacks_pane_at(controller, 120, 20).find(&.includes?("203.0.113.")).not_nil!
+      row.should contain(".oast.test") # the destination survives beside the provider
+    end
+  end
+end
