@@ -899,6 +899,13 @@ module Gori
         report.notes.each { |n| STDERR.puts "gori run show: #{n}" }
       end
 
+      # `raw` is the format whose whole promise is that the bytes ARE the message ("exact
+      # bytes" in the --format help), which is what makes a body the capture cap cut short
+      # invisible HERE and nowhere else: nothing in the octets says they stop early, and the
+      # head above them still declares the length the origin sent, so the shortfall reads as
+      # the origin's. Every sibling format already says so — `show_text` inline, `show_har`
+      # and the code formats on STDERR — and this one is the one an operator pipes into a
+      # file and diffs. On STDERR, like those, so STDOUT stays byte-pure.
       private def self.show_raw(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
         if req
           STDOUT.write(detail.request_head)
@@ -915,6 +922,25 @@ module Gori
           end
         end
         STDOUT.flush
+        raw_truncation_notes(detail, req, resp).each { |n| STDERR.puts "gori run show: #{n}" }
+      end
+
+      # What `--format raw` left out, one line per side, or empty when the bytes are whole.
+      # A separate function for the same reason `socket_curl_note` is one: the sentence is the
+      # part worth pinning down, and it is testable without capturing STDERR.
+      #
+      # Keyed on the side actually PRINTED — `--request-only` on a flow whose response was
+      # capped must not warn about bytes it did not write.
+      private def self.raw_truncation_notes(detail : Store::FlowDetail, req : Bool, resp : Bool) : Array(String)
+        notes = [] of String
+        {"request"  => req && detail.request_body_truncated?,
+         "response" => resp && detail.response_body_truncated?}.each do |side, capped|
+          next unless capped
+          notes << "flow ##{detail.row.id}'s #{side} body was truncated at the capture cap — " \
+                   "these bytes are the stored prefix, not the whole body " \
+                   "(--format json reports the true size)"
+        end
+        notes
       end
 
       private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool,

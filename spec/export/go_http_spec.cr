@@ -37,4 +37,18 @@ describe Gori::Export::GoHttp do
     code.should contain(%(req.Host = "evil.test"))
     code.should_not contain("req.Header.Add(\"Host\"")
   end
+  # net/http escapes `URL.Path` on its way to the request line but writes `RawQuery` VERBATIM,
+  # so a captured `/한?q=한` went out with the path encoded and the query's high bytes raw — a
+  # request-target no other generated client sends. Pre-encoding settles it: measured against a
+  # raw listener, curl / httpie / requests / fetch / net-http all send `GET /%ED%95%9C?q=%ED%95%9C`.
+  it "percent-encodes a non-ASCII path and query" do
+    code = go("GET /\u{d55c}?q=\u{d55c} HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    code.should contain(%(http.NewRequest("GET", "https://h.test/%ED%95%9C?q=%ED%95%9C", nil)))
+  end
+
+  it "leaves a non-ASCII authority alone — a host is IDNA-encoded, not percent-encoded" do
+    code = go("GET /a HTTP/1.1\r\nHost: \u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}\r\n\r\n",
+      "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}")
+    code.should contain(%("https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}/a"))
+  end
 end

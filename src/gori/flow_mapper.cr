@@ -91,15 +91,28 @@ module Gori
       )
     end
 
-    # No response was obtained (upstream failure, timeout). We still record the
-    # flow so the human sees the failure (P4/P7). `duration_us` preserves the
-    # attempt time (how long before the failure) so an error Flow isn't left with
-    # a null duration in History.
-    def self.error_response(flow_id : Int64, message : String, duration_us : Int64? = nil) : Store::CapturedResponse
+    # No response was DELIVERED (upstream failure, timeout, or a head gori refused to
+    # forward). We still record the flow so the human sees the failure (P4/P7).
+    # `duration_us` preserves the attempt time (how long before the failure) so an error
+    # Flow isn't left with a null duration in History.
+    #
+    # `head` is for the second kind: the origin answered and gori declined to relay it — a
+    # CL+TE response, a 1xx that declared a body. Those octets are the FINDING, not noise
+    # around it (P7): a response-desync primitive is exactly what an operator points gori at,
+    # and recording only gori's sentence about it left `gori run show --format raw` with
+    # nothing to print. `status` stays 0 either way — gori delivered no response, and both
+    # `Tui::FlowStatus` and `Repeater::ExchangeMeta` read an error row's status as that.
+    #
+    # The default is `Bytes.new(0)` and NOT `Bytes.empty`: the latter carries a null pointer,
+    # which the SQLite driver binds as SQL NULL, and `Export::Har.skip_reason` keys on the
+    # difference between a NULL head (Pending) and an EMPTY one (Error/Aborted) — the R4-F3
+    # case in `spec/export/har_spec.cr`.
+    def self.error_response(flow_id : Int64, message : String, duration_us : Int64? = nil,
+                            head : Bytes = Bytes.new(0)) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: 0,
-        head: Bytes.new(0),
+        head: head,
         body: nil,
         duration_us: duration_us,
         state: Store::FlowState::Error,

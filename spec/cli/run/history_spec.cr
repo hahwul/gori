@@ -25,6 +25,16 @@ private def flow_detail(scheme : String, host : String, port : Int32, request_he
     response_head.try(&.to_slice), response_body.try(&.to_slice))
 end
 
+private def capped_detail(*, request_capped : Bool, response_capped : Bool) : Gori::Store::FlowDetail
+  row = Gori::Store::FlowRow.new(
+    id: 14_i64, created_at: 0_i64, scheme: "http", method: "POST", host: "example.test",
+    port: 80, target: "/big", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+  Gori::Store::FlowDetail.new(row, "HTTP/1.1",
+    "POST /big HTTP/1.1\r\nContent-Length: 9999\r\n\r\n".to_slice, "short".to_slice,
+    "HTTP/1.1 200 OK\r\nContent-Length: 9999\r\n\r\n".to_slice, "short".to_slice,
+    request_body_truncated: request_capped, response_body_truncated: response_capped)
+end
+
 # gRPC length-prefixed frame (1-byte flag + 4-byte big-endian length + payload).
 private def grpc_frame_for_spec(payload : Bytes, flag : UInt8 = 0_u8) : Bytes
   io = IO::Memory.new
@@ -42,6 +52,10 @@ module Gori::CLI::Run
   def self.show_json_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
                               ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
     show_json(detail, req, resp, ws_msgs)
+  end
+
+  def self.raw_truncation_notes_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool) : Array(String)
+    raw_truncation_notes(detail, req, resp)
   end
 end
 
@@ -1039,5 +1053,34 @@ describe "gori run history / sitemap — the FTS drain that did not finish" do
           "anything;").should be_nil
       end
     end
+  end
+end
+
+describe "gori run show --format raw" do
+  # `raw` is documented as "exact bytes", so it is the one format where a body the capture
+  # cap cut short reads as a whole message: the octets carry no marker and the head above
+  # them still declares the origin's length. `text` says `[response body truncated]`, `json`
+  # carries `truncated`/`wire_truncated`, `har` writes a note — `raw` said nothing at all.
+  it "says on STDERR when the bytes it printed are a capped prefix" do
+    detail = capped_detail(request_capped: false, response_capped: true)
+    notes = Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true)
+    notes.size.should eq(1)
+    notes.first.should contain("response body was truncated at the capture cap")
+    notes.first.should contain("stored prefix")
+  end
+
+  it "stays silent for a flow whose bodies are whole" do
+    detail = capped_detail(request_capped: false, response_capped: false)
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true).should be_empty
+  end
+
+  # The note names bytes that were actually written, so a one-sided print says one side.
+  it "does not warn about a side it did not print" do
+    detail = capped_detail(request_capped: true, response_capped: true)
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, false).size.should eq(1)
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, false).first.should contain("request body")
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, false, true).size.should eq(1)
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, false, true).first.should contain("response body")
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true).size.should eq(2)
   end
 end

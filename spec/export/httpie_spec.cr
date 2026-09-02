@@ -91,4 +91,71 @@ describe Gori::Export::Httpie do
     # LAST line: the note is a comment, so it swallows the ` \` that would continue the command.
     cmd.lines.last.lstrip.should start_with("#")
   end
+
+  # httpie is Python: argv arrives through `surrogateescape`, so a byte that is not valid UTF-8
+  # becomes a lone surrogate and the first `.encode()` raises. Measured on httpie 3.2.4 /
+  # Python 3.14 against a raw listener, `http GET http://h/ $'X-L:caf\xe9'` died with
+  # `UnicodeEncodeError: … '\udce9' … surrogates not allowed` and sent NOTHING, where curl,
+  # requests, fetch and net/http all put those bytes on the wire. So the field is dropped, the
+  # rest of the command stays runnable, and the drop is named.
+  describe "a field whose bytes are not valid UTF-8" do
+    it "drops the header and names it rather than emitting a command that dies" do
+      io = IO::Memory.new
+      io << "GET /x HTTP/1.1\r\nHost: h.test\r\nX-Latin1: caf"
+      io.write_byte(0xe9_u8)
+      io << "\r\nX-Ok: v\r\n\r\n"
+      cmd = httpie(String.new(io.to_slice), "https://h.test")
+      cmd.should contain("# header 'X-Latin1' omitted")
+      cmd.should contain("not valid UTF-8")
+      cmd.should_not contain("X-Latin1:caf")
+      cmd.should contain("'X-Ok:v'")
+      cmd.lines.last.lstrip.should start_with("#")
+    end
+
+    it "drops a --raw body it cannot carry and names it" do
+      io = IO::Memory.new
+      io << "POST /u HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      io.write(Bytes[0x80_u8, 0xff_u8, 0x41_u8])
+      cmd = httpie(String.new(io.to_slice), "https://h.test")
+      cmd.lines.any? { |l| l.lstrip.starts_with?("--raw ") }.should be_false
+      cmd.should contain("# body omitted: 3 bytes")
+      cmd.should contain("not valid UTF-8")
+    end
+
+    # An invalid byte in the PATH is not a refusal: `percent_encode_non_ascii` already spelled it
+    # `%FF`, which is ASCII and is the byte the capture asked for.
+    it "carries an unencodable path byte as its percent escape" do
+      io = IO::Memory.new
+      io << "GET /pa"
+      io.write_byte(0xff_u8)
+      io << "th HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      httpie(String.new(io.to_slice), "https://h.test").should contain("'https://h.test/pa%FFth'")
+    end
+
+    # The AUTHORITY is the part left raw, so that is where a URL can still be uncarriable.
+    it "refuses the whole command when the authority cannot be carried" do
+      io = IO::Memory.new
+      io << "https://h"
+      io.write_byte(0xff_u8)
+      io << ".test"
+      cmd = httpie("GET /x HTTP/1.1\r\n\r\n", String.new(io.to_slice))
+      cmd.should start_with("# no command")
+      cmd.should_not contain("http '")
+    end
+
+    # A valid-UTF-8 non-ASCII header IS carriable — httpie sends it — so the drop must not widen
+    # to "non-ASCII".
+    it "keeps a non-ASCII header that is valid UTF-8" do
+      cmd = httpie("GET /x HTTP/1.1\r\nHost: h.test\r\nX-K: \u{d55c}\u{ad6d}\r\n\r\n", "https://h.test")
+      cmd.should contain("'X-K:\u{d55c}\u{ad6d}'")
+      cmd.should_not contain("omitted")
+    end
+  end
+
+  # Same rule as every other code serializer: the URL says which bytes to request, and stops at
+  # the authority so httpie's own IDNA still runs.
+  it "percent-encodes a non-ASCII path and query, leaving the authority raw" do
+    cmd = httpie("GET /\u{d55c}?q=\u{d55c} HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    cmd.should contain("'https://h.test/%ED%95%9C?q=%ED%95%9C'")
+  end
 end

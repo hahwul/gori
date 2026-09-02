@@ -1166,6 +1166,32 @@ describe Gori::Import::Builder do
     end
   end
 
+  # `Export::Har` writes `Content-Length: 0` and no `postData` for a captured request with an
+  # empty entity, so gori's own HAR round trip has to carry that pair back. It did not: the loop
+  # skipped the incoming length and the re-emit was gated on a BODY, so a POST framed
+  # `Content-Length: 0` came back framed by nothing at all — measured through
+  # `gori run show 8 --format har | gori run import --har -`, whose stored head lost the line.
+  describe "a source that stated Content-Length with no body" do
+    it "keeps the length it stated" do
+      headers = Gori::Import::Builder::Headers.new
+      headers << {"Content-Type", "application/json"}
+      headers << {"Content-Length", "0"}
+      head = String.new(Gori::Import::Builder.request_head("POST", "/empty", "HTTP/1.1",
+        scheme: "http", host: "h.test", port: 80, headers: headers, body: nil))
+      head.should contain("Content-Length: 0\r\n")
+      head.scan(/^Content-Length:/im).size.should eq(1)
+    end
+
+    # The complement: a bodiless source that stated NO length still gets none — `--urls` and
+    # OpenAPI carry no headers at all, and a GET framed by nothing must stay that way.
+    it "invents nothing for a bodiless source that stated no length" do
+      head = String.new(Gori::Import::Builder.request_head("GET", "/x", "HTTP/1.1",
+        scheme: "http", host: "h.test", port: 80,
+        headers: Gori::Import::Builder::Headers.new, body: nil))
+      head.should_not contain("Content-Length")
+    end
+  end
+
   # R4-F4. `Content-Length` + `Transfer-Encoding` on one message is THE request-smuggling
   # primitive, and it was the one framing this Builder could not express: the incoming CL was
   # dropped unconditionally and `wire_chunked?` then picked a single framing, so the entry

@@ -215,6 +215,11 @@ module Gori::Proxy
       # so the flow says so (`Store::FlowRow#advisory`). Assigned unconditionally at the seam,
       # which is what resets it between keep-alive requests on this connection.
       @alt_svc_note = nil.as(String?)
+      # What is wrong with THIS response's start-line, or nil when it is a status line. Set
+      # from the PEER's final head (before any rule touches it) in `handle_response` and
+      # folded into the record by `response_advisory`, exactly like `@alt_svc_note` above —
+      # and reset the same way, by being assigned unconditionally at that seam.
+      @status_line_note = nil.as(String?)
       # Hosts whose h3 `Alt-Svc` strip this connection has already written to `gori.log`. The
       # advisory is the record an operator reads; the log line is for the one debugging a
       # client that stopped using QUIC, and an origin that sends `Alt-Svc` on every response
@@ -288,6 +293,10 @@ module Gori::Proxy
       release_upstream
       @io.close rescue nil
     end
+
+    # How much of an unparseable start-line the advisory quotes. The "line" can be a body
+    # tail of any length, so it is clipped before it becomes a String in a History row.
+    STATUS_LINE_QUOTE_MAX = 80
 
     # Per-connection upstream keep-alive reuse. Within one client connection —
     # especially a TLS-MITM tunnel pinned to a single origin (`@fixed_host`),
@@ -942,6 +951,9 @@ module Gori::Proxy
       final = skip_interim_responses(upstream, req, flow_id, resp_head, resp)
       return false unless final
       resp_head, resp = final
+      # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
+      # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
+      @status_line_note = status_line_note(resp)
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
@@ -1122,7 +1134,8 @@ module Gori::Proxy
         # for the next reused request. Refuse it: close the connection (don't parse a
         # body as the next response, don't reuse the upstream).
         if interim_has_body?(resp)
-          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)"))
+          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)",
+            head: resp.raw_head))
           release_upstream
           return nil
         end
@@ -1327,11 +1340,17 @@ module Gori::Proxy
     # returns nil when the framing is illegal (CL+TE, non-final chunked, bad
     # Content-Length). We already hold a flow_id from on_request, so a raise here
     # used to leave the flow stuck Pending forever; record + close instead.
+    #
+    # The refused head goes ON the record. Refusing to FORWARD it is the security decision
+    # (`Body.response_framing`); dropping the octets was an accident of reaching for the
+    # "nothing arrived" mapper when something had. A head this rule rejects is a
+    # response-desync primitive, so it is the finding an operator opened History for.
     private def response_framing_or_close(resp : Codec::RawResponse, method : String,
                                           flow_id : Int64) : {Codec::BodyFraming, Int64}?
       Codec::Body.response_framing(resp, method)
     rescue ex : Gori::Error
-      @sink.on_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}"))
+      @sink.on_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}",
+        head: resp.raw_head))
       release_upstream
       nil
     end
@@ -1925,13 +1944,38 @@ module Gori::Proxy
       note
     end
 
-    # The advisory a RESPONSE record carries: what the body seam had to say, plus what the
-    # proxy did to the head on its own account. Newline-separated, which is the shape
-    # `Store::FlowRow#advisories` splits back apart.
+    # The advisory a RESPONSE record carries: what the body seam had to say, what the proxy
+    # did to the head on its own account, and what is wrong with the head the origin sent.
+    # Newline-separated, which is the shape `Store::FlowRow#advisories` splits back apart.
     private def response_advisory(body : String?) : String?
-      note = @alt_svc_note
-      return body unless note
-      body ? "#{body}\n#{note}" : note
+      notes = [body, @alt_svc_note, @status_line_note].compact
+      return nil if notes.empty?
+      notes.join("\n")
+    end
+
+    # The sentence for a response whose start-line is not a status line, or nil for one that
+    # is. `parse_response_head` still fills `status`/`reason` from whatever it found there —
+    # it has to, a captured flow has to render — so History shows a plausible code for a line
+    # that never was one, and the row reads as an ordinary exchange.
+    #
+    # The shape that produces it is worth naming in the sentence: an origin whose body ran
+    # PAST its own Content-Length leaves that tail in gori's upstream buffer, and the next
+    # request on that reused connection reads `<tail>HTTP/1.1 200 OK` as its status line. The
+    # bytes are recorded exactly (P7) and forwarded exactly — response framing stays lenient
+    # on purpose (`Body.response_framing`) — so the record is right and only the DERIVED
+    # columns were lying. This is the one place that says so.
+    private def status_line_note(resp : Codec::RawResponse) : String?
+      return nil unless resp.malformed?
+      raw = resp.raw_head
+      eol = raw.index { |b| b == 0x0d_u8 || b == 0x0a_u8 } || raw.size
+      # Clip the BYTES before building a String: the "line" here can be a body tail of any
+      # length, and it is about to sit in a History row.
+      line = String.new(raw[0, Math.min(eol, STATUS_LINE_QUOTE_MAX + 1)])
+      quoted = line.size > STATUS_LINE_QUOTE_MAX ? "#{line[0, STATUS_LINE_QUOTE_MAX]}…" : line
+      "the origin's start-line is not an HTTP status line (#{quoted.inspect}) — the status " \
+      "and reason on this row are whatever gori could read out of it. Junk in front of a " \
+      "version is what a body that over-ran its Content-Length leaves for the next request " \
+      "on a reused connection"
     end
 
     # The `Sec-WebSocket-Extensions` half of a 101 (#518). Returns the head and projection

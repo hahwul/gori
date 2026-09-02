@@ -1,6 +1,7 @@
 require "../url"
 require "../proxy/h2/head_codec"
 require "../proxy/codec/content_decode"
+require "./escape"
 
 module Gori
   module Export
@@ -83,7 +84,8 @@ module Gori
         # The stored body is WIRE bytes. curl frames `--data-raw` itself, so the chunk framing
         # has to come off with the coding that declared it.
         entity, transfer_encoding = unchunk(header_lines, body, notes)
-        parts = ["curl #{shell_quote(url)}"]
+        parts = ["curl #{shell_quote(Escape.percent_encode_non_ascii(url))}"]
+        parts << "--globoff" if globbed?(url)
         if flag = version_flag(version, url)
           parts << flag
         end
@@ -296,6 +298,30 @@ module Gori
         "# -X omitted: the captured method holds a NUL, which no shell argument can carry — " \
         "bash would truncate it and curl would send #{body.empty? ? "GET" : "POST"} instead. " \
         "Read the request line with --format raw"
+      end
+
+      # Does this URL contain a byte curl reads as a URL GLOB rather than as itself? By default
+      # curl expands `[a-b]` / `[1-3]` ranges and `{x,y}` lists in the URL argument, which for a
+      # captured URL is never what the operator meant. Measured against a raw listener, curl
+      # 8.7.1, one command each:
+      #
+      #   ?f=[1-3]              THREE requests (f=1, f=2, f=3), none of them the capture
+      #   ?g={a,b}              TWO requests (g=a, g=b)
+      #   ?fields[item]=id      curl: (3) bad range in URL position 32 — nothing sent
+      #   ?h=x{y  ?i=]          curl: (3) unmatched brace / unmatched close brace — nothing sent
+      #
+      # The third is not exotic: `fields[item]=…` is a JSON:API sparse fieldset, and gori's own
+      # demo project carries one (flow #108). `--globoff` turns the whole feature off, so the one
+      # URL gori resolved is the one URL curl fetches; with it, every line above sends exactly one
+      # request for the literal target. Added only when a glob byte is present, so an ordinary
+      # command keeps the shape a reader expects.
+      #
+      # It also fires on the one bracket that is legitimate — an IPv6 literal authority — and that
+      # is harmless: curl parses the bracketed host before globbing, so `--globoff
+      # \'http://[::1]:9143/p\'` puts `GET /p` / `Host: [::1]:9143` on the wire byte-identically
+      # to the same command without the flag (measured against an AF_INET6 listener).
+      private def self.globbed?(url : String) : Bool
+        url.to_slice.any? { |b| b == 0x5b_u8 || b == 0x5d_u8 || b == 0x7b_u8 || b == 0x7d_u8 }
       end
 
       # The protocol flag for a capture whose request line says HTTP/2, else nil. curl
