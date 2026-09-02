@@ -269,6 +269,10 @@ module Gori
           # NEITHER of those reasons applies when the source stated BOTH framings — see
           # `both_framings?`. There the pair IS the payload, so both lines go out verbatim
           # and nothing is synthesized beside them.
+          #
+          # What gets re-emitted is `synthesized_length`'s answer, which is nil only when the
+          # source described no length at all — a body is not the gate, since a source can state
+          # a length and ship no entity.
           wire_chunked = wire_chunked?(headers, body, truncated)
           both = both_framings?(headers)
           headers.each do |k, v|
@@ -276,13 +280,30 @@ module Gori
             next if !both && !wire_chunked && transfer_encoding?(k)
             b << k << ": " << v << "\r\n"
           end
-          b << "Content-Length: " << (content_length || body.size) << "\r\n" if body && !wire_chunked && !both
+          if !both && !wire_chunked && (length = synthesized_length(headers, body, content_length))
+            b << "Content-Length: " << length << "\r\n"
+          end
           b << "\r\n"
         end.to_slice
       end
 
       private def self.transfer_encoding?(name : String) : Bool
         name.compare("transfer-encoding", case_insensitive: true) == 0
+      end
+
+      # The Content-Length `request_head` writes beside the body it actually stored, or nil when
+      # the source described no length at all. `declared` is the capture-cap override; otherwise
+      # the stored body's own size. The last arm is the case a body alone cannot answer: a source
+      # that STATED a length and shipped no entity (`Export::Har` writes exactly that pair —
+      # `Content-Length: 0` and no `postData` — for a captured request with an empty body) is
+      # framed, and dropping the line turned gori's own HAR round trip of such a POST into a
+      # request carrying no framing header. A bodiless source that stated nothing (`--urls`,
+      # OpenAPI) still gets nothing.
+      private def self.synthesized_length(headers : Headers, body : Bytes?, declared : Int64?) : Int64?
+        return declared if declared
+        return body.size.to_i64 if body
+        stated = headers.any? { |(k, _)| k.compare("content-length", case_insensitive: true) == 0 }
+        stated ? 0_i64 : nil
       end
 
       # Did the SOURCE state a `Content-Length` and a `Transfer-Encoding` on the same
