@@ -2071,3 +2071,33 @@ half an operator pastes a token into.
 its outcome (including the refusals a config event never sees); the config event writes the value
 the tool name cannot carry. Two questions, two rows, one `actor`, separated by the source chip —
 a single row would have to drop one of the halves.
+
+### 2026-09-02: a denied baseline anchors nothing, and `Same` must not read as a bypass
+
+Refines: [P4](#p4). Extends the 2026-08-16 Authorize entry.
+
+That entry drew the line at traffic that never left: a run whose sends were all refused reports
+`nothing_sent`, never `enforced`, because the shape of "we learned nothing" is indistinguishable
+from the shape of "the server held". The same substitution reaches the *other* headline through a
+door that entry did not cover.
+
+Authorize's finding is `Same` — a non-baseline identity was served what the baseline was served —
+and every surface aggregates a row holding one to BYPASS. The word claims the identity under test
+obtained the protected resource. It cannot be true when the BASELINE got a 4xx or a 5xx: the
+privileged request this run is anchored on was refused too, so a matching denial is two refusals
+and evidence of nothing. In practice that covered the most ordinary inputs the tool has — a
+captured flow that 403s, any 404 in a `--query` selection, and the case an operator hits weekly, a
+baseline slot whose session cookie has expired, which painted every request in the run red.
+
+So `Judge.verdict` returns `Review` against a denied baseline, in the same position and for the
+same stated reason as the `baseline.error` guard immediately above it: a baseline that cannot
+anchor a comparison must not have one asserted against it. `Review` is the verdict whose whole
+meaning is "the operator judges", the row keeps both statuses on screen, and no finding is lost —
+a 4xx/5xx baseline can never have been served the resource, so there was no bypass under it to
+miss. The demotion is stated rather than left to be inferred (`Target#baseline_denied?`): a CLI
+note per request plus a run tally, MCP's `baseline_denied_count` and a per-result field, and the
+TUI's run summary — because a row that quietly stops being red is the same silence this section
+keeps refusing.
+
+A 3xx baseline is deliberately NOT included. `302 → /login` is a denial and `302 → /dashboard` is
+a grant, and only the `Location` separates them, which is exactly what `redirect_verdict` reads.

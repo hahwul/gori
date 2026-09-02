@@ -810,14 +810,18 @@ module Gori::Tui
       # that answered, so without this "no identity matched the baseline" would speak for the
       # ones that never did.
       unreached = unanswered > 0 ? " · #{unanswered} could not be reached" : ""
+      # …and so does a baseline that was itself refused: those rows are `review` by
+      # construction and the count below cannot speak for them either. Same sentence the CLI
+      # summary and the MCP headline carry.
+      anchored = (n = @view.baseline_denied_in(@batch_ids)) > 0 ? " · #{n} had a denied baseline" : ""
       if stopped
         tail = bypasses > 0 ? " · #{bypasses} bypass#{bypasses == 1 ? "" : "es"}" : ""
-        return "authorize: stopped — #{done} of #{@batch_size} replayed#{tail}#{unreached}#{skips}"
+        return "authorize: stopped — #{done} of #{@batch_size} replayed#{tail}#{unreached}#{anchored}#{skips}"
       end
       if bypasses > 0
-        "authorize: ran #{done} · #{bypasses} identity result#{bypasses == 1 ? "" : "s"} matched the baseline — review for access-control bypass#{unreached}#{skips}"
+        "authorize: ran #{done} · #{bypasses} identity result#{bypasses == 1 ? "" : "s"} matched the baseline — review for access-control bypass#{unreached}#{anchored}#{skips}"
       else
-        "authorize: ran #{done} · no identity matched the baseline#{unreached}#{skips}"
+        "authorize: ran #{done} · no identity matched the baseline#{unreached}#{anchored}#{skips}"
       end
     end
 

@@ -191,6 +191,56 @@ describe Gori::Authorize::Judge do
   end
 end
 
+# ── a baseline that was itself DENIED anchors nothing ───────────────────────────────────
+#
+# `Same` aggregates a request to BYPASS on all three surfaces, and that word claims a
+# non-baseline identity was served the protected resource. When the BASELINE got a 4xx/5xx it
+# was not served it either, so a matching denial is two refusals — and gori shouted BROKEN
+# ACCESS CONTROL at a plain 403, a 404, and at every request in a run whose baseline slot
+# carried an expired cookie.
+describe Gori::Authorize::Judge do
+  it "is Review, not Same, when the baseline was refused and this identity was refused too" do
+    base = summary(403, "Forbidden")
+    Judge.verdict(base, summary(403, "Forbidden")).should eq(Verdict::Review)
+  end
+
+  it "is Review for a 404 baseline every identity also gets (an absent resource is not a bypass)" do
+    base = summary(404, "not found")
+    Judge.verdict(base, summary(404, "not found")).should eq(Verdict::Review)
+  end
+
+  it "is Review for a 5xx baseline — a fault is not the resource either" do
+    base = summary(500, "Internal Server Error")
+    Judge.verdict(base, summary(500, "Internal Server Error")).should eq(Verdict::Review)
+  end
+
+  it "leaves a 3xx baseline to the Location rule, which is the only thing that can tell a" \
+     " login redirect from a grant" do
+    login = redirect(302, "https://acme.test/login")
+    Judge.verdict(login, redirect(302, "https://acme.test/login")).should eq(Verdict::Same)
+    Judge.verdict(login, redirect(302, "https://acme.test/dashboard")).should eq(Verdict::Different)
+  end
+
+  it "still finds the real bypass: a 2xx baseline served to a low-privilege identity" do
+    doc = "the full admin dashboard with billing and every user record and control panel here"
+    Judge.verdict(summary(200, doc), summary(200, doc)).should eq(Verdict::Same)
+  end
+end
+
+describe Gori::Authorize::ResponseSummary do
+  it "calls 4xx and 5xx denied, and 2xx/3xx not" do
+    summary(403, "x").denied?.should be_true
+    summary(404, "x").denied?.should be_true
+    summary(500, "x").denied?.should be_true
+    summary(200, "x").denied?.should be_false
+    summary(302, "x").denied?.should be_false
+  end
+
+  it "does not call an errored exchange denied — `error` already speaks for it" do
+    summary(nil, "", error: "connection refused").denied?.should be_false
+  end
+end
+
 # ── a body the protocol forbade is not a body that matched ──────────────────────────────
 #
 # HEAD and 304 describe an entity they deliberately do not send. "Both bodies were empty" is
