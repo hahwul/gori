@@ -141,3 +141,72 @@ describe "FuzzerView results payload cell" do
     b.row(row_y)[35].should eq(Frame::V)
   end
 end
+
+private def tmp_history_store(&)
+  path = File.tempname("gori-hsta", ".db")
+  store = Gori::Store.open(path)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+private def history_with_flow(store) : HistoryView
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_700_000_000_000_000_i64, scheme: "http", host: "h.test", port: 80,
+    method: "GET", target: "/x", http_version: "HTTP/1.1",
+    head: "GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+    source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil))
+  view = HistoryView.new
+  view.reload(store)
+  view
+end
+
+describe "HistoryView status column" do
+  # STA is the one cell in the right-anchored cluster that is not gated on spare room, so on a
+  # pane narrower than the FIXED left block plus three columns `status_x` fell back to `host_x`
+  # and drew from there — over the frame's hairline at `rect.right` and into the column beyond
+  # it. Live: a 40-column terminal with a `strip` colour rule armed (which spends STRIP_W = 2
+  # more of the left block) drew `2┃0` on every row — the scroll gauge painted through the
+  # middle of a 200 — and lost the pane's own `│` from the header row. Rendering into a backend
+  # wider than the rect is what makes that observable: with the rect ending at the backend's
+  # edge, `Screen` clips the spill and the defect leaves no trace.
+  it "never paints the status cell at or past the frame's right edge" do
+    tmp_history_store do |store|
+      view = history_with_flow(store)
+      # 34 is the first width three cells fit at. The app reaches 33 and under at 40 columns —
+      # `Layout.usable?`'s floor — as soon as a `strip` colour rule spends STRIP_W more of the
+      # left block. (Below 30 the fixed block alone is wider than the pane, which the shell
+      # never hands this list: the body is always the full terminal minus its padding.)
+      (30..33).each do |w|
+        b = MemoryBackend.new(w + 8, 12)
+        view.render_list(Screen.new(b), Rect.new(0, 0, w, 12))
+        rows = (0...12).map { |y| b.row(y) }
+        hdr = rows.index(&.includes?("TIME"))
+        hdr.should_not be_nil # (w=#{w}) the header really rendered
+        # `rect.right` is the enclosing card's hairline: the divider tee and the scroll gauge
+        # are drawn there on purpose, the column heads and the row cells never are.
+        rows[hdr.not_nil!][w..].strip.should eq("")        # (w=#{w})
+        rows.each { |r| r[(w + 1)..].strip.should eq("") } # (w=#{w})
+      end
+    end
+  end
+
+  # The other half: the clamp must not cost the column on a pane that can hold it.
+  it "still draws the code once three cells fit inside the frame" do
+    tmp_history_store do |store|
+      view = history_with_flow(store)
+      b = MemoryBackend.new(40, 12)
+      view.render_list(Screen.new(b), Rect.new(0, 0, 34, 12))
+      rows = (0...12).map { |y| b.row(y) }
+      rows.any?(&.includes?("STA")).should be_true
+      rows.any?(&.includes?("200")).should be_true
+    end
+  end
+end

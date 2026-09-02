@@ -39,7 +39,7 @@ module Gori::Tui
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @notes.current_index, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           editor_rect = body
-          if !@notes.link_preview.empty?
+          if links_row_shown?(body)
             links_rect, editor_rect = carve_links_row(body)
             screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
             screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
@@ -59,6 +59,14 @@ module Gori::Tui
         line = Links.resolve(@host.session.store, links.first).line
         @notes.link_preview = links.size > 1 ? "#{line} (+#{links.size - 1})" : line
       end
+    end
+
+    # Whether the link preview gets its own row. It is carved off the BOTTOM of the editor, so
+    # a body with only one row to give would place it at `rect.y - 1` — over the filter bar
+    # above, which then read `/linkser[repeater] XSS PoC (+2)` — and hand the editor a negative
+    # height. Asked by both the render path and the click hit-test so they carve the same rect.
+    private def links_row_shown?(rect : Rect) : Bool
+      !@notes.link_preview.empty? && rect.h > 1
     end
 
     private def carve_links_row(rect : Rect) : {Rect, Rect}
@@ -197,7 +205,7 @@ module Gori::Tui
     # out so click, drag and double-click cannot land on three slightly different rects.
     private def notes_body_rect(rect : Rect) : Rect
       body = body_rect_below_filter(rect)
-      @notes.link_preview.empty? ? body : carve_links_row(body)[1]
+      links_row_shown?(body) ? carve_links_row(body)[1] : body
     end
 
     def handle_wheel(step : Int32) : Bool

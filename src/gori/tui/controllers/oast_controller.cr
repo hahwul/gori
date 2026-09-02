@@ -924,11 +924,16 @@ module Gori::Tui
       end
       header_y = inner.y
       pw = provider_col_w(inner, ordered)
-      screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg)
-      screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg)
-      screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg)
-      screen.text(inner.x + DEST_COL_X, header_y, "DESTINATION", Theme.muted, Theme.bg)
-      screen.text(inner.right - pw, header_y, "PROVIDER", Theme.muted, Theme.bg)
+      # The header labels are clamped by the SAME geometry the rows use. Unclamped they had
+      # `Screen#text`'s default limit — the whole screen — so on a narrow pane DESTINATION ran
+      # over the PROVIDER label (`PROVIDERTINATION` at 70 columns) and straight through the
+      # card's right border (at 52 and under).
+      screen.text(inner.x + 2, header_y, "PROTO", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 2, 6))
+      screen.text(inner.x + 9, header_y, "METHOD", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 9, 8))
+      screen.text(inner.x + 18, header_y, "SOURCE", Theme.muted, Theme.bg, width: cell_w(inner, inner.x + 18, 17))
+      dest_x, dest_w, prov_w = dest_provider_layout(inner, pw)
+      screen.text(dest_x, header_y, "DESTINATION", Theme.muted, Theme.bg, width: dest_w) if dest_w > 0
+      screen.text(inner.right - prov_w, header_y, "PROVIDER", Theme.muted, Theme.bg, width: prov_w) if prov_w > 0
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
       return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
@@ -964,6 +969,33 @@ module Gori::Tui
     # Where DESTINATION starts, relative to the table's left edge.
     DEST_COL_X = 36
 
+    # The narrowest DESTINATION worth keeping. Under this the right-anchored PROVIDER is what
+    # gives way — the destination is the evidence and the provider is a label, the same
+    # priority `provider_col_w` spends its slack on.
+    DEST_COL_MIN = 6
+
+    # A fixed-offset cell's width, bounded by the table's right edge. `Screen#text`'s own
+    # `width:` default is the whole SCREEN, so every cell laid out from a constant offset needs
+    # this or it paints over the card border on a pane narrower than the constants assume.
+    private def cell_w(rect : Rect, x : Int32, want : Int32) : Int32
+      { {rect.right - x, want}.min, 0 }.max
+    end
+
+    # Where DESTINATION starts and how wide DESTINATION / PROVIDER may run — {dest_x, dest_w,
+    # prov_w}, PROVIDER right-anchored at `rect.right - prov_w`. Shared by the header and the
+    # rows, which used to compute their own and disagree: the header drew both labels flat out
+    # and the rows floored DESTINATION at 6 columns whatever was left, so on a narrow pane the
+    # right-anchored PROVIDER started LEFT of DESTINATION (and left of SOURCE) and the three
+    # runs overwrote each other. PROVIDER drops rather than displacing the destination.
+    private def dest_provider_layout(rect : Rect, pw : Int32) : {Int32, Int32, Int32}
+      dest_x = rect.x + DEST_COL_X
+      avail = {rect.right - dest_x, 0}.max
+      # -1 for the blank column between the two variable-width runs, so a destination that
+      # fills its cell does not read as one token with the provider behind it.
+      return {dest_x, avail, 0} if avail - pw - 1 < DEST_COL_MIN
+      {dest_x, avail - pw - 1, pw}
+    end
+
     private def provider_col_w(inner : Rect, rows : Array(CbRow)) : Int32
       widest = rows.max_of? { |r| Screen.draw_width(r.provider) } || 0
       dest_need = rows.max_of? { |r| Screen.draw_width(r.destination) } || 0
@@ -977,14 +1009,12 @@ module Gori::Tui
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(rect.x, py, rect.w, 1), bg)
       screen.cell(rect.x, py, sel ? '▎' : ' ', Theme.accent, bg)
-      screen.text(rect.x + 2, py, row.protocol, protocol_hue(row.protocol), bg, width: 6)
-      screen.text(rect.x + 9, py, row.method || "—", Theme.text, bg, width: 8)
-      screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: 17)
-      # One blank column between the two variable-width runs, so a destination that fills its
-      # cell does not read as one token with the provider behind it.
-      dw = {rect.right - pw - 1 - (rect.x + DEST_COL_X), 6}.max
-      screen.text(rect.x + DEST_COL_X, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dw)
-      screen.text(rect.right - pw, py, row.provider, Theme.muted, bg, width: pw)
+      screen.text(rect.x + 2, py, row.protocol, protocol_hue(row.protocol), bg, width: cell_w(rect, rect.x + 2, 6))
+      screen.text(rect.x + 9, py, row.method || "—", Theme.text, bg, width: cell_w(rect, rect.x + 9, 8))
+      screen.text(rect.x + 18, py, row.source || "—", Theme.accent, bg, width: cell_w(rect, rect.x + 18, 17))
+      dest_x, dest_w, prov_w = dest_provider_layout(rect, pw)
+      screen.text(dest_x, py, row.destination, sel ? Theme.text_bright : Theme.text, bg, width: dest_w) if dest_w > 0
+      screen.text(rect.right - prov_w, py, row.provider, Theme.muted, bg, width: prov_w) if prov_w > 0
     end
 
     private def protocol_hue(proto : String) : Color

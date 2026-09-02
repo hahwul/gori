@@ -2300,9 +2300,10 @@ module Gori::Tui
       host_x = rect.x + 31 + sw
       # Right cluster STA · SRC · TYPE · SIZE · DUR (status code, provenance, response MIME,
       # size, latency — frequently-scanned), anchored to the right edge and sized to FIT:
-      # STA always shows; the rest drop when the pane is too narrow to also keep HOST+PATH
+      # STA outlives the rest, which drop when the pane is too narrow to also keep HOST+PATH
       # legible, so the cluster never spills past the frame. (Each span includes its trailing
-      # 1-col gap.) HOST+PATH split the rest.
+      # 1-col gap.) HOST+PATH split the rest. STA itself drops only when even three cells will
+      # not fit inside the frame — see `show_status`.
       #
       # The offsets used to be hand-computed constants off `status_x` (+4/+11/+18), which meant
       # inserting a column here was three arithmetic edits with nothing to catch a missed one.
@@ -2340,6 +2341,13 @@ module Gori::Tui
       cluster_w += 6 if show_dur
 
       status_x = {rect.right - cluster_w, host_x}.max
+      # STA is the one cell here that is not gated on `spare`, so on a pane narrower than the
+      # fixed left block plus the cluster it is placed at `host_x` — and three cells from there
+      # land ON the frame's hairline and one column past it (a 40-column terminal, the smallest
+      # `Layout.usable?` allows, drew `2┃0` over the border and the scroll gauge). `rect` is the
+      # framed interior, so it drops like the rest of the cluster instead of spilling: a status
+      # code is three cells or none, and two thirds of one is a different code.
+      show_status = rect.right - status_x >= 3
       cx = status_x + 4
       src_x = cx
       cx += 6 if show_src
@@ -2365,7 +2373,7 @@ module Gori::Tui
       screen.text(proto_x, hdr_y, "PROTO", Theme.muted)
       screen.text(host_x, hdr_y, "HOST", Theme.muted, width: host_w) if host_w > 0
       screen.text(path_x, hdr_y, "PATH", Theme.muted, width: path_w) if path_w > 0
-      screen.text(status_x, hdr_y, "STA", Theme.muted, width: 3)
+      screen.text(status_x, hdr_y, "STA", Theme.muted, width: 3) if show_status
       screen.text(src_x, hdr_y, "SRC", Theme.muted, width: 5) if show_src
       screen.text(type_x, hdr_y, "TYPE", Theme.muted, width: 6) if show_type
       screen.text(size_x, hdr_y, "SIZE", Theme.muted, width: 6) if show_size
@@ -2504,7 +2512,7 @@ module Gori::Tui
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
         # a cryptic "0" indistinguishable from a still-pending "···".
         status, scolor = FlowStatus.cell(row)
-        screen.text(status_x, y, status, scolor, bg, width: 3)
+        screen.text(status_x, y, status, scolor, bg, width: 3) if show_status
         # SRC: which gori tool produced this flow. `Gori::FlowSource::Kind#label` owns the
         # spelling — the same single-source-of-truth contract `Proto` keeps for PROTO — and
         # `src:` accepts these tags as well as the long tokens, so what is on screen is
