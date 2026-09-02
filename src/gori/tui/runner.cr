@@ -2391,7 +2391,7 @@ module Gori::Tui
     # always knows which region the keys drive: an open overlay wins, else the
     # tab bar (TABS) vs the content pane (BODY).
     private def focus_label : String
-      return "SPACE" if @space_menu_open # orthogonal to @overlay — floats over it
+      return I18n.ui("SPACE") if @space_menu_open # orthogonal to @overlay — floats over it
       # The prompt-tier pickers self-name exactly like a migrated modal; they just live
       # in their own slots rather than @active_overlay (see copy_as_shown?).
       if pt = prompt_picker
@@ -2401,13 +2401,13 @@ module Gori::Tui
         return ov.title
       end
       case @overlay
-      when .palette? then "PALETTE"
-      when .detail?  then "DETAIL"
+      when .palette? then I18n.ui("PALETTE")
+      when .detail?  then I18n.ui("DETAIL")
       else
         case @focus
-        when :menu    then "TABS"
-        when :subtabs then "SUBTABS"
-        else               body_editor? ? "EDITOR" : "BODY"
+        when :menu    then I18n.ui("TABS")
+        when :subtabs then I18n.ui("SUBTABS")
+        else               body_editor? ? I18n.ui("EDITOR") : I18n.ui("BODY")
         end
       end
     end
@@ -2433,7 +2433,7 @@ module Gori::Tui
     # the active tab, and any open overlay (so the user always sees what the keys
     # under their fingers do right now).
     private def key_hints : String
-      return "press a key · ↑/↓ select · ←/→ column · ↵ run · esc close" if @space_menu_open
+      return I18n.ui("press a key · ↑/↓ select · ←/→ column · ↵ run · esc close") if @space_menu_open
       if pt = prompt_picker # prompt-tier Overlays carry their own hint too
         return pt.hint
       end
@@ -2441,12 +2441,12 @@ module Gori::Tui
         return ov.hint
       end
       case @overlay
-      when .palette?   then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when .tabs_more? then "↑/↓ select · ↵ open tab · ←/esc close"
+      when .palette?   then I18n.ui("↑/↓ select · ↵ run · ⌫ · esc close · type to filter")
+      when .tabs_more? then I18n.ui("↑/↓ select · ↵ open tab · ←/esc close")
       when .detail?    then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
-        return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
+        return I18n.ui("↵/↓ show hidden tabs · ← back · ^P cmds · q projects") if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         #
         # `c` and `i` earn their place here even though they are Global verbs reachable from
@@ -2454,18 +2454,18 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        return "←/→ switch tab · ↹/↵ enter · 1-9 jump · c capture · i intercept · ^P cmds · q projects · ^D quit" if @focus == :menu
+        return I18n.ui("←/→ switch tab · ↹/↵ enter · 1-9 jump · c capture · i intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really
           # on screen (see subtab_find_focused?), so this never advertises a missing stop.
-          return "↵ list all sub-tabs · → chips · ↑/esc tabs" if subtab_find_focused?
+          return I18n.ui("↵ list all sub-tabs · → chips · ↑/esc tabs") if subtab_find_focused?
           # A fixed strip (Help) has no create/close and a read-only body — don't
           # advertise ^N/^W/edit as live keys there.
           if @tabs[@active_tab]?.try(&.subtabs_fixed?)
-            return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
+            return I18n.ui("←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs")
           end
-          rn = renameable_subtabs? ? " · r rename" : ""
+          rn = renameable_subtabs? ? I18n.ui(" · r rename") : ""
           # `f find` takes the column `^1-9 jump` used to hold. Both keys still work; only one
           # of them works EVERYWHERE. Ctrl+digit has no control character, so on many terminals
           # the jump never arrives (docs/content/guide/hotkeys.md says so in as many words),
@@ -2474,9 +2474,9 @@ module Gori::Tui
           # Miner sessions are background-seeded (^N is a no-op) and its body is a read-only
           # table (↵ ENTERS, doesn't edit) — drop the ^N/edit tokens that fit editor strips.
           unless subtab_new_supported?
-            return "←/→ switch sub-tab · ↓/↵ enter · f find · ^W close · space cmds#{rn} · ↑/esc tabs"
+            return I18n.ui("←/→ switch sub-tab · ↓/↵ enter · f find · ^W close · space cmds%{rename} · ↑/esc tabs", rename: rn)
           end
-          return "←/→ switch sub-tab · ↓/↵ edit · f find · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
+          return I18n.ui("←/→ switch sub-tab · ↓/↵ edit · f find · ^N new · ^W close · space cmds%{rename} · ↑/esc tabs", rename: rn)
         end
         body_hints
       end
@@ -2494,9 +2494,9 @@ module Gori::Tui
     # least to go on.
     private def body_hints : String
       fallback = String.build do |s|
-        s << "↹/esc tabs · ^P cmds · "
-        s << "q projects · " if back_key_live?
-        s << "^D quit"
+        s << I18n.ui("↹/esc tabs · ^P cmds · ")
+        s << I18n.ui("q projects · ") if back_key_live?
+        s << I18n.ui("^D quit")
       end
       @tabs[@active_tab]?.try(&.body_hint(@focus)) || fallback
     end

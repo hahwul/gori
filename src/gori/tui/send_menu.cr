@@ -17,10 +17,10 @@ module Gori::Tui
     # target for now is the Decoder — the selection becomes a new conversion's input.
     def self.destinations : Array(Destination)
       [
-        Destination.new("Decoder", 'd', :decoder, "decode / encode input"),
-        Destination.new("Sequencer", 's', :sequencer, "analyze tokens"),
-        Destination.new("JWT", 'j', :jwt, "decode / re-sign / attack a token"),
-        Destination.new("Cookie", 'k', :cookie, "decode / verify / crack / forge a session cookie"),
+        Destination.new("Decoder", 'd', :decoder, I18n.ui("decode / encode input")),
+        Destination.new("Sequencer", 's', :sequencer, I18n.ui("analyze tokens")),
+        Destination.new("JWT", 'j', :jwt, I18n.ui("decode / re-sign / attack a token")),
+        Destination.new("Cookie", 'k', :cookie, I18n.ui("decode / verify / crack / forge a session cookie")),
       ]
     end
   end

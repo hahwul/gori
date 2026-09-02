@@ -53,7 +53,7 @@ module Gori::Tui
     def render(screen : Screen, anchor : Rect, body : Rect) : Nil
       box = overlay_box(anchor, body)
       return unless box
-      Frame.card(screen, box, "TABS", border: Theme.border_focus)
+      Frame.card(screen, box, I18n.ui("TABS"), border: Theme.border_focus)
       rows = list_capacity(box)
       ensure_visible(rows)
       (0...rows).each do |i|

@@ -283,8 +283,8 @@ module Gori::Tui
           next
         end
         scope = SCOPE_LABEL[row.scope]? || row.scope.to_s.upcase
-        chord = effective_chord(row.verb_id).try(&.label) || "(unbound)"
-        next unless "#{scope} #{row.title} #{chord}".downcase.includes?(needle)
+        chord = effective_chord(row.verb_id).try(&.label) || I18n.ui("(unbound)")
+        next unless "#{scope} #{I18n.ui(scope)} #{row.title} #{I18n.ui(row.title)} #{chord}".downcase.includes?(needle)
         if h = header
           out << h
           header = nil
@@ -511,18 +511,18 @@ module Gori::Tui
 
     private def render_search(screen : Screen, box : Rect) : Nil
       unless searching?
-        screen.text(box.x + 2, box.y + 1, "/ search", Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
+        screen.text(box.x + 2, box.y + 1, I18n.ui("/ search"), Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
         screen.desired_cursor = nil # the card is browsing, even if the pane underneath edits
         return
       end
-      px = screen.text(box.x + 2, box.y + 1, "search: ", Theme.muted, Theme.panel)
+      px = screen.text(box.x + 2, box.y + 1, I18n.ui("search: "), Theme.muted, Theme.panel)
       screen.input_line(px, box.y + 1, @search_query, @search_query.size, @search_preedit,
         Theme.text_bright, Theme.panel, width: {box.right - 2 - px, 1}.max)
     end
 
     private def draw_header(screen : Screen, box : Rect, r : Row, ry : Int32) : Nil
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), Theme.panel)
-      screen.text(box.x + 2, ry, r.title, Theme.accent, Theme.panel, attr: Attribute::Bold, width: {box.w - 4, 1}.max)
+      screen.text(box.x + 2, ry, I18n.ui(r.title), Theme.accent, Theme.panel, attr: Attribute::Bold, width: {box.w - 4, 1}.max)
     end
 
     private def draw_binding(screen : Screen, box : Rect, i : Int32, ry : Int32, *, up : Bool, down : Bool) : Nil
@@ -536,11 +536,11 @@ module Gori::Tui
 
       mark_x = box.right - 2
       chord = effective_chord(r.verb_id) # resolve once (label + unbound flag derive from it)
-      clabel = chord.try(&.label) || "(unbound)"
+      clabel = chord.try(&.label) || I18n.ui("(unbound)")
       unbound = chord.nil?
-      cx = mark_x - 1 - clabel.size
+      cx = mark_x - 1 - Screen.draw_width(clabel)
       name_w = {cx - (box.x + 5) - 1, 1}.max
-      screen.text(box.x + 5, ry, r.title, sel ? Theme.text_bright : Theme.text, bg, width: name_w)
+      screen.text(box.x + 5, ry, I18n.ui(r.title), sel ? Theme.text_bright : Theme.text, bg, width: name_w)
       ccol = unbound ? Theme.yellow : (ov ? Theme.accent : (sel ? Theme.text_bright : Theme.muted))
       screen.text(cx, ry, clabel, ccol, bg) if cx > box.x + 5
       draw_scroll_marker(screen, mark_x, ry, bg, up: up, down: down)
@@ -577,7 +577,7 @@ module Gori::Tui
       elsif selected_visible_binding? && (r = @rows[@selected]?) && (v = @registry[r.verb_id]?)
         # Retagged: a description may name a claimed chord (settings.editor's "opened by ^E"),
         # and this is the one surface that renders verb descriptions.
-        screen.text(box.x + 2, ry, Hotkeys.retag(v.description), Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
+        screen.text(box.x + 2, ry, Hotkeys.retag(I18n.help(v.description)), Theme.muted, Theme.panel, width: {box.w - 4, 1}.max)
       end
     end
 

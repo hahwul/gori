@@ -923,7 +923,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       return if box.w < 30 || area.h < box.h
-      Frame.card(screen, box, "SETTINGS · #{@section.to_s.upcase}", border: Theme.border_focus)
+      Frame.card(screen, box, "#{I18n.ui("SETTINGS")} · #{@section.to_s.upcase}", border: Theme.border_focus)
       if @section == :theme
         render_theme_list(screen, box)
       else
@@ -947,7 +947,7 @@ module Gori::Tui
     # `rect` (block == viewport, no extra clipping). Shared by the overlay and the tab.
     def render_fields_into(screen : Screen, rect : Rect, focused_idx : Int32, viewport : Rect = rect) : Nil
       flds = fields
-      label_w = flds.max_of { |f| Screen.draw_width(f.label) }
+      label_w = flds.max_of { |f| Screen.draw_width(I18n.ui(f.label)) }
       flds.each_with_index do |field, i|
         ry = rect.y + i
         next if ry < viewport.y
@@ -956,7 +956,7 @@ module Gori::Tui
         bg = focused ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(rect.x, ry, rect.w, 1), bg)
         screen.cell(rect.x, ry, focused ? '▎' : ' ', Theme.accent, bg)
-        screen.text(rect.x + 2, ry, field.label, focused ? Theme.text_bright : Theme.text, bg)
+        screen.text(rect.x + 2, ry, I18n.ui(field.label), focused ? Theme.text_bright : Theme.text, bg)
         screen.text(rect.x + 2 + label_w + 1, ry, "›", focused ? Theme.accent : Theme.muted, bg)
         vx = rect.x + 2 + label_w + 3
         vw = {rect.right - vx, 1}.max
@@ -993,13 +993,13 @@ module Gori::Tui
         end
       elsif field.bool
         on = value == "on"
-        glyph = on ? "◉ on" : "◯ off"
+        glyph = on ? "◉ #{I18n.ui("on")}" : "◯ #{I18n.ui("off")}"
         col = focused ? Theme.text_bright : (on ? Theme.green : Theme.muted)
         screen.text(vx, ry, glyph, col, bg, width: vw)
       elsif focused
         screen.input_line(vx, ry, value, @cursor, @preedit, Theme.text_bright, bg, width: vw)
       elsif value.empty?
-        screen.text(vx, ry, Hotkeys.retag(field.hint), Theme.muted, bg, width: vw)
+        screen.text(vx, ry, Hotkeys.retag(I18n.help(field.hint)), Theme.muted, bg, width: vw)
       else
         screen.text(vx, ry, value, Theme.text, bg, width: vw)
       end
@@ -1082,12 +1082,12 @@ module Gori::Tui
         screen.text(box.x + 3, note_y, "• #{status}", color, Theme.panel, width: iw)
       elsif @section == :theme
         names = Theme.available
-        screen.text(box.x + 3, note_y, "theme #{(names.index(@values[0]) || 0) + 1}/#{names.size}", Theme.muted, Theme.panel, width: iw)
+        screen.text(box.x + 3, note_y, I18n.ui("theme %{i}/%{n}", i: (names.index(@values[0]) || 0) + 1, n: names.size), Theme.muted, Theme.panel, width: iw)
       else
-        screen.text(box.x + 3, note_y, Hotkeys.retag(fields[@focused].hint), Theme.muted, Theme.panel, width: iw)
+        screen.text(box.x + 3, note_y, Hotkeys.retag(I18n.help(fields[@focused].hint)), Theme.muted, Theme.panel, width: iw)
       end
-      hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
-      hx = {box.right - hint.size - 2, box.x + 1}.max # never start left of the box interior
+      hint = @section == :theme ? I18n.ui("↑/↓ select · ↵ apply · ^R reset · esc close") : I18n.ui("↑/↓ field · ↵ save · ^R reset · esc close")
+      hx = {box.right - Screen.draw_width(hint) - 2, box.x + 1}.max # never start left of the box interior
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
     end
   end

@@ -124,10 +124,10 @@ module Gori::Tui
         # Coming-soon verbs are dimmed at rest (still readable when selected) so the
         # list signals what's not functional yet without hiding it.
         title_fg = active ? Theme.text_bright : (soon ? Theme.muted : Theme.text)
-        screen.text(box.x + 5, ry, verb.title, title_fg, bg, width: w - 21)
+        screen.text(box.x + 5, ry, I18n.ui(verb.title), title_fg, bg, width: w - 21)
         if soon
-          badge = "soon"
-          screen.text(box.right - badge.size - 2, ry, badge, Theme.yellow, bg)
+          badge = I18n.ui("soon")
+          screen.text(box.right - Screen.draw_width(badge) - 2, ry, badge, Theme.yellow, bg)
         elsif chord = Hotkeys.binding_for(@registry, verb.id, overrides)
           hint = chord.label
           screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)

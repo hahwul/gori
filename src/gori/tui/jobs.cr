@@ -101,7 +101,7 @@ module Gori::Tui
     def active_summary : String?
       a = active
       return nil if a.empty?
-      parts = a.group_by(&.kind).map { |kind, js| "#{KIND_LABELS.fetch(kind, "jobs")} #{js.size}" }
+      parts = a.group_by(&.kind).map { |kind, js| "#{I18n.ui(KIND_LABELS.fetch(kind, "jobs"))} #{js.size}" }
       return parts.join(" · ") if parts.size <= SUMMARY_KINDS + 1
       "#{parts.first(SUMMARY_KINDS).join(" · ")} · +#{parts.size - SUMMARY_KINDS} more"
     end
@@ -113,7 +113,7 @@ module Gori::Tui
       return nil if a.empty?
       kinds = a.map(&.kind).uniq!
       return "jobs:#{a.size}" if kinds.size != 1
-      "#{KIND_LABELS.fetch(kinds.first, "jobs")} #{a.size}"
+      "#{I18n.ui(KIND_LABELS.fetch(kinds.first, "jobs"))} #{a.size}"
     end
 
     private def find(id : Int32) : Job?

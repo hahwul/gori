@@ -79,6 +79,46 @@ private def wrapped_in_tables : Array(Wrapped)
   Gori::Tui::Tutorial::COMPANION_LINES.each do |(_, line)|
     found << Wrapped.new("companion", line, "Tutorial::COMPANION_LINES")
   end
+  # Verb titles are drawn through I18n.ui by the palette, the space menu and the hotkeys
+  # editor; descriptions through I18n.help by the hotkeys editor's footer.
+  Gori::Verbs.registry.each do |v|
+    found << Wrapped.new("ui", v.title, "Verb #{v.id}")
+    found << Wrapped.new("help", v.description, "Verb #{v.id}")
+  end
+  # Help: section heads and item descriptions (HelpView.draw_row / shortcut_rows), and the
+  # Query page's tables read from QL and InterceptFilter (HelpView.query_rows).
+  Gori::Tui::HelpView::SECTIONS.each do |(title, items)|
+    found << Wrapped.new("help", title, "HelpView::SECTIONS")
+    items.each { |it| found << Wrapped.new("help", it.desc, "HelpView::SECTIONS #{title}") }
+  end
+  Gori::QL::SYNTAX_HELP.each { |(_, meaning)| found << Wrapped.new("help", meaning, "QL::SYNTAX_HELP") }
+  Gori::QL::FIELD_HELP.each_value { |text| found << Wrapped.new("help", text, "QL::FIELD_HELP") }
+  Gori::InterceptFilter::FIELD_HELP.each_value { |text| found << Wrapped.new("help", text, "InterceptFilter::FIELD_HELP") }
+  Gori::QL::CAVEATS.each do |(what, why)|
+    found << Wrapped.new("help", what, "QL::CAVEATS")
+    found << Wrapped.new("help", why, "QL::CAVEATS")
+  end
+  # Settings: field labels (ui) and hints (help), catalog section titles (ui) and
+  # descriptions (help), the group strip (ui).
+  Gori::Tui::SettingsView::SECTIONS.each_value do |fields|
+    fields.each do |field|
+      found << Wrapped.new("ui", field.label, "SettingsView::Field")
+      found << Wrapped.new("help", field.hint, "SettingsView::Field")
+    end
+  end
+  Gori::Tui::SettingsCatalog.all.each do |sec|
+    found << Wrapped.new("ui", sec.title, "SettingsCatalog #{sec.id}")
+    found << Wrapped.new("help", sec.desc, "SettingsCatalog #{sec.id}")
+  end
+  Gori::Tui::SettingsCatalog::GROUPS.each { |(_, label)| found << Wrapped.new("ui", label, "SettingsCatalog::GROUPS") }
+  # Menus and chips whose labels are tables.
+  Gori::Tui::SpaceMenu::SECTION_LABELS.each_value { |l| found << Wrapped.new("ui", l, "SpaceMenu::SECTION_LABELS") }
+  Gori::Tui::SpaceMenu::GROUP_LABELS.each_value { |l| found << Wrapped.new("ui", l, "SpaceMenu::GROUP_LABELS") }
+  Gori::Tui::HotkeysOverlay::SCOPE_LABEL.each_value { |l| found << Wrapped.new("ui", l, "HotkeysOverlay::SCOPE_LABEL") }
+  Gori::Tui::Jobs::KIND_LABELS.each_value { |l| found << Wrapped.new("ui", l, "Jobs::KIND_LABELS") }
+  found << Wrapped.new("ui", "jobs", "Jobs::KIND_LABELS fallback") # `KIND_LABELS.fetch(kind, "jobs")`
+  # The Query page's own heads ("SYNTAX", …) are built as English keys and translated by draw_row.
+  Gori::Tui::HelpView.query_rows.each { |r| found << Wrapped.new("help", r.a, "HelpView.query_rows") if r.kind == :head }
   # A settings choice draws `choice_labels[code]` through I18n.ui — except a language's own
   # name, which SettingsView#choice_label leaves alone.
   Gori::Tui::SettingsView::SECTIONS.each_value do |fields|

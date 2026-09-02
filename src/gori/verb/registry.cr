@@ -155,7 +155,9 @@ module Gori
         return candidates if query.empty?
 
         scored = candidates.compact_map do |v|
-          if score = Gori::Fuzzy.score(query.downcase, "#{v.title} #{v.id}".downcase)
+          # The English title stays in the haystack beside its translation, so the palette
+          # answers to either spelling whatever the interface speaks.
+          if score = Gori::Fuzzy.score(query.downcase, "#{v.title} #{I18n.ui(v.title)} #{v.id}".downcase)
             {v, score}
           end
         end

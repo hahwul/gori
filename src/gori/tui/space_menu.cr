@@ -144,9 +144,9 @@ module Gori::Tui
       # practice, but defensive) or an empty CONTEXT (the common case for
       # single-region tabs, or a section nothing is tagged for yet) simply drops out
       # rather than rendering a header with nothing under it.
-      ctx_label = SECTION_LABELS[section]? || section.to_s.upcase
+      ctx_label = I18n.ui(SECTION_LABELS[section]? || section.to_s.upcase)
       buckets = [] of {String, Array(Verb::Definition)}
-      buckets << {SECTION_LABELS[:common], common} unless common.empty?
+      buckets << {I18n.ui(SECTION_LABELS[:common]), common} unless common.empty?
       buckets << {ctx_label, context} unless context.empty?
 
       # Each focus-area bucket is then subdivided by the SEMANTIC axis when its verbs
@@ -191,7 +191,7 @@ module Gori::Tui
       bands = [] of {String, Array(Verb::Definition)}
       GROUP_ORDER.each do |g|
         band = verbs.select { |v| v.group == g }
-        bands << {GROUP_LABELS[g], band} unless band.empty?
+        bands << {I18n.ui(GROUP_LABELS[g]), band} unless band.empty?
       end
       rest = verbs.select { |v| v.group == :none }
       bands << {label, rest} unless rest.empty?
@@ -214,8 +214,9 @@ module Gori::Tui
       label
     end
 
+    # A verb's row title, translated here — where it is drawn — and never in the registry.
     private def menu_title(v : Verb::Definition, ctx : Verb::ExecContext) : String
-      ctx.space_menu_title(v.id) || v.title
+      ctx.space_menu_title(v.id) || I18n.ui(v.title)
     end
 
     def move(delta : Int32) : Nil
@@ -390,7 +391,7 @@ module Gori::Tui
     def render(screen : Screen, body : Rect) : Nil
       b = box(body)
       return if b.empty?
-      title = @section_label.empty? ? "SPACE" : "SPACE · #{@section_label}"
+      title = @section_label.empty? ? I18n.ui("SPACE") : "#{I18n.ui("SPACE")} · #{@section_label}"
       Frame.card(screen, b, title, border: Theme.border_focus)
 
       g = grid(body)
@@ -442,7 +443,7 @@ module Gori::Tui
       # stay visible without changing mnemonics.
       hint = chord_hint(v)
       hint_w = hint ? hint.size + 1 : 0
-      title_text = @ctx.try { |c| menu_title(v, c) } || v.title
+      title_text = @ctx.try { |c| menu_title(v, c) } || I18n.ui(v.title)
       screen.text(cx + 3, ry, title_text, active ? Theme.text_bright : Theme.text, bg,
         width: {cw - 3 - hint_w, 0}.max)
       screen.text(cx + cw - hint.size, ry, hint, Theme.muted, bg) if hint

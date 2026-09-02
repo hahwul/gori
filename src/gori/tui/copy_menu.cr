@@ -41,10 +41,10 @@ module Gori::Tui
       opts = [] of Option
       opts << Option.new("URL", 'u', url) unless url.empty?
       headers_text = header_lines.reject(&.strip.empty?).join("\n")
-      opts << Option.new("Headers", 'h', headers_text) unless headers_text.empty?
-      opts << Option.new("Body", 'b', body) unless body.empty?
+      opts << Option.new(I18n.ui("Headers"), 'h', headers_text) unless headers_text.empty?
+      opts << Option.new(I18n.ui("Body"), 'b', body) unless body.empty?
       if cookie = cookie_value(header_lines)
-        opts << Option.new("Cookies", 'c', cookie)
+        opts << Option.new(I18n.ui("Cookies"), 'c', cookie)
       end
       unless url.empty?
         opts << Option.new("cURL", 'l', Export::Curl.command(method, url, header_lines, body, version))
@@ -66,7 +66,7 @@ module Gori::Tui
         ws_url = websocket_url(url)
         opts << Option.new("wscat", 'w', wscat_command(ws_url, header_lines, messages)) unless ws_url.empty?
       end
-      opts << Option.new("Raw request", 'r', wire) unless wire.strip.empty?
+      opts << Option.new(I18n.ui("Raw request"), 'r', wire) unless wire.strip.empty?
       opts
     end
 
@@ -88,10 +88,10 @@ module Gori::Tui
     def self.response_options(head : String, body : String) : Array(Option)
       head_clean = chomp_blank_line(head)
       opts = [] of Option
-      opts << Option.new("Status + headers", 'h', head_clean) unless head_clean.strip.empty?
-      opts << Option.new("Body", 'b', body) unless body.empty?
+      opts << Option.new(I18n.ui("Status + headers"), 'h', head_clean) unless head_clean.strip.empty?
+      opts << Option.new(I18n.ui("Body"), 'b', body) unless body.empty?
       unless body.empty? || head_clean.strip.empty?
-        opts << Option.new("Raw response", 'r', "#{head_clean}\r\n\r\n#{body}")
+        opts << Option.new(I18n.ui("Raw response"), 'r', "#{head_clean}\r\n\r\n#{body}")
       end
       opts
     end

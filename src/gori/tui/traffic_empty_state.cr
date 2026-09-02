@@ -129,29 +129,29 @@ module Gori::Tui
     # resize between the card and the one-line fallback does not appear to change what happened.
     private def default_title(variant : Symbol, *, running : Bool, scan_on : Bool) : String
       case variant
-      when :history           then "waiting for traffic…"
-      when :sitemap           then "no traffic captured yet"
-      when :intercept         then "no held messages"
-      when :repeater          then "no repeater open"
-      when :fuzzer            then "no fuzz session open"
-      when :fuzzer_results    then running ? "running…" : "no results yet"
-      when :probe             then scan_on ? "no issues yet" : "scanning is OFF"
-      when :issues            then "no issues yet"
-      when :discover          then "no runs yet"
-      when :comparer          then "nothing to compare"
-      when :authorize         then "no requests queued"
-      when :miner             then "no mining session"
-      when :miner_results     then running ? "mining…" : "no run yet"
-      when :sequencer         then "no sequencer session"
-      when :sequencer_samples then running ? "collecting…" : "no samples yet"
-      when :oast              then "no callbacks yet"
-      when :notes             then "empty note"
-      when :project_desc      then "no description yet"
-      when :project_scope     then "no scope rules yet"
-      when :project_overrides then "no host overrides yet"
-      when :project_env       then "no env variables yet"
-      when :project_activity  then "no activity recorded yet"
-      else                         "nothing here yet"
+      when :history           then I18n.ui("waiting for traffic…")
+      when :sitemap           then I18n.ui("no traffic captured yet")
+      when :intercept         then I18n.ui("no held messages")
+      when :repeater          then I18n.ui("no repeater open")
+      when :fuzzer            then I18n.ui("no fuzz session open")
+      when :fuzzer_results    then running ? I18n.ui("running…") : I18n.ui("no results yet")
+      when :probe             then scan_on ? I18n.ui("no issues yet") : I18n.ui("scanning is OFF")
+      when :issues            then I18n.ui("no issues yet")
+      when :discover          then I18n.ui("no runs yet")
+      when :comparer          then I18n.ui("nothing to compare")
+      when :authorize         then I18n.ui("no requests queued")
+      when :miner             then I18n.ui("no mining session")
+      when :miner_results     then running ? I18n.ui("mining…") : I18n.ui("no run yet")
+      when :sequencer         then I18n.ui("no sequencer session")
+      when :sequencer_samples then running ? I18n.ui("collecting…") : I18n.ui("no samples yet")
+      when :oast              then I18n.ui("no callbacks yet")
+      when :notes             then I18n.ui("empty note")
+      when :project_desc      then I18n.ui("no description yet")
+      when :project_scope     then I18n.ui("no scope rules yet")
+      when :project_overrides then I18n.ui("no host overrides yet")
+      when :project_env       then I18n.ui("no env variables yet")
+      when :project_activity  then I18n.ui("no activity recorded yet")
+      else                         I18n.ui("nothing here yet")
       end
     end
 

@@ -12,7 +12,10 @@ module Gori::Tui
   # as the command palette) so a rebind is reflected here.
   class HelpView
     # One rendered line: a section :head, a key/desc :item, or a blank :gap.
-    record Row, kind : Symbol, a : String, b : String
+    # `en` is the untranslated description an :item row was built from — the search haystack
+    # keeps it beside the drawn text so `/` answers to either spelling. Heads keep their English
+    # `a` as the key TAB_SECTION and the popup look up, and translate in draw_row.
+    record Row, kind : Symbol, a : String, b : String, en : String = ""
 
     # Left key column width + gap before the description. Long enough for labels like
     # "palette / settings" / "Settings: Hotkeys" so they don't run into the desc text.
@@ -372,7 +375,7 @@ module Gori::Tui
           # Retag both columns: an item with a verb id already resolves through
           # binding_label, but the keyless rows (^N/^W, ^G/^F, ^1-9) and the chords named
           # inside descriptions are hand-written literals.
-          rows << Row.new(:item, Hotkeys.retag(key), Hotkeys.retag(item.desc))
+          rows << Row.new(:item, Hotkeys.retag(key), Hotkeys.retag(I18n.help(item.desc)), item.desc)
         end
       end
       rows
@@ -391,7 +394,7 @@ module Gori::Tui
         when :head
           head = row
         when :item
-          next unless "#{row.a} #{row.b}".downcase.includes?(needle)
+          next unless "#{row.a} #{row.b} #{row.en}".downcase.includes?(needle)
           if h = head
             out << h
             head = nil
@@ -535,7 +538,7 @@ module Gori::Tui
                       key_w : Int32 = KEY_W) : Nil
       case row.kind
       when :head
-        screen.text(rect.x + 1, y, row.a, Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
+        screen.text(rect.x + 1, y, I18n.help(row.a), Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
       when :item
         kw = {key_w, {rect.w - 3 - KEY_GAP, 1}.max}.min
         screen.text(rect.x + 2, y, row.a, Theme.text_bright, width: kw)
@@ -633,10 +636,15 @@ module Gori::Tui
     # Memoised per instance: the tables are constants, so this is the same list every time, and
     # `render_query` runs on the draw path.
     private def query_rows : Array(Row)
+      if @query_rows_rev != I18n.revision # the rows bake translated text — rebuild on a language change
+        @query_rows = nil
+        @query_rows_rev = I18n.revision
+      end
       @query_rows ||= HelpView.query_rows
     end
 
     @query_rows : Array(Row)? = nil
+    @query_rows_rev : UInt32 = 0_u32
 
     # Built fresh per call, and deliberately NOT memoised on the class: the callers each hold
     # their own copy for the lifetime they need it (this view above, the palette popup at open
@@ -659,14 +667,15 @@ module Gori::Tui
                         aliases : Hash(String, String) = QL::FIELD_ALIASES) : Array(Row)
       rows = [] of Row
       rows << Row.new(:head, "SYNTAX", "")
-      QL::SYNTAX_HELP.each { |(example, meaning)| rows << Row.new(:item, example, meaning) }
+      QL::SYNTAX_HELP.each { |(example, meaning)| rows << Row.new(:item, example, I18n.help(meaning), meaning) }
 
       # Fields in `FIELDS` order — the order completion offers them, so the page and the Tab key
       # agree about what comes first.
       rows << Row.new(:gap, "", "")
       rows << Row.new(:head, "FIELDS  (: matches, ~ is regex)", "")
       fields.each do |name|
-        rows << Row.new(:item, "#{name}:", help.call(name) || "")
+        desc = help.call(name) || ""
+        rows << Row.new(:item, "#{name}:", I18n.help(desc), desc)
       end
 
       live = aliases.select { |_, to| fields.includes?(to) }
@@ -680,7 +689,7 @@ module Gori::Tui
 
       rows << Row.new(:gap, "", "")
       rows << Row.new(:head, "WORTH KNOWING", "")
-      QL::CAVEATS.each { |(what, why)| rows << Row.new(:item, what, why) }
+      QL::CAVEATS.each { |(what, why)| rows << Row.new(:item, I18n.help(what), I18n.help(why), "#{what} #{why}") }
       rows
     end
 

@@ -32,6 +32,11 @@ module Gori::Tui
 
     GROUP_LABELS = SettingsCatalog::GROUPS.map { |g| g[1] }
 
+    # The strip labels as drawn — translated per call, so render and hit-test agree.
+    private def group_labels : Array(String)
+      GROUP_LABELS.map { |l| I18n.ui(l) }
+    end
+
     @group : Int32 = 0
     @focus : Int32 = 0       # index into the active group's flat target list
     @scroll : Int32 = 0      # first visible virtual row (derived — follows @focus)
@@ -114,7 +119,7 @@ module Gori::Tui
     private def dirty_titles : Array(String)
       SettingsCatalog.all.compact_map do |s|
         f = @forms[s.sym]?
-        s.title if f && f.dirty?
+        I18n.ui(s.title) if f && f.dirty?
       end
     end
 
@@ -231,7 +236,7 @@ module Gori::Tui
       @confirm_discard = false
       strip = Rect.new(box.x + 2, box.y + 2, box.w - 4, 1)
       if strip.contains?(mx, my)
-        if seg = Chrome.strip_segments(strip, GROUP_LABELS, @group, @strip_start, nil).find { |(_, r)| r.contains?(mx, my) }
+        if seg = Chrome.strip_segments(strip, group_labels, @group, @strip_start, nil).find { |(_, r)| r.contains?(mx, my) }
           @on_strip = true
           set_group(seg[0])
         end
@@ -338,7 +343,7 @@ module Gori::Tui
       return render_too_small(screen, area) if box.w < 24 || box.h < 10
       Frame.card(screen, box, "PREFERENCES", border: Theme.border_focus)
       strip = Rect.new(box.x + 2, box.y + 2, box.w - 4, 1)
-      @strip_start = Chrome.render_tab_strip(screen, strip, GROUP_LABELS, @group, @on_strip, @strip_start)
+      @strip_start = Chrome.render_tab_strip(screen, strip, group_labels, @group, @on_strip, @strip_start)
       # `tee_divider`, not a bare hline: the seam now lands ├ and ┤ ON the card's side borders
       # instead of butting `─` straight into `│`, which is the whole reason frame.cr grew the
       # helper. Same focus tint as before.
@@ -386,7 +391,7 @@ module Gori::Tui
       end
       y = content.y - @scroll
       group_sections.each do |sec|
-        draw_subheader(screen, content, sec.title, y, dirty: @forms[sec.sym]?.try(&.dirty?) || false)
+        draw_subheader(screen, content, I18n.ui(sec.title), y, dirty: @forms[sec.sym]?.try(&.dirty?) || false)
         y += 1
         if sec.kind == :form
           fc = field_count(sec.sym)
@@ -428,8 +433,8 @@ module Gori::Tui
       lx = content.x + 2
       # An :action row's label is its `desc`: the subheader above already says the title, and
       # "Reset / Reset" would read as a stutter where the row has to say what it will do.
-      label = sec.kind == :action ? sec.desc : sec.title
-      cue = sec.kind == :action ? "↵ reset" : "↵ open"
+      label = sec.kind == :action ? I18n.help(sec.desc) : I18n.ui(sec.title)
+      cue = sec.kind == :action ? I18n.ui("↵ reset") : I18n.ui("↵ open")
       # The cue is pinned to the right edge of the CARD and the label is clipped to what is
       # left of it. It used to be `{content.right - cue.size, lx + title.size + 1}.max`, which
       # pushed the cue PAST the card whenever the label did not fit — `screen.text` clips at
@@ -492,8 +497,8 @@ module Gori::Tui
         fld = flds ? flds[field]? : nil
         return fld ? fld.hint : ""
       end
-      return "restores every section to its factory default — asks before it writes" if sec.kind == :action
-      "↵ opens the #{sec.title} editor"
+      return I18n.help("restores every section to its factory default — asks before it writes") if sec.kind == :action
+      I18n.ui("↵ opens the %{section} editor", section: I18n.ui(sec.title))
     end
 
     # Keep the focused row inside the content viewport (scroll follows focus).
@@ -661,11 +666,11 @@ module Gori::Tui
     end
 
     def title : String
-      "PREFERENCES"
+      I18n.ui("PREFERENCES")
     end
 
     def hint : String
-      "←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close"
+      I18n.ui("←/→ group · ↑/↓ field · ↵ save/open · ^R reset · esc close")
     end
 
     def render(screen : Screen, area : Rect) : Nil
