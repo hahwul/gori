@@ -44,7 +44,11 @@ module Gori
         name, kind, host, token, enabled = fields
         position = store.oast_providers.size
         id = store.insert_oast_provider(name, kind, host, token, enabled, position)
-        return err("failed to persist the provider (store busy or unwritable)", "STORE_ERROR") if id == 0
+        # `busy`, not `err(…, "STORE_ERROR")`: a rolled-back write is a transient busy store
+        # (a capturing peer holds SQLite's single writer slot), so it must be PROJECT_BUSY /
+        # retryable — the contract every other create here (create_issue, create_rule) gives,
+        # and the one `update_oast_provider`/`delete_oast_provider` next door already give.
+        return busy("failed to persist the provider (store busy or unwritable)") if id == 0
         Result.new({"id" => "p_#{id}", "row_id" => id, "name" => name, "kind" => kind}.to_json)
       end
 
