@@ -388,6 +388,7 @@ module Gori
       Settings.load
       Tui::Theme.load_custom           # register user themes before the theme step
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame
+      Tui.apply_language               # …and the language; the wizard previews from it
       # The wizard drives /dev/tty directly (not STDIN/STDOUT, which may be redirected
       # while a real terminal is still present), so the guard lives at the shared
       # Tui.open_terminal construction point (same as App#run_tui).
@@ -433,6 +434,7 @@ module Gori
       Settings.load
       Tui::Theme.load_custom           # honour user themes so the mock matches the real UI
       Tui::Theme.apply(Settings.theme) # render the tour in the persisted theme
+      Tui.apply_language               # …and speak it in the persisted language
       term = Tui.open_terminal("run the tutorial directly, not under CI or a detached/background job")
       with_tui_terminal(term) do
         term.enable_enhanced_keyboard # Kitty disambiguation (mirrors the wizard)

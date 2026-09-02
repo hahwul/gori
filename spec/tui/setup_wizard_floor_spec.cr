@@ -11,7 +11,7 @@ private alias SW = Gori::Tui::SetupWizard
 # row can't quietly push the real floor past the advertised one again.
 describe Gori::Tui::SetupWizard do
   it "gives every fixed-layout step a card that fits at MIN_H" do
-    {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.each do |rows|
+    {SW::LANGUAGE_ROWS, SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.each do |rows|
       # `rows + 3` = top border + pad row + content + bottom border, which is exactly the
       # invariant render_* rely on: they draw at fixed offsets down to `box.y + 2 + rows - 1`.
       SW.card_h(SW::MIN_H, rows).should be >= rows + 3
@@ -21,7 +21,7 @@ describe Gori::Tui::SetupWizard do
   it "sets MIN_H no higher than the tallest step actually needs" do
     # One row below the floor the tallest step must NOT fit — otherwise MIN_H is padded and the
     # wizard turns away terminals it could have served.
-    tallest = {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.max
+    tallest = {SW::LANGUAGE_ROWS, SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.max
     SW.card_h(SW::MIN_H - 1, tallest).should be < tallest + 3
   end
 

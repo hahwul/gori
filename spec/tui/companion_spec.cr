@@ -1229,3 +1229,42 @@ describe Gori::Tui::Companion do
     end
   end
 end
+
+# Her hello is the one line she authors, so it is the one line the COMPANION language decides —
+# everything else in her bubble is a relayed note, already in the SYSTEM language.
+describe "Companion in another language" do
+  before_each { Companion.forget_greeting! }
+  after_each { Companion.forget_greeting! }
+
+  it "says hello in her own language, whatever the interface speaks" do
+    with_locale("ko") do
+      with_companion(true) do
+        companion = Companion.new(Notifications.new)
+        companion.tick(Time.instant)
+        bubble = companion.frame.not_nil!.bubble.not_nil!
+        bubble.should eq(Gori::I18n.ring(Companion::GREETING))
+        bubble.should_not eq(Companion::GREETING)
+        bubble.should_not match(/[A-Za-z]{3,}/)                 # a translation, not the English with a word swapped
+        Gori::Tui::Screen.display_width(bubble).should be <= 30 # BUBBLE_BASE_W minus the chrome
+      end
+    end
+  end
+
+  it "relays a note in the SYSTEM language, not hers" do
+    Gori::I18n.apply("en", {Gori::I18n::Domain::Companion => "ko"}, env: {} of String => String)
+    begin
+      with_companion(true) do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        companion.frame.not_nil!.bubble.should eq(Gori::I18n.ring(Companion::GREETING)) # Korean hello…
+        notes.push(:success, "fuzz done")                                               # …an English note…
+        companion.tick(t0 + Companion::GREET_TTL + Companion::BEAT)
+        companion.frame.not_nil!.bubble.should eq("fuzz done") # …relayed as it came
+      end
+    ensure
+      Gori::I18n.apply("en", env: {} of String => String)
+    end
+  end
+end

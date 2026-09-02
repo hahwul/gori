@@ -7,7 +7,7 @@ include Gori::Tui
 # opening anything). If a catalog entry named a symbol outside this set, the palette verb and
 # the tab opener would both land on the "coming soon (TODO)" toast.
 KNOWN_SETTINGS_SECTIONS = [
-  :network, :editor, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
+  :network, :editor, :keys, :theme, :language, :layout, :statusline, :display, :companion, :notifications,
   :general, :tabs, :hosts, :env, :hotkeys, :reset_all,
 ]
 

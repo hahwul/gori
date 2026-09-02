@@ -301,7 +301,7 @@ module Gori::Tui
     # takes the row while she is talking and hands it back when she stops.
     private def announce_update(version : String) : Nil
       return unless Settings.companion? && Settings.companion_notices?
-      @update_line = "heads up: v#{version} is out · run: gori update"
+      @update_line = I18n.ring("heads up: v%{version} is out · run: gori update", version: version)
     end
 
     # --- Miss Ring -----------------------------------------------------------
@@ -489,7 +489,8 @@ module Gori::Tui
       case outcome.kind
       when :close then @mode = :list
       when :saved
-        @resized = true # a saved Display/Layout pref may change how the picker draws
+        @resized = true    # a saved Display/Layout pref may change how the picker draws
+        Tui.apply_language # …and a saved Language changes what the next frame says
         # Mouse capture is armed once for the whole process in `App` and reconciled only
         # by the in-app save seam, so toggling it here used to persist and do nothing —
         # not even after opening a project — leaving native text selection broken for the

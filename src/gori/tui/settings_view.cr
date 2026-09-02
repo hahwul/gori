@@ -168,6 +168,33 @@ module Gori::Tui
         "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",
         bool: true),
     ]
+    # Language: `@values` hold the stored codes (Settings.language_*), never a label — see
+    # `Field#choice_labels`. An endonym ("English", "한국어") is never translated; the two
+    # sentinels are labels like any other and translate with the rest of the row.
+    LANGUAGE_DEFAULT_CHOICES  = Settings.language_defaults          # ["en", "ko", "auto"]
+    LANGUAGE_OVERRIDE_CHOICES = Settings.language_overrides_allowed # ["inherit", "en", "ko"]
+    LANGUAGE_CHOICE_LABELS    = begin
+      labels = {I18n::AUTO => "auto (system)", I18n::INHERIT => "follow Language"}
+      I18n::LANGUAGES.each { |l| labels[l.code] = l.endonym }
+      labels
+    end
+    LANGUAGE_FIELDS = [
+      Field.new("Language",
+        "what every area below speaks unless it picks its own — auto follows $GORI_LANG, $LC_ALL, $LC_MESSAGES or $LANG (a language gori lacks → English); ←/→ cycles",
+        choices: LANGUAGE_DEFAULT_CHOICES, choice_labels: LANGUAGE_CHOICE_LABELS),
+      Field.new("Interface",
+        "tabs, menus, labels and key hints — ←/→ cycles",
+        choices: LANGUAGE_OVERRIDE_CHOICES, choice_labels: LANGUAGE_CHOICE_LABELS),
+      Field.new("Help",
+        "the Help tab, field hints, the wizard and the tour — ←/→ cycles",
+        choices: LANGUAGE_OVERRIDE_CHOICES, choice_labels: LANGUAGE_CHOICE_LABELS),
+      Field.new("System messages",
+        "toasts, notifications, confirmations and errors — English keeps them pasteable into a bug report; ←/→ cycles",
+        choices: LANGUAGE_OVERRIDE_CHOICES, choice_labels: LANGUAGE_CHOICE_LABELS),
+      Field.new("Miss Ring",
+        "what the mascot says for herself — what she relays follows System messages; ←/→ cycles",
+        choices: LANGUAGE_OVERRIDE_CHOICES, choice_labels: LANGUAGE_CHOICE_LABELS),
+    ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
       Field.new("Bell on result",
@@ -205,6 +232,7 @@ module Gori::Tui
       :statusline    => STATUSLINE_FIELDS,
       :display       => DISPLAY_FIELDS,
       :companion     => COMPANION_FIELDS,
+      :language      => LANGUAGE_FIELDS,
       :notifications => NOTIFICATIONS_FIELDS,
       :general       => GENERAL_FIELDS,
     }
@@ -245,6 +273,7 @@ module Gori::Tui
                 when :statusline    then statusline_values
                 when :display       then display_values
                 when :companion     then companion_values
+                when :language      then language_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then general_values
                 else                     network_values
@@ -307,6 +336,7 @@ module Gori::Tui
                   Settings::DEFAULT_COMPANION_MOTION,
                   Settings::DEFAULT_COMPANION_NOTICES ? "on" : "off",
                 ]
+                when :language then [Settings::DEFAULT_LANGUAGE] + Array.new(4, Settings::DEFAULT_LANGUAGE_OVERRIDE)
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
                   Settings::DEFAULT_NOTIFY_TOAST ? "on" : "off",
@@ -470,6 +500,16 @@ module Gori::Tui
         Settings.companion_placement,
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
+      ]
+    end
+
+    private def language_values : Array(String)
+      [
+        Settings.language_default,
+        Settings.language_ui,
+        Settings.language_help,
+        Settings.language_system,
+        Settings.language_companion,
       ]
     end
 
@@ -708,6 +748,15 @@ module Gori::Tui
         @values = companion_values
         return persist
       end
+      if @section == :language
+        Settings.language_default = Settings.normalize_language_default(@values[0])
+        Settings.language_ui = Settings.normalize_language_override(@values[1])
+        Settings.language_help = Settings.normalize_language_override(@values[2])
+        Settings.language_system = Settings.normalize_language_override(@values[3])
+        Settings.language_companion = Settings.normalize_language_override(@values[4])
+        @values = language_values
+        return persist
+      end
       if @section == :notifications
         ret = @values[2].strip.to_i?
         unless ret && ret >= 1
@@ -936,7 +985,7 @@ module Gori::Tui
         choices.each do |opt|
           break if left <= 0
           on = opt == value
-          seg = "#{on ? '◉' : '◯'} #{field.choice_labels.try(&.[opt]?) || opt}"
+          seg = "#{on ? '◉' : '◯'} #{choice_label(field, opt)}"
           screen.text(cx, ry, seg, on ? Theme.text_bright : Theme.muted, bg, width: left)
           adv = Screen.draw_width(seg) + 2
           cx += adv
@@ -954,6 +1003,14 @@ module Gori::Tui
       else
         screen.text(vx, ry, value, Theme.text, bg, width: vw)
       end
+    end
+
+    # What a choice row shows for a stored code: its label, translated — except a language's
+    # own name, which is never translated — or, with no label, the code itself.
+    private def choice_label(field : Field, code : String) : String
+      label = field.choice_labels.try(&.[code]?)
+      return code unless label
+      I18n::LANGUAGES.any? { |l| l.endonym == label } ? label : I18n.ui(label)
     end
 
     # The THEME section: a vertical, scrollable list of theme names (built-ins + user

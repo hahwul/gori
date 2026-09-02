@@ -146,6 +146,7 @@ module Gori
       Tui.bind_log_file                # gori.log, and OFF the screen — see Tui.bind_log_file
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
+      Tui.apply_language               # …and the persisted language, for the same frame
       projects = ProjectRegistry.new(Paths.projects_dir)
       # /dev/tty guard at the shared construction point: covers both this TUI and the
       # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean

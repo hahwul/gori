@@ -733,4 +733,42 @@ describe SettingsView do
       FileUtils.rm_rf(dir)
     end
   end
+
+  it "round-trips the LANGUAGE section, drawing labels while saving codes" do
+    dir = File.tempname("gori-settings-language")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.language_default, Gori::Settings.language_ui, Gori::Settings.language_help,
+            Gori::Settings.language_system, Gori::Settings.language_companion}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.language_default = "en"
+      Gori::Settings.language_ui = Gori::Settings.language_help = "inherit"
+      Gori::Settings.language_system = Gori::Settings.language_companion = "inherit"
+      v = SettingsView.new
+      v.reload(:language)
+      backend = MemoryBackend.new(120, 40)
+      v.render(Screen.new(backend), Rect.new(0, 0, 120, 40))
+      backend.contains?("◉ English").should be_true # the endonym, never the code
+      backend.contains?("◯ auto (system)").should be_true
+      backend.contains?("◉ follow Language").should be_true # the per-area default
+      v.toggle_or_move(1)                                   # Language: en → ko
+      v.move_field(3)
+      v.toggle_or_move(1) # System messages: inherit → en
+      v.save.should eq("settings saved")
+      Gori::Settings.language_default.should eq("ko")
+      Gori::Settings.language_system.should eq("en")
+      Gori::Settings.language_ui.should eq("inherit")
+      Gori::Settings.language_overrides.should eq({Gori::I18n::Domain::System => "en"})
+
+      v.reset_to_defaults
+      v.save.should eq("settings saved")
+      Gori::Settings.language_default.should eq(Gori::Settings::DEFAULT_LANGUAGE)
+      Gori::Settings.language_system.should eq(Gori::Settings::DEFAULT_LANGUAGE_OVERRIDE)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.language_default, Gori::Settings.language_ui, Gori::Settings.language_help, Gori::Settings.language_system, Gori::Settings.language_companion = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
 end

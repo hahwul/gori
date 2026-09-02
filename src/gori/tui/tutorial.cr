@@ -227,7 +227,7 @@ module Gori::Tui
       return if companion_speaking?
       COMPANION_LINES.each do |(goal, line)|
         next unless companion_goal_reached?(goal)
-        return if companion_react(goal, Hotkeys.retag(line))
+        return if companion_react(goal, Hotkeys.retag(I18n.ring(line)))
       end
     end
 

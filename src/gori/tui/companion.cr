@@ -566,7 +566,7 @@ module Gori::Tui
       return if @@greeted
       @@greeted = true
       return unless Settings.companion_notices?
-      @bubble = GREETING
+      @bubble = I18n.ring(GREETING) # the constant is the msgid; she speaks it in her own language
       @bubble_at = now
       @bubble_until = now + GREET_TTL
       @restless = true

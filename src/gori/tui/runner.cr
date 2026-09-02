@@ -4957,7 +4957,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :keys, :layout, :statusline, :display, :companion, :notifications, :general
+      when :network, :editor, :keys, :language, :layout, :statusline, :display, :companion, :notifications, :general
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))
@@ -5173,6 +5173,7 @@ module Gori::Tui
     # spot; the reset was the one path that did not.
     private def apply_factory_reset(msg : String) : String
       Theme.apply(Settings.theme)
+      Tui.apply_language              # the language section is at its default again — English, everywhere
       @theme_restore = Settings.theme # nothing to revert on the next esc — this IS the theme now
       @keymap = Hotkeys.build_keymap(@session.registry)
       help_controller.reload_help(@session.registry) # Help rows name the chords that just moved
@@ -5248,6 +5249,7 @@ module Gori::Tui
               when :display   then apply_display(msg)
               when :companion then apply_companion(msg)
               when :keys      then apply_keys(msg)
+              when :language  then apply_language(msg)
               else                 msg
               end
       @theme_restore = Settings.theme if section == :theme # saved → don't revert this on esc
@@ -5290,6 +5292,18 @@ module Gori::Tui
     # up to one BEAT later; Companion#tick self-gates on Settings.companion? for the rest.
     private def apply_companion(save_msg : String) : String
       @companion.wake_on_input
+      save_msg
+    end
+
+    # The LANGUAGE section applies at RENDER time — `I18n.t` runs where text is drawn — so the
+    # switch is a repaint, except Help, whose rows are built once from the registry (the same
+    # reason `apply_keys` reloads it), and any cache keyed on rendered text, which compares
+    # `I18n.revision`. The verb registry is NOT rebuilt: a Definition's title is translated
+    # where the palette and the space menu draw it, never where it is registered.
+    private def apply_language(save_msg : String) : String
+      Tui.apply_language
+      help_controller.reload_help(@session.registry)
+      @resized = true
       save_msg
     end
 

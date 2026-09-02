@@ -16,8 +16,11 @@ module Gori::Tui
   # `gori wizard`. A config-only tool — no Session/proxy/CA — so it just edits the
   # global Settings + live Theme, mirroring ProjectPicker's run-loop/render shape.
   #
-  # Steps: NETWORK (bind ip/port) → THEME (list + live preview) → COMPANION (Miss Ring) →
-  # REVIEW (recap + finish).
+  # Steps: LANGUAGE (live preview) → NETWORK (bind ip/port) → THEME (list + live preview) →
+  # COMPANION (Miss Ring) → REVIEW (recap + finish).
+  #
+  # Every string here is drawn through `I18n`, and LANGUAGE comes first so that the rest of the
+  # wizard is the preview: move the highlight and the card you are reading changes language.
   #
   # Edits are STAGED in wizard-local fields and committed to Settings only on
   # finish, so "skip" (Esc) is coherent: it reverts the live theme preview to the
@@ -31,11 +34,11 @@ module Gori::Tui
     # Narrowest text column the COMPANION step will lay out AROUND her sprite: the width of its
     # opening line ("A mascot in the corner, off unless you want her."), the one sentence
     # that says what the step is asking. Below it she is dropped and the copy takes the
-    # card — see `self.companion_preview_x`. Coupled BY HAND to that sentence, exactly the way
-    # BIND_ROWS/COMPANION_ROWS/REVIEW_ROWS are coupled to their renderers and just as unchecked:
-    # reword the line and this number is what decides whether the reworded one survives.
+    # card — see `self.companion_preview_x`. The renderer measures the sentence it actually
+    # draws (in whatever language) and passes that; this constant is the English width, the
+    # default the spec pins the threshold against, coupled BY HAND to that sentence the way
+    # BIND_ROWS/COMPANION_ROWS/REVIEW_ROWS are coupled to their renderers.
     COMPANION_TEXT_MIN = 48
-    LABEL_W            =  9 # widest bind label ("Bind Port")
     PREVIEW_W          = 30 # theme-preview panel width (two-column theme step)
     PREVIEW_GAP        =  2
     LIST_MIN           = 24 # minimum theme-list width before the preview is dropped
@@ -52,9 +55,10 @@ module Gori::Tui
     # Count the offsets in the renderer when you touch either.
     # (Appearance isn't here — it scrolls, so its viewport follows the card height rather than
     # demanding one; see `content_rows`.)
-    BIND_ROWS      = 8 # heading, gap, ip, port, gap, 2 info lines, status
-    COMPANION_ROWS = 7 # heading, gap, 2 offer rows, gap, motion row, info line
-    REVIEW_ROWS    = 9 # title, gap, 4 recap rows, gap, 2 offer rows
+    LANGUAGE_ROWS  = I18n::LANGUAGES.size + 5 # heading, gap, one row per language + auto, gap, info line
+    BIND_ROWS      = 8                        # heading, gap, ip, port, gap, 2 info lines, status
+    COMPANION_ROWS = 7                        # heading, gap, 2 offer rows, gap, motion row, info line
+    REVIEW_ROWS    = 9                        # title, gap, 4 recap rows, gap, 2 offer rows
 
     # ONE size floor for every step, DERIVED from the tallest rather than hand-counted. It used
     # to be checked per step against each step's own rows, and the steps don't agree — BIND
@@ -67,10 +71,7 @@ module Gori::Tui
     # `card_h` can only reach `h - 3`. See the spec, which pins the derivation in both
     # directions so a new REVIEW row can't quietly raise the real floor past this number.
     MIN_W = 40 # Layout.usable?'s width floor; step_card clamps to 34 columns inside it
-    MIN_H = {BIND_ROWS, COMPANION_ROWS, REVIEW_ROWS}.max + 6
-
-    # The failed-save footer once the full one no longer fits — see render_footer.
-    SAVE_FAILED_SHORT = "save failed · ↵ retry · esc discard"
+    MIN_H = {LANGUAGE_ROWS, BIND_ROWS, COMPANION_ROWS, REVIEW_ROWS}.max + 6
 
     # The card height `step_card` settles on for a terminal of height `h` and a step wanting
     # `rows` of content. Pulled out as a pure class method so the MIN_H invariant above is
@@ -100,12 +101,13 @@ module Gori::Tui
     # tails to buy the sprite back. Deliberate — she is the thing the step is asking about,
     # and a step that describes a mascot you cannot see is the worse trade. `theme_list_w`
     # doesn't have this band only because a theme NAME fits either side of its threshold.
-    def self.companion_preview_x(box : Rect) : Int32?
+    def self.companion_preview_x(box : Rect, text_min : Int32 = COMPANION_TEXT_MIN) : Int32?
       px = box.right - 2 - COMPANION_PREVIEW_W
-      px - COMPANION_PREVIEW_GAP - (box.x + 3) >= COMPANION_TEXT_MIN ? px : nil
+      px - COMPANION_PREVIEW_GAP - (box.x + 3) >= text_min ? px : nil
     end
 
     enum Step
+      Language   # what the TUI speaks (live-previewed — the wizard itself is the preview)
       Bind       # bind ip/port
       Appearance # theme (named Appearance to avoid clashing with the Theme module)
       Companion  # Miss Ring: on/off + motion (enum members are scoped to Step, so this
@@ -116,7 +118,12 @@ module Gori::Tui
     def initialize(@term : Termisu)
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
-      @step = Step::Bind
+      @step = Step::Language
+      # Language step — previewed LIVE through I18n and never through Settings.language_*,
+      # which `skip` would persist; `skip` and a failed `finish` re-apply the persisted choice
+      # instead. `auto` is a row of its own, so the list is Settings' own allowed set.
+      @language = Settings.language_default
+      @language_choices = Settings.language_defaults
       # Bind step — staged values prefilled from the PERSISTED global, which is deliberately
       # NOT where a `gori tui -l/-p` override lives (that is `Settings.cli_bind_*`, a
       # process-only layer). Staging the flag here is what used to promote a documented
@@ -226,6 +233,7 @@ module Gori::Tui
       # answer is staged in this object.
       return unless fits?(*@backend.size)
       case @step
+      when Step::Language   then handle_language_key(ev)
       when Step::Bind       then handle_bind_key(ev)
       when Step::Appearance then handle_theme_key(ev)
       when Step::Companion  then handle_companion_key(ev)
@@ -233,12 +241,27 @@ module Gori::Tui
       end
     end
 
+    # Language step: ↑/↓ (or ←/→) cycle the language, previewed live; ↵/⇥ next. It is the
+    # first step, so there is no ⇧⇥.
+    private def handle_language_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if key.enter? || key.tab?
+        @step = Step::Bind
+      elsif key.up? || key.left?
+        cycle_language(-1)
+      elsif key.down? || key.right?
+        cycle_language(1)
+      end
+    end
+
     # Bind step: two text fields. ↵/⇥ moves ip→port then validates + advances;
-    # ↑/↓ switches field; ←/→ moves the caret; type to edit.
+    # ↑/↓ switches field; ←/→ moves the caret; type to edit; ⇧⇥ back.
     private def handle_bind_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter? || key.tab?
         @bind_field == :ip ? switch_bind_field(:port) : advance_from_bind
+      elsif key.back_tab?
+        @step = Step::Language
       elsif key.up?
         switch_bind_field(:ip)
       elsif key.down?
@@ -342,11 +365,11 @@ module Gori::Tui
         # in the field we land on clears the status (bind_insert), which is the fix the message
         # is asking for.
         switch_bind_field(:ip)
-        @status = "invalid bind IP (e.g. 127.0.0.1)"
+        @status = I18n.sys("invalid bind IP (e.g. 127.0.0.1)")
         return
       end
       unless valid_port?(@port)
-        @status = "invalid port (0-65535)"
+        @status = I18n.sys("invalid port (0-65535)")
         return
       end
       @status = nil
@@ -415,6 +438,15 @@ module Gori::Tui
       @resized = true
     end
 
+    # Live-preview the chosen language. Straight through I18n — see `@language` — and a full
+    # repaint, since every cell's contents may change under the diff renderer.
+    private def cycle_language(delta : Int32) : Nil
+      i = @language_choices.index(@language) || 0
+      @language = @language_choices[(i + delta) % @language_choices.size]
+      I18n.apply(@language, Settings.language_overrides)
+      @resized = true
+    end
+
     # Commit the staged choices and persist. The live palette is already @theme_name.
     #
     # Every field is snapshotted first so a FAILED write can be rolled back: the wizard has
@@ -426,6 +458,8 @@ module Gori::Tui
       prev_host, prev_port = Settings.bind_host, Settings.bind_port
       prev_theme, prev_modifier = Settings.theme, Settings.command_modifier
       prev_companion, prev_motion = Settings.companion?, Settings.companion_motion
+      prev_language = Settings.language_default
+      Settings.language_default = Settings.normalize_language_default(@language)
       Settings.bind_host = effective_ip
       Settings.bind_port = @port.strip.to_i? || Settings.bind_port
       Settings.theme = @theme_name
@@ -438,11 +472,13 @@ module Gori::Tui
       Settings.companion = @companion_enabled
       Settings.companion_motion = Settings.normalize_companion_motion(@companion_motion) if @companion_enabled
       if Settings.save
+        Tui.apply_language # what was previewed is now what is persisted
         @save_error = nil
         @launch_tutorial = @offer == :tour # `run` launches the tour after the loop
         @running = false
         return
       end
+      Settings.language_default = prev_language
       Settings.bind_host = prev_host
       Settings.bind_port = prev_port
       Settings.theme = prev_theme
@@ -458,7 +494,7 @@ module Gori::Tui
       # This string is FOOTER-ONLY and never reaches a caller: `finish` leaves @running true, so
       # the loop can exit only through a successful finish (which nils it) or `skip` (which
       # overwrites it) — see `run`'s return.
-      @save_error = "save failed: could not write #{Settings.path} · ↵ retry · esc discard"
+      @save_error = I18n.sys("save failed: could not write %{path} · ↵ retry · esc discard", path: Settings.path)
     end
 
     # Exit without committing: revert the live theme preview to the baseline, leave
@@ -466,13 +502,14 @@ module Gori::Tui
     # gate depends on the file, not its contents).
     private def skip : Nil
       Theme.apply(@theme_baseline)
+      Tui.apply_language # drop the language preview the same way — back to what is persisted
       @resized = true
       # Esc means leave, so unlike `finish` a failed write cannot hold the user here — it is
       # reported through `run`'s return instead. It matters even though nothing was staged:
       # the file not appearing is exactly what makes the first-run wizard re-open next launch.
       # Unprefixed: this is the ONE string `run` can return, and each caller frames it for where
       # it lands ("gori: setup wizard: …" on STDERR, "setup wizard: …" on the picker).
-      @save_error = Settings.save ? nil : "could not write #{Settings.path}"
+      @save_error = Settings.save ? nil : I18n.sys("could not write %{path}", path: Settings.path)
       @running = false
     end
 
@@ -553,6 +590,7 @@ module Gori::Tui
     # them, and render_* draw at fixed offsets up to `box.y + 2 + this`.
     private def content_rows : Int32
       case @step
+      when Step::Language  then LANGUAGE_ROWS
       when Step::Bind      then BIND_ROWS
       when Step::Companion then COMPANION_ROWS
       when Step::Review    then REVIEW_ROWS
@@ -595,8 +633,8 @@ module Gori::Tui
       # retry" left the user guessing by how much) and the fact that Esc still works — input
       # is live behind this screen, which is the only thing that makes it escapable.
       unless fits?(w, h)
-        screen.text(0, 0, "terminal too small for the setup wizard", Theme.red, Theme.bg)
-        screen.text(0, 1, "min #{MIN_W}x#{MIN_H} · resize, or esc to skip", Theme.muted, Theme.bg)
+        screen.text(0, 0, I18n.sys("terminal too small for the setup wizard"), Theme.red, Theme.bg)
+        screen.text(0, 1, I18n.sys("min %{w}x%{h} · resize, or esc to skip", w: MIN_W, h: MIN_H), Theme.muted, Theme.bg)
         @term.hide_cursor
         flush
         return
@@ -606,6 +644,7 @@ module Gori::Tui
       box = step_card(w, h)
       Frame.card(screen, box, card_title, border: Theme.border_focus)
       case @step
+      when Step::Language   then render_language(screen, box)
       when Step::Bind       then render_bind(screen, box)
       when Step::Appearance then render_theme(screen, box)
       when Step::Companion  then render_companion(screen, box)
@@ -630,26 +669,28 @@ module Gori::Tui
 
     private def render_header(screen : Screen, w : Int32) : Nil
       x = screen.text(2, 0, "gori", Theme.text_bright, Theme.bg, attr: Attribute::Bold)
-      screen.text(x + 1, 0, "· setup wizard", Theme.muted, Theme.bg)
+      screen.text(x + 1, 0, I18n.ui("· setup wizard"), Theme.muted, Theme.bg)
       prog = progress_label
-      screen.text({w - prog.size - 2, 0}.max, 0, prog, Theme.muted, Theme.bg)
+      screen.text({w - Screen.draw_width(prog) - 2, 0}.max, 0, prog, Theme.muted, Theme.bg)
     end
 
     private def progress_label : String
       case @step
-      when Step::Bind       then "step 1 of 3"
-      when Step::Appearance then "step 2 of 3"
-      when Step::Companion  then "step 3 of 3"
-      else                       "review"
+      when Step::Language   then I18n.ui("step %{n} of %{total}", n: 1, total: 4)
+      when Step::Bind       then I18n.ui("step %{n} of %{total}", n: 2, total: 4)
+      when Step::Appearance then I18n.ui("step %{n} of %{total}", n: 3, total: 4)
+      when Step::Companion  then I18n.ui("step %{n} of %{total}", n: 4, total: 4)
+      else                       I18n.ui("review")
       end
     end
 
     private def card_title : String
       case @step
-      when Step::Bind       then "NETWORK · global default"
-      when Step::Appearance then "THEME · appearance"
-      when Step::Companion  then "COMPANION · Miss Ring"
-      else                       "REVIEW"
+      when Step::Language   then I18n.ui("LANGUAGE")
+      when Step::Bind       then I18n.ui("NETWORK · global default")
+      when Step::Appearance then I18n.ui("THEME · appearance")
+      when Step::Companion  then I18n.ui("COMPANION · Miss Ring")
+      else                       I18n.ui("REVIEW")
       end
     end
 
@@ -662,10 +703,10 @@ module Gori::Tui
         # that has to survive. `Screen#text` ellipsizes from the RIGHT, and the long form runs
         # ~84 columns for a default `~/.gori` path — more than twice MIN_W — so what it dropped
         # first was precisely the "↵ retry · esc discard" telling the user four screens of
-        # answers are still in hand. Keep SAVE_FAILED_SHORT's tail in step with the string
+        # answers are still in hand. Keep the short form's tail in step with the string
         # `finish` builds; that is the only one that reaches here (`skip`'s never renders,
         # see there).
-        err = SAVE_FAILED_SHORT if Screen.draw_width(err) > w
+        err = I18n.sys("save failed · ↵ retry · esc discard") if Screen.draw_width(err) > w
         screen.text({(w - Screen.draw_width(err)) // 2, 0}.max, h - 1, err, Theme.red, Theme.bg)
         return
       end
@@ -683,46 +724,71 @@ module Gori::Tui
     # stopped advertising a way. Same reason the too-small screen spells out esc.
     private def footer_hints : Array(String)
       case @step
+      when Step::Language
+        [I18n.ui("↑/↓ pick language · ↵ next · esc skip"), I18n.ui("↑/↓ · ↵ next · esc skip")]
       when Step::Bind
-        ["↵ next · ↑/↓ field · esc skip", "↵ next · esc skip"]
+        [I18n.ui("↵ next · ↑/↓ field · ⇧⇥ back · esc skip"), I18n.ui("↵ next · esc skip")]
       when Step::Appearance
-        ["↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip", "↑/↓ theme · ↵ next · esc skip"]
+        [I18n.ui("↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip"), I18n.ui("↑/↓ theme · ↵ next · esc skip")]
       when Step::Companion
         # ←/→ is only offered while she is on — it does nothing under "No mascot", and the
         # motion row it drives is hidden there too.
         if @companion_enabled
-          ["↑/↓ choose · ←/→ motion · ↵ next · ⇧⇥ back · esc skip", "←/→ motion · ↵ next · esc skip"]
+          [I18n.ui("↑/↓ choose · ←/→ motion · ↵ next · ⇧⇥ back · esc skip"), I18n.ui("←/→ motion · ↵ next · esc skip")]
         else
-          ["↑/↓ choose · ↵ next · ⇧⇥ back · esc skip", "↑/↓ choose · ↵ next · esc skip"]
+          [I18n.ui("↑/↓ choose · ↵ next · ⇧⇥ back · esc skip"), I18n.ui("↑/↓ choose · ↵ next · esc skip")]
         end
       else
-        ["↑/↓ choose · ←/→ shortcuts · ↵ confirm · ⇧⇥ back · esc skip", "↵ confirm · esc skip"]
+        [I18n.ui("↑/↓ choose · ←/→ shortcuts · ↵ confirm · ⇧⇥ back · esc skip"), I18n.ui("↵ confirm · esc skip")]
       end
+    end
+
+    # The first step, and the demonstration: the highlight moves and this card — heading,
+    # footer, title, progress — re-renders in the highlighted language on the next frame.
+    private def render_language(screen : Screen, box : Rect) : Nil
+      ix = box.x + 3
+      iw = {box.w - 6, 1}.max
+      screen.text(ix, box.y + 2, I18n.help("Pick the language gori speaks — it previews as you move."), Theme.text, Theme.panel, width: iw)
+      ry = box.y + 4
+      @language_choices.each_with_index do |code, i|
+        render_offer_row(screen, box, ry + i, language_offer_label(code), code == @language)
+      end
+      screen.text(ix, ry + @language_choices.size + 1,
+        I18n.help("Help, system messages and Miss Ring can each pick their own later, in Settings › Language."),
+        Theme.muted, Theme.panel, width: iw)
+    end
+
+    # A language's own name, never translated; `auto` is a label like any other.
+    private def language_offer_label(code : String) : String
+      code == I18n::AUTO ? I18n.ui("Auto — follow the system locale") : I18n.endonym(code)
     end
 
     private def render_bind(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       iw = {box.w - 6, 1}.max
-      screen.text(ix, box.y + 2, "Global default bind (projects inherit this)", Theme.text, Theme.panel, width: iw)
+      screen.text(ix, box.y + 2, I18n.help("Global default bind (projects inherit this)"), Theme.text, Theme.panel, width: iw)
       fy = box.y + 4
-      render_field(screen, box, fy, "Bind IP", @ip, @bind_field == :ip)
-      render_field(screen, box, fy + 1, "Bind Port", @port, @bind_field == :port)
+      ip_label, port_label = I18n.ui("Bind IP"), I18n.ui("Bind Port")
+      label_w = {Screen.draw_width(ip_label), Screen.draw_width(port_label)}.max # measured, not a constant: the labels translate
+      render_field(screen, box, fy, ip_label, label_w, @ip, @bind_field == :ip)
+      render_field(screen, box, fy + 1, port_label, label_w, @port, @bind_field == :port)
       # Two muted lines: this is the *global* layer only. Projects may pin their own
       # bind; -l/-p override settings for one process and are not written to disk.
-      # Keep each line ≤ ~56 chars so a 64-col card (iw ≈ 58) never clips mid-word.
-      screen.text(ix, fy + 3, "Projects inherit this unless they pin their own bind.", Theme.muted, Theme.panel, width: iw)
-      screen.text(ix, fy + 4, "Settings later · Project tab to pin · -l/-p one run.", Theme.muted, Theme.panel, width: iw)
+      # Keep each line ≤ ~56 cells so a 64-col card (iw ≈ 58) never clips mid-word.
+      screen.text(ix, fy + 3, I18n.help("Projects inherit this unless they pin their own bind."), Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, fy + 4, I18n.help("Settings later · Project tab to pin · -l/-p one run."), Theme.muted, Theme.panel, width: iw)
       if st = @status
         screen.text(ix, fy + 5, "• #{st}", Theme.yellow, Theme.panel, width: iw)
       end
     end
 
-    private def render_field(screen : Screen, box : Rect, ry : Int32, label : String, value : String, focused : Bool) : Nil
+    private def render_field(screen : Screen, box : Rect, ry : Int32, label : String, label_w : Int32,
+                             value : String, focused : Bool) : Nil
       bg = focused ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
       screen.cell(box.x + 1, ry, focused ? '▎' : ' ', Theme.accent, bg)
       screen.text(box.x + 3, ry, label, focused ? Theme.text_bright : Theme.text, bg)
-      vx = box.x + 3 + LABEL_W + 2
+      vx = box.x + 3 + label_w + 2
       vw = {box.right - vx - 1, 1}.max
       if focused
         # Render via input_line even when empty so the terminal's IME anchors here.
@@ -797,7 +863,7 @@ module Gori::Tui
       return if rect.w < 6 || rect.h < 3
       pal = Theme.palette(name)
       return unless pal
-      Frame.card(screen, rect, "PREVIEW", bg: pal.panel, border: pal.border)
+      Frame.card(screen, rect, I18n.ui("PREVIEW"), bg: pal.panel, border: pal.border)
       ix = rect.x + 2
       iw = {rect.w - 4, 1}.max
       screen.text(ix, rect.y + 1, "gori · 127.0.0.1", pal.text_bright, pal.panel, width: iw)
@@ -835,21 +901,21 @@ module Gori::Tui
       # consumer of the reservation — the text width here, the accent band below,
       # draw_companion_preview at the end — reads that ONE answer, so the step either lays out
       # around her or takes the card's full interior, never half of each.
-      px = @companion_enabled ? SetupWizard.companion_preview_x(box) : nil
+      opening = I18n.help("A mascot in the corner, off unless you want her.")
+      px = @companion_enabled ? SetupWizard.companion_preview_x(box, Screen.draw_width(opening)) : nil
       band = px.try { |x| x - COMPANION_PREVIEW_GAP }
       iw = {(band || (box.right - 1)) - ix, 1}.max
-      screen.text(ix, box.y + 2, "A mascot in the corner, off unless you want her.",
-        Theme.text, Theme.panel, width: iw)
+      screen.text(ix, box.y + 2, opening, Theme.text, Theme.panel, width: iw)
       ry = box.y + 4
-      render_offer_row(screen, box, ry, "Show Miss Ring", @companion_enabled, band)
-      render_offer_row(screen, box, ry + 1, "No mascot", !@companion_enabled, band)
+      render_offer_row(screen, box, ry, I18n.ui("Show Miss Ring"), @companion_enabled, band)
+      render_offer_row(screen, box, ry + 1, I18n.ui("No mascot"), !@companion_enabled, band)
       # Only while she is on — a motion row under "No mascot" offers a setting for
       # something that isn't there, and its ←/→ hint would advertise a key that (rightly)
       # does nothing in that state.
-      screen.text(ix, ry + 3, "Motion   #{companion_motion_recap}", Theme.muted, Theme.panel, width: iw) if @companion_enabled
+      screen.text(ix, ry + 3, "#{I18n.ui("Motion")}   #{companion_motion_recap}", Theme.muted, Theme.panel, width: iw) if @companion_enabled
       # Say the cost out loud: she is the one piece of chrome that repaints while you are
       # at the keyboard, which is why she is opt-in at all.
-      screen.text(ix, ry + 4, "She reacts to results, then dozes off after 90s idle.",
+      screen.text(ix, ry + 4, I18n.help("She reacts to results, then dozes off after 90s idle."),
         Theme.muted, Theme.panel, width: iw)
       px.try { |x| draw_companion_preview(screen, x, ry) }
     end
@@ -870,25 +936,25 @@ module Gori::Tui
     # 80-column terminal leaves ~59 columns of interior once her band is held back.
     private def companion_motion_recap : String
       case @companion_motion
-      when "calm"  then "calm    (←/→ · half the blinks, for SSH)"
-      when "still" then "still   (←/→ · she never moves on her own)"
-      else              "lively  (←/→ · winks, a glint, gestures)"
+      when "calm"  then I18n.help("calm    (←/→ · half the blinks, for SSH)")
+      when "still" then I18n.help("still   (←/→ · she never moves on her own)")
+      else              I18n.help("lively  (←/→ · winks, a glint, gestures)")
       end
     end
 
     private def render_review(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       y = box.y + 2
-      screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
+      screen.text(ix, y, I18n.help("You're all set!"), Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
-      recap_labels = ["Proxy (global)", "Theme", "Miss Ring", "Shortcuts"]
+      recap_labels = [I18n.ui("Proxy (global)"), I18n.ui("Theme"), I18n.ui("Miss Ring"), I18n.ui("Shortcuts")]
       vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
-      recap(screen, box, ix, vx, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
-      recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
-      recap(screen, box, ix, vx, y, "Miss Ring", @companion_enabled ? "on · #{@companion_motion}" : "off"); y += 1
+      recap(screen, box, ix, vx, y, recap_labels[0], "#{effective_ip}:#{@port.strip}"); y += 1
+      recap(screen, box, ix, vx, y, recap_labels[1], @theme_name); y += 1
+      recap(screen, box, ix, vx, y, recap_labels[2], @companion_enabled ? I18n.ui("on · %{motion}", motion: @companion_motion) : I18n.ui("off")); y += 1
       # The only EDITABLE recap row (←/→). Spell out both the chords it moves and the
       # macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing happen.
-      recap(screen, box, ix, vx, y, "Shortcuts", modifier_recap); y += 2
+      recap(screen, box, ix, vx, y, recap_labels[3], modifier_recap); y += 2
       # No prompt line above the offer: the two rows below say "Take the guided tour" /
       # "Skip — finish setup" in full, so "New to gori? Take a quick tour of the TUI:" was
       # restating them. Dropping it is what keeps the Miss Ring recap row free — adding a
@@ -896,16 +962,16 @@ module Gori::Tui
       # minimum height from 15 rows to 16 and, since REVIEW is the tallest step, MIN_H along
       # with it. That is the worst row to lose: `finish` lives here, so every row added
       # locks another terminal size out of completing setup. Net rows are unchanged.
-      render_offer_row(screen, box, y, "Take the guided tour", @offer == :tour); y += 1
-      render_offer_row(screen, box, y, "Skip — finish setup", @offer == :skip)
+      render_offer_row(screen, box, y, I18n.ui("Take the guided tour"), @offer == :tour); y += 1
+      render_offer_row(screen, box, y, I18n.ui("Skip — finish setup"), @offer == :skip)
     end
 
     # The Shortcuts recap value: what's staged, plus how to change it / what it costs.
     private def modifier_recap : String
       if @modifier == "alt"
-        "⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)"
+        I18n.help("⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)")
       else
-        "^P ^N ^W ^1-9  (←/→ to add ⌥ aliases)"
+        I18n.help("^P ^N ^W ^1-9  (←/→ to add ⌥ aliases)")
       end
     end
 

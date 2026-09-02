@@ -62,6 +62,8 @@ module Gori::Tui
       # Appearance
       Section.new(:theme, "settings.theme", "Theme",
         "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)", :appearance, :opener),
+      Section.new(:language, "settings.language", "Language",
+        "Which language the TUI speaks — English or 한국어 — for the interface, Help, system messages and Miss Ring, each on its own", :appearance, :form),
       Section.new(:display, "settings.display", "Display",
         "Message-body rendering: default detail pane, list time format, line numbers, preview size", :appearance, :form),
       Section.new(:layout, "settings.layout", "Layout",

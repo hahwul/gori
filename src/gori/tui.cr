@@ -51,6 +51,15 @@ module Gori
 
     @@log_io : File? = nil
 
+    # The ONE place the persisted language choice becomes the live one. TUI-only by design:
+    # neither `gori run` nor `gori mcp` calls it, so their output stays English whatever the
+    # operator picked, and a core module that phrases a sentence through `I18n` (a peer
+    # notice, say) is still English on the headless surfaces. Returns I18n.apply's
+    # "something changed" verdict; a re-assert is free.
+    def self.apply_language : Bool
+      I18n.apply(Settings.language_default, Settings.language_overrides)
+    end
+
     # Keep the terminal library out of `/tmp`, for the length of its constructor and no longer.
     #
     # `Termisu.new` unconditionally runs `Termisu::Logging.setup`, and with nothing in the
