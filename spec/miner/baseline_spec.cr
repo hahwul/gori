@@ -112,9 +112,19 @@ private class WidthAwareBackend < F::Backend
   # `jitter` is a rotating element — bytes that move on every response and belong to no
   # parameter. `bytes_only` reacts to the parameters in LENGTH alone (names run together on one
   # line), which is a JSON API naming back the keys it did not recognise.
+  #
+  # The churn is drawn from a SEEDED generator, one per backend, so a run reproduces. It used to
+  # come off the global `Random`, and that made the reference guard's own spec fail about one
+  # run in twelve: `settle` estimates this page's churn from exactly two controls (`p` and
+  # `twin`) and widens the band to twice what they disagreed by, so two draws that land close
+  # together leave a band too narrow to absorb a third sample, and a page that only churns gets
+  # locked in as an anchor. That is a real property of a two-sample estimate — `injected_bands`
+  # says as much where it only ever WIDENS — and not something a spec can assert away; what a
+  # spec can do is name the sequence it exercises instead of drawing a new one each run.
   def initialize(@refuse_over : Int32 = 1024, @react : Bool = true,
-                 @jitter : Int32 = 0, @bytes_only : Bool = false)
+                 @jitter : Int32 = 0, @bytes_only : Bool = false, seed : UInt64 = 0x5eed_u64)
     @origin = F::Origin.new("http", "h", 80)
+    @churn = Random.new(seed)
   end
 
   def send(bytes : Bytes) : Gori::Repeater::Result
@@ -125,7 +135,7 @@ private class WidthAwareBackend < F::Backend
     end
     body = String.build do |io|
       io << "BASELINE BODY\n"
-      io << ("x" * Random.rand(@jitter)) << "\n" if @jitter > 0
+      io << ("x" * @churn.rand(@jitter)) << "\n" if @jitter > 0
       if @bytes_only
         io << "unknown:" << (0...n).join(",") { |i| "k#{i}" } << "\n"
       elsif @react
