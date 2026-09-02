@@ -18,6 +18,10 @@ require "./passive/directory_listing"
 require "./passive/exposed_config"
 require "./passive/serialized_object"
 require "./passive/debug_mode_exposed"
+require "./passive/subdomain_takeover"
+require "./passive/cleartext_credentials"
+require "./passive/shared_cache"
+require "./passive/internal_host_leak"
 require "./passive/ws_payloads"
 require "./passive/secrets"
 require "./passive/js_scan"
@@ -55,6 +59,10 @@ module Gori
         ExposedConfig.new,
         SerializedObject.new,
         DebugModeExposed.new,
+        SubdomainTakeover.new,
+        CleartextCredentials.new,
+        SharedCache.new,
+        InternalHostLeak.new,
         WsPayloads.new,
         DomXss.new,
         DomClobbering.new,

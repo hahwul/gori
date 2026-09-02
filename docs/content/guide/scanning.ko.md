@@ -24,11 +24,11 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 | 범주 | 다루는 내용 |
 |----------|----------------|
-| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, 혼합 콘텐츠, 캐시 가능한 API 응답, MIME 타입 혼동(`nosniff` 없이 스니핑 가능한 타입으로 나가는 HTML 본문, `text/html`로 제공되는 JSON), JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
+| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, http://로 제출된 비밀번호 또는 http://로 제공된 로그인 폼, 혼합 콘텐츠, 캐시 가능한 API 응답, 공유 캐시가 저장할 수 있는 Set-Cookie, MIME 타입 혼동(`nosniff` 없이 스니핑 가능한 타입으로 나가는 HTML 본문, `text/html`로 제공되는 JSON), JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` 및 관련 쿠키 위생 |
 | `tech` | 기술 및 프로토콜 핑거프린트(Project 탭에도 표시) |
-| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임, 클라이언트에 노출된 설정·진단 파일(`.env`, `.git/config`, `phpinfo()`, `.htpasswd`, `wp-config` 자격증명, Spring actuator env), 프로덕션에서 닿는 프레임워크 디버그 모드와 대화형 디버거(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), 그리고 쿠키·파라미터·hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET `BinaryFormatter`/ViewState, PHP) — 안전하지 않은 역직렬화 표면 |
-| `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; 액티브 origin 반사 |
+| `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임, 클라이언트에 노출된 설정·진단 파일(`.env`, `.git/config`, `phpinfo()`, `.htpasswd`, `wp-config` 자격증명, Spring actuator env), 프로덕션에서 닿는 프레임워크 디버그 모드와 대화형 디버거(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), 의심되는 서브도메인 테이크오버, 응답 헤더에 적힌 내부 호스트명 또는 RFC 1918 주소, 그리고 쿠키·파라미터·hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET `BinaryFormatter`/ViewState, PHP) — 안전하지 않은 역직렬화 표면 |
+| `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; `Vary: Origin` 없이 캐시된 반사 origin; 액티브 origin 반사 |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
 | `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송 — 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(쿼리 파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 그리고 **대역 외** 로 확인하는 블라인드 SSRF — URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다 — 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록) |
 
