@@ -49,7 +49,7 @@ module Gori::Tui
     # global/project custom rules. Keeps the selection on a live selectable row.
     def reload(store : Store) : Nil
       disabled = store.probe_disabled_rules
-      # Whether this project has a registered OAST listener. The out-of-band rules (ssrf_oast)
+      # Whether this project has a registered OAST listener. Out-of-band rules (OOB_RULE_IDS)
       # plan nothing without one, so the list SAYS so rather than showing a request cost the
       # rule cannot actually pay until a listener exists.
       oob_ready = oob_ready?(store)
