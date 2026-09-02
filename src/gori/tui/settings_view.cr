@@ -24,10 +24,17 @@ module Gori::Tui
     # `readonly` is a DISPLAY row: it shows a live summary of something configured elsewhere and
     # swallows every edit. It exists so a table that lives only in settings.json is still
     # discoverable from the UI, without pretending to be editable here.
+    #
+    # `choices` are the STORED codes, in cycle order, and `@values` holds one of them verbatim.
+    # `choice_labels` is what the row draws for a code (absent = the code itself) and is read
+    # in exactly one place, `render_field_value`. Nothing parses a label back: the four
+    # `*_from_label` helpers this replaced turned a displayed string into a setting, so the
+    # day a label was reworded (or translated) the save silently fell back to the default.
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
-      opener : Symbol? = nil, readonly : Bool = false
+      opener : Symbol? = nil, readonly : Bool = false, choice_labels : Hash(String, String)? = nil
 
-    PROXY_PROTOCOL_CHOICES = ["None", "HTTP", "SOCKS5", "SOCKS5H"]
+    PROXY_PROTOCOL_CHOICES = ["none", "http", "socks5", "socks5h"]
+    PROXY_PROTOCOL_LABELS  = {"none" => "None", "http" => "HTTP", "socks5" => "SOCKS5", "socks5h" => "SOCKS5H"}
     NETWORK_PROXY_PROTOCOL = 2
     NETWORK_PROXY_HOST     = 3
     NETWORK_PROXY_PORT     = 4
@@ -36,7 +43,7 @@ module Gori::Tui
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
       Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
       Field.new("Proxy protocol", "None = direct · SOCKS5 resolves names locally · SOCKS5H resolves at the proxy — ←/→ cycles",
-        choices: PROXY_PROTOCOL_CHOICES),
+        choices: PROXY_PROTOCOL_CHOICES, choice_labels: PROXY_PROTOCOL_LABELS),
       Field.new("Proxy host", "upstream proxy hostname or IP — disabled when protocol is None"),
       Field.new("Proxy port", "upstream proxy port (1-65535) — disabled when protocol is None"),
       Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
@@ -56,9 +63,10 @@ module Gori::Tui
         readonly: true),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
-    # Command-modifier labels. The stored values are "ctrl"/"alt" (Settings.command_modifier);
-    # these are what the row shows — see #modifier_label / #modifier_from_label.
-    COMMAND_MODIFIER_CHOICES = ["Ctrl", "Option (⌥)"]
+    # Command modifier: the stored values ARE the choices (Settings.command_modifier); the
+    # labels are what the row shows for each.
+    COMMAND_MODIFIER_CHOICES = ["ctrl", "alt"]
+    COMMAND_MODIFIER_LABELS  = {"ctrl" => "Ctrl", "alt" => "Option (⌥)"}
 
     EDITOR_FIELDS = [
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
@@ -71,7 +79,7 @@ module Gori::Tui
     # "which binding" read as the pair they are.
     KEYS_FIELDS = [
       Field.new("Command modifier", "which modifier fronts gori's built-in shortcuts (^P ^N ^W ^G ^F ^B ^E ^, ^1-9) — Option ADDS ⌥ as an alias, Ctrl keeps working; for terminals/multiplexers that swallow the Ctrl form (tmux's ^B, Ctrl+digit). macOS Terminal/iTerm must be set to send Option as Meta. ←/→ cycles",
-        choices: COMMAND_MODIFIER_CHOICES),
+        choices: COMMAND_MODIFIER_CHOICES, choice_labels: COMMAND_MODIFIER_LABELS),
     ]
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
@@ -81,8 +89,10 @@ module Gori::Tui
       Field.new("Theme", "TUI colour theme — ↑/↓ select, ↵ applies", choices: Theme.available),
     ]
     # Layout: vertical list of per-area prefs (extend by appending fields + Settings keys).
-    LAYOUT_DEPTH_CHOICES = ["all", "0", "1", "2", "3"]
-    LAYOUT_ORDER_CHOICES = ["newest first", "oldest first"]
+    LAYOUT_DEPTH_CHOICES = ["-1", "0", "1", "2", "3"] # Settings.sitemap_expand_depth, -1 = all
+    LAYOUT_DEPTH_LABELS  = {"-1" => "all"}
+    LAYOUT_ORDER_CHOICES = ["newest", "oldest"]
+    LAYOUT_ORDER_LABELS  = {"newest" => "newest first", "oldest" => "oldest first"}
     LAYOUT_FIELDS        = [
       Field.new("History Req/Res preview",
         "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
@@ -95,10 +105,10 @@ module Gori::Tui
         bool: true),
       Field.new("History list order",
         "newest first (default, live tail at top) or oldest first — ←/→ cycles",
-        choices: LAYOUT_ORDER_CHOICES),
+        choices: LAYOUT_ORDER_CHOICES, choice_labels: LAYOUT_ORDER_LABELS),
       Field.new("Sitemap expand depth",
         "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
-        choices: LAYOUT_DEPTH_CHOICES),
+        choices: LAYOUT_DEPTH_CHOICES, choice_labels: LAYOUT_DEPTH_LABELS),
     ]
     # Statusline: an opt-in bottom row that runs a command and shows its output.
     STATUSLINE_FIELDS = [
@@ -115,8 +125,10 @@ module Gori::Tui
     # Display: message-body + chrome prefs (three choice fields, three bools, a text cap).
     DISPLAY_PANE_CHOICES = ["request", "response"]
     DISPLAY_TIME_CHOICES = ["absolute", "relative"]
-    # Kept short: all three render inline on one row inside the settings box.
-    DISPLAY_TITLE_CHOICES = ["project + tab", "tab", "off"]
+    # Kept short: all three render inline on one row inside the settings box. "project" is
+    # stored (Settings.terminal_title) and shown as "project + tab" since the title carries both.
+    DISPLAY_TITLE_CHOICES = ["project", "tab", "off"]
+    DISPLAY_TITLE_LABELS  = {"project" => "project + tab"}
     DISPLAY_FIELDS        = [
       Field.new("Default detail pane",
         "which pane a freshly-opened History flow shows first — ←/→ cycles",
@@ -137,7 +149,7 @@ module Gori::Tui
         bool: true),
       Field.new("Terminal title",
         "what gori writes into the terminal window title — off leaves it to your shell/tmux — ←/→ cycles",
-        choices: DISPLAY_TITLE_CHOICES),
+        choices: DISPLAY_TITLE_CHOICES, choice_labels: DISPLAY_TITLE_LABELS),
     ]
     # Companion: Miss Ring, the mascot in the body's bottom-right corner.
     COMPANION_MOTION_CHOICES    = ["lively", "calm", "still"]
@@ -265,14 +277,14 @@ module Gori::Tui
                   Settings::DEFAULT_MOUSE ? "on" : "off",
                   Settings::DEFAULT_PRETTY_BODIES ? "on" : "off",
                 ]
-                when :keys  then [modifier_label(Settings::DEFAULT_COMMAND_MODIFIER)]
+                when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER]
                 when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
                   Settings::DEFAULT_PROBE_PREVIEW ? "on" : "off",
                   Settings::DEFAULT_ISSUES_PREVIEW ? "on" : "off",
-                  order_label(Settings::DEFAULT_HISTORY_LIST_ORDER),
-                  depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
+                  Settings::DEFAULT_HISTORY_LIST_ORDER,
+                  Settings::DEFAULT_SITEMAP_EXPAND_DEPTH.to_s,
                 ]
                 when :statusline then [
                   Settings::DEFAULT_STATUSLINE_ENABLED ? "on" : "off",
@@ -287,7 +299,7 @@ module Gori::Tui
                   Settings::DEFAULT_WRAP_LINES ? "on" : "off",
                   Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
                   Settings::DEFAULT_RESOURCE_METER ? "on" : "off",
-                  title_label(Settings::DEFAULT_TERMINAL_TITLE),
+                  Settings::DEFAULT_TERMINAL_TITLE,
                 ]
                 when :companion then [
                   Settings::DEFAULT_COMPANION ? "on" : "off",
@@ -308,7 +320,7 @@ module Gori::Tui
                   Settings::DEFAULT_REPEATER_RECORD_HISTORY ? "on" : "off",
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
-                      proxy_protocol_label("none"), "", "",
+                      "none", "", "",
                       Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off",
                       Settings::DEFAULT_SERVE_LANDING ? "on" : "off",
                       Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s,
@@ -356,23 +368,10 @@ module Gori::Tui
 
     private def upstream_proxy_field_values(raw : String) : {String, String, String}
       if fields = Settings.upstream_proxy_fields(raw)
-        {proxy_protocol_label(fields[0]), fields[1], fields[2]}
+        {PROXY_PROTOCOL_CHOICES.includes?(fields[0]) ? fields[0] : "none", fields[1], fields[2]}
       else
         {"Invalid · #{raw}", "", ""}
       end
-    end
-
-    private def proxy_protocol_label(kind : String) : String
-      case kind
-      when "http"    then "HTTP"
-      when "socks5"  then "SOCKS5"
-      when "socks5h" then "SOCKS5H"
-      else                "None"
-      end
-    end
-
-    private def proxy_protocol_kind(label : String) : String
-      label.downcase
     end
 
     # The EDITOR row values, read from the live Settings — same reason as #network_values:
@@ -389,17 +388,7 @@ module Gori::Tui
 
     # The KEYS row values (one row today — the command modifier).
     private def keys_values : Array(String)
-      [modifier_label(Settings.command_modifier)]
-    end
-
-    # "ctrl"/"alt" ↔ the row's display labels (unknown → the Ctrl default, matching
-    # Settings.normalize_command_modifier).
-    private def modifier_label(value : String) : String
-      value == "alt" ? COMMAND_MODIFIER_CHOICES[1] : COMMAND_MODIFIER_CHOICES[0]
-    end
-
-    private def modifier_from_label(label : String) : String
-      label == COMMAND_MODIFIER_CHOICES[1] ? "alt" : "ctrl"
+      [Settings.command_modifier]
     end
 
     # The GENERAL row values, read from the live Settings — one helper for the load and the
@@ -447,8 +436,8 @@ module Gori::Tui
         Settings.history_preview ? "on" : "off",
         Settings.probe_preview ? "on" : "off",
         Settings.issues_preview ? "on" : "off",
-        order_label(Settings.history_list_order),
-        depth_label(Settings.sitemap_expand_depth),
+        Settings.history_list_order,
+        Settings.sitemap_expand_depth.to_s,
       ]
     end
 
@@ -461,22 +450,6 @@ module Gori::Tui
       ]
     end
 
-    private def depth_label(d : Int32) : String
-      d < 0 ? "all" : d.to_s
-    end
-
-    private def depth_from_label(s : String) : Int32
-      s == "all" ? -1 : (s.to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
-    end
-
-    private def order_label(order : String) : String
-      order == "oldest" ? "oldest first" : "newest first"
-    end
-
-    private def order_from_label(s : String) : String
-      s.starts_with?("oldest") ? "oldest" : "newest"
-    end
-
     private def display_values : Array(String)
       [
         Settings.default_detail_pane,
@@ -485,7 +458,7 @@ module Gori::Tui
         Settings.wrap_lines? ? "on" : "off",
         Settings.preview_body_kib.to_s,
         Settings.resource_meter? ? "on" : "off",
-        title_label(Settings.terminal_title),
+        Settings.terminal_title,
       ]
     end
 
@@ -498,16 +471,6 @@ module Gori::Tui
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
       ]
-    end
-
-    # "tab"/"off" label as themselves; only the default mode reads differently in the UI
-    # ("project" stored, "project + tab" shown) since the title carries both.
-    private def title_label(mode : String) : String
-      mode == "project" ? "project + tab" : mode
-    end
-
-    private def title_from_label(s : String) : String
-      DISPLAY_TITLE_CHOICES.includes?(s) && s != "project + tab" ? s : "project"
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -608,7 +571,7 @@ module Gori::Tui
       return false unless @section == :network
       return false unless index == NETWORK_PROXY_HOST || index == NETWORK_PROXY_PORT
       protocol = @values[NETWORK_PROXY_PROTOCOL]
-      protocol == "None" || protocol.starts_with?("Invalid ·")
+      protocol == "none" || protocol.starts_with?("Invalid ·")
     end
 
     # The sub-overlay the focused action row opens (↵), or nil for an ordinary field. The
@@ -659,10 +622,10 @@ module Gori::Tui
       @values[NETWORK_PROXY_PORT] = proxy_default_port(current)
     end
 
-    private def proxy_default_port(label : String) : String
-      case label
-      when "HTTP"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
-      when "SOCKS5", "SOCKS5H" then Settings::DEFAULT_SOCKS_PORT.to_s
+    private def proxy_default_port(kind : String) : String
+      case kind
+      when "http"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
+      when "socks5", "socks5h" then Settings::DEFAULT_SOCKS_PORT.to_s
       else                          ""
       end
     end
@@ -689,7 +652,7 @@ module Gori::Tui
         return persist
       end
       if @section == :keys
-        Settings.command_modifier = Settings.normalize_command_modifier(modifier_from_label(@values[0]))
+        Settings.command_modifier = Settings.normalize_command_modifier(@values[0])
         @values = keys_values
         return persist
       end
@@ -697,8 +660,8 @@ module Gori::Tui
         Settings.history_preview = @values[0] == "on"
         Settings.probe_preview = @values[1] == "on"
         Settings.issues_preview = @values[2] == "on"
-        Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[3]))
-        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[4]))
+        Settings.history_list_order = Settings.normalize_history_list_order(@values[3])
+        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(@values[4].to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
         @values = layout_values
         return persist
       end
@@ -733,7 +696,7 @@ module Gori::Tui
         Settings.wrap_lines = @values[3] == "on"
         Settings.preview_body_kib = kib
         Settings.resource_meter = @values[5] == "on"
-        Settings.terminal_title = title_from_label(@values[6])
+        Settings.terminal_title = Settings.normalize_terminal_title(@values[6])
         @values = display_values
         return persist
       end
@@ -784,7 +747,7 @@ module Gori::Tui
         up = @network_upstream_raw
       else
         up, proxy_error = Settings.build_upstream_proxy(
-          proxy_protocol_kind(@values[NETWORK_PROXY_PROTOCOL]),
+          @values[NETWORK_PROXY_PROTOCOL],
           @values[NETWORK_PROXY_HOST], @values[NETWORK_PROXY_PORT])
         if proxy_error
           @status = "invalid upstream proxy"
@@ -973,9 +936,9 @@ module Gori::Tui
         choices.each do |opt|
           break if left <= 0
           on = opt == value
-          seg = "#{on ? '◉' : '◯'} #{opt}"
+          seg = "#{on ? '◉' : '◯'} #{field.choice_labels.try(&.[opt]?) || opt}"
           screen.text(cx, ry, seg, on ? Theme.text_bright : Theme.muted, bg, width: left)
-          adv = seg.size + 2
+          adv = Screen.draw_width(seg) + 2
           cx += adv
           left -= adv
         end

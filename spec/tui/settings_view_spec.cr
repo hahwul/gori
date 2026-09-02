@@ -685,4 +685,52 @@ describe SettingsView do
       FileUtils.rm_rf(dir)
     end
   end
+
+  # A choice field's `@values` entry is the STORED code and the row draws `choice_labels[code]`.
+  # The four `*_from_label` helpers this replaced parsed the DISPLAYED string back into the
+  # setting, so rewording (or translating) a label silently saved the default instead.
+  it "draws a choice's label while saving its stored code" do
+    dir = File.tempname("gori-settings-choice-labels")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.command_modifier, Gori::Settings.history_list_order,
+            Gori::Settings.sitemap_expand_depth, Gori::Settings.terminal_title}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.command_modifier = "alt"
+      Gori::Settings.history_list_order = "oldest"
+      Gori::Settings.sitemap_expand_depth = -1
+      Gori::Settings.terminal_title = "project"
+      box = Rect.new(0, 0, 120, 40)
+
+      v = SettingsView.new
+      v.reload(:keys)
+      backend = MemoryBackend.new(120, 40)
+      v.render(Screen.new(backend), box)
+      backend.contains?("◉ Option (⌥)").should be_true # the label…
+      backend.contains?("◉ alt").should be_false       # …never the code
+      v.save.should eq("settings saved")
+      Gori::Settings.command_modifier.should eq("alt") # a round-trip through the label lost this once
+
+      v.reload(:layout)
+      backend = MemoryBackend.new(120, 40)
+      v.render(Screen.new(backend), box)
+      backend.contains?("◉ oldest first").should be_true
+      backend.contains?("◉ all").should be_true # depth -1 shows as "all"
+      v.save.should eq("settings saved")
+      Gori::Settings.history_list_order.should eq("oldest")
+      Gori::Settings.sitemap_expand_depth.should eq(-1)
+
+      v.reload(:display)
+      backend = MemoryBackend.new(120, 40)
+      v.render(Screen.new(backend), box)
+      backend.contains?("◉ project + tab").should be_true
+      v.save.should eq("settings saved")
+      Gori::Settings.terminal_title.should eq("project")
+    ensure
+      Gori::Settings.command_modifier, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth, Gori::Settings.terminal_title = prev
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
 end
