@@ -41,10 +41,12 @@ module Gori
         # a password-ish name is otherwise a guaranteed High.
         NON_SECRET_VALUES = Set{"true", "false", "0", "1", "on", "off", "yes", "no", "null", "undefined"}
 
-        # A JSON member whose NAME ends in a password token and whose value is a non-empty STRING.
-        # JSON booleans are unquoted, so requiring the quoted form is already the `showPassword:
-        # false` screen the form-encoded path has to make explicitly.
-        JSON_PASSWORD = /"[A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)"\s*:\s*"(?:[^"\\]|\\.)+"/i
+        # A JSON member whose NAME ends in a password token, capturing the name and its non-empty
+        # STRING value. An unquoted boolean (`"showPassword": false`) never matches the `"…"`
+        # value; a value that IS a quoted boolean-ish token (`"false"`, `"off"` — a boolean a JS
+        # serialiser wrote as a string) is screened by `NON_SECRET_VALUES` in `json_password`, the
+        # same UI-state screen the form-encoded path applies to its value.
+        JSON_PASSWORD = /"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd))"\s*:\s*"((?:[^"\\]|\\.)+)"/i
 
         # `<input … type=password>`. The negative lookbehind is the same one the neighbouring HTML
         # scans use: without it a `data-type="password"` attribute matches, because `\b` treats the
@@ -116,10 +118,11 @@ module Gori
 
         private def json_password(body : String) : String?
           m = JSON_PASSWORD.match(body) || return nil
-          # The member name, quotes stripped — the evidence is the field, never the value.
-          quoted = m[0]
-          close = quoted.index('"', 1) || return "password"
-          safe_name(quoted[1...close])
+          # A quoted boolean-ish value (`"showPassword":"false"`) is UI state, not a transmitted
+          # secret — the same screen `form_password` applies to its value. The evidence is the
+          # member NAME (capture 1), never the value.
+          return nil if NON_SECRET_VALUES.includes?(m[2].downcase)
+          safe_name(m[1])
         end
 
         # A parameter name reads as a credential once punctuation and case are dropped, so

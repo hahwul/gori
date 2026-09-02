@@ -1642,23 +1642,35 @@ module Gori::Tui
       end
     end
 
+    # The hit rect and index of each mock tab chip, laid left to right and measured in terminal
+    # CELLS. The advance to the next chip is the same `draw_width` the rect and the overflow test
+    # use, so a wide-glyph tab name (the point of the i18n pre-work) pushes the run and its click
+    # targets by the same amount instead of drifting one cell per wide char. Stops before the
+    # first chip that would overflow `w`.
+    def self.tab_chip_rects(labels : Array(String), x : Int32, y : Int32, w : Int32) : Array({Rect, Int32})
+      hits = [] of {Rect, Int32}
+      cx = x
+      labels.each_with_index do |name, i|
+        lw = Screen.draw_width(" #{name} ")
+        break if cx + lw > x + w
+        hits << {Rect.new(cx, y, lw, 1), i}
+        cx += lw + 1
+      end
+      hits
+    end
+
     private def render_tab_bar(screen : Screen, x : Int32, y : Int32, w : Int32,
                                active : Int32, focused : Bool) : Nil
-      @tab_hits = [] of {Rect, Int32}
-      cx = x
-      TABS.each_with_index do |name, i|
-        label = " #{name} "
-        lw = Screen.draw_width(label)
-        break if cx + lw > x + w
-        @tab_hits << {Rect.new(cx, y, lw, 1), i}
+      @tab_hits = Tutorial.tab_chip_rects(TABS, x, y, w)
+      @tab_hits.each do |(rect, i)|
+        label = " #{TABS[i]} "
         if i == active
           bg = focused ? Theme.focus_gold : Theme.accent_bg
           fg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright
-          screen.text(cx, y, label, fg, bg, attr: Attribute::Bold)
+          screen.text(rect.x, y, label, fg, bg, attr: Attribute::Bold)
         else
-          screen.text(cx, y, label, Theme.muted, Theme.bg)
+          screen.text(rect.x, y, label, Theme.muted, Theme.bg)
         end
-        cx += label.size + 1
       end
     end
 
