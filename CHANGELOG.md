@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Probe: four more passive checks — a suspected subdomain takeover (the provider's unclaimed-resource page behind a customer hostname), a password submitted or a login form served over http://, a Set-Cookie or reflected CORS origin a shared cache may store, and an internal host named in a response header.
 - Probe: a new active check, `cmd_injection_oast`, confirms blind OS command injection out of band. It appends a shell-breakout OAST payload to a command/diagnostic parameter (`cmd`, `ping`, `host`, …) and raises the finding when the server's shell calls the project's OAST listener back — same `needs OAST` gate as blind SSRF.
 - MCP: `delete_probe_rule` refuses a delete the store rolled back instead of reporting `{"deleted":1}` while the rule keeps firing (and logging success into Activity); `create_probe_rule` and `create_oast_provider` answer retryable `PROJECT_BUSY` on a rolled-back insert, matching every other create on this surface (#918).
 - TUI: the Fuzzer's `^N` line no longer tells you to type into a field that is in READ. `load_blank` opens the TARGET in READ mode, so the toast's “type the target URL” named a gesture that edited nothing — and because the field holds a URL, its digits fired the global 1-9 tab jump and walked the operator off the session they had just made. It names `i/↵` now, the way `repeater_new` already said “edit” (#912).
