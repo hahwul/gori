@@ -76,6 +76,41 @@ describe Gori::SessionSlots do
     end
   end
 
+  # `find` is exact; the WRITE side asks a different question. Authorize compares identity
+  # names case-insensitively (`PlanError::DuplicateIdentity`) and the TUI's form always did —
+  # so a CLI/MCP writer that only asked `find` could create `admin` beside `Admin` and leave
+  # every Authorize run in the project refusing to start.
+  describe "#name_clash" do
+    it "answers the EXISTING spelling for a name that differs only in case" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin"), Slot.new("anonymous")]).should be_true
+        slots.name_clash("ADMIN").should eq("admin")
+        slots.name_clash("AdMiN").should eq("admin")
+        slots.name_clash("admin").should eq("admin")
+      end
+    end
+
+    it "answers nil for a free name, and `find` stays exact" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin")]).should be_true
+        slots.name_clash("user").should be_nil
+        slots.find("ADMIN").should be_nil # the send-side key is the literal string
+        slots.find("admin").should_not be_nil
+      end
+    end
+
+    it "ignores the row a rename is moving, so re-casing a slot's own name is not a clash" do
+      with_store do |store|
+        slots = Gori::SessionSlots.load(store)
+        slots.save([Slot.new("admin"), Slot.new("user")]).should be_true
+        slots.name_clash("ADMIN", except: "admin").should be_nil
+        slots.name_clash("USER", except: "admin").should eq("user")
+      end
+    end
+  end
+
   describe "the active slot" do
     it "starts as nil — as-captured, no overlay, which is what every project opens as" do
       with_store do |store|

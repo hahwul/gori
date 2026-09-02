@@ -110,6 +110,23 @@ module Gori
         @trials.find(&.baseline?)
       end
 
+      # The BASELINE was refused (4xx) or faulted (5xx), so this request anchors nothing:
+      # `Judge.verdict` demotes every comparison against it to `Review` rather than letting a
+      # matching denial read as a bypass. Surfaced so a surface can SAY that, because the
+      # demotion is otherwise invisible — the row simply stops being red, and an operator
+      # whose baseline credential expired needs to be told which fact to go fix.
+      def baseline_denied? : Bool
+        !baseline_denied_status.nil?
+      end
+
+      # The status that made it one, for a surface writing the sentence — read off the SAME
+      # field the predicate tests, so the two can never disagree about which number to name.
+      def baseline_denied_status : Int32?
+        b = baseline
+        return nil unless b && b.summary.denied?
+        b.summary.status
+      end
+
       # Non-baseline identities whose response matched the baseline — the rows worth a look,
       # since a low-privilege identity seeing baseline content is a likely access-control bypass.
       def same_count : Int32

@@ -242,8 +242,14 @@ module Gori
 
         store, slots = session_slots(project_name, db_path)
         begin
-          abort "gori run session add: a slot called #{name.inspect} already exists " \
-                "(change it with `gori run session edit #{name}`)" if slots.find(name)
+          # Case-INSENSITIVELY (`SessionSlots#name_clash`): `admin` and `Admin` are one identity
+          # to Authorize, and creating both left every run in the project refusing to start.
+          if taken = slots.name_clash(name)
+            abort "gori run session add: a slot called #{taken.inspect} already exists " \
+                  "(change it with `gori run session edit #{taken}`). Names are compared " \
+                  "case-insensitively — Authorize reads #{name.inspect} and #{taken.inspect} " \
+                  "as one identity and refuses a set holding both"
+          end
           slot = Gori::SessionSlot.new(name,
             edit.set || [] of {String, String}, edit.remove || [] of String,
             edit.baseline == true, edit.rules || [] of String)
@@ -312,8 +318,11 @@ module Gori
           # Checked BEFORE the flow read so the cheap, deterministic refusal comes first — the
           # same order `session add` uses, and the one that keeps a duplicate name from being
           # reported as "that flow is not a login".
-          abort "gori run session from-flow: a slot called #{name.inspect} already exists " \
-                "(change it with `gori run session edit #{name}`, or pick another --name)" if slots.find(name)
+          if taken = slots.name_clash(name)
+            abort "gori run session from-flow: a slot called #{taken.inspect} already exists " \
+                  "(change it with `gori run session edit #{taken}`, or pick another --name). " \
+                  "Names are compared case-insensitively"
+          end
           detail = store.get_flow(flow_id)
           abort "gori run session from-flow: no flow ##{flow_id} in this project " \
                 "(`gori run history` lists them)" unless detail
@@ -365,8 +374,11 @@ module Gori
           current = slots.find(target)
           abort "gori run session edit: no session slot named #{target.inspect}" unless current
           renamed = edit.name || current.name
-          if renamed != current.name && slots.find(renamed)
-            abort "gori run session edit: another slot is already called #{renamed.inspect}"
+          # `except:` is the row being renamed, so `edit admin --name ADMIN` re-cases a slot's
+          # own name without reading as a collision with itself.
+          if taken = slots.name_clash(renamed, except: current.name)
+            abort "gori run session edit: another slot is already called #{taken.inspect} " \
+                  "(names are compared case-insensitively)"
           end
           abort "gori run session edit: a slot needs a name" if renamed.empty?
           updated = Gori::SessionSlot.new(renamed,

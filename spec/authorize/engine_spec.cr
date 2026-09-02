@@ -123,6 +123,50 @@ describe Gori::Authorize::Engine do
     target.baseline.should_not be_nil
   end
 
+  # A BASELINE that was itself refused anchors nothing, and the row must not read as the
+  # finding. `Same` aggregates to BYPASS on all three surfaces, so a captured flow that 403s —
+  # or a whole run whose baseline slot carries an expired cookie — used to come back as BROKEN
+  # ACCESS CONTROL about endpoints that denied every identity including the privileged one.
+  describe "a request whose baseline was denied" do
+    it "reports review, not BYPASS, when every identity is refused alongside the baseline" do
+      responses = {"*" => ok_resp(403, "Forbidden")} # every identity gets the same refusal
+      target = engine(responses).run(detail, [
+        Identity.new("admin-expired", baseline: true),
+        Identity.new("anon", remove_headers: ["Cookie"]),
+        Identity.new("user", set_headers: [{"Cookie", "session=USER"}]),
+      ]).not_nil!
+
+      target.baseline_denied?.should be_true
+      target.trials.reject(&.baseline?).each { |t| t.verdict.should eq(Verdict::Review) }
+      target.same_count.should eq(0)
+      Gori::CLI::Output.authorize_verdict(target).should eq(:review)
+      Gori::CLI::Output.authorize_target_text(target)
+        .should contain("the baseline itself answered 403")
+      Gori::CLI::Output.authorize_target_json(target).should contain(%("baseline_denied":true))
+    end
+
+    it "does the same for a 404 nobody was ever served" do
+      target = engine({"*" => ok_resp(404, "not found")}).run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anon", remove_headers: ["Cookie"]),
+      ]).not_nil!
+      target.baseline_denied?.should be_true
+      Gori::CLI::Output.authorize_verdict(target).should eq(:review)
+    end
+
+    it "leaves an ordinary 2xx baseline alone — the real bypass still reports as one" do
+      page = "the full admin dashboard with billing and every user record and control panel here"
+      target = engine({"*" => ok_resp(200, page)}).run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anon", remove_headers: ["Cookie"]),
+      ]).not_nil!
+      target.baseline_denied?.should be_false
+      target.same_count.should eq(1)
+      Gori::CLI::Output.authorize_verdict(target).should eq(:bypass)
+      Gori::CLI::Output.authorize_target_json(target).should_not contain("baseline_denied")
+    end
+  end
+
   # A run that compared NOTHING must not be readable as a run that found nothing. Every
   # surface builds its headline out of `same_count` and the review tally, both of which are
   # zero when every send failed — so the fact has to live on the Target itself.

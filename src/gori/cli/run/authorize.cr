@@ -131,6 +131,11 @@ module Gori
         # could not reach. See `Authorize::Target#unanswered?`.
         unanswered = 0
         unanswered_reason : String? = nil
+        # Requests whose BASELINE was refused. Counted for the third time in the same shape as
+        # the two above: nothing here could be judged, so a run made of these also ends in
+        # "0 possible bypasses" — and the cause is almost always one stale credential rather
+        # than N quiet endpoints. See `Authorize::Target#baseline_denied?`.
+        baseline_denied = 0
         stopping = false
         # `--format json` buffers every target and prints ONCE after the loop, so a bare SIGINT
         # threw away the whole run. The stop is polled between requests AND handed to the engine
@@ -153,13 +158,15 @@ module Gori
           elsif target.unanswered?
             unanswered += 1
             unanswered_reason ||= target.trials.each.compact_map(&.summary.error).first?
+          elsif target.baseline_denied?
+            baseline_denied += 1
           end
           emit_authorize_target(target, format, done, buffered)
           done += 1
           authorize_progress(done, total, bypasses, format)
         end
         puts CLI::Output.authorize_array_json(buffered) if format == :json
-        authorize_done(sent, total, ids, bypasses, failed, unanswered)
+        authorize_done(sent, total, ids, bypasses, failed, unanswered, baseline_denied)
         # …and, on the same summary, any identity whose `$NAME` went out LITERALLY. This is the
         # surface the drain exists for: a slot overlay that resolved to nothing sends the
         # identity UNAUTHENTICATED, the resource answers 401 exactly as it does for anonymous,
@@ -266,7 +273,8 @@ module Gori
       end
 
       private def self.authorize_done(sent : Int32, total : Int32, ids : Int32, bypasses : Int32,
-                                      failed : Int32, unanswered : Int32) : Nil
+                                      failed : Int32, unanswered : Int32,
+                                      baseline_denied : Int32) : Nil
         STDERR.print "\r\e[K" if STDERR.tty? # clear the in-place meter before the summary
         # "1 of 3 requests" — the noun agrees with the SELECTION, not with how much of it ran, so
         # an interrupted run does not read as "1 of 3 request".
@@ -278,8 +286,12 @@ module Gori
         # speaks for them: "0 possible bypasses" is a statement about responses, and these
         # requests produced none.
         unreached = unanswered > 0 ? " · #{unanswered} could not be reached" : ""
+        # And the requests whose BASELINE was refused, for the third time in the same shape:
+        # the bypass count speaks for them too, and "0 possible bypasses" over a stale
+        # credential is a clean bill of health nothing earned. See `Target#baseline_denied?`.
+        anchored = baseline_denied > 0 ? " · #{baseline_denied} had a denied baseline" : ""
         STDERR.puts "done · #{sent}#{of} request#{total == 1 ? "" : "s"} replayed · #{sent * ids} sends · " \
-                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreached}#{unreplayable}"
+                    "#{bypasses} possible bypass#{bypasses == 1 ? "" : "es"}#{unreached}#{anchored}#{unreplayable}"
       end
 
       # Refuse a selection that cannot become a run, listing what it reached first: `skipped` is

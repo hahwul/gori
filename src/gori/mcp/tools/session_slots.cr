@@ -74,8 +74,13 @@ module Gori
         registry = fresh_slots
         # Deterministic and un-retryable, so INVALID_ARGUMENT rather than PROJECT_BUSY — the
         # #414 shape: an agent that trusts `retryable` loops forever on a duplicate.
-        if registry.find(name)
-          return err("a session slot called '#{name}' already exists (change it with update_session_slot)",
+        # Case-INSENSITIVELY (`SessionSlots#name_clash`), which is the comparison Authorize
+        # makes: creating both `admin` and `Admin` left every authorize_start in the project
+        # refusing with DuplicateIdentity until a human renamed one.
+        if taken = registry.name_clash(name)
+          return err("a session slot called '#{taken}' already exists (change it with " \
+                     "update_session_slot). Names are compared case-insensitively — authorize " \
+                     "reads '#{name}' and '#{taken}' as one identity and refuses a set with both",
             "INVALID_ARGUMENT", field: "name")
         end
         built = slot_set_headers_or_flow(h)
@@ -135,8 +140,9 @@ module Gori
         current = registry.find(name)
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless current
         renamed = (str(h, "new_name").try(&.strip)).presence
-        if renamed && renamed != name && registry.find(renamed)
-          return err("another session slot is already called '#{renamed}'", "INVALID_ARGUMENT", field: "new_name")
+        if renamed && renamed != name && (taken = registry.name_clash(renamed, except: name))
+          return err("another session slot is already called '#{taken}' (names are compared " \
+                     "case-insensitively)", "INVALID_ARGUMENT", field: "new_name")
         end
         set_headers = h.has_key?("set_headers") ? session_set_headers(h) : current.set_headers
         return set_headers if set_headers.is_a?(Result)

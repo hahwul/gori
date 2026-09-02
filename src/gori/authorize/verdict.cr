@@ -43,6 +43,17 @@ module Gori
         @head_request || @status == 304
       end
 
+      # Was this response a refusal or a fault rather than the resource? 4xx and 5xx both
+      # answer "the requester did not get the thing", which is the only question a BASELINE
+      # has to answer before any other row may be judged against it (see `Judge.verdict`).
+      # nil — no parseable status line — is not a denial: that is an errored exchange, and
+      # `error` already speaks for it.
+      def denied? : Bool
+        s = @status
+        return false unless s
+        s >= 400
+      end
+
       # From a live send. Decodes the body for the fingerprint; `Repeater::Result` carries the
       # raw head/body and the send error.
       def self.of(result : Repeater::Result, head_request : Bool = false) : ResponseSummary
@@ -161,6 +172,20 @@ module Gori
         # A baseline that itself errored cannot anchor a comparison — treat every other row as
         # needing a manual look rather than asserting same/different against nothing.
         return Verdict::Review if baseline.error
+        # …and neither can one that was DENIED. Same fact through a different door: a 4xx/5xx
+        # baseline means the request this whole run is anchored on never obtained the
+        # resource, so "this identity was served what the baseline was served" describes two
+        # refusals. `Same` there aggregates the row to BYPASS, and that is the tool shouting
+        # BROKEN ACCESS CONTROL about an endpoint that denied EVERY identity including the
+        # privileged one — a captured flow that 403s, a 404, or the case an operator hits
+        # daily: a baseline slot whose session cookie has expired, which paints the entire run
+        # red. The evidence needed to refuse the claim was already on the row (MCP even
+        # reported `baseline_status: 403` inside the finding).
+        #
+        # 3xx is deliberately NOT here. A `302 → /login` is a denial and a `302 → /dashboard`
+        # is a grant, and the status alone cannot tell them apart — `redirect_verdict` below
+        # reads the `Location`, which is where that distinction lives.
+        return Verdict::Review if baseline.denied?
 
         bs = status_class(baseline.status)
         os = status_class(other.status)

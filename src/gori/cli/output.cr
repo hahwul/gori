@@ -735,6 +735,10 @@ module Gori
           json_captured(j, "url", t.url)
           j.field "verdict", authorize_verdict(t).to_s
           j.field "same_count", t.same_count
+          # Only when it bit, exactly like `blocked` below: this row's verdicts were demoted
+          # to `review` because the baseline was itself refused, and a consumer scripting on
+          # `verdict` needs the reason it is not `bypass` (see `Target#baseline_denied?`).
+          j.field "baseline_denied", true if t.baseline_denied?
           # Only when it bit. A `"blocked":0` on every row of every ordinary run would bury the
           # one run whose traffic never left the machine.
           if t.blocked > 0
@@ -798,6 +802,15 @@ module Gori
             io << " identit" << (total == 1 ? "y" : "ies") << " matched the baseline"
           end
           t.trials.each { |tr| io << "\n" << authorize_trial_text(tr) }
+          # Why every row on this request reads `review`: the baseline was itself refused, so
+          # nothing here could be judged against it (`Authorize::Target#baseline_denied?`).
+          # Said out loud because the demotion is otherwise invisible — the operator sees a
+          # quiet run and cannot tell it from a clean one, and the usual cause is a fixable
+          # one line away (a baseline slot whose session cookie has expired).
+          if (status = t.baseline_denied_status)
+            io << "\n      ⚠ the baseline itself answered " << status
+            io << " — an identity matching it is not evidence of a bypass"
+          end
           # Sends the scope gate refused before the socket. Named here rather than left to the
           # per-trial `error` text, because a request that never left the machine must not be
           # read as evidence about the target (see `Authorize::Target#blocked`).

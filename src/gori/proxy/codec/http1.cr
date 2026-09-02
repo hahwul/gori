@@ -362,7 +362,15 @@ module Gori::Proxy::Codec::Http1
     code_str = second_sp ? rest[0...second_sp] : rest
     reason = second_sp ? rest[(second_sp + 1)..] : ""
     status = code_str.to_i?(strict: false) || 0
-    malformed = version.empty? || status == 0
+    # The version token has to BE a version, not merely be present. A status line is the one
+    # place junk can hide in plain sight: `split(' ')` finds "200" in the second field of
+    # `<leftover bytes>HTTP/1.1 200 OK` just as happily as in a real status line, so a
+    # response head that is actually the tail of the PREVIOUS body glued to the next
+    # response — what an origin whose body over-ran its Content-Length leaves on a reused
+    # connection — parsed as a clean 200 and reached History as one. `HTTP/` and not a
+    # `HTTP/\d\.\d` match: this parser is also handed STORED heads back, and the head gori
+    # synthesizes for an h2 flow spells its version `HTTP/2`, with no minor.
+    malformed = !version.starts_with?("HTTP/") || status == 0
     RawResponse.new(
       raw_head: raw,
       version: version,

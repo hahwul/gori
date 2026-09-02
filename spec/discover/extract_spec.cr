@@ -469,4 +469,88 @@ describe Gori::Discover::Extract do
       E.base_href(io.to_slice).should eq("/ok/")
     end
   end
+
+  # A character reference in a DECLARED url is the markup's escaping, not part of the url.
+  # `&amp;` is how server-side templating spells `&` in an href, so this is the ordinary shape
+  # of any linked url with two query parameters; reading it literally sends the origin a
+  # parameter named `amp;sort`. The numeric forms are worse — `&#38;` puts a live `#` in front
+  # of `Url.resolve`, which reads it as the fragment delimiter and drops the whole query tail.
+  describe ".decode_refs" do
+    it "resolves the five predefined names and both numeric forms" do
+      E.decode_refs("/list?page=2&amp;sort=name").should eq("/list?page=2&sort=name")
+      E.decode_refs("/list?page=2&#38;sort=name").should eq("/list?page=2&sort=name")
+      E.decode_refs("/list?page=2&#x26;sort=name").should eq("/list?page=2&sort=name")
+      E.decode_refs("/a?q=&lt;&gt;&quot;&apos;").should eq(%(/a?q=<>"'))
+      E.decode_refs("/a?e=&#x1F600;").should eq("/a?e=\u{1F600}")
+    end
+
+    # HTML5 decodes a `;`-less named reference in TEXT but not in an attribute value followed
+    # by `=` or an alphanumeric, and that rule exists so legacy query strings keep working.
+    # `HTML.unescape` implements the text rule and rewrites both of these, which is why it is
+    # not what this uses.
+    it "leaves a reference without its semicolon alone" do
+      E.decode_refs("/a?x=1&amp=2").should eq("/a?x=1&amp=2")
+      E.decode_refs("/a?x=1&ampersand=y").should eq("/a?x=1&ampersand=y")
+      E.decode_refs("/a?x=1&notit;y=2").should eq("/a?x=1&notit;y=2")
+    end
+
+    # Returned by identity, not rebuilt: `?a=1&b=2` carries an `&` that opens nothing, and it
+    # is the commonest shape this runs over.
+    it "leaves a url with no reference in it untouched" do
+      plain = "/a?x=1&y=2"
+      E.decode_refs(plain).should be(plain)
+      E.decode_refs("/a/b/c").should eq("/a/b/c")
+      E.decode_refs("/a?x=1&y=2").should eq("/a?x=1&y=2")
+      E.decode_refs("/a?q=%26amp%3B").should eq("/a?q=%26amp%3B")
+      E.decode_refs("").should eq("")
+      E.decode_refs("&").should eq("&")
+      E.decode_refs("&&&").should eq("&&&")
+    end
+
+    it "refuses a numeric reference that names no character" do
+      E.decode_refs("/a?x=&#0;").should eq("/a?x=&#0;")
+      E.decode_refs("/a?x=&#xD800;").should eq("/a?x=&#xD800;")
+      E.decode_refs("/a?x=&#1114112;").should eq("/a?x=&#1114112;")
+      E.decode_refs("/a?x=&#zz;").should eq("/a?x=&#zz;")
+    end
+
+    # Decoding cannot manufacture a request, only a refusal: a decoded CR/LF reaches
+    # `Headers.safe_url?` and `Sender#fetch` exactly as a raw one does (#390).
+    it "decodes a framing octet rather than hiding it from the gate" do
+      E.decode_refs("/a?x=1&#13;&#10;X: 1").should eq("/a?x=1\r\nX: 1")
+    end
+  end
+
+  describe "character references in declared values" do
+    it "decodes them in href / src / action and in a meta refresh" do
+      body = %(<a href="/list?page=2&amp;sort=name">x</a>) +
+             %(<img src="/i?w=1&#38;h=2">) +
+             %(<meta http-equiv="refresh" content="0; url=/next?a=1&amp;b=2">)
+      links = html_hrefs(body.to_slice)
+      links.should contain("/list?page=2&sort=name")
+      links.should contain("/i?w=1&h=2")
+      links.should contain("/next?a=1&b=2")
+    end
+
+    it "decodes them in a base href" do
+      E.base_href(%(<head><base href="/app?v=1&amp;b=2"></head>).to_slice).should eq("/app?v=1&b=2")
+    end
+
+    # sitemaps.org REQUIRES the escape in a <loc>, giving `&amp;` as its own example, so an
+    # escaped url is the only spelling a conforming sitemap can use.
+    it "decodes them in a sitemap loc" do
+      body = "<urlset><url><loc>http://h/p?a=1&amp;b=2</loc></url></urlset>".to_slice
+      E.from_sitemap(body).should eq(["http://h/p?a=1&b=2"])
+    end
+
+    # The endpoint pass reads TEXT. Inside a <script> the five characters `&amp;` are exactly
+    # what the script says, and robots.txt is not markup at all.
+    it "leaves the text passes alone" do
+      # The endpoint pass's own character classes stop at `?` (path branch) and at `;` (url
+      # branch), so a text body yields a PREFIX here — what this pins is that nothing rewrote
+      # the substring it did take.
+      E.from_text(%(see http://h/p?a=1&amp b).to_slice).should eq(["http://h/p?a=1&amp"])
+      E.from_robots("Disallow: /x?a=1&amp;b=2\n".to_slice).should eq(["/x?a=1&amp;b=2"])
+    end
+  end
 end
