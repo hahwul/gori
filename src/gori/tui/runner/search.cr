@@ -200,7 +200,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # a now-stale query as "no matches", AND it covers the status row the toast needs.
     # ^F reopens in one keystroke.
     close_search
-    @toast = "replaced #{n} occurrence#{n == 1 ? "" : "s"}"
+    @toast = I18n.sys_n(n, "replaced %{n} occurrence", "replaced %{n} occurrences", n: n)
   end
 
   private def search_refresh : Nil

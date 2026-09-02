@@ -101,7 +101,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         if rid = db_id.call(idx)
           commit_link_to_owner(lo.owner_kind, lo.owner_id, ref_kind, rid)
         else
-          @toast = "session not persisted"
+          @toast = I18n.sys("session not persisted")
         end
       end
       true
@@ -114,7 +114,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @session.store.remove_link(link.id)
     lo.reload(@session.store)
     refresh_link_owners(lo.owner_kind, lo.owner_id)
-    @toast = "link removed"
+    @toast = I18n.sys("link removed")
   end
 
   private def refresh_link_owners(kind : Store::LinkOwnerKind, id : Int64) : Nil
@@ -148,7 +148,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
                 in .issue? then "issue ##{row.id}: #{link_title_snip(row.name)}"
                 in .note?  then "note #{link_title_snip(row.name)}"
                 end
-        @toast = "linked to #{owner}"
+        @toast = I18n.sys("linked to %{owner}", owner: owner)
       end
     end
     true
@@ -222,10 +222,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @focus = :body
     @overlay = OverlayKind::None
     if issues_controller.view.open_by_id(@session.store, id)
-      @toast = "opened issue ##{id}"
+      @toast = I18n.sys("opened issue #%{id}", id: id)
     else
       issues_controller.view.reload(@session.store)
-      @toast = "issue ##{id} created"
+      @toast = I18n.sys("issue #%{id} created", id: id)
     end
   end
 
@@ -235,20 +235,20 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @overlay = OverlayKind::None
     if notes_controller.view.switch_note_by_id(id)
       notes_controller.refresh_link_preview
-      @toast = "opened note"
+      @toast = I18n.sys("opened note")
     else
-      @toast = "note created"
+      @toast = I18n.sys("note created")
     end
   end
 
   private def commit_link_to_owner(owner_kind : Store::LinkOwnerKind, owner_id : Int64,
                                    ref_kind : Store::LinkRefKind, ref_id : Int64) : Bool
     if @session.store.add_link(owner_kind, owner_id, ref_kind, ref_id)
-      @toast = "linked"
+      @toast = I18n.sys("linked")
       refresh_link_owners(owner_kind, owner_id)
       true
     else
-      @toast = "already linked"
+      @toast = I18n.sys("already linked")
       false
     end
   end
@@ -283,7 +283,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         @focus = :body
         @overlay = OverlayKind::Detail
       else
-        @toast = "flow no longer captured"
+        @toast = I18n.sys("flow no longer captured")
       end
     when .repeater?
       if idx = repeater_controller.index_for_db_id(ref_id)
@@ -291,7 +291,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         repeater_controller.jump_subtab(idx)
         @focus = :body
       else
-        @toast = "repeater session gone"
+        @toast = I18n.sys("repeater session gone")
       end
     when .fuzz?
       if idx = fuzzer_controller.index_for_db_id(ref_id)
@@ -299,7 +299,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         fuzzer_controller.jump_subtab(idx)
         @focus = :body
       else
-        @toast = "fuzz session gone"
+        @toast = I18n.sys("fuzz session gone")
       end
     when .miner?
       if idx = miner_controller.index_for_db_id(ref_id)
@@ -307,7 +307,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         miner_controller.jump_subtab(idx)
         @focus = :body
       else
-        @toast = "miner session gone"
+        @toast = I18n.sys("miner session gone")
       end
     end
   end

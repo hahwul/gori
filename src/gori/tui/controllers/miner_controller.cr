@@ -402,7 +402,7 @@ module Gori::Tui
         # See FuzzerController#apply_rename: the view already carries the new label, so a
         # refused write is a silent no-op unless the store's answer is reported.
         unless @host.session.store.set_miner_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+          @host.status(I18n.sys("rename NOT saved (project busy) — the chip reads the new name until the session reloads"))
         end
       end
     end
@@ -487,12 +487,12 @@ module Gori::Tui
 
     # Content-only clone of the active miner session (request + config; no findings/links).
     def miner_duplicate : Nil
-      return @host.status("no miner session open to duplicate") unless src = current_view
+      return @host.status(I18n.sys("no miner session open to duplicate")) unless src = current_view
       view = MinerView.new
       view.duplicate_from(src)
       open_session(view, nil)
       @host.goto_tab(:miner)
-      @host.status("duplicated miner session (#{@miners.size} open)")
+      @host.status(I18n.sys("duplicated miner session (%{miners} open)", miners: @miners.size))
     end
 
     # Seed handed to RepeaterController for "Send to Repeater" (Miner finding → injected request).
@@ -606,14 +606,14 @@ module Gori::Tui
       ensure
         view.finish_run # backstop — the drain's Done also clears it
       end
-      @host.status("mining #{view.target_origin} in the background — watch the bottom bar / notifications")
+      @host.status(I18n.sys("mining %{target_origin} in the background — watch the bottom bar / notifications", target_origin: view.target_origin))
     end
 
     # --- run controls (mine.run re-runs the current session; mine.stop halts it) ---
     def mine_run : Nil
       return unless v = current_view
       if v.running?
-        @host.status("already mining — ^X to stop")
+        @host.status(I18n.sys("already mining — ^X to stop"))
         return
       end
       # Flush any trailing Done/Error from a just-finished run before start_run rebinds
@@ -627,7 +627,7 @@ module Gori::Tui
     def mine_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
-      @host.status("stopping…", :busy)
+      @host.status(I18n.sys("stopping…"), :busy)
     end
 
     # --- async (run loop) ---
@@ -669,7 +669,7 @@ module Gori::Tui
         msg = "Miner: #{ev.message} on #{v.summary}"
         log_event(v, :error, msg)
         push_mine_notification(v, :error, msg)
-        @host.status("miner error: #{ev.message}", :error) if v.config.notify.posts_notification?(0, error: true)
+        @host.status(I18n.sys("miner error: %{message}", message: ev.message), :error) if v.config.notify.posts_notification?(0, error: true)
       end
     end
 

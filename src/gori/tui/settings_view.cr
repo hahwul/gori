@@ -252,6 +252,9 @@ module Gori::Tui
       @cursor = 0
       @preedit = ""
       @status = nil.as(String?)
+      # Whether @status reports a refusal (drawn yellow) rather than a save (green). A flag, not
+      # a prefix match on the English text, so the colour survives translation.
+      @status_warn = false
       @theme_scroll = 0 # top row of the THEME list viewport (see render_theme_list)
       reload
     end
@@ -708,13 +711,13 @@ module Gori::Tui
       if @section == :statusline
         iv = @values[2].strip.to_i?
         unless iv && iv >= 1
-          @status = "invalid interval"
-          return "settings: invalid statusline interval #{@values[2].inspect} (seconds, min 1)"
+          refuse(I18n.sys("invalid interval"))
+          return I18n.sys("settings: invalid statusline interval %{value} (seconds, min 1)", value: @values[2].inspect)
         end
         to = @values[3].strip.to_i?
         unless to && to >= 1
-          @status = "invalid timeout"
-          return "settings: invalid statusline timeout #{@values[3].inspect} (seconds, min 1)"
+          refuse(I18n.sys("invalid timeout"))
+          return I18n.sys("settings: invalid statusline timeout %{value} (seconds, min 1)", value: @values[3].inspect)
         end
         Settings.statusline_enabled = @values[0] == "on"
         Settings.statusline_command = @values[1] # blank is valid (the row is simply not reserved)
@@ -726,8 +729,8 @@ module Gori::Tui
       if @section == :display
         kib = @values[4].strip.to_i?
         unless kib && kib >= 1
-          @status = "invalid preview limit"
-          return "settings: invalid preview body limit #{@values[4].inspect} (KiB, min 1)"
+          refuse(I18n.sys("invalid preview limit"))
+          return I18n.sys("settings: invalid preview body limit %{value} (KiB, min 1)", value: @values[4].inspect)
         end
         kib = kib.clamp(1, Settings::MAX_PREVIEW_BODY_KIB) # keep kib*1024 within Int32
         Settings.default_detail_pane = @values[0] == "response" ? "response" : "request"
@@ -760,8 +763,8 @@ module Gori::Tui
       if @section == :notifications
         ret = @values[2].strip.to_i?
         unless ret && ret >= 1
-          @status = "invalid retention"
-          return "settings: invalid notification retention #{@values[2].inspect} (count, min 1)"
+          refuse(I18n.sys("invalid retention"))
+          return I18n.sys("settings: invalid notification retention %{value} (count, min 1)", value: @values[2].inspect)
         end
         Settings.notify_bell = @values[0] == "on"
         Settings.notify_toast = @values[1] == "on"
@@ -771,7 +774,7 @@ module Gori::Tui
       end
       if @section == :general
         if err = Settings.retention_error(@values[3])
-          @status = "invalid retention"
+          refuse(I18n.sys("invalid retention"))
           return err
         end
         Settings.clipboard_osc52 = @values[0] == "on"
@@ -783,13 +786,13 @@ module Gori::Tui
         return persist
       end
       if err = Settings.bind_host_error(@values[0])
-        @status = "invalid bind IP"
+        refuse(I18n.sys("invalid bind IP"))
         return err
       end
       port = @values[1].strip.to_i?
       unless port && 0 <= port <= 65535
-        @status = "invalid port"
-        return "settings: invalid bind port #{@values[1].inspect}"
+        refuse(I18n.sys("invalid port"))
+        return I18n.sys("settings: invalid bind port %{value}", value: @values[1].inspect)
       end
       proxy_fields_unchanged = @values[NETWORK_PROXY_PROTOCOL, 3] == @baseline[NETWORK_PROXY_PROTOCOL, 3]
       if proxy_fields_unchanged
@@ -799,33 +802,33 @@ module Gori::Tui
           @values[NETWORK_PROXY_PROTOCOL],
           @values[NETWORK_PROXY_HOST], @values[NETWORK_PROXY_PORT])
         if proxy_error
-          @status = "invalid upstream proxy"
+          refuse(I18n.sys("invalid upstream proxy"))
           return proxy_error
         end
       end
       if err = Settings.upstream_proxy_error(up)
-        @status = "invalid upstream proxy"
+        refuse(I18n.sys("invalid upstream proxy"))
         return err
       end
       ct = @values[7].strip.to_i?
       unless ct && ct >= 1
-        @status = "invalid connect timeout"
-        return "settings: invalid connect timeout #{@values[7].inspect} (seconds, min 1)"
+        refuse(I18n.sys("invalid connect timeout"))
+        return I18n.sys("settings: invalid connect timeout %{value} (seconds, min 1)", value: @values[7].inspect)
       end
       it = @values[8].strip.to_i?
       unless it && it >= 1
-        @status = "invalid idle timeout"
-        return "settings: invalid idle timeout #{@values[8].inspect} (seconds, min 1)"
+        refuse(I18n.sys("invalid idle timeout"))
+        return I18n.sys("settings: invalid idle timeout %{value} (seconds, min 1)", value: @values[8].inspect)
       end
       cap = @values[9].strip.to_i?
       unless cap && cap >= 1
-        @status = "invalid capture limit"
-        return "settings: invalid capture limit #{@values[9].inspect} (MiB, min 1)"
+        refuse(I18n.sys("invalid capture limit"))
+        return I18n.sys("settings: invalid capture limit %{value} (MiB, min 1)", value: @values[9].inspect)
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
       passthrough = passthrough_from_label(@values[12])
       if err = Settings.tls_passthrough_error(passthrough)
-        @status = "invalid TLS passthrough host"
+        refuse(I18n.sys("invalid TLS passthrough host"))
         return err
       end
       # An explicit bind edit HERE supersedes a `-l`/`-p` launch override. That override is
@@ -854,17 +857,23 @@ module Gori::Tui
       persist
     end
 
+    private def refuse(status : String) : Nil
+      @status = status
+      @status_warn = true
+    end
+
     private def persist : String
       ok = Settings.save
       @saved = ok
       @baseline = @values.dup if ok # the working copy IS the persisted state now → no longer dirty
-      @status = ok ? "saved" : "save failed"
+      @status = ok ? I18n.sys("saved") : I18n.sys("save failed")
+      @status_warn = !ok
       # `<thing> applied — could not save to <path>`, the shape the rest of the app uses and
       # `Runner#toggle_companion` documents: every setter above ran BEFORE `Settings.save`, so on a
       # failed write the change IS live in this session and only persistence is missing. The
       # old `settings: save failed (…)` said the second half and left the operator to guess
       # the first — on the highest-traffic save in the app.
-      ok ? "settings saved" : "settings applied — could not save to #{Settings.path}"
+      ok ? I18n.sys("settings saved") : I18n.sys("settings applied — could not save to %{path}", path: Settings.path)
     end
 
     # The centred settings box for `area` — the exact Rect render draws into (so
@@ -1078,7 +1087,7 @@ module Gori::Tui
       hint_y = box.bottom - 2
       iw = {box.right - (box.x + 3) - 1, 0}.max # interior width so long hints can't bleed past the box border
       if status = @status
-        color = status.starts_with?("invalid") || status.starts_with?("save failed") ? Theme.yellow : Theme.green
+        color = @status_warn ? Theme.yellow : Theme.green
         screen.text(box.x + 3, note_y, "• #{status}", color, Theme.panel, width: iw)
       elsif @section == :theme
         names = Theme.available

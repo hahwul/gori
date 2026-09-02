@@ -103,7 +103,7 @@ module Gori::Tui
       return nil if a.empty?
       parts = a.group_by(&.kind).map { |kind, js| "#{I18n.ui(KIND_LABELS.fetch(kind, "jobs"))} #{js.size}" }
       return parts.join(" · ") if parts.size <= SUMMARY_KINDS + 1
-      "#{parts.first(SUMMARY_KINDS).join(" · ")} · +#{parts.size - SUMMARY_KINDS} more"
+      I18n.ui("%{parts} · +%{n} more", parts: parts.first(SUMMARY_KINDS).join(" · "), n: parts.size - SUMMARY_KINDS)
     end
 
     # The status-bar chip text (the Runner prepends a spinner glyph). nil → no chip.
@@ -112,7 +112,7 @@ module Gori::Tui
       a = active
       return nil if a.empty?
       kinds = a.map(&.kind).uniq!
-      return "jobs:#{a.size}" if kinds.size != 1
+      return I18n.ui("jobs:%{n}", n: a.size) if kinds.size != 1
       "#{I18n.ui(KIND_LABELS.fetch(kinds.first, "jobs"))} #{a.size}"
     end
 

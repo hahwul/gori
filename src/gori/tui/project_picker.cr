@@ -88,7 +88,7 @@ module Gori::Tui
     end
 
     def self.plural_projects(n : Int32) : String
-      "#{n} project#{n == 1 ? "" : "s"}"
+      I18n.sys_n(n, "%{n} project", "%{n} projects", n: n)
     end
 
     # The mark count appended to the list divider, or "" with nothing marked (so an unmarked
@@ -696,7 +696,7 @@ module Gori::Tui
       # delete you cannot have confirmed.
       w, h = @backend.size
       if dialog.overlay_box(Rect.new(0, 0, w, h)).w == 0
-        set_flash("window too small to confirm a delete — make it taller", ok: false)
+        set_flash(I18n.sys("window too small to confirm a delete — make it taller"), ok: false)
         return
       end
       @confirm = dialog
@@ -722,30 +722,30 @@ module Gori::Tui
     # Pure + class-level so a spec can pin it without a Termisu.
     def self.delete_confirm_body(names : Array(String), hidden : Int32, blocked : Int32) : String
       one = names.size == 1
-      head = "Delete #{plural_projects(names.size)}?"
+      head = I18n.sys("Delete %{what}?", what: plural_projects(names.size))
       if names.size <= NAMED_DELETE_MAX
-        named = %(Delete #{names.map { |n| %("#{n}") }.join(", ")}?)
+        named = I18n.sys("Delete %{names}?", names: names.map { |n| %("#{n}") }.join(", "))
         # A single project is named whatever it costs: "Delete 1 project?" names nothing at
         # all, and ConfirmDialog ellipsizes a long name the same way the list row does.
         head = named if one || Screen.display_width(named) <= NAMED_DELETE_WIDTH
       end
       String.build do |io|
         io << head
-        io << '\n' << "This permanently removes all of " << (one ? "its" : "their") << " captured data."
+        io << '\n' << (one ? I18n.sys("This permanently removes all of its captured data.") : I18n.sys("This permanently removes all of their captured data."))
         if hidden > 0
           io << '\n'
           # "them" needs a plural to refer to; with one target the sentence is about it.
-          one ? (io << "It is hidden by the current search.") : (io << hidden << " of them " << (hidden == 1 ? "is" : "are") << " hidden by the current search.")
+          io << (one ? I18n.sys("It is hidden by the current search.") : I18n.sys_n(hidden, "%{n} of them is hidden by the current search.", "%{n} of them are hidden by the current search.", n: hidden))
         end
-        io << '\n' << blocked << " more " << (blocked == 1 ? "is" : "are") << " in use and will be kept." if blocked > 0
+        io << '\n' << I18n.sys_n(blocked, "%{n} more is in use and will be kept.", "%{n} more are in use and will be kept.", n: blocked) if blocked > 0
       end
     end
 
     # Why a delete never got as far as the confirm: every target is in use.
     def self.delete_blocked_flash(names : Array(String)) : String
-      return "nothing to delete" if names.empty?
-      return %(can't delete "#{names.first}" — it's open in another gori instance) if names.size == 1
-      "can't delete #{plural_projects(names.size)} — they're open in another gori instance"
+      return I18n.sys("nothing to delete") if names.empty?
+      return I18n.sys("can't delete \"%{name}\" — it's open in another gori instance", name: names.first) if names.size == 1
+      I18n.sys("can't delete %{what} — they're open in another gori instance", what: plural_projects(names.size))
     end
 
     private def commit_delete : Nil
@@ -1080,7 +1080,7 @@ module Gori::Tui
             set_flash(%(can't compress "#{project.name}" — it's open in another window), ok: false)
           end
         rescue ex : Gori::Error | IO::Error | DB::Error | SQLite3::Exception
-          set_flash("compress failed: #{ex.message}", ok: false)
+          set_flash(I18n.sys("compress failed: %{message}", message: ex.message), ok: false)
         end
         reload_projects
       end

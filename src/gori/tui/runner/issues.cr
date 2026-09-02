@@ -17,7 +17,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # live marks with no form and no toast.
     row = primary.try { |id| @session.store.flow_row(id) }
     row ||= ids.each.compact_map { |id| @session.store.flow_row(id) }.first?
-    return (@toast = "no flows left to file an issue for") unless row
+    return (@toast = I18n.sys("no flows left to file an issue for")) unless row
     open_issue_form(IssueForm.new("#{row.method} #{row.target}", row.host, row.id,
       extra_flow_ids: ids.reject(row.id)))
   end
@@ -108,7 +108,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = issues_target_ids
     return if ids.empty?
     seed = issues_picker_seed(ids)
-    return (@toast = "no issues left to update") unless seed
+    return (@toast = I18n.sys("no issues left to update")) unless seed
     open_choice_picker(ChoicePicker.for_severity(seed.severity.value)) { |p| apply_issue_choice(p, ids) }
   end
 
@@ -116,7 +116,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = issues_target_ids
     return if ids.empty?
     seed = issues_picker_seed(ids)
-    return (@toast = "no issues left to update") unless seed
+    return (@toast = I18n.sys("no issues left to update")) unless seed
     open_choice_picker(ChoicePicker.for_status(seed.status.value)) { |p| apply_issue_choice(p, ids) }
   end
 
@@ -127,7 +127,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     ids = issues_target_ids
     return if ids.empty?
     seed = issues_picker_seed(ids)
-    return (@toast = "no issues left to update") unless seed
+    return (@toast = I18n.sys("no issues left to update")) unless seed
     calc = CvssCalculatorOverlay.new(seed.cvss || "")
     calc.on_commit = -> { apply_issue_cvss(calc, ids) }
     open_overlay(calc)
@@ -172,13 +172,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # mediator: reads the Issues controller, drives the History controller + overlay.
   def issue_open_flow : Nil
     return unless f = issues_controller.view.detail_issue
-    return (@toast = "this issue has no linked flow") unless fid = f.flow_id
+    return (@toast = I18n.sys("this issue has no linked flow")) unless fid = f.flow_id
     if history_controller.view.open_detail_id(fid, @session.store)
       @active_tab = :history
       @focus = :body
       @overlay = OverlayKind::Detail
     else
-      @toast = "evidence no longer captured (pruned)"
+      @toast = I18n.sys("evidence no longer captured (pruned)")
     end
   end
 
@@ -186,11 +186,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # mediator: reads the Issues controller, opens a Repeater tab.
   def issue_repeater_flow : Nil
     return unless f = issues_controller.view.detail_issue
-    return (@toast = "this issue has no linked flow") unless fid = f.flow_id
+    return (@toast = I18n.sys("this issue has no linked flow")) unless fid = f.flow_id
     if @session.store.get_flow(fid)
       repeater_flow(fid)
     else
-      @toast = "evidence no longer captured (pruned)"
+      @toast = I18n.sys("evidence no longer captured (pruned)")
     end
   end
 
@@ -203,7 +203,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if res = issues_controller.view.selected_resolved_link
       navigate_link_ref(res.link.ref_kind, res.link.ref_id)
     else
-      @toast = "no related link selected"
+      @toast = I18n.sys("no related link selected")
     end
   end
 
@@ -225,7 +225,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # It uses count_issues rather than materializing store.issues here and again downstream.
   def issues_export_pick : Nil
     if @session.store.count_issues == 0
-      @toast = "no issues to export"
+      @toast = I18n.sys("no issues to export")
       return
     end
     # A modal opened from inside another's commit is not closed afterwards (see
@@ -239,7 +239,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # no picker, and a caller that already knows the format should not have to open one.
   def issues_export(format : Symbol) : Nil
     if @session.store.count_issues == 0
-      @toast = "no issues to export"
+      @toast = I18n.sys("no issues to export")
       return
     end
     ext, kind = case format

@@ -196,7 +196,7 @@ module Gori::Tui
       @sessions << make_session("", nil)
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("new Cookie session (#{@sessions.size} open)")
+      @host.status(I18n.sys("new Cookie session (%{sessions} open)", sessions: @sessions.size))
     end
 
     # Seed a NEW session from an externally-supplied cookie (the "Send selection to → Cookie"
@@ -206,7 +206,7 @@ module Gori::Tui
       @sessions << s
       @idx = @sessions.size - 1
       @host.goto_tab(:cookie)
-      @host.status("sent selection to Cookie (#{text.bytesize}b)")
+      @host.status(I18n.sys("sent selection to Cookie (%{bytesize}b)", bytesize: text.bytesize))
     end
 
     def cookie_duplicate : Nil
@@ -224,7 +224,7 @@ module Gori::Tui
       @sessions << dup
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("duplicated Cookie session (#{@sessions.size} open)")
+      @host.status(I18n.sys("duplicated Cookie session (%{sessions} open)", sessions: @sessions.size))
     end
 
     def cookie_close : Nil
@@ -678,7 +678,7 @@ module Gori::Tui
       i = list.index(display_format(s)) || -1
       s.format = list[(i + 1) % list.size]
       recompute_all(s)
-      @host.status("format = #{s.format}")
+      @host.status(I18n.sys("format = %{format}", format: s.format))
     end
 
     def cycle_algorithm : Nil
@@ -702,14 +702,14 @@ module Gori::Tui
     def cycle_salt_preset : Nil
       s = cur
       unless effective_format(s) == "django"
-        @host.status("salt presets are Django-only")
+        @host.status(I18n.sys("salt presets are Django-only"))
         return
       end
       s.salt = s.salt.strip == Cookie::Django::SESSION_SALT ? Cookie::Django::DEFAULT_SALT : Cookie::Django::SESSION_SALT
       s.salt_cx = s.salt.size
       s.salt_pre = ""
       recompute_all(s)
-      @host.status("salt = #{salt_preset_label(s)} (#{s.salt})")
+      @host.status(I18n.sys("salt = %{salt_preset_label} (%{salt})", salt_preset_label: salt_preset_label(s), salt: s.salt))
     end
 
     # The salt badge's label: which canonical Django salt is in effect. A blank field signs under
@@ -733,17 +733,17 @@ module Gori::Tui
       # from the FORGE OUTPUT pane too (both are read panes), where cracking the hidden input and
       # swapping out the secret the OUTPUT is signed under would be an invisible side effect.
       unless s.mode == :decode
-        @host.status("crack runs from the DECODE lens")
+        @host.status(I18n.sys("crack runs from the DECODE lens"))
         return
       end
       token = s.input.text.strip
       if token.empty?
-        @host.status("INPUT is empty — paste a cookie to crack")
+        @host.status(I18n.sys("INPUT is empty — paste a cookie to crack"))
         return
       end
       spec = s.secret.strip
       if spec.empty?
-        @host.status("SECRET is empty — enter a wordlist path or a comma-separated candidate list")
+        @host.status(I18n.sys("SECRET is empty — enter a wordlist path or a comma-separated candidate list"))
         return
       end
       source = crack_source(spec)
@@ -754,15 +754,15 @@ module Gori::Tui
         s.crack_note = "cracked: #{found.size > 24 ? found[0, 23] + "…" : found}"
         recompute_verify(s)
         recompute_forge(s)
-        @host.status("cracked the signing secret")
+        @host.status(I18n.sys("cracked the signing secret"))
       else
         # No `source.size` here: for a WordlistFile that re-reads the whole file just to print a
         # count, doubling the I/O of the crack that already scanned it.
         s.crack_note = nil
-        @host.status("no candidate verified")
+        @host.status(I18n.sys("no candidate verified"))
       end
     rescue ex : Gori::Error
-      @host.status("crack: #{ex.message}")
+      @host.status(I18n.sys("crack: %{message}", message: ex.message))
     end
 
     # A file path → a lazily-read wordlist; anything else → the comma-split inline list. A path
@@ -778,13 +778,13 @@ module Gori::Tui
       s = cur
       token = s.input.text.strip
       if token.empty?
-        @host.status("INPUT is empty — nothing to load")
+        @host.status(I18n.sys("INPUT is empty — nothing to load"))
         return
       end
       begin
         doc = JSON.parse(Cookie.decode_json(token, decode_format(s)))
       rescue
-        @host.status("INPUT is not a decodable cookie")
+        @host.status(I18n.sys("INPUT is not a decodable cookie"))
         return
       end
       fmt = doc["format"]?.try(&.as_s?)
@@ -799,7 +799,7 @@ module Gori::Tui
       s.mode = :forge
       s.pane = :payload
       recompute_forge(s)
-      @host.status("loaded decoded payload into FORGE")
+      @host.status(I18n.sys("loaded decoded payload into FORGE"))
     end
 
     def clear_all : Nil
@@ -813,7 +813,7 @@ module Gori::Tui
       s.crack_note = nil
       recompute_decode(s)
       recompute_forge(s)
-      @host.status("cleared")
+      @host.status(I18n.sys("cleared"))
     end
 
     # Copy the OUTPUT (forged) cookie.
@@ -822,7 +822,7 @@ module Gori::Tui
       if s.output_ok? && !s.output.empty?
         do_copy(s.output, "cookie")
       else
-        @host.status("no valid cookie to copy")
+        @host.status(I18n.sys("no valid cookie to copy"))
       end
     end
 
@@ -858,11 +858,11 @@ module Gori::Tui
 
     private def do_copy(text : String, label : String? = nil) : Nil
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
       else
         written = Clipboard.copy(text)
         prefix = label ? "copied \"#{label}\"" : "copied"
-        @host.status("#{prefix} (#{written}b)#{Clipboard.note(written, text)}")
+        @host.status(I18n.sys("%{prefix} (%{written}b)%{note}", prefix: prefix, written: written, note: Clipboard.note(written, text)))
       end
     end
 

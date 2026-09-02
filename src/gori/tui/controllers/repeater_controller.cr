@@ -528,7 +528,7 @@ module Gori::Tui
     # keystroke; wrap a value in §…§ to give it an inline Decoder chain, applied on send).
     def repeater_toggle_decoded : Nil
       view = current_view
-      return @host.status("no repeater open") unless view
+      return @host.status(I18n.sys("no repeater open")) unless view
       # With the RESPONSE pane focused on a WebSocket tab, ^T toggles THAT column's two cards
       # (handshake response ⇄ transcript) instead of the request's. Same key, same gesture —
       # "switch the card I am reading" — on whichever column has focus; this method has been
@@ -558,7 +558,7 @@ module Gori::Tui
       if view.chain_pane_active?
         view.commit_chain_pane
         save_current_repeater
-        @host.status("chain saved")
+        @host.status(I18n.sys("chain saved"))
       else
         msg = view.focus_chain_pane
         @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
@@ -573,7 +573,7 @@ module Gori::Tui
         # that payload is `␣F:FRAME`'s answer, not this one — so the toast reads the toggle
         # rather than promising the recompute it used to be fused with.
         if !view.grpc_reframable?
-          @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
+          @host.status(I18n.sys("gRPC hex edit needs a single-message body (this call has %{grpc_msg_count}) — sent verbatim", grpc_msg_count: view.grpc_msg_count))
         elsif view.focus == :request
           # FIELDS and hex are two editors over the same payload; entering one leaves the
           # other rather than stacking two authoritative buffers over one slice.
@@ -582,11 +582,11 @@ module Gori::Tui
           framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
           @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
         else
-          @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
+          @host.status(I18n.sys("hex edit (^X) applies to the REQUEST pane — ↹ to it"))
         end
       elsif view.ws_mode? || view.decode_mode?
         msg = view.ws_mode? ? "edit WS messages as text" : "edit the envelope as text + the decoded payload below; it is re-encoded on send"
-        @host.status("hex edit not available here — #{msg}")
+        @host.status(I18n.sys("hex edit not available here — %{msg}", msg: msg))
       elsif view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
@@ -597,13 +597,13 @@ module Gori::Tui
         # pane looked completely unchanged. (Reachable only on a pipelined GROUP send: WS and
         # gRPC are refused above.) Refuse it where it cannot be honoured.
         if view.group_mode?
-          @host.status("no hex dump for a group transcript — it is N responses, not one byte stream")
+          @host.status(I18n.sys("no hex dump for a group transcript — it is N responses, not one byte stream"))
         else
           view.toggle_resp_hex
           @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
         end
       else
-        @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
+        @host.status(I18n.sys("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one"))
       end
     end
 
@@ -614,29 +614,29 @@ module Gori::Tui
     def repeater_toggle_grpc_fields : Nil
       return unless view = current_view
       unless view.grpc_mode?
-        @host.status("the gRPC field editor (␣E) applies to a gRPC tab")
+        @host.status(I18n.sys("the gRPC field editor (␣E) applies to a gRPC tab"))
         return
       end
       unless view.focus == :request
-        @host.status("the gRPC field editor (␣E) applies to the REQUEST pane — ↹ to it")
+        @host.status(I18n.sys("the gRPC field editor (␣E) applies to the REQUEST pane — ↹ to it"))
         return
       end
       if view.grpc_fields?
         view.toggle_grpc_fields
-        @host.status("gRPC fields: off — back to the head/metadata editor")
+        @host.status(I18n.sys("gRPC fields: off — back to the head/metadata editor"))
         return
       end
       unless view.grpc_reframable?
-        @host.status("the gRPC field editor needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
+        @host.status(I18n.sys("the gRPC field editor needs a single-message body (this call has %{grpc_msg_count}) — sent verbatim", grpc_msg_count: view.grpc_msg_count))
         return
       end
       if view.grpc_field_binding.nil?
-        @host.status("no .proto for #{view.grpc_method_target} — #{Gori::Protobuf::Schemas.status} · Project → Proto schema · ^X edits the bytes")
+        @host.status(I18n.sys("no .proto for %{grpc_method_target} — %{status} · Project → Proto schema · ^X edits the bytes", grpc_method_target: view.grpc_method_target, status: Gori::Protobuf::Schemas.status))
         return
       end
       view.toggle_grpc_fields
       framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣F to reframe)"
-      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣E/esc exit)")
+      @host.status(I18n.sys("gRPC fields: on — ↑/↓ pick · ↵ edit · %{framing} (␣E/esc exit)", framing: framing))
     end
 
     def repeater_toggle_sni : Nil
@@ -644,14 +644,14 @@ module Gori::Tui
         view.toggle_sni_field
         @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
       else
-        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
+        @host.status(I18n.sys("SNI override (^S) applies to the TARGET pane — ↹ to it"))
       end
     end
 
     def repeater_toggle_auto_content_length : Nil
       return unless view = current_view
       if view.request_hex?
-        @host.status("auto Content-Length disabled in hex edit")
+        @host.status(I18n.sys("auto Content-Length disabled in hex edit"))
       else
         on = view.toggle_auto_content_length
         @host.status(on ? "auto Content-Length: on" : "auto Content-Length: off")
@@ -673,7 +673,7 @@ module Gori::Tui
     def repeater_toggle_http2 : Nil
       return unless view = current_view
       if view.grpc_mode?
-        @host.status("transport is fixed for gRPC flows (h2 by specification)")
+        @host.status(I18n.sys("transport is fixed for gRPC flows (h2 by specification)"))
       elsif view.ws_content?
         @host.status(view.cycle_ws_transport)
       else
@@ -693,7 +693,7 @@ module Gori::Tui
     def repeater_toggle_ws_key : Nil
       return unless view = current_view
       unless view.ws_mode?
-        @host.status("Sec-WebSocket-Key reuse applies to a WebSocket handshake only")
+        @host.status(I18n.sys("Sec-WebSocket-Key reuse applies to a WebSocket handshake only"))
         return
       end
       on = view.toggle_ws_keep_key
@@ -712,13 +712,13 @@ module Gori::Tui
     def repeater_toggle_grpc_reframe : Nil
       return unless view = current_view
       unless view.grpc_mode?
-        @host.status("gRPC reframe applies to a gRPC tab only")
+        @host.status(I18n.sys("gRPC reframe applies to a gRPC tab only"))
         return
       end
       unless view.grpc_reframable?
         # Not a refusal of the toggle so much as a report that there is nothing for it to do:
         # `Grpc.reframe` declines a 0-/multi-message body outright, and so does this tab.
-        @host.status("gRPC reframe needs a UNARY message (this body has #{view.grpc_msg_count}) — sent verbatim")
+        @host.status(I18n.sys("gRPC reframe needs a UNARY message (this body has %{grpc_msg_count}) — sent verbatim", grpc_msg_count: view.grpc_msg_count))
         return
       end
       on = view.toggle_grpc_reframe
@@ -737,12 +737,12 @@ module Gori::Tui
       return unless view = current_view
       name = view.cycle_tls_preset # marks the tab dirty; the save-on-leave path persists it
       if name.nil?
-        @host.status("TLS fingerprint: none — this tab uses the destination's outbound_tls policy")
+        @host.status(I18n.sys("TLS fingerprint: none — this tab uses the destination's outbound_tls policy"))
       elsif view.tls_preset_live?
         @host.status("TLS fingerprint: #{name} — this tab only; an approximation of that client's " \
                      "hello (`gori settings tls-fingerprint HOST --preset #{name}` prints the JA3/JA4)")
       else
-        @host.status("TLS fingerprint: #{name} — set, but this target is not https, so no ClientHello is sent")
+        @host.status(I18n.sys("TLS fingerprint: %{name} — set, but this target is not https, so no ClientHello is sent", name: name))
       end
     end
 
@@ -751,7 +751,7 @@ module Gori::Tui
       if err = view.pretty_print_request
         @host.status(err)
       else
-        @host.status("pretty-printed request body")
+        @host.status(I18n.sys("pretty-printed request body"))
       end
     end
 
@@ -945,7 +945,7 @@ module Gori::Tui
       text = v.pane_copy_text
       return if text.empty?
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # The focused pane's selection (or current line) text without copying — for the
@@ -960,7 +960,7 @@ module Gori::Tui
       text = v.pane_copy_all_text
       return if text.empty?
       written = Clipboard.copy(text)
-      @host.status("copied all (#{written}b)#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied all (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     def repeater_read_mode? : Bool
@@ -1000,7 +1000,7 @@ module Gori::Tui
       wire = begin
         String.new(v.request_bytes)
       rescue ex : Fuzz::ChainError
-        @host.status("repeater: #{ex.message}")
+        @host.status(I18n.sys("repeater: %{message}", message: ex.message))
         return [] of CopyMenu::Option
       end
       target = Env.expand(v.target)
@@ -1185,7 +1185,7 @@ module Gori::Tui
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
         unless @host.session.store.set_repeater_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the tab reloads")
+          @host.status(I18n.sys("rename NOT saved (project busy) — the chip reads the new name until the tab reloads"))
         end
       end
     end
@@ -1198,7 +1198,7 @@ module Gori::Tui
       view.tags = Repeater::Tags.parse(raw)
       if id = tab.db_id
         unless @host.session.store.set_repeater_tags(id, Repeater::Tags.serialize(view.tags))
-          @host.status("tags NOT saved (project busy) — the chip reads the new tags until the tab reloads")
+          @host.status(I18n.sys("tags NOT saved (project busy) — the chip reads the new tags until the tab reloads"))
         end
       end
     end
@@ -1226,9 +1226,10 @@ module Gori::Tui
         end
         note = record_note ? " · #{record_note}" : ""
         if result.ok?
-          @host.status("sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{note}", :done)
+          @host.status(I18n.sys("sent → %{status} in %{ms}ms%{incomplete}%{evidence}%{note}", status: result.response.try(&.status), ms: result.duration_us // 1000,
+            incomplete: result.incomplete? ? I18n.sys(" (incomplete)") : "", evidence: evidence_literal_note(view), note: note), :done)
         else
-          @host.status("repeater error: #{result.error}#{note}", :error)
+          @host.status(I18n.sys("repeater error: %{error}%{note}", error: result.error, note: note), :error)
         end
         applied = true
       end
@@ -1246,11 +1247,11 @@ module Gori::Tui
         end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
-          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}", :done)
+          @host.status(I18n.sys("ws sent: %{received} received%{closed}", received: recv, closed: result.close_code ? I18n.sys(" · closed %{code}", code: result.close_code) : ""), :done)
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           probe_scan_ws_repeater(id, result, tab.flow_id, view) if id
         else
-          @host.status("ws repeater error: #{result.error}", :error)
+          @host.status(I18n.sys("ws repeater error: %{error}", error: result.error), :error)
         end
         applied = true
       end
@@ -1259,7 +1260,7 @@ module Gori::Tui
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
         ok = labeled.count { |(_, r)| r.error.nil? }
-        @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
+        @host.status(I18n.sys("send group: %{ok}/%{labeled} ok on one connection", ok: ok, labeled: labeled.size))
         applied = true
       end
       while pair = nonblocking_minimize_event
@@ -1531,7 +1532,7 @@ module Gori::Tui
         unshown = view.ws_unshown_seed
         note = unshown.empty? ? "" : " — #{unshown.size} frame#{unshown.size == 1 ? "" : "s"} not shown (#{unshown.join(", ")}); #{unshown.size == 1 ? "it replays" : "they replay"} unless you edit the list"
         note += " · #{CLI::Run.ws_notice_dropped_note(notice_dropped)}" if notice_dropped > 0
-        @host.status("ws repeater: #{view.summary} — edit messages (one per line)#{note} · ^R send · esc back")
+        @host.status(I18n.sys("ws repeater: %{summary} — edit messages (one per line)%{note} · ^R send · esc back", summary: view.summary, note: note))
       elsif detail.websocket?
         # A WebSocket gori captured but cannot re-open: an RFC 8441 extended CONNECT over
         # HTTP/2 (#733). The frames are real RFC 6455 frames and replaying them is not the
@@ -1564,24 +1565,24 @@ module Gori::Tui
         view.load_grpc(detail)
         @repeaters << RepeaterTab.new(view, id, nil)
         tip = view.grpc_reframable? ? "edit head · ^X payload" : "edit head/metadata"
-        @host.status("grpc repeater: #{view.summary} — #{tip} · ^R send · esc back")
+        @host.status(I18n.sys("grpc repeater: %{summary} — %{tip} · ^R send · esc back", summary: view.summary, tip: tip))
       elsif saml_doc = saml_request_doc(detail)
         # SAML: split — full request envelope + the decoded XML payload (re-encoded into
         # the param on send). Session-only (db_id nil): the binding/param reconstruction
         # context isn't persistable through the text repeaters store.
         view.load_saml(detail, saml_doc)
         @repeaters << RepeaterTab.new(view, id, nil)
-        @host.status("saml repeater: #{view.summary} — envelope + decoded XML · ^T switch · ^R send · esc back")
+        @host.status(I18n.sys("saml repeater: %{summary} — envelope + decoded XML · ^T switch · ^R send · esc back", summary: view.summary))
       elsif gql = graphql_op(detail)
         # GraphQL: split — full request envelope + the query/variables payload (re-encoded
         # into the JSON body on send). Session-only (db_id nil) like the others.
         view.load_graphql(detail, gql)
         @repeaters << RepeaterTab.new(view, id, nil)
-        @host.status("graphql repeater: #{view.summary} — envelope + query/vars · ^T switch · ^R send · esc back")
+        @host.status(I18n.sys("graphql repeater: %{summary} — envelope + query/vars · ^T switch · ^R send · esc back", summary: view.summary))
       else
         view.load(detail)
         @repeaters << RepeaterTab.new(view, id, persist_new_repeater(view, id))
-        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ^1-9 switch · esc back")
+        @host.status(I18n.sys("repeater: %{summary} — %{graphql_raw_note}type to edit · ^R send · ^N new · ^1-9 switch · esc back", summary: view.summary, graphql_raw_note: graphql_raw_note(detail)))
       end
       @current_repeater_idx = @repeaters.size - 1
       @host.goto_tab(:repeater)
@@ -1594,7 +1595,7 @@ module Gori::Tui
       @repeaters << RepeaterTab.new(view, nil, persist_new_repeater(view, nil))
       @current_repeater_idx = @repeaters.size - 1
       @host.goto_tab(:repeater)
-      @host.status("new repeater — edit the request & target · ^R send · ^1-9 switch · esc back")
+      @host.status(I18n.sys("new repeater — edit the request & target · ^R send · ^1-9 switch · esc back"))
     end
 
     # Open a hand-authored repeater session from an arbitrary request (Miner finding, etc.).
@@ -1613,7 +1614,7 @@ module Gori::Tui
       db_id = persist_new_repeater(view, nil)
       if (id = db_id) && (chip = view.name)
         unless @host.session.store.set_repeater_name(id, chip)
-          @host.status("repeater opened, but its “#{chip}” label was NOT saved (project busy)")
+          @host.status(I18n.sys("repeater opened, but its “%{chip}” label was NOT saved (project busy)", chip: chip))
         end
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
@@ -1624,7 +1625,7 @@ module Gori::Tui
     # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
     # gRPC and split-decode tabs stay session-only (db_id nil), matching open-from-History.
     def repeater_duplicate : Nil
-      return @host.status("no repeater open to duplicate") unless src = current_view
+      return @host.status(I18n.sys("no repeater open to duplicate")) unless src = current_view
       src.flush_decoded_edits if src.decode_mode?
       view = RepeaterView.new
       view.duplicate_from(src)
@@ -1648,9 +1649,9 @@ module Gori::Tui
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
       if frames_lost
-        @host.status("duplicated repeater (#{@repeaters.size} open) — ws frames NOT saved (project busy), the tab stays dirty so a later save retries")
+        @host.status(I18n.sys("duplicated repeater (%{repeaters} open) — ws frames NOT saved (project busy), the tab stays dirty so a later save retries", repeaters: @repeaters.size))
       else
-        @host.status("duplicated repeater (#{@repeaters.size} open)")
+        @host.status(I18n.sys("duplicated repeater (%{repeaters} open)", repeaters: @repeaters.size))
       end
     end
 
@@ -1787,7 +1788,7 @@ module Gori::Tui
     # bytes — so the pane shows one request and the wire carries another, and this is the one
     # line that reconciles them. Silent for as-captured, which is the default.
     private def sending_as : String
-      (name = Gori::Env.active_slot_name) ? " as #{name}" : ""
+      (name = Gori::Env.active_slot_name) ? I18n.sys(" as %{name}", name: name) : ""
     end
 
     # "· not recorded (…)" for the one send shape that History recording does not cover, said
@@ -1797,7 +1798,7 @@ module Gori::Tui
       return "" unless Settings.repeater_record_history?
       return "" if @unrecorded_notice
       @unrecorded_notice = true
-      " · not recorded (#{what})"
+      I18n.sys(" · not recorded (%{what})", what: what)
     end
 
     def repeater_send : Nil
@@ -1806,7 +1807,7 @@ module Gori::Tui
       view.sync_host_to_target_once                 # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
       view.downgrade_h2_request_lines(group: false) # a request line pasted from an h2 view can't ride this h1 socket (origins answer 400)
       if view.inflight?                             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
-        @host.status("repeater already in flight…")
+        @host.status(I18n.sys("repeater already in flight…"))
         return
       end
       if view.ws_mode?
@@ -1821,19 +1822,19 @@ module Gori::Tui
       begin
         wire = view.request_bytes
       rescue ex : Fuzz::ChainError
-        @host.status("repeater: #{ex.message}")
+        @host.status(I18n.sys("repeater: %{message}", message: ex.message))
         return
       end
       return unless plan = repeater_plan(view, [wire], http2: view.http2?)
       save_current_repeater # persist the request we're about to send (before it goes inflight)
       if reason = plan.refusal
         apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
-        @host.status("repeater: #{reason}")
+        @host.status(I18n.sys("repeater: %{reason}", reason: reason))
         return
       end
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
-      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy)
+      @host.status(I18n.sys("sending%{as} → %{host}:%{port}%{sni}…", as: sending_as, host: plan.host, port: plan.port, sni: sni ? I18n.sys(" (SNI %{sni})", sni: sni) : ""), :busy)
       # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` above is the
       # assembled DRAFT; this is the message, with the send seam's two passes applied (the
       # `$NAME` binding pass and the active session slot's header overlay). The History
@@ -1897,11 +1898,11 @@ module Gori::Tui
       # the two cannot drift. The old sentence here named hex/gRPC/WS/decode and §markers,
       # and answered none of the three problems for a `%%%` group document.
       if reason = view.minimize_refusal
-        @host.status("minimize: #{reason}")
+        @host.status(I18n.sys("minimize: %{reason}", reason: reason))
         return
       end
       if view.inflight? || @minimize_job
-        @host.status("repeater busy — one send/minimize at a time")
+        @host.status(I18n.sys("repeater busy — one send/minimize at a time"))
         return
       end
       view.commit_chain_pane
@@ -1917,12 +1918,12 @@ module Gori::Tui
       env_names = Env.unresolved(view.target) |
                   (view.sni_override.try { |s| Env.unresolved(s) } || [] of String)
       unless env_names.empty?
-        @host.status("minimize: unresolved env #{Env.token_list(env_names)} — add it in the Project tab's ENV pane")
+        @host.status(I18n.sys("minimize: unresolved env %{token_list} — add it in the Project tab's ENV pane", token_list: Env.token_list(env_names)))
         return
       end
       scheme, host, port = view.parse_target
       if host.empty?
-        @host.status("repeater: invalid target — use scheme://host[:port]/path")
+        @host.status(I18n.sys("repeater: invalid target — use scheme://host[:port]/path"))
         return
       end
       save_current_repeater # persist the request we're about to minimize
@@ -1975,7 +1976,7 @@ module Gori::Tui
       # the controller, so close_repeater_tab / stop_all can reach the run they just ended.
       stop = @minimize_stop = Repeater::Minimize::Stop.new
       events = @minimize_events
-      @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
+      @host.status(I18n.sys("minimizing %{summary} in the background — watch the bottom bar / notifications", summary: view.summary))
       spawn(name: "gori-minimize") do
         report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend, stop: stop) do |progress|
           select # progress pings are droppable — the terminal Report is not
@@ -2001,7 +2002,7 @@ module Gori::Tui
       if reason = plan.refusal
         # Inline, not through @ws_results — see the invariant on #apply_refusal.
         apply_refusal { view.apply_ws(Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64, reason)) }
-        @host.status("ws repeater: #{reason}")
+        @host.status(I18n.sys("ws repeater: %{reason}", reason: reason))
         return
       end
       messages = view.ws_out_messages
@@ -2010,7 +2011,7 @@ module Gori::Tui
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
       # the repeater session already keeps, and a flow row would hold a handshake and nothing else.
-      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…#{unrecorded_note("WebSocket")}", :busy)
+      @host.status(I18n.sys_n(messages.size, "ws sending → %{host}:%{port} (%{messages} msg)…%{unrecorded_note}", "ws sending → %{host}:%{port} (%{messages} msgs)…%{unrecorded_note}", host: plan.host, port: plan.port, messages: messages.size, unrecorded_note: unrecorded_note("WebSocket")), :busy)
       spawn(name: "gori-ws-repeater") do
         result = plan.send_ws(messages, Repeater::WsEngine::DEFAULT_IDLE, keep_key)
         select
@@ -2037,7 +2038,7 @@ module Gori::Tui
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
       view.commit_chain_pane
       if view.inflight?
-        @host.status("repeater already in flight…")
+        @host.status(I18n.sys("repeater already in flight…"))
         return
       end
       unless view.group_sendable?
@@ -2060,7 +2061,7 @@ module Gori::Tui
         labeled = labels.map { |l| {l, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)} }
         # Inline, not through @group_results — see the invariant on #apply_refusal.
         apply_refusal { view.apply_group(labeled) }
-        @host.status("send group: #{reason}")
+        @host.status(I18n.sys("send group: %{reason}", reason: reason))
         return
       end
       view.inflight = true
@@ -2069,7 +2070,7 @@ module Gori::Tui
       # the seam, so there is no per-request slice a recorder could be handed — and writing the
       # drafts instead is exactly the defect `HistoryRecord`'s required `wire` argument exists
       # to prevent.
-      @host.status("send group → #{plan.host}:#{plan.port} · #{n} request#{n == 1 ? "" : "s"} on one connection…#{unrecorded_note("send group")}")
+      @host.status(I18n.sys_n(n, "send group → %{host}:%{port} · %{n} request on one connection…%{unrecorded_note}", "send group → %{host}:%{port} · %{n} requests on one connection…%{unrecorded_note}", host: plan.host, port: plan.port, n: n, unrecorded_note: unrecorded_note("send group")))
       spawn(name: "gori-repeater-group") do
         rs = plan.send_group
         labeled = labels.zip(rs)
@@ -2117,7 +2118,7 @@ module Gori::Tui
     private def evidence_literal_note(view : RepeaterView) : String
       names = RepeaterController.literal_bindings(view.evidence?, view.request_text)
       return "" if names.empty?
-      " · #{Env.token_list(names)} sent literally (evidence tab — not substituted)"
+      I18n.sys(" · %{tokens} sent literally (evidence tab — not substituted)", tokens: Env.token_list(names))
     end
 
     # `self.` and pure so the rule is directly testable, the same reason
@@ -2231,18 +2232,18 @@ module Gori::Tui
     rescue ex : Repeater::PlanError
       @host.status(case ex.reason
       in Repeater::PlanError::Reason::NoRequest
-        "nothing to send — the request is empty"
+        I18n.sys("nothing to send — the request is empty")
       in Repeater::PlanError::Reason::NoTarget, Repeater::PlanError::Reason::BadTarget
-        "repeater: invalid target — use scheme://host[:port]/path"
+        I18n.sys("repeater: invalid target — use scheme://host[:port]/path")
       in Repeater::PlanError::Reason::UnsupportedScheme
-        "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
+        I18n.sys("repeater: unsupported scheme %{scheme} — use http:// or https://", scheme: (ex.detail || "").inspect)
       in Repeater::PlanError::Reason::UnresolvedEnv
-        "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        I18n.sys("repeater: unresolved env %{detail} — add it in the Project tab's ENV pane", detail: ex.detail)
       in Repeater::PlanError::Reason::TlsPreset
         # Unreachable from the TUI, where the value is only ever chosen by cycling the
         # known presets — but a tab restored from a project another version (or another
         # tool) wrote can carry any string, and this is the surface that has to say so.
-        "repeater: #{ex.message}"
+        I18n.sys("repeater: %{message}", message: ex.message)
       end)
       nil
     end
@@ -2271,7 +2272,7 @@ module Gori::Tui
         # clean over that loses the authored ones outright — this runs on every path that
         # LEAVES the editor, so there is no later save to retry from.
         unless @host.session.store.update_repeater_ws_messages(id, v.ws_out_messages_raw)
-          @host.status("ws frames NOT saved (project busy) — leaving the tab dirty so the next save retries")
+          @host.status(I18n.sys("ws frames NOT saved (project busy) — leaving the tab dirty so the next save retries"))
           return
         end
         v.ws_out_persisted
@@ -2471,7 +2472,7 @@ module Gori::Tui
             # No `save_current_repeater`: a gRPC tab is session-only (the framed binary body
             # does not round-trip the text store), exactly as after a `^X` hex edit. `@dirty`
             # is what protects the tab from a cross-session reconcile.
-            @host.status("field applied — the rest of the message is byte-for-byte as captured")
+            @host.status(I18n.sys("field applied — the rest of the message is byte-for-byte as captured"))
           end
         end
         # No `escape` arm: `handle_body_key`'s own escape chain intercepts it first and calls

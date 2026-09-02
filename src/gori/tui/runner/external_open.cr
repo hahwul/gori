@@ -17,9 +17,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # open the response of whatever just arrived instead of the one on screen — the exact
     # hazard that resolver exists for, and what every sibling detail verb goes through.
     id = history_target_flow_id
-    return status("open in browser: select a flow first") unless id
+    return status(I18n.sys("open in browser: select a flow first")) unless id
     detail = @session.store.get_flow(id)
-    return status("open in browser: flow ##{id} is no longer in History") unless detail
+    return status(I18n.sys("open in browser: flow #%{id} is no longer in History", id: id)) unless detail
     # The head goes in as well as the body: it carries the `Content-Type` the suffix comes
     # from AND the `Content-Encoding` the body has to be inflated against.
     #
@@ -32,9 +32,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def repeater_open_response_external : Nil
     v = repeater_controller.current_view
-    return status("open in browser: no repeater tab open") unless v
+    return status(I18n.sys("open in browser: no repeater tab open")) unless v
     wire = v.response_wire
-    return status("open in browser: send the request first — there is no response yet") unless wire
+    return status(I18n.sys("open in browser: send the request first — there is no response yet")) unless wire
     head, body = wire
     # Named by the SUB-TAB index rather than a store id: a hand-authored tab has no row, and
     # the index is what the operator sees on the chip they invoked this from.
@@ -47,7 +47,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     result = begin
       ExternalOpen.write(stem, head, body, body_truncated)
     rescue ex : Gori::Error
-      return status("open in browser: #{ex.message}")
+      return status(I18n.sys("open in browser: %{message}", message: ex.message))
     end
 
     cmd = ExternalOpen.opener(result.path)
@@ -55,7 +55,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # No opener to call, but the file IS written — so say where it is rather than throwing
       # the work away. On a platform gori has no `open` for, a path the operator can paste
       # into their own viewer is the whole feature.
-      return status("wrote #{result.path} — no desktop opener on this platform, open it yourself")
+      return status(I18n.sys("wrote %{path} — no desktop opener on this platform, open it yourself", path: result.path))
     end
     program, args = cmd
 
@@ -72,14 +72,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         output: Process::Redirect::Close,
         error: Process::Redirect::Close)
       unless st.success?
-        return status("open in browser: #{program} exited #{st.exit_code} — the file is at #{result.path}")
+        return status(I18n.sys("open in browser: %{program} exited %{exit_code} — the file is at %{path}", program: program, exit_code: st.exit_code, path: result.path))
       end
     rescue File::NotFoundError
       # `xdg-open` is absent on a bare box or a minimal container, and this is the ordinary
       # shape of that — not a bug to surface as one.
-      return status("open in browser: #{program} is not installed — the file is at #{result.path}")
+      return status(I18n.sys("open in browser: %{program} is not installed — the file is at %{path}", program: program, path: result.path))
     rescue ex
-      return status("open in browser: #{program} failed: #{ex.message} — the file is at #{result.path}")
+      return status(I18n.sys("open in browser: %{program} failed: %{message} — the file is at %{path}", program: program, message: ex.message, path: result.path))
     end
 
     status(opened_message(result))

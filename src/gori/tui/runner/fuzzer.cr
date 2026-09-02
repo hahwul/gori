@@ -8,7 +8,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # SENT here — a session only fires on ^R — so the >1 confirm names the session count.
   def fuzz_selected : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     return fuzzer_controller.fuzz_flow(ids.first) if ids.size == 1
     return unless targets = batch_within_cap(ids, "Fuzzer")
     confirm(I18n.ui("SEND TO FUZZER"), I18n.sys("Open %{n} flows as %{n} fuzz sessions?", n: targets.size),
@@ -55,7 +55,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def fuzz_run_history : Nil
     rows = fuzzer_controller.saved_runs
     if rows.empty?
-      @toast = "no saved fuzz runs for this session"
+      @toast = I18n.sys("no saved fuzz runs for this session")
       return
     end
     picker = Gori::Tui::FuzzRunPicker.new(rows)
@@ -153,9 +153,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # mine_repeater_selected, for a result row instead of a finding).
   def fuzz_repeater_selected : Nil
     seed = fuzzer_controller.selected_repeater_seed
-    return (@toast = "select a result first") unless seed
+    return (@toast = I18n.sys("select a result first")) unless seed
     repeater_controller.repeater_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
       name: seed.label, tls_preset: seed.tls_preset)
-    @toast = "repeater ← fuzz: #{seed.label}"
+    @toast = I18n.sys("repeater ← fuzz: %{label}", label: seed.label)
   end
 end

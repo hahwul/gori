@@ -146,7 +146,7 @@ module Gori::Tui
 
     private def commit_prefix_and_persist : Nil
       case commit_prefix
-      when :empty then toast("env prefix: empty")
+      when :empty then toast(I18n.sys("env prefix: empty"))
       when :ok
         toast(persist ? "env prefix saved — #{@prefix.inspect}" : "prefix applied — could not save to #{Settings.path}")
       end
@@ -155,9 +155,9 @@ module Gori::Tui
     private def commit_and_persist : Nil
       verb = @edit_index ? "updated" : "added"
       case commit_entry
-      when :empty   then toast("env var: empty")
+      when :empty   then toast(I18n.sys("env var: empty"))
       when :invalid then toast(%(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
-      when :dup     then toast("env var: KEY already defined — edit it (e)")
+      when :dup     then toast(I18n.sys("env var: KEY already defined — edit it (e)"))
       when :ok
         # `added` / `updated` — see HostsOverlay#commit_and_persist, which this mirrors.
         toast(persist ? "env var #{verb} — #{@items.size} total" : "env var applied — could not save to #{Settings.path}")

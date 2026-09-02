@@ -170,11 +170,11 @@ module Gori::Tui
     def discover_run : Nil
       run = @view.current
       unless run
-        @host.status("no run selected — start from Sitemap/History (space → \"Discover here\")")
+        @host.status(I18n.sys("no run selected — start from Sitemap/History (space → \"Discover here\")"))
         return
       end
       if run.running?
-        @host.status("already running — ^X to stop")
+        @host.status(I18n.sys("already running — ^X to stop"))
         return
       end
       drain_events # flush a just-finished run's trailing Done before start_run rebinds job_id
@@ -191,7 +191,7 @@ module Gori::Tui
         return
       end
       run.request_stop
-      @host.status("stopping #{run.label(40)}…", :busy)
+      @host.status(I18n.sys("stopping %{label}…", label: run.label(40)), :busy)
     end
 
     # Remove the selected run's row — the manual half of retention, since the list is append-
@@ -203,12 +203,12 @@ module Gori::Tui
     def discover_dismiss : Nil
       run = @view.current
       unless run
-        @host.status("no run selected")
+        @host.status(I18n.sys("no run selected"))
         return
       end
       label = run.label(40)
       unless @view.dismiss(run)
-        @host.status("#{label} is still going — ^X to stop it first")
+        @host.status(I18n.sys("%{label} is still going — ^X to stop it first", label: label))
         return
       end
       @host.status(@view.empty? ? "dismissed #{label} — no runs left" : "dismissed #{label}")
@@ -243,18 +243,18 @@ module Gori::Tui
     # Runner#discover_open_flow, which is `sitemap_open_flow`'s hop from the same parent tab).
     def open_flow_target : Int64?
       if @view.empty?
-        @host.status("no runs yet — start from Sitemap/History (space → \"Discover here\")")
+        @host.status(I18n.sys("no runs yet — start from Sitemap/History (space → \"Discover here\")"))
         return nil
       end
       unless @view.selected_finding
-        @host.status("no finding to open — this run found nothing")
+        @host.status(I18n.sys("no finding to open — this run found nothing"))
         return nil
       end
       id = @view.selected_flow_id
       # A finding is persisted in the same drain tick that adds its row, so this is not a
       # "wait a moment" — it means the store write for this row did not land, and saying so
       # beats a detail overlay that silently opens some other flow.
-      @host.status("no stored request/response for this finding — the project write did not land") unless id
+      @host.status(I18n.sys("no stored request/response for this finding — the project write did not land")) unless id
       id
     end
 
@@ -262,12 +262,12 @@ module Gori::Tui
       return unless run = @view.current
       if run.paused?
         run.resume
-        @host.status("resumed #{run.label(40)}")
+        @host.status(I18n.sys("resumed %{label}", label: run.label(40)))
       elsif run.running?
         run.pause
-        @host.status("paused #{run.label(40)} — p to resume")
+        @host.status(I18n.sys("paused %{label} — p to resume", label: run.label(40)))
       else
-        @host.status("selected run is #{run.status} — nothing to pause")
+        @host.status(I18n.sys("selected run is %{status} — nothing to pause", status: run.status))
       end
     end
 
@@ -335,7 +335,7 @@ module Gori::Tui
         # lives on the main fiber: this event IS the finish, so there is nothing local to clear.
         events.send({run, Discover::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       end
-      @host.status("discovering #{run.target} in the background — watch the bottom bar / notifications")
+      @host.status(I18n.sys("discovering %{target} in the background — watch the bottom bar / notifications", target: run.target))
     end
 
     # View state → Discover::PlanOptions → the ONE builder every surface shares. The run's
@@ -376,15 +376,15 @@ module Gori::Tui
     private def discover_plan_error(ex : Discover::PlanError) : String
       case ex.reason
       in Discover::PlanError::Reason::NoTarget
-        "no target — start from Sitemap/History (space → \"Discover here\")"
+        I18n.sys("no target — start from Sitemap/History (space → \"Discover here\")")
       in Discover::PlanError::Reason::BadTarget
-        "invalid target — use scheme://host[:port][/path]"
+        I18n.sys("invalid target — use scheme://host[:port][/path]")
       in Discover::PlanError::Reason::NoTechnique
-        "enable spider or brute-force in the run config first"
+        I18n.sys("enable spider or brute-force in the run config first")
       in Discover::PlanError::Reason::Wordlist
-        "wordlist error: #{ex.detail}"
+        I18n.sys("wordlist error: %{detail}", detail: ex.detail)
       in Discover::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        I18n.sys("unresolved env %{detail} — add it in the Project tab's ENV pane", detail: ex.detail)
       end
     end
 
@@ -452,7 +452,7 @@ module Gori::Tui
         msg = "Discover: #{ev.message} on #{run.target}"
         log_event(run, :error, msg)
         push_notification(run, :error, msg)
-        @host.status("discover error: #{ev.message}", :error)
+        @host.status(I18n.sys("discover error: %{message}", message: ev.message), :error)
       end
     end
 

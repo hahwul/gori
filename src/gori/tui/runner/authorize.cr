@@ -5,7 +5,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Batch-capable: every marked flow becomes a request row, replayed under the same identities.
   def authorize_seed_selected : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     added, skipped = authorize_controller.seed_flows(ids)
     goto_tab(:authorize) if added > 0
     @toast = authorize_seed_toast(added, skipped)
@@ -15,9 +15,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # representative-flow lookup the Comparer/Repeater sends use.
   def authorize_seed_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
-    return (@toast = "select an endpoint to send") unless ep
+    return (@toast = I18n.sys("select an endpoint to send")) unless ep
     id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-    return (@toast = "no captured request for this path — capture it, or use Discover") unless id
+    return (@toast = I18n.sys("no captured request for this path — capture it, or use Discover")) unless id
     added, skipped = authorize_controller.seed_flows([id])
     goto_tab(:authorize) if added > 0
     @toast = authorize_seed_toast(added, skipped)
@@ -115,7 +115,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if authorize_controller.identities_editable?
       open_authorize_identities
     else
-      @toast = "a run is in flight — ^X to stop it first"
+      @toast = I18n.sys("a run is in flight — ^X to stop it first")
     end
   end
 end

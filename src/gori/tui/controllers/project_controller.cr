@@ -413,7 +413,7 @@ module Gori::Tui
       @project_view.reload_activity(@host.session.store)
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: event feed read failed" }
-      @host.status("could not read the event feed — see gori.log")
+      @host.status(I18n.sys("could not read the event feed — see gori.log"))
     end
 
     # Runner#apply_external_change already refreshed the live Scope / HostOverrides objects
@@ -443,7 +443,7 @@ module Gori::Tui
       @project_view.refresh_activity(@host.session.store)
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: event feed refresh failed" }
-      @host.status("could not read the event feed — see gori.log")
+      @host.status(I18n.sys("could not read the event feed — see gori.log"))
     end
 
     def save : Nil
@@ -540,11 +540,11 @@ module Gori::Tui
     def project_copy : Nil
       text = @project_view.desc_copy_text
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # The description selection (or current line) text without copying — "Send selection to".
@@ -555,11 +555,11 @@ module Gori::Tui
     def project_copy_all : Nil
       text = @project_view.desc_copy_all
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied description to clipboard (#{written}b)#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied description to clipboard (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # Bare `y` in the description: the selection when one is held, else the WHOLE description.
@@ -665,7 +665,7 @@ module Gori::Tui
       @project_view.activity_load_more(@host.session.store)
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: paging the event feed failed" }
-      @host.status("could not read more of the event feed — see gori.log")
+      @host.status(I18n.sys("could not read more of the event feed — see gori.log"))
     end
 
     # --- ACTIVITY verbs (`s` `l` `a` `/` `r` `⇧X` via the keymap + the pane's action menu) ---
@@ -696,11 +696,11 @@ module Gori::Tui
     def activity_clear_filters : Nil
       @project_view.focus_pane(:activity)
       unless @project_view.activity_clear_filters
-        @host.status("activity: no filters set")
+        @host.status(I18n.sys("activity: no filters set"))
         return
       end
       reload_activity
-      @host.status("activity: filters cleared")
+      @host.status(I18n.sys("activity: filters cleared"))
     end
 
     def activity_find : Nil
@@ -736,7 +736,7 @@ module Gori::Tui
     # the pane answered a keypress with nothing at all while `d` two methods down explained
     # itself. Three panes on this tab had the same split.
     def scope_edit_rule : Nil
-      rule = @project_view.selected_rule || return @host.status("no scope rule selected")
+      rule = @project_view.selected_rule || return @host.status(I18n.sys("no scope rule selected"))
       @project_view.focus_pane(:scope)
       @host.open_scope_rule_editor(rule.id, rule.kind, rule.match_type, rule.pattern)
     end
@@ -746,7 +746,7 @@ module Gori::Tui
     # the four, a scope rule is the one whose loss changes what the proxy lets through, so an
     # accidental keypress here is the most expensive of the set.
     def scope_delete_rule : Nil
-      rule = @project_view.selected_rule || return @host.status("no scope rule selected")
+      rule = @project_view.selected_rule || return @host.status(I18n.sys("no scope rule selected"))
       label = "#{rule.include? ? "incl" : "excl"} #{rule.match_type} #{rule.pattern}"
       @host.confirm(I18n.ui("DELETE SCOPE RULE"), I18n.sys("Delete “%{name}”? This can't be undone.", name: label),
         confirm_label: I18n.ui("delete"), danger: true) do
@@ -754,9 +754,9 @@ module Gori::Tui
         # traffic, and reporting "removed" over one that still gates is the failure this
         # branch exists to prevent. Selection cannot have moved — the confirm is modal.
         if pat = @project_view.scope_delete
-          @host.status("scope rule deleted: #{pat}#{scope_blackhole_note}")
+          @host.status(I18n.sys("scope rule deleted: %{pat}%{scope_blackhole_note}", pat: pat, scope_blackhole_note: scope_blackhole_note))
         else
-          @host.status("scope rule NOT removed (project busy) — it still gates traffic")
+          @host.status(I18n.sys("scope rule NOT removed (project busy) — it still gates traffic"))
         end
       end
     end
@@ -779,19 +779,19 @@ module Gori::Tui
     def apply_scope_rule(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Bool
       case @project_view.commit_scope_rule(kind, match_type, pattern, edit_id)
       when :empty
-        @host.status("scope: empty pattern")
+        @host.status(I18n.sys("scope: empty pattern"))
         false
       when :invalid
-        @host.status("scope: #{Scope.validation_error(match_type, pattern.strip) || "invalid pattern"}")
+        @host.status(I18n.sys("scope: %{error}", error: Scope.validation_error(match_type, pattern.strip) || I18n.sys("invalid pattern")))
         false
       when :dup
-        @host.status("scope: duplicate rule")
+        @host.status(I18n.sys("scope: duplicate rule"))
         false
       when :failed
         # The store refused the write (busy/locked/closing). Distinct from :dup on purpose —
         # the scope is UNCHANGED and still gating traffic, and a retry is worth making, which
         # is the opposite of what "duplicate rule" tells the operator to do.
-        @host.status("scope rule NOT saved (store busy or unwritable) — the scope is unchanged")
+        @host.status(I18n.sys("scope rule NOT saved (store busy or unwritable) — the scope is unchanged"))
         false
       when :ok
         n = @host.session.scope.size
@@ -908,31 +908,31 @@ module Gori::Tui
     end
 
     def hostov_edit_entry : Nil
-      return @host.status("no host override selected") unless @project_view.selected_override_host
+      return @host.status(I18n.sys("no host override selected")) unless @project_view.selected_override_host
       @host.focus_body
       @project_view.ov_edit_start
     end
 
     def hostov_delete_entry : Nil
-      host = @project_view.selected_override_host || return @host.status("no host override selected")
+      host = @project_view.selected_override_host || return @host.status(I18n.sys("no host override selected"))
       @host.confirm(I18n.ui("DELETE HOST OVERRIDE"), I18n.sys("Delete the override for “%{host}”? This can't be undone.", host: host),
         confirm_label: I18n.ui("delete"), danger: true) do
         if removed = @project_view.ov_delete
-          @host.status("host override deleted: #{removed}")
+          @host.status(I18n.sys("host override deleted: %{removed}", removed: removed))
         else
-          @host.status("host override NOT deleted (project busy) — it is still in effect")
+          @host.status(I18n.sys("host override NOT deleted (project busy) — it is still in effect"))
         end
       end
     end
 
     private def commit_override : Nil
       case @project_view.ov_commit
-      when :empty   then @host.status("host override: empty")
+      when :empty   then @host.status(I18n.sys("host override: empty"))
       when :invalid then @host.status(%(host override: need "IP host" — a valid IP + a hostname))
-      when :dup     then @host.status("host override: host already mapped — edit it (e)")
-      when :failed  then @host.status("host override NOT saved (store busy or unwritable) — nothing changed")
-      when :updated then @host.status("host override updated — #{@host.session.host_overrides.size} total")
-      when :ok      then @host.status("host override added — #{@host.session.host_overrides.size} total")
+      when :dup     then @host.status(I18n.sys("host override: host already mapped — edit it (e)"))
+      when :failed  then @host.status(I18n.sys("host override NOT saved (store busy or unwritable) — nothing changed"))
+      when :updated then @host.status(I18n.sys("host override updated — %{host_overrides} total", host_overrides: @host.session.host_overrides.size))
+      when :ok      then @host.status(I18n.sys("host override added — %{host_overrides} total", host_overrides: @host.session.host_overrides.size))
       end
     end
 
@@ -971,13 +971,13 @@ module Gori::Tui
     end
 
     def env_edit_var : Nil
-      return @host.status("no env var selected") unless @project_view.selected_env_key
+      return @host.status(I18n.sys("no env var selected")) unless @project_view.selected_env_key
       @host.focus_body
       @project_view.env_edit_start
     end
 
     def env_delete_var : Nil
-      key = @project_view.selected_env_key || return @host.status("no env var selected")
+      key = @project_view.selected_env_key || return @host.status(I18n.sys("no env var selected"))
       # The KEY, never the value — a confirm is a modal an operator may be sharing a screen on.
       @host.confirm(I18n.ui("DELETE ENV VAR"), I18n.sys("Delete “%{name}”? This can't be undone.", name: key),
         confirm_label: I18n.ui("delete"), danger: true) do
@@ -1050,12 +1050,12 @@ module Gori::Tui
 
     private def commit_project_env : Nil
       case @project_view.env_commit
-      when :empty then @host.status("env var: empty")
+      when :empty then @host.status(I18n.sys("env var: empty"))
       when :invalid then @host.status( # The KEY rule spelled out, as the global editor's copy of this message already did — a
       # rejected entry is usually a key with a dash or a leading digit, so naming the shape is
       # the difference between one retry and three.
 %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*))
-      when :dup then @host.status("env var: KEY already defined")
+      when :dup then @host.status(I18n.sys("env var: KEY already defined"))
       when :ok
         # See `env_delete_var`: the store answers whether the write committed, and this is the
         # surface where a false "saved" is least recoverable — nothing here re-reads the store,
@@ -1093,7 +1093,7 @@ module Gori::Tui
     private def commit_project_env_prefix : Nil
       kind, prefix = @project_view.env_prefix_commit
       case kind
-      when :empty then @host.status("env prefix: empty")
+      when :empty then @host.status(I18n.sys("env prefix: empty"))
       when :ok
         Settings.env_prefix = prefix
         ok = Settings.save

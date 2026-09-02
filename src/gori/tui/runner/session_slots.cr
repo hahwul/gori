@@ -59,7 +59,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # The slot was deleted between the card opening and ↵. Reported rather than swallowed:
       # a silent no-op leaves the previous identity active while the operator believes they
       # switched.
-      @toast = "session slot #{name.inspect} is gone — the send context is unchanged"
+      @toast = I18n.sys("session slot %{name} is gone — the send context is unchanged", name: name.inspect)
       return
     end
     @toast = name ? "sending as #{name}" : "sending as captured — no header overlay"

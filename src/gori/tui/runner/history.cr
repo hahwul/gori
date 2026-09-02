@@ -4,14 +4,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Toggle whitespace reveal (·→␍␊) in the req/res views — for smuggling tests.
   def toggle_reveal : Nil
     @reveal = !@reveal
-    @toast = "whitespace: #{@reveal ? "on (·→␍␊)" : "off"}"
+    @toast = I18n.sys("whitespace: %{state}", state: @reveal ? I18n.sys("on (·→␍␊)") : I18n.sys("off"))
   end
 
   # Toggle pretty-print of req/res bodies (display only) — global like reveal, so a
   # single `p` flips both History detail and the Repeater response.
   def toggle_pretty : Nil
     @pretty = !@pretty
-    @toast = "pretty bodies: #{@pretty ? "on" : "off"}"
+    @toast = I18n.sys("pretty bodies: %{state}", state: @pretty ? I18n.sys("on") : I18n.sys("off"))
   end
 
   # --- History / detail ExecContext --- (delegated to HistoryController)

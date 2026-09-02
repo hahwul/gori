@@ -202,7 +202,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       next unless ic.forward(it.id)
       secs = @intercept_max_hold_ms // 1000
       goto = (fid = it.flow_id) ? Jobs::Goto.new(:history, fid) : nil
-      @notifications.push(:warn, "auto-forwarded held #{it.label} (no decision after #{secs}s)", goto, source: "app")
+      @notifications.push(:warn, I18n.sys("auto-forwarded held %{label} (no decision after %{secs}s)", label: it.label, secs: secs), goto, source: "app")
       reaped = true
     end
     reaped

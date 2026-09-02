@@ -1,6 +1,7 @@
 require "./probe/mode"
 require "./rule_set_change"
 require "./store"
+require "./i18n"
 
 module Gori
   # What a PEER changed under a running session, turned into the line the operator reads (#772).
@@ -142,13 +143,15 @@ module Gori
         if rules && extract
           # Both halves of the send path at once. Naming neither count keeps the line short enough
           # to still say the thing that matters, which is the consequence.
-          "Match&Replace and extract rules changed by #{author(by_agent)} — this session sends different bytes now"
+          I18n.sys("Match&Replace and extract rules changed by %{author} — this session sends different bytes now", author: author(by_agent))
         elsif change = rules
-          "#{subject(change, "Match&Replace rule")} changed by #{author(by_agent)} — " \
-          "#{consequence(change, "rewriting live traffic here", "a different rule now wins on the same header")}"
+          subject = change.changed.zero? ? I18n.sys("Match&Replace rule order") : I18n.sys_n(change.changed, "%{n} Match&Replace rule", "%{n} Match&Replace rules", n: change.changed)
+          I18n.sys("%{subject} changed by %{author} — %{consequence}", subject: subject, author: author(by_agent),
+            consequence: consequence(change, I18n.sys("rewriting live traffic here"), I18n.sys("a different rule now wins on the same header")))
         elsif change = extract
-          "#{subject(change, "extract rule")} changed by #{author(by_agent)} — " \
-          "#{consequence(change, "$KEY may expand to a different value here", "they are read in a different order")}"
+          subject = change.changed.zero? ? I18n.sys("extract rule order") : I18n.sys_n(change.changed, "%{n} extract rule", "%{n} extract rules", n: change.changed)
+          I18n.sys("%{subject} changed by %{author} — %{consequence}", subject: subject, author: author(by_agent),
+            consequence: consequence(change, I18n.sys("$KEY may expand to a different value here"), I18n.sys("they are read in a different order")))
         else
           return nil
         end
@@ -158,23 +161,14 @@ module Gori
     # The pipe-rule line. Split out of `rule_notice` so that method keeps one shape per case.
     private def executes_notice(change : RuleSetChange, extract : RuleSetChange?,
                                 by_agent : Bool) : Notice
-      one = change.executes == 1
       # `flush` has already taken and cleared BOTH held changes, so an extract change that
       # arrived in the same burst cannot be re-announced later — returning here without it
       # would drop the "$KEY may expand to a different value" warning outright. It rides on
       # the end of this line instead: the pipe fact leads because it is the bigger one.
-      also = extract ? " (the extract rules moved too — $KEY may expand to a different value here)" : ""
+      also = extract ? I18n.sys(" (the extract rules moved too — $KEY may expand to a different value here)") : ""
       Notice.new(:warn,
-        "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
-        "#{author(by_agent)} — #{one ? "it runs" : "they run"} a local command " \
-        "here, with your privileges, on every message #{one ? "it matches" : "they match"}#{also}",
+        I18n.sys_n(change.executes, "%{n} Match&Replace pipe rule added or changed by %{author} — it runs a local command here, with your privileges, on every message it matches%{also}", "%{n} Match&Replace pipe rules added or changed by %{author} — they run a local command here, with your privileges, on every message they match%{also}", n: change.executes, author: author(by_agent), also: also),
         :rewriter, by_agent)
-    end
-
-    # What moved. A change that added, removed and edited NOTHING can only have moved in ORDER, and
-    # a line reading "0 rules changed" would be both wrong and useless.
-    private def subject(change : RuleSetChange, noun : String) : String
-      change.changed.zero? ? "#{noun} order" : counted(change.changed, noun)
     end
 
     # What it means for the wire.
@@ -183,19 +177,15 @@ module Gori
     # burst that edited one rule AND moved another: the count then carries the edit and nothing
     # would carry the precedence move, which is the only thing that field was added for.
     private def consequence(change : RuleSetChange, live : String, reorder : String) : String
-      return "none are enabled, nothing on the wire" if change.enabled.zero?
+      return I18n.sys("none are enabled, nothing on the wire") if change.enabled.zero?
       return reorder if change.changed.zero?
-      change.reordered ? "#{live}, and in a new order" : live
+      change.reordered ? I18n.sys("%{live}, and in a new order", live: live) : live
     end
 
     # Who to name. "an agent" only when the feed says so; "another session" is the honest answer for
     # everything else, including the peers that write no feed row at all.
     private def author(by_agent : Bool) : String
-      by_agent ? "an agent" : "another session"
-    end
-
-    private def counted(n : Int32, noun : String) : String
-      "#{n} #{noun}#{"s" if n != 1}"
+      by_agent ? I18n.sys("an agent") : I18n.sys("another session")
     end
 
     # A peer moved the project's probe mode and this session ADOPTED it — `@mode` is the
@@ -212,14 +202,14 @@ module Gori
         # Includes active → aggressive: aggressive probes UNSAFE methods, so an in-scope endpoint
         # can be state-mutated by the automatic pipeline. That is a widening, not a re-label.
         Notice.new(:warn,
-          "probe mode raised to #{curr.label} by #{author(by_agent)} — attack payloads are sent from here",
+          I18n.sys("probe mode raised to %{mode} by %{author} — attack payloads are sent from here", mode: curr.label, author: author(by_agent)),
           :probe, by_agent)
       elsif prev.probes_actively? && !curr.probes_actively?
         Notice.new(:info,
-          "probe mode lowered to #{curr.label} by #{author(by_agent)} — active probing stopped here",
+          I18n.sys("probe mode lowered to %{mode} by %{author} — active probing stopped here", mode: curr.label, author: author(by_agent)),
           :probe, by_agent)
       else
-        Notice.new(:info, "probe mode set to #{curr.label} by #{author(by_agent)}", :probe, by_agent)
+        Notice.new(:info, I18n.sys("probe mode set to %{mode} by %{author}", mode: curr.label, author: author(by_agent)), :probe, by_agent)
       end
     end
   end

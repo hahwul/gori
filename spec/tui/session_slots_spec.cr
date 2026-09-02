@@ -144,7 +144,7 @@ describe "the Repeater's send line" do
     # editor shows one request and the wire carries another. The status line is where the two
     # are reconciled.
     body = slot_code("tui", "controllers", "repeater_controller.cr").join('\n')
-    line = body[/@host\.status\("sending.*?\n/]
+    line = body[/@host\.status\((?:I18n\.sys\()?"sending.*?\n/]
     line.should contain("sending_as")
     body[/def sending_as.*?\n    end/m].should contain("Gori::Env.active_slot_name")
   end

@@ -131,7 +131,7 @@ module Gori::Tui
       # The write's outcome is the caller's answer: `false` keeps the form open, which is what
       # stops an identity from looking saved and being gone at the next restart.
       unless replace_identities(list)
-        @host.status("authorize: the project could not be written — identity not saved")
+        @host.status(I18n.sys("authorize: the project could not be written — identity not saved"))
         return false
       end
       true
@@ -220,14 +220,14 @@ module Gori::Tui
           @host.status("authorize: passive replay ON, but this project has no scope include rule — " \
                        "nothing is replayed until you add one (Project → Scope)")
         else
-          @host.status("authorize: passive replay ON — in-scope requests any identity changes will be replayed")
+          @host.status(I18n.sys("authorize: passive replay ON — in-scope requests any identity changes will be replayed"))
         end
         @view.passive_note = passive_readout
       else
         @view.passive_note = nil
         # The watcher fiber stays parked on the channel; it re-checks the flag per event, so
         # turning passive off stops the work without needing to kill (and later re-spawn) it.
-        @host.status("authorize: passive replay off")
+        @host.status(I18n.sys("authorize: passive replay off"))
       end
     end
 
@@ -391,7 +391,7 @@ module Gori::Tui
         @passive_skips[:out_of_scope] += 1
         host = detail.row.host
         if @passive_unscoped.size < UNSCOPED_REPORT_CAP && @passive_unscoped.add?(host)
-          @host.status("authorize: #{host} is outside project scope — passive replay only sends to scoped hosts")
+          @host.status(I18n.sys("authorize: %{host} is outside project scope — passive replay only sends to scoped hosts", host: host))
         end
         return false
       end
@@ -403,7 +403,7 @@ module Gori::Tui
       if @view.size >= PASSIVE_CAP
         unless @passive_capped
           @passive_capped = true
-          @host.status("authorize: passive queue is full at #{PASSIVE_CAP} — clear it to keep going")
+          @host.status(I18n.sys("authorize: passive queue is full at %{PASSIVE_CAP} — clear it to keep going", PASSIVE_CAP: PASSIVE_CAP))
         end
         return false
       end
@@ -498,8 +498,8 @@ module Gori::Tui
     # Requests go out one at a time and each finished one streams back its own Target, so the
     # table fills as the run proceeds. The scope gate (Outbound) is the one Probe active uses.
     def run(mode : Symbol = :pending) : Nil
-      return @host.status("send requests here first (Send to Authorize from History)") unless @view.any_requests?
-      return @host.status("a run is already in flight") if running?
+      return @host.status(I18n.sys("send requests here first (Send to Authorize from History)")) unless @view.any_requests?
+      return @host.status(I18n.sys("a run is already in flight")) if running?
       batch = select_batch(mode)
       return if batch.nil? # select_batch already said why
                 # `identities`, not `@view.identities`: the loader is what reads the project's persisted
@@ -532,7 +532,7 @@ module Gori::Tui
       @active_gen = gen
       noun = "#{batch.size} request#{batch.size == 1 ? "" : "s"}"
       @job_id = @host.jobs.start(:authorize, noun, Jobs::Goto.new(:authorize))
-      @host.status("authorize: replaying #{noun} under #{idents.size} identities…")
+      @host.status(I18n.sys("authorize: replaying %{noun} under %{idents} identities…", noun: noun, idents: idents.size))
       # Snapshot the details now — the background fiber must not touch the view.
       jobs = batch.map { |e| {e.id, e.detail} }
       stop = -> { @view.stop_requested? }
@@ -569,18 +569,18 @@ module Gori::Tui
       when :all
         batch = @view.runnable
         return batch unless batch.empty?
-        @host.status("nothing to run")
+        @host.status(I18n.sys("nothing to run"))
       when :one
         if e = @view.selected_entry
           return [e] unless e.state == :running
-          @host.status("that request is already running")
+          @host.status(I18n.sys("that request is already running"))
         else
-          @host.status("select a request first")
+          @host.status(I18n.sys("select a request first"))
         end
       else
         batch = @view.pending_entries
         return batch unless batch.empty?
-        @host.status("every request already has a result — ⇧R re-runs them all")
+        @host.status(I18n.sys("every request already has a result — ⇧R re-runs them all"))
       end
       nil
     end
@@ -597,7 +597,7 @@ module Gori::Tui
     private def comparable_batch(batch : Array(AuthorizeView::Entry),
                                  idents : Array(Authorize::Identity)) : Array(AuthorizeView::Entry)?
       if why = identity_problem(idents)
-        @host.status("authorize: #{why}")
+        @host.status(I18n.sys("authorize: %{why}", why: why))
         return nil
       end
       decline_unchanged(batch, idents)
@@ -664,7 +664,7 @@ module Gori::Tui
       @batch_declined = declined.size
       @batch_declined_reason = declined.first?
       return kept unless kept.empty?
-      @host.status("authorize: nothing to send — #{skip_phrase(declined.size, declined.first?)}")
+      @host.status(I18n.sys("authorize: nothing to send — %{skip_phrase}", skip_phrase: skip_phrase(declined.size, declined.first?)))
       nil
     end
 
@@ -678,20 +678,20 @@ module Gori::Tui
     # Ask the run to stop. Cooperative: the flag is polled between requests AND between
     # identities, so the request in flight stops at its next identity rather than mid-send.
     def stop : Nil
-      return @host.status("nothing is running") unless running?
-      return @host.status("already stopping…") if @view.stop_requested?
+      return @host.status(I18n.sys("nothing is running")) unless running?
+      return @host.status(I18n.sys("already stopping…")) if @view.stop_requested?
       @view.request_stop
-      @host.status("authorize: stopping…")
+      @host.status(I18n.sys("authorize: stopping…"))
     end
 
     # Drop the cursor request from the queue. Refused while it is mid-run — its outcome is
     # still on the way.
     def remove_selected : Nil
-      return @host.status("nothing to remove") unless @view.any_requests?
+      return @host.status(I18n.sys("nothing to remove")) unless @view.any_requests?
       unless @view.remove_selected
-        return @host.status("that request is still running — ^X to stop it first")
+        return @host.status(I18n.sys("that request is still running — ^X to stop it first"))
       end
-      @host.status("authorize: removed — #{@view.size} left")
+      @host.status(I18n.sys("authorize: removed — %{view} left", view: @view.size))
     end
 
     # The one clear-all verb that used to go straight through. It was menu-only when it was
@@ -705,9 +705,9 @@ module Gori::Tui
     # count is named because "the queue" understates what goes with it — every identity's
     # result for every request, which is the work the tab exists to produce.
     def clear : Nil
-      return @host.status("a run is in flight — ^X to stop it first") if running?
+      return @host.status(I18n.sys("a run is in flight — ^X to stop it first")) if running?
       n = @view.size
-      return @host.status("authorize: nothing to clear") if n <= 0
+      return @host.status(I18n.sys("authorize: nothing to clear")) if n <= 0
       @host.confirm(I18n.ui("CLEAR AUTHORIZE"),
         I18n.sys_n(n, "Empty the queue of %{n} request?\n\nEvery identity's result goes with it.\nThis can't be undone.", "Empty the queue of %{n} requests?\n\nEvery identity's result goes with them.\nThis can't be undone.", n: n),
         confirm_label: I18n.ui("clear"), danger: true) { clear_now }
@@ -729,7 +729,7 @@ module Gori::Tui
       # cleared the tab and fixed the scope.
       @passive_unscoped.clear
       @view.passive_note = passive_readout if @passive
-      @host.status("authorize: cleared")
+      @host.status(I18n.sys("authorize: cleared"))
     end
 
     # Drain finished requests (main fiber, per render tick). Returns true when something landed.
@@ -766,7 +766,7 @@ module Gori::Tui
       return unless o.gen == @active_gen
       return finish_batch if o.done
       # A batch-level error (no entry): report it and let the marker close the batch.
-      return @host.status("authorize: #{o.error}") if o.entry_id == 0
+      return @host.status(I18n.sys("authorize: %{error}", error: o.error)) if o.entry_id == 0
       if t = o.target
         @view.apply_result(o.entry_id, t)
       else

@@ -1578,21 +1578,21 @@ module Gori::Tui
     private def fuzz_plan_error(ex : Fuzz::PlanError) : String
       case ex.reason
       in Fuzz::PlanError::Reason::NoPositions
-        "mark a position first — ^A params · ^K word"
+        I18n.sys("mark a position first — ^A params · ^K word")
       in Fuzz::PlanError::Reason::NoTarget, Fuzz::PlanError::Reason::BadTarget
-        "invalid target — use scheme://host[:port]/path"
+        I18n.sys("invalid target — use scheme://host[:port]/path")
       in Fuzz::PlanError::Reason::NoPayloads
-        "add a payload set — ^O config · + Add set (^L for a List)"
+        I18n.sys("add a payload set — ^O config · + Add set (^L for a List)")
       in Fuzz::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        I18n.sys("unresolved env %{detail} — add it in the Project tab's ENV pane", detail: ex.detail)
       in Fuzz::PlanError::Reason::BadRaceCount
-        "race needs at least 2 connections — set Race to 2 or more (^O config)"
+        I18n.sys("race needs at least 2 connections — set Race to 2 or more (^O config)")
       in Fuzz::PlanError::Reason::TlsPreset
         # The ORDINARY path here, unlike the Repeater's `␣T` (which cycles known names and so
         # cannot produce one): the advanced card's TLS fingerprint row is a TEXT field, so a
         # typo reaches this branch on the operator's first run. `ex.message` already names
         # every preset that does exist.
-        ex.message || "unknown TLS fingerprint preset"
+        ex.message || I18n.sys("unknown TLS fingerprint preset")
       end
     end
 

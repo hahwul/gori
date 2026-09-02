@@ -190,7 +190,7 @@ module Gori::Tui
       @sessions << make_session("", nil)
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("new JWT session (#{@sessions.size} open)")
+      @host.status(I18n.sys("new JWT session (%{sessions} open)", sessions: @sessions.size))
     end
 
     # Seed a NEW session from an externally-supplied token (the "Send selection to → JWT"
@@ -200,7 +200,7 @@ module Gori::Tui
       @sessions << s
       @idx = @sessions.size - 1
       @host.goto_tab(:jwt)
-      @host.status("sent selection to JWT (#{text.bytesize}b)")
+      @host.status(I18n.sys("sent selection to JWT (%{bytesize}b)", bytesize: text.bytesize))
     end
 
     def jwt_duplicate : Nil
@@ -215,7 +215,7 @@ module Gori::Tui
       @sessions << dup
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("duplicated JWT session (#{@sessions.size} open)")
+      @host.status(I18n.sys("duplicated JWT session (%{sessions} open)", sessions: @sessions.size))
     end
 
     def jwt_close : Nil
@@ -695,7 +695,7 @@ module Gori::Tui
       i = Jwt::ALGS.index(s.alg) || 0
       s.alg = Jwt::ALGS[(i + 1) % Jwt::ALGS.size]
       recompute_encode(s)
-      @host.status("alg = #{s.alg}")
+      @host.status(I18n.sys("alg = %{alg}", alg: s.alg))
     end
 
     # Seed the ENCODE editors from the INPUT token's decoded claims + switch to ENCODE.
@@ -703,13 +703,13 @@ module Gori::Tui
       s = cur
       token = s.input.text.strip
       if token.empty?
-        @host.status("INPUT is empty — nothing to load")
+        @host.status(I18n.sys("INPUT is empty — nothing to load"))
         return
       end
       h = Jwt.header_json(token)
       p = Jwt.payload_json(token)
       if h.empty? && p.empty?
-        @host.status("INPUT is not a decodable JWT")
+        @host.status(I18n.sys("INPUT is not a decodable JWT"))
         return
       end
       s.header.set_text(h)
@@ -720,7 +720,7 @@ module Gori::Tui
       s.mode = :encode
       s.pane = :header
       recompute_encode(s)
-      @host.status("loaded decoded claims into the editor")
+      @host.status(I18n.sys("loaded decoded claims into the editor"))
     end
 
     def clear_all : Nil
@@ -732,7 +732,7 @@ module Gori::Tui
       s.secret_cx = 0
       recompute_decode(s)
       recompute_encode(s)
-      @host.status("cleared")
+      @host.status(I18n.sys("cleared"))
     end
 
     # Copy the OUTPUT (re-signed) token.
@@ -741,7 +741,7 @@ module Gori::Tui
       if s.output_ok? && !s.output.empty?
         do_copy(s.output, "token")
       else
-        @host.status("no valid token to copy")
+        @host.status(I18n.sys("no valid token to copy"))
       end
     end
 
@@ -751,7 +751,7 @@ module Gori::Tui
       if a = s.attacks[s.view.attacks_selected]?
         do_copy(a.token, a.name)
       else
-        @host.status("no attack selected")
+        @host.status(I18n.sys("no attack selected"))
       end
     end
 
@@ -816,11 +816,11 @@ module Gori::Tui
 
     private def do_copy(text : String, label : String? = nil) : Nil
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
       else
         written = Clipboard.copy(text)
         prefix = label ? "copied \"#{label}\"" : "copied"
-        @host.status("#{prefix} (#{written}b)#{Clipboard.note(written, text)}")
+        @host.status(I18n.sys("%{prefix} (%{written}b)%{note}", prefix: prefix, written: written, note: Clipboard.note(written, text)))
       end
     end
 

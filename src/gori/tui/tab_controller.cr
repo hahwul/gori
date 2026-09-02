@@ -394,7 +394,7 @@ module Gori::Tui
     # for it would fire constantly.
     def report_replaced(n : Int32) : Nil
       return unless n > 1
-      @host.status("replaced #{n} chars — ^Z to undo")
+      @host.status(I18n.sys("replaced %{n} chars — ^Z to undo", n: n))
     end
 
     # Whether a press in this tab's body can start a DRAG — pointer motion with the button

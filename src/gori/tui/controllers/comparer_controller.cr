@@ -78,7 +78,7 @@ module Gori::Tui
       @sessions << ComparerView.new
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("new comparison (#{@sessions.size} open)")
+      @host.status(I18n.sys("new comparison (%{sessions} open)", sessions: @sessions.size))
     end
 
     # Close active session. Last session is reset to blank (always keep ≥1).
@@ -86,11 +86,11 @@ module Gori::Tui
       if @sessions.size <= 1
         @sessions[0].reset!
         @idx = 0
-        @host.status("comparison cleared")
+        @host.status(I18n.sys("comparison cleared"))
       else
         @sessions.delete_at(@idx)
         @idx = @idx.clamp(0, @sessions.size - 1)
-        @host.status("comparison closed (#{@sessions.size} open)")
+        @host.status(I18n.sys("comparison closed (%{sessions} open)", sessions: @sessions.size))
       end
     end
 
@@ -98,7 +98,7 @@ module Gori::Tui
       @sessions << view.duplicate
       @idx = @sessions.size - 1
       @host.request_focus(:body)
-      @host.status("duplicated comparison (#{@sessions.size} open)")
+      @host.status(I18n.sys("duplicated comparison (%{sessions} open)", sessions: @sessions.size))
     end
 
     def view_at(idx : Int32) : ComparerView?

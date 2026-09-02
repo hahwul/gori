@@ -12,15 +12,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # 12 flows on 2 hosts adds 2 rules, not 12.
   def scope_add_host : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     # Resolved through the store, never the view's rows: a kept mark can outlive the
     # visible window (filter change, trim, follow reload).
     hosts = ids.compact_map { |id| @session.store.flow_row(id).try(&.host) }.uniq!
-    return (@toast = "no flows left to add") if hosts.empty?
+    return (@toast = I18n.sys("no flows left to add")) if hosts.empty?
     # A host gori itself could not store as a rule — a flow captured with no Host header at
     # all, say — is named, not counted as added and not blamed on the store below.
     hosts, unusable = hosts.map(&.strip).partition { |h| !h.empty? && Scope.valid?("host", h) }
-    return (@toast = "no usable host on the selected flow#{ids.size == 1 ? "" : "s"}") if hosts.empty?
+    return (@toast = I18n.sys_n(ids.size, "no usable host on the selected flow", "no usable host on the selected flows", ids: ids.size)) if hosts.empty?
     # `add` answers whether the rule LANDED and `enable` whether the lens flag COMMITTED;
     # both answers used to be discarded and the toast said "added <host> to scope" either way.
     # A busy or locked project was therefore told hosts were scoped while the scope had not
@@ -75,7 +75,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.view.reload(@session.store)
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
     probe_controller.view.reload(@session.store) if @active_tab == :probe
-    return (@toast = "scope lens NOT changed — the project store is busy or unwritable") unless committed
+    return (@toast = I18n.sys("scope lens NOT changed — the project store is busy or unwritable")) unless committed
     project_controller.toast_scope_state
   end
 

@@ -4,7 +4,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # CROSS-TAB: open the config popup for History's selected flow (space → Send to Sequencer).
   def sequence_selected : Nil
     id = history_target_flow_id
-    return (@toast = "select a flow first") unless id
+    return (@toast = I18n.sys("select a flow first")) unless id
     open_sequence_config(sequencer_controller.build_seed_from_flow(id))
   end
 
@@ -18,11 +18,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # CROSS-TAB: open the config popup for the selected Sitemap endpoint's captured flow.
   def sequence_from_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
-    return (@toast = "select an endpoint to send") unless ep
+    return (@toast = I18n.sys("select an endpoint to send")) unless ep
     if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
       open_sequence_config(sequencer_controller.build_seed_from_flow(id))
     else
-      @toast = "no captured request for this path — capture it, or use Discover"
+      @toast = I18n.sys("no captured request for this path — capture it, or use Discover")
     end
   end
 
@@ -52,7 +52,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Open the destination-path popup, then write the randomness report there. `format` is
   # :markdown | :json — the same pair `issues_export` offers, and the same overlay.
   def sequence_export(format : Symbol) : Nil
-    return (@toast = "open a sequencer session first") unless sequencer_controller.current_view
+    return (@toast = I18n.sys("open a sequencer session first")) unless sequencer_controller.current_view
     json = format == :json
     kind = json ? :sequence_json : :sequence_md
     open_export(kind, File.join(Dir.current, "sequence-report.#{json ? "json" : "md"}")) do |p|

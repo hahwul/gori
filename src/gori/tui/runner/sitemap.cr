@@ -57,13 +57,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return sitemap_repeater_marked if sitemap_controller.marked_node_count > 0
     ep = sitemap_controller.view.selected_endpoint
     unless ep
-      @toast = "select an endpoint to send"
+      @toast = I18n.sys("select an endpoint to send")
       return
     end
     if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
       repeater_flow(id)
     else
-      @toast = "no captured request for this path — capture it, or use Discover"
+      @toast = I18n.sys("no captured request for this path — capture it, or use Discover")
     end
   end
 
@@ -78,7 +78,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sitemap_scope_add : Nil
     seed = sitemap_controller.view.selected_scope_seed
     unless seed
-      @toast = "select a host or path to scope"
+      @toast = I18n.sys("select a host or path to scope")
       return
     end
     # Reload on success: the tree shows a scope marker per host whenever rules EXIST (lens or
@@ -98,11 +98,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sitemap_open_flow : Nil
     ep = sitemap_controller.view.selected_endpoint
     unless ep
-      @toast = "select an endpoint to open"
+      @toast = I18n.sys("select an endpoint to open")
       return
     end
     unless id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-      @toast = "no captured request for this path — capture it, or use Discover"
+      @toast = I18n.sys("no captured request for this path — capture it, or use Discover")
       return
     end
     if history_controller.view.open_detail_id(id, @session.store)
@@ -113,7 +113,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # The resolve above just saw this id, so only a prune racing between the two reads
       # lands here — say so rather than repeating "no captured request", which would read
       # as "this path was never captured".
-      @toast = "that request was pruned since the tree was built"
+      @toast = I18n.sys("that request was pruned since the tree was built")
     end
   end
 
@@ -131,7 +131,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
     end.uniq!
     if ids.empty?
-      @toast = "no captured requests for the #{plural(wanted, "marked path")} — capture them, or use Discover"
+      @toast = I18n.sys_n(wanted, "no captured requests for the %{n} marked path — capture it, or use Discover", "no captured requests for the %{n} marked paths — capture them, or use Discover", n: wanted)
       return
     end
     # One flow behind the whole set — a single mark, or N marks that share a representative
@@ -148,7 +148,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       end
       # `wanted`, not targets.size, is the denominator: a marked path with no captured request
       # never became an id, and a batch that silently drops it reads as "sent everything".
-      @toast = "opened #{opened} of #{plural(wanted, "marked path")}"
+      @toast = I18n.sys_n(wanted, "opened %{opened} of %{n} marked path", "opened %{opened} of %{n} marked paths", opened: opened, n: wanted)
     end
   end
 end

@@ -14,7 +14,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       begin
         @session.store.search(@scope.filter, 2000, raise_on_error: true)
       rescue ex
-        @toast = "could not list flows: #{ex.message}"
+        @toast = I18n.sys("could not list flows: %{message}", message: ex.message)
         return
       end
     fp = FlowPicker.new(rows, slot, scoped: @scope.active?)
@@ -26,9 +26,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     if row = fp.selected_row
       if detail = @session.store.get_flow(row.id)
         comparer_controller.view.set_slot(slot, detail)
-        @toast = "comparer: set #{slot.to_s.upcase} — #{row.method} #{row.host}"
+        @toast = I18n.sys("comparer: set %{slot} — %{method} %{host}", slot: slot.to_s.upcase, method: row.method, host: row.host)
       else
-        @toast = "flow no longer available"
+        @toast = I18n.sys("flow no longer available")
       end
     end
     true
@@ -36,22 +36,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def comparer_swap : Nil
     comparer_controller.view.swap
-    @toast = "comparer: swapped A ⇄ B"
+    @toast = I18n.sys("comparer: swapped A ⇄ B")
   end
 
   def comparer_toggle_pane : Nil
     view = comparer_controller.view
     view.toggle_pane
-    @toast = "comparer: comparing #{view.pane}s"
+    @toast = I18n.sys("comparer: comparing %{pane}s", pane: view.pane)
   end
 
   # `n` / `N`: walk the diff by CHANGE rather than by row. A 900-line response whose diff is
   # one line put that line 400 ↓ presses from the top, with nothing to ask for it directly.
   def comparer_jump_change(dir : Int32) : Nil
     view = comparer_controller.view
-    return (@toast = "pick flow A and flow B first") unless view.both_set?
+    return (@toast = I18n.sys("pick flow A and flow B first")) unless view.both_set?
     unless view.jump_change(dir)
-      @toast = "no differences — the two are identical"
+      @toast = I18n.sys("no differences — the two are identical")
       return
     end
     @toast = nil # the footer's "n/total" readout is the answer; a toast would just cover it
@@ -61,7 +61,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # around every change — the diff of a long response, on one screen.
   def comparer_toggle_fold : Nil
     view = comparer_controller.view
-    return (@toast = "pick flow A and flow B first") unless view.both_set?
+    return (@toast = I18n.sys("pick flow A and flow B first")) unless view.both_set?
     @toast = view.toggle_fold ? "comparer: unchanged runs folded" : "comparer: showing every line"
   end
 
@@ -86,16 +86,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # on the *active* comparison sub-tab (rings A → B → A).
   def comparer_add_selected : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     return comparer_add_pair(ids) if ids.size == 2
     # 1 mark (or none — the cursor row), or 3+: keep the next-slot ring. 3+ marks has no
     # meaning for a two-slot diff, so it falls back rather than silently picking two.
-    @toast = "comparer takes 2 flows — mark exactly 2, or use the cursor row" if ids.size > 2
+    @toast = I18n.sys("comparer takes 2 flows — mark exactly 2, or use the cursor row") if ids.size > 2
     id = ids.first
     detail = @session.store.get_flow(id)
-    return (@toast = "flow no longer available") unless detail
+    return (@toast = I18n.sys("flow no longer available")) unless detail
     slot = comparer_controller.view.add_flow(detail)
-    @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
+    @toast = I18n.sys("comparer: set %{slot} — open Comparer (^P) to view the diff", slot: slot.to_s.upcase)
   end
 
   # Exactly 2 marked (#442): fill A and B directly instead of making the user guess where
@@ -105,9 +105,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     older, newer = ids.minmax
     a = @session.store.get_flow(older)
     b = @session.store.get_flow(newer)
-    return (@toast = "flow no longer available") unless a && b
+    return (@toast = I18n.sys("flow no longer available")) unless a && b
     comparer_controller.view.set_pair(a, b)
-    @toast = "comparer: A ##{older} · B ##{newer} — open Comparer (^P) to view the diff"
+    @toast = I18n.sys("comparer: A #%{older} · B #%{newer} — open Comparer (^P) to view the diff", older: older, newer: newer)
   end
 
   # CROSS-TAB: the active Repeater tab's last send → the next Comparer slot. The Repeater
@@ -116,9 +116,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Repeater send leaves no flow row for the picker to find.
   def comparer_add_repeater : Nil
     slot = repeater_controller.current_view.try(&.comparer_slot)
-    return (@toast = "send the request first (^R) — there is no response to compare") unless slot
+    return (@toast = I18n.sys("send the request first (^R) — there is no response to compare")) unless slot
     which = comparer_controller.view.add_slot(slot)
-    @toast = "comparer: set #{which.to_s.upcase} ← repeater — open Comparer (^P) to view the diff"
+    @toast = I18n.sys("comparer: set %{which} ← repeater — open Comparer (^P) to view the diff", which: which.to_s.upcase)
   end
 
   # CROSS-TAB: the Sitemap cursor's endpoint → the next Comparer slot, resolved through the
@@ -126,13 +126,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # agree about which capture a tree row stands for.
   def comparer_add_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
-    return (@toast = "select an endpoint to send") unless ep
+    return (@toast = I18n.sys("select an endpoint to send")) unless ep
     id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-    return (@toast = "no captured request for this path — capture it, or use Discover") unless id
+    return (@toast = I18n.sys("no captured request for this path — capture it, or use Discover")) unless id
     detail = @session.store.get_flow(id)
-    return (@toast = "that request was pruned since the tree was built") unless detail
+    return (@toast = I18n.sys("that request was pruned since the tree was built")) unless detail
     which = comparer_controller.view.add_flow(detail)
-    @toast = "comparer: set #{which.to_s.upcase} — open Comparer (^P) to view the diff"
+    @toast = I18n.sys("comparer: set %{which} — open Comparer (^P) to view the diff", which: which.to_s.upcase)
   end
 
   # CROSS-TAB: the selected fuzz result → the next Comparer slot. The request is the one the
@@ -142,9 +142,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the request diff both work, and only the response half comes up empty.
   def comparer_add_fuzz : Nil
     slot = fuzzer_controller.comparer_slot
-    return (@toast = "select a result first") unless slot
+    return (@toast = I18n.sys("select a result first")) unless slot
     which = comparer_controller.view.add_slot(slot)
-    @toast = "comparer: set #{which.to_s.upcase} ← fuzz — open Comparer (^P) to view the diff"
+    @toast = I18n.sys("comparer: set %{which} ← fuzz — open Comparer (^P) to view the diff", which: which.to_s.upcase)
   end
 
   # Both flows are set — the gate for the diff's row select / copy verbs.

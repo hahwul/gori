@@ -638,7 +638,7 @@ module Gori::Tui
                 # "nothing to copy" rather than a silent return: on the INPUT sample `^Y` is the ONLY
                 # copy and the footer names it, so an empty pane swallowing the chord reads as a dead
                 # key. Every sibling tab's `do_copy` answers here; this one returned.
-      return @host.status("nothing to copy") if text.empty?
+      return @host.status(I18n.sys("nothing to copy")) if text.empty?
       written = Clipboard.copy(text)
       note = Clipboard.note(written, text)
       @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
@@ -710,23 +710,23 @@ module Gori::Tui
     def install_preset(preset : RulePresets::Preset) : Nil
       n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true)
       if n == 0
-        return @host.status("preset NOT installed (project busy or unwritable)")
+        return @host.status(I18n.sys("preset NOT installed (project busy or unwritable)"))
       end
       @sub = :rules
       @sel = last_index_of_scope(Store::RuleScope::Project)
-      @host.status("installed \"#{preset.name}\" — #{n} rule#{n == 1 ? "" : "s"} added (editable, deletable like any other)")
+      @host.status(I18n.sys_n(n, "installed \"%{name}\" — %{n} rule added (editable, deletable like any other)", "installed \"%{name}\" — %{n} rules added (editable, deletable like any other)", name: preset.name, n: n))
     end
 
     def rewriter_edit : Nil
       if rule = selected_rule
         @host.open_rewriter_rule_editor(rule)
       else
-        @host.status("no rewrite rule selected")
+        @host.status(I18n.sys("no rewrite rule selected"))
       end
     end
 
     def rewriter_delete : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
       label = rule.name.empty? ? rule.pattern : rule.name
       # A global rule is deleted out of EVERY project, and the prompt has to say so — the row
       # looks the same as a project rule's apart from one badge, and the confirm is the last
@@ -748,9 +748,9 @@ module Gori::Tui
     # the change lands — the same keypress means "off in this engagement", not "off everywhere"
     # (that is ⇧X / `rewriter_toggle_default`).
     def rewriter_toggle : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
       unless rules_engine.toggle(rule.id, rule.scope)
-        return @host.status("enable/disable NOT applied (project busy) — the rule is unchanged")
+        return @host.status(I18n.sys("enable/disable NOT applied (project busy) — the rule is unchanged"))
       end
       state = rule.enabled? ? "disabled" : "enabled"
       @host.status(rule.global? ? "global rule #{state} in this project" : "rule #{state}")
@@ -758,18 +758,18 @@ module Gori::Tui
 
     # ⇧X: the global DEFAULT — what every project that has not overridden this rule follows.
     def rewriter_toggle_default : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
-      return @host.status("only a global rule has a default — this one is project-scoped") unless rule.global?
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
+      return @host.status(I18n.sys("only a global rule has a default — this one is project-scoped")) unless rule.global?
       unless rules_engine.toggle_default(rule.id)
-        return @host.status("default NOT changed (settings not writable) — the rule is unchanged")
+        return @host.status(I18n.sys("default NOT changed (settings not writable) — the rule is unchanged"))
       end
       after = rule_list.find { |r| r.global? && r.id == rule.id }
       note = after.try(&.overridden?) ? " (this project still overrides it)" : ""
-      @host.status("global rule default flipped for every project#{note}")
+      @host.status(I18n.sys("global rule default flipped for every project%{note}", note: note))
     end
 
     def rewriter_move(dir : Int32) : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
       # Only follow the rule when it actually moved: ⇧J on the last GLOBAL rule cannot push it
       # into the project block (that is a scope change, `s`), and walking the cursor there
       # anyway would read as a swap that never happened.
@@ -780,7 +780,7 @@ module Gori::Tui
         # silent no-op here reads exactly like "the rule is already at the end of its block",
         # and precedence decides which of two rules touching the same header wins — so an
         # operator who stops trying keeps testing against an order that reverts at next start.
-        @host.status("precedence NOT changed (project busy or settings not writable)")
+        @host.status(I18n.sys("precedence NOT changed (project busy or settings not writable)"))
       end
     end
 
@@ -803,12 +803,12 @@ module Gori::Tui
     # asked for — and for a `stub` rule it is an endpoint that stops reaching the origin at
     # all. For a global rule `enabled?` is its state HERE, which is the state on that row.
     def rewriter_duplicate : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
                rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
                enabled: rule.enabled?)
-        return @host.status("rule NOT duplicated (project busy or settings not writable)")
+        return @host.status(I18n.sys("rule NOT duplicated (project busy or settings not writable)"))
       end
       state = rule.enabled? ? "" : " (disabled, like the original)"
       @host.status(rule.global? ? "global rule duplicated#{state}" : "rule duplicated#{state}")
@@ -817,10 +817,10 @@ module Gori::Tui
     # `s`: move the selected rule between the global library and this project. The rule keeps
     # its fields and the state it has HERE; what changes is who else sees it.
     def rewriter_scope_toggle : Nil
-      rule = selected_rule || return @host.status("no rewrite rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no rewrite rule selected"))
       to = rule.global? ? Store::RuleScope::Project : Store::RuleScope::Global
       unless rules_engine.set_scope(rule, to)
-        return @host.status("scope NOT changed (project busy or settings not writable) — the rule is unchanged")
+        return @host.status(I18n.sys("scope NOT changed (project busy or settings not writable) — the rule is unchanged"))
       end
       # The rule moved between the two blocks, so its row moved too — follow it rather than
       # leaving the highlight on whatever slid into its old index. It lands at the END of the
@@ -832,7 +832,7 @@ module Gori::Tui
 
     def rewriter_reload : Nil
       rules_engine.reload
-      @host.status("rules reloaded")
+      @host.status(I18n.sys("rules reloaded"))
     end
 
     # Commit the editor overlay: add a new rule or update the edited one, then re-select it.
@@ -845,13 +845,13 @@ module Gori::Tui
         from = ov.edit_scope || Store::RuleScope::Project
         unless rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
                  ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from)
-          @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
+          @host.status(I18n.sys("rule NOT saved (project busy or settings not writable) — it is unchanged"))
           return true
         end
         if from != ov.scope
           moved = rule_list.find { |r| r.scope == from && r.id == id }
           if moved && !rules_engine.set_scope(moved, ov.scope)
-            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+            @host.status(I18n.sys("rule saved, but the scope change did not commit — it is still %{label}", label: from.label))
           end
         end
       else
@@ -859,7 +859,7 @@ module Gori::Tui
                  ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: ov.scope)
           # Report rather than re-select: with nothing added, `last_index_of_scope` would
           # move the highlight onto whatever already sat at the end of that block.
-          @host.status("rule NOT added (project busy or settings not writable)")
+          @host.status(I18n.sys("rule NOT added (project busy or settings not writable)"))
           return true
         end
         # A global rule lands at the end of the GLOBAL block, which is not the end of the list.
@@ -887,14 +887,14 @@ module Gori::Tui
       if rule = selected_extract_rule
         @host.open_extract_rule_editor(rule)
       else
-        @host.status("no extract rule selected")
+        @host.status(I18n.sys("no extract rule selected"))
       end
     end
 
     def extract_toggle : Nil
-      rule = selected_extract_rule || return @host.status("no extract rule selected")
+      rule = selected_extract_rule || return @host.status(I18n.sys("no extract rule selected"))
       unless bindings.toggle(rule.id)
-        return @host.status("enable/disable NOT applied (project busy) — the extract rule is unchanged")
+        return @host.status(I18n.sys("enable/disable NOT applied (project busy) — the extract rule is unchanged"))
       end
       # Disabling the WRITER also un-declares the name, so a rewrite rule naming it goes
       # back to refusing rather than injecting a value nothing is refreshing any more.
@@ -902,7 +902,7 @@ module Gori::Tui
     end
 
     def extract_delete : Nil
-      rule = selected_extract_rule || return @host.status("no extract rule selected")
+      rule = selected_extract_rule || return @host.status(I18n.sys("no extract rule selected"))
       @host.confirm(I18n.ui("DELETE EXTRACT RULE"), I18n.sys("Delete “$%{name}”? Its binding is forgotten too.", name: rule.name),
         confirm_label: I18n.ui("delete"), danger: true) do
         ok = bindings.remove(rule.id)
@@ -914,8 +914,8 @@ module Gori::Tui
     # Forget one bound value without touching its rule — the next send naming it refuses
     # instead of going out with a stale token, which is the point of having the action.
     def binding_clear : Nil
-      row = binding_rows[@sub_sel]? || return @host.status("no binding selected")
-      return @host.status("$#{row.name} is not bound") unless row.bound?
+      row = binding_rows[@sub_sel]? || return @host.status(I18n.sys("no binding selected"))
+      return @host.status(I18n.sys("$%{name} is not bound", name: row.name)) unless row.bound?
       # `clear_row` takes the row's OWN table, because the pane lists one row per (rule,
       # table) and the operator is pointing at ONE of them. The predecessor this replaced
       # forgot the current send context instead — the active slot plus the global table — so

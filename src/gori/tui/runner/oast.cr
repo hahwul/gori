@@ -54,7 +54,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def oast_sessions : Nil
     rows = oast_controller.session_rows
     if rows.empty?
-      @toast = "no OAST sessions yet — start one with ^R"
+      @toast = I18n.sys("no OAST sessions yet — start one with ^R")
       return
     end
     picker = OastSessionPicker.new(rows)
@@ -76,7 +76,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def oast_issue_create : Nil
     draft = oast_controller.callback_issue_draft
     unless draft
-      @toast = "no callback selected"
+      @toast = I18n.sys("no callback selected")
       return
     end
     open_issue_form(IssueForm.new(draft.title, draft.host,
@@ -106,7 +106,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def oast_insert_payload : Nil
     url = oast_controller.generate_for_insert
     unless url
-      @toast = "no OAST listener — start one in the OAST tab (^R)"
+      @toast = I18n.sys("no OAST listener — start one in the OAST tab (^R)")
       return
     end
     ok = case @active_tab
@@ -120,11 +120,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def oast_copy_payload : Nil
     url = oast_controller.generate_for_insert
     unless url
-      @toast = "no OAST listener — start one in the OAST tab (^R)"
+      @toast = I18n.sys("no OAST listener — start one in the OAST tab (^R)")
       return
     end
     Clipboard.copy(url)
-    @toast = "copied OAST payload: #{url}"
+    @toast = I18n.sys("copied OAST payload: %{url}", url: url)
   end
 
   # A callback's detail is open — the gate for its read verbs.

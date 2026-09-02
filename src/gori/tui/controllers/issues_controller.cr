@@ -338,7 +338,7 @@ module Gori::Tui
       # Announce instead — the alternative is the operator finding out at `esc`, when the save
       # is refused for a reason nothing on screen had hinted at. Latched to once per distinct
       # peer value: this tick also fires on this session's OWN captures.
-      @host.status("notes changed by another session — esc will refuse to overwrite; ^W discards yours")
+      @host.status(I18n.sys("notes changed by another session — esc will refuse to overwrite; ^W discards yours"))
     end
 
     # The flush the shell runs on a tab switch and on `commit_pending_edits` (quit /
@@ -368,11 +368,11 @@ module Gori::Tui
       # from inside a teardown is never rendered and the operator would have learned about it
       # by finding the writeup gone.
       if @issues.notes_conflict?(@host.session.store)
-        @host.status("notes NOT saved — another session rewrote them; esc in the notes pane overwrites theirs, ^W takes theirs")
+        @host.status(I18n.sys("notes NOT saved — another session rewrote them; esc in the notes pane overwrites theirs, ^W takes theirs"))
         return
       end
       return if @issues.save_notes(@host.session.store)
-      @host.status("notes NOT saved — project busy")
+      @host.status(I18n.sys("notes NOT saved — project busy"))
     end
 
     # `esc` out of the notes editor. IssuesView#save_notes returns false when the write was
@@ -400,7 +400,7 @@ module Gori::Tui
       if key = @issues.notes_conflict_key(@host.session.store)
         if @notes_overwrite_armed != key
           @notes_overwrite_armed = key
-          @host.status("notes NOT saved — another session rewrote them; esc again overwrites theirs, ^W takes theirs, ^Y copies yours")
+          @host.status(I18n.sys("notes NOT saved — another session rewrote them; esc again overwrites theirs, ^W takes theirs, ^Y copies yours"))
           return
         end
       end
@@ -408,7 +408,7 @@ module Gori::Tui
       # an arm can never outlive the press it was granted for.
       @notes_overwrite_armed = nil
       return if @issues.save_notes(@host.session.store)
-      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+      @host.status(I18n.sys("notes NOT saved — project busy; your text is still here, esc to retry"))
     end
 
     def issues_notes_read_mode? : Bool
@@ -483,20 +483,20 @@ module Gori::Tui
     end
 
     def issues_mark_toggle : Nil
-      return @host.status("no issue to mark") unless @issues.selected_id
+      return @host.status(I18n.sys("no issue to mark")) unless @issues.selected_id
       @issues.toggle_mark
       @host.status(mark_status)
     end
 
     def issues_mark_all : Nil
-      return @host.status("no issues to mark") if @issues.empty?
+      return @host.status(I18n.sys("no issues to mark")) if @issues.empty?
       @issues.mark_all
       @host.status(mark_status)
     end
 
     def issues_mark_clear : Nil
       @issues.clear_marks
-      @host.status("marks cleared")
+      @host.status(I18n.sys("marks cleared"))
     end
 
     def issues_mark_extend(delta : Int32) : Nil
@@ -542,10 +542,10 @@ module Gori::Tui
         # in place — say so instead of reporting a delete that didn't happen, so the set is
         # still there to retry.
         unless @issues.delete_ids(@host.session.store, ids)
-          @host.status("issue NOT deleted (project busy) — the marks are kept, try again")
+          @host.status(I18n.sys("issue NOT deleted (project busy) — the marks are kept, try again"))
           next
         end
-        @host.status("issue deleted: #{name}")
+        @host.status(I18n.sys("issue deleted: %{name}", name: name))
       end
     end
 
@@ -568,7 +568,7 @@ module Gori::Tui
     # that differs from the mark count the operator is looking at.
     def issues_clear : Nil
       n = @host.session.store.count_issues
-      return @host.status("issues: nothing to clear") if n <= 0
+      return @host.status(I18n.sys("issues: nothing to clear")) if n <= 0
       @host.confirm(I18n.ui("CLEAR ISSUES"),
         I18n.sys_n(n, "Delete ALL %{n} issue for this project?\nIts notes, CVSS score and evidence links go too.\nThis can't be undone.", "Delete ALL %{n} issues for this project?\nTheir notes, CVSS scores and evidence links go too.\nThis can't be undone.", n: n),
         confirm_label: I18n.ui("clear"), danger: true) do
@@ -582,12 +582,12 @@ module Gori::Tui
     # so. Same sentence Runner#apply_issue_choice uses for the picker path.
     def issue_severity(delta : Int32) : Nil
       return if @issues.severity_delta(delta, @host.session.store)
-      @host.status("severity NOT changed — project busy; try again")
+      @host.status(I18n.sys("severity NOT changed — project busy; try again"))
     end
 
     def issue_status(delta : Int32) : Nil
       return if @issues.status_delta(delta, @host.session.store)
-      @host.status("status NOT changed — project busy; try again")
+      @host.status(I18n.sys("status NOT changed — project busy; try again"))
     end
 
     def issue_edit_notes : Nil
@@ -602,11 +602,11 @@ module Gori::Tui
     def issues_copy : Nil
       text = @issues.notes_copy_text
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # The notes selection (or current line) text without copying — "Send selection to".
@@ -617,11 +617,11 @@ module Gori::Tui
     def issues_copy_all : Nil
       text = @issues.notes_copy_all
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied notes to clipboard (#{written}b)#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied notes to clipboard (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # `y` in the notes pane: the selection when one is held, else the WHOLE notes. The keymap's
@@ -645,7 +645,7 @@ module Gori::Tui
       store = @host.session.store
       issues = store.issues
       if issues.empty?
-        @host.status("no issues to export")
+        @host.status(I18n.sys("no issues to export"))
         return true
       end
       content = case format
@@ -664,7 +664,7 @@ module Gori::Tui
       @host.status(msg)
       true
     rescue ex
-      @host.status("export failed: #{ex.message}")
+      @host.status(I18n.sys("export failed: %{message}", message: ex.message))
       false
     end
   end

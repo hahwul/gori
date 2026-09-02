@@ -1,3 +1,4 @@
+require "./i18n"
 require "./config"
 require "./bind_address"
 require "./project"
@@ -304,22 +305,22 @@ module Gori
       # comes last and NAMES the address, because that is the part the operator has to go fix.
       def summary : String
         parts = [] of String
-        parts << "#{added} added" if added > 0
-        parts << "#{removed} removed" if removed > 0
-        parts << "#{retargeted} retargeted" if retargeted > 0
-        head = parts.empty? ? "listeners: settings.json already matches the running sockets" : "listeners: #{parts.join(", ")}"
+        parts << I18n.sys("%{n} added", n: added) if added > 0
+        parts << I18n.sys("%{n} removed", n: removed) if removed > 0
+        parts << I18n.sys("%{n} retargeted", n: retargeted) if retargeted > 0
+        head = parts.empty? ? I18n.sys("listeners: settings.json already matches the running sockets") : I18n.sys("listeners: %{parts}", parts: parts.join(", "))
         # Capture off means nothing was bound and nothing could be — "0 serving" would read as a
         # failure of the reconcile rather than as the state the operator put gori in.
-        return "#{head} — capture is off, press c to start" unless capturing
+        return I18n.sys("%{head} — capture is off, press c to start", head: head) unless capturing
         "#{head}#{tail}"
       end
 
       private def tail : String
         # The wording #508 asked for: it WAS serving, it is STILL wanted, and it did not come
         # back. Distinct from `failed`, which also covers a listener that never bound at all.
-        return " — #{dropped.join(", ")} was serving and could not rebind" if dropped.present?
-        return " — #{failed.size} could not bind (see the listeners chip)" unless failed.empty?
-        changed? ? " · #{serving} serving" : ""
+        return I18n.sys(" — %{names} was serving and could not rebind", names: dropped.join(", ")) if dropped.present?
+        return I18n.sys(" — %{n} could not bind (see the listeners chip)", n: failed.size) unless failed.empty?
+        changed? ? I18n.sys(" · %{n} serving", n: serving) : ""
       end
     end
 

@@ -464,7 +464,7 @@ module Gori::Tui
         # transient environmental accident overwrote the port the operator deliberately
         # pinned. See `Runner.port_fallback` for the full invariant.
         @bind_fallback = fallback
-        @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
+        @toast = I18n.sys("port %{requested} in use — capturing on %{port} instead (point your client there)", requested: requested, port: @session.proxy.port)
       end
       # The Project SETTINGS pane is an editor for the PINNED config, so its snapshot (and the
       # dirty baseline `load_settings_values` takes from it) must read the pin, not the port
@@ -785,7 +785,7 @@ module Gori::Tui
       # companion's bubble when `@toast_at` is fresher than `@companion.bubble_at`, so
       # assigning the message without its timestamp lost the race to any bubble Miss Ring
       # happened to be holding — and the breaker's one operator-visible signal never showed.
-      status("recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})")
+      status(I18n.sys("recovered from an internal error — details in gori.log (%{class}: %{message})", class: ex.class, message: ex.message))
       # The frame that raised is half-drawn, so force a full repaint rather than a cell diff
       # against a screen state no complete render ever produced.
       @resized = true
@@ -1547,7 +1547,7 @@ module Gori::Tui
       cert = ov.cert_path
       key = ov.key_path
       if cert.empty? || key.empty?
-        @toast = "CA import: both certificate and key paths are required"
+        @toast = I18n.sys("CA import: both certificate and key paths are required")
         return false
       end
       path = @session.ca.ca_cert_path
@@ -1558,9 +1558,9 @@ module Gori::Tui
         warning = @session.ca.import!(cert, key)
         Clipboard.copy(path)
         note = warning ? " (warning: #{warning})" : ""
-        @toast = "root CA imported#{note} — re-trust it (path copied): #{path}"
+        @toast = I18n.sys("root CA imported%{note} — re-trust it (path copied): %{path}", note: note, path: path)
       rescue ex
-        @toast = "CA import failed: #{ex.message}"
+        @toast = I18n.sys("CA import failed: %{message}", message: ex.message)
       end
       false
     end
@@ -1687,11 +1687,11 @@ module Gori::Tui
       # A rolled-back write touches NOTHING locally — the same rule delete_ids follows, and
       # re-reading the list is wasted work on the one path where the store is already busy.
       unless ok
-        @toast = "update failed — project busy; try again"
+        @toast = I18n.sys("update failed — project busy; try again")
         return
       end
       issues_controller.view.resync(store)
-      @toast = "#{plural(ids.size, "issue")} updated" if ids.size > 1
+      @toast = I18n.sys_n(ids.size, "%{n} issue updated", "%{n} issues updated", n: ids.size) if ids.size > 1
     end
 
     # Score the target issues, straight from the Space menu. The same calculator the create
@@ -1709,14 +1709,14 @@ module Gori::Tui
              store.update_issues(ids, cvss: raw, severity: Gori::Cvss.severity_for(raw))
            end
       unless ok
-        @toast = "cvss NOT saved — project busy; try again"
+        @toast = I18n.sys("cvss NOT saved — project busy; try again")
         return false
       end
       issues_controller.view.resync(store)
       # Only a BATCH needs saying — a single issue's chip and severity badge both change under
       # the operator's eyes, and echoing a 44-character vector into the status strip just
       # truncates it. Same rule apply_issue_choice follows.
-      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{plural(ids.size, "issue")}" if ids.size > 1
+      @toast = I18n.sys_n(ids.size, "%{what} · %{n} issue", "%{what} · %{n} issues", what: raw.empty? ? I18n.sys("cvss cleared") : I18n.sys("cvss set"), n: ids.size) if ids.size > 1
       true
     end
 
@@ -1725,7 +1725,7 @@ module Gori::Tui
       committed = @session.probe.set_mode(Probe::Mode.new(p.selected_value))
       probe_controller.view.reload(@session.store)
       unless committed
-        @toast = "scan mode NOT saved — project busy; another instance keeps the old mode"
+        @toast = I18n.sys("scan mode NOT saved — project busy; another instance keeps the old mode")
         return
       end
       mode = @session.probe.mode
@@ -1768,7 +1768,7 @@ module Gori::Tui
       cp.on_commit = -> {
         if opt = cp.selected_option
           written = Clipboard.copy(opt.text)
-          @toast = "copied #{opt.label.downcase} (#{written}b)#{Clipboard.note(written, opt.text)}"
+          @toast = I18n.sys("copied %{label} (%{written}b)%{note}", label: opt.label.downcase, written: written, note: Clipboard.note(written, opt.text))
         end
         true
       }
@@ -1832,7 +1832,7 @@ module Gori::Tui
     def send_to_open : Nil
       payload = read_selection_text
       if payload.empty?
-        @toast = "nothing selected to send"
+        @toast = I18n.sys("nothing selected to send")
         return
       end
       sp = SendPicker.new("Send selection to", payload, SendMenu.destinations)
@@ -1976,11 +1976,11 @@ module Gori::Tui
         # phantom, and returning true dropped the form with the retyped title inside it.
         # FALSE keeps the card up, which is the only place that text still exists.
         unless @session.store.update_issue(id, title: title, severity: form.severity, cvss: cvss_val, clear_cvss: cvss_val.nil?)
-          @toast = "issue NOT updated — project busy; the form is still here, ↵ to retry"
+          @toast = I18n.sys("issue NOT updated — project busy; the form is still here, ↵ to retry")
           return false
         end
         issues_controller.view.resync(@session.store)
-        @toast = "issue updated"
+        @toast = I18n.sys("issue updated")
       else
         new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id, cvss: cvss_val)
         # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
@@ -1990,7 +1990,7 @@ module Gori::Tui
         # create-and-link path, put up an "issue #0 created and linked" confirm). Nothing was
         # written, so keep the form: its title is the only copy left.
         if new_id == 0
-          @toast = "could not file the issue (store busy) — nothing was written, ↵ to retry"
+          @toast = I18n.sys("could not file the issue (store busy) — nothing was written, ↵ to retry")
           return false
         end
         # `insert_issue` writes notes '' — it has no notes parameter, and giving it one would
@@ -2728,9 +2728,9 @@ module Gori::Tui
     # SEPARATE lines: `ConfirmDialog` sizes its card to the longest line and clamps at 60
     # columns, so one combined sentence lost its own verb to the ellipsis.
     def self.leave_confirm_message(active : String?, count : Int32, notes_conflict : Bool = false) : String
-      base = "Close this project and return to the picker?"
-      msg = active ? "#{base}\n#{job_count(count)} still running — leaving stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
-      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      base = I18n.sys("Close this project and return to the picker?")
+      msg = active ? I18n.sys_n(count, "%{base}\n%{jobs} still running — leaving stops it.\n%{active}", "%{base}\n%{jobs} still running — leaving stops them.\n%{active}", base: base, jobs: job_count(count), active: active) : base
+      notes_conflict ? "#{msg}\n#{notes_conflict_line}" : msg
     end
 
     # Quit's two prompts — the opt-in modal and the double-press arm — name the live jobs
@@ -2740,18 +2740,18 @@ module Gori::Tui
       # refuses an Issues writeup a peer has rewritten (IssuesController#commit), and saying
       # "pending edits are committed first" over the top of that is the lie that made this the
       # one place a writeup could disappear without the operator being told anything at all.
-      base = notes_conflict ? "Quit gori?" : "Quit gori? (pending edits are committed first)"
-      msg = active ? "#{base}\n#{job_count(count)} still running — quitting stops #{count == 1 ? "it" : "them"}.\n#{active}" : base
-      notes_conflict ? "#{msg}\n#{NOTES_CONFLICT_LINE}" : msg
+      base = notes_conflict ? I18n.sys("Quit gori?") : I18n.sys("Quit gori? (pending edits are committed first)")
+      msg = active ? I18n.sys_n(count, "%{base}\n%{jobs} still running — quitting stops it.\n%{active}", "%{base}\n%{jobs} still running — quitting stops them.\n%{active}", base: base, jobs: job_count(count), active: active) : base
+      notes_conflict ? "#{msg}\n#{notes_conflict_line}" : msg
     end
 
     # Said the same way in all three exit prompts, because it is the same fact — and said in
     # terms of what the operator loses and which key keeps it, not in terms of the guard.
     # This is the LAST point at which either version can still be chosen; after it, one of the
     # two texts is gone and nothing on screen said so.
-    NOTES_CONFLICT_LINE =
-      "An Issues writeup here was rewritten by another session — leaving DISCARDS yours " \
-      "(esc in the notes pane overwrites theirs instead)."
+    def self.notes_conflict_line : String
+      I18n.sys("An Issues writeup here was rewritten by another session — leaving DISCARDS yours (esc in the notes pane overwrites theirs instead).")
+    end
 
     # A status toast, not a card, so this one stays on a single line.
     #
@@ -2762,18 +2762,18 @@ module Gori::Tui
     # The running-jobs sentence never offered `q` and is byte-identical to what shipped.
     def self.quit_arm_hint(active : String?, count : Int32, *, back_key : Bool = false,
                            notes_conflict : Bool = false) : String
-      base = "press ^D (or ^C) again to quit"
+      base = I18n.sys("press ^D (or ^C) again to quit")
       # Ahead of the jobs clause, because this is the one that loses something UNRECOVERABLE.
       # A stopped job can be started again; the writeup cannot be typed again. The double-press
       # arm is the quit path that never raises a modal, so this hint is the operator's only
       # warning on it.
-      return "an Issues writeup was rewritten by another session — quitting DISCARDS yours; #{base}" if notes_conflict
-      return "#{job_count(count)} running (#{active}) — #{base} and stop #{count == 1 ? "it" : "them"}" if active
-      back_key ? "#{base} · q: back to projects" : base
+      return I18n.sys("an Issues writeup was rewritten by another session — quitting DISCARDS yours; %{base}", base: base) if notes_conflict
+      return I18n.sys_n(count, "%{jobs} running (%{active}) — %{base} and stop it", "%{jobs} running (%{active}) — %{base} and stop them", jobs: job_count(count), active: active, base: base) if active
+      back_key ? I18n.sys("%{base} · q: back to projects", base: base) : base
     end
 
     private def self.job_count(count : Int32) : String
-      "#{count} job#{count == 1 ? "" : "s"}"
+      I18n.sys_n(count, "%{n} job", "%{n} jobs", n: count)
     end
 
     # What an operator-initiated quit request does right now.
@@ -2890,7 +2890,7 @@ module Gori::Tui
     # the app already uses on resize / theme reload / external-editor return.
     def refresh_screen : Nil
       @resized = true
-      status("screen refreshed")
+      status(I18n.sys("screen refreshed"))
     end
 
     def toggle_companion : Nil
@@ -3214,7 +3214,7 @@ module Gori::Tui
       # have only hidden nav verbs, so the entry list is empty. Opening there would
       # trap input behind an empty box — keep space a no-op (with a hint) instead.
       if @space_menu.entries.empty?
-        @toast = "no commands for this area"
+        @toast = I18n.sys("no commands for this area")
         return
       end
       # Need a body tall enough to draw the card (≥3 rows); below that the popup
@@ -3222,7 +3222,7 @@ module Gori::Tui
       # trap the user behind an invisible modal (only hit at the minimum 40×8 size).
       w, h = @backend.size
       if Layout.compute(w, h, statusline_active?).body.h < 3
-        @toast = "terminal too short for the menu"
+        @toast = I18n.sys("terminal too short for the menu")
         return
       end
       @space_menu_open = true
@@ -3411,7 +3411,7 @@ module Gori::Tui
     # empty path is a no-op cancel, not a correctable error, so it closes too.
     private def submit_import(ov : ImportOverlay) : Bool
       if ov.path.empty?
-        @toast = "import cancelled — path is empty"
+        @toast = I18n.sys("import cancelled — path is empty")
       else
         apply_import(ov.kind, ov.label, ov.path)
       end
@@ -3428,7 +3428,7 @@ module Gori::Tui
       result.shortfall_note.try { |note| msg += " — #{note}" }
       @toast = msg
     rescue ex
-      @toast = "import failed: #{ex.message}"
+      @toast = I18n.sys("import failed: %{message}", message: ex.message)
     end
 
     # --- Export path popup (Notes → Export note, Issues → Export issues) -----
@@ -3796,14 +3796,14 @@ module Gori::Tui
     # `subject` names what was marked (the Sitemap marks endpoints, not flows).
     private def batch_within_cap(ids : Array(Int64), noun : String, subject : String = "flows") : Array(Int64)?
       return ids if ids.size <= BATCH_SUBTAB_CAP
-      @toast = "#{ids.size} #{subject} marked — #{noun} is capped at #{BATCH_SUBTAB_CAP}"
+      @toast = I18n.sys("%{ids} %{subject} marked — %{noun} is capped at %{BATCH_SUBTAB_CAP}", ids: ids.size, subject: subject, noun: noun, BATCH_SUBTAB_CAP: BATCH_SUBTAB_CAP)
       nil
     end
 
     # Shared summary for a continue-and-report batch: "opened 5 · 1 gone" (#442 Q4 — a
     # partial failure reports, it never aborts the rest).
     private def batch_summary(verb : String, done : Int32, total : Int32) : String
-      msg = "#{verb} #{plural(done, "flow")}"
+      msg = I18n.sys_n(done, "%{verb} %{n} flow", "%{verb} %{n} flows", verb: verb, n: done)
       msg += " · #{total - done} no longer available" if done < total
       msg
     end
@@ -3829,7 +3829,7 @@ module Gori::Tui
     # flow is attached to whatever it lands on. refs is 1-element everywhere else.
     def link_attach : Nil
       refs = current_link_refs
-      return (@toast = "nothing to link") if refs.empty?
+      return (@toast = I18n.sys("nothing to link")) if refs.empty?
       # Persist the notes buffer before listing it: the rows are read off the store, so an
       # unsaved in-progress note would otherwise be missing or stale in the card.
       notes_controller.save_notes
@@ -3900,7 +3900,7 @@ module Gori::Tui
       est_unsafe = merged_active_estimate(details, Probe::Active::Options.new(allow_unsafe: true))
       # Nothing applies even with unsafe methods allowed — no popup to show.
       if est_unsafe.empty?
-        @toast = "no active checks apply (needs a request with reflectable params, or a CORS response)"
+        @toast = I18n.sys("no active checks apply (needs a request with reflectable params, or a CORS response)")
         return
       end
       ov = ProbeActiveOverlay.new(details, est_safe, est_unsafe, repeater_id)
@@ -3942,7 +3942,7 @@ module Gori::Tui
       # Selected options send nothing (e.g. a POST with the unsafe opt-in still off) — hint, don't
       # fire a no-op scan or close the popup.
       if ov.estimate_empty?
-        @toast = "nothing to send — enable unsafe methods to probe this #{ov.detail.row.method}"
+        @toast = I18n.sys("nothing to send — enable unsafe methods to probe this %{method}", method: ov.detail.row.method)
         return false
       end
       notify = ov.notify_mode
@@ -3957,7 +3957,7 @@ module Gori::Tui
       dest = hosts.size == 1 ? hosts.first : "#{hosts.size} hosts"
       scope = ov.details.size == 1 ? "" : " across #{ov.details.size} flows"
       unsafe_note = ov.allow_unsafe? ? " (incl. unsafe methods)" : ""
-      @toast = "active scan → #{dest}: #{ov.total_label} sent#{scope}#{unsafe_note} (see the Probe tab)"
+      @toast = I18n.sys("active scan → %{dest}: %{total_label} sent%{scope}%{unsafe_note} (see the Probe tab)", dest: dest, total_label: ov.total_label, scope: scope, unsafe_note: unsafe_note)
       true
     end
 
@@ -3996,7 +3996,7 @@ module Gori::Tui
       if committed
         project_controller.toast_sandbox_state
       else
-        status("sandbox NOT changed — the project store is busy or unwritable")
+        status(I18n.sys("sandbox NOT changed — the project store is busy or unwritable"))
       end
     end
 
@@ -4063,7 +4063,7 @@ module Gori::Tui
       # Opens from ONE session up, matching the ⌕ affordance's own threshold: the pill is
       # drawn from the first session, and an affordance that is visible has to do something.
       # A one-row list is a poor list, but it is not a dead key.
-      return @toast = "no sub-tabs open" if rows.empty?
+      return @toast = I18n.sys("no sub-tabs open") if rows.empty?
       sp = SubtabPicker.new(I18n.ui("FIND SUB-TAB"), rows)
       # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
       # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
@@ -4098,11 +4098,11 @@ module Gori::Tui
 
     private def open_mine_config(seed : MineSeed?, extra : Array(MineSeed) = [] of MineSeed) : Nil
       unless seed
-        @toast = "can't mine this request"
+        @toast = I18n.sys("can't mine this request")
         return
       end
       if seed.applicable.empty?
-        @toast = "no mineable locations for this request"
+        @toast = I18n.sys("no mineable locations for this request")
         return
       end
       ov = MineConfigOverlay.new(seed, extra)
@@ -4124,10 +4124,10 @@ module Gori::Tui
             miner_controller.start_session(s, cfg)
             started += 1
           end
-          @toast = "mining #{started} flows in the background" unless ov.extra_seeds.empty?
+          @toast = I18n.sys("mining %{started} flows in the background", started: started) unless ov.extra_seeds.empty?
           true
         else
-          @toast = "select at least one location to mine"
+          @toast = I18n.sys("select at least one location to mine")
           false
         end
       }
@@ -4141,7 +4141,7 @@ module Gori::Tui
     # injected commit, so no shell flag distinguishes it from a new-session open.
     def reconfigure_sequence : Nil
       seed = sequencer_controller.build_seed_from_current
-      return (@toast = "manual sessions have no token descriptor to configure") unless seed
+      return (@toast = I18n.sys("manual sessions have no token descriptor to configure")) unless seed
       ov = SequenceConfigOverlay.new(seed)
       ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config) } }
       open_overlay(ov)
@@ -4149,7 +4149,7 @@ module Gori::Tui
 
     private def open_sequence_config(seed : SequenceSeed?) : Nil
       unless seed
-        @toast = "can't sequence this request"
+        @toast = I18n.sys("can't sequence this request")
         return
       end
       ov = SequenceConfigOverlay.new(seed)
@@ -4162,7 +4162,7 @@ module Gori::Tui
     # close, matching the Overlay#commit contract.
     private def commit_sequence(ov : SequenceConfigOverlay, & : -> Nil) : Bool
       unless ov.valid?
-        @toast = "set a token location first"
+        @toast = I18n.sys("set a token location first")
         return false
       end
       yield
@@ -4172,7 +4172,7 @@ module Gori::Tui
     # --- Discover config popup (Sitemap/History → "Discover here") ---
     private def open_discover_config(seed : DiscoverSeed?) : Nil
       unless seed
-        @toast = "can't discover from here"
+        @toast = I18n.sys("can't discover from here")
         return
       end
       ov = DiscoverConfigOverlay.new(seed)
@@ -4186,7 +4186,7 @@ module Gori::Tui
     # Returns whether the popup should close (the Overlay seam's commit contract).
     private def start_discover(ov : DiscoverConfigOverlay) : Bool
       unless ov.valid?
-        @toast = "enable spider or bruteforce"
+        @toast = I18n.sys("enable spider or bruteforce")
         return false
       end
       ov.save_prefs
@@ -4394,17 +4394,17 @@ module Gori::Tui
     def toggle_capture : Nil
       if @session.capturing?
         @session.toggle_capture # => false (now off); keeps the project lock
-        @toast = "capture off"
+        @toast = I18n.sys("capture off")
       elsif @session.toggle_capture
-        @toast = "capture on"
+        @toast = I18n.sys("capture on")
       else
         # Refused: another live instance holds this project's capture lock.
-        @toast = "another gori instance is capturing this project — can't capture here"
+        @toast = I18n.sys("another gori instance is capturing this project — can't capture here")
       end
     rescue ex
       # Starting capture re-binds the listener, which can fail (port in use / bad
       # address). Report it instead of crashing the TUI; capture stays off.
-      @toast = "can't start capture: #{ex.message} — free the port in settings (^P)"
+      @toast = I18n.sys("can't start capture: %{message} — free the port in settings (^P)", message: ex.message)
     end
 
     def export_ca : Nil
@@ -4413,7 +4413,7 @@ module Gori::Tui
       # step that unblocks HTTPS capture.
       path = @session.ca.ca_cert_path
       Clipboard.copy(path)
-      @toast = "root CA path copied to clipboard: #{path}"
+      @toast = I18n.sys("root CA path copied to clipboard: %{path}", path: path)
     end
 
     # Regenerate the root CA — irreversible (the old key is overwritten) and it
@@ -4427,9 +4427,9 @@ module Gori::Tui
         confirm_label: I18n.ui("regenerate"), danger: true) do
         @session.ca.regenerate!
         Clipboard.copy(path)
-        @toast = "root CA regenerated — re-trust it (path copied): #{path}"
+        @toast = I18n.sys("root CA regenerated — re-trust it (path copied): %{path}", path: path)
       rescue ex
-        @toast = "CA regeneration failed: #{ex.message}"
+        @toast = I18n.sys("CA regeneration failed: %{message}", message: ex.message)
       end
     end
 
@@ -4448,7 +4448,7 @@ module Gori::Tui
     def open_browser_picker : Nil
       found = Browser.detect
       if found.empty?
-        @toast = "no supported browser found (Chrome/Chromium/Brave/Edge/Vivaldi/Firefox)"
+        @toast = I18n.sys("no supported browser found (Chrome/Chromium/Brave/Edge/Vivaldi/Firefox)")
         return
       end
       ov = BrowserPicker.new(found, Browser.certutil_available?)
@@ -4497,16 +4497,16 @@ module Gori::Tui
     # the same list the availability gate (history_targets) and the per-verb handlers implement.
     # "%s" takes the flow-count phrase ("3 flows").
     HISTORY_BATCH_TITLES = {
-      "history.copy-as"      => "Copy %s as…",
-      "history.delete"       => "Delete %s",
-      "history.repeater"     => "Repeater %s",
-      "history.fuzz"         => "Send %s to Fuzzer",
-      "history.mine"         => "Mine %s",
-      "history.probe-active" => "Run active scan on %s",
-      "history.discover"     => "Discover from %s",
-      "scope.add-host"       => "Add %s' hosts to scope",
-      "issue.create"         => "Add issue with %s",
-      "link.history.attach"  => "Link %s…",
+      "history.copy-as"      => {"Copy %{n} flow as…", "Copy %{n} flows as…"},
+      "history.delete"       => {"Delete %{n} flow", "Delete %{n} flows"},
+      "history.repeater"     => {"Repeater %{n} flow", "Repeater %{n} flows"},
+      "history.fuzz"         => {"Send %{n} flow to Fuzzer", "Send %{n} flows to Fuzzer"},
+      "history.mine"         => {"Mine %{n} flow", "Mine %{n} flows"},
+      "history.probe-active" => {"Run active scan on %{n} flow", "Run active scan on %{n} flows"},
+      "history.discover"     => {"Discover from %{n} flow", "Discover from %{n} flows"},
+      "scope.add-host"       => {"Add %{n} flow' hosts to scope", "Add %{n} flows' hosts to scope"},
+      "issue.create"         => {"Add issue with %{n} flow", "Add issue with %{n} flows"},
+      "link.history.attach"  => {"Link %{n} flow…", "Link %{n} flows…"},
     }
 
     # Verbs that stay SINGLE-target even with marks set, and say so in their menu hint (AC: a
@@ -4527,15 +4527,15 @@ module Gori::Tui
       n = history_mark_menu_count
       return nil if n == 0
       if fmt = HISTORY_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "flow")
+        return I18n.ui_n(n, fmt[0], fmt[1], n: n)
       end
-      return "#{@session.registry[verb_id].title} (cursor)" if HISTORY_CURSOR_ONLY.includes?(verb_id)
+      return I18n.ui("%{title} (cursor)", title: I18n.ui(@session.registry[verb_id].title)) if HISTORY_CURSOR_ONLY.includes?(verb_id)
       case verb_id
-      when "history.copy"       then "Copy #{plural(n, "URL")}"
-      when "history.mark-clear" then "Clear #{plural(n, "mark")}"
+      when "history.copy"       then I18n.ui_n(n, "Copy %{n} URL", "Copy %{n} URLs", n: n)
+      when "history.mark-clear" then I18n.ui_n(n, "Clear %{n} mark", "Clear %{n} marks", n: n)
         # Only meaningful at exactly 2 — otherwise leave the registered title, which IS what
         # comparer_add_selected falls back to (the next-slot ring on the cursor row).
-      when "history.compare" then n == 2 ? "Compare the 2 marked flows" : nil
+      when "history.compare" then n == 2 ? I18n.ui("Compare the 2 marked flows") : nil
       end
     end
 
@@ -4551,17 +4551,17 @@ module Gori::Tui
     # marked, so every existing title stays byte-identical. forward-all is absent on purpose:
     # it releases the whole queue regardless of the marks, and a count would misdescribe it.
     INTERCEPT_BATCH_TITLES = {
-      "intercept.forward" => "Forward %s",
-      "intercept.drop"    => "Drop %s",
+      "intercept.forward" => {"Forward %{n} held message", "Forward %{n} held messages"},
+      "intercept.drop"    => {"Drop %{n} held message", "Drop %{n} held messages"},
     }
 
     private def intercept_mark_menu_title(verb_id : String) : String?
       n = intercept_mark_menu_count
       return nil if n == 0
       if fmt = INTERCEPT_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "held message")
+        return I18n.ui_n(n, fmt[0], fmt[1], n: n)
       end
-      "Clear #{plural(n, "mark")}" if verb_id == "intercept.mark-clear"
+      I18n.ui_n(n, "Clear %{n} mark", "Clear %{n} marks", n: n) if verb_id == "intercept.mark-clear"
     end
 
     # How many marks the SITEMAP menu should speak for; 0 whenever mark titles don't apply
@@ -4575,8 +4575,8 @@ module Gori::Tui
     # The Sitemap's batch-capable entries — the same set the per-verb handlers implement by
     # reading SitemapView#target_keys. "%s" takes the path-count phrase ("3 paths").
     SITEMAP_BATCH_TITLES = {
-      "sitemap.tag"      => "Tag %s",
-      "sitemap.repeater" => "Send %s to Repeater",
+      "sitemap.tag"      => {"Tag %{n} path", "Tag %{n} paths"},
+      "sitemap.repeater" => {"Send %{n} path to Repeater", "Send %{n} paths to Repeater"},
     }
 
     # Sitemap verbs that stay SINGLE-target even with marks set, and say so in their menu
@@ -4594,19 +4594,19 @@ module Gori::Tui
       n = sitemap_mark_menu_count
       return nil if n == 0
       if fmt = SITEMAP_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "path")
+        return I18n.ui_n(n, fmt[0], fmt[1], n: n)
       end
-      return "#{@session.registry[verb_id].title} (cursor)" if SITEMAP_CURSOR_ONLY.includes?(verb_id)
-      verb_id == "sitemap.mark-clear" ? "Clear #{plural(n, "mark")}" : nil
+      return I18n.ui("%{title} (cursor)", title: I18n.ui(@session.registry[verb_id].title)) if SITEMAP_CURSOR_ONLY.includes?(verb_id)
+      verb_id == "sitemap.mark-clear" ? I18n.ui_n(n, "Clear %{n} mark", "Clear %{n} marks", n: n) : nil
     end
 
     # The Issues half of the same rule. Its own table and count, like every other surface's:
     # the lists carry different marks, and a shared table would let one tab's verb inherit
     # another's count on a tab where it never renders.
     ISSUES_BATCH_TITLES = {
-      "issues.delete"       => "Delete %s",
-      "issues.set-severity" => "Set severity on %s",
-      "issues.set-status"   => "Set status on %s",
+      "issues.delete"       => {"Delete %{n} issue", "Delete %{n} issues"},
+      "issues.set-severity" => {"Set severity on %{n} issue", "Set severity on %{n} issues"},
+      "issues.set-status"   => {"Set status on %{n} issue", "Set status on %{n} issues"},
     }
 
     # Verbs that stay SINGLE-target (or whole-store) even with marks set, and say so in the
@@ -4625,16 +4625,12 @@ module Gori::Tui
       n = issues_mark_menu_count
       return nil if n == 0
       if fmt = ISSUES_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "issue")
+        return I18n.ui_n(n, fmt[0], fmt[1], n: n)
       end
       if note = ISSUES_CURSOR_ONLY[verb_id]?
-        return "#{@session.registry[verb_id].title} #{note}"
+        return I18n.ui("%{title} %{note}", title: I18n.ui(@session.registry[verb_id].title), note: I18n.ui(note))
       end
-      "Clear #{plural(n, "mark")}" if verb_id == "issues.mark-clear"
-    end
-
-    private def plural(n : Int32, noun : String) : String
-      "#{n} #{noun}#{n == 1 ? "" : "s"}"
+      I18n.ui_n(n, "Clear %{n} mark", "Clear %{n} marks", n: n) if verb_id == "issues.mark-clear"
     end
 
     def read_selection_active? : Bool
@@ -4962,7 +4958,7 @@ module Gori::Tui
         # the modal to re-pull afterwards when there is one (nil from the palette).
         confirm_factory_reset(back)
       else
-        @toast = "#{section} settings — coming soon (TODO)"
+        @toast = I18n.sys("%{section} settings — coming soon (TODO)", section: section)
       end
     end
 
@@ -5063,7 +5059,7 @@ module Gori::Tui
         confirm_label: I18n.ui("reset"), danger: true, return_to: :settings) do
         ov.reset_to_defaults
         apply_theme_preview(ov.theme_value) # :theme live-previews the restored default theme
-        @toast = "#{section} settings reset to defaults — ↵ to save"
+        @toast = I18n.sys("%{section} settings reset to defaults — ↵ to save", section: section)
       end
     end
 
@@ -5134,7 +5130,7 @@ module Gori::Tui
         # Covers both refusals now: a file only half read in, and one that could not be read at
         # all (a root-owned settings.json, a `--config` naming a directory). Resetting from
         # either would write factory defaults over a file this session never saw.
-        in .refused? then @toast = "settings not reset — #{Settings.path} could not be read"
+        in .refused? then @toast = I18n.sys("settings not reset — %{path} could not be read", path: Settings.path)
         in .saved?   then @toast = apply_factory_reset("settings reset to defaults")
         in .applied? then @toast = apply_factory_reset("settings reset — could not save to #{Settings.path}")
         end
@@ -5216,7 +5212,7 @@ module Gori::Tui
         I18n.sys("Reset the tab bar to its default order and visibility? Your current arrangement is replaced."),
         confirm_label: I18n.ui("reset"), danger: true, return_to: :tabs) do
         ov.reset_to_defaults
-        @toast = "tabs reset to defaults — ↵ to save"
+        @toast = I18n.sys("tabs reset to defaults — ↵ to save")
       end
     end
 
@@ -5388,9 +5384,9 @@ module Gori::Tui
       case result.outcome
       in ExternalEditor::Outcome::Changed
         yield result.text.not_nil!
-        @toast = "applied external edit"
+        @toast = I18n.sys("applied external edit")
       in ExternalEditor::Outcome::Unchanged
-        @toast = "no changes"
+        @toast = I18n.sys("no changes")
       in ExternalEditor::Outcome::Failed
         @toast = result.error || "external editor failed"
       end
@@ -5410,7 +5406,7 @@ module Gori::Tui
         profile_root: File.join(Gori::Paths.home_dir, "browser"))
       @toast = Browser.launch(browser, spec)
     rescue ex
-      @toast = "browser launch failed: #{ex.message}"
+      @toast = I18n.sys("browser launch failed: %{message}", message: ex.message)
     end
   end
 end

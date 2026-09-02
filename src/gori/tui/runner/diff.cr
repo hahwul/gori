@@ -12,7 +12,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     controller = target_controller.diff
     projects = controller.pickable(slot)
     if projects.empty?
-      @toast = "no other project to compare against — capture one, or `gori run project create`"
+      @toast = I18n.sys("no other project to compare against — capture one, or `gori run project create`")
       return
     end
     shown = projects.first(DIFF_PICK_KEYS.size)
@@ -68,22 +68,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def diff_to_comparer : Nil
     controller = target_controller.diff
     row = controller.view.selected_row
-    return (@toast = "select an endpoint first") unless row
+    return (@toast = I18n.sys("select an endpoint first")) unless row
     a, b = controller.comparer_slots
     if a && b
       comparer_controller.view.set_pair(a, b)
       goto_tab(:comparer)
-      @toast = "comparer: #{row.key.method} #{row.key.path}"
+      @toast = I18n.sys("comparer: %{method} %{path}", method: row.key.method, path: row.key.path)
       return
     end
     only = a || b
     unless only
-      @toast = "the capture behind this row is gone — re-run the diff (r)"
+      @toast = I18n.sys("the capture behind this row is gone — re-run the diff (r)")
       return
     end
     which = comparer_controller.view.add_slot(only)
     goto_tab(:comparer)
-    @toast = "comparer: set #{which.to_s.upcase} — this endpoint was captured on one side only"
+    @toast = I18n.sys("comparer: set %{which} — this endpoint was captured on one side only", which: which.to_s.upcase)
   end
 
   # --- the exit: a row becomes an Issue or a Note -----------------------------
@@ -97,7 +97,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # there); the create itself is `IssueForm` + `create_issue_from_form`, untouched (P1/P3).
   def diff_issue : Nil
     recorded = target_controller.diff.selected_record
-    return (@toast = "select an endpoint first") unless recorded
+    return (@toast = I18n.sys("select an endpoint first")) unless recorded
     flow_id, build = recorded
     # `insert_issue` writes the issue AND its flow link in ONE transaction, and the shell
     # bails on `new_id == 0` — so a committed issue implies a committed link, and the body
@@ -117,7 +117,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # is one `j` away.
   def diff_note : Nil
     recorded = target_controller.diff.selected_record
-    return (@toast = "select an endpoint first") unless recorded
+    return (@toast = I18n.sys("select an endpoint first")) unless recorded
     flow_id, build = recorded
     linked = false
     # The note is minted blank, LINKED, and only then given its body — because the body says

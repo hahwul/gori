@@ -205,7 +205,7 @@ module Gori::Tui
       dirty = dirty_titles
       return Outcome.new(:close) if confirming || dirty.empty?
       @confirm_discard = true
-      @status = "unsaved: #{dirty.join(", ")} — ↵ saves the focused section, esc again discards"
+      @status = I18n.sys("unsaved: %{sections} — ↵ saves the focused section, esc again discards", sections: dirty.join(", "))
       @status_warn = true
       NONE
     end
@@ -288,7 +288,7 @@ module Gori::Tui
     # picker has no tabs/hosts/env/hotkeys editors) it's a no-op with a hint instead.
     private def open_or_block(sym : Symbol) : Outcome
       return Outcome.new(:open, sym) if opener_allowed?(sym)
-      @status = "open a project to edit this"
+      @status = I18n.sys("open a project to edit this")
       @status_warn = true
       NONE
     end
@@ -304,7 +304,7 @@ module Gori::Tui
         # tracks focus in its own flat index. Without this the highlighted row and the
         # row that actually receives edits drift apart until the next ↑/↓/click.
         sync_focus
-        @status = "section reset to defaults — ↵ to save"
+        @status = I18n.sys("section reset to defaults — ↵ to save")
         return NONE
       end
       # Not a form row, so there is nothing here to revert in place. The footer advertises
@@ -325,12 +325,12 @@ module Gori::Tui
       # :reset arm — so without this the picker's Theme row would answer ^R with exactly the
       # silence this whole change set exists to remove.
       unless @allowed_openers.nil?
-        @status = "open a project to reset this"
+        @status = I18n.sys("open a project to reset this")
         @status_warn = true
         return NONE
       end
       return Outcome.new(:reset, sec.sym) if sec.resettable
-      @status = "#{sec.title} holds your own entries — nothing to restore (^R resets defaults)"
+      @status = I18n.sys("%{section} holds your own entries — nothing to restore (^R resets defaults)", section: I18n.ui(sec.title))
       @status_warn = true
       NONE
     end

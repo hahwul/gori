@@ -296,12 +296,12 @@ module Gori::Tui
       if rule = selected_rule
         @host.open_colormarker_rule_editor(rule)
       else
-        @host.status("no colour rule selected")
+        @host.status(I18n.sys("no colour rule selected"))
       end
     end
 
     def colormarker_delete : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
       label = rule.name.empty? ? rule.match_filter : rule.name
       # A global rule is deleted out of EVERY project, and the prompt has to say so — the row
       # differs from a project rule's by one badge, and the confirm is the last place to notice.
@@ -318,9 +318,9 @@ module Gori::Tui
     # is this project's override of the library's default, which is why the toast says where the
     # change lands.
     def colormarker_toggle : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
       unless engine.toggle(rule.id, rule.scope)
-        return @host.status("enable/disable NOT applied (project busy) — the row colour is unchanged")
+        return @host.status(I18n.sys("enable/disable NOT applied (project busy) — the row colour is unchanged"))
       end
       state = rule.enabled? ? "disabled" : "enabled"
       @host.status(rule.global? ? "global colour rule #{state} in this project" : "colour rule #{state}")
@@ -328,27 +328,27 @@ module Gori::Tui
 
     # ⇧X: the global DEFAULT — what every project that has not overridden this rule follows.
     def colormarker_toggle_default : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
-      return @host.status("only a global rule has a default — this one is project-scoped") unless rule.global?
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
+      return @host.status(I18n.sys("only a global rule has a default — this one is project-scoped")) unless rule.global?
       unless engine.toggle_default(rule.id, rule.scope)
-        return @host.status("default NOT changed (settings not writable) — the rule is unchanged")
+        return @host.status(I18n.sys("default NOT changed (settings not writable) — the rule is unchanged"))
       end
       after = rule_list.find { |r| r.global? && r.id == rule.id }
       note = after.try(&.overridden?) ? " (this project still overrides it)" : ""
-      @host.status("global colour rule default flipped for every project#{note}")
+      @host.status(I18n.sys("global colour rule default flipped for every project%{note}", note: note))
     end
 
     # Reordering here changes WHICH rule paints a row (first enabled match wins), so the toast
     # says that rather than leaving an operator to infer it from a list that merely shuffled.
     def colormarker_move(dir : Int32) : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
       if engine.move(rule.id, dir, rule.scope)
         move_sel(dir)
-        @host.status("precedence changed — the first enabled match paints the row")
+        @host.status(I18n.sys("precedence changed — the first enabled match paints the row"))
       elsif !at_scope_edge?(rule, dir)
         # Not an edge, so the reorder was refused by the store / settings write. Say so: a
         # silent no-op here reads exactly like "the rule is already at the top".
-        @host.status("precedence NOT changed (project busy or settings not writable)")
+        @host.status(I18n.sys("precedence NOT changed (project busy or settings not writable)"))
       end
     end
 
@@ -363,20 +363,20 @@ module Gori::Tui
     end
 
     def colormarker_duplicate : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless engine.add(rule.match_filter, rule.color, rule.style, name, scope: rule.scope)
-        return @host.status("colour rule NOT duplicated (project busy or settings not writable)")
+        return @host.status(I18n.sys("colour rule NOT duplicated (project busy or settings not writable)"))
       end
       @host.status(rule.global? ? "global colour rule duplicated" : "colour rule duplicated")
     end
 
     # `s`: move the selected rule between the global library and this project.
     def colormarker_scope_toggle : Nil
-      rule = selected_rule || return @host.status("no colour rule selected")
+      rule = selected_rule || return @host.status(I18n.sys("no colour rule selected"))
       to = rule.global? ? Store::RuleScope::Project : Store::RuleScope::Global
       unless engine.set_scope(rule, to)
-        return @host.status("scope NOT changed (project busy or settings not writable) — the rule is unchanged")
+        return @host.status(I18n.sys("scope NOT changed (project busy or settings not writable) — the rule is unchanged"))
       end
       @sel = last_index_of_scope(to)
       @host.status(to.global? ? "colour rule is now GLOBAL — it applies in every project" : "colour rule is now project-scoped")
@@ -384,7 +384,7 @@ module Gori::Tui
 
     def colormarker_reload : Nil
       engine.reload
-      @host.status("colour rules reloaded")
+      @host.status(I18n.sys("colour rules reloaded"))
     end
 
     # Commit the rule editor overlay: add a new rule or update the edited one, then re-select it.
@@ -402,7 +402,7 @@ module Gori::Tui
           # Return rather than fall through: `rule_list` still holds the PRE-EDIT row, so the
           # re-home below would move that stale rule to the other scope and succeed, dropping
           # the edit while reporting nothing.
-          @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
+          @host.status(I18n.sys("rule NOT saved (project busy or settings not writable) — it is unchanged"))
           return false
         end
         if from != ov.scope
@@ -412,11 +412,11 @@ module Gori::Tui
             # `exec_task_ok`, so an `UPDATE … WHERE id = ?` against an id a peer deleted while
             # this card was open commits and matches nothing. Falling through here reported
             # nothing and closed the form, so the operator watched a promotion they never got.
-            @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
+            @host.status(I18n.sys("rule is gone (deleted elsewhere) — nothing was saved or moved"))
             return false
           end
           unless engine.set_scope(moved, ov.scope)
-            @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
+            @host.status(I18n.sys("rule saved, but the scope change did not commit — it is still %{label}", label: from.label))
             return true
           end
           # Follow the rule into its new block, exactly as `colormarker_scope_toggle` does.
@@ -432,7 +432,7 @@ module Gori::Tui
         unless engine.add(ov.condition, ov.color, ov.style, ov.name, scope: ov.scope)
           # Report rather than re-select: with nothing added, `last_index_of_scope` would move
           # the highlight onto whatever already sat at the end of that block.
-          @host.status("rule NOT added (project busy or settings not writable)")
+          @host.status(I18n.sys("rule NOT added (project busy or settings not writable)"))
           return false
         end
         @sel = last_index_of_scope(ov.scope)
@@ -455,12 +455,12 @@ module Gori::Tui
       if c = selected_color
         @host.open_colormarker_color_editor(c)
       else
-        @host.status("no custom colour selected")
+        @host.status(I18n.sys("no custom colour selected"))
       end
     end
 
     def customcolor_delete : Nil
-      c = selected_color || return @host.status("no custom colour selected")
+      c = selected_color || return @host.status(I18n.sys("no custom colour selected"))
       # A colour still named by a rule is NOT cascaded away — those rows fall back to a visible
       # default. The prompt says how many, so the deletion is not a surprise.
       #
@@ -477,9 +477,9 @@ module Gori::Tui
         if Settings.delete_colormarker_color(c.name)
           sync_custom_marks
           @color_sel = @color_sel.clamp(0, {custom_colors.size - 1, 0}.max)
-          @host.status("custom colour deleted: #{c.name}")
+          @host.status(I18n.sys("custom colour deleted: %{name}", name: c.name))
         else
-          @host.status("custom colour NOT deleted (settings not writable)")
+          @host.status(I18n.sys("custom colour NOT deleted (settings not writable)"))
         end
       end
     end

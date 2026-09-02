@@ -13,13 +13,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # because the detail overlay's own navigation is gated on `@active_tab == :history`.
   def activity_open : Nil
     unless row = project_controller.view.activity_selected_row
-      @toast = "no event selected"
+      @toast = I18n.sys("no event selected")
       return
     end
     unless target = ProjectView.activity_target(row)
       # Most of the feed records something that happened rather than something to look at, and
       # a key that silently does nothing reads as a bug. Name the absence instead.
-      @toast = "this event records no jump target"
+      @toast = I18n.sys("this event records no jump target")
       return
     end
     if tab = target.tab
@@ -69,11 +69,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @session.store.events_recent(1).rows.empty?
     rescue ex : DB::Error | SQLite3::Exception
       Log.warn(exception: ex) { "activity: event feed read failed before clear" }
-      @toast = "could not read the event feed — see gori.log"
+      @toast = I18n.sys("could not read the event feed — see gori.log")
       return
     end
     if empty
-      @toast = "activity: nothing to clear"
+      @toast = I18n.sys("activity: nothing to clear")
       return
     end
     # HAND-WRAPPED, like every other confirm in the app. `ConfirmDialog` splits on '\n' and

@@ -88,30 +88,30 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # Named, not merely refused. `↵` that does nothing reads as a dropped keystroke; the Save
       # row already carries this sentence, but the caret is on the field the operator was typing
       # in when they pressed it.
-      @toast = "column not saved — #{reason}"
+      @toast = I18n.sys("column not saved — %{reason}", reason: reason)
       return false
     end
     store = @session.store
     if id = form.edit_id
       unless store.update_display_column(id, form.label, form.kind, form.selector,
                form.pos_start, form.pos_end, form.side, form.width)
-        @toast = "could not save #{form.label} — the store is busy"
+        @toast = I18n.sys("could not save %{label} — the store is busy", label: form.label)
         return false
       end
-      @toast = "updated column #{form.label}"
+      @toast = I18n.sys("updated column %{label}", label: form.label)
     else
       # Re-checked at the commit and not only on the list card: a peer (the CLI, MCP, another
       # gori against this project) can have filled the last slot while this form was open.
       if Gori::DisplayColumns.load(store).size >= Gori::DisplayColumns::MAX_COLUMNS
-        @toast = "#{Gori::DisplayColumns::MAX_COLUMNS} columns is the limit — delete one first"
+        @toast = I18n.sys("%{MAX_COLUMNS} columns is the limit — delete one first", MAX_COLUMNS: Gori::DisplayColumns::MAX_COLUMNS)
         return false
       end
       if store.insert_display_column(form.label, form.kind, form.selector,
            form.pos_start, form.pos_end, form.side, form.width) == 0
-        @toast = "could not save #{form.label} — the store is busy"
+        @toast = I18n.sys("could not save %{label} — the store is busy", label: form.label)
         return false
       end
-      @toast = "added column #{form.label}"
+      @toast = I18n.sys("added column %{label}", label: form.label)
     end
     history_controller.reload_columns
     true

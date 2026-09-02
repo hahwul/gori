@@ -119,6 +119,15 @@ private def wrapped_in_tables : Array(Wrapped)
   found << Wrapped.new("ui", "jobs", "Jobs::KIND_LABELS fallback") # `KIND_LABELS.fetch(kind, "jobs")`
   # The Query page's own heads ("SYNTAX", …) are built as English keys and translated by draw_row.
   Gori::Tui::HelpView.query_rows.each { |r| found << Wrapped.new("help", r.a, "HelpView.query_rows") if r.kind == :head }
+  # The space menu's batch titles: {one, other} msgid pairs the Runner draws through I18n.ui_n.
+  {Gori::Tui::Runner::HISTORY_BATCH_TITLES, Gori::Tui::Runner::INTERCEPT_BATCH_TITLES,
+   Gori::Tui::Runner::SITEMAP_BATCH_TITLES, Gori::Tui::Runner::ISSUES_BATCH_TITLES}.each do |table|
+    table.each_value do |(one, other)|
+      found << Wrapped.new("ui", one, "Runner batch titles")
+      found << Wrapped.new("ui", other, "Runner batch titles")
+    end
+  end
+  Gori::Tui::Runner::ISSUES_CURSOR_ONLY.each_value { |note| found << Wrapped.new("ui", note, "Runner::ISSUES_CURSOR_ONLY") }
   # Hint constants an overlay wraps at its use site (`I18n.ui(IDLE_HINT)`).
   {Gori::Tui::FlowPicker::IDLE_HINT, Gori::Tui::LinkPicker::IDLE_HINT, Gori::Tui::LinkPicker::CARD_HINT,
    Gori::Tui::LinksOverlay::ADD_HINT, Gori::Tui::LinksOverlay::BROWSE_HINT,

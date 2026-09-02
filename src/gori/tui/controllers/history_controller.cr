@@ -456,13 +456,13 @@ module Gori::Tui
       @history.reload(@host.session.store) # catch peer captures while we were elsewhere
       if had && @history.active_view.nil?
         @lost_view_key = nil
-        @host.status("the #{had.name} view is gone — showing All")
+        @host.status(I18n.sys("the %{name} view is gone — showing All", name: had.name))
       elsif !@lost_view_key.nil? || !lost.nil?
         # The boot case: nothing was being shown yet, so there is no before/after to compare —
         # the dangling pointer itself is the signal, and this is the first moment the operator
         # is actually looking at History (a status set during startup is overwritten unread).
         @lost_view_key = nil
-        @host.status("the saved view this project had is gone — showing All")
+        @host.status(I18n.sys("the saved view this project had is gone — showing All"))
       end
     end
 
@@ -480,7 +480,7 @@ module Gori::Tui
       had = @history.active_view
       resolve_active_view
       if had && @history.active_view.nil?
-        @host.status("the #{had.name} view is gone — showing All")
+        @host.status(I18n.sys("the %{name} view is gone — showing All", name: had.name))
       end
       @history.reload(@host.session.store)
       @history.refresh_detail(@host.session.store) if @host.overlay == :detail # peer filled the open flow
@@ -645,11 +645,11 @@ module Gori::Tui
     def grpc_reflect : Nil
       row = @history.selected_row
       unless row
-        @host.status("gRPC reflection: no flow selected")
+        @host.status(I18n.sys("gRPC reflection: no flow selected"))
         return
       end
       if @reflect_inflight
-        @host.status("gRPC reflection: already running")
+        @host.status(I18n.sys("gRPC reflection: already running"))
         return
       end
       client = Gori::Protobuf::Reflection::Client.new(Gori::Outbound.interactive(@host.session.scope),
@@ -658,13 +658,13 @@ module Gori::Tui
       # Asked BEFORE anything is printed and before the fiber is spawned, so a blocked target
       # costs no thread and reads as a refusal rather than as a failed send.
       if reason = client.refusal
-        @host.status("gRPC reflection: #{reason}")
+        @host.status(I18n.sys("gRPC reflection: %{reason}", reason: reason))
         return
       end
       target = client.target
       results = @reflect_results
       @reflect_inflight = true
-      @host.status("gRPC reflection → #{target}…")
+      @host.status(I18n.sys("gRPC reflection → %{target}…", target: target))
       spawn(name: "gori-grpc-reflect") do
         outcome = begin
           client.fetch
@@ -710,12 +710,12 @@ module Gori::Tui
     private def apply_reflection(done : ReflectDone) : Nil
       outcome = done.outcome
       if err = outcome.error
-        @host.status("gRPC reflection #{done.target}: #{err}")
+        @host.status(I18n.sys("gRPC reflection %{target}: %{err}", target: done.target, err: err))
         return
       end
       set = outcome.descriptor_set
       unless set
-        @host.status("gRPC reflection #{done.target}: no descriptors returned")
+        @host.status(I18n.sys("gRPC reflection %{target}: no descriptors returned", target: done.target))
         return
       end
       committed = Gori::Protobuf::Schemas.adopt(@host.session.store, done.target,
@@ -742,20 +742,20 @@ module Gori::Tui
     end
 
     def history_mark_toggle : Nil
-      return @host.status("no flow to mark") unless @history.selected_id
+      return @host.status(I18n.sys("no flow to mark")) unless @history.selected_id
       @history.toggle_mark
       @host.status(mark_status)
     end
 
     def history_mark_all : Nil
-      return @host.status("no flows to mark") if @history.empty?
+      return @host.status(I18n.sys("no flows to mark")) if @history.empty?
       @history.mark_all
       @host.status(mark_status)
     end
 
     def history_mark_clear : Nil
       @history.clear_marks
-      @host.status("marks cleared")
+      @host.status(I18n.sys("marks cleared"))
     end
 
     def history_mark_extend(delta : Int32) : Nil
@@ -782,7 +782,7 @@ module Gori::Tui
       return unless id
       detail = @host.session.store.get_flow(id)
       unless detail
-        @host.status("copy: flow no longer available")
+        @host.status(I18n.sys("copy: flow no longer available"))
         return
       end
       io = IO::Memory.new
@@ -792,7 +792,7 @@ module Gori::Tui
       # one copy on this path that can carry non-UTF-8 bytes for it to flag.
       raw = String.new(io.to_slice)
       written = Clipboard.copy(raw)
-      @host.status("copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{written}b)#{Clipboard.note(written, raw)}")
+      @host.status(I18n.sys("copied %{method} %{origin_path} to clipboard (%{written}b)%{note}", method: detail.row.method, origin_path: Url.origin_path(detail.row.target), written: written, note: Clipboard.note(written, raw)))
     end
 
     # Multi-mark copy (#442): concatenating N raw request dumps is not what anyone marking
@@ -801,7 +801,7 @@ module Gori::Tui
     def copy_urls(ids : Array(Int64)) : Nil
       store = @host.session.store
       urls = ids.compact_map { |id| store.flow_row(id).try(&.url) }
-      return @host.status("copy: no flows left to copy") if urls.empty?
+      return @host.status(I18n.sys("copy: no flows left to copy")) if urls.empty?
       text = urls.join('\n')
       written = Clipboard.copy(text)
       # A thousand marked URLs overrun the 64KB clipboard cap, and a severed list that CLAIMS a
@@ -820,7 +820,7 @@ module Gori::Tui
 
     def history_query : Nil
       @history.start_query
-      @host.status("filter: type a query · ↹ complete · ↵ apply · esc clear")
+      @host.status(I18n.sys("filter: type a query · ↹ complete · ↵ apply · esc clear"))
     end
 
     # Space-menu delete: capture the flow id NOW so a live-capture reload between the
@@ -855,11 +855,11 @@ module Gori::Tui
         # place — say so instead of reporting a delete that didn't happen, so the set is still
         # there to retry.
         unless @history.delete_ids(@host.session.store, ids)
-          @host.status("flow NOT deleted (project busy) — the marks are kept, try again")
+          @host.status(I18n.sys("flow NOT deleted (project busy) — the marks are kept, try again"))
           next
         end
         @host.request_overlay(:none) if @host.overlay == :detail
-        @host.status("flow deleted: #{name}")
+        @host.status(I18n.sys("flow deleted: %{name}", name: name))
       end
     end
 
@@ -898,7 +898,7 @@ module Gori::Tui
       sel = @history.detail_selection?
       text = sel ? @history.detail_copy_text : @history.detail_copy_all
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)

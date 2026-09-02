@@ -596,13 +596,13 @@ module Gori::Tui
     private def plan_error(ex : Sequencer::PlanError) : String
       case ex.reason
       in Sequencer::PlanError::Reason::NoTokens
-        "no tokens to analyze — paste some first"
+        I18n.sys("no tokens to analyze — paste some first")
       in Sequencer::PlanError::Reason::NoTarget, Sequencer::PlanError::Reason::BadTarget
-        "invalid target — use scheme://host[:port]/path"
+        I18n.sys("invalid target — use scheme://host[:port]/path")
       in Sequencer::PlanError::Reason::NoTokenLoc
-        "set a token location first"
+        I18n.sys("set a token location first")
       in Sequencer::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        I18n.sys("unresolved env %{detail} — add it in the Project tab's ENV pane", detail: ex.detail)
       end
     end
 

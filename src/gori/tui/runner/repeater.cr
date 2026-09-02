@@ -8,7 +8,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # session only fires on ^R — so the >1 case just confirms the sub-tab count.
   def repeater_selected : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     return repeater_controller.repeater_flow(ids.first) if ids.size == 1
     return unless ids = batch_within_cap(ids, "Repeater")
     targets = ids

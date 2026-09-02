@@ -7,7 +7,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     view = sitemap_controller.view
     ep = view.selected_endpoint
     unless ep
-      @toast = "select a host or path to discover"
+      @toast = I18n.sys("select a host or path to discover")
       return
     end
     # The origin comes from a REAL captured flow (an id fold has none of its own, so that
@@ -45,7 +45,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # Narrow to the PRIMARY target's host — the cursor row when it is itself a target, else the
       # oldest mark. Not `parsed.first`: that is display order, so which host survived would flip
       # with a history_list_order change, and the toast below promises the cursor row.
-      @toast = "marked flows span #{hosts.size} hosts — discover runs one host at a time"
+      @toast = I18n.sys("marked flows span %{hosts} hosts — discover runs one host at a time", hosts: hosts.size)
       primary = history_controller.primary_target_flow_id
       keep = parsed.find { |(id, _)| id == primary } || parsed.first
       parsed = parsed.select { |(_, p)| p.host == keep[1].host }

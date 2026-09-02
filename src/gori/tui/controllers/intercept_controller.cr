@@ -220,7 +220,7 @@ module Gori::Tui
     private def open_editor : Nil
       @intercept.toggle_edit
       return unless @intercept.hex_editing?
-      @host.status("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes")
+      @host.status(I18n.sys("binary WebSocket message — hex edit: 0-9a-f overtype, Ins/Del/⌫ bytes"))
     end
 
     # esc over a mark set hands the marks back first — the reflex clear, mirroring History,
@@ -228,7 +228,7 @@ module Gori::Tui
     private def queue_escape : Nil
       if @intercept.mark_count > 0
         @intercept.clear_marks
-        @host.status("marks cleared")
+        @host.status(I18n.sys("marks cleared"))
       else
         @host.request_focus(:menu)
       end
@@ -533,7 +533,7 @@ module Gori::Tui
       # not keep — the real holder went on catching. Same tiebreak, and the same wording as the
       # bind-error toast on entry, so "view-only" means one thing across the UI.
       unless @host.session.capturing_lock_held?
-        @host.status("view-only — this window is not holding traffic; press c to take over capture")
+        @host.status(I18n.sys("view-only — this window is not holding traffic; press c to take over capture"))
         return
       end
       result = @host.session.interceptor.toggle
@@ -576,9 +576,9 @@ module Gori::Tui
       sent = ids.count { |id| ic.forward(id, (edit && edit[0] == id) ? edit[1] : nil) }
       @intercept.reload(ic)
       if sent == ids.size
-        @host.status("forwarded #{label}")
+        @host.status(I18n.sys("forwarded %{label}", label: label))
       else
-        @host.status("forwarded #{sent} of #{ids.size} — the rest were already decided elsewhere")
+        @host.status(I18n.sys("forwarded %{sent} of %{ids} — the rest were already decided elsewhere", sent: sent, ids: ids.size))
       end
     end
 
@@ -599,9 +599,9 @@ module Gori::Tui
       dropped = ids.count { |id| ic.drop(id) }
       @intercept.reload(ic)
       if dropped == ids.size
-        @host.status("dropped #{label}")
+        @host.status(I18n.sys("dropped %{label}", label: label))
       else
-        @host.status("dropped #{dropped} of #{ids.size} — the rest were already decided elsewhere")
+        @host.status(I18n.sys("dropped %{dropped} of %{ids} — the rest were already decided elsewhere", dropped: dropped, ids: ids.size))
       end
     end
 
@@ -638,7 +638,7 @@ module Gori::Tui
       return false unless refusal
       item, reason = refusal
       return false unless ids.includes?(item.id)
-      @host.status("edit NOT applied to #{item.label} — #{reason}")
+      @host.status(I18n.sys("edit NOT applied to %{label} — %{reason}", label: item.label, reason: reason))
       true
     end
 
@@ -653,20 +653,20 @@ module Gori::Tui
       # the operator's only record of how many irreversible decisions just went out.
       n = ic.forward_all(overrides)
       @intercept.reload(ic)
-      @host.status("forwarded all (#{n})")
+      @host.status(I18n.sys("forwarded all (%{n})", n: n))
     end
 
     # Open the catch-condition filter bar (a query that narrows which messages hold).
     def intercept_query : Nil
       @intercept.start_query(@host.session.store) # store backs `host:` Tab-completion
-      @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
+      @host.status(I18n.sys("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear"))
     end
 
     # Cycle which leg(s) to hold: all → requests → responses → all.
     def intercept_cycle_direction : Nil
       dir = @host.session.interceptor.cycle_direction
       @intercept.reload(@host.session.interceptor)
-      @host.status("intercept catch: #{direction_phrase(dir)}")
+      @host.status(I18n.sys("intercept catch: %{direction_phrase}", direction_phrase: direction_phrase(dir)))
     end
 
     private def direction_phrase(dir : Interceptor::Direction) : String
@@ -688,20 +688,20 @@ module Gori::Tui
     # hold's read-only preview, with the focus ring still saying "detail".
     def intercept_mark_toggle : Nil
       return if @intercept.editing?
-      return @host.status("nothing held to mark") unless @intercept.selected_id
+      return @host.status(I18n.sys("nothing held to mark")) unless @intercept.selected_id
       @intercept.toggle_mark
       @host.status(mark_status)
     end
 
     def intercept_mark_all : Nil
-      return @host.status("nothing held to mark") if @intercept.empty?
+      return @host.status(I18n.sys("nothing held to mark")) if @intercept.empty?
       @intercept.mark_all
       @host.status(mark_status)
     end
 
     def intercept_mark_clear : Nil
       @intercept.clear_marks
-      @host.status("marks cleared")
+      @host.status(I18n.sys("marks cleared"))
     end
 
     def intercept_mark_extend(delta : Int32) : Nil

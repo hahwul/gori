@@ -48,7 +48,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def notes_export : Nil
     view = notes_controller.view
     if view.current_text.strip.empty?
-      @toast = "note is empty — nothing to export"
+      @toast = I18n.sys("note is empty — nothing to export")
       return
     end
     base = Notes.export_basename(view.current_text, view.current_index)

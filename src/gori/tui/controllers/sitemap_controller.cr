@@ -43,7 +43,7 @@ module Gori::Tui
       return false if ev.ctrl? || ev.alt?
       return false unless ev.key.escape? && @sitemap.mark_count > 0
       @sitemap.clear_marks
-      @host.status("marks cleared")
+      @host.status(I18n.sys("marks cleared"))
       true
     end
 
@@ -242,7 +242,7 @@ module Gori::Tui
     # `/` — focus the QL filter bar (verb-dispatched).
     def sitemap_query : Nil
       @sitemap.start_query
-      @host.status("filter: type a query · ↹ complete · ↵ apply · esc clear")
+      @host.status(I18n.sys("filter: type a query · ↹ complete · ↵ apply · esc clear"))
     end
 
     # --- tag editor (a text sub-mode; the shell routes its keys via handle_tag_key) ---
@@ -253,9 +253,9 @@ module Gori::Tui
       n = @sitemap.mark_count
       if @sitemap.start_tag
         subject = n > 0 ? "tag #{paths(n)}" : "tag"
-        @host.status("#{subject}: type a memo · ↵ save · esc cancel")
+        @host.status(I18n.sys("%{subject}: type a memo · ↵ save · esc cancel", subject: subject))
       else
-        @host.status("can't tag a fold — expand it and tag a value")
+        @host.status(I18n.sys("can't tag a fold — expand it and tag a value"))
       end
     end
 
@@ -331,13 +331,13 @@ module Gori::Tui
     # `t` — flip the cursor row's mark and step down. A fold carries no path, so it can't be
     # marked (nor tagged, nor resolved to an endpoint) — say so rather than eat the key.
     def sitemap_mark_toggle : Nil
-      return @host.status("can't mark a fold — expand it and mark a value") unless @sitemap.toggle_mark
+      return @host.status(I18n.sys("can't mark a fold — expand it and mark a value")) unless @sitemap.toggle_mark
       @host.status(mark_status)
     end
 
     def sitemap_mark_clear : Nil
       @sitemap.clear_marks
-      @host.status("marks cleared")
+      @host.status(I18n.sys("marks cleared"))
     end
 
     def sitemap_mark_extend(delta : Int32) : Nil

@@ -347,7 +347,7 @@ module Gori::Tui
     # needs the quit confirm, which lives in `runner.cr`.
     def save_notes : Bool
       return true if @notes.save(@host.session.store)
-      @host.status("notes NOT saved — project busy; your text is still here, esc to retry")
+      @host.status(I18n.sys("notes NOT saved — project busy; your text is still here, esc to retry"))
       false
     end
 
@@ -358,7 +358,7 @@ module Gori::Tui
       @notes.new_note
       @notes.enter_insert!
       @host.focus_body
-      @host.status("new note (#{@notes.count}) — ^1-9 switch · ^W close · esc sub-tabs")
+      @host.status(I18n.sys("new note (%{notes}) — ^1-9 switch · ^W close · esc sub-tabs", notes: @notes.count))
     end
 
     # Create a blank note without focusing the Notes tab (link-picker "create +
@@ -406,7 +406,7 @@ module Gori::Tui
       @notes.duplicate_current
       refresh_link_preview
       @host.focus_body
-      @host.status("duplicated note (#{@notes.count} open)") if saved
+      @host.status(I18n.sys("duplicated note (%{notes} open)", notes: @notes.count)) if saved
     end
 
     # Close the current note (^W) — after a confirm, since the text is discarded. A
@@ -425,18 +425,18 @@ module Gori::Tui
         @host.session.store.delete_links_for_owner(Store::LinkOwnerKind::Note, closed_id)
       end
       refresh_link_preview
-      @host.status("closed note (#{@notes.count} open)")
+      @host.status(I18n.sys("closed note (%{notes} open)", notes: @notes.count))
     end
 
     # Copy selection (or current line) in READ mode.
     def notes_copy : Nil
       text = @notes.copy_text
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # The selection (or current line) text without the clipboard write — for the
@@ -449,11 +449,11 @@ module Gori::Tui
     def notes_copy_all : Nil
       text = @notes.current_text
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
         return
       end
       written = Clipboard.copy(text)
-      @host.status("copied note to clipboard (#{written}b)#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied note to clipboard (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # Wipe the current note's text (the sub-tab stays open). Confirm-gated like every
@@ -465,7 +465,7 @@ module Gori::Tui
       @host.confirm(I18n.ui("CLEAR NOTE"), I18n.sys("Clear this note's text?\nThis can't be undone."),
         confirm_label: I18n.ui("clear"), danger: true) do
         @notes.clear_current
-        @host.status("note cleared")
+        @host.status(I18n.sys("note cleared"))
       end
     end
 
@@ -485,10 +485,10 @@ module Gori::Tui
     def notes_export_to(path : String) : Bool
       text = @notes.current_text
       File.write(path, text.ends_with?('\n') ? text : "#{text}\n")
-      @host.status("exported note → #{path}")
+      @host.status(I18n.sys("exported note → %{path}", path: path))
       true
     rescue ex
-      @host.status("export failed: #{ex.message}")
+      @host.status(I18n.sys("export failed: %{message}", message: ex.message))
       false
     end
   end

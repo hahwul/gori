@@ -418,17 +418,17 @@ module Gori::Tui
     private def mine_plan_error(ex : Miner::PlanError) : String
       case ex.reason
       in Miner::PlanError::Reason::NoTarget, Miner::PlanError::Reason::BadTarget
-        "invalid target — use scheme://host[:port]/path"
+        I18n.sys("invalid target — use scheme://host[:port]/path")
       in Miner::PlanError::Reason::NoLocations
-        "no locations selected"
+        I18n.sys("no locations selected")
       in Miner::PlanError::Reason::Wordlist
-        "wordlist error: #{ex.detail}"
+        I18n.sys("wordlist error: %{detail}", detail: ex.detail)
       in Miner::PlanError::Reason::NoNames
-        "wordlist is empty"
+        I18n.sys("wordlist is empty")
       in Miner::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        I18n.sys("unresolved env %{detail} — add it in the Project tab's ENV pane", detail: ex.detail)
       in Miner::PlanError::Reason::HookArgv
-        "hook command does not parse: #{ex.detail}"
+        I18n.sys("hook command does not parse: %{detail}", detail: ex.detail)
       end
     end
 

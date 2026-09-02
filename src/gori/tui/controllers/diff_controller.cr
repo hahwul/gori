@@ -118,21 +118,21 @@ module Gori::Tui
 
     def cycle_lens(dir : Int32) : Nil
       lens = @diff.cycle_lens(dir)
-      @host.status("diff lens: #{lens.try(&.label) || "findings (everything but unchanged)"}")
+      @host.status(I18n.sys("diff lens: %{lens}", lens: lens.try(&.label) || I18n.sys("findings (everything but unchanged)")))
     end
 
     # Run the comparison. Both slots must be set; a store this tab opened is closed here.
     def run : Nil
       a = @diff.slot(:a)
       b = @diff.slot(:b)
-      return @host.status("pick both sides first (a / b)") unless a && b
+      return @host.status(I18n.sys("pick both sides first (a / b)")) unless a && b
       if a.db_path == b.db_path
         @diff.error = "both slots name the same project — pick two different ones"
         return
       end
       # The read blocks the event loop for its duration, so say what is running BEFORE it
       # starts rather than only reporting the result once it is over.
-      @host.status("diff: reading #{a.name} → #{b.name}…")
+      @host.status(I18n.sys("diff: reading %{name} → %{name2}…", name: a.name, name2: b.name))
       # Either slot may name the OPEN project — B does by default, and `s` moves it to A —
       # and then its store is the session's. A second connection to the database this TUI is
       # capturing into buys nothing and would sit beside the writer's lock, so it is borrowed
@@ -149,7 +149,7 @@ module Gori::Tui
           label_a: a.name, label_b: b.name,
           path_a: a.db_path, path_b: b.db_path,
           limit: READ_MAX, raise_on_error: true)
-        @host.status("diff: #{a.name} → #{b.name}")
+        @host.status(I18n.sys("diff: %{name} → %{name2}", name: a.name, name2: b.name))
       rescue ex
         @diff.error = "diff failed: #{ex.message}"
       ensure

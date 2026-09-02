@@ -105,8 +105,8 @@ describe "status glyph kinds" do
     Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status\(|@toast =|toast\()/)
-        next unless line.matches?(/"([a-z]+ error): #\{/)
-        line.scan(/"([a-z]+ error): #\{/) { |m| emitted << m[1] }
+        next unless line.matches?(/"([a-z]+ error): [#%]\{/)
+        line.scan(/"([a-z]+ error): [#%]\{/) { |m| emitted << m[1] }
         unmarked << "#{File.basename(path)}:#{i + 1}" unless line.includes?(", :error)")
       end
     end

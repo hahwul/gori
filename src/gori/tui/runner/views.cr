@@ -97,7 +97,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # The store refused the write (busy/locked/closing). Applying the view in memory anyway
       # would leave the list filtered by something the next restart forgets, with no way to tell
       # the two states apart — so refuse both halves and say so.
-      @toast = "could not save the view — the project store is busy"
+      @toast = I18n.sys("could not save the view — the project store is busy")
       return
     end
     history_controller.view.set_view(view)
@@ -114,18 +114,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # card come down on a keystroke that did nothing — ^X on the same row already answers, and
     # a silent dismissal is indistinguishable from ^E having worked.
     unless view
-      @toast = "pick a view to edit — ↵ on this row saves the filter instead"
+      @toast = I18n.sys("pick a view to edit — ↵ on this row saves the filter instead")
       return
     end
     unless view.narrowing?
-      @toast = "#{view.name} has no query to edit"
+      @toast = I18n.sys("%{name} has no query to edit", name: view.name)
       return
     end
     if view.builtin?
       # Loaded, not refused: a built-in is a fine STARTING POINT for a view of your own, and the
       # bar is where you would tailor it. Saving it lands in one of the two writable scopes, so
       # nothing here can modify the built-in itself.
-      @toast = "#{view.name} is built in — edit and save it under a new name"
+      @toast = I18n.sys("%{name} is built in — edit and save it under a new name", name: view.name)
     end
     history_controller.set_history_query(view.query)
     history_controller.history_query
@@ -135,15 +135,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # are refused by name rather than hidden: an operator who tries is asking a reasonable question
   # and deserves the answer.
   private def delete_view(lp : LibraryPicker, i : Int32, views : Array(SavedViews::View)) : Nil
-    return @toast = "pick a view to delete" if i == VIEW_ROW_SAVE
+    return @toast = I18n.sys("pick a view to delete") if i == VIEW_ROW_SAVE
     return unless view = views[i]?
     if view.builtin?
-      @toast = "#{view.name} is a built-in view — it can't be deleted"
+      @toast = I18n.sys("%{name} is a built-in view — it can't be deleted", name: view.name)
       return
     end
     store = @session.store
     unless SavedViews.remove(store, view)
-      @toast = "could not delete #{view.name} — the store is busy"
+      @toast = I18n.sys("could not delete %{name} — the store is busy", name: view.name)
       return
     end
     # Deleting the ACTIVE view leaves a dangling pointer; drop back to All rather than keep
@@ -155,7 +155,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     fresh = SavedViews.merged(store)
     lp.set_rows(view_rows(fresh, history_controller.view.active_view, history_controller.view.query))
-    @toast = "deleted view #{view.name}"
+    @toast = I18n.sys("deleted view %{name}", name: view.name)
     # The card stays up and its rows were just replaced, so the closure the open-site installed
     # is now indexing a stale array. Reinstall both hooks against the fresh one.
     lp.on_commit = -> {
@@ -172,7 +172,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # is on, so "tweak the filter and re-save" is ↵↵ rather than retyping.
   private def open_view_save(query : String) : Nil
     if reason = SavedViews.unusable_query_reason(query)
-      @toast = "can't save this filter: #{reason}"
+      @toast = I18n.sys("can't save this filter: %{reason}", reason: reason)
       return
     end
     seed = history_controller.view.active_view.try { |v| v.builtin? ? "" : v.name } || ""
@@ -217,10 +217,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
     if same
       unless SavedViews.update(store, same, name, query)
-        return @toast = "could not update #{name} — the store is busy"
+        return @toast = I18n.sys("could not update %{name} — the store is busy", name: name)
       end
       activate_view(SavedViews::View.new(same.id, name, query, scope))
-      @toast = "updated view #{name} (#{scope})"
+      @toast = I18n.sys("updated view %{name} (%{scope})", name: name, scope: scope)
     elsif other
       # The name exists in the OTHER scope. Re-home it and take the new query with it, rather
       # than leaving two views one `--view NAME` would silently have to choose between.
@@ -228,16 +228,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # follow-up edit whose refusal could leave the list filtered by a query that was never
       # persisted — and no window where the destination holds the OLD name.
       unless moved = SavedViews.set_scope(store, other, scope, name, query)
-        return @toast = "could not move #{name} to #{scope} — the store is busy"
+        return @toast = I18n.sys("could not move %{name} to %{scope} — the store is busy", name: name, scope: scope)
       end
       activate_view(moved)
-      @toast = "moved view #{name} to #{scope}"
+      @toast = I18n.sys("moved view %{name} to %{scope}", name: name, scope: scope)
     else
       unless created = SavedViews.add(store, name, query, scope)
-        return @toast = "could not save #{name} — the store is busy"
+        return @toast = I18n.sys("could not save %{name} — the store is busy", name: name)
       end
       activate_view(created)
-      @toast = "saved view #{name} (#{scope})"
+      @toast = I18n.sys("saved view %{name} (%{scope})", name: name, scope: scope)
     end
   end
 end

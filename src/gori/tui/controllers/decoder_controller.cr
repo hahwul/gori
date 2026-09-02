@@ -188,7 +188,7 @@ module Gori::Tui
       @chain_pre = ""
       @dirty = true
       @host.request_focus(:body)
-      @host.status("new conversion (#{@sessions.size} open)")
+      @host.status(I18n.sys("new conversion (%{sessions} open)", sessions: @sessions.size))
     end
 
     # Seed a NEW conversion from an externally-supplied string (the "Send selection
@@ -203,7 +203,7 @@ module Gori::Tui
       @chain_pre = ""
       @dirty = true
       @host.goto_tab(:decoder)
-      @host.status("sent selection to Decoder (#{text.bytesize}b)")
+      @host.status(I18n.sys("sent selection to Decoder (%{bytesize}b)", bytesize: text.bytesize))
     end
 
     # Content-only clone of the active conversion (input + chain + chip name).
@@ -216,7 +216,7 @@ module Gori::Tui
       @chain_pre = ""
       @dirty = true
       @host.request_focus(:body)
-      @host.status("duplicated conversion (#{@sessions.size} open)")
+      @host.status(I18n.sys("duplicated conversion (%{sessions} open)", sessions: @sessions.size))
     end
 
     # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just
@@ -598,17 +598,17 @@ module Gori::Tui
       s.chain_cx = 0
       @popup.close
       touch
-      @host.status("cleared")
+      @host.status(I18n.sys("cleared"))
     end
 
     def copy_output : Nil
       s = cur
       text = s.view.output_copy(s.result)
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
       else
         written = Clipboard.copy(text)
-        @host.status("output copied to clipboard#{Clipboard.note(written, text)}")
+        @host.status(I18n.sys("output copied to clipboard%{note}", note: Clipboard.note(written, text)))
       end
     end
 
@@ -625,10 +625,10 @@ module Gori::Tui
              else             ""
              end
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
       else
         written = Clipboard.copy(text)
-        @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+        @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
       end
     end
 
@@ -644,10 +644,10 @@ module Gori::Tui
              else              s.chain
              end
       if text.empty?
-        @host.status("nothing to copy")
+        @host.status(I18n.sys("nothing to copy"))
       else
         written = Clipboard.copy(text)
-        @host.status("copied all (#{written}b)#{Clipboard.note(written, text)}")
+        @host.status(I18n.sys("copied all (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
       end
     end
 
@@ -1033,15 +1033,15 @@ module Gori::Tui
       # the save reported success and left an entry no spec could ever reach.
       name = name.strip
       if name.empty?
-        @host.status("chain name required")
+        @host.status(I18n.sys("chain name required"))
         return
       end
       if name.matches?(/[>|,¦§]/)
-        @host.status("chain name can't contain > | , ¦ or §")
+        @host.status(I18n.sys("chain name can't contain > | , ¦ or §"))
         return
       end
       if (c = registry[name]?) && !c.category.saved?
-        @host.status("\"#{name}\" is a built-in converter — pick another name")
+        @host.status(I18n.sys("\"%{name}\" is a built-in converter — pick another name", name: name))
         return
       end
       # Reject by NORMALIZED name, the key the registry resolves on: saving "my chain" while
@@ -1061,7 +1061,7 @@ module Gori::Tui
       if Settings.save
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
       else
-        @host.status("could not save chain")
+        @host.status(I18n.sys("could not save chain"))
       end
     end
 
@@ -1074,7 +1074,7 @@ module Gori::Tui
       s.chain_cx = s.chain.size
       @popup.close
       touch
-      @host.status("loaded chain \"#{name}\"")
+      @host.status(I18n.sys("loaded chain \"%{name}\"", name: name))
     end
   end
 end

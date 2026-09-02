@@ -368,12 +368,12 @@ module Gori::Tui
     def sequencer_export_to(format : Symbol, path : String) : Bool
       v = current_view
       unless v
-        @host.status("no sequencer session")
+        @host.status(I18n.sys("no sequencer session"))
         return true
       end
       rep = v.report
       if rep.usable_count == 0
-        @host.status("nothing to export — collect tokens first (^R)")
+        @host.status(I18n.sys("nothing to export — collect tokens first (^R)"))
         return true
       end
       content = if format == :json
@@ -389,7 +389,7 @@ module Gori::Tui
       @host.status(msg)
       true
     rescue ex
-      @host.status("export failed: #{ex.message}")
+      @host.status(I18n.sys("export failed: %{message}", message: ex.message))
       false
     end
 
@@ -401,22 +401,22 @@ module Gori::Tui
     def sequencer_promote : Nil
       tab = current_tab_obj
       v = tab.try(&.view)
-      return @host.status("no sequencer session") unless tab && v
+      return @host.status(I18n.sys("no sequencer session")) unless tab && v
       rep = v.report
-      return @host.status("nothing to file — collect tokens first (^R)") if rep.usable_count == 0
+      return @host.status(I18n.sys("nothing to file — collect tokens first (^R)")) if rep.usable_count == 0
       store = @host.session.store
       severity = Store::Severity.parse?(Sequencer::Present.issue_severity_label(rep)) || Store::Severity::Info
       id = store.insert_issue(Sequencer::Present.issue_title(rep, v.subject), severity, v.target_host, tab.flow_id)
       # insert_issue returns 0 — NOT nil — when the write never committed (busy/locked/closing
       # store), and 0 is TRUTHY in Crystal. Reporting success there would tell the operator a
       # finding is recorded when nothing was written; the same trap Probe::Triage.promote names.
-      return @host.status("could not file the issue (store busy) — nothing was written, try again") if id == 0
+      return @host.status(I18n.sys("could not file the issue (store busy) — nothing was written, try again")) if id == 0
       # A failed notes update leaves the Issue standing with its title and severity, which is
       # still the finding — say which half landed rather than claim the whole thing did.
       if store.update_issue(id, notes: Sequencer::Present.report_markdown(rep, v.subject))
-        @host.status("filed issue ##{id} (#{severity.label}) — see the Issues tab")
+        @host.status(I18n.sys("filed issue #%{id} (%{label}) — see the Issues tab", id: id, label: severity.label))
       else
-        @host.status("filed issue ##{id} (#{severity.label}), but the report body did not save — store busy")
+        @host.status(I18n.sys("filed issue #%{id} (%{label}), but the report body did not save — store busy", id: id, label: severity.label))
       end
     end
 
@@ -517,7 +517,7 @@ module Gori::Tui
         # See FuzzerController#apply_rename: the view already carries the new label, so a
         # refused write is a silent no-op unless the store's answer is reported.
         unless @host.session.store.set_sequencer_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+          @host.status(I18n.sys("rename NOT saved (project busy) — the chip reads the new name until the session reloads"))
         end
       end
     end
@@ -601,7 +601,7 @@ module Gori::Tui
       # operator selected in a pane whose lines can be raw captured bytes, and PCRE2 raises on
       # a non-UTF-8 subject. The `.strip` already drops the CR the regex used to consume.
       tokens = payload.split('\n').map(&.strip).reject(&.empty?)
-      return @host.status("nothing to analyze") if tokens.empty?
+      return @host.status(I18n.sys("nothing to analyze")) if tokens.empty?
       # Append into the current manual session only when it is NOT still collecting — starting
       # a run under a live fiber would spawn a second concurrent engine feeding the same view
       # (corrupted stats + orphaned job). A running session instead gets a fresh session below.
@@ -610,7 +610,7 @@ module Gori::Tui
         save_current
         drain_events
         start_run(v)
-        @host.status("added #{tokens.size} token#{tokens.size == 1 ? "" : "s"} — analyzing")
+        @host.status(I18n.sys_n(tokens.size, "added %{tokens} token — analyzing", "added %{tokens} tokens — analyzing", tokens: tokens.size))
       else
         config = Sequencer::Config.new(mode: Sequencer::Mode::Manual, manual_tokens: tokens)
         view = SequencerView.new
@@ -618,7 +618,7 @@ module Gori::Tui
         open_session(view, nil)
         @host.goto_tab(:sequencer)
         start_run(view)
-        @host.status("sequencer ← #{tokens.size} manual token#{tokens.size == 1 ? "" : "s"}")
+        @host.status(I18n.sys_n(tokens.size, "sequencer ← %{tokens} manual token", "sequencer ← %{tokens} manual tokens", tokens: tokens.size))
       end
     end
 
@@ -639,7 +639,7 @@ module Gori::Tui
       # Restarting under a live collection would spawn a second engine fiber feeding the same
       # view (interleaved samples → corrupted randomness stats, orphaned job). Require a stop first.
       if v.running?
-        @host.status("stop the collection first (^X) to reconfigure")
+        @host.status(I18n.sys("stop the collection first (^X) to reconfigure"))
         return
       end
       v.set_config(config)
@@ -710,14 +710,14 @@ module Gori::Tui
       ensure
         view.finish_run
       end
-      @host.status("collecting tokens in the background — watch the bottom bar / notifications")
+      @host.status(I18n.sys("collecting tokens in the background — watch the bottom bar / notifications"))
     end
 
     # --- run controls ---
     def sequence_run : Nil
       return unless v = current_view
       if v.running?
-        @host.status("already collecting — ^X to stop")
+        @host.status(I18n.sys("already collecting — ^X to stop"))
         return
       end
       drain_events
@@ -727,7 +727,7 @@ module Gori::Tui
     def sequence_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
-      @host.status("stopping…", :busy)
+      @host.status(I18n.sys("stopping…"), :busy)
     end
 
     # --- async (run loop) ---
@@ -774,7 +774,7 @@ module Gori::Tui
         msg = "Sequencer: #{ev.message} on #{v.summary}"
         log_event(v, :error, msg)
         push_notification(v, :error, msg)
-        @host.status("sequencer error: #{ev.message}", :error) if v.config.notify.posts_notification?(0, error: true)
+        @host.status(I18n.sys("sequencer error: %{message}", message: ev.message), :error) if v.config.notify.posts_notification?(0, error: true)
       end
     end
 

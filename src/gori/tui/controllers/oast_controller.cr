@@ -400,7 +400,7 @@ module Gori::Tui
     def select_provider(key : String) : Bool
       idx = enabled_providers.index { |p| p.key == key }
       unless idx
-        @host.status("that provider is gone or was disabled — pick another")
+        @host.status(I18n.sys("that provider is gone or was disabled — pick another"))
         return false
       end
       @payload_pick = idx + 1
@@ -464,9 +464,9 @@ module Gori::Tui
     def copy_payload : Nil
       if url = @last_payload
         Clipboard.copy(url)
-        @host.status("copied OAST payload")
+        @host.status(I18n.sys("copied OAST payload"))
       else
-        @host.status("no payload yet — press g to generate")
+        @host.status(I18n.sys("no payload yet — press g to generate"))
       end
     end
 
@@ -475,7 +475,7 @@ module Gori::Tui
       prov = picked_provider
       return @host.status(no_provider_status("listen")) unless prov
       if listener_for(prov.key)
-        @host.status("already listening with #{prov.name}")
+        @host.status(I18n.sys("already listening with %{name}", name: prov.name))
       else
         start_listening(prov, want_payload: false)
       end
@@ -490,9 +490,9 @@ module Gori::Tui
       prov = picked_provider
       return @host.status(no_provider_status("stop listening")) unless prov
       listener = listener_for(prov.key)
-      return @host.status("not listening with #{prov.name}") unless listener
+      return @host.status(I18n.sys("not listening with %{name}", name: prov.name)) unless listener
       stop_listener(listener)
-      @host.status("stopped listening with #{prov.name} — session kept, resume it with `r`")
+      @host.status(I18n.sys("stopped listening with %{name} — session kept, resume it with `r`", name: prov.name))
     end
 
     # Stop every live listener on a project-level exit (leave project / quit). A listener
@@ -511,9 +511,9 @@ module Gori::Tui
       # in-flight guard a second g/^R spawns a duplicate register → two sessions, two
       # Listeners and two poller fibers for one provider. Dedup on the provider key.
       key = prov.key
-      return @host.status("already registering with #{prov.name}…") if @registering.includes?(key)
+      return @host.status(I18n.sys("already registering with %{name}…", name: prov.name)) if @registering.includes?(key)
       kind = Oast::ProviderKind.parse?(prov.kind)
-      return @host.status("unknown provider type #{prov.kind}") unless kind
+      return @host.status(I18n.sys("unknown provider type %{kind}", kind: prov.kind)) unless kind
       provider = Oast::Provider.build(kind, prov.host, prov.token)
       http = Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
       reg = @reg_events
@@ -526,7 +526,7 @@ module Gori::Tui
       rescue ex
         reg.send(RegErr.new(ex.message || "register failed", label, key))
       end
-      @host.status("registering with #{label}…")
+      @host.status(I18n.sys("registering with %{label}…", label: label))
     end
 
     # =========================================================================
@@ -554,10 +554,10 @@ module Gori::Tui
     # uses, so a resume and a register can never race into two listeners for one provider.
     def resume_session(session_id : Int64) : Nil
       rec = @host.session.store.get_oast_session(session_id)
-      return @host.status("session ##{session_id} is gone") unless rec
-      return @host.status("already listening on session ##{session_id}") if @listeners.any? { |l| l.active? && l.session.id == session_id }
+      return @host.status(I18n.sys("session #%{session_id} is gone", session_id: session_id)) unless rec
+      return @host.status(I18n.sys("already listening on session #%{session_id}", session_id: session_id)) if @listeners.any? { |l| l.active? && l.session.id == session_id }
       kind = Oast::ProviderKind.parse?(rec.kind)
-      return @host.status("session ##{session_id} names an unknown provider type #{rec.kind}") unless kind
+      return @host.status(I18n.sys("session #%{session_id} names an unknown provider type %{kind}", session_id: session_id, kind: rec.kind)) unless kind
 
       # A listener is addressed BY ITS PROVIDER everywhere else in this tab — ^X, `g` and the
       # payload picker all resolve through `listener_for(picked_provider.key)` — so a resumed
@@ -565,15 +565,15 @@ module Gori::Tui
       # and never stop.
       config = provider_config_for(rec)
       unless config
-        return @host.status("session ##{session_id}'s provider is gone — re-add #{rec.kind} #{rec.server_url} in Providers to resume it")
+        return @host.status(I18n.sys("session #%{session_id}'s provider is gone — re-add %{kind} %{server_url} in Providers to resume it", session_id: session_id, kind: rec.kind, server_url: rec.server_url))
       end
       key = config.key
-      return @host.status("already registering with #{config.name}…") if @registering.includes?(key)
+      return @host.status(I18n.sys("already registering with %{name}…", name: config.name)) if @registering.includes?(key)
       # ONE listener per provider key, the invariant `listener_for` rests on. Resuming a second
       # session of a provider that is already listening would put two Listeners under one key,
       # and every lookup after that — stop, generate, the job note — would silently pick one.
       if listener_for(key)
-        return @host.status("already listening with #{config.name} — stop it first (^X)")
+        return @host.status(I18n.sys("already listening with %{name} — stop it first (^X)", name: config.name))
       end
 
       session = session_from_record(rec)
@@ -593,7 +593,7 @@ module Gori::Tui
       rescue ex
         reg.send(RegErr.new(ex.message || "resume failed", label, key))
       end
-      @host.status("resuming #{label} session ##{session_id}…")
+      @host.status(I18n.sys("resuming %{label} session #%{session_id}…", label: label, session_id: session_id))
     end
 
     # Deregister a session's server-side state, stopping its poller first if it is live. The
@@ -601,19 +601,19 @@ module Gori::Tui
     # evidence, and an operator who wanted the findings gone would say so on the Issues tab.
     def release_session(session_id : Int64) : Nil
       rec = @host.session.store.get_oast_session(session_id)
-      return @host.status("session ##{session_id} is gone") unless rec
+      return @host.status(I18n.sys("session #%{session_id} is gone", session_id: session_id)) unless rec
       if listener = @listeners.find { |l| l.session.id == session_id }
         stop_listener(listener, release: true)
       else
         kind = Oast::ProviderKind.parse?(rec.kind)
-        return @host.status("session ##{session_id} names an unknown provider type #{rec.kind}") unless kind
+        return @host.status(I18n.sys("session #%{session_id} names an unknown provider type %{kind}", session_id: session_id, kind: rec.kind)) unless kind
         config = provider_config_for(rec)
         deregister(Oast::Provider.build(kind, rec.server_url, config.try(&.token) || rec.token),
           session_from_record(rec), report: true)
       end
       # NOT "released" — the deregister is a network round trip that has not happened yet.
       # `drain_releases` says which of the two it turned out to be.
-      @host.status("releasing session ##{session_id}…")
+      @host.status(I18n.sys("releasing session #%{session_id}…", session_id: session_id))
     end
 
     # Rebuild the engine Session from its row, and re-resolve the provider it belongs to.
@@ -698,7 +698,7 @@ module Gori::Tui
     private def deliver_payload(url : String) : Nil
       @last_payload = url
       Clipboard.copy(url)
-      @host.status("OAST payload ready + copied: #{url}")
+      @host.status(I18n.sys("OAST payload ready + copied: %{url}", url: url))
     end
 
     # Cross-tab: a listener exists → a payload can be generated locally (no network).
@@ -732,7 +732,7 @@ module Gori::Tui
     end
 
     def open_edit_provider : Nil
-      return @host.status("no provider selected") unless p = selected_provider
+      return @host.status(I18n.sys("no provider selected")) unless p = selected_provider
       @host.open_oast_provider_editor(p)
     end
 
@@ -781,10 +781,10 @@ module Gori::Tui
           ov.edit_scope == "global" ? Settings.delete_oast_provider(id) : store.delete_oast_provider(id.to_i64)
           insert_provider(store, ov, prev_enabled)
         end
-        @host.status("updated provider #{ov.provider_name}")
+        @host.status(I18n.sys("updated provider %{provider_name}", provider_name: ov.provider_name))
       else
         insert_provider(store, ov, true)
-        @host.status("added provider #{ov.provider_name}")
+        @host.status(I18n.sys("added provider %{provider_name}", provider_name: ov.provider_name))
       end
       reload
       true
@@ -1508,7 +1508,7 @@ module Gori::Tui
       @registering.delete(reg.provider_key) # registration resolved (ok or err) — clear the in-flight guard
       case reg
       when RegErr
-        @host.status("OAST register failed (#{reg.provider_label}): #{reg.message}")
+        @host.status(I18n.sys("OAST register failed (%{provider_label}): %{message}", provider_label: reg.provider_label, message: reg.message))
       when RegOk
         unless @providers.any? { |p| p.key == reg.provider_key }
           # The provider was deleted or scope-migrated while the round trip was in flight — its
@@ -1523,7 +1523,7 @@ module Gori::Tui
           # releasing that server state because a provider row vanished mid-flight would throw
           # away exactly what the operator asked to get back. Re-add the provider and resume.
           deregister(reg.provider, reg.session) unless reg.resumed
-          return @host.status("OAST #{reg.resumed ? "resume" : "register"} for #{reg.provider_label} finished after its provider was removed — discarded")
+          return @host.status(I18n.sys("OAST %{what} for %{provider} finished after its provider was removed — discarded", what: reg.resumed ? I18n.sys("resume") : I18n.sys("register"), provider: reg.provider_label))
         end
         # A resume already HAS its row (see RegOk#resumed); only a fresh registration inserts.
         unless reg.resumed
@@ -1549,9 +1549,9 @@ module Gori::Tui
           # Name the hits already on file. A resume that only said "listening" would look
           # identical to a fresh register, and the whole point of the action is that this
           # session has a history — and payloads still out there — that a new one does not.
-          @host.status("resumed #{reg.provider_label} session ##{id} (#{callbacks_for(id)} callbacks so far)")
+          @host.status(I18n.sys("resumed %{provider_label} session #%{id} (%{callbacks_for} callbacks so far)", provider_label: reg.provider_label, id: id, callbacks_for: callbacks_for(id)))
         else
-          @host.status("listening with #{reg.provider_label}")
+          @host.status(I18n.sys("listening with %{provider_label}", provider_label: reg.provider_label))
         end
       end
     end
@@ -1559,7 +1559,7 @@ module Gori::Tui
     private def apply_callback(ev : Oast::Event) : Nil
       case ev
       when Oast::OastErrorEvent
-        @host.status("OAST poll error: #{ev.message}")
+        @host.status(I18n.sys("OAST poll error: %{message}", message: ev.message))
       when Oast::CallbackEvent
         sid = ev.session_id
         seen = (@seen[sid] ||= Set(String).new)
@@ -1580,7 +1580,7 @@ module Gori::Tui
         @cb_version += 1
         n = @listeners.find { |l| l.session.id == sid }
         @host.jobs.progress(n.job_id, nil, nil, "#{callbacks_for(sid)} hits") if n
-        @host.notifications.push(:success, "OAST #{i.protocol.upcase} hit on #{label} (#{i.source_ip || "?"})",
+        @host.notifications.push(:success, I18n.sys("OAST %{protocol} hit on %{label} (%{source})", protocol: i.protocol.upcase, label: label, source: i.source_ip || "?"),
           Jobs::Goto.new(:oast), source: "oast")
       end
     end

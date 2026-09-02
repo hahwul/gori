@@ -393,7 +393,7 @@ module Gori::Tui
       if view.chain_pane_active?
         view.commit_chain_pane
         save_current
-        @host.status("chain saved")
+        @host.status(I18n.sys("chain saved"))
       else
         msg = view.focus_chain_pane
         @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
@@ -412,7 +412,7 @@ module Gori::Tui
       if err = view.pretty_print_template
         @host.status(err)
       else
-        @host.status("pretty-printed template request body")
+        @host.status(I18n.sys("pretty-printed template request body"))
       end
     end
 
@@ -425,7 +425,7 @@ module Gori::Tui
         view.toggle_sni_field
         @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
       else
-        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
+        @host.status(I18n.sys("SNI override (^S) applies to the TARGET pane — ↹ to it"))
       end
     end
 
@@ -863,7 +863,7 @@ module Gori::Tui
       text = v.pane_copy_text
       return if text.empty?
       written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied %{written}b to clipboard%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     # The focused pane's selection (or current line) text without copying — for the
@@ -878,7 +878,7 @@ module Gori::Tui
       text = v.pane_copy_all_text
       return if text.empty?
       written = Clipboard.copy(text)
-      @host.status("copied all (#{written}b)#{Clipboard.note(written, text)}")
+      @host.status(I18n.sys("copied all (%{written}b)%{note}", written: written, note: Clipboard.note(written, text)))
     end
 
     def fuzzer_read_mode? : Bool
@@ -998,7 +998,7 @@ module Gori::Tui
         # and the operator concludes the rename took. Mirrors close_tab's orphaned refusal
         # below and RepeaterController#apply_rename.
         unless @host.session.store.set_fuzz_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+          @host.status(I18n.sys("rename NOT saved (project busy) — the chip reads the new name until the session reloads"))
         end
       end
     end
@@ -1058,7 +1058,7 @@ module Gori::Tui
     private def apply_spool_lost(event : SpoolLost) : Nil
       return unless @fuzzers.any?(&.view.same?(event.view))
       return unless event.view.run_generation == event.generation
-      @host.status("complete fuzz archive unavailable — #{event.reason}")
+      @host.status(I18n.sys("complete fuzz archive unavailable — %{reason}", reason: event.reason))
     end
 
     private def apply_save_done(event : SaveDone) : Nil
@@ -1074,9 +1074,9 @@ module Gori::Tui
         if spool_run = @spool_runs.delete(event.view)
           @spool.delete(spool_run)
         end
-        @host.status("saved #{event.written} fuzz results as run ##{event.run_id}")
+        @host.status(I18n.sys("saved %{written} fuzz results as run #%{run_id}", written: event.written, run_id: event.run_id))
       else
-        @host.status("fuzz results NOT saved: #{event.error || "project write failed"}")
+        @host.status(I18n.sys("fuzz results NOT saved: %{error}", error: event.error || I18n.sys("project write failed")))
       end
     end
 
@@ -1142,7 +1142,7 @@ module Gori::Tui
         # feed (the AI firehose logs freely; only the human center suppresses it).
         @host.jobs.finish(v.job_id, :error, ev.message)
         log_event(v, :error, "Fuzzer: #{ev.message} on #{v.summary}")
-        @host.status("fuzzer error: #{ev.message}", :error)
+        @host.status(I18n.sys("fuzzer error: %{message}", message: ev.message), :error)
       end
     end
 
@@ -1259,7 +1259,7 @@ module Gori::Tui
         @cancelled_views.delete(view)
       else
         @release_pending.add(view)
-        @host.status("fuzz session closed — a worker is still winding down in the background")
+        @host.status(I18n.sys("fuzz session closed — a worker is still winding down in the background"))
       end
     end
 
@@ -1274,13 +1274,13 @@ module Gori::Tui
     # --- run lifecycle ---
     def fuzz_run : Nil
       return unless v = current_view
-      return @host.status("project is closing") if @closing
+      return @host.status(I18n.sys("project is closing")) if @closing
       if v.saving_results? || v.loading_results?
         @host.status(v.loading_results? ? "loading results — wait" : "saving results — wait for the database commit")
         return
       end
       if v.running?
-        @host.status("fuzz running — ^X to stop", :busy)
+        @host.status(I18n.sys("fuzz running — ^X to stop"), :busy)
         return
       end
       # Flush any trailing Done/Error from a just-finished run before we rebind
@@ -1298,7 +1298,7 @@ module Gori::Tui
       total = begin
         engine.total
       rescue ex
-        @host.status("fuzz: #{ex.message}", :error)
+        @host.status(I18n.sys("fuzz: %{message}", message: ex.message), :error)
         return
       end
       if total.nil? || total > CONFIRM_THRESHOLD
@@ -1315,7 +1315,7 @@ module Gori::Tui
       # confirm dialog was pending — don't launch an unstoppable engine fiber + orphaned job
       # into a detached view whose events drain_events would then drop forever.
       unless tab = @fuzzers.find(&.view.same?(v))
-        @host.status("fuzz session no longer open — run cancelled")
+        @host.status(I18n.sys("fuzz session no longer open — run cancelled"))
         return
       end
       save_current
@@ -1330,7 +1330,7 @@ module Gori::Tui
       spool_run = begin
         @spool.start(v.saved_run_meta(tab.db_id))
       rescue ex
-        @host.status("temporary fuzz archive unavailable: #{ex.message} — run continues with a bounded view")
+        @host.status(I18n.sys("temporary fuzz archive unavailable: %{message} — run continues with a bounded view", message: ex.message))
         nil
       end
       @spool_runs[v] = spool_run if spool_run
@@ -1391,7 +1391,7 @@ module Gori::Tui
         end_worker(v)
       end
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}", :busy)
+      @host.status(I18n.sys("fuzzing %{target_origin} — ^X stop%{archive}%{framing_note}", target_origin: v.target_origin, archive: archive, framing_note: framing_note(v)), :busy)
     end
 
     # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it
@@ -1405,9 +1405,9 @@ module Gori::Tui
     # the wire carried 37.
     private def framing_note(v : FuzzerView) : String
       if v.unframed_body?
-        " · warning: #{FuzzerView::UNFRAMED_BODY_NOTE}"
+        I18n.sys(" · warning: %{note}", note: FuzzerView::UNFRAMED_BODY_NOTE)
       elsif v.rewrites_content_length?
-        " · note: #{FuzzerView::CL_REWRITE_NOTE}"
+        I18n.sys(" · note: %{note}", note: FuzzerView::CL_REWRITE_NOTE)
       else
         ""
       end
@@ -1416,7 +1416,7 @@ module Gori::Tui
     def fuzz_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
-      @host.status("stopping…", :busy)
+      @host.status(I18n.sys("stopping…"), :busy)
     end
 
     def results_saveable? : Bool
@@ -1429,15 +1429,15 @@ module Gori::Tui
       return unless tab = current_tab_obj
       view = tab.view
       if id = view.saved_run_id
-        @host.status("fuzz results already saved as run ##{id}")
+        @host.status(I18n.sys("fuzz results already saved as run #%{id}", id: id))
         return
       end
-      return @host.status("finish a fuzz run before saving its results") unless view.results_saveable?
+      return @host.status(I18n.sys("finish a fuzz run before saving its results")) unless view.results_saveable?
       session_id = tab.db_id
-      return @host.status("fuzz session is not persisted — save unavailable") unless session_id
+      return @host.status(I18n.sys("fuzz session is not persisted — save unavailable")) unless session_id
 
       spool_run = @spool_runs[view]?
-      return @host.status("complete fuzz archive unavailable for this run") unless spool_run && !spool_run.failed?
+      return @host.status(I18n.sys("complete fuzz archive unavailable for this run")) unless spool_run && !spool_run.failed?
       count = spool_run.written
       bytes = spool_run.accepted_bytes
       @host.confirm(I18n.ui("SAVE FUZZ RESULTS"),
@@ -1529,7 +1529,7 @@ module Gori::Tui
       rescue ex
         # A transient read failure is not a decision that this session has no history.
         @auto_load_considered.delete(session_id)
-        @host.status("could not restore latest fuzz run: #{ex.message}")
+        @host.status(I18n.sys("could not restore latest fuzz run: %{message}", message: ex.message))
       end
     end
 
@@ -1537,8 +1537,8 @@ module Gori::Tui
       return unless tab = current_tab_obj
       session_id = tab.db_id || return
       view = tab.view
-      return @host.status("finish the current fuzz run before loading history") if view.running?
-      return @host.status("result I/O in progress — wait before loading history") if view.saving_results? || view.loading_results?
+      return @host.status(I18n.sys("finish the current fuzz run before loading history")) if view.running?
+      return @host.status(I18n.sys("result I/O in progress — wait before loading history")) if view.saving_results? || view.loading_results?
       if view.results_saveable? && !replace_unsaved
         @host.confirm(I18n.ui("REPLACE UNSAVED RESULTS"),
           I18n.sys("Load saved run #%{id}?\nThe current %{rows}-row run has not been saved and will be replaced.", id: id, rows: view.result_count),
@@ -1546,9 +1546,9 @@ module Gori::Tui
         return
       end
       run = @host.session.store.get_fuzz_run(id)
-      return @host.status("saved fuzz run ##{id} is gone") unless run && run.session_id == session_id
-      return @host.status("legacy fuzz run ##{id} has incomplete transport context — inspect it with `gori run fuzz show`") if run.legacy_snapshot?
-      return @host.status("saved fuzz run ##{id} is still #{run.status}") if run.status.in?("running", "saving")
+      return @host.status(I18n.sys("saved fuzz run #%{id} is gone", id: id)) unless run && run.session_id == session_id
+      return @host.status(I18n.sys("legacy fuzz run #%{id} has incomplete transport context — inspect it with `gori run fuzz show`", id: id)) if run.legacy_snapshot?
+      return @host.status(I18n.sys("saved fuzz run #%{id} is still %{status}", id: id, status: run.status)) if run.status.in?("running", "saving")
       @auto_load_considered.add(session_id)
       start_saved_run_load(tab, run)
     end
@@ -1598,16 +1598,16 @@ module Gori::Tui
 
     def delete_saved_run(id : Int64) : Nil
       run = @host.session.store.get_fuzz_run(id)
-      return @host.status("saved fuzz run ##{id} is gone") unless run
+      return @host.status(I18n.sys("saved fuzz run #%{id} is gone", id: id)) unless run
       count = @host.session.store.fuzz_result_count(id)
       @host.confirm(I18n.ui("DELETE FUZZ RUN"), I18n.sys("Delete saved run #%{id} and %{count} results?", id: id, count: count),
         confirm_label: I18n.ui("delete"), danger: true) do
         deleted = @host.session.store.delete_fuzz_run_result(id)
         if deleted.deleted?
           current_view.try(&.forget_saved_run(id))
-          @host.status("deleted saved fuzz run ##{id} and #{deleted.deleted_results} results")
+          @host.status(I18n.sys("deleted saved fuzz run #%{id} and %{deleted_results} results", id: id, deleted_results: deleted.deleted_results))
         else
-          @host.status("saved run NOT deleted (#{deleted.status.to_s.underscore})")
+          @host.status(I18n.sys("saved run NOT deleted (%{underscore})", underscore: deleted.status.to_s.underscore))
         end
       end
     end
@@ -1621,16 +1621,16 @@ module Gori::Tui
       # nothing — and a digit in a URL fires the global `nav.posN` tab jump instead, which
       # walks the operator off the session they just made. `repeater_new` says "edit" for the
       # same reason; this line named the mode it does not open in.
-      @host.status("new fuzz session — i/↵ edits the target URL · ^A mark params · ^O config · ^R run")
+      @host.status(I18n.sys("new fuzz session — i/↵ edits the target URL · ^A mark params · ^O config · ^R run"))
     end
 
     # Content-only clone of the active fuzz session (template + config; no results/links).
     def fuzz_duplicate : Nil
-      return @host.status("no fuzz session open to duplicate") unless src = current_view
+      return @host.status(I18n.sys("no fuzz session open to duplicate")) unless src = current_view
       view = FuzzerView.new
       view.duplicate_from(src)
       open_session(view, nil)
-      @host.status("duplicated fuzz session (#{@fuzzers.size} open)")
+      @host.status(I18n.sys("duplicated fuzz session (%{fuzzers} open)", fuzzers: @fuzzers.size))
     end
 
     # Seed handed to RepeaterController for "Send to Repeater" (a fuzz result row → the
@@ -1724,7 +1724,7 @@ module Gori::Tui
       view = FuzzerView.new
       view.load(detail)
       open_session(view, id)
-      @host.status("fuzzer: #{view.summary} — ^A auto-mark · ^K word · ^O config · ^R run")
+      @host.status(I18n.sys("fuzzer: %{summary} — ^A auto-mark · ^K word · ^O config · ^R run", summary: view.summary))
     end
 
     # Turn a Repeater request (or any reconstructed request) into a fuzz session.
@@ -1732,7 +1732,7 @@ module Gori::Tui
       view = FuzzerView.new
       view.load_request(target, request_text, http2, sni || "")
       open_session(view, nil)
-      @host.status("fuzzer ← request — ^A auto-mark · ^O config · ^R run")
+      @host.status(I18n.sys("fuzzer ← request — ^A auto-mark · ^O config · ^R run"))
     end
 
     private def open_session(view : FuzzerView, flow_id : Int64?) : Nil
@@ -1755,7 +1755,7 @@ module Gori::Tui
     def request_close : Nil
       return unless tab = current_tab_obj
       if tab.view.saving_results? || tab.view.loading_results?
-        @host.status("result I/O in progress — wait before closing this fuzz session")
+        @host.status(I18n.sys("result I/O in progress — wait before closing this fuzz session"))
         return
       end
       if (session_id = tab.db_id) &&
@@ -1773,7 +1773,7 @@ module Gori::Tui
       tab = @fuzzers[@current_idx]
       if (session_id = tab.db_id) &&
          @host.session.store.fuzz_runs(session_id).any?(&.status.in?("running", "saving"))
-        @host.status("fuzz session NOT closed — a saved run started writing; wait for it to finish")
+        @host.status(I18n.sys("fuzz session NOT closed — a saved run started writing; wait for it to finish"))
         return
       end
       was_running = tab.view.running?

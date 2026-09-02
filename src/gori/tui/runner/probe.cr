@@ -56,7 +56,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         @focus = :body
         @overlay = OverlayKind::Detail
       else
-        @toast = "evidence no longer captured (pruned)"
+        @toast = I18n.sys("evidence no longer captured (pruned)")
       end
       return
     end
@@ -64,7 +64,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       navigate_link_ref(Store::LinkRefKind::Repeater, rid)
       return
     end
-    @toast = "this issue has no sample evidence"
+    @toast = I18n.sys("this issue has no sample evidence")
   end
 
   # ↵ on the AFFECTED URLS list: open the flow THAT url was captured on, which for a group of
@@ -75,8 +75,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # per-URL flow id — so the row is resolved through the store by URL, narrowed by the issue's
   # own host (the group is keyed by (code, host), so every URL on the list is on it).
   def probe_open_affected : Nil
-    return (@toast = "open an issue first") unless issue = probe_controller.view.detail_issue
-    return (@toast = "no affected URL selected") unless url = probe_controller.probe_affected_url
+    return (@toast = I18n.sys("open an issue first")) unless issue = probe_controller.view.detail_issue
+    return (@toast = I18n.sys("no affected URL selected")) unless url = probe_controller.probe_affected_url
     # The sample flow's METHOD, so a group that fired on `GET /v1/me` cannot open the `POST`
     # to the same URL — see Store#flow_id_for_url, which ranks on it first.
     method = probe_controller.view.detail_flow.try(&.method)
@@ -84,18 +84,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # A Repeater-sourced finding (Probe::FromRepeater) has no `flows` row for its URL AT ALL
       # — the send never went through capture — so "no captured flow" would be true and
       # useless: `o`, one key away, navigates to the session that holds it. Say that instead.
-      return (@toast = "this URL came from a Repeater send — o opens it") if issue.sample_repeater_id
+      return (@toast = I18n.sys("this URL came from a Repeater send — o opens it")) if issue.sample_repeater_id
       # NOT "pruned" either: a finding can be older than the capture it names — a `gori run
       # probe` sweep, an issue that outlived a compact — and telling the operator a flow was
       # deleted when it was never in this project sends them looking for a retention setting.
-      return (@toast = "no captured flow for that URL")
+      return (@toast = I18n.sys("no captured flow for that URL"))
     end
     if history_controller.view.open_detail_id(fid, @session.store)
       @active_tab = :history
       @focus = :body
       @overlay = OverlayKind::Detail
     else
-      @toast = "evidence no longer captured (pruned)"
+      @toast = I18n.sys("evidence no longer captured (pruned)")
     end
   end
 
@@ -107,7 +107,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       if @session.store.get_flow(fid)
         repeater_flow(fid)
       else
-        @toast = "evidence no longer captured (pruned)"
+        @toast = I18n.sys("evidence no longer captured (pruned)")
       end
       return
     end
@@ -115,7 +115,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       navigate_link_ref(Store::LinkRefKind::Repeater, rid)
       return
     end
-    @toast = "this issue has no sample evidence"
+    @toast = I18n.sys("this issue has no sample evidence")
   end
 
   # History list / open detail → the selected (or open) flow, or every MARKED flow (#442).
@@ -123,7 +123,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # count exactly as one flow already was.
   def probe_active_selected : Nil
     ids = history_target_flow_ids
-    return (@toast = "select a flow first") if ids.empty?
+    return (@toast = I18n.sys("select a flow first")) if ids.empty?
     # Capped like the other batch verbs, and for two reasons at once: the estimate below has to
     # load a FULL detail per flow (bodies included) before it can show a count, and ⇧T can mark
     # a whole page — so an uncapped run would freeze the render loop and then offer to send
@@ -131,24 +131,24 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return unless targets = batch_within_cap(ids, "the active scan")
     # Through the store, not the view's rows — a mark can outlive the visible window.
     details = targets.compact_map { |id| @session.store.get_flow(id) }
-    return (@toast = "flow no longer available") if details.empty?
+    return (@toast = I18n.sys("flow no longer available")) if details.empty?
     open_probe_active_overlay(details)
   end
 
   # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
   def probe_active_rescan : Nil
-    return (@toast = "select an issue first") unless i = probe_controller.view.target_issue
+    return (@toast = I18n.sys("select an issue first")) unless i = probe_controller.view.target_issue
     fid = i.sample_flow_id
-    return (@toast = "this issue has no captured flow to re-scan") unless fid
+    return (@toast = I18n.sys("this issue has no captured flow to re-scan")) unless fid
     detail = @session.store.get_flow(fid)
-    return (@toast = "evidence no longer captured (pruned)") unless detail
+    return (@toast = I18n.sys("evidence no longer captured (pruned)")) unless detail
     open_probe_active_overlay(detail)
   end
 
   # Repeater → the current session's last HTTP send (request as edited + its response).
   def probe_active_from_repeater : Nil
     detail = repeater_controller.active_scan_detail
-    return (@toast = "send the request first (an active scan needs a response)") unless detail
+    return (@toast = I18n.sys("send the request first (an active scan needs a response)")) unless detail
     open_probe_active_overlay(detail, repeater_id: repeater_controller.current_session_db_id)
   end
 
@@ -161,12 +161,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # would fix it.
     case Probe::Triage.promote(@session.store, i).outcome
     in Probe::Triage::Outcome::AlreadyPromoted
-      @toast = "already promoted to an issue"
+      @toast = I18n.sys("already promoted to an issue")
     in Probe::Triage::Outcome::Failed
-      @toast = "promotion failed (store busy) — nothing was written, try again"
+      @toast = I18n.sys("promotion failed (store busy) — nothing was written, try again")
     in Probe::Triage::Outcome::Promoted
       probe_controller.view.reload(@session.store)
-      @toast = "promoted to issue — see the Issues tab"
+      @toast = I18n.sys("promoted to issue — see the Issues tab")
     end
   end
 

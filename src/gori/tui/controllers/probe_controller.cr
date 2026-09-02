@@ -328,22 +328,22 @@ module Gori::Tui
           if summary = ev.summary
             # #124: log to the AI event feed regardless of the human notification.
             @host.session.store.insert_event("probe", "issue_found", "success", "Probe: #{summary}", goto_tab: "probe")
-            @host.notifications.push(:success, "Probe: #{summary}", source: "probe")
+            @host.notifications.push(:success, I18n.sys("Probe: %{summary}", summary: summary), source: "probe")
             # Status toast is visible on every tab and pairs with the list paint.
-            @host.status("Probe: #{summary}") if Settings.notify_toast?
+            @host.status(I18n.sys("Probe: %{summary}", summary: summary)) if Settings.notify_toast?
           end
         when Probe::ErrorEvent
           # Bottom bar only — a scan error is operational noise, not a result to push
           # into the notification center (#127). Still logged to the #124 event feed
           # (the AI firehose logs freely; only the human center suppresses it).
           @host.session.store.insert_event("probe", "error", "error", "Probe: #{ev.message}", goto_tab: "probe")
-          @host.status("probe error: #{ev.message}", :error)
+          @host.status(I18n.sys("probe error: %{message}", message: ev.message), :error)
         when Probe::CompleteEvent
           # A manual "Run active scan" in Always mode came back clean — the analyzer only emits
           # this when the operator asked to be told either way, so it always posts to the tray.
           @host.session.store.insert_event("probe", "scan_complete", "info", "Probe: #{ev.message}", goto_tab: "probe")
-          @host.notifications.push(:info, "Probe: #{ev.message}", source: "probe")
-          @host.status("Probe: #{ev.message}") if Settings.notify_toast?
+          @host.notifications.push(:info, I18n.sys("Probe: %{message}", message: ev.message), source: "probe")
+          @host.status(I18n.sys("Probe: %{message}", message: ev.message)) if Settings.notify_toast?
         end
       end
       refresh_from_store if needs_refresh && @host.active_tab == :probe
@@ -404,7 +404,7 @@ module Gori::Tui
       # — you were looking at the list you had just opened a menu over. ⇧X is pressed without
       # that, and an advertised key that answers with nothing at all reads as a key that
       # failed. `activity_clear` says the same thing for the same reason.
-      return @host.status("probe: nothing to clear") if @probe.empty?
+      return @host.status(I18n.sys("probe: nothing to clear")) if @probe.empty?
       @host.confirm(I18n.ui("CLEAR ISSUES"), I18n.sys("Delete ALL Probe issues for this project?\nThis can't be undone."),
         confirm_label: I18n.ui("clear"), danger: true) do
         @probe.clear(@host.session.store)
@@ -446,7 +446,7 @@ module Gori::Tui
       @host.confirm(I18n.ui("DISMISS GROUP"), I18n.sys("Dismiss all open “%{code}” issues?", code: code), confirm_label: I18n.ui("dismiss"), danger: false) do
         n = ProbeController.dismiss_open_by_code(@host.session.store, @host.session.scope, code)
         @probe.reload(@host.session.store)
-        @host.status("dismissed #{n} \"#{code}\" issue#{n == 1 ? "" : "s"}")
+        @host.status(I18n.sys_n(n, "dismissed %{n} \"%{code}\" issue", "dismissed %{n} \"%{code}\" issues", n: n, code: code))
       end
     end
 
@@ -456,7 +456,7 @@ module Gori::Tui
       @host.confirm(I18n.ui("DISMISS GROUP"), I18n.sys("Dismiss all open issues on %{host}?", host: host), confirm_label: I18n.ui("dismiss"), danger: false) do
         n = ProbeController.dismiss_open_by_host(@host.session.store, host)
         @probe.reload(@host.session.store)
-        @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{host}")
+        @host.status(I18n.sys_n(n, "dismissed %{n} issue on %{host}", "dismissed %{n} issues on %{host}", n: n, host: host))
       end
     end
 
@@ -514,7 +514,7 @@ module Gori::Tui
         # still enabled — two lines of UI contradicting each other with no way to tell which
         # was true. Same refusal as the CLI/MCP twins.
         unless store.set_probe_disabled_rules(dis)
-          @host.status("rule \"#{row.title}\" NOT changed (project busy)")
+          @host.status(I18n.sys("rule \"%{title}\" NOT changed (project busy)", title: row.title))
           return
         end
         @host.status(row.enabled? ? "disabled rule \"#{row.title}\"" : "enabled rule \"#{row.title}\"")
@@ -530,7 +530,7 @@ module Gori::Tui
                store.set_probe_custom_rule_enabled(c.id.to_i64, on)
              end
         unless ok
-          @host.status("rule \"#{c.title}\" NOT changed (project busy)")
+          @host.status(I18n.sys("rule \"%{title}\" NOT changed (project busy)", title: c.title))
           return
         end
         @host.status(on ? "enabled rule \"#{c.title}\"" : "disabled rule \"#{c.title}\"")
@@ -574,7 +574,7 @@ module Gori::Tui
         confirm_label: I18n.ui("delete"), danger: true) do
         c.global? ? Settings.delete_scan_rule(c.id) : @host.session.store.delete_probe_custom_rule(c.id.to_i64)
         reload_rules
-        @host.status("probe rule deleted: #{c.title}")
+        @host.status(I18n.sys("probe rule deleted: %{title}", title: c.title))
       end
     end
 
@@ -594,7 +594,7 @@ module Gori::Tui
             # widened still matches on the old pattern, and saying otherwise is the same false
             # negative the project branch refuses. Same refusal, same open form.
             unless Settings.update_scan_rule(id, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
-              @host.status("rule \"#{ov.rule_title}\" NOT updated (settings not writable) — it still matches on the old pattern")
+              @host.status(I18n.sys("rule \"%{title}\" NOT updated (settings not writable) — it still matches on the old pattern", title: ov.rule_title))
               return false
             end
           else
@@ -603,7 +603,7 @@ module Gori::Tui
             # believing it is the new one — a false negative they were told not to expect — so
             # refuse, and return false to keep the form open with the edits intact for a retry.
             unless store.update_probe_custom_rule(id.to_i64, ov.rule_title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
-              @host.status("rule \"#{ov.rule_title}\" NOT updated (project busy) — it still matches on the old pattern")
+              @host.status(I18n.sys("rule \"%{title}\" NOT updated (project busy) — it still matches on the old pattern", title: ov.rule_title))
               return false
             end
           end
@@ -611,10 +611,10 @@ module Gori::Tui
           ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
           insert_custom_rule(ov, store)
         end
-        @host.status("updated custom rule")
+        @host.status(I18n.sys("updated custom rule"))
       else
         insert_custom_rule(ov, store)
-        @host.status("added custom rule")
+        @host.status(I18n.sys("added custom rule"))
       end
       reload_rules
       true
