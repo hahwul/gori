@@ -186,7 +186,7 @@ module Gori::Tui
       # phantom box (e.g. firing the destructive button on an undrawn modal).
       return Rect.new(area.x, area.y, 0, 0) if area.w < 18 || area.h < MIN_H
       lines = display_lines(area)
-      content = {longest(lines), @heading.size + 2, button_row_width}.max
+      content = {longest(lines), Screen.draw_width(@heading) + 2, button_row_width}.max
       # The roomy height, capped by what there IS. The card used to demand its full height and
       # draw nothing at all below it — on an 80×12 terminal (body 6 rows) `⇧X Clear history`
       # armed a modal that showed no heading, no count and no warning, and `y` still wiped the
@@ -281,7 +281,7 @@ module Gori::Tui
     end
 
     private def btn_width(label : String) : Int32
-      label.size + 2
+      Screen.draw_width(label) + 2
     end
 
     private def render_buttons(screen : Screen, box : Rect) : Nil
@@ -316,14 +316,15 @@ module Gori::Tui
     private def render_button(screen : Screen, x : Int32, y : Int32, label : String,
                               selected : Bool, danger : Bool) : Int32
       text = " #{label} "
+      tw = Screen.draw_width(text)
       if selected
         bg = danger ? Theme.red : Theme.accent_bg
-        screen.fill(Rect.new(x, y, text.size, 1), bg)
+        screen.fill(Rect.new(x, y, tw, 1), bg)
         screen.text(x, y, text, Theme.text_bright, bg, attr: Attribute::Bold)
       else
         screen.text(x, y, text, danger ? Theme.red : Theme.muted, Theme.panel)
       end
-      x + text.size
+      x + tw
     end
   end
 end

@@ -416,8 +416,8 @@ module Gori::Tui
       # outline, the strip above this one when it has the keys — so spending it on a static
       # section heading makes two different things look like the same thing. The Probe rules
       # list already headed its sections in accent; this is the other half of that pair.
-      screen.text(content.x, y, title.upcase, Theme.accent, Theme.panel, Attribute::Bold, width: content.w)
-      screen.text(content.x + title.size + 1, y, "● unsaved", Theme.yellow, Theme.panel, width: {content.right - content.x - title.size - 1, 1}.max) if dirty
+      tw = screen.text(content.x, y, title.upcase, Theme.accent, Theme.panel, Attribute::Bold, width: content.w) - content.x
+      screen.text(content.x + tw + 1, y, "● unsaved", Theme.yellow, Theme.panel, width: {content.right - content.x - tw - 1, 1}.max) if dirty
     end
 
     private def draw_opener(screen : Screen, content : Rect, sec : SettingsCatalog::Section, y : Int32, focused : Bool) : Nil
@@ -436,7 +436,7 @@ module Gori::Tui
       # the screen, not at the card, so the row overwrote the right border and lost the cue
       # entirely. A 43-character :action label does that under ~61 columns, well above the
       # `box.w < 24` render guard.
-      cx = {content.right - cue.size, lx + 1}.max
+      cx = {content.right - Screen.draw_width(cue), lx + 1}.max
       screen.text(lx, y, label, focused ? Theme.text_bright : Theme.text, bg, width: {cx - lx - 1, 1}.max)
       # Theme row: preview the CURRENT theme inline — its name + a swatch of its palette —
       # so you see what's selected without opening the card. Both are extras: on a card too
@@ -444,7 +444,7 @@ module Gori::Tui
       # or the cue.
       if sec.sym == :theme
         name = Theme.canonical(Settings.theme)
-        name_x = lx + label.size + 2
+        name_x = lx + Screen.draw_width(label) + 2
         sx = cx - 1 - SWATCH_W
         if sx >= name_x
           screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)

@@ -388,7 +388,8 @@ module Gori::Tui
           used += gw
         end
       end
-      "#{cut}…".ljust(width)
+      clipped = "#{cut}…"
+      "#{clipped}#{" " * {width - Screen.draw_width(clipped), 0}.max}"
     end
 
     private def self.hex(data : Bytes) : String

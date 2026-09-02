@@ -935,7 +935,7 @@ module Gori::Tui
     # `rect` (block == viewport, no extra clipping). Shared by the overlay and the tab.
     def render_fields_into(screen : Screen, rect : Rect, focused_idx : Int32, viewport : Rect = rect) : Nil
       flds = fields
-      label_w = flds.max_of(&.label.size)
+      label_w = flds.max_of { |f| Screen.draw_width(f.label) }
       flds.each_with_index do |field, i|
         ry = rect.y + i
         next if ry < viewport.y

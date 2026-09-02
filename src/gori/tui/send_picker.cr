@@ -122,7 +122,7 @@ module Gori::Tui
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         screen.text(box.x + 3, ry, d.key.to_s, Theme.accent, bg, Attribute::Bold)
         screen.text(box.x + 6, ry, d.label, active ? Theme.text_bright : Theme.text, bg, Attribute::Bold)
-        screen.text(box.right - d.hint.size - 2, ry, d.hint, Theme.muted, bg)
+        screen.text(box.right - Screen.draw_width(d.hint) - 2, ry, d.hint, Theme.muted, bg)
       end
     end
 
@@ -134,8 +134,8 @@ module Gori::Tui
 
     # Widest row (label + hint) and the sized title, driving the card width.
     private def content_w : Int32
-      rows = @destinations.max_of { |d| d.label.size + d.hint.size + 4 }
-      {rows, card_title.size}.max
+      rows = @destinations.max_of { |d| Screen.draw_width(d.label) + Screen.draw_width(d.hint) + 4 }
+      {rows, Screen.draw_width(card_title)}.max
     end
   end
 end

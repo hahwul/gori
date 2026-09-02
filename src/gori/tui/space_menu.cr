@@ -176,8 +176,8 @@ module Gori::Tui
       # Widest of the entry titles AND the group headers ("─ LABEL ─", 4 chars of
       # chrome around the label) — a grouped view with a long section label (e.g.
       # SECTION_LABELS additions) must still fit inside the box the entries sized.
-      entry_w = @entries.empty? ? 0 : @entries.max_of { |v| menu_title(v, ctx).size + chord_hint_w(v) }
-      header_w = @groups.empty? ? 0 : @groups.max_of { |g| g.label.size + 4 }
+      entry_w = @entries.empty? ? 0 : @entries.max_of { |v| Screen.draw_width(menu_title(v, ctx)) + chord_hint_w(v) }
+      header_w = @groups.empty? ? 0 : @groups.max_of { |g| Screen.draw_width(g.label) + 4 }
       @title_w = {entry_w, header_w}.max
     end
 

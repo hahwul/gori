@@ -707,7 +707,7 @@ module Gori::Tui
     # Shared by render_status and status_bar_chip_at, so the two cannot disagree about the
     # run's left edge — and with it about which cells a chip occupies.
     private def self.status_hint_x(rect : Rect, focus : String) : Int32
-      rect.x + " #{focus} ".size + 1
+      rect.x + Screen.draw_width(" #{focus} ") + 1
     end
 
     # Hit-test the status row's chips. Mirrors top_bar_chip_at, and for the same reason the

@@ -136,7 +136,7 @@ module Gori::Tui
 
     # Widest row (label + size hint), driving the card width.
     private def content_w : Int32
-      @options.max_of { |o| o.label.size + Fmt.size(o.text.bytesize.to_i64).size + 4 }
+      @options.max_of { |o| Screen.draw_width(o.label) + Fmt.size(o.text.bytesize.to_i64).size + 4 }
     end
   end
 end

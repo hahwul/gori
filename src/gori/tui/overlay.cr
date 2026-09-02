@@ -187,8 +187,7 @@ module Gori::Tui
     def draw_field(screen : Screen, box : Rect, py : Int32, bg : Color, fg : Color,
                    sel : Bool, label : String, field : TextField) : Nil
       x = box.x + 3
-      screen.text(x, py, label, Theme.muted, bg)
-      vx = x + label.size + 1
+      vx = screen.text(x, py, label, Theme.muted, bg) + 1
       vw = {box.right - 2 - vx, 3}.max
       val = field.value
       pre = field.preedit

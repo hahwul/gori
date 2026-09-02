@@ -711,7 +711,7 @@ module Gori::Tui
     # Horizontally center `text` on row `y` within `rect` (mirrors ProjectPicker).
     private def centered(screen : Screen, rect : Rect, y : Int32, text : String, fg : Color,
                          attr : Attribute = Attribute::None) : Nil
-      x = rect.x + {(rect.w - text.size) // 2, 0}.max
+      x = rect.x + {(rect.w - Screen.draw_width(text)) // 2, 0}.max
       screen.text(x, y, text, fg, Theme.bg, attr: attr)
     end
   end

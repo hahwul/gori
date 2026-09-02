@@ -41,7 +41,7 @@ module Gori::Tui
     # there's nothing to show or it can't fit.
     def overlay_box(anchor : Rect, body : Rect) : Rect?
       return nil if @items.empty? || body.empty?
-      label_w = @items.max_of { |(_, l)| l.size }
+      label_w = @items.max_of { |(_, l)| Screen.draw_width(l) }
       w = {label_w + 4, body.w}.min     # left border + ▎ + label + right border
       h = {@items.size + 2, body.h}.min # top border + rows + bottom border
       return nil if w < 8 || h < 3

@@ -1801,11 +1801,11 @@ module Gori::Tui
 
     private def render_busy(screen : Screen, w : Int32, h : Int32) : Nil
       msg = BUSY_LABELS[@mode]? || " Working … "
-      bw = {msg.size + 4, 22}.max
+      bw = {Screen.draw_width(msg) + 4, 22}.max
       bh = 3
       box = Rect.new({(w - bw) // 2, 0}.max, {(h - bh) // 2, 0}.max, bw, bh)
       Frame.card(screen, box, border: Theme.border_focus)
-      screen.text(box.x + (box.w - msg.size) // 2, box.y + 1, msg, Theme.text_bright, Theme.panel, Attribute::Bold)
+      screen.text(box.x + (box.w - Screen.draw_width(msg)) // 2, box.y + 1, msg, Theme.text_bright, Theme.panel, Attribute::Bold)
     end
 
     private def render_rename(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
@@ -1903,7 +1903,7 @@ module Gori::Tui
     # x=0 and run off the right edge into the hint row.
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
                          attr : Attribute = Attribute::None, width : Int32? = nil) : Nil
-      screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr, width: width)
+      screen.text({(w - Screen.draw_width(text)) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr, width: width)
     end
 
     # Draw BRAND_ART as one centered block: every line starts at the same left

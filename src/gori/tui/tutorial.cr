@@ -1211,7 +1211,7 @@ module Gori::Tui
     private def render_footer(screen : Screen, w : Int32, h : Int32) : Nil
       hint = footer_hint
       hy = h - 2
-      screen.text({(w - hint.size) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
+      screen.text({(w - Screen.draw_width(hint)) // 2, 0}.max, hy, hint, Theme.muted, Theme.bg)
 
       by = h - 1
       prev_l = prev_btn_label
@@ -1505,7 +1505,7 @@ module Gori::Tui
       render_request_pane(screen, pane, true, insert: insert, typed: typed, flow: 0)
 
       kh = insert ? "INS · type · esc → READ" : "READ · i or ↵ → INS"
-      screen.text(shell.x + {(shell.w - kh.size) // 2, 0}.max, shell.bottom - 1, kh, Theme.muted, Theme.bg)
+      screen.text(shell.x + {(shell.w - Screen.draw_width(kh)) // 2, 0}.max, shell.bottom - 1, kh, Theme.muted, Theme.bg)
     end
 
     private def render_practice(screen : Screen, box : Rect) : Nil
@@ -1635,7 +1635,7 @@ module Gori::Tui
 
       unless keyhint.empty?
         kh = " #{keyhint} "
-        screen.text(rect.x + {(rect.w - kh.size) // 2, 0}.max, rect.y + 1, kh,
+        screen.text(rect.x + {(rect.w - Screen.draw_width(kh)) // 2, 0}.max, rect.y + 1, kh,
           Theme.ink_on(Theme.accent), Theme.accent, attr: Attribute::Bold)
       end
     end
@@ -1646,8 +1646,9 @@ module Gori::Tui
       cx = x
       TABS.each_with_index do |name, i|
         label = " #{name} "
-        break if cx + label.size > x + w
-        @tab_hits << {Rect.new(cx, y, label.size, 1), i}
+        lw = Screen.draw_width(label)
+        break if cx + lw > x + w
+        @tab_hits << {Rect.new(cx, y, lw, 1), i}
         if i == active
           bg = focused ? Theme.focus_gold : Theme.accent_bg
           fg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright
