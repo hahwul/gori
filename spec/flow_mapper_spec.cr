@@ -60,5 +60,14 @@ describe Gori::FlowMapper do
     cap.state.should eq(Gori::Store::FlowState::Error)
     cap.error.should eq("connection refused")
     cap.status.should eq(0)
+    cap.head.size.should eq(0)
+  end
+
+  it "keeps the head of a response that arrived but was refused" do
+    raw = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
+    cap = Gori::FlowMapper.error_response(4_i64, "response framing rejected: both", head: raw)
+    cap.state.should eq(Gori::Store::FlowState::Error)
+    cap.status.should eq(0) # gori delivered nothing; the head is evidence, not a result
+    String.new(cap.head).should eq(String.new(raw))
   end
 end
