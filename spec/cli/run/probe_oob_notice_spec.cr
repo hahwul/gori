@@ -2,11 +2,12 @@ require "../../spec_helper"
 
 # `gori run probe --active` and the out-of-band half.
 #
-# An OOB rule (ssrf_oast) only plants when the project has an OAST session to mint against, and
-# the TUI's OAST tab is the only surface that writes one — `gori run oast listen` and the MCP
-# `oast_start` are ad-hoc, their registration dying with the process. So headless the rule can be
-# listed `[on]` by `probe rules` and still send nothing, which made an empty active result read
-# as "no blind SSRF" rather than "never looked". These pin the sentence that now says so.
+# An OOB rule (ssrf_oast, cmd_injection_oast) only plants when the project has an OAST session to
+# mint against, and the TUI's OAST tab is the only surface that writes one — `gori run oast listen`
+# and the MCP `oast_start` are ad-hoc, their registration dying with the process. So headless the
+# rule can be listed `[on]` by `probe rules` and still send nothing, which made an empty active
+# result read as "no blind (out-of-band) vulnerability" rather than "never looked". These pin the
+# sentence that now says so.
 #
 # The decision is spec'd through the pure helper rather than by driving the scan, the same seam
 # spec/cli/run/probe_helpers_spec.cr works at (the scan itself is an active sender).
@@ -42,8 +43,9 @@ describe "gori run probe — out-of-band reachability notice" do
       Gori::Probe::OutOfBand.available?(store).should be_false
       note = Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg, true).not_nil!
       note.should contain("ssrf_oast")
+      note.should contain("cmd_injection_oast")
       note.should contain("no OAST session")
-      note.should contain("not evidence of no blind SSRF")
+      note.should contain("not evidence that no blind (out-of-band) vulnerability exists")
     end
   end
 
@@ -71,8 +73,8 @@ describe "gori run probe — out-of-band reachability notice" do
     with_store do |store|
       # passive: nothing was going to be sent, so there is nothing to warn about
       Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg, false).should be_nil
-      # the operator switched the rule off — not a surprise that needs naming
-      Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(["ssrf_oast"]), true).should be_nil
+      # the operator switched the OOB rules off — not a surprise that needs naming
+      Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(["ssrf_oast", "cmd_injection_oast"]), true).should be_nil
       # degraded: ACTIVE is skipped wholesale and Scan reports that instead
       Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg(degraded: true), true).should be_nil
     end

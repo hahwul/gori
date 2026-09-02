@@ -193,8 +193,8 @@ module Gori
       # `gori run oast listen` and the MCP `oast_start` are ad-hoc, their registration dying with
       # the process. So headless, `probe rules` lists the rule `[on]` and `--active` then sends
       # nothing to any interaction server and says nothing about it: absence of a finding reads
-      # as "no blind SSRF" when it means "never looked". Same failure the --active scope warning
-      # above exists to prevent, so it reads the same way.
+      # as "no blind (out-of-band) vulnerability" when it means "never looked". Same failure the
+      # --active scope warning above exists to prevent, so it reads the same way.
       #
       # Silent unless the scan would otherwise have probed: nothing to warn about on a passive
       # run, on a rule the operator switched OFF, or under a degraded rule config (which skips
@@ -205,8 +205,9 @@ module Gori
         on = Probe::OOB_RULE_IDS.select { |id| Probe.rule_enabled?(id, cfg.disabled) }
         return nil if on.empty? || Probe::OutOfBand.available?(store)
         "#{on.join(", ")} #{on.size == 1 ? "is" : "are"} enabled but this project has no OAST " \
-        "session — out-of-band probes were NOT sent, so an empty result is not evidence of no " \
-        "blind SSRF (register a listener in the TUI's OAST tab, then `gori run oast resume ID`)"
+        "session — out-of-band probes were NOT sent, so an empty result is not evidence that no " \
+        "blind (out-of-band) vulnerability exists (register a listener in the TUI's OAST tab, " \
+        "then `gori run oast resume ID`)"
       end
 
       private def self.report_probe(groups : Array(Probe::Group), flow_n : Int32, repeater_n : Int32,
