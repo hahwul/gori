@@ -168,7 +168,7 @@ module Gori::Tui
     end
 
     def title : String
-      "ADVANCED"
+      I18n.ui("ADVANCED")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -179,7 +179,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
+      I18n.ui("↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes")
     end
 
     # --- input --------------------------------------------------------------

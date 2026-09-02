@@ -81,12 +81,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # and this one lost the half that says what is being deleted ("…what each attac…"). A
     # destructive confirm that cannot finish naming the thing it destroys is the one place the
     # cap must not be discovered at runtime; keep every line inside ~50 columns.
-    confirm("CLEAR ACTIVITY",
-      "Delete every event in this project's feed?\n\n" \
-      "That includes the agent audit trail — what each\n" \
-      "attached agent changed and sent.\n" \
-      "This can't be undone.",
-      confirm_label: "clear", danger: true) do
+    confirm(I18n.ui("CLEAR ACTIVITY"),
+      I18n.sys("Delete every event in this project's feed?\n\nThat includes the agent audit trail — what each attached agent changed and sent.\nThis can't be undone."),
+      confirm_label: I18n.ui("clear"), danger: true) do
       ok = @session.store.clear_events
       project_controller.reload_activity
       @toast = ok ? "activity cleared" : "activity NOT cleared (project busy) — the feed is unchanged"

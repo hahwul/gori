@@ -60,11 +60,11 @@ module Gori::Tui
     end
 
     def title : String
-      "LISTENERS"
+      I18n.ui("LISTENERS")
     end
 
     def hint : String
-      "↑/↓ scroll · r reload settings.json · esc close"
+      I18n.ui("↑/↓ scroll · r reload settings.json · esc close")
     end
 
     # No ↵ commit — there is nothing here to edit, so the only action is `r`, which re-reads the

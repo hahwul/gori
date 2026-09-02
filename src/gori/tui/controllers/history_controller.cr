@@ -406,13 +406,13 @@ module Gori::Tui
       intercept = Hotkeys.binding_label(reg, "intercept.toggle", "i")
       if @host.overlay == :detail
         if @history.detail_strip_focus?
-          return "←/→ panes · ↓/↵ enter · ↑ tabs · ↹ pane · space cmds · esc back"
+          return I18n.ui("←/→ panes · ↓/↵ enter · ↑ tabs · ↹ pane · space cmds · esc back")
         end
-        nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
+        nav = @history.detail_navigable? ? I18n.ui("↑/↓ move · ←/→ caret") : I18n.ui("↑/↓ scroll")
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "#{nav} · ⇧arrows select · #{dy} copy · ↑ strip · ↹ pane · space cmds · esc back"
+        return I18n.ui("%{nav} · ⇧arrows select · %{y} copy · ↑ strip · ↹ pane · space cmds · esc back", nav: nav, y: dy)
       end
-      return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
+      return I18n.ui("type query · ↹ complete · ↵ apply · esc clear") if @history.querying?
       # #898 gave this list `d` and `⇧X` and named neither here. `⇧X` is the one that goes in:
       # it deletes the project's whole History, and a destructive chord whose only
       # advertisement is the space menu is precisely the arrangement 0edc3c5b called out in
@@ -424,10 +424,11 @@ module Gori::Tui
       # in one of the list's three states and hide it in the other two.
       clear = Hotkeys.binding_label(reg, "history.clear", "⇧X")
       if @history.preview_enabled?
-        return "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs" if @history.preview_focus != :list
-        return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · #{clear} clear · space cmds · esc tabs"
+        return I18n.ui("↑/↓ scroll preview · ↹ list · ↵ open full · %{clear} clear · space cmds · esc tabs", clear: clear) if @history.preview_focus != :list
+        return I18n.ui("↑/↓ move · ↵ open · ↹ preview · %{repeater} repeater · %{filter} filter · %{clear} clear · space cmds · esc tabs", repeater: repeater, filter: filter, clear: clear)
       end
-      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{follow} follow · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
+      I18n.ui("↑/↓ move · ↵ open · %{repeater} repeater · %{issue} issue · %{follow} follow · %{clear} clear · %{filter} filter · %{intercept} hold-mode · space cmds · esc tabs",
+        repeater: repeater, issue: issue, follow: follow, clear: clear, filter: filter, intercept: intercept)
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).
@@ -849,7 +850,7 @@ module Gori::Tui
       # detail (instead of dropping to the list) and the guard below still fires on accept
       # (the flow is gone, so :detail → :none).
       @host.confirm(ids.size == 1 ? "DELETE FLOW" : "DELETE FLOWS", "Delete #{label}?\nThis can't be undone.",
-        confirm_label: "delete", danger: true, return_to: from_detail ? :detail : :none) do
+        confirm_label: I18n.ui("delete"), danger: true, return_to: from_detail ? :detail : :none) do
         # A rolled-back write (cross-process SQLite busy/lock) leaves the flows AND the marks in
         # place — say so instead of reporting a delete that didn't happen, so the set is still
         # there to retry.
@@ -868,9 +869,9 @@ module Gori::Tui
     def history_clear : Nil
       n = @host.session.store.count
       return if n <= 0
-      @host.confirm("CLEAR HISTORY",
-        "Delete ALL #{n} History flow#{n == 1 ? "" : "s"} for this project?\nThis can't be undone.",
-        confirm_label: "clear", danger: true, return_to: @host.overlay == :detail ? :detail : :none) do
+      @host.confirm(I18n.ui("CLEAR HISTORY"),
+        I18n.sys_n(n, "Delete ALL %{n} History flow for this project?\nThis can't be undone.", "Delete ALL %{n} History flows for this project?\nThis can't be undone.", n: n),
+        confirm_label: I18n.ui("clear"), danger: true, return_to: @host.overlay == :detail ? :detail : :none) do
         ok = @history.clear(@host.session.store)
         @host.request_overlay(:none) if @host.overlay == :detail
         @host.status(ok ? "history cleared" : "history NOT cleared (project busy) — every flow is still there")

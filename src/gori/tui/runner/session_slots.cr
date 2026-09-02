@@ -18,7 +18,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     registry = @session.slots
     list = registry.slots
     active = registry.active_name
-    lp = LibraryPicker.new("SESSION SLOT", session_slot_rows(list, active), "session slot", "activate")
+    lp = LibraryPicker.new(I18n.ui("SESSION SLOT"), session_slot_rows(list, active), I18n.ui("session slot"), I18n.ui("activate"))
     lp.on_commit = -> {
       # Index against the SAME array the rows were built from, and by NAME rather than by
       # position: the list can be edited from the Authorize card, `gori run session` or MCP

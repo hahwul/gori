@@ -99,8 +99,8 @@ module Gori::Tui
     end
 
     def hint : String
-      return "type to search · ↑/↓ scroll · ⇞/⇟ page · esc clear" if @searching
-      "/ search · ↑/↓ scroll · ⇞/⇟ page · esc close"
+      return I18n.ui("type to search · ↑/↓ scroll · ⇞/⇟ page · esc clear") if @searching
+      I18n.ui("/ search · ↑/↓ scroll · ⇞/⇟ page · esc close")
     end
 
     # Read-only: never :commit. `/` enters the explicit search mode; esc there clears the

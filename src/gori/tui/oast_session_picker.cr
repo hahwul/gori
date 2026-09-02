@@ -56,11 +56,11 @@ module Gori::Tui
     end
 
     def title : String
-      "RESUME LISTENER"
+      I18n.ui("RESUME LISTENER")
     end
 
     def hint : String
-      "↑/↓ select · ↵ resume · x release (deregister) · esc cancel"
+      I18n.ui("↑/↓ select · ↵ resume · x release (deregister) · esc cancel")
     end
 
     # ↵ resumes, `x` releases, esc cancels; j/k are the vim nav every other picker gives.

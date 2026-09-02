@@ -232,7 +232,7 @@ module Gori::Tui
     # verbs resolve through Hotkeys so a rebind is reflected in the status line.
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · ^N new" unless v
+      return I18n.ui("↹/esc tabs · ^N new") unless v
       reg = @host.session.registry
       y = Hotkeys.binding_label(reg, "repeater.copy", "y")
       send = Hotkeys.binding_label(reg, "repeater.send", "^R")
@@ -249,11 +249,11 @@ module Gori::Tui
       params = Hotkeys.binding_label(reg, "repeater.auto-mark", "^A")
       word = Hotkeys.binding_label(reg, "repeater.mark-word", "^K")
       point = Hotkeys.binding_label(reg, "repeater.toggle-decoded", "^T")
-      marks = "#{params} params · #{word} word · #{point} point"
+      marks = I18n.ui("%{params} params · %{word} word · %{point} point", params: params, word: word, point: point)
       # ^R send lives on the REQUEST border chip (` ^R:SEND `) — not re-listed in the
       # request-focus footer (discoverability is the border badge; keys still work).
-      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · #{hex}/esc exit" if v.request_hex?
-      read_common = "⇧arrows select · #{y} copy · space cmds"
+      return I18n.ui("HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · %{hex}/esc exit", hex: hex) if v.request_hex?
+      read_common = I18n.ui("⇧arrows select · %{y} copy · space cmds", y: y)
       if v.ws_mode?
         # The response column has two cards on a WS tab, so name the card being read and the
         # key that swaps them — the same shape `ws_hint` uses for the request column's two.
@@ -261,19 +261,20 @@ module Gori::Tui
         return ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ←/→ char · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? I18n.ui("↑/↓ move · %{common} · ←/→ char · ^F find · %{send} send · ↹ pane · esc tabs", common: read_common, send: send) : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
       when :target
         if v.target_insert?
-          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
+          v.editing_sni? ? I18n.ui("type SNI · %{sni}/↵/esc URL · %{send} send", sni: sni, send: send) : I18n.ui("type URL · %{sni} SNI · ↵ request · %{send} send · ↹ pane · esc read", sni: sni, send: send)
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · esc tabs"
+          I18n.ui("i/↵ edit · %{common} · %{sni} SNI · %{send} send · ↹ pane · esc tabs", common: read_common, sni: sni, send: send)
         end
       when :response
-        nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ←/→ char · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
+        nav = v.resp_navigable? ? I18n.ui("↑/↓ move") : I18n.ui("↑/↓ scroll")
+        I18n.ui("%{nav} · %{common} · %{diff} diff · ←/→ char · %{hex} hex · %{pretty} pretty · ^F find · ↵/%{send} send · ↹ pane · esc tabs",
+          nav: nav, common: read_common, diff: diff, hex: hex, pretty: pretty, send: send)
       when :request
         if v.request_insert?
           # `↹ text`, not `↹ pane`: in INSERT, Tab inserts a TAB CHARACTER (handle_editor_tab
@@ -283,12 +284,12 @@ module Gori::Tui
           # `^Y copy` is named here and not only in READ: a ⇧arrow selection can be built in
           # INSERT, and the bare `y` that copies it in READ is a literal character here — one
           # that REPLACES the selection. The footer has to say which key copies while typing.
-          "type to edit · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^G goto · ^F find · #{hex} hex · esc read · ↹ text"
+          I18n.ui("type to edit · ⇧arrows select · ^Y copy · ^Z undo · %{marks} · ^G goto · ^F find · %{hex} hex · esc read · ↹ text", marks: marks, hex: hex)
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
-          back = v.ws_http_only? ? " · ^V websocket" : ""
-          "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · esc tabs"
+          back = v.ws_http_only? ? I18n.ui(" · ^V websocket") : ""
+          I18n.ui("i/↵ edit · %{common} · %{marks} · ^G goto · ^F find · %{hex} hex%{back} · ↹ pane · esc tabs", common: read_common, marks: marks, hex: hex, back: back)
         end
       else
         ""
@@ -297,11 +298,11 @@ module Gori::Tui
 
     private def grpc_hint(v : RepeaterView) : String
       if v.grpc_fields_editing?
-        "type the value · ↵ apply · esc cancel · ^R send"
+        I18n.ui("type the value · ↵ apply · esc cancel · ^R send")
       elsif v.grpc_fields?
-        "↑/↓ pick a field · i/↵ edit · ␣E/esc head · ^X hex · ^R send"
+        I18n.ui("↑/↓ pick a field · i/↵ edit · ␣E/esc head · ^X hex · ^R send")
       elsif v.request_hex?
-        "gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send"
+        I18n.ui("gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send")
       elsif v.request_insert?
         # `⇧arrows select · ^Y copy` for the same reason the plain-HTTP request footer names
         # them (see #body_hint's `:request` arm): the band is buildable in INSERT and the `y` that
@@ -310,11 +311,11 @@ module Gori::Tui
         # `↹ text`, not `↹ pane`, for the same reason as well: `editor_captures_tab?` is
         # `request_text_editing?`, which has no gRPC arm, so Tab splices a TAB into the
         # head/metadata. The old token promised a focus move and silently corrupted a header.
-        "type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text"
+        I18n.ui("type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text")
       else
-        msg = v.grpc_reframable? ? "^X hex-edit payload · " : ""
-        fields = v.grpc_fields_available? ? "␣E fields · " : ""
-        "i/↵ edit head · #{msg}#{fields}⇧arrows select · y copy · space cmds · ↹ pane"
+        msg = v.grpc_reframable? ? I18n.ui("^X hex-edit payload · ") : ""
+        fields = v.grpc_fields_available? ? I18n.ui("␣E fields · ") : ""
+        I18n.ui("i/↵ edit head · %{hex}%{fields}⇧arrows select · y copy · space cmds · ↹ pane", hex: msg, fields: fields)
       end
     end
 
@@ -415,22 +416,22 @@ module Gori::Tui
     # The split-decode request hint: which sub-pane is being edited + how to switch.
     private def decode_hint(v : RepeaterView) : String
       sub = if v.req_pane != :decoded
-              "request envelope"
+              I18n.ui("request envelope")
             elsif v.decode_kind? == :saml
-              "SAML XML"
+              I18n.ui("SAML XML")
             else
-              "GraphQL query/vars"
+              I18n.ui("GraphQL query/vars")
             end
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · #{tab_token(v)}"
+      mode = v.request_insert? ? I18n.ui("type to edit · ⇧arrows select · ^Y copy") : I18n.ui("i/↵ edit · ⇧arrows select · y copy · space cmds")
+      I18n.ui("%{mode} %{pane} · ^T switch · ^G goto · ^F find · esc read · %{tab}", mode: mode, pane: sub, tab: tab_token(v))
     end
 
     private def ws_hint(v : RepeaterView) : String
-      sub = v.req_pane == :envelope ? "handshake request" : "messages"
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      sub = v.req_pane == :envelope ? I18n.ui("handshake request") : I18n.ui("messages")
+      mode = v.request_insert? ? I18n.ui("type to edit · ⇧arrows select · ^Y copy") : I18n.ui("i/↵ edit · ⇧arrows select · y copy · space cmds")
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
-      "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · #{tab_token(v)}"
+      I18n.ui("%{mode} %{pane} · ^T switch · ^V http · ^G goto · ^F find · esc read · %{tab}", mode: mode, pane: sub, tab: tab_token(v))
     end
 
     # What Tab actually does on the REQUEST column right now. In INSERT it types a TAB
@@ -440,15 +441,15 @@ module Gori::Tui
     # plain-HTTP `:request` arm has said `↹ text` since it grew its own INSERT branch; these
     # two (and gRPC) shared one string across the modes and kept the READ token.
     private def tab_token(v : RepeaterView) : String
-      v.request_insert? ? "↹ text" : "↹ pane"
+      v.request_insert? ? I18n.ui("↹ text") : I18n.ui("↹ pane")
     end
 
     # The RESPONSE column's footer on a WS tab — the twin of `ws_hint`, naming the card being
     # read and `^T` as the way to the other one. Without it the handshake response card was
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
-      card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      "↑/↓ move #{card} · #{read_common} · ←/→ char · ^T switch · ^F find · #{send} send · ↹ pane · esc tabs"
+      card = v.resp_pane == :handshake ? I18n.ui("handshake response") : I18n.ui("transcript")
+      I18n.ui("↑/↓ move %{card} · %{common} · ←/→ char · ^T switch · ^F find · %{send} send · ↹ pane · esc tabs", card: card, common: read_common, send: send)
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -1672,8 +1673,8 @@ module Gori::Tui
     # are discarded. No-op when no repeater is open.
     def request_close : Nil
       return unless tab = current_repeater_tab
-      @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.summary}”?\nThe edited request and response are discarded.",
-        confirm_label: "close", danger: true) { close_repeater_tab }
+      @host.confirm(I18n.ui("CLOSE REPEATER"), I18n.sys("Close repeater “%{name}”?\nThe edited request and response are discarded.", name: tab.view.summary),
+        confirm_label: I18n.ui("close"), danger: true) { close_repeater_tab }
     end
 
     # Close the current repeater sub-tab. Clamps the active index; when the last one
@@ -2447,9 +2448,9 @@ module Gori::Tui
     private def guard_marker_delete(view : RepeaterView, span : {Int32, Int32}?) : Bool
       return false unless span
       n = view.marker_ordinal(span)
-      @host.confirm("REMOVE MARKER",
-        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
-        confirm_label: "remove marker", danger: true) do
+      @host.confirm(I18n.ui("REMOVE MARKER"),
+        I18n.sys("Deleting this character breaks marker §%{n}.\nRemove the whole marker and keep only its value?", n: n),
+        confirm_label: I18n.ui("remove marker"), danger: true) do
         view.strip_marker_span(span)
       end
       true

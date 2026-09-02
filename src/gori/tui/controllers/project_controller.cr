@@ -52,35 +52,35 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+        I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs")
       when :overrides
-        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+        @project_view.ov_adding? ? I18n.ui("type \"IP host\" · ↵ save · esc cancel") : I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs")
       when :env
         if @project_view.env_prefix_editing?
-          "type prefix · ↵ save · esc cancel"
+          I18n.ui("type prefix · ↵ save · esc cancel")
         elsif @project_view.env_adding?
-          "type \"KEY VALUE\" · ↵ save · esc cancel"
+          I18n.ui("type \"KEY VALUE\" · ↵ save · esc cancel")
         else
-          "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+          I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs")
         end
       when :activity
         if @project_view.activity_querying?
-          "type to filter · ↵ keep · esc clear"
+          I18n.ui("type to filter · ↵ keep · esc clear")
         else
           # The one pane on this tab with a destructive key, and the only hint here that names
           # one. Resolved through the keymap (the rest of this method is literal, because no
           # other pane key is rebindable-and-dangerous) so a rebind reaches the line that
           # advertises it.
           clear = Hotkeys.binding_label(@host.session.registry, "activity.clear", "⇧X")
-          "↑/↓ select · ↵ open · s source · l level · a actor · / filter · #{clear} clear · space cmds · esc sub-tabs"
+          I18n.ui("↑/↓ select · ↵ open · s source · l level · a actor · / filter · %{clear} clear · space cmds · esc sub-tabs", clear: clear)
         end
       when :settings
         settings_hint
       else
         if @project_view.desc_insert_mode?
-          "type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
+          I18n.ui("type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR")
         else
-          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
+          I18n.ui("i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs")
         end
       end
     end
@@ -89,13 +89,13 @@ module Gori::Tui
     # only one that branches on the selected ROW rather than on a pane mode.
     private def settings_hint : String
       if @project_view.settings_text_row?
-        "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs"
+        I18n.ui("type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc sub-tabs")
       elsif @project_view.settings_protocol_row?
-        "←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs"
+        I18n.ui("←/→/space protocol · SOCKS5 local DNS · SOCKS5H proxy DNS · ↑/↓ move · esc sub-tabs")
       elsif @project_view.settings_sandbox_row?
-        "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs"
+        I18n.ui("space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc sub-tabs")
       else
-        "space/↵ toggle lens · ↑/↓ move · esc sub-tabs"
+        I18n.ui("space/↵ toggle lens · ↑/↓ move · esc sub-tabs")
       end
     end
 
@@ -748,8 +748,8 @@ module Gori::Tui
     def scope_delete_rule : Nil
       rule = @project_view.selected_rule || return @host.status("no scope rule selected")
       label = "#{rule.include? ? "incl" : "excl"} #{rule.match_type} #{rule.pattern}"
-      @host.confirm("DELETE SCOPE RULE", "Delete “#{label}”? This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE SCOPE RULE"), I18n.sys("Delete “%{name}”? This can't be undone.", name: label),
+        confirm_label: I18n.ui("delete"), danger: true) do
         # The store's answer, not an assumption: a rolled-back batch leaves the rule gating
         # traffic, and reporting "removed" over one that still gates is the failure this
         # branch exists to prevent. Selection cannot have moved — the confirm is modal.
@@ -915,8 +915,8 @@ module Gori::Tui
 
     def hostov_delete_entry : Nil
       host = @project_view.selected_override_host || return @host.status("no host override selected")
-      @host.confirm("DELETE HOST OVERRIDE", "Delete the override for “#{host}”? This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE HOST OVERRIDE"), I18n.sys("Delete the override for “%{host}”? This can't be undone.", host: host),
+        confirm_label: I18n.ui("delete"), danger: true) do
         if removed = @project_view.ov_delete
           @host.status("host override deleted: #{removed}")
         else
@@ -979,8 +979,8 @@ module Gori::Tui
     def env_delete_var : Nil
       key = @project_view.selected_env_key || return @host.status("no env var selected")
       # The KEY, never the value — a confirm is a modal an operator may be sharing a screen on.
-      @host.confirm("DELETE ENV VAR", "Delete “#{key}”? This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE ENV VAR"), I18n.sys("Delete “%{name}”? This can't be undone.", name: key),
+        confirm_label: I18n.ui("delete"), danger: true) do
         if removed = @project_view.env_delete
           # Whether the write COMMITTED, like the host-override sibling above and like MCP's
           # `delete_env_var` / `gori run project env delete`. A dropped write reported as

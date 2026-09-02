@@ -69,7 +69,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def open_chain_save : Nil
     c = decoder_controller
     spec = c.chain_spec
-    ov = NamePromptOverlay.new("SAVE CHAIN", spec.strip.empty? ? "(empty chain)" : spec,
+    ov = NamePromptOverlay.new(I18n.ui("SAVE CHAIN"), spec.strip.empty? ? I18n.ui("(empty chain)") : spec,
       c.subtab_name)
     ov.on_commit = -> {
       c.save_chain(ov.name)
@@ -83,7 +83,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # which is the answer to "what have I saved?" that the prompt could never give.
   def open_chain_load : Nil
     chains = Settings.decoder_chains
-    lp = LibraryPicker.new("LOAD CHAIN", chain_rows(chains), "chain")
+    lp = LibraryPicker.new(I18n.ui("LOAD CHAIN"), chain_rows(chains), I18n.ui("chain"))
     lp.on_commit = -> {
       # Index against the SAME array this picker's rows were built from — `chains` is
       # reassigned by on_delete below, and a stale index into a shorter list would load a

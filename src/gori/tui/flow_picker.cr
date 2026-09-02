@@ -47,11 +47,11 @@ module Gori::Tui
     end
 
     def title : String
-      "PICK FLOW"
+      I18n.ui("PICK FLOW")
     end
 
     def hint : String
-      IDLE_HINT
+      I18n.ui(IDLE_HINT)
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-

@@ -175,14 +175,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     return if n == 0
     q, r = @search_buffer, @search_replace_buffer
-    plural = n == 1 ? "" : "s"
     msg = if r.empty?
-            "Delete #{n} occurrence#{plural} of “#{q}”?"
+            I18n.sys_n(n, "Delete %{n} occurrence of “%{q}”?", "Delete %{n} occurrences of “%{q}”?", n: n, q: q)
           else
-            "Replace #{n} occurrence#{plural} of “#{q}” with “#{r}”?"
+            I18n.sys_n(n, "Replace %{n} occurrence of “%{q}” with “%{r}”?", "Replace %{n} occurrences of “%{q}” with “%{r}”?", n: n, q: q, r: r)
           end
-    confirm("REPLACE ALL", "#{msg}\nOne undo step — ^Z puts it back.",
-      confirm_label: r.empty? ? "delete" : "replace", danger: true) do
+    confirm(I18n.ui("REPLACE ALL"), I18n.sys("%{question}\nOne undo step — ^Z puts it back.", question: msg),
+      confirm_label: r.empty? ? I18n.ui("delete") : I18n.ui("replace"), danger: true) do
       run_replace(q, r)
     end
   end

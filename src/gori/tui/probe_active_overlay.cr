@@ -128,11 +128,11 @@ module Gori::Tui
     end
 
     def title : String
-      "ACTIVE SCAN"
+      I18n.ui("ACTIVE SCAN")
     end
 
     def hint : String
-      "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ adjust · ↵ run · esc cancel")
     end
 
     # Formerly Runner#handle_probe_active_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵ toggles a

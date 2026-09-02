@@ -120,15 +120,15 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
-      return "type query · ↹ complete · ↵ apply · esc clear" if @sitemap.querying?
+      return I18n.ui("type a tag · ↵ save · esc cancel") if @sitemap.tagging?
+      return I18n.ui("type query · ↹ complete · ↵ apply · esc clear") if @sitemap.querying?
       # Marks survive a filter change, so the `/` affordance stays up while they're set.
       # `space tag`, not `⇧T`: tagging is menu-only now — ⇧T meant "mark all" in every other
       # marked list, so a hand that learnt `t`/⇧T there opened a text prompt here.
-      return "↑/↓ move · / filter · t mark · space tag · space cmds · esc clears marks" if @sitemap.mark_count > 0
+      return I18n.ui("↑/↓ move · / filter · t mark · space tag · space cmds · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
-      "↑/↓ move · / filter · t mark · g fold · ↵/→ expand · space cmds · esc sub-tabs"
+      I18n.ui("↑/↓ move · / filter · t mark · g fold · ↵/→ expand · space cmds · esc sub-tabs")
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or

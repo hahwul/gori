@@ -138,8 +138,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # request — is not a batch: open it straight away, like the cursor row and History's ^R.
     return repeater_flow(ids.first) if ids.size == 1
     return unless targets = batch_within_cap(ids, "Repeater", subject: "endpoints")
-    confirm("SEND TO REPEATER", "Open #{targets.size} endpoints as #{targets.size} Repeater sub-tabs?",
-      confirm_label: "open", danger: false) do
+    confirm(I18n.ui("SEND TO REPEATER"), I18n.sys("Open %{n} endpoints as %{n} Repeater sub-tabs?", n: targets.size),
+      confirm_label: I18n.ui("open"), danger: false) do
       opened = 0
       targets.each do |id|
         next unless @session.store.flow_row(id) # pruned since the resolve: skip, report below

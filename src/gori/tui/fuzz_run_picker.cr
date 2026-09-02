@@ -20,11 +20,11 @@ module Gori::Tui
     end
 
     def title : String
-      "FUZZ RUN HISTORY"
+      I18n.ui("FUZZ RUN HISTORY")
     end
 
     def hint : String
-      "↑/↓ select · ↵ load · d delete · esc cancel"
+      I18n.ui("↑/↓ select · ↵ load · d delete · esc cancel")
     end
 
     def entry_count : Int32

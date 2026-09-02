@@ -106,17 +106,17 @@ module Gori::Tui
     end
 
     def title : String
-      "ISSUE"
+      I18n.ui("ISSUE")
     end
 
     def hint : String
       case @sel
       when ROW_SEV
-        "←/→ severity · ⇥ title · ↵ create · esc cancel"
+        I18n.ui("←/→ severity · ⇥ title · ↵ create · esc cancel")
       when ROW_CVSS
-        "↵ calculator · ⌫ clear · ⇥ severity · esc cancel"
+        I18n.ui("↵ calculator · ⌫ clear · ⇥ severity · esc cancel")
       else
-        "type title · ←/→ caret · ⇥ cvss · ↵ create · esc cancel"
+        I18n.ui("type title · ←/→ caret · ⇥ cvss · ↵ create · esc cancel")
       end
     end
 

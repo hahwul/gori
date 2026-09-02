@@ -51,11 +51,11 @@ module Gori::Tui
     end
 
     def title : String
-      "HISTORY COLUMNS"
+      I18n.ui("HISTORY COLUMNS")
     end
 
     def hint : String
-      "↑/↓ pick · ⇧←/⇧→ move · a add · e edit · d delete · esc close"
+      I18n.ui("↑/↓ pick · ⇧←/⇧→ move · a add · e edit · d delete · esc close")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

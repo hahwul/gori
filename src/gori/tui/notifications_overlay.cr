@@ -86,11 +86,11 @@ module Gori::Tui
     end
 
     def title : String
-      "NOTIFICATIONS"
+      I18n.ui("NOTIFICATIONS")
     end
 
     def hint : String
-      "↑/↓ select · ↵ open · c clear · esc close"
+      I18n.ui("↑/↓ select · ↵ open · c clear · esc close")
     end
 
     # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps

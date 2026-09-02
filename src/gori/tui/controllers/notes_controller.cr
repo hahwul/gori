@@ -292,10 +292,10 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @notes.insert_mode?
-        "type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
+        I18n.ui("type to edit · ⇧arrows select · ^Y copy · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs")
       else
         y = Hotkeys.binding_label(@host.session.registry, "notes.copy", "y")
-        "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc sub-tabs"
+        I18n.ui("i/↵ edit · ⇧arrows select · %{y} copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc sub-tabs", y: y)
       end
     end
 
@@ -416,8 +416,8 @@ module Gori::Tui
         do_notes_close
         return
       end
-      @host.confirm("CLOSE NOTE", "Close “#{@notes.current_label}”?\nIts text will be discarded.",
-        confirm_label: "close", danger: true) { do_notes_close }
+      @host.confirm(I18n.ui("CLOSE NOTE"), I18n.sys("Close “%{name}”?\nIts text will be discarded.", name: @notes.current_label),
+        confirm_label: I18n.ui("close"), danger: true) { do_notes_close }
     end
 
     private def do_notes_close : Nil
@@ -462,8 +462,8 @@ module Gori::Tui
     # Skip the prompt when the note is already blank (nothing to lose).
     def notes_clear : Nil
       return if @notes.current_blank?
-      @host.confirm("CLEAR NOTE", "Clear this note's text?\nThis can't be undone.",
-        confirm_label: "clear", danger: true) do
+      @host.confirm(I18n.ui("CLEAR NOTE"), I18n.sys("Clear this note's text?\nThis can't be undone."),
+        confirm_label: I18n.ui("clear"), danger: true) do
         @notes.clear_current
         @host.status("note cleared")
       end

@@ -51,11 +51,11 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
+      return I18n.ui("start from Sitemap/History (space → \"Discover here\")") if @view.empty?
       if @view.focus == :runs
-        "↑/↓ runs · ↵/tab findings · ^R run · ^X stop · p pause · d dismiss · space cmds · esc sub-tabs"
+        I18n.ui("↑/↓ runs · ↵/tab findings · ^R run · ^X stop · p pause · d dismiss · space cmds · esc sub-tabs")
       else
-        "↑/↓ nav · ↵/o request+response · tab runs · ^R run · ^X stop · p pause · space cmds · esc sub-tabs"
+        I18n.ui("↑/↓ nav · ↵/o request+response · tab runs · ^R run · ^X stop · p pause · space cmds · esc sub-tabs")
       end
     end
 

@@ -26,11 +26,11 @@ module Gori::Tui
     end
 
     def title : String
-      "BROWSER"
+      I18n.ui("BROWSER")
     end
 
     def hint : String
-      "↑/↓ select · ↵ open · esc cancel"
+      I18n.ui("↑/↓ select · ↵ open · esc cancel")
     end
 
     # ↑/↓ (or k/j) pick, ↵ launches the highlighted browser, esc cancels. Any other key

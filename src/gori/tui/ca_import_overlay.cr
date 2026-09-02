@@ -50,7 +50,7 @@ module Gori::Tui
     end
 
     def title : String
-      "IMPORT CA"
+      I18n.ui("IMPORT CA")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -61,7 +61,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
+      I18n.ui("type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels")
     end
 
     # --- input ---------------------------------------------------------------

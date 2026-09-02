@@ -38,7 +38,7 @@ module Gori::Tui
         # The same sentence the Repeater's `^X` footer uses, because they are the same editor
         # and the same gestures. No `⇧arrows select` / `^Y copy` band: the byte editor has a
         # nibble cursor and no selection, and `^Y` copies the whole payload.
-        "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue"
+        I18n.ui("HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue")
       elsif @intercept.editing?
         # `⇧arrows select · ^Y copy`: this editor is the one INS strip in the tree that named
         # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
@@ -46,9 +46,9 @@ module Gori::Tui
         # `edit_motion_key`, and `intercept.copy` carries `^Y` on the wider `intercept_copyable?`
         # gate precisely for this pane. Bare `y` is chordless here (the queue spends the
         # letters) AND a literal character while typing, so `^Y` is the only copy there is.
-        "type to edit · ⇧arrows select · ^Y copy · ^R forward · ⇧↹/esc queue"
+        I18n.ui("type to edit · ⇧arrows select · ^Y copy · ^R forward · ⇧↹/esc queue")
       elsif @intercept.querying?
-        "type condition · ↹ complete · ↵ apply · esc clear"
+        I18n.ui("type condition · ↹ complete · ↵ apply · esc clear")
       else
         queue_hint(reg)
       end
@@ -65,12 +65,13 @@ module Gori::Tui
       n = @intercept.mark_count
       if n > 0
         all = Hotkeys.binding_label(reg, "intercept.mark-all", "⇧T")
-        return "#{n} marked · #{f} fwd all · #{d} drop all · #{mark} mark · #{all} mark all · esc clear · space cmds"
+        return I18n.ui("%{n} marked · %{f} fwd all · %{d} drop all · %{mark} mark · %{all} mark all · esc clear · space cmds", n: n, f: f, d: d, mark: mark, all: all)
       end
       fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
       filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
       catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
-      "↑/↓ move · #{mark} mark · ⇧↑/↓ range · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{filt} filter · #{catch} catch · space cmds · esc tabs"
+      I18n.ui("↑/↓ move · %{mark} mark · ⇧↑/↓ range · ↵/e edit · %{f} fwd · %{d} drop · %{fa} all · %{filt} filter · %{catch} catch · space cmds · esc tabs",
+        mark: mark, f: f, d: d, fa: fa, filt: filt, catch: catch)
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable

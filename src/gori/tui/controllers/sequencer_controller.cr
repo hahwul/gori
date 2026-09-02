@@ -78,12 +78,12 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · send a request here (space → Send to Sequencer) or a selection" unless v
+      return I18n.ui("↹/esc tabs · send a request here (space → Send to Sequencer) or a selection") unless v
       case v.focus
-      when :samples  then "↑/↓ select · → analysis · ↵ detail · ^X stop · c config · space cmds · ↹ pane · esc tabs"
-      when :analysis then "↑/↓ scroll · ← samples · ^R run · c config · ↹ pane · esc tabs"
-      when :detail   then "↑/↓ scroll · esc back"
-      else                "^R run · c config · space cmds · ↹ pane · esc tabs"
+      when :samples  then I18n.ui("↑/↓ select · → analysis · ↵ detail · ^X stop · c config · space cmds · ↹ pane · esc tabs")
+      when :analysis then I18n.ui("↑/↓ scroll · ← samples · ^R run · c config · ↹ pane · esc tabs")
+      when :detail   then I18n.ui("↑/↓ scroll · esc back")
+      else                I18n.ui("^R run · c config · space cmds · ↹ pane · esc tabs")
       end
     end
 
@@ -817,8 +817,8 @@ module Gori::Tui
     # --- close / persist ---
     def request_close : Nil
       return unless tab = current_tab_obj
-      @host.confirm("CLOSE SEQUENCER", "Close sequencing session “#{tab.view.summary}”?\nIts config and collected tokens are discarded.",
-        confirm_label: "close", danger: true) { close_tab }
+      @host.confirm(I18n.ui("CLOSE SEQUENCER"), I18n.sys("Close sequencing session “%{name}”?\nIts config and collected tokens are discarded.", name: tab.view.summary),
+        confirm_label: I18n.ui("close"), danger: true) { close_tab }
     end
 
     def close_tab : Nil

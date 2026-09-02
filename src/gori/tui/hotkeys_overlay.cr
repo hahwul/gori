@@ -113,13 +113,13 @@ module Gori::Tui
     end
 
     def title : String
-      "HOTKEYS"
+      I18n.ui("HOTKEYS")
     end
 
     def hint : String
-      return "press a key to bind · esc cancel" if capturing?
-      return "type to search · ↑/↓ select · ↵ jump · esc clear" if searching?
-      "↑/↓ select · / search · e/␣ rebind · x/⌫ unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc cancel"
+      return I18n.ui("press a key to bind · esc cancel") if capturing?
+      return I18n.ui("type to search · ↑/↓ select · ↵ jump · esc clear") if searching?
+      I18n.ui("↑/↓ select · / search · e/␣ rebind · x/⌫ unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc cancel")
     end
 
     # In :capture the shell must route EVERY key here before its own pre-filter, so a

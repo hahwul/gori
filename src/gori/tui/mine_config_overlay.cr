@@ -114,11 +114,11 @@ module Gori::Tui
     end
 
     def title : String
-      "MINE PARAMS"
+      I18n.ui("MINE PARAMS")
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · ␣ toggle · ↵ start · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ options · ␣ toggle · ↵ start · esc cancel")
     end
 
     # Own key handling (formerly Runner#handle_mine_config_key): ↑/↓ move, ←/→ adjust

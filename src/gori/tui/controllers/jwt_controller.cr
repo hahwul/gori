@@ -890,28 +890,28 @@ module Gori::Tui
           # The READ arm below advertises the band and `y`; INSERT kept the band and named
           # neither it nor the key that copies it. `y` is a literal character while typing —
           # and typing it over the band REPLACES it — so `^Y` is the copy this mode has.
-          "type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} encode · ^L clear · ^N new · ↑ sub-tabs"
+          I18n.ui("type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · %{lens} encode · ^L clear · ^N new · ↑ sub-tabs", lens: lens)
         else
-          "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓ decoded · #{lens} encode · ^N new · esc sub-tabs"
+          I18n.ui("i/↵ edit · ⇧arrows select · %{y} copy · space cmds · ↓ decoded · %{lens} encode · ^N new · esc sub-tabs", y: y, lens: lens)
         end
       when :decoded
-        "↑/↓ scroll · #{y} copy · space cmds · ↑-top input · ↓ attacks · #{lens} encode · esc sub-tabs"
+        I18n.ui("↑/↓ scroll · %{y} copy · space cmds · ↑-top input · ↓ attacks · %{lens} encode · esc sub-tabs", y: y, lens: lens)
       when :attacks
-        "↑/↓ pick · ↵/#{y} copy token · space cmds · ↑-top decoded · #{lens} encode · esc sub-tabs"
+        I18n.ui("↑/↓ pick · ↵/%{y} copy token · space cmds · ↑-top decoded · %{lens} encode · esc sub-tabs", y: y, lens: lens)
       when :header, :payload
         # The ENCODE lens has no READ mode at all — its three panes always capture keys — so
         # `^Y` is the ONLY copy here, and `space cmds` was a lie the moment it was written:
         # `edit_json`/`edit_secret` insert a literal space (`handle_body_key` only defers
         # ctrl/alt chords). Naming a menu that types a space instead of opening cost these
         # strips the one token that had room to say which key copies.
-        "type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A alg · #{lens} decode · esc sub-tabs"
+        I18n.ui("type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A alg · %{lens} decode · esc sub-tabs", lens: lens)
       when :secret
         # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
         # + caret index (JwtSession#secret_cx), not a TextArea, so it has no band to grow.
         # `^Y` still copies the whole field.
-        "type secret · ^Y copy · ^A alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs"
+        I18n.ui("type secret · ^Y copy · ^A alg (%{alg}) · ↑/↓ cross · %{lens} decode · esc sub-tabs", alg: s.alg, lens: lens)
       when :output
-        "↑/↓ scroll · #{y} copy token · space cmds · ^A alg · #{lens} decode · esc sub-tabs"
+        I18n.ui("↑/↓ scroll · %{y} copy token · space cmds · ^A alg · %{lens} decode · esc sub-tabs", y: y, lens: lens)
       else
         ""
       end

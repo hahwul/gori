@@ -100,7 +100,7 @@ module Gori::Tui
     end
 
     def title : String
-      "SEQUENCER"
+      I18n.ui("SEQUENCER")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -111,7 +111,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · type to edit selector · ←/→ options · ↵ start · esc cancel"
+      I18n.ui("↑/↓ field · type to edit selector · ←/→ options · ↵ start · esc cancel")
     end
 
     # Own key handling (formerly Runner#handle_sequence_config_key). ↑/↓ move fields; the

@@ -98,11 +98,11 @@ module Gori::Tui
     end
 
     def title : String
-      editing? ? "EDIT IDENTITY" : "ADD IDENTITY"
+      editing? ? I18n.ui("EDIT IDENTITY") : I18n.ui("ADD IDENTITY")
     end
 
     def hint : String
-      "⇥ field · type · ↵ save (newline in headers) · esc cancel"
+      I18n.ui("⇥ field · type · ↵ save (newline in headers) · esc cancel")
     end
 
     def text_fields : Array(TextField)

@@ -257,15 +257,15 @@ module Gori::Tui
     end
 
     def title : String
-      "CVSS"
+      I18n.ui("CVSS")
     end
 
     def hint : String
       case @sel
-      when ROW_VECTOR  then "type/paste a vector or score · ↑/↓ row · ↵ save · esc cancel"
-      when ROW_VERSION then "←/→ cvss version · ↑/↓ row · ↵ save · esc cancel"
+      when ROW_VECTOR  then I18n.ui("type/paste a vector or score · ↑/↓ row · ↵ save · esc cancel")
+      when ROW_VERSION then I18n.ui("←/→ cvss version · ↑/↓ row · ↵ save · esc cancel")
       else
-        @sel == row_save ? "↵ save · ↑/↓ row · esc cancel" : "←/→ option · 1..4 pick · ↑/↓ row · ↵ save · esc cancel"
+        @sel == row_save ? I18n.ui("↵ save · ↑/↓ row · esc cancel") : I18n.ui("←/→ option · 1..4 pick · ↑/↓ row · ↵ save · esc cancel")
       end
     end
 

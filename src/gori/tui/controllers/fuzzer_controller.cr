@@ -176,7 +176,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · ^N new" unless v
+      return I18n.ui("↹/esc tabs · ^N new") unless v
       reg = @host.session.registry
       y = Hotkeys.binding_label(reg, "fuzzer.copy", "y")
       run = Hotkeys.binding_label(reg, "fuzz.run", "^R")
@@ -187,17 +187,17 @@ module Gori::Tui
       params = Hotkeys.binding_label(reg, "fuzz.automark", "^A")
       word = Hotkeys.binding_label(reg, "fuzz.mark-word", "^K")
       point = Hotkeys.binding_label(reg, "fuzz.insert-marker", "^T")
-      marks = "#{params} params · #{word} word · #{point} point"
-      read_common = "⇧arrows select · #{y} copy · space cmds"
+      marks = I18n.ui("%{params} params · %{word} word · %{point} point", params: params, word: word, point: point)
+      read_common = I18n.ui("⇧arrows select · %{y} copy · space cmds", y: y)
       sni = Hotkeys.binding_label(reg, "fuzz.toggle-sni", "^S")
       case v.focus
       when :target
         if v.editing_sni?
-          "type SNI · #{sni}/↵/esc URL · #{run} run"
+          I18n.ui("type SNI · %{sni}/↵/esc URL · %{run} run", sni: sni, run: run)
         elsif v.target_insert?
-          "type URL · #{sni} SNI · ↵/↓ template · #{run} run · ↹ pane · esc read"
+          I18n.ui("type URL · %{sni} SNI · ↵/↓ template · %{run} run · ↹ pane · esc read", sni: sni, run: run)
         else
-          "i/↵ edit · #{read_common} · #{sni} SNI · #{run} run · ↹ pane · esc tabs"
+          I18n.ui("i/↵ edit · %{common} · %{sni} SNI · %{run} run · ↹ pane · esc tabs", common: read_common, sni: sni, run: run)
         end
       when :template
         if v.template_insert?
@@ -209,9 +209,9 @@ module Gori::Tui
           # you a band could be built here and then named no key that copies one. In INSERT the
           # `y` the READ footer advertises is a literal character — and typing it over the band
           # REPLACES it, which is the whole reason `fuzzer.copy` carries a ctrl chord.
-          "type · ⇧arrows select · ^Y copy · ^Z undo · #{marks} · ^O config · #{run} run · esc read · ↹ text"
+          I18n.ui("type · ⇧arrows select · ^Y copy · ^Z undo · %{marks} · ^O config · %{run} run · esc read · ↹ text", marks: marks, run: run)
         else
-          "i/↵ edit · #{read_common} · #{marks} · ^F find · ^O config · #{run} run · ↹ pane · esc tabs"
+          I18n.ui("i/↵ edit · %{common} · %{marks} · ^F find · ^O config · %{run} run · ↹ pane · esc tabs", common: read_common, marks: marks, run: run)
         end
       when :config then config_hint(v, run)
       when :results
@@ -222,20 +222,20 @@ module Gori::Tui
         # said nothing while this line kept promising it. That also made the controller's own
         # "fuzz results already saved as run #N" refusal unreachable through the binding.
         # Named off the same predicate the gate reads, not a second copy of its conditions.
-        save = v.results_saveable? ? " · #{save_key} save" : ""
-        "↑/↓ select · ↵ detail · o sort · m matched · v dist#{save} · " \
-        "#{run} run · #{stop} stop · space cmds · ↹ pane"
-      when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
-      else              "↹/esc tabs"
+        save = v.results_saveable? ? I18n.ui(" · %{save} save", save: save_key) : ""
+        I18n.ui("↑/↓ select · ↵ detail · o sort · m matched · v dist%{save} · %{run} run · %{stop} stop · space cmds · ↹ pane",
+          save: save, run: run, stop: stop)
+      when :detail then I18n.ui("↑/↓ move · %{common} · ←/→ pane · ^F find · esc back", common: read_common)
+      else              I18n.ui("↹/esc tabs")
       end
     end
 
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
-      when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane"
-      when :add  then "↵ add a payload set · ^L quick List · ↑/↓ row · #{run} run · ↹ pane"
-      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane"
-      else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane"
+      when :set  then I18n.ui("↑/↓ row · ↵ edit set · Del remove · %{run} run · ↹ pane", run: run)
+      when :add  then I18n.ui("↵ add a payload set · ^L quick List · ↑/↓ row · %{run} run · ↹ pane", run: run)
+      when :mode then I18n.ui("←/→ mode · ↵ open editor · ↑/↓ row · %{run} run · ↹ pane", run: run)
+      else            I18n.ui("↵ open Advanced · ↑/↓ row · %{run} run · ↹ pane", run: run)
       end
     end
 
@@ -627,9 +627,9 @@ module Gori::Tui
     private def guard_marker_delete(v : FuzzerView, span : {Int32, Int32}?) : Bool
       return false unless span
       n = v.marker_ordinal(span)
-      @host.confirm("REMOVE MARKER",
-        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
-        confirm_label: "remove marker", danger: true) do
+      @host.confirm(I18n.ui("REMOVE MARKER"),
+        I18n.sys("Deleting this character breaks marker §%{n}.\nRemove the whole marker and keep only its value?", n: n),
+        confirm_label: I18n.ui("remove marker"), danger: true) do
         v.strip_marker_span(span)
       end
       true
@@ -1303,8 +1303,8 @@ module Gori::Tui
       end
       if total.nil? || total > CONFIRM_THRESHOLD
         e = engine
-        @host.confirm("RUN FUZZ", "Send #{total ? total.to_s : "an unknown number of"} requests to #{v.target_origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.",
-          confirm_label: "run", danger: false) { start_run(v, e, total) }
+        @host.confirm(I18n.ui("RUN FUZZ"), I18n.sys("Send %{count} requests to %{origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.", count: total ? total.to_s : I18n.sys("an unknown number of"), origin: v.target_origin),
+          confirm_label: I18n.ui("run"), danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
       end
@@ -1440,9 +1440,9 @@ module Gori::Tui
       return @host.status("complete fuzz archive unavailable for this run") unless spool_run && !spool_run.failed?
       count = spool_run.written
       bytes = spool_run.accepted_bytes
-      @host.confirm("SAVE FUZZ RESULTS",
-        "Permanently save #{count} result#{count == 1 ? "" : "s"} (#{Fmt.size(bytes)}) in this project?",
-        confirm_label: "save", danger: false) do
+      @host.confirm(I18n.ui("SAVE FUZZ RESULTS"),
+        I18n.sys_n(count, "Permanently save %{n} result (%{size}) in this project?", "Permanently save %{n} results (%{size}) in this project?", n: count, size: Fmt.size(bytes)),
+        confirm_label: I18n.ui("save"), danger: false) do
         start_results_save(view, session_id)
       end
     end
@@ -1540,9 +1540,9 @@ module Gori::Tui
       return @host.status("finish the current fuzz run before loading history") if view.running?
       return @host.status("result I/O in progress — wait before loading history") if view.saving_results? || view.loading_results?
       if view.results_saveable? && !replace_unsaved
-        @host.confirm("REPLACE UNSAVED RESULTS",
-          "Load saved run ##{id}?\nThe current #{view.result_count}-row run has not been saved and will be replaced.",
-          confirm_label: "load", danger: true) { load_saved_run(id, true) }
+        @host.confirm(I18n.ui("REPLACE UNSAVED RESULTS"),
+          I18n.sys("Load saved run #%{id}?\nThe current %{rows}-row run has not been saved and will be replaced.", id: id, rows: view.result_count),
+          confirm_label: I18n.ui("load"), danger: true) { load_saved_run(id, true) }
         return
       end
       run = @host.session.store.get_fuzz_run(id)
@@ -1600,8 +1600,8 @@ module Gori::Tui
       run = @host.session.store.get_fuzz_run(id)
       return @host.status("saved fuzz run ##{id} is gone") unless run
       count = @host.session.store.fuzz_result_count(id)
-      @host.confirm("DELETE FUZZ RUN", "Delete saved run ##{id} and #{count} results?",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE FUZZ RUN"), I18n.sys("Delete saved run #%{id} and %{count} results?", id: id, count: count),
+        confirm_label: I18n.ui("delete"), danger: true) do
         deleted = @host.session.store.delete_fuzz_run_result(id)
         if deleted.deleted?
           current_view.try(&.forget_saved_run(id))
@@ -1764,8 +1764,8 @@ module Gori::Tui
                      "wait before closing (or remove a crashed row with CLI --force-stale)")
         return
       end
-      @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config, private temporary spool, and every saved run are deleted.",
-        confirm_label: "close", danger: true) { close_tab }
+      @host.confirm(I18n.ui("CLOSE FUZZER"), I18n.sys("Close fuzz session “%{name}”?\nIts template/config, private temporary spool, and every saved run are deleted.", name: tab.view.summary),
+        confirm_label: I18n.ui("close"), danger: true) { close_tab }
     end
 
     def close_tab : Nil

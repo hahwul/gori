@@ -24,7 +24,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     views = SavedViews.merged(store)
     active = history_controller.view.active_view
     bar = history_controller.view.query
-    lp = LibraryPicker.new("HISTORY VIEW", view_rows(views, active, bar), "view", "activate")
+    lp = LibraryPicker.new(I18n.ui("HISTORY VIEW"), view_rows(views, active, bar), I18n.ui("view"), I18n.ui("activate"))
     # Open ON the view that is on. This card is a MODE selector, not a "load one of your saved
     # recipes" library like the Decoder's and the Rewriter's — the two the picker was built for,
     # where nothing is currently loaded and row 0 is the only honest place to start. Here there
@@ -176,7 +176,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     seed = history_controller.view.active_view.try { |v| v.builtin? ? "" : v.name } || ""
-    np = NamePromptOverlay.new("SAVE VIEW", query, seed)
+    np = NamePromptOverlay.new(I18n.ui("SAVE VIEW"), query, seed)
     np.on_commit = -> {
       name = np.name
       if reason = SavedViews.unusable_name_reason(name)
@@ -195,7 +195,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # engagement — and that is a judgement only the operator can make. Same two-scope question
   # `gori run views add --scope` and MCP `create_view{scope}` ask.
   private def open_view_scope(name : String, query : String) : Nil
-    cp = ChoicePicker.new("SAVE VIEW WHERE", [
+    cp = ChoicePicker.new(I18n.ui("SAVE VIEW WHERE"), [
       ChoicePicker::Choice.new("PROJECT — this engagement only", 'p', Theme.accent, 0),
       ChoicePicker::Choice.new("GLOBAL — every project", 'g', Theme.orange, 1),
     ], 0, :view_scope)

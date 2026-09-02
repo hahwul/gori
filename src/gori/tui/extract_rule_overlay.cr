@@ -194,7 +194,7 @@ module Gori::Tui
     end
 
     def title : String
-      "EXTRACT RULE"
+      I18n.ui("EXTRACT RULE")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -205,7 +205,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type when/selector · ↵ save · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ options · type when/selector · ↵ save · esc cancel")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

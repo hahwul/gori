@@ -49,11 +49,11 @@ module Gori::Tui
     end
 
     def title : String
-      "TLS PASSTHROUGH"
+      I18n.ui("TLS PASSTHROUGH")
     end
 
     def hint : String
-      "↑/↓ scroll · r refresh · esc close"
+      I18n.ui("↑/↓ scroll · r refresh · esc close")
     end
 
     # Read-only: no ↵ commit, nothing to apply. esc closes, r re-snapshots, ↑/↓ scroll.

@@ -515,18 +515,18 @@ module Gori::Tui
       case s.pane
       when :chain
         if @popup.open?
-          return @popup_engaged ? "↑/↓ pick · ↹/↵ complete · esc close · type to filter" : "↓ browse · type to filter · ⇥ output · esc sub-tabs"
+          return @popup_engaged ? I18n.ui("↑/↓ pick · ↹/↵ complete · esc close · type to filter") : I18n.ui("↓ browse · type to filter · ⇥ output · esc sub-tabs")
         end
-        "chain (> | ,) · exec:CMD runs a command · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc"
+        I18n.ui("chain (> | ,) · exec:CMD runs a command · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc")
       when :output
         # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
         # so it is not re-listed here as a second, different action.
-        "↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · ^X mode · esc sub-tabs"
+        I18n.ui("↑/↓ move · ⇧arrows select · %{y} copy · ^F find · ↑-top chain · space cmds · ^X mode · esc sub-tabs", y: y)
       when :input
         if s.input_mode == InputMode::Insert
-          "type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+          I18n.ui("type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs")
         else
-          "i/↵ edit · ⇧arrows select · #{y} copy · ^F find · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs"
+          I18n.ui("i/↵ edit · ⇧arrows select · %{y} copy · ^F find · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs", y: y)
         end
       else
         ""

@@ -17,7 +17,7 @@ describe "confirm dialog wording" do
     offenders = [] of String
     Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
-        next unless m = line.match(/\bconfirm\("([^"]+)"/)
+        next unless m = line.match(/\bconfirm\((?:I18n\.ui\()?"([^"]+)"/)
         heading = m[1]
         # Interpolated headings are built at runtime; only literal prose is checkable here.
         next if heading.includes?("\#{")
@@ -35,7 +35,7 @@ describe "confirm dialog wording" do
     offenders = [] of String
     Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
-        line.scan(/(?:confirm|cancel)_label: "([^"]+)"/) do |m|
+        line.scan(/(?:confirm|cancel)_label: (?:I18n\.ui\()?"([^"]+)"/) do |m|
           label = m[1]
           next if label == label.downcase
           offenders << "#{File.basename(path)}:#{i + 1} — #{label}"

@@ -230,13 +230,13 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if callbacks_sub?
-        return "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back" if @cb_detail
-        return "type to filter · ↵ keep · esc clear" if @filter_editing
-        "↑/↓ select · ‹/› provider · g payload · y copy · / filter · ^R listen · ^X stop · ↵ detail · space cmds"
+        return I18n.ui("↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back") if @cb_detail
+        return I18n.ui("type to filter · ↵ keep · esc clear") if @filter_editing
+        I18n.ui("↑/↓ select · ‹/› provider · g payload · y copy · / filter · ^R listen · ^X stop · ↵ detail · space cmds")
       else
         # `x on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
         # `t` here alone, and ↵ has always opened the editor without the hint saying so.
-        "↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc sub-tabs"
+        I18n.ui("↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc sub-tabs")
       end
     end
 
@@ -745,8 +745,8 @@ module Gori::Tui
 
     def delete_provider : Nil
       return unless p = selected_provider
-      @host.confirm("DELETE PROVIDER", "Delete OAST provider “#{p.name}”?\nIts callback history is kept.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE PROVIDER"), I18n.sys("Delete OAST provider “%{name}”?\nIts callback history is kept.", name: p.name),
+        confirm_label: I18n.ui("delete"), danger: true) do
         if l = @listeners.find { |ls| ls.provider_key == p.key }
           stop_listener(l)
         end

@@ -44,7 +44,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "type a name · ↵ #{@action} · esc cancel"
+      I18n.ui("type a name · ↵ %{action} · esc cancel", action: @action)
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

@@ -61,13 +61,13 @@ module Gori::Tui
     end
 
     def title : String
-      "ENVIRONMENT"
+      I18n.ui("ENVIRONMENT")
     end
 
     def hint : String
-      return "type prefix · ↵ save · esc cancel" if @prefix_editing
-      return %(type "KEY VALUE" · ↵ save · esc cancel) if @adding
-      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close"
+      return I18n.ui("type prefix · ↵ save · esc cancel") if @prefix_editing
+      return I18n.ui("type \"KEY VALUE\" · ↵ save · esc cancel") if @adding
+      I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close")
     end
 
     # a add · ↵/e edit · d delete · p edit the prefix sigil · esc close. ^P jumps back to

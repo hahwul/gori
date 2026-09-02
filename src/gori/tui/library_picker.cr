@@ -83,9 +83,9 @@ module Gori::Tui
     end
 
     private def idle_hint : String
-      edit = @on_edit ? " · ^E edit" : ""
-      del = @on_delete ? " · ^X delete" : ""
-      "type to filter · ↑/↓ select · ↵ #{@action}#{edit}#{del} · esc cancel"
+      edit = @on_edit ? I18n.ui(" · ^E edit") : ""
+      del = @on_delete ? I18n.ui(" · ^X delete") : ""
+      I18n.ui("type to filter · ↑/↓ select · ↵ %{action}%{edit}%{delete} · esc cancel", action: @action, edit: edit, delete: del)
     end
 
     # ^X removes the highlighted entry from the library, in place — the card stays up so a

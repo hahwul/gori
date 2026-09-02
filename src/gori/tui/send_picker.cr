@@ -47,11 +47,11 @@ module Gori::Tui
     # The focus badge. Deliberately NOT the card's own label ("Send selection to · 128 B"),
     # which is a sentence, not a region name.
     def title : String
-      "SEND TO"
+      I18n.ui("SEND TO")
     end
 
     def hint : String
-      "↑/↓ select · ↵ send · key picks · esc cancel"
+      I18n.ui("↑/↓ select · ↵ send · key picks · esc cancel")
     end
 
     # ↑/↓ move, ↵ or a row mnemonic sends, esc cancels. No j/k vim fallback: destination

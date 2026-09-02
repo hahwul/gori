@@ -85,7 +85,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · ↵ set · key picks · esc cancel"
+      I18n.ui("↑/↓ select · ↵ set · key picks · esc cancel")
     end
 
     # ↑/↓ pick, ↵ sets, esc cancels. A printable matching a row's mnemonic sets that row

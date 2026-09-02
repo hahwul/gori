@@ -58,7 +58,7 @@ module Gori::Tui
     # The ↵ verb varies with the open-site ("jump" vs "link"), so the card's own hint row
     # and the shell's bottom row read the same string.
     private def idle_hint : String
-      "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel"
+      I18n.ui("type to filter · ↑/↓ select · ↵ %{action} · esc cancel", action: @action)
     end
 
     # Recompute the visible rows from the precomputed haystacks: every whitespace-

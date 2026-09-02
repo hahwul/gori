@@ -708,11 +708,9 @@ module Gori::Tui
       return @host.status("a run is in flight — ^X to stop it first") if running?
       n = @view.size
       return @host.status("authorize: nothing to clear") if n <= 0
-      @host.confirm("CLEAR AUTHORIZE",
-        "Empty the queue of #{n} request#{n == 1 ? "" : "s"}?\n\n" \
-        "Every identity's result goes with them.\n" \
-        "This can't be undone.",
-        confirm_label: "clear", danger: true) { clear_now }
+      @host.confirm(I18n.ui("CLEAR AUTHORIZE"),
+        I18n.sys_n(n, "Empty the queue of %{n} request?\n\nEvery identity's result goes with it.\nThis can't be undone.", "Empty the queue of %{n} requests?\n\nEvery identity's result goes with them.\nThis can't be undone.", n: n),
+        confirm_label: I18n.ui("clear"), danger: true) { clear_now }
     end
 
     # The wipe itself, past the confirm.
@@ -908,17 +906,17 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      passive = @passive ? " · PASSIVE on" : ""
+      passive = @passive ? I18n.ui(" · PASSIVE on") : ""
       unless @view.any_requests?
-        return "i identities · p passive · Send to Authorize from History to begin#{passive}"
+        return I18n.ui("i identities · p passive · Send to Authorize from History to begin%{passive}", passive: passive)
       end
-      return "↑/↓ request · ⇥ identity · ^X stop#{passive} · space cmds" if running?
+      return I18n.ui("↑/↓ request · ⇥ identity · ^X stop%{passive} · space cmds", passive: passive) if running?
       # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
       # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
       # front of an operator watching one go out. Resolved through the keymap so a rebind
       # reaches the hint; the rest of this line is still literal, as its siblings are.
       clear = Hotkeys.binding_label(@host.session.registry, "authorize.clear", "⇧X")
-      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · #{clear} clear · space cmds"
+      I18n.ui("↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive%{passive} · %{clear} clear · space cmds", passive: passive, clear: clear)
     end
   end
 end

@@ -57,7 +57,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · ↵ use this provider · esc cancel"
+      I18n.ui("↑/↓ select · ↵ use this provider · esc cancel")
     end
 
     # esc cancels · ↑/↓ (and j/k, as in every sibling picker) move · ↵ picks. This card has no

@@ -41,11 +41,11 @@ module Gori::Tui
     end
 
     def title : String
-      "STUB RESPONSE"
+      I18n.ui("STUB RESPONSE")
     end
 
     def hint : String
-      "status line · headers · blank line · body — esc saves & closes"
+      I18n.ui("status line · headers · blank line · body — esc saves & closes")
     end
 
     # Nothing to cancel INTO (the rule form is still underneath), so a click outside the card

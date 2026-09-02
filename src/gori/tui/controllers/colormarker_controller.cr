@@ -142,9 +142,9 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @focus == :colors
-        "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc tabs"
+        I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc tabs")
       else
-        "↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · ↹ colours"
+        I18n.ui("↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · ↹ colours")
       end
     end
 
@@ -305,9 +305,9 @@ module Gori::Tui
       label = rule.name.empty? ? rule.match_filter : rule.name
       # A global rule is deleted out of EVERY project, and the prompt has to say so — the row
       # differs from a project rule's by one badge, and the confirm is the last place to notice.
-      note = rule.global? ? " It is a GLOBAL rule — this removes it from every project." : ""
-      @host.confirm("DELETE COLOUR RULE", "Delete “#{label}”?#{note} This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      note = rule.global? ? I18n.sys(" It is a GLOBAL rule — this removes it from every project.") : ""
+      @host.confirm(I18n.ui("DELETE COLOUR RULE"), I18n.sys("Delete “%{name}”?%{note} This can't be undone.", name: label, note: note),
+        confirm_label: I18n.ui("delete"), danger: true) do
         ok = engine.remove(rule.id, rule.scope)
         @sel = @sel.clamp(0, {rule_list.size - 1, 0}.max)
         @host.status(ok ? "colour rule deleted: #{label}" : "colour rule NOT deleted (project busy) — the row colour is unchanged")
@@ -470,10 +470,10 @@ module Gori::Tui
       # wording says "in this project" rather than implying a total, and the tail is
       # unconditional so a count of zero still does not read as "nothing references this".
       in_use = engine.rules.count { |r| r.color == c.name }
-      note = in_use > 0 ? " #{in_use} rule#{in_use == 1 ? "" : "s"} in this project still name it;" : " No rule in this project names it, but"
-      note += " rules in other projects may too — those rows fall back to a default colour."
-      @host.confirm("DELETE CUSTOM COLOUR", "Delete “#{c.name}”?#{note} This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      note = in_use > 0 ? I18n.sys_n(in_use, " %{n} rule in this project still names it;", " %{n} rules in this project still name it;", n: in_use) : I18n.sys(" No rule in this project names it, but")
+      note += I18n.sys(" rules in other projects may too — those rows fall back to a default colour.")
+      @host.confirm(I18n.ui("DELETE CUSTOM COLOUR"), I18n.sys("Delete “%{name}”?%{note} This can't be undone.", name: c.name, note: note),
+        confirm_label: I18n.ui("delete"), danger: true) do
         if Settings.delete_colormarker_color(c.name)
           sync_custom_marks
           @color_sel = @color_sel.clamp(0, {custom_colors.size - 1, 0}.max)

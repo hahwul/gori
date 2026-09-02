@@ -116,23 +116,23 @@ module Gori::Tui
         #
         # `esc sub-tabs`, not `esc tabs`: escape goes to the strip (handle_body_key), and the
         # strip is always shown here, so `focus_pane` never downgrades it to the tab bar.
-        edits = rules_custom_selected? ? " · ↵/e edit · d delete" : ""
-        return "↑/↓ select · x on/off · a add#{edits} · space cmds · ↑ sub-tabs · esc sub-tabs"
+        edits = rules_custom_selected? ? I18n.ui(" · ↵/e edit · d delete") : ""
+        return I18n.ui("↑/↓ select · x on/off · a add%{edits} · space cmds · ↑ sub-tabs · esc sub-tabs", edits: edits)
       elsif @probe.detail_open?
         # `↵ open` and `o flow` are two different destinations and both belong here — the
         # caret's own affected URL, and the issue's sample evidence. The Issues detail names
         # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-        "↑/↓ URL · ↵ open · ⇧arrows select · y copy · o flow · r repeater · p promote · space cmds · ←/esc back"
+        I18n.ui("↑/↓ URL · ↵ open · ⇧arrows select · y copy · o flow · r repeater · p promote · space cmds · ←/esc back")
       elsif @probe.querying?
-        "type to filter · ↹ complete · ↵ apply · esc clear"
+        I18n.ui("type to filter · ↹ complete · ↵ apply · esc clear")
       elsif @probe.mode.off?
-        "#{mode} enable scanning · #{filt} filter · #{clear} clear · space cmds · esc tabs"
+        I18n.ui("%{mode} enable scanning · %{filt} filter · %{clear} clear · space cmds · esc tabs", mode: mode, filt: filt, clear: clear)
       elsif @probe.preview_enabled? && @probe.preview_focus == :preview
-        "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
+        I18n.ui("↑/↓ scroll preview · ↹ list · ↵ open full · %{clear} clear · space cmds · esc tabs", clear: clear)
       elsif @probe.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
+        I18n.ui("↑/↓ move · ↵ open · ↹ preview · %{clear} clear · %{mode} mode · %{filt} filter · space cmds", clear: clear, mode: mode, filt: filt)
       else
-        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
+        I18n.ui("↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · %{clear} clear · %{mode} mode · %{filt} filter · space cmds", clear: clear, mode: mode, filt: filt)
       end
     end
 
@@ -390,7 +390,7 @@ module Gori::Tui
       # probe_generation reload can shift the selection in between — so both the suppress and
       # the delete must target THIS issue by id, not whatever happens to be selected at confirm.
       id, code, host, title = i.id, i.code, i.host, i.title
-      @host.confirm("DELETE ISSUE", "Delete “#{title}” on #{host}?", confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE ISSUE"), I18n.sys("Delete “%{title}” on %{host}?", title: title, host: host), confirm_label: I18n.ui("delete"), danger: true) do
         # Suppress FIRST: delete's exec_task yields to the store writer, and an
         # in-flight Active/passive fiber can re-upsert the same (code, host) in
         # that window if suppress runs after delete.
@@ -405,8 +405,8 @@ module Gori::Tui
       # that, and an advertised key that answers with nothing at all reads as a key that
       # failed. `activity_clear` says the same thing for the same reason.
       return @host.status("probe: nothing to clear") if @probe.empty?
-      @host.confirm("CLEAR ISSUES", "Delete ALL Probe issues for this project?\nThis can't be undone.",
-        confirm_label: "clear", danger: true) do
+      @host.confirm(I18n.ui("CLEAR ISSUES"), I18n.sys("Delete ALL Probe issues for this project?\nThis can't be undone."),
+        confirm_label: I18n.ui("clear"), danger: true) do
         @probe.clear(@host.session.store)
         @host.session.probe.clear_suppressions
       end
@@ -443,7 +443,7 @@ module Gori::Tui
     def probe_dismiss_code : Nil
       return unless i = @probe.target_issue
       code = i.code
-      @host.confirm("DISMISS GROUP", "Dismiss all open “#{code}” issues?", confirm_label: "dismiss", danger: false) do
+      @host.confirm(I18n.ui("DISMISS GROUP"), I18n.sys("Dismiss all open “%{code}” issues?", code: code), confirm_label: I18n.ui("dismiss"), danger: false) do
         n = ProbeController.dismiss_open_by_code(@host.session.store, @host.session.scope, code)
         @probe.reload(@host.session.store)
         @host.status("dismissed #{n} \"#{code}\" issue#{n == 1 ? "" : "s"}")
@@ -453,7 +453,7 @@ module Gori::Tui
     def probe_dismiss_host : Nil
       return unless i = @probe.target_issue
       host = i.host
-      @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{host}?", confirm_label: "dismiss", danger: false) do
+      @host.confirm(I18n.ui("DISMISS GROUP"), I18n.sys("Dismiss all open issues on %{host}?", host: host), confirm_label: I18n.ui("dismiss"), danger: false) do
         n = ProbeController.dismiss_open_by_host(@host.session.store, host)
         @probe.reload(@host.session.store)
         @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{host}")
@@ -569,9 +569,9 @@ module Gori::Tui
       # Sentence-case title, `Delete` button — the same dress every other policy-rule delete
       # wears. This one shouted "DELETE RULE" over a lowercase `delete` button, so the one
       # dialog an operator sees least often was also the one that looked unlike the rest.
-      @host.confirm("DELETE PROBE RULE",
-        "Delete custom rule “#{c.title}”? Existing findings from it are kept until cleared.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE PROBE RULE"),
+        I18n.sys("Delete custom rule “%{title}”? Existing findings from it are kept until cleared.", title: c.title),
+        confirm_label: I18n.ui("delete"), danger: true) do
         c.global? ? Settings.delete_scan_rule(c.id) : @host.session.store.delete_probe_custom_rule(c.id.to_i64)
         reload_rules
         @host.status("probe rule deleted: #{c.title}")

@@ -119,6 +119,12 @@ private def wrapped_in_tables : Array(Wrapped)
   found << Wrapped.new("ui", "jobs", "Jobs::KIND_LABELS fallback") # `KIND_LABELS.fetch(kind, "jobs")`
   # The Query page's own heads ("SYNTAX", …) are built as English keys and translated by draw_row.
   Gori::Tui::HelpView.query_rows.each { |r| found << Wrapped.new("help", r.a, "HelpView.query_rows") if r.kind == :head }
+  # Hint constants an overlay wraps at its use site (`I18n.ui(IDLE_HINT)`).
+  {Gori::Tui::FlowPicker::IDLE_HINT, Gori::Tui::LinkPicker::IDLE_HINT, Gori::Tui::LinkPicker::CARD_HINT,
+   Gori::Tui::LinksOverlay::ADD_HINT, Gori::Tui::LinksOverlay::BROWSE_HINT,
+   Gori::Tui::LinksOverlay::CARD_ADD_HINT, Gori::Tui::LinksOverlay::CARD_BROWSE_HINT}.each do |h|
+    found << Wrapped.new("ui", h, "overlay hint constant")
+  end
   # A settings choice draws `choice_labels[code]` through I18n.ui — except a language's own
   # name, which SettingsView#choice_label leaves alone.
   Gori::Tui::SettingsView::SECTIONS.each_value do |fields|

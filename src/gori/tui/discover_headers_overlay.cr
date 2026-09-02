@@ -78,14 +78,14 @@ module Gori::Tui
     end
 
     def title : String
-      "CUSTOM HEADERS"
+      I18n.ui("CUSTOM HEADERS")
     end
 
     def hint : String
       # Keys only. The two format rules this editor enforces are stated on the card's own
       # band, where the operator is already looking to type them — repeating them down here
       # was the same sentence in two places, which is how the two spellings drifted.
-      "type headers · esc saves & closes"
+      I18n.ui("type headers · esc saves & closes")
     end
 
     # There is nothing to cancel INTO — the user is still inside the Discover popup — so a

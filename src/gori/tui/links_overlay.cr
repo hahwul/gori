@@ -95,12 +95,12 @@ module Gori::Tui
     end
 
     def title : String
-      owner = @owner_kind.issue? ? "ISSUE ##{@owner_id}" : "NOTE ##{@owner_id}"
-      "LINKS — #{owner}"
+      owner = @owner_kind.issue? ? I18n.ui("ISSUE #%{id}", id: @owner_id) : I18n.ui("NOTE #%{id}", id: @owner_id)
+      I18n.ui("LINKS — %{owner}", owner: owner)
     end
 
     def hint : String
-      adding? ? ADD_HINT : BROWSE_HINT
+      adding? ? I18n.ui(ADD_HINT) : I18n.ui(BROWSE_HINT)
     end
 
     # Browse: ↑/↓ (or k/j) select · ↵/o open · a arms add · d removes · esc closes.

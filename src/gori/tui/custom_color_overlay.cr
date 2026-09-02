@@ -88,7 +88,7 @@ module Gori::Tui
     end
 
     def title : String
-      "CUSTOM COLOUR"
+      I18n.ui("CUSTOM COLOUR")
     end
 
     def text_fields : Array(TextField)
@@ -96,7 +96,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ↵ save · esc cancel"
+      I18n.ui("↑/↓ field · ↵ save · esc cancel")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

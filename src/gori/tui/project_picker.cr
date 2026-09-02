@@ -685,9 +685,9 @@ module Gori::Tui
       # Hoisted: `filtered_projects` re-runs the fuzzy scoring on every call.
       shown = filtered_projects.map(&.dir).to_set
       hidden = deletable.count { |p| !shown.includes?(p.dir) }
-      dialog = ConfirmDialog.new(deletable.size == 1 ? "DELETE PROJECT" : "DELETE PROJECTS",
+      dialog = ConfirmDialog.new(deletable.size == 1 ? I18n.ui("DELETE PROJECT") : I18n.ui("DELETE PROJECTS"),
         ProjectPicker.delete_confirm_body(deletable.map(&.name), hidden, blocked.size),
-        confirm_label: "delete", cancel_label: "cancel", danger: true)
+        confirm_label: I18n.ui("delete"), cancel_label: I18n.ui("cancel"), danger: true)
       # ConfirmDialog DECLINES to draw on a terminal too small for its card (render and
       # overlay_box share the guard, the latter answering with a 0×0 rect). Its mouse path
       # already takes that as "not showing"; the key path never did, so on a short window
@@ -1043,15 +1043,15 @@ module Gori::Tui
       plan = ov.plan
       est = ov.estimated_bytes
       detail = if plan.removes_data?
-                 amount = est > 0 ? "~#{Fmt.size(est)} of data" : "the selected data"
-                 "Remove #{amount} and reclaim disk?"
+                 amount = est > 0 ? I18n.sys("~%{size} of data", size: Fmt.size(est)) : I18n.sys("the selected data")
+                 I18n.sys("Remove %{amount} and reclaim disk?", amount: amount)
                else
-                 "Reclaim free space (VACUUM only)?"
+                 I18n.sys("Reclaim free space (VACUUM only)?")
                end
       @pending_compact = plan
-      @confirm = ConfirmDialog.new("COMPRESS PROJECT",
-        %(#{detail}\nThis permanently drops the selected data.),
-        confirm_label: "compress", cancel_label: "cancel", danger: true)
+      @confirm = ConfirmDialog.new(I18n.ui("COMPRESS PROJECT"),
+        I18n.sys("%{detail}\nThis permanently drops the selected data.", detail: detail),
+        confirm_label: I18n.ui("compress"), cancel_label: I18n.ui("cancel"), danger: true)
       @confirm_kind = :compress
       @compact = nil
       @mode = :confirm

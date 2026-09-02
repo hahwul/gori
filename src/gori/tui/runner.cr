@@ -1552,12 +1552,9 @@ module Gori::Tui
       end
       path = @session.ca.ca_cert_path
       close_active_overlay(ov)
-      confirm("IMPORT CA",
-        "Replace the current root CA with the imported one?\n\n" \
-        "The old CA becomes untrusted — re-trust the imported\n" \
-        "certificate in your clients (gori ca / path copied).\n" \
-        "New connections use it immediately.",
-        confirm_label: "import", danger: true) do
+      confirm(I18n.ui("IMPORT CA"),
+        I18n.sys("Replace the current root CA with the imported one?\n\nThe old CA becomes untrusted — re-trust the imported certificate in your clients (gori ca / path copied).\nNew connections use it immediately."),
+        confirm_label: I18n.ui("import"), danger: true) do
         warning = @session.ca.import!(cert, key)
         Clipboard.copy(path)
         note = warning ? " (warning: #{warning})" : ""
@@ -2643,7 +2640,7 @@ module Gori::Tui
     # The one QUIT GORI modal, raised from both quit paths so the chord and the palette cannot
     # show different prompts — the same anti-drift reason the message helpers below are shared.
     private def raise_quit_confirm : Nil
-      confirm("QUIT GORI", quit_message, confirm_label: "quit", danger: true) { finish_quit }
+      confirm(I18n.ui("QUIT GORI"), quit_message, confirm_label: I18n.ui("quit"), danger: true) { finish_quit }
     end
 
     # `q` from the TABS row. When jobs are live the confirm NAMES them and says what
@@ -2658,8 +2655,8 @@ module Gori::Tui
     def leave_project : Nil
       active = @jobs.active_summary
       notes_conflict = issues_notes_conflict?
-      confirm("LEAVE PROJECT", Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
-        confirm_label: "leave", danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
+      confirm(I18n.ui("LEAVE PROJECT"), Runner.leave_confirm_message(active, @jobs.active.size, notes_conflict),
+        confirm_label: I18n.ui("leave"), danger: !active.nil? || notes_conflict, return_to: @overlay.to_sym) do
         # Inside the accept block, so a CANCEL leaves every job running untouched.
         stop_all_jobs
         commit_pending_edits
@@ -3976,14 +3973,12 @@ module Gori::Tui
     # black hole (every captured request blocked), so that one case gets a danger confirm first.
     def toggle_sandbox : Nil
       if !@scope.sandbox? && @scope.include_count == 0
-        confirm("ENABLE SANDBOX",
+        confirm(I18n.ui("ENABLE SANDBOX"),
           # Hand-wrapped: ConfirmDialog splits on '\n' only and caps the card at 60 columns, so
           # the single-line version was cut off mid-sentence — and the clause it lost was the
           # one naming what enabling this does to live traffic.
-          "The scope has no include rules yet, so the sandbox\n" \
-          "will BLOCK ALL captured traffic until you add one.\n\n" \
-          "Enable anyway?",
-          confirm_label: "enable", danger: true) do
+          I18n.sys("The scope has no include rules yet, so the sandbox will BLOCK ALL captured traffic until you add one.\n\nEnable anyway?"),
+          confirm_label: I18n.ui("enable"), danger: true) do
           report_sandbox_write(@scope.enable_sandbox)
         end
       else
@@ -4045,9 +4040,9 @@ module Gori::Tui
       # The heading is the card's TITLE, so it takes the same shape as every other confirm
       # (and every other card in gori): an uppercase noun for what this is about. The question
       # itself belongs in the body, one line down, where the rest of them ask it.
-      confirm("USE FLOW HEADERS",
-        "Use this flow's headers? #{hdrs.size} header(s) from flow ##{id}: #{names}",
-        confirm_label: "use", cancel_label: "start clean",
+      confirm(I18n.ui("USE FLOW HEADERS"),
+        I18n.sys("Use this flow's headers? %{n} header(s) from flow #%{id}: %{names}", n: hdrs.size, id: id, names: names),
+        confirm_label: I18n.ui("use"), cancel_label: I18n.ui("start clean"),
         danger: false, return_to: :discover_config) { ov.try(&.set_headers(hdrs)) }
     end
 
@@ -4069,7 +4064,7 @@ module Gori::Tui
       # drawn from the first session, and an affordance that is visible has to do something.
       # A one-row list is a poor list, but it is not a dead key.
       return @toast = "no sub-tabs open" if rows.empty?
-      sp = SubtabPicker.new("FIND SUB-TAB", rows)
+      sp = SubtabPicker.new(I18n.ui("FIND SUB-TAB"), rows)
       # The picker hands back the ABSOLUTE index; jump_subtab clamps + saves the outgoing
       # tab, so a stale index (the cross-session reconcile reordered behind the modal) is
       # a safe no-op.
@@ -4303,7 +4298,7 @@ module Gori::Tui
       rows = presets.map_with_index do |ps, i|
         LibraryPicker::Row.new(i, ps.name, "#{ps.summary} · #{ps.description}")
       end
-      lp = LibraryPicker.new("ADD FROM PRESET", rows, "preset", "install")
+      lp = LibraryPicker.new(I18n.ui("ADD FROM PRESET"), rows, I18n.ui("preset"), I18n.ui("install"))
       lp.on_commit = -> {
         if (i = lp.selected_index) && (ps = presets[i]?)
           rewriter_controller.install_preset(ps)
@@ -4427,12 +4422,9 @@ module Gori::Tui
     # operator's next step — re-trusting the new cert — is one paste away.
     def regenerate_ca : Nil
       path = @session.ca.ca_cert_path
-      confirm("REGENERATE CA",
-        "Replace the current root CA with a new one?\n\n" \
-        "The old CA becomes untrusted — re-trust the new\n" \
-        "certificate in your clients (gori ca / path copied).\n" \
-        "New connections use it immediately.",
-        confirm_label: "regenerate", danger: true) do
+      confirm(I18n.ui("REGENERATE CA"),
+        I18n.sys("Replace the current root CA with a new one?\n\nThe old CA becomes untrusted — re-trust the new certificate in your clients (gori ca / path copied).\nNew connections use it immediately."),
+        confirm_label: I18n.ui("regenerate"), danger: true) do
         @session.ca.regenerate!
         Clipboard.copy(path)
         @toast = "root CA regenerated — re-trust it (path copied): #{path}"
@@ -5066,10 +5058,9 @@ module Gori::Tui
     # the only thing holding this card.)
     private def confirm_section_reset(ov : SettingsOverlay) : Nil
       section = ov.section
-      confirm("RESET SETTINGS",
-        "Reset the #{section.to_s.upcase} settings to their\n" \
-        "default values? Unsaved edits here are replaced.",
-        confirm_label: "reset", danger: true, return_to: :settings) do
+      confirm(I18n.ui("RESET SETTINGS"),
+        I18n.sys("Reset the %{section} settings to their default values? Unsaved edits here are replaced.", section: section.to_s.upcase),
+        confirm_label: I18n.ui("reset"), danger: true, return_to: :settings) do
         ov.reset_to_defaults
         apply_theme_preview(ov.theme_value) # :theme live-previews the restored default theme
         @toast = "#{section} settings reset to defaults — ↵ to save"
@@ -5095,20 +5086,18 @@ module Gori::Tui
       case section
       when :reset_all then confirm_factory_reset(prefs)
       when :tabs
-        confirm("RESET TAB BAR",
-          "Reset the tab bar to its default order and\n" \
-          "visibility? This is saved immediately.",
-          confirm_label: "reset", danger: true, return_to: :preferences) do
+        confirm(I18n.ui("RESET TAB BAR"),
+          I18n.sys("Reset the tab bar to its default order and visibility? This is saved immediately."),
+          confirm_label: I18n.ui("reset"), danger: true, return_to: :preferences) do
           ov = TabsOverlay.new # reconciled from the persisted prefs, then reverted
           ov.reset_to_defaults
           save_tabs(ov)
           prefs.reload_from_settings
         end
       when :theme
-        confirm("RESET THEME",
-          "Switch back to the default #{Settings::DEFAULT_THEME} theme?\n" \
-          "This is saved immediately.",
-          confirm_label: "reset", danger: true, return_to: :preferences) do
+        confirm(I18n.ui("RESET THEME"),
+          I18n.sys("Switch back to the default %{theme} theme?\nThis is saved immediately.", theme: Settings::DEFAULT_THEME),
+          confirm_label: I18n.ui("reset"), danger: true, return_to: :preferences) do
           v = SettingsView.new
           v.reload(:theme)
           v.reset_to_defaults
@@ -5116,10 +5105,9 @@ module Gori::Tui
           prefs.reload_from_settings
         end
       when :hotkeys
-        confirm("RESET HOTKEYS",
-          "Drop every rebinding and the OS profile pin,\n" \
-          "back to gori's defaults? This is saved immediately.",
-          confirm_label: "reset", danger: true, return_to: :preferences) do
+        confirm(I18n.ui("RESET HOTKEYS"),
+          I18n.sys("Drop every rebinding and the OS profile pin, back to gori's defaults? This is saved immediately."),
+          confirm_label: I18n.ui("reset"), danger: true, return_to: :preferences) do
           ov = HotkeysOverlay.new(@session.registry)
           ov.reset_all     # the rebindings…
           ov.reset_profile # …and the OS pin, which reset_all deliberately leaves alone
@@ -5135,12 +5123,9 @@ module Gori::Tui
     # saved decoder chains, global rewriter/colormarker rules), and an operator who reads
     # "every setting" alone would not expect their tokens to go with it.
     private def confirm_factory_reset(prefs : PreferencesOverlay? = nil) : Nil
-      confirm("FACTORY RESET",
-        "Restore every setting to its factory default?\n" \
-        "This also drops your global env values, hostname\n" \
-        "overrides, OAST tokens, saved decoder chains and\n" \
-        "global rewriter/colormarker rules. Projects are kept.",
-        confirm_label: "reset", danger: true, return_to: :preferences) do
+      confirm(I18n.ui("FACTORY RESET"),
+        I18n.sys("Restore every setting to its factory default?\nThis also drops your global env values, hostname overrides, OAST tokens, saved decoder chains and global rewriter/colormarker rules. Projects are kept."),
+        confirm_label: I18n.ui("reset"), danger: true, return_to: :preferences) do
         # `Refused` means NOTHING was touched — not the file, not memory — so it must not run
         # the live re-apply (which would rebind the proxy and reconcile listeners off the back
         # of a reset that did not happen) and must not report one either. That is the whole
@@ -5227,10 +5212,9 @@ module Gori::Tui
     end
 
     private def confirm_tabs_reset(ov : TabsOverlay) : Nil
-      confirm("RESET TAB BAR",
-        "Reset the tab bar to its default order and\n" \
-        "visibility? Your current arrangement is replaced.",
-        confirm_label: "reset", danger: true, return_to: :tabs) do
+      confirm(I18n.ui("RESET TAB BAR"),
+        I18n.sys("Reset the tab bar to its default order and visibility? Your current arrangement is replaced."),
+        confirm_label: I18n.ui("reset"), danger: true, return_to: :tabs) do
         ov.reset_to_defaults
         @toast = "tabs reset to defaults — ↵ to save"
       end

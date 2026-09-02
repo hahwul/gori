@@ -731,9 +731,9 @@ module Gori::Tui
       # A global rule is deleted out of EVERY project, and the prompt has to say so — the row
       # looks the same as a project rule's apart from one badge, and the confirm is the last
       # place to notice which of the two is about to go.
-      note = rule.global? ? " It is a GLOBAL rule — this removes it from every project." : ""
-      @host.confirm("DELETE RULE", "Delete “#{label}”?#{note} This can't be undone.",
-        confirm_label: "delete", danger: true) do
+      note = rule.global? ? I18n.sys(" It is a GLOBAL rule — this removes it from every project.") : ""
+      @host.confirm(I18n.ui("DELETE RULE"), I18n.sys("Delete “%{name}”?%{note} This can't be undone.", name: label, note: note),
+        confirm_label: I18n.ui("delete"), danger: true) do
         # The store's answer, not an assumption: a rolled-back write left the rule rewriting
         # live traffic while this toasted "rule deleted". Both headless surfaces already
         # refuse to say that (`mcp/tools/rules.cr`, `cli/run/rewriter.cr`).
@@ -903,8 +903,8 @@ module Gori::Tui
 
     def extract_delete : Nil
       rule = selected_extract_rule || return @host.status("no extract rule selected")
-      @host.confirm("DELETE EXTRACT RULE", "Delete “$#{rule.name}”? Its binding is forgotten too.",
-        confirm_label: "delete", danger: true) do
+      @host.confirm(I18n.ui("DELETE EXTRACT RULE"), I18n.sys("Delete “$%{name}”? Its binding is forgotten too.", name: rule.name),
+        confirm_label: I18n.ui("delete"), danger: true) do
         ok = bindings.remove(rule.id)
         @sub_sel = @sub_sel.clamp(0, {extract_list.size - 1, 0}.max)
         @host.status(ok ? "extract rule deleted" : "extract rule NOT deleted (project busy) — it is still observing responses")
@@ -954,20 +954,20 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @sub
       when :extract
-        return "[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc tabs"
+        return I18n.ui("[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc tabs")
       when :bindings
-        return "[/] sub-tab · ↑/↓ select · d clear · space cmds · esc tabs"
+        return I18n.ui("[/] sub-tab · ↑/↓ select · d clear · space cmds · esc tabs")
       end
       case @focus
       when :preview_in
         # This pane is ALWAYS typing — there is no READ mode to fall back to — so `^Y` is not
         # merely the INS spelling of copy here, it is the only one (`rewriter_copy`'s
         # `:preview_in` arm says the same). The footer named neither the band nor the key.
-        "type sample HTTP · ⇧arrows select · ^Y copy · ↑ list · ↓/→ output · esc list"
+        I18n.ui("type sample HTTP · ⇧arrows select · ^Y copy · ↑ list · ↓/→ output · esc list")
       when :preview_out
-        "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input"
+        I18n.ui("↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input")
       else
-        "[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · s global/project · d delete · ⇧K/⇧J reorder · esc tabs"
+        I18n.ui("[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · s global/project · d delete · ⇧K/⇧J reorder · esc tabs")
       end
     end
   end

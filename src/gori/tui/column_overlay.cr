@@ -186,7 +186,7 @@ module Gori::Tui
     end
 
     def title : String
-      "HISTORY COLUMN"
+      I18n.ui("HISTORY COLUMN")
     end
 
     def text_fields : Array(TextField)
@@ -194,7 +194,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type label/selector · ↵ save · esc back"
+      I18n.ui("↑/↓ field · ←/→ options · type label/selector · ↵ save · esc back")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

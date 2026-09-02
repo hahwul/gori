@@ -85,11 +85,11 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
+      return I18n.ui("↹/esc tabs · mine from History/Repeater (space → Mine parameters)") unless v
       case v.focus
-      when :results then "↑/↓ select · ↵ detail · ^X stop · space cmds · ↹ pane · esc tabs"
-      when :detail  then "↑/↓ scroll · esc back"
-      else               "↓ findings · ^X stop · space cmds · ↹ pane · esc tabs"
+      when :results then I18n.ui("↑/↓ select · ↵ detail · ^X stop · space cmds · ↹ pane · esc tabs")
+      when :detail  then I18n.ui("↑/↓ scroll · esc back")
+      else               I18n.ui("↓ findings · ^X stop · space cmds · ↹ pane · esc tabs")
       end
     end
 
@@ -713,8 +713,8 @@ module Gori::Tui
     # --- close / persist ---
     def request_close : Nil
       return unless tab = current_tab_obj
-      @host.confirm("CLOSE MINER", "Close mining session “#{tab.view.summary}”?\nIts config and results are discarded.",
-        confirm_label: "close", danger: true) { close_tab }
+      @host.confirm(I18n.ui("CLOSE MINER"), I18n.sys("Close mining session “%{name}”?\nIts config and results are discarded.", name: tab.view.summary),
+        confirm_label: I18n.ui("close"), danger: true) { close_tab }
     end
 
     def close_tab : Nil

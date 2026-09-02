@@ -914,24 +914,24 @@ module Gori::Tui
       case s.pane
       when :input
         if s.input_mode == InputMode::Insert
-          "type a cookie · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} forge · ^A format · ^L clear · ↑ sub-tabs"
+          I18n.ui("type a cookie · ⇧arrows select · ^Y copy · esc read · ↓ decoded · %{lens} forge · ^A format · ^L clear · ↑ sub-tabs", lens: lens)
         else
-          "i/↵ edit · c crack · #{y} copy · space cmds · ↓ decoded · #{lens} forge · ^A format · ^N new · esc sub-tabs"
+          I18n.ui("i/↵ edit · c crack · %{y} copy · space cmds · ↓ decoded · %{lens} forge · ^A format · ^N new · esc sub-tabs", y: y, lens: lens)
         end
       when :decoded
-        "↑/↓ scroll · c crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs"
+        I18n.ui("↑/↓ scroll · c crack · %{y} copy · space cmds · ↑-top input · ↓ options · %{lens} forge · esc sub-tabs", y: y, lens: lens)
       when :opts
         if effective_format(s) == "django"
-          "type salt · salt:#{salt_preset_label(s)} (click/space) · ^A format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+          I18n.ui("type salt · salt:%{salt} (click/space) · ^A format · algo %{algo} · ↑/↓ cross · %{lens} forge · esc sub-tabs", salt: salt_preset_label(s), algo: effective_algorithm(s), lens: lens)
         else
-          "type salt · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+          I18n.ui("type salt · ^A format · ↑/↓ cross · %{lens} forge · esc sub-tabs", lens: lens)
         end
       when :secret
-        "type secret · ^Y copy · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+        I18n.ui("type secret · ^Y copy · ^A format · ↑/↓ cross · %{lens} forge · esc sub-tabs", lens: lens)
       when :payload
-        "type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A format · #{lens} decode · esc sub-tabs"
+        I18n.ui("type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A format · %{lens} decode · esc sub-tabs", lens: lens)
       when :output
-        "↑/↓ scroll · #{y} copy cookie · space cmds · ^A format · #{lens} decode · esc sub-tabs"
+        I18n.ui("↑/↓ scroll · %{y} copy cookie · space cmds · ^A format · %{lens} decode · esc sub-tabs", y: y, lens: lens)
       else
         ""
       end

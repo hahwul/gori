@@ -109,7 +109,7 @@ module Gori::Tui
     end
 
     def title : String
-      "OAST PROVIDER"
+      I18n.ui("OAST PROVIDER")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -120,7 +120,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type name/host/token · ↵ save · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ options · type name/host/token · ↵ save · esc cancel")
     end
 
     # Click a field row to select it; a click on Save commits; a click outside the card

@@ -115,11 +115,11 @@ module Gori::Tui
     end
 
     def title : String
-      "DISCOVER"
+      I18n.ui("DISCOVER")
     end
 
     def hint : String
-      "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel")
     end
 
     # Formerly Runner#handle_discover_config_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵

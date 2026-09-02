@@ -11,8 +11,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return (@toast = "select a flow first") if ids.empty?
     return fuzzer_controller.fuzz_flow(ids.first) if ids.size == 1
     return unless targets = batch_within_cap(ids, "Fuzzer")
-    confirm("SEND TO FUZZER", "Open #{targets.size} flows as #{targets.size} fuzz sessions?",
-      confirm_label: "open", danger: false) do
+    confirm(I18n.ui("SEND TO FUZZER"), I18n.sys("Open %{n} flows as %{n} fuzz sessions?", n: targets.size),
+      confirm_label: I18n.ui("open"), danger: false) do
       opened = 0
       targets.each do |id|
         next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary

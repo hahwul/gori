@@ -45,11 +45,11 @@ module Gori::Tui
     end
 
     def title : String
-      "IDENTITIES"
+      I18n.ui("IDENTITIES")
     end
 
     def hint : String
-      "↑/↓ pick · a add · e edit · d delete · b baseline · esc close"
+      I18n.ui("↑/↓ pick · a add · e edit · d delete · b baseline · esc close")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

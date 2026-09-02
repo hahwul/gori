@@ -12,8 +12,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return repeater_controller.repeater_flow(ids.first) if ids.size == 1
     return unless ids = batch_within_cap(ids, "Repeater")
     targets = ids
-    confirm("SEND TO REPEATER", "Open #{targets.size} flows as #{targets.size} Repeater sub-tabs?",
-      confirm_label: "open", danger: false) do
+    confirm(I18n.ui("SEND TO REPEATER"), I18n.sys("Open %{n} flows as %{n} Repeater sub-tabs?", n: targets.size),
+      confirm_label: I18n.ui("open"), danger: false) do
       opened = 0
       targets.each do |id|
         next unless @session.store.flow_row(id) # a stale mark: skip, report in the summary

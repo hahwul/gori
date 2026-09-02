@@ -201,15 +201,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     leave_overlay
     case kind
     when :issue
-      confirm("ISSUE CREATED",
-        "issue ##{id} created and linked.\nOpen it now, or stay here?",
-        confirm_label: "open", cancel_label: "stay", danger: false) do
+      confirm(I18n.ui("ISSUE CREATED"),
+        I18n.sys("issue #%{id} created and linked.\nOpen it now, or stay here?", id: id),
+        confirm_label: I18n.ui("open"), cancel_label: I18n.ui("stay"), danger: false) do
         navigate_to_created_issue(id)
       end
     when :note
-      confirm("NOTE CREATED",
-        "note created and linked.\nOpen it now, or stay here?",
-        confirm_label: "open", cancel_label: "stay", danger: false) do
+      confirm(I18n.ui("NOTE CREATED"),
+        I18n.sys("note created and linked.\nOpen it now, or stay here?"),
+        confirm_label: I18n.ui("open"), cancel_label: I18n.ui("stay"), danger: false) do
         navigate_to_created_note(id)
       end
     else

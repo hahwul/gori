@@ -64,12 +64,12 @@ module Gori::Tui
     end
 
     def title : String
-      "HOSTNAME OVERRIDES"
+      I18n.ui("HOSTNAME OVERRIDES")
     end
 
     def hint : String
-      return %(type "IP host" · ↵ save · esc cancel) if @adding
-      "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      return I18n.ui("type \"IP host\" · ↵ save · esc cancel") if @adding
+      I18n.ui("↑/↓ select · a add · ↵/e edit · d delete · esc close")
     end
 
     # a add · ↵/e edit · d delete · esc close. ^P jumps back to the palette. The add/edit

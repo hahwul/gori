@@ -52,7 +52,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ select · ↵ copy · key picks · esc cancel"
+      I18n.ui("↑/↓ select · ↵ copy · key picks · esc cancel")
     end
 
     # ↑/↓ move, ↵ or a row mnemonic copies, esc cancels — j/k fall back to vim-style nav

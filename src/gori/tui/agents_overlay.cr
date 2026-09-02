@@ -80,11 +80,11 @@ module Gori::Tui
     end
 
     def title : String
-      "AGENTS"
+      I18n.ui("AGENTS")
     end
 
     def hint : String
-      "↑/↓ scroll · r re-check · esc close"
+      I18n.ui("↑/↓ scroll · r re-check · esc close")
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol

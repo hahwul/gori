@@ -136,7 +136,7 @@ module Gori::Tui
     end
 
     def title : String
-      "PAYLOAD SET"
+      I18n.ui("PAYLOAD SET")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -154,7 +154,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
+      I18n.ui("↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes")
     end
 
     # --- input ---------------------------------------------------------------

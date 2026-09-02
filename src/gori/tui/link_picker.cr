@@ -94,11 +94,11 @@ module Gori::Tui
     end
 
     def title : String
-      "LINK TO"
+      I18n.ui("LINK TO")
     end
 
     def hint : String
-      IDLE_HINT
+      I18n.ui(IDLE_HINT)
     end
 
     protected def refilter : Nil

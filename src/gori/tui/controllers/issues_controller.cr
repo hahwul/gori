@@ -79,16 +79,16 @@ module Gori::Tui
       clear = Hotkeys.binding_label(reg, "issues.clear", "⇧X")
       if @issues.detail_open?
         if @issues.notes_insert_mode?
-          "type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard"
+          I18n.ui("type to edit · ⇧arrows select · ^Y copy · esc save · ^W discard")
         elsif @issues.notes_focused?
-          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · esc links"
+          I18n.ui("↑/↓ move · ⇧arrows select · %{y} copy · i/↵ edit · space cmds · esc links", y: y)
         else
-          "↑/↓ links · ↵ open · i/↵ notes · o flow · r repeater · space cmds · ←/esc back"
+          I18n.ui("↑/↓ links · ↵ open · i/↵ notes · o flow · r repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
-        "type to filter · ↹ complete · ↵ apply · esc clear"
+        I18n.ui("type to filter · ↹ complete · ↵ apply · esc clear")
       elsif @issues.preview_enabled? && @issues.preview_focus == :preview
-        "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs"
+        I18n.ui("↑/↓ scroll preview · ↹ list · ↵ open full · %{clear} clear · space cmds · esc tabs", clear: clear)
       elsif @issues.mark_count > 0
         # Marks re-point what `space` acts on AND take over esc (handle_body_key shadows
         # issues.leave while a set is live), so the standing "esc tabs" hint would be wrong.
@@ -97,11 +97,11 @@ module Gori::Tui
         # state where the two words mean different sets: `space`/`d` act on the marks, ⇧X does
         # not — it wipes the project. A bare "clear" here would read as "clear the marked ones".
         mark = Hotkeys.binding_label(reg, "issues.mark-toggle", "t")
-        "#{@issues.mark_count} marked · #{mark} mark · ⇧↑/⇧↓ range · space acts on marks · #{clear} clear ALL · esc drops marks"
+        I18n.ui("%{n} marked · %{mark} mark · ⇧↑/⇧↓ range · space acts on marks · %{clear} clear ALL · esc drops marks", n: @issues.mark_count, mark: mark, clear: clear)
       elsif @issues.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
+        I18n.ui("↑/↓ move · ↵ open · ↹ preview · %{filt} filter · %{new} new · %{clear} clear · space cmds · esc tabs", filt: filt, new: nnew, clear: clear)
       else
-        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · #{clear} clear · space cmds · esc tabs"
+        I18n.ui("↑/↓ move · ↵ open · %{filt} filter · %{new} new · %{clear} clear · space cmds · esc tabs", filt: filt, new: nnew, clear: clear)
       end
     end
 
@@ -537,7 +537,7 @@ module Gori::Tui
         end
       label = ids.size == 1 ? "“#{name}”" : name
       @host.confirm(ids.size == 1 ? "DELETE ISSUE" : "DELETE ISSUES",
-        "Delete #{label}?\nThis can't be undone.", confirm_label: "delete", danger: true) do
+        "Delete #{label}?\nThis can't be undone.", confirm_label: I18n.ui("delete"), danger: true) do
         # A rolled-back write (cross-process SQLite busy/lock) leaves the issues AND the marks
         # in place — say so instead of reporting a delete that didn't happen, so the set is
         # still there to retry.
@@ -569,10 +569,9 @@ module Gori::Tui
     def issues_clear : Nil
       n = @host.session.store.count_issues
       return @host.status("issues: nothing to clear") if n <= 0
-      @host.confirm("CLEAR ISSUES",
-        "Delete ALL #{n} issue#{n == 1 ? "" : "s"} for this project?\n" \
-        "Their notes, CVSS scores and evidence links go too.\nThis can't be undone.",
-        confirm_label: "clear", danger: true) do
+      @host.confirm(I18n.ui("CLEAR ISSUES"),
+        I18n.sys_n(n, "Delete ALL %{n} issue for this project?\nIts notes, CVSS score and evidence links go too.\nThis can't be undone.", "Delete ALL %{n} issues for this project?\nTheir notes, CVSS scores and evidence links go too.\nThis can't be undone.", n: n),
+        confirm_label: I18n.ui("clear"), danger: true) do
         ok = @issues.clear(@host.session.store)
         @host.status(ok ? "issues cleared" : "issues NOT cleared (project busy) — every issue is still there")
       end

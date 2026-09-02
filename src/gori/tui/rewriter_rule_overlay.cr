@@ -318,7 +318,7 @@ module Gori::Tui
     end
 
     def title : String
-      "REWRITER RULE"
+      I18n.ui("REWRITER RULE")
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -329,7 +329,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
+      I18n.ui("↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel")
     end
 
     # :stay | :commit | :cancel. A key that leaves the form open also refreshes the match

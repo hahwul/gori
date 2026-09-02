@@ -239,7 +239,7 @@ module Gori::Tui
       s = Hotkeys.binding_label(reg, "comparer.swap", "s")
       n = Hotkeys.binding_label(reg, "comparer.next-change", "n")
       f = Hotkeys.binding_label(reg, "comparer.toggle-fold", "f")
-      "←/→ req|res · ↑/↓ row · #{n}/⇧#{n} change · #{f} fold · y copy · ⇧←/→ h-scroll · #{a}/#{b} pick · #{s} swap · space cmds"
+      I18n.ui("←/→ req|res · ↑/↓ row · %{n}/⇧%{n} change · %{f} fold · y copy · ⇧←/→ h-scroll · %{a}/%{b} pick · %{s} swap · space cmds", n: n, f: f, a: a, b: b, s: s)
     end
   end
 end

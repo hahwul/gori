@@ -1141,11 +1141,11 @@ module Gori::Tui
     end
 
     def title : String
-      "SETTINGS"
+      I18n.ui("SETTINGS")
     end
 
     def hint : String
-      "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      I18n.ui("↑/↓ field · type to edit · ↵ save · ^R reset · esc close")
     end
 
     def render(screen : Screen, area : Rect) : Nil

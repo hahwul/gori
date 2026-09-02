@@ -59,25 +59,25 @@ module Gori::Tui
     # the popup and the toast can't disagree about what was written.
     def label : String
       case @kind
-      when :note          then "note"
-      when :issues_md     then "issues (Markdown)"
-      when :issues_json   then "issues (JSON)"
-      when :issues_sarif  then "issues (SARIF)"
-      when :sequence_md   then "randomness report (Markdown)"
-      when :sequence_json then "randomness report (JSON)"
-      else                     "file"
+      when :note          then I18n.ui("note")
+      when :issues_md     then I18n.ui("issues (Markdown)")
+      when :issues_json   then I18n.ui("issues (JSON)")
+      when :issues_sarif  then I18n.ui("issues (SARIF)")
+      when :sequence_md   then I18n.ui("randomness report (Markdown)")
+      when :sequence_json then I18n.ui("randomness report (JSON)")
+      else                     I18n.ui("file")
       end
     end
 
     private def blurb : String
       case @kind
-      when :note          then "Write the current note's text to a Markdown file."
-      when :issues_md     then "Write the Markdown issue report to a file."
-      when :issues_json   then "Write every issue to a JSON file."
-      when :issues_sarif  then "Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
-      when :sequence_md   then "Write this session's token-randomness report to a Markdown file (no token values)."
-      when :sequence_json then "Write this session's token-randomness report to a JSON file (no token values)."
-      else                     "Write the export to a file."
+      when :note          then I18n.help("Write the current note's text to a Markdown file.")
+      when :issues_md     then I18n.help("Write the Markdown issue report to a file.")
+      when :issues_json   then I18n.help("Write every issue to a JSON file.")
+      when :issues_sarif  then I18n.help("Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest.")
+      when :sequence_md   then I18n.help("Write this session's token-randomness report to a Markdown file (no token values).")
+      when :sequence_json then I18n.help("Write this session's token-randomness report to a JSON file (no token values).")
+      else                     I18n.help("Write the export to a file.")
       end
     end
 
@@ -87,7 +87,7 @@ module Gori::Tui
     end
 
     def title : String
-      "EXPORT #{label}"
+      I18n.ui("EXPORT %{label}", label: label)
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -98,7 +98,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "type to complete · ↹ pick · ↑↓ browse · ↵ write · esc cancel"
+      I18n.ui("type to complete · ↹ pick · ↑↓ browse · ↵ write · esc cancel")
     end
 
     # --- input ---------------------------------------------------------------

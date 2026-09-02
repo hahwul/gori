@@ -40,7 +40,7 @@ module Gori::Tui
     getter message : String
 
     def initialize(@heading : String, @message : String, *,
-                   @confirm_label : String = "confirm", @cancel_label : String = "cancel",
+                   @confirm_label : String = I18n.ui("confirm"), @cancel_label : String = I18n.ui("cancel"),
                    @danger : Bool = true)
       @selected = :cancel # safe default
       # "The last frame did not REFUSE to draw me" — not "a frame has run". The shell draws
@@ -66,11 +66,11 @@ module Gori::Tui
     end
 
     def title : String
-      "CONFIRM"
+      I18n.ui("CONFIRM")
     end
 
     def hint : String
-      "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      I18n.ui("←/→ choose · y confirm · n/esc cancel · ↵ select")
     end
 
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the

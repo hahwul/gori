@@ -46,13 +46,13 @@ module Gori::Tui
 
     private def blurb : String
       case @kind
-      when :har      then "Load flows from a browser or proxy HAR export into History."
-      when :urls     then "Load a text file of URLs into History — one URL per line."
-      when :oas      then "Build request templates from an OpenAPI spec into History."
-      when :postman  then "Build request templates from a Postman Collection v2 export."
-      when :insomnia then "Build request templates from an Insomnia v4 JSON export."
-      when :burp     then "Load saved Burp items into History — request and response, byte-exact."
-      when :wsdl     then "Build request templates from a WSDL 1.1 service — one per operation."
+      when :har      then I18n.help("Load flows from a browser or proxy HAR export into History.")
+      when :urls     then I18n.help("Load a text file of URLs into History — one URL per line.")
+      when :oas      then I18n.help("Build request templates from an OpenAPI spec into History.")
+      when :postman  then I18n.help("Build request templates from a Postman Collection v2 export.")
+      when :insomnia then I18n.help("Build request templates from an Insomnia v4 JSON export.")
+      when :burp     then I18n.help("Load saved Burp items into History — request and response, byte-exact.")
+      when :wsdl     then I18n.help("Build request templates from a WSDL 1.1 service — one per operation.")
       else                "Load flows into History."
       end
     end
@@ -65,7 +65,7 @@ module Gori::Tui
     # The focus badge names the SOURCE FORMAT, not just "IMPORT" — the same `label` the
     # card title and the result toast read, so the three can't disagree.
     def title : String
-      "IMPORT #{label}"
+      I18n.ui("IMPORT %{label}", label: label)
     end
 
     # The single-line fields the pointer can reach — see `Overlay#text_fields`. Listing them
@@ -76,7 +76,7 @@ module Gori::Tui
     end
 
     def hint : String
-      "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
+      I18n.ui("type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel")
     end
 
     # --- input ---------------------------------------------------------------
