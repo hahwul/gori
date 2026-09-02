@@ -80,24 +80,12 @@ module Gori
           # `--bind-from` discarded before it could speak) that CLI::Run.preflight_bind_from exists
           # to close — left open one branch away from it.
           #
-          # Read off the PARSED state rather than re-scanning argv for flag names, so the list
-          # cannot drift from the parser above. The three numeric collection knobs (--count,
-          # --concurrency, --retries) are deliberately absent: they carry non-nil defaults, so
-          # "was it passed" is not recoverable from state, and each only sizes a collection that is
-          # not happening. Every flag that would put a REQUEST on the wire, and every token-location
-          # flag (redundant against a list of already-extracted tokens), is named.
-          live = [] of String
-          live << "<flow-id> #{positional.join(" ").inspect}" unless positional.empty?
-          live << "--flow" if flow_id
-          live << "--request" if request_file
-          live << "--target" if target_override
-          live << "--sni" if sni
-          live << "--http2" if force_h2
-          live << "--insecure-upstream" if insecure
-          live << "--bind-from" if bind_from
-          live << "--slot" if slot
-          live << "--allow-unscoped" if allow_unscoped
-          live << "a token location (--cookie/--header/--regex/--position/--jsonpath)" if kind
+          # What counts as "only matters to a live replay" is `tokens_live_conflicts` below.
+          live = tokens_live_conflicts(positional: positional, flow_id: flow_id,
+            request_file: request_file, target: target_override, sni: sni, http2: force_h2,
+            insecure: insecure, bind_from: bind_from, slot: slot,
+            allow_unscoped: allow_unscoped, max_requests: max_requests, rate: rate,
+            throttle: throttle, timeout: timeout, keep_alive: keep_alive, kind: kind)
           unless live.empty?
             abort "gori run sequence: --tokens analyzes a pasted list and sends nothing, so it " \
                   "cannot be combined with #{live.join(", ")} — drop one"
@@ -174,6 +162,48 @@ module Gori
         ensure
           outbound.close
         end
+      end
+
+      # The live-replay flags a `--tokens` run was given, in the order the refusal names them.
+      #
+      # A pure function of the PARSED state — never a re-scan of argv for flag names, which
+      # would drift from the parser the moment one is renamed. Split out of `cmd_sequence` so
+      # the list is reachable from a spec: `abort` ends the process, so the only other way to
+      # tell a forgotten flag from a refused one is to run the binary.
+      #
+      # `--count`, `--concurrency` and `--retries` are deliberately NOT here: they carry
+      # non-nil defaults, so "was it passed" is not recoverable from this state at all.
+      # Everything else that only means something to a run that dials is — including the
+      # PACING knobs (`--max-requests`, `--rate`, `--throttle`, `--timeout`, `--no-keep-alive`),
+      # which are nilable and so ARE recoverable. They were missing for a while and read as a
+      # request gori then ignored: `--tokens list.txt --max-requests 10` asked for ten and
+      # silently analyzed the whole file.
+      private def self.tokens_live_conflicts(*, positional : Array(String), flow_id : Int64?,
+                                             request_file : String?, target : String?,
+                                             sni : String?, http2 : Bool, insecure : Bool,
+                                             bind_from : Int64?, slot : String?,
+                                             allow_unscoped : Bool, max_requests : Int64?,
+                                             rate : Float64?, throttle : Int32?,
+                                             timeout : Time::Span?, keep_alive : Bool,
+                                             kind : Sequencer::ExtractKind?) : Array(String)
+        live = [] of String
+        live << "<flow-id> #{positional.join(" ").inspect}" unless positional.empty?
+        live << "--flow" if flow_id
+        live << "--request" if request_file
+        live << "--target" if target
+        live << "--sni" if sni
+        live << "--http2" if http2
+        live << "--insecure-upstream" if insecure
+        live << "--bind-from" if bind_from
+        live << "--slot" if slot
+        live << "--allow-unscoped" if allow_unscoped
+        live << "--max-requests" if max_requests
+        live << "--rate" if rate
+        live << "--throttle" if throttle
+        live << "--timeout" if timeout
+        live << "--no-keep-alive" unless keep_alive
+        live << "a token location (--cookie/--header/--regex/--position/--jsonpath)" if kind
+        live
       end
 
       # `gori run sequence`'s wording for a collection the options can't produce. The builder

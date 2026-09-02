@@ -341,6 +341,17 @@ module Gori::Tui
       @entries.count { |e| ids.includes?(e.id) && (t = e.target) && t.unanswered? }
     end
 
+    # Requests in `ids` whose BASELINE was itself refused (4xx/5xx). Counted beside the two
+    # above and for the same reason: nothing on such a request could be judged against
+    # anything, so it contributes no bypass and no `different`, and the summary's "no identity
+    # matched the baseline" would speak for it. See `Authorize::Target#baseline_denied?`.
+    def baseline_denied_in(ids : Set(Int32)) : Int32
+      @entries.count do |e|
+        ids.includes?(e.id) && (t = e.target) && !t.fully_blocked? && !t.unanswered? &&
+          t.baseline_denied?
+      end
+    end
+
     # The first send error any unanswered batch entry recorded, for the summary line — the
     # operator's actual next step is in that string ("Connection refused", "no such host").
     def unanswered_reason_in(ids : Set(Int32)) : String?

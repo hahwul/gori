@@ -712,6 +712,12 @@ module Gori
         # not reach. See `Authorize::Target#unanswered?`.
         property unanswered = 0
         property unanswered_reason : String? = nil
+        # Requests whose BASELINE was itself refused (4xx/5xx). Nothing on such a request can
+        # be judged — `Judge.verdict` demotes every comparison against a denied baseline to
+        # `review` — so these contribute to neither count below, and a job made only of them
+        # reads `review` with no reason attached. Tracked for the same reason `unanswered` is:
+        # the cause is usually one stale credential, and it is fixable once the caller is told.
+        property baseline_denied = 0
         # Non-baseline identities served the same response as the baseline: the finding.
         property bypasses = 0
         property reviews = 0
