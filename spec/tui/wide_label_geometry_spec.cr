@@ -40,6 +40,21 @@ describe "wide-label geometry" do
     Frame.left_chip_hit(10 + first + 1, 0, 0, 10, chips).should eq(:hex)
   end
 
+  it "advances tour tab chips and their hit rects by cell width, not char count" do
+    # Each Hangul syllable is 2 cells but 1 char, so a char-measured advance drifts one cell per
+    # syllable: the chips after a Korean tab name would draw and hit-test off their labels.
+    rects = Tutorial.tab_chip_rects(["AB", "탭", "C"], 0, 0, 100)
+    rects.map(&.last).should eq([0, 1, 2])
+    rects[0][0].x.should eq(0)
+    rects[1][0].x.should eq(5)  # after " AB " (4 cells) + a 1-col gap
+    rects[1][0].w.should eq(4)  # " 탭 " is 4 cells — String#size said 3
+    rects[2][0].x.should eq(10) # 5 + 4 cells + 1 gap: the wide char advanced by cells, not chars
+  end
+
+  it "stops the tour tab run before the first chip that would overflow the width" do
+    Tutorial.tab_chip_rects(["AB", "CD"], 0, 0, 8).map(&.last).should eq([0])
+  end
+
   it "starts the status hint one cell past a Hangul focus badge" do
     rect = Rect.new(0, 23, 80, 1)
     backend = MemoryBackend.new(80, 24)
