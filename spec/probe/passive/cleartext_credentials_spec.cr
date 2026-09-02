@@ -74,9 +74,18 @@ describe Gori::Probe::Passive::CleartextCredentials do
   it "does not flag UI state carried under a password-ish name" do
     with_store do |store|
       dets(store, req_body: "showPassword=false&password=").should be_empty
-      # JSON booleans are unquoted, so the quoted-string requirement is the screen there.
+      # An unquoted JSON boolean never matches the "…" value pattern to begin with.
       dets(store, req_content_type: "application/json",
         req_body: %({"showPassword":false})).should be_empty
+      # A boolean a serialiser wrote as a QUOTED string is screened by NON_SECRET_VALUES, the
+      # same as the form-encoded path — otherwise `"showPassword":"false"` reads as a High
+      # cleartext password.
+      dets(store, req_content_type: "application/json",
+        req_body: %({"showPassword":"false"})).should be_empty
+      # …but a real quoted secret under the very same key is still flagged (the screen is the
+      # value, not the name).
+      dets(store, req_content_type: "application/json",
+        req_body: %({"showPassword":"hunter2"})).any?(&.code.== "cleartext_credentials").should be_true
     end
   end
 
