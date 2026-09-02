@@ -271,6 +271,55 @@ describe Gori::Export::Curl do
     cmd.should contain("-H 'X-Full: v'")
   end
 
+  # curl expands `[a-b]` and `{x,y}` in the URL argument by default, which for a URL gori
+  # RESOLVED is never what the operator meant. Measured against a raw listener, curl 8.7.1, one
+  # command each: `?f=[1-3]` sent THREE requests (f=1, f=2, f=3), `?g={a,b}` sent two, and
+  # `?fields[item]=id` — a JSON:API sparse fieldset, one of which sits in gori's own demo
+  # project — died with `curl: (3) bad range in URL position 32` having sent nothing.
+  describe "a URL curl would read as a glob" do
+    it "adds --globoff when the URL holds a bracket or a brace" do
+      curl_of("GET /q?f=[1-3] HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--globoff")
+      curl_of("GET /q?g={a,b} HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--globoff")
+      curl_of("GET /q?fields[item]=id HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--globoff")
+    end
+
+    it "leaves an ordinary URL without the flag" do
+      curl_of("GET /q?a=1 HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("--globoff")
+    end
+
+    # The one bracket that is legitimate. Harmless: curl parses a bracketed authority before
+    # globbing, so the flag changes nothing on the wire — measured against an AF_INET6 listener,
+    # `GET /p` / `Host: [::1]:9143` either way.
+    it "fires on an IPv6 literal authority, which curl handles anyway" do
+      cmd = curl_of("GET /p HTTP/1.1\r\nHost: [::1]:9143\r\n\r\n", "http://[::1]:9143")
+      cmd.should contain("curl 'http://[::1]:9143/p'")
+      cmd.should contain("--globoff")
+    end
+
+    it "keeps the URL itself literal — the flag is what disarms it, not an escape" do
+      cmd = curl_of("GET /q?f=[1-3] HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      cmd.lines.first.should eq("curl 'http://h/q?f=[1-3]' \\")
+    end
+  end
+
+  # The URL is the one field every generated client re-reads, and left raw they split three
+  # ways: curl lowercases the path escape and leaves the QUERY's high bytes alone, Go escapes
+  # the path and writes RawQuery verbatim, requests/fetch/httpie encode both. Pre-encoding says
+  # which bytes to ask for once — measured against a raw listener, all five then send
+  # `GET /%ED%95%9C/caf%C3%A9?q=%ED%95%9C`.
+  describe "a non-ASCII URL" do
+    it "percent-encodes the path and query" do
+      cmd = curl_of("GET /\u{d55c}?q=\u{d55c} HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      cmd.should contain("curl 'http://h/%ED%95%9C?q=%ED%95%9C'")
+    end
+
+    it "leaves a non-ASCII authority alone for curl's own IDNA to handle" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: \u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}\r\n\r\n",
+        "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}")
+      cmd.should contain("curl 'https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}/a'")
+    end
+  end
+
   describe "a body no shell argument can carry" do
     it "refuses a NUL-bearing body in a comment rather than sending a SHORTER one" do
       cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\nab\u{0}cd", "http://h")

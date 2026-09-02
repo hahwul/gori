@@ -66,4 +66,32 @@ describe Gori::Export::JsFetch do
     code.should contain("body: new Uint8Array([255, 254, 65]),")
     code.should contain("not valid UTF-8")
   end
+  # `body` on a GET/HEAD is not ignored — the Request constructor THROWS, so the snippet sent
+  # nothing at all. Measured on Node 26: `fetch(u, {method:"GET", body:"b"})` rejects with
+  # `TypeError: Request with GET/HEAD method cannot have body.` A captured GET-with-a-body is a
+  # real shape (curl reproduces it with -X GET --data-raw), so name the drop and stay runnable.
+  describe "a GET or HEAD carrying a body" do
+    it "omits the body and says why" do
+      code = js("GET /g HTTP/1.1\r\nHost: h.test\r\nContent-Length: 9\r\n\r\nbody-here", "https://h.test")
+      code.should_not contain("body: ")
+      code.should contain("body omitted")
+      code.should contain("GET/HEAD method cannot have body")
+      code.should contain("--format curl")
+    end
+
+    it "covers HEAD and a lowercase method fetch would upcase" do
+      js("HEAD /g HTTP/1.1\r\nHost: h.test\r\n\r\nb", "https://h.test").should contain("body omitted")
+      js("get /g HTTP/1.1\r\nHost: h.test\r\n\r\nb", "https://h.test").should contain("body omitted")
+    end
+
+    it "still sends a POST body" do
+      js("POST /g HTTP/1.1\r\nHost: h.test\r\n\r\nb", "https://h.test").should contain(%(body: "b",))
+    end
+  end
+
+  it "leaves a non-ASCII authority alone — a host is IDNA-encoded, not percent-encoded" do
+    code = js("GET /a HTTP/1.1\r\nHost: \u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}\r\n\r\n",
+      "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}")
+    code.should contain("fetch(\"https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}/a\", {")
+  end
 end

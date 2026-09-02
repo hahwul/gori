@@ -78,4 +78,14 @@ describe Gori::Export::PythonRequests do
     code = py(String.new(io.to_slice), "https://h.test")
     code.should contain(%(data = b"\\xff\\x00\\""))
   end
+  # The encoding stops at the authority. A host is IDNA-encoded, not percent-encoded, and
+  # urllib3 does NOT decode one back: measured on the demo project's `https://쇼핑몰.한국/…`,
+  # `urllib3.util.parse_url` answers `xn--352bl7khqr.xn--3e0b707e` for the raw URL and the
+  # literal `%ec%87%bc%ed%95%91%eb%aa%b0.%ed%95%9c%ea%b5%ad` for the encoded one — a name no
+  # resolver answers, so the script could not reach the captured host at all.
+  it "leaves a non-ASCII authority raw so requests can IDNA-encode it" do
+    code = py("GET /api/\u{c8fc}\u{bb38} HTTP/1.1\r\nHost: \u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}\r\n\r\n",
+      "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}")
+    code.should contain(%(url = "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}/api/%EC%A3%BC%EB%AC%B8"))
+  end
 end
