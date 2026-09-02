@@ -1617,7 +1617,11 @@ module Gori::Tui
       view = FuzzerView.new
       view.load_blank
       open_session(view, nil)
-      @host.status("new fuzz session — type the target URL · ^A mark params · ^O config · ^R run")
+      # `i/↵`, not "type": `load_blank` opens the TARGET field in READ, so bare typing edits
+      # nothing — and a digit in a URL fires the global `nav.posN` tab jump instead, which
+      # walks the operator off the session they just made. `repeater_new` says "edit" for the
+      # same reason; this line named the mode it does not open in.
+      @host.status("new fuzz session — i/↵ edits the target URL · ^A mark params · ^O config · ^R run")
     end
 
     # Content-only clone of the active fuzz session (template + config; no results/links).
