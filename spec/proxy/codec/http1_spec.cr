@@ -111,6 +111,35 @@ describe Gori::Proxy::Codec::Http1 do
       resp = Http1.parse_response_head(raw)
       resp.status.should eq(204)
       resp.reason.should eq("")
+      resp.malformed?.should be_false
+    end
+
+    it "accepts a status line with no reason phrase at all" do
+      resp = Http1.parse_response_head(bytes("HTTP/1.1 200\r\n\r\n"))
+      resp.status.should eq(200)
+      resp.malformed?.should be_false
+    end
+
+    # The h2 capture path spells its synthesized version `HTTP/2` (no minor), and this
+    # predicate is shared, so the check is the `HTTP/` name and not a `\d.\d` match.
+    it "accepts the HTTP/2 projection's version" do
+      Http1.parse_response_head(bytes("HTTP/2 200\r\n\r\n")).malformed?.should be_false
+    end
+
+    # A body that over-ran its Content-Length leaves its tail in front of the NEXT response
+    # on a reused upstream. `split(' ')` finds "200" in the second field either way, so this
+    # used to parse as a clean 200 with a version of "…threeHTTP/1.1".
+    it "flags a status line with junk in front of the version" do
+      raw = bytes("s-body-is-way-longer-than-threeHTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+      resp = Http1.parse_response_head(raw)
+      resp.status.should eq(200)     # the projection still says what it read …
+      resp.malformed?.should be_true # … and now says it is not to be trusted
+      resp.raw_head.should eq(raw)   # bytes untouched either way (P7)
+    end
+
+    it "flags a start-line that is not HTTP at all" do
+      Http1.parse_response_head(bytes("ICY 200 OK\r\n\r\n")).malformed?.should be_true
+      Http1.parse_response_head(bytes("+OK POP3 ready\r\n\r\n")).malformed?.should be_true
     end
   end
 
