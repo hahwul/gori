@@ -274,7 +274,11 @@ module Gori
         return fields if fields.is_a?(Result)
         title, description, side, region, kind, pattern, severity = fields
         id = store.insert_probe_custom_rule(title, description, side, region, kind, pattern, severity)
-        return err("failed to persist the rule (store busy or unwritable)", "STORE_ERROR") if id == 0
+        # `busy`, not a bare `err(…, "STORE_ERROR")`: a rolled-back write is transient (a
+        # capturing peer holds SQLite's single writer slot), so the refusal has to carry
+        # PROJECT_BUSY / retryable — the same contract every other create on this surface
+        # (create_issue, create_rule, create_color_rule) already gives an agent's retry policy.
+        return busy("failed to persist the rule (store busy or unwritable)") if id == 0
         Result.new({"id" => "custom_p_#{id}", "row_id" => id, "title" => title}.to_json)
       end
 
@@ -307,7 +311,13 @@ module Gori
         return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
           "INVALID_ARGUMENT", field: "id") unless row_id
         return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
-        store.delete_probe_custom_rule(row_id)
+        # Checked, like every other single-item delete on this surface (delete_color_rule,
+        # delete_extract_rule, probe_delete) and like the CLI twin (cli/run/probe.cr): a
+        # busy/locked store rolls the DELETE back, and reporting `{"deleted":1}` over that told
+        # an agent the rule was gone while every later scan still fired it — and, because this
+        # is an AGENT_ACTION_TOOLS verb, logged `delete_probe_rule ok` into the human's Activity
+        # feed for a delete that never landed. `busy`, so the refusal is retryable.
+        return busy("custom rule '#{id}' NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_probe_custom_rule(row_id)
         Result.new({"deleted" => 1, "id" => id}.to_json)
       end
 

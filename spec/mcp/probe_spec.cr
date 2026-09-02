@@ -23,6 +23,7 @@ end
 # hold for this one writer batch while the read pool still serves the id check.
 private class RuleUpdateFailingStore < Gori::Store
   property fail_update = false
+  property fail_delete = false
 
   # No return annotation on purpose. With src/gori/store/probe_rules.cr reverted this infers
   # `Bool | Nil` and still COMPILES, so the example below fails on its assertion instead of
@@ -30,6 +31,14 @@ private class RuleUpdateFailingStore < Gori::Store
   def update_probe_custom_rule(id : Int64, title : String, description : String, side : String,
                                region : String, kind : String, pattern : String, severity : Gori::Store::Severity)
     return false if @fail_update
+    super
+  end
+
+  # The DELETE twin of the injection above, for the same cross-process-lock shape: the id
+  # check (`probe_custom_rules`) still serves the row from the read pool while this one writer
+  # batch is rolled back. No return annotation, for the same compile-on-revert reason.
+  def delete_probe_custom_rule(id : Int64)
+    return false if @fail_delete
     super
   end
 end
@@ -411,6 +420,27 @@ describe "MCP probe rules + mode tools" do
       row = store.probe_custom_rules.first
       row.title.should eq("a")
       row.pattern.should eq("AAA")
+    end
+  end
+
+  # A delete the store rolled back used to come back `{"deleted":1}` — the phantom success this
+  # server refuses everywhere else, and worse here because delete_probe_rule is an
+  # AGENT_ACTION_TOOLS verb, so a delete that never landed also logged `delete_probe_rule ok`
+  # into the human's Activity feed. The CLI twin (cli/run/probe.cr) has always checked it.
+  it "refuses to report a delete the store did not commit" do
+    with_rule_update_failing_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      id = call_json(tools, "create_probe_rule", %({"title":"a","pattern":"AAA"}))["id"].as_s
+
+      store.fail_delete = true
+      r = tools.call("delete_probe_rule", JSON.parse(%({"id":"#{id}"})))
+      r.is_error.should be_true
+      r.error_code.should eq("PROJECT_BUSY")
+      r.retryable.should be_true
+      r.text.should contain("NOT deleted")
+
+      # And the rule the next scan runs is still there.
+      store.probe_custom_rules.map(&.title).should eq(["a"])
     end
   end
 
