@@ -62,12 +62,32 @@ module Gori
       def self.percent_encode_non_ascii(url : String) : String
         bytes = url.to_slice
         from = path_offset(url)
-        return url if bytes[from..].all? { |b| b < 0x80 }
+        return url if bytes[from..].none? { |b| opaque_target_byte?(b) }
         String.build do |io|
           bytes.each_with_index do |b, i|
-            b < 0x80 || i < from ? io.write_byte(b) : io << "%" << b.to_s(16).upcase
+            if i < from || !opaque_target_byte?(b)
+              io.write_byte(b)
+            else
+              io << "%" << b.to_s(16).rjust(2, '0').upcase
+            end
           end
         end
+      end
+
+      # A byte the request-target cannot carry literally, so `percent_encode_non_ascii` spells it
+      # `%NN`: every non-ASCII byte (which each generated client would otherwise re-encode its own
+      # way) plus the C0 controls (0x01–0x1f) and DEL. A raw control byte in a captured path is not
+      # a hypothetical — the Repeater and Fuzzer store whatever a target sent with `auto_encode`
+      # off — and left literal it made curl reject the URL (`(3) URL rejected`, exit 3, nothing
+      # sent) and Go's `net/url` panic, so the "runnable" export was a script that did not run.
+      # `rjust(2, '0')` because a control byte is one hex digit (`0x01` → `%01`, never `%1`).
+      #
+      # NUL (0x00) is deliberately NOT in this set: a shell argv is NUL-terminated, so no exporter
+      # can carry one at all, and `%00` would be a DIFFERENT resource than the raw NUL the capture
+      # holds. The shell serializers refuse the whole command for it instead (see curl's
+      # `nul_url_note`) — leaving it raw here is what lets that refusal still see it.
+      private def self.opaque_target_byte?(b : UInt8) : Bool
+        (0x01 <= b && b < 0x20) || b == 0x7f || b >= 0x80
       end
 
       # A whole `"…"` literal holding a URL, for the three serializers that hand one to a client

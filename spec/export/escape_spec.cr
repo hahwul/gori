@@ -49,5 +49,32 @@ describe Gori::Export::Escape do
     it "encodes from byte 0 when there is no scheme://authority to skip" do
       Gori::Export::Escape.percent_encode_non_ascii("/안").should eq("/%EC%95%88")
     end
+
+    # A raw C0 control or DEL in the target is a byte no client carries literally: curl rejects
+    # the URL (`(3) URL rejected`, exit 3, nothing sent) and Go's net/url panics. The
+    # Repeater/Fuzzer store exactly such bytes with auto-encode off, so the export has to spell
+    # them or the "runnable" script does not run.
+    it "percent-encodes C0 control bytes and DEL in the target, two hex digits each" do
+      io = IO::Memory.new
+      io << "https://h.test/a"
+      io.write_byte(0x7f_u8) # DEL
+      io << "b"
+      io.write_byte(0x01_u8) # SOH — one hex digit, must pad to %01, not %1
+      io << "?q="
+      io.write_byte(0x09_u8) # TAB
+      Gori::Export::Escape.percent_encode_non_ascii(String.new(io.to_slice))
+        .should eq("https://h.test/a%7Fb%01?q=%09")
+    end
+
+    # The authority is the part left raw (a client IDNA-encodes it), so a control byte there is
+    # NOT touched here — the neighbouring serializers refuse the whole command instead.
+    it "leaves a control byte in the authority raw for the caller to refuse" do
+      io = IO::Memory.new
+      io << "https://h"
+      io.write_byte(0x01_u8)
+      io << ".test/p"
+      url = String.new(io.to_slice)
+      Gori::Export::Escape.percent_encode_non_ascii(url).should be(url)
+    end
   end
 end
