@@ -71,13 +71,16 @@ module Gori::Tui
     # did before she existed — see #companion_band.
     COMPANION_BAND = Companion::GUTTER + Mascot::W + 1
 
-    # Fake palette rows used by the palette lesson + practice overlay.
+    # Fake palette rows used by the palette lesson + practice overlay: sigil, label, and the
+    # fake tab index the row switches to (nil = the row only closes the palette). The action
+    # rides its own slot so the label is free to be reworded or translated without the
+    # practice step's "Go to …" quietly turning into a no-op.
     PALETTE_ROWS = [
-      {"»", "Go to Repeater"},
-      {"≡", "Settings: Theme"},
-      {"×", "Quit gori"},
-      {"→", "Go to History"},
-      {"?", "Open Help"},
+      {"»", "Go to Repeater", 4},
+      {"≡", "Settings: Theme", nil},
+      {"×", "Quit gori", nil},
+      {"→", "Go to History", 2},
+      {"?", "Open Help", 6},
     ]
 
     # Fake space-menu rows (mnemonic key + label).
@@ -678,10 +681,10 @@ module Gori::Tui
       end
     end
 
-    private def filtered_palette : Array({String, String})
+    private def filtered_palette : Array({String, String, Int32?})
       q = @pal_query.downcase
       return PALETTE_ROWS if q.empty?
-      PALETTE_ROWS.select { |(_, label)| label.downcase.includes?(q) }
+      PALETTE_ROWS.select { |(_, label, _)| label.downcase.includes?(q) }
     end
 
     private def run_overlay_selection : Nil
@@ -689,10 +692,9 @@ module Gori::Tui
         rows = filtered_palette
         if row = rows[@pal_sel]?
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
-          case row[1]
-          when "Go to Repeater" then @p_tab = 4; mark_switch
-          when "Go to History"  then @p_tab = 2; mark_switch
-          when "Open Help"      then @p_tab = 6; mark_switch
+          if tab = row[2]
+            @p_tab = tab
+            mark_switch
           end
         end
       end

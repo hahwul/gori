@@ -365,3 +365,16 @@ describe "Gori::Tui::Tutorial.prose_gaps" do
     end
   end
 end
+
+# The practice palette's "Go to …" rows act on the tab index they CARRY, not on their label:
+# `run_overlay_selection` used to `case` on the English text, so rewording a row (or drawing
+# it in another language) turned the switch into a silent no-op.
+describe "Gori::Tui::Tutorial::PALETTE_ROWS" do
+  it "carry the fake tab each navigating row switches to" do
+    rows = Gori::Tui::Tutorial::PALETTE_ROWS
+    rows.select { |(_, label, _)| label.starts_with?("Go to") || label == "Open Help" }
+      .map { |(_, _, tab)| tab }.should eq([4, 2, 6])
+    rows.reject { |(_, label, _)| label.starts_with?("Go to") || label == "Open Help" }
+      .all? { |(_, _, tab)| tab.nil? }.should be_true
+  end
+end
