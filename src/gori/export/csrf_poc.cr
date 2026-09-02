@@ -108,7 +108,7 @@ module Gori
           b << "<!-- Content-Type (e.g. application/json) triggers a CORS preflight the endpoint may refuse. -->\n"
           dropped_headers_comment(b, parts, carried: ct.empty? ? nil : "content-type")
           b << "<body>\n<script>\n"
-          b << "fetch(" << jsstr(Escape.percent_encode_non_ascii(parts.url)) << ", {\n"
+          b << "fetch(" << jsurl(Escape.percent_encode_non_ascii(parts.url)) << ", {\n"
           b << "  method: " << jsstr(method) << ",\n"
           b << "  credentials: \"include\",\n"
           unless ct.empty?
@@ -116,8 +116,14 @@ module Gori
           end
           unless body.empty?
             # A non-UTF-8 body rides as a Uint8Array (exact bytes); a string body would have fetch
-            # re-encode a high byte to two — the same footgun `Export::JsFetch` guards.
-            if body.valid_encoding?
+            # re-encode a high byte to two — the same footgun `Export::JsFetch` guards. And a
+            # GET/HEAD carries no body at all: the Request constructor throws rather than
+            # ignoring it, so the PoC would fire nothing. (`form_capable?` sends every GET down
+            # the form path, so only a captured HEAD-with-a-body reaches this.)
+            if method == "HEAD"
+              b << "  // body omitted: fetch() refuses a body on a GET/HEAD request, so the\n"
+              b << "  // captured " << body.bytesize << " bytes cannot ride — see --format raw.\n"
+            elsif body.valid_encoding?
               b << "  body: " << jstext(body) << ",\n"
             else
               b << "  // body is not valid UTF-8; sent as raw bytes so the endpoint gets it exactly.\n"
@@ -374,6 +380,16 @@ module Gori
           end
           b << '"'
         end
+      end
+
+      # The URL literal. Character-wise like `jstext` — after `percent_encode_non_ascii` the only
+      # non-ASCII bytes left are the AUTHORITY's, and a `\xNN` per UTF-8 byte hands the URL parser
+      # one Latin-1 codepoint per byte to IDNA-encode, which is a different host than the capture.
+      # Not `Escape.double_quoted_url`: this literal sits inside a `<script>`, so `<`/`>` still
+      # have to be neutralised before anything else. A URL that is not valid UTF-8 has no text
+      # spelling and falls back to the byte form rather than being scrubbed to U+FFFD.
+      private def self.jsurl(url : String) : String
+        url.valid_encoding? ? jstext(url) : jsstr(url)
       end
 
       # A JS Uint8Array literal (`new Uint8Array([255, …])`) — the fetch path's body when it is

@@ -20,6 +20,11 @@ module Gori
         binary = has_body && !s.body.valid_encoding?
         imports = ["fmt", "io", "net/http"]
         imports << (binary ? "bytes" : "strings") if has_body
+        # `net/http` escapes `URL.Path` on its way to the request line but writes `RawQuery`
+        # verbatim, so a captured `/\xed\x95\x9c?q=\xed\x95\x9c` went out half-encoded and half raw
+        # — a request-target no other generated client sends. `percent_encode_non_ascii` says
+        # which bytes to ask for once, and all five then agree (see `Export::Escape`).
+        url = Escape.double_quoted_url(Escape.percent_encode_non_ascii(parts.url))
         String.build do |b|
           b << "package main\n\n"
           b << "import (\n"
@@ -32,9 +37,9 @@ module Gori
             else
               b << "\tbody := strings.NewReader(" << gostr(s.body) << ")\n"
             end
-            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << gostr(parts.url) << ", body)\n"
+            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << url << ", body)\n"
           else
-            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << gostr(parts.url) << ", nil)\n"
+            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << url << ", nil)\n"
           end
           b << "\tif err != nil {\n\t\tpanic(err)\n\t}\n"
           s.headers.each do |(n, v)|
