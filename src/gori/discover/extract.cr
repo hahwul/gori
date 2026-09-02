@@ -51,6 +51,97 @@ module Gori::Discover
     # and turns an unbounded run into a truncated one, which is a candidate that simply 404s.
     ENDPOINT = /https?:\/\/[^\s"'`<>\\,;)\]}]{3,2048}|["'`](\/[A-Za-z0-9_\-.~%\/]{1,256})/i
 
+    # The five names XML predefines, which is also the complete named set a sitemap `<loc>`
+    # may legally carry. Nothing wider is needed here: see `decode_refs`.
+    NAMED_REFS = {"amp" => '&', "lt" => '<', "gt" => '>', "quot" => '"', "apos" => '\''}
+
+    # Longest `&`…`;` span this can decode — `&#x10FFFF;` and `&#1114111;` are both 9.
+    REF_MAX = 10
+
+    # Character references in a value the markup DECLARED as a URL, resolved to the characters
+    # they denote.
+    #
+    # `<a href="/list?page=2&amp;sort=name">` links to `/list?page=2&sort=name`. The `&amp;` is
+    # the attribute's SERIALIZATION, not part of the URL, so keeping it is not byte-preservation
+    # (P7 is about the operator's bytes; this is the page's own escaping) — it is a misread. The
+    # origin then sees a parameter named `amp;sort`, answers whatever it answers with `sort`
+    # absent, and the page that was actually linked is never crawled. Server-side templating
+    # escapes `&` in an href as a matter of course, so this is the ordinary shape of any linked
+    # URL carrying two query parameters.
+    #
+    # The numeric forms fail worse than wrong, they TRUNCATE: `&#38;` reaches `Url.resolve` with
+    # a live `#` in it, which is the fragment delimiter, so `?id=6&#38;view=full` is cut to
+    # `?id=6` and the entire query tail is lost before any gate or key sees it.
+    #
+    # Applied at EXTRACTION and to DECLARED values only — `href`/`src`/`action`, `<meta
+    # refresh>`, `<base href>`, sitemap `<loc>` — because those are the values whose escaping is
+    # defined. The endpoint pass reads TEXT, not markup: a path inside a `<script>` is character
+    # data where `&amp;` means those five characters, and robots.txt is not markup at all.
+    #
+    # A decoded CR or LF changes nothing downstream on purpose. It reaches `Headers.safe_url?`
+    # and `Sender#fetch` like a raw one and is REFUSED there, which is the disposition #390
+    # settled — decoding cannot manufacture a request, only a refusal.
+    #
+    # SEMICOLON-TERMINATED ONLY, and only the five predefined names. HTML5 decodes a named
+    # reference missing its `;` in text but explicitly does NOT in an attribute value when the
+    # next character is `=` or alphanumeric, and that rule exists precisely so legacy query
+    # strings keep working — which is what this runs over. `?a=1&amp=2` and `?x=1&ampersand=y`
+    # have to survive unchanged. `HTML.unescape` implements the text rule and rewrites both
+    # (the second to `&ersand=y`), so the stdlib is not the tool here; restricting to the
+    # unambiguous `;`-terminated spelling is.
+    def self.decode_refs(s : String) : String
+      return s unless decodable?(s)
+      amp = s.index('&')
+      String.build(s.bytesize) do |io|
+        pos = 0
+        while at = amp
+          semi = s.index(';', at + 1)
+          if semi && semi - at <= REF_MAX && (ch = reference(s[(at + 1)...semi]))
+            io << s[pos...at] << ch
+            pos = semi + 1
+          else
+            io << s[pos..at] # the `&` opens nothing — copy it through
+            pos = at + 1
+          end
+          amp = s.index('&', pos)
+        end
+        io << s[pos..]
+      end
+    end
+
+    # Is there anything here to decode? `s` itself is returned for every value that carries no
+    # reference — which includes the ordinary `?a=1&b=2`, where the `&` opens nothing — so scan
+    # before building, the way `Url.needs_encoding?` does beside the encoder for the same
+    # reason. Every `&` is examined here and only a subset is in the builder, so a negative
+    # from this is a negative there.
+    private def self.decodable?(s : String) : Bool
+      at = s.index('&')
+      while at
+        semi = s.index(';', at + 1)
+        return true if semi && semi - at <= REF_MAX && reference(s[(at + 1)...semi])
+        at = s.index('&', at + 1)
+      end
+      false
+    end
+
+    # The character `name` (the run between `&` and `;`) denotes, or nil when it denotes
+    # nothing this decodes. A codepoint outside Unicode, a lone surrogate and NUL all answer
+    # nil rather than a replacement character: the reference is then copied through verbatim,
+    # which is the same outcome an unknown name gets.
+    private def self.reference(name : String) : Char?
+      return nil if name.empty?
+      return NAMED_REFS[name]? unless name.starts_with?('#')
+      digits = name[1..]
+      cp = if digits.starts_with?('x') || digits.starts_with?('X')
+             digits[1..].to_i?(16)
+           else
+             digits.to_i?
+           end
+      return nil unless cp && 0 < cp <= Char::MAX_CODEPOINT
+      return nil if 0xd800 <= cp <= 0xdfff
+      cp.unsafe_chr
+    end
+
     # One extracted URL string, plus HOW the document yielded it.
     #
     # `declared` is true when the markup NAMED it as a link — an `href`/`src`/`action` attribute
@@ -120,7 +211,7 @@ module Gori::Discover
         at = m.begin(0)
         break if at >= cut                                 # past </head> or into <body>
         next if masked.any? { |(a, b)| at >= a && at < b } # inside a comment / <script> / <title>
-        found = (m[1]? || m[2]? || m[3]?).presence
+        found = (m[1]? || m[2]? || m[3]?).presence.try { |v| decode_refs(v) }
         break
       end
       found
@@ -185,6 +276,15 @@ module Gori::Discover
       {cut, masked}
     end
 
+    # A captured attribute value ready to become a candidate: references resolved, empty
+    # rejected, and not already `seen`. Shared by the two declared-value passes so `from_html`
+    # states each of them once.
+    private def self.declared(v : String?, seen : Set(String)) : String?
+      return nil unless v && !v.empty?
+      d = decode_refs(v)
+      d.empty? || !seen.add?(d) ? nil : d
+    end
+
     def self.from_html(body : Bytes) : Array(Found)
       # `acc`, not `out`: `out` is a Crystal keyword in ARGUMENT position, so a local named
       # that cannot be passed to `endpoints` below (it parses as an out-parameter).
@@ -193,16 +293,18 @@ module Gori::Discover
       text = scan_text(body)
       text.scan(ATTR) do |m|
         break if acc.size >= MAX_LINKS
-        v = m[1]? || m[2]? || m[3]?
-        acc << Found.new(v, true) if v && !v.empty? && seen.add?(v)
+        if v = declared(m[1]? || m[2]? || m[3]?, seen)
+          acc << Found.new(v, true)
+        end
       end
       text.scan(META) do |m|
         # The cap is per BODY, not per pass — this loop appends to the same `acc` the one above
         # filled, so without the guard a page could leave here over MAX_LINKS and hand the
         # orchestrator the excess anyway.
         break if acc.size >= MAX_LINKS
-        v = m[1]?
-        acc << Found.new(v, true) if v && !v.empty? && seen.add?(v)
+        if v = declared(m[1]?, seen)
+          acc << Found.new(v, true)
+        end
       end
       # Inline <script> — where a single-page app keeps the endpoints no attribute names, and
       # where a server-rendered page keeps its bootstrap JSON. Run over the WHOLE body rather
@@ -274,7 +376,12 @@ module Gori::Discover
       out = [] of String
       scan_text(body).scan(LOC) do |m|
         v = m[1]?
-        out << v if v && !v.empty?
+        # `<loc>` is XML text, where `&` MUST be escaped — sitemaps.org states the rule and
+        # gives `&amp;` as its example — so a sitemap URL carrying two query parameters always
+        # arrives escaped. Undoing that is reading the document, not rewriting it.
+        next unless v && !v.empty?
+        v = decode_refs(v)
+        out << v unless v.empty?
       end
       out
     end
