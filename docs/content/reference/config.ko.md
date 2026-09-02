@@ -758,6 +758,7 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리 — 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 off), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
+| `language` | TUI가 쓰는 언어. `default`는 언어 코드(`en`, `ko`) 또는 `auto`(`GORI_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG` 순으로 따름. 모르는 언어는 영어로). `ui`, `help`, `system`, `companion`은 영역별로 코드를 지정해 덮어쓰거나 `inherit`로 `default`를 따릅니다. 기본값은 영어이며 TUI만 읽습니다 — `gori run`과 `gori mcp`는 영어 그대로입니다. 모두 기본값이면 생략됩니다. [Settings 가이드](/ko/guide/settings/#appearance) 참고 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |

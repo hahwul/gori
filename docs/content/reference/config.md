@@ -776,6 +776,7 @@ Omitted until you apply or star a wordlist.
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `saved_views` | The GLOBAL History **views** library — named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
 | `companion` | Miss Ring, the mascot: `enabled` (off by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
+| `language` | What the TUI speaks. `default` is a language code (`en`, `ko`) or `auto` (follow `GORI_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`; an unknown language falls back to English). `ui`, `help`, `system` and `companion` each override it per area with a code, or `inherit` to follow `default`. English is the default; only the TUI reads this — `gori run` and `gori mcp` stay English. Omitted while everything is at its default. See the [Settings guide](/guide/settings/#appearance) |
 | `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |

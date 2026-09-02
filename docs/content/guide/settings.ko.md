@@ -69,11 +69,14 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | 섹션 | 필드 |
 |------|------|
 | **Theme** | 오프너: 테마 선택기(내장 테마와 직접 만든 테마) |
+| **Language** | Language, Interface, Help, System messages, Miss Ring |
 | **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
 | **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth |
 | **Companion** | Companion (Miss Ring), Placement, Motion, Notices |
 
 Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. [테마 가이드](/ko/guide/themes/)를 참고하세요.
+
+**Language**는 TUI가 쓰는 언어입니다. English 또는 한국어를 고르면 저장하는 순간 바로 바뀌며 재시작이 필요 없습니다. 첫 행이 전체의 기본값이고, `auto`는 셸 로케일(`GORI_LANG`, 그다음 `LC_ALL`, `LC_MESSAGES`, `LANG`)을 따르되 gori에 없는 언어면 영어로 돌아갑니다. 그 아래 네 행은 *영역별* 언어이며 기본값은 모두 **follow Language**입니다. **Interface**(탭·메뉴·라벨·키 힌트), **Help**(Help 탭, 필드 힌트, 설정 마법사, 가이드 투어), **System messages**(토스트·알림·확인창·오류 — 버그 리포트에 그대로 붙여 넣으려고 영어로 두는 경우가 많습니다), **Miss Ring**(그녀가 직접 하는 말. 전달하는 알림은 System messages를 따릅니다)입니다. 탭 이름과 도구 이름은 이 문서에서처럼 어느 언어에서나 영어 그대로입니다. 이 설정은 TUI만 읽으므로 `gori run`과 `gori mcp`의 출력은 언제나 영어입니다. 새로 설치하면 설정 마법사의 첫 단계에서 묻고, 고르는 즉시 미리 보여줍니다.
 
 Companion은 기본값이 off입니다. 켜면 금빛 고리 마스코트 Miss Ring이 처음 나타나는 프레임에서 인사를 건네고, 이후 스스로 눈을 깜빡이고 윙크하며 백그라운드 작업 결과에 반응하다가, 90초간 아무 입력이 없으면 잠들어 애니메이션을 완전히 멈춥니다. 25초에 한 번쯤은 일곱 가지 idle 제스처 중 하나를 무작위로 꺼내기도 합니다 — 하품, 미소, 실눈, 뚱한 표정, 알겠다는 듯 바뀌는 궁금한 표정, 눈을 깜빡여 털어 내는 작은 콧방귀, 그리고 눈을 가늘게 뜬 "흠". 이 표정들은 눈만큼이나 눈썹이 만듭니다. 편안하게 열린 얼굴에서는 두 속눈썹이 함께 올라가고, 찌푸린 얼굴에서는 뒤집히며, 갸웃하는 얼굴에서는 한 번에 하나씩 움직입니다. 결과에 대한 반응도 표정 하나가 아니라 호를 그립니다. 결과가 도착하면 정점을 찍고 — 활짝 웃거나, 긴장하거나, 움찔하거나 — 1.5초 뒤에 그것의 조용한 버전으로 가라앉아 반응이 끝날 때까지 머뭅니다. Motion을 `calm`으로 두면 눈 깜빡임 주기가 절반이 되고 제스처는 꺼집니다. SSH나 배터리 환경용입니다. `still`은 깜빡임까지 꺼서 Miss Ring이 스스로 하는 움직임이 하나도 남지 않고, 다시 그리는 일도 없습니다 — 90초를 기다리지 않은 잠든 상태와 같은 비용이며, asciinema 녹화나 스크린 리더, 공유 tmux 팬을 위한 모드입니다. 반응은 세 모드 모두에서 그대로 남습니다. `still`은 그중 말 그대로 '움직임'인 부분, 즉 오류에 움찔하는 동작만 끄고 표정은 유지합니다. 백그라운드 작업이 도는 동안 — fuzz, discover, mine, 전송 중인 repeater — Miss Ring은 배지 칸에서 점이 위아래로 움직이는 표시를 답니다. 상태 줄의 활동 스피너와 같은 카운터로 움직이므로 둘의 박자가 어긋나지 않습니다. 이게 가장 유용한 곳은 `body` 배치입니다. 그 화면에서는 활동 칩이 보이지 않으므로, 작업이 아직 돌고 있다는 사실을 알려 주는 것은 본문 구석의 Miss Ring뿐입니다. 반응이 이 배지보다 우선하므로 작업 도중 실패는 여전히 `×`로 나타납니다. 작업이 도는 동안에는 잠들지 않으며, 에이전트가 MCP로 시작한 작업도 Miss Ring을 깨웁니다. 세션에서 Miss Ring이 먼저 꺼내는 말은 이 인사뿐이고, gori 실행당 한 번만 나옵니다. Notices를 끄면 아무 말도 하지 않습니다.
 

@@ -2101,3 +2101,41 @@ keeps refusing.
 
 A 3xx baseline is deliberately NOT included. `302 → /login` is a denial and `302 → /dashboard` is
 a grant, and only the `Location` separates them, which is exactly what `redirect_verdict` reads.
+
+### 2026-09-02: the TUI speaks the operator's language, per area, and only the TUI
+
+Refines: [P0](#p0), [P1](#p1). Settled by the i18n series (#TBD).
+
+The TUI's text was English literals in render code — some 3,500 of them, half in tables (verb
+definitions, Help sections, settings fields) and half inline. Making it speak Korean set three
+shapes, each chosen against a heavier alternative.
+
+**The English string is the key.** `I18n.ui("History")`, `I18n.sys("sent → %{host}", host: h)`:
+a call reads as the text it draws, English needs no catalog, a missing entry falls back to the
+msgid, and a translation happens where text is DRAWN, never where a table is built — so the verb
+registry, the Help sections and the settings fields stay English in memory and a live switch is a
+repaint (`I18n.revision` for the few caches that bake text, like `Theme.revision`). The heavier
+alternative, key-based catalogs (`t("tab.history")`) with English as one more locale, would have
+rewritten every call site into an identifier and made the code unreadable next to the screen it
+draws. The price of msgids is that rewording English can orphan a translation in silence; the
+seam spec `spec/i18n_catalog_spec.cr` holds the catalog to the source in both directions for
+exactly that reason, and the Korean file (`src/gori/i18n/locales/ko.json`) is embedded at compile
+time, the way payload sets are.
+
+**Four domains, one setting.** `ui` (labels, menus, key legends), `help` (explanatory prose),
+`system` (toasts, notifications, confirm bodies, errors) and `companion` (Miss Ring's own lines)
+each resolve their own language from `Settings.language_*` — a default plus per-domain overrides
+that follow it unless set. The split is by CHANNEL, not by content: an operator who keeps the
+interface English to match the docs can still read Help in Korean, and one who keeps system
+messages English can paste a toast into a bug report. Tab and tool names are not translated in
+any language, as the docs already do not. The default is `en`, not `auto`: an upgrade must not
+flip an existing install's screen because its shell exports a Korean locale; a fresh install is
+asked on the wizard's first step, which is itself the preview.
+
+**Only the TUI installs it.** `Tui.apply_language` is the one call that turns the setting into
+live languages; `gori run` and `gori mcp` never make it, so a core module that phrases a sentence
+through `I18n` (a peer notice) is still English on the headless surfaces, and their output is
+unchanged by an operator's choice. The pre-work this needed is recorded in the same series: label
+geometry measured in cells (`Screen.draw_width`) rather than characters, the status strip's
+glyph riding a `kind` rather than an English prefix, and settings choices storing codes and
+drawing labels rather than parsing a label back.
