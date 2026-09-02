@@ -86,31 +86,34 @@ describe "status-strip wording" do
   end
 end
 
-# `Runner#format_status_message` prefixes the strip with a spinner / ✓ / ✗ by MATCHING THE
-# MESSAGE TEXT. That makes it the one place where renaming a toast silently changes how it
-# looks — and it did: `fuzz error:` became `fuzzer error:` for the sake of one noun per engine,
-# and the ✗ simply stopped appearing. Nothing failed; the mark was gone.
-describe "status glyph prefixes" do
-  it "cover every engine's error toast" do
+# The strip's spinner / ✓ / ✗ used to come from MATCHING THE MESSAGE TEXT against English
+# prefixes, which made `format_status_message` the one place where renaming a toast silently
+# changed how it looked — and it did: `fuzz error:` became `fuzzer error:` for the sake of one
+# noun per engine, and the ✗ simply stopped appearing. The glyph now rides a KIND passed with
+# the toast (`status(message, :error)`), so the wording — or the language it is drawn in — is
+# free to change. What this guards is the other direction: an engine error toast that forgot
+# to say it is one.
+describe "status glyph kinds" do
+  it "mark every engine's error toast as :error" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     # Only what reaches the STRIP. The same `<x> error:` shape is also used for text drawn
     # INTO a pane — `config error:` in the Fuzzer/Miner config bodies, `upstream error:` in a
     # History detail line, `wordlist error:` as a returned string — and those are not status
     # messages, so no glyph applies to them.
     emitted = [] of String
+    unmarked = [] of String
     Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
-      File.read(path).lines.each do |line|
+      File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status\(|@toast =|toast\()/)
+        next unless line.matches?(/"([a-z]+ error): #\{/)
         line.scan(/"([a-z]+ error): #\{/) { |m| emitted << m[1] }
+        unmarked << "#{File.basename(path)}:#{i + 1}" unless line.includes?(", :error)")
       end
     end
     emitted.uniq.sort.should eq(["discover error", "fuzzer error", "miner error",
                                  "probe error", "repeater error", "sequencer error"])
-    # Every one of them must be in the table that earns the ✗.
-    runner = File.read(File.join(root, "runner.cr"))
-    table = runner[/ERROR_PREFIXES = \[(.*?)\]/m]?.should_not be_nil
-    emitted.uniq.each do |prefix|
-      runner.should contain(%("#{prefix}:"))
-    end
+    unmarked.should be_empty
+    # …and the text-matching table is gone for good, not merely bypassed.
+    File.read(File.join(root, "runner.cr")).should_not contain("ERROR_PREFIXES")
   end
 end

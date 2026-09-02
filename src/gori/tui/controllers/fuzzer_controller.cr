@@ -1142,7 +1142,7 @@ module Gori::Tui
         # feed (the AI firehose logs freely; only the human center suppresses it).
         @host.jobs.finish(v.job_id, :error, ev.message)
         log_event(v, :error, "Fuzzer: #{ev.message} on #{v.summary}")
-        @host.status("fuzzer error: #{ev.message}")
+        @host.status("fuzzer error: #{ev.message}", :error)
       end
     end
 
@@ -1188,7 +1188,7 @@ module Gori::Tui
       msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}"
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
-      @host.status(msg) if Settings.notify_toast?
+      @host.status(msg, :done) if Settings.notify_toast?
     end
 
     # #124: append every fuzz completion/error to the store event feed UNCONDITIONALLY
@@ -1280,7 +1280,7 @@ module Gori::Tui
         return
       end
       if v.running?
-        @host.status("fuzz running — ^X to stop")
+        @host.status("fuzz running — ^X to stop", :busy)
         return
       end
       # Flush any trailing Done/Error from a just-finished run before we rebind
@@ -1298,7 +1298,7 @@ module Gori::Tui
       total = begin
         engine.total
       rescue ex
-        @host.status("fuzz: #{ex.message}")
+        @host.status("fuzz: #{ex.message}", :error)
         return
       end
       if total.nil? || total > CONFIRM_THRESHOLD
@@ -1391,7 +1391,7 @@ module Gori::Tui
         end_worker(v)
       end
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}")
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}", :busy)
     end
 
     # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it
@@ -1416,7 +1416,7 @@ module Gori::Tui
     def fuzz_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
-      @host.status("stopping…")
+      @host.status("stopping…", :busy)
     end
 
     def results_saveable? : Bool

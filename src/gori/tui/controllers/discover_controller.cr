@@ -191,7 +191,7 @@ module Gori::Tui
         return
       end
       run.request_stop
-      @host.status("stopping #{run.label(40)}…")
+      @host.status("stopping #{run.label(40)}…", :busy)
     end
 
     # Remove the selected run's row — the manual half of retention, since the list is append-
@@ -452,7 +452,7 @@ module Gori::Tui
         msg = "Discover: #{ev.message} on #{run.target}"
         log_event(run, :error, msg)
         push_notification(run, :error, msg)
-        @host.status("discover error: #{ev.message}")
+        @host.status("discover error: #{ev.message}", :error)
       end
     end
 
