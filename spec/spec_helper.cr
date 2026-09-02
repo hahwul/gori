@@ -20,6 +20,20 @@ require "../src/gori"
 # assert the line swap in an IO::Memory of their own.
 Gori::Settings.warning_io = nil
 
+# Pin the suite to English. `Tui.apply_language` is the only thing that installs the operator's
+# language and no spec calls it, but the pin costs one line and keeps the ~1,100 TUI examples
+# that assert English text from ever depending on the developer's own LANG.
+Gori::I18n.apply("en", env: {} of String => String)
+
+# Run the block with every domain in `code`, then back to English — for the examples that
+# assert a translated string lands where the English one did.
+def with_locale(code : String, &)
+  Gori::I18n.apply(code, env: {} of String => String)
+  yield
+ensure
+  Gori::I18n.apply("en", env: {} of String => String)
+end
+
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
 # The chord a SHIFTED letter actually produces, built the way the TUI builds it rather than

@@ -13,6 +13,7 @@ private RESET_FIXTURE = <<-JSON
     "statusline": { "command": "echo hi" },
     "display": { "history_time_format": "relative", "wrap_lines": false },
     "companion": { "enabled": true, "notices": false },
+    "language": { "default": "ko", "system": "en" },
     "notifications": { "bell": true, "toast": false },
     "general": { "confirm_quit": true, "clipboard_osc52": false },
     "update": { "notified_version": "9.9.9", "checked_at": 1234 },
@@ -121,6 +122,8 @@ describe "Settings.reset_to_factory" do
       Gori::Settings.editor.should eq(Gori::Settings::DEFAULT_EDITOR)
       Gori::Settings.wrap_lines?.should eq(Gori::Settings::DEFAULT_WRAP_LINES)
       Gori::Settings.command_modifier.should eq(Gori::Settings::DEFAULT_COMMAND_MODIFIER)
+      Gori::Settings.language_default.should eq(Gori::Settings::DEFAULT_LANGUAGE)
+      Gori::Settings.language_system.should eq(Gori::Settings::DEFAULT_LANGUAGE_OVERRIDE)
       Gori::Settings.keymap_overrides.should be_empty
       Gori::Settings.tab_prefs.should be_empty
       Gori::Settings.env_vars.should be_empty

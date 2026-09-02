@@ -10,6 +10,7 @@ require "./settings/scan_rules"
 require "./settings/oast_providers"
 require "./settings/display"
 require "./settings/companion"
+require "./settings/language"
 require "./settings/tabs"
 require "./settings/keymap"
 require "./settings/decoder"
@@ -273,6 +274,7 @@ module Gori
       parse_statusline(root["statusline"]?)
       parse_display(root["display"]?)
       parse_companion(root["companion"]?)
+      parse_language(root["language"]?)
       parse_notifications(root["notifications"]?)
       parse_general(root["general"]?)
       parse_update(root["update"]?)
@@ -918,7 +920,7 @@ module Gori
     # The `document_keys - SECTION_KEYS` guard in spec/settings/profile_spec.cr catches a
     # rename, and catches an addition as soon as any example populates the new section.
     SECTION_KEYS = %w[
-      theme mouse pretty_bodies layout statusline display companion notifications general update
+      theme mouse pretty_bodies layout statusline display companion language notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
       hooks colormarker saved_views
@@ -1270,6 +1272,7 @@ module Gori
       reset_statusline
       reset_display
       reset_companion
+      reset_language
       reset_notifications
       reset_general
       reset_update
@@ -1313,6 +1316,7 @@ module Gori
           serialize_statusline(j)
           serialize_display(j)
           serialize_companion(j)
+          serialize_language(j)
           serialize_notifications(j)
           serialize_general(j)
           serialize_update(j)

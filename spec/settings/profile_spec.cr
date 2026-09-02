@@ -47,6 +47,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "statusline": { "command": "echo hi" },
     "display": { "history_time_format": "relative" },
     "companion": { "enabled": true, "notices": false },
+    "language": { "default": "ko" },
     "notifications": { "bell": true, "toast": false },
     "general": { "confirm_quit": false, "clipboard_osc52": false },
     "update": { "notified_version": "9.9.9" },
@@ -87,6 +88,8 @@ private def with_every_section_populated(&)
   time_format = Gori::Settings.history_time_format
   companion = Gori::Settings.companion?
   companion_notices = Gori::Settings.companion_notices?
+  language = {Gori::Settings.language_default, Gori::Settings.language_ui, Gori::Settings.language_help,
+              Gori::Settings.language_system, Gori::Settings.language_companion}
   bell = Gori::Settings.notify_bell?
   toast = Gori::Settings.notify_toast?
   osc52 = Gori::Settings.clipboard_osc52?
@@ -129,6 +132,7 @@ private def with_every_section_populated(&)
     Gori::Settings.history_time_format = time_format
     Gori::Settings.companion = companion
     Gori::Settings.companion_notices = companion_notices
+    Gori::Settings.language_default, Gori::Settings.language_ui, Gori::Settings.language_help, Gori::Settings.language_system, Gori::Settings.language_companion = language
     Gori::Settings.notify_bell = bell
     Gori::Settings.notify_toast = toast
     Gori::Settings.clipboard_osc52 = osc52
