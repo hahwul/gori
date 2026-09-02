@@ -113,9 +113,19 @@ private class PoisonOrigin
       tail = req.target.lchop("/f/")
       ident = "ID:#{tail}"
       if tail == @poison_tail
-        # framed body is 4 bytes; a WHOLE extra response is glued on behind it
+        # framed body is 4 bytes; a WHOLE extra response is glued on behind it.
+        #
+        # ONE write, not two. `TCPSocket#sync` is true by default, so `conn << resp << ghost`
+        # is two `write` syscalls and therefore two segments — the residue then arrives after
+        # the response instead of with it, and whether it has landed by the time
+        # `checkout_state` looks is a race this spec loses roughly one full-suite run in three
+        # (it never loses it alone, which is what made it read as a mystery). A real
+        # out-of-process origin whose body over-ran its Content-Length puts the leftover in
+        # the same send as the response, which is the case under test; residue still in
+        # flight is the other one, and `recycle`'s early retire is explicitly best-effort
+        # about it.
         ghost = "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nID:GHOST!"
-        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nPOIS" << ghost
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nPOIS#{ghost}"
         conn.flush
       else
         conn << "HTTP/1.1 200 OK\r\nContent-Length: #{ident.bytesize}\r\n\r\n" << ident
