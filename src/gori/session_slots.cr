@@ -79,6 +79,30 @@ module Gori
       @mutex.synchronize { @slots.find(&.name.==(name)) }
     end
 
+    # The slot already holding `name` CASE-INSENSITIVELY, ignoring `except` (the row a rename
+    # is moving), or nil when the name is free. The WRITE side's question, and a different one
+    # from `find`.
+    #
+    # `find` is exact and must stay exact: `activate`, `--slot NAME` and `Bindings`' per-slot
+    # tables are all keyed by the literal string. But two slots called `admin` and `Admin` are
+    # two rows a person reads as one, so `Authorize::Plan.reject_duplicate_names` refuses the
+    # whole set (`PlanError::DuplicateIdentity`) and the TUI's identity form has always
+    # rejected the second one. The CLI and MCP writers asked `find`, so they created the pair
+    # happily — and from then on EVERY Authorize run in that project aborted, on all three
+    # surfaces, until an operator noticed and renamed one by hand. The rule lives here for the
+    # same reason the single-baseline rule does: three copies of it is how the surfaces came
+    # to disagree.
+    #
+    # Returns the EXISTING spelling so a refusal can name it — "a slot called \"Admin\" already
+    # exists" is baffling next to a list that shows `admin`.
+    def name_clash(name : String, except : String? = nil) : String?
+      needle = name.downcase
+      skip = except.try(&.downcase)
+      @mutex.synchronize do
+        @slots.find { |s| (d = s.name.downcase) == needle && d != skip }.try(&.name)
+      end
+    end
+
     # Bumped on every list edit and every activation. `Bindings` folds this into its own `rev`
     # so a consumer caching a merged snapshot (`Rules`, on the proxy hot path) repaints when
     # the send context changes and not only when a value does.
