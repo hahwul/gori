@@ -1009,7 +1009,7 @@ describe Gori::Proxy::Server do
     # next request be consumed as the missing body. The decision has to come from what gori
     # sent, not from what the origin's headers claim.
     done = Channel(Nil).new(1)
-    upstream_after = Channel(Int32).new(1)
+    upstream_after = Channel(String).new(1)
     conns = Atomic(Int32).new(0)
     origin = TCPServer.new("127.0.0.1", 0)
     origin_port = origin.local_address.port
@@ -1019,13 +1019,22 @@ describe Gori::Proxy::Server do
         if Gori::Proxy::Codec::Http1.read_head(conn)
           conn << "HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n"
           conn.flush
-          # 0 = gori closed the upstream (what we want). -1 = held open in silence, i.e.
-          # parked for reuse. >0 = it pushed something at an origin still reading for a body.
+          # "closed" = gori released the upstream (what we want). Anything else names itself:
+          # a timeout is the socket held open in silence, i.e. parked for reuse, and a byte
+          # count is gori pushing at an origin still reading for a body.
+          #
+          # A SENTENCE and not a number, because the two ways this can go wrong used to share
+          # one value. A bare `rescue` folded `IO::TimeoutError` into the same -1, so a failure
+          # said `Expected: 0 got: -1` and could not tell "gori parked the socket" — the defect
+          # this example exists for — from "the read timed out", which is a fact about the
+          # machine. Whichever it is, the next failure now says so and how long it waited.
           conn.read_timeout = 2.seconds
+          t = Time.instant
           upstream_after.send(begin
-            conn.read(Bytes.new(64))
-          rescue
-            -1
+            n = conn.read(Bytes.new(64))
+            n == 0 ? "closed" : "pushed #{n} bytes"
+          rescue ex
+            "#{ex.class} after #{(Time.instant - t).total_milliseconds.round.to_i}ms"
           end)
         end
         conn.close
@@ -1049,10 +1058,12 @@ describe Gori::Proxy::Server do
     # answered — this is the half that keeps the upstream release above from ever mattering.
     client << "GET http://127.0.0.1:#{origin_port}/next HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
     client.flush
+    t0 = Time.instant
     client_after = begin
-      client.read(Bytes.new(64))
-    rescue
-      -1
+      n = client.read(Bytes.new(64))
+      n == 0 ? "closed" : "answered #{n} bytes"
+    rescue ex
+      "#{ex.class} after #{(Time.instant - t0).total_milliseconds.round.to_i}ms"
     end
     client.close
 
@@ -1060,9 +1071,9 @@ describe Gori::Proxy::Server do
     proxy.stop
 
     got.should contain("417 Expectation Failed")
-    upstream_after.receive.should eq(0) # upstream released, not parked for reuse
-    client_after.should eq(0)           # client connection closed, second request unanswered
-    conns.get.should eq(1)              # and no second origin connection was ever dialed
+    upstream_after.receive.should eq("closed") # upstream released, not parked for reuse
+    client_after.should eq("closed")           # client connection closed, second request unanswered
+    conns.get.should eq(1)                     # and no second origin connection was ever dialed
     sink.responses.size.should eq(1)
     sink.responses.first.status.should eq(417)
   end
