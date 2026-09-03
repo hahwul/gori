@@ -95,6 +95,17 @@ gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
 
 발견은 이웃과 어울리지 않는 행입니다 — 나머지가 `404`인데 혼자 뜬금없는 `200`이나 `500`, 또는 페이로드 하나가 다르게 안착하며 길이가 튀는 곳. 그 행은 결론이 아니라 실마리입니다. 결과에서 `Space` 메뉴로 **Repeater**에 넘기거나 **Comparer**로 기준선과 diff를 떠서, 튀어나온 그 페이로드 하나를 손으로 계속 파고드세요.
 
+실행 전체를 남기려면, 끝난 뒤 에디터를 READ 모드에 둔 채 **`Shift-S`** 를 누르세요. 스윕이 도는 동안 gori는 완전한 요청/와이어/응답 행을 전부 디스크에 비공개로 스풀하고, 화면은 5,000행 / 64 MiB로 제한된 창을 유지합니다. Shift-S는 그 완전한 스풀을 프로젝트로 승격시킵니다. 마지막으로 성공한 실행은 해당 Fuzzer 세션과 함께 제한된 창으로 자동으로 다시 열리고, **Space → Run history** 로 더 오래된 실행을 고를 수 있으며, CLI/MCP는 아카이브 전체를 페이지 단위로 읽습니다. 헤드리스에서는 영구 저장을 명시하고 id로 들여다봅니다:
+
+```bash
+gori run fuzz save <flow-id> --auto --wordlist params.txt --mc 200,302
+gori run fuzz list
+gori run fuzz show RUN_ID
+gori run fuzz show RUN_ID RESULT_INDEX --format json
+```
+
+원래의 `gori run fuzz …`는 계속 일회성이므로, 업그레이드했다고 기존 스크립트가 갑자기 프로젝트 데이터베이스를 불리기 시작하지는 않습니다.
+
 앱이 아예 이름조차 밝히지 않은 숨은 파라미터는 다른 일입니다. Fuzzer가 볼 수 있는 값을 변형하는 곳에서, **Miner**는 서버가 받아 주지만 광고하지 않는 후보 이름을 추측합니다 — [Param Miner](/ko/guide/scanning/#param-miner)를 보세요.
 
 ## 다음 단계 {#next-steps}

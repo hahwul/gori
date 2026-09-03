@@ -141,6 +141,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣는다 — 모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`) — 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부른다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶인다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $AUTH`)을 준다. `include_response_body`는 저장된 마지막 응답 본문을 인라인한다 |
+| `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다 — `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시됩니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
@@ -180,7 +181,8 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | 커스텀 매치 규칙 관리와 스캔 규칙 활성화 / 비활성화 |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | `oast_start`가 사용할 OAST 프로바이더 관리 |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다 — 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송, 리트라이, 잘린 응답)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `save_results:true`는 바이트 상한이 걸린 비동기 기록자를 통해 **모든** 행을 영구 저장하고 데이터베이스 `run_id`를 돌려줍니다. 저장소 백프레셔가 걸리면 나가는 트래픽은 멈추지 않고 저장만 실패로 표시됩니다. 이것은 상한이 걸린 선택적 라이브 잡 캐시나 `record_history`와는 별개입니다. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다 — 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송, 리트라이, 잘린 응답)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
+| `delete_fuzz_run` | 영구 퍼즈 실행 하나와 그 결과를 삭제합니다. 살아 있는 기록자가 확인되면 거부합니다. `force_stale:true`는 죽은 프로세스가 남긴 `running`/`saving` 행을 지우며, 다른 gori가 저장 중일 때는 절대 쓰면 안 됩니다 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 — 접근 제어 결함. 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |

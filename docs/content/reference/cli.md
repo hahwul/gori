@@ -62,7 +62,9 @@ gori run <subcommand> [verb] [options]
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
 | `repeater h2` | Send a field-native HTTP/2 request from an ordered HPACK field list |
+| `repeater move <id>` · `delete <id>…` | Reorder the workbench strip by tab number, or close one or more saved sessions |
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
+| `fuzz save` · `list` · `show` · `delete` | Store a sweep's every result permanently, then page and prune the archive |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
 | `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
 | `authorize [<flow-id>…]` | Replay captured flows under several identities and judge each response against a baseline (broken access control) |
@@ -80,7 +82,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Decode, verify, brute-force, or forge a Flask / Rack / Django session cookie |
 | `decoder <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes |
-| `issues` · `create` · `update` | List / export issues, or write issues |
+| `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
@@ -340,6 +342,15 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
 | `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | As above |
 
+**`repeater move <repeater-id>`**: reorder the workbench strip. `--to N` names the 1-based tab number `repeater list` prints; `--up` / `--down` step one place. Pass one of the three — passing both `--to` and a direction is refused rather than resolved, and a `--to` outside `1-<count>` is refused rather than clamped, so a session never lands somewhere the command did not name. `--format json` reports `from_index` / `to_index` / `moved`.
+
+```bash
+gori run repeater move 5 --to 1        # make it the first tab
+gori run repeater move 5 --down
+```
+
+**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: close one or more saved sessions and renumber the strip. `--yes` is required, and every id is checked before the first delete — one unknown id refuses the whole call, so a typo cannot half-empty the workbench. Each line names the tab number the session *had* (read once, before anything shifts); `--format json` returns `deleted` (with `was_tui_index`), `failed`, and `remaining`. A session that could not be removed leaves a non-zero exit.
+
 **`repeater minimize <repeater-id>`**: shrink a request to the smallest form that still reproduces the response. `--apply` writes the result back into the session; `--verbatim` sends the stored bytes as-is (body params stop being candidates, because their framing could not be kept honest); `-k`/`--insecure`, `--allow-unscoped` and `--format` behave as above.
 
 **`repeater h2`**: send a field-native HTTP/2 request from an ordered HPACK field list, so duplicate or misordered pseudo-headers can be scripted.
@@ -481,6 +492,7 @@ gori run session rm admin
 | `list` (default) | `--show-values` (print header values instead of `[REDACTED]`), `--format text\|json` |
 | `show <name>` | `--show-values`, `--format text\|json` |
 | `add` | `--name`, `--set 'Name: value'` (repeatable), `--remove NAME` (repeatable), `--rule NAME` (repeatable), `--baseline` |
+| `from-flow <flow-id>` | `--name` (required), `--baseline`, `--show-values`. Build the overlay from a captured login exchange instead of typing it |
 | `edit <name>` | The same flags, plus `--clear-set` / `--clear-remove` / `--clear-rules`. A collection flag REPLACES that whole collection; one you omit is left alone |
 | `rm`\|`delete <name>` | Any extract rule it claimed goes back to writing the global binding table |
 | `baseline <name>` | Move the Authorize baseline (exactly one slot holds it) |
@@ -488,6 +500,15 @@ gori run session rm admin
 All verbs take `--project=NAME` / `--db=PATH`.
 
 A `--set` value goes through the same header parser the TUI form uses: a name must be an RFC 7230 token and a value may not contain CR or LF, and a line that fails is refused by name rather than dropped.
+
+**`from-flow` builds a slot from a captured login.** Point it at the flow that logged in and gori reads that flow's *response* into the overlay: every `Set-Cookie` `name=value` folded into one `Cookie:` header (attributes dropped, and a cookie the response *deletes* skipped), then the response's own `Authorization`, else a top-level `access_token` / `token` / `id_token` string in a JSON body as `Authorization: Bearer <value>`, else the request's own `Authorization`.
+
+```bash
+gori run session from-flow 4211 --name admin
+gori run repeater 900 --slot admin        # re-send flow 900 as that identity
+```
+
+The overlay is **literal** — the bytes login handed back, saved with the project. It does not re-authenticate, so a token that *rotates* (a short-lived JWT, a per-request CSRF value) belongs on the extract-rule path instead: `gori run rewriter extract` plus `--bind-from FLOW`, which re-mints the value once per run. The name is checked before the flow is read, so a duplicate is reported as a name clash rather than as "that flow is not a login".
 
 **There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span — and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
 
@@ -749,6 +770,7 @@ Write issues from scripts with `create` / `update`:
 ```bash
 gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
+gori run issues delete 7
 ```
 
 | Option | Description |
@@ -757,6 +779,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 | `--export=PATH` | Write to `PATH` instead of STDOUT (bytes verbatim; STDOUT is escape-scrubbed) |
 | `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+| `delete <id>` | Delete the issue and its evidence links. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log — the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
 
