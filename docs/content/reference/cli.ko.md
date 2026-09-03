@@ -331,7 +331,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | Option | Description |
 |--------|-------------|
 | `--diff` | 세션에 마지막으로 저장된 응답과 비교 |
-| `--verbatim` | 저장된 바이트를 정확히 그대로 전송: `$VAR` 확장, 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음 |
+| `--verbatim` | 저장된 바이트를 정확히 그대로 전송: `$VAR` 확장(프로젝트 env 변수 **와** 세션 바인딩 모두 — `$NAME`이 와이어에 리터럴로 나감), 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음. 활성 `--slot`의 헤더 오버레이는 계속 적용됩니다 — *어떤 바이트*가 아니라 *누구로서* 보낼지에 답하는 옵션이기 때문입니다 |
 | `--reframe-grpc` | HTTP/2 전용: 실제로 전송되는 본문에 맞춰 gRPC 5바이트 길이 접두사를 다시 계산합니다(길이가 바뀐 단항 메시지용). 기본값은 꺼짐 — 페이로드와 어긋나는 접두사는 표준적인 파서 테스트이므로 쓴 그대로 나갑니다 |
 | `--message=TEXT` | WebSocket: 보낼 텍스트 메시지 (반복 가능; 세션에 저장된 메시지를 대체) |
 | `--message-frame=SPEC` | WebSocket: 형태를 명시한 프레임 하나. 쉼표로 구분한 `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, 그리고 `hex=`/`b64=`/`text=` 중 하나 |

@@ -810,3 +810,292 @@ module Gori::CLI::Run
     ws_out_messages(store, id, override, verbatim, evidence)
   end
 end
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# `verbatim` at the same seam (#910).
+#
+# PROVENANCE answers WHO WROTE the bytes; VERBATIM is the operator saying, about bytes that
+# ARE their own draft, "send these as they are". `Plan.expand_requests` deliberately leaves a
+# DECLARED binding for `Repeater::Sender` so that a tab carrying `Authorization: Bearer
+# $SESSION` picks up the live identity — and every `verbatim` surface set the BUILDER flag
+# (`expand_request: false`) and nothing else, so the seam substituted anyway. The two
+# intentions genuinely collide and the collision was resolved silently in favour of the
+# binding: a stored `GET /api?$TOKEN=1` reached the origin as `GET /api?SECRETTOKEN123=1`,
+# a request nobody wrote, with a live credential in the position the operator chose as a
+# PAYLOAD and in the target's access log.
+#
+# The three surfaces are asserted THROUGH their own glue (the real `session_plan_options`,
+# the real MCP tool), not through a hand-built `PlanOptions` — `PlanOptions` is the thing
+# that was wrong, and this seam has drifted between exactly these surfaces twice before.
+
+module Gori::CLI::Run
+  # `gori run repeater send --verbatim`'s row → options mapping, reached the only way a spec
+  # can. Distinctly named from the wrappers in `spec/cli/run_spec.cr` — all of them compile
+  # into this one module in a full run.
+  def self.session_plan_options_prov_spec(rec : Gori::Store::RepeaterRecord, *,
+                                          verbatim : Bool) : Gori::Repeater::PlanOptions
+    session_plan_options(rec, false, nil, verbatim)
+  end
+end
+
+# A saved repeater session whose stored request is exactly `head` — what `repeater send` sends.
+private def seam_repeater(store, target : String, head : String) : Gori::Store::RepeaterRecord
+  id = store.insert_repeater(target, head.to_slice, false, true, nil, 0)
+  store.flush
+  store.get_repeater(id).not_nil!
+end
+
+# The WS twin of `RecordingOrigin`: completes the upgrade, keeps the handshake head and every
+# client frame, echoes each one back, then closes. The handshake is the half `send_ws` used to
+# expand behind its own back.
+private class WsRecordingOrigin
+  getter port : Int32
+  getter handshake : Bytes = Bytes.empty
+  getter frames = [] of String
+
+  def initialize(@server : TCPServer = TCPServer.new("127.0.0.1", 0))
+    @port = @server.local_address.port
+  end
+
+  def serve : Nil
+    spawn do
+      next unless conn = @server.accept?
+      conn.read_timeout = 5.seconds
+      next unless head = Gori::Proxy::Codec::Http1.read_head(conn)
+      @handshake = head.dup
+      key = String.new(head).each_line
+        .find(&.downcase.starts_with?("sec-websocket-key:"))
+        .try { |line| line.split(':', 2)[1].strip } || ""
+      accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Repeater::WsEngine::GUID))
+      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+              "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+      conn.flush
+      while (frame = Gori::Proxy::WS.read_frame(conn)) && frame.data?
+        @frames << String.new(frame.payload)
+        conn.write(Gori::Proxy::WS.encode(frame.opcode, frame.payload, mask: false))
+        conn.flush
+      end
+      conn.write(Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
+      conn.flush
+      conn.close
+    rescue
+    ensure
+      @server.close rescue nil
+    end
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+end
+
+describe "verbatim at the send seam (#910)" do
+  it "gori run repeater send --verbatim leaves a DECLARED binding literal on the wire" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(2)
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        rec = seam_repeater(store, "http://127.0.0.1:#{origin.port}",
+          "GET /api?$TOKEN=1&sort=asc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+
+        plan = Gori::Repeater::Plan.build(
+          Gori::CLI::Run.session_plan_options_prov_spec(rec, verbatim: true), outbound_any)
+        plan.send.error.should be_nil
+        wire = String.new(origin.requests[0])
+        wire.should contain("/api?$TOKEN=1&sort=asc")
+        wire.should_not contain("SECRETTOKEN123")
+
+        # THE COMPLEMENT — the same stored row, same binding, without the flag. A tab's
+        # `$NAME` is deliberately deferred to this seam so the live identity reaches it, and
+        # that has NOT changed: `--verbatim` is the only difference between these two sends.
+        plain = Gori::Repeater::Plan.build(
+          Gori::CLI::Run.session_plan_options_prov_spec(rec, verbatim: false), outbound_any)
+        plain.send.error.should be_nil
+        String.new(origin.requests[1]).should contain("/api?SECRETTOKEN123=1")
+      end
+      origin.close
+    end
+  end
+
+  it "reaches MCP send_request{repeater_id, verbatim:true}, and its report describes that wire" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      rec = seam_repeater(store, "http://127.0.0.1:#{origin.port}",
+        "GET /api?$TOKEN=1&sort=asc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+      # BEFORE `with_layer`, and that order is load-bearing: `Tools#bind_binding_layer` installs
+      # its OWN freshly-loaded `Bindings` as `Env.layer` at construction, so a table bound first
+      # is replaced by an empty one and every "the token did not go out" assertion below would
+      # pass with nothing to substitute.
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        r = tools.call("send_request",
+          JSON.parse(%({"repeater_id":#{rec.id},"verbatim":true,"allow_unscoped":true})))
+        r.is_error.should be_false
+        wire = String.new(origin.requests.first)
+        wire.should contain("/api?$TOKEN=1&sort=asc")
+        wire.should_not contain("SECRETTOKEN123")
+        # `effective_request` is documented as "the request actually put on the wire" and is
+        # derived from `Plan#wire_bytes`, so it moves with the seam rather than describing the
+        # stored draft.
+        JSON.parse(r.text)["effective_request"]["target"].as_s
+          .should eq("/api?$TOKEN=1&sort=asc")
+      end
+      origin.close
+    end
+  end
+
+  it "reaches MCP send_request{raw, verbatim:true} — the hand-authored half" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(2)
+      # Constructed before the layer — see the note in the `repeater_id` example above.
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        raw = "GET /api?$TOKEN=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        url = "http://127.0.0.1:#{origin.port}/"
+
+        r = tools.call("send_request", JSON.parse(
+          {"url" => url, "raw" => raw, "verbatim" => true, "allow_unscoped" => true}.to_json))
+        r.is_error.should be_false
+        String.new(origin.requests[0]).should contain("/api?$TOKEN=1")
+        String.new(origin.requests[0]).should_not contain("SECRETTOKEN123")
+
+        # Complement: `raw` WITHOUT the flag is still a draft, and a draft's `$NAME` still
+        # resolves at the seam — that is the behaviour a Repeater tab depends on.
+        r2 = tools.call("send_request", JSON.parse(
+          {"url" => url, "raw" => raw, "allow_unscoped" => true}.to_json))
+        r2.is_error.should be_false
+        String.new(origin.requests[1]).should contain("/api?SECRETTOKEN123=1")
+      end
+      origin.close
+    end
+  end
+
+  it "takes the scope verdict on the bytes that GO OUT, not on their expansion" do
+    with_prov_store do |store|
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        scope = Gori::Scope.load(store)
+        scope.add("include", "string", "/api?$TOKEN=1").should be_true
+        scope.enable_sandbox
+        ob = Gori::Outbound.cli(scope, false)
+        captured = "GET /api?$TOKEN=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+
+        # Under verbatim the request line on the wire is the literal one, so THAT is the URL
+        # the Sandbox allowlist is asked about — and this rule includes it.
+        literal = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([captured.to_slice],
+          expand_request: false, expand_bindings: false,
+          target: "http://127.0.0.1:1"), ob)
+        literal.refusal.should be_nil
+
+        # The draft sends `/api?SECRETTOKEN123=1`, which the same rule does not include — so
+        # the two halves of the decision move together instead of the gate judging a URL no
+        # send can produce.
+        draft = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([captured.to_slice],
+          expand_request: false, target: "http://127.0.0.1:1"), ob)
+        draft.refusal.should_not be_nil
+      end
+    end
+  end
+
+  it "reaches the WebSocket handshake head and its message frames alike" do
+    with_prov_store do |store|
+      origin = WsRecordingOrigin.new
+      origin.serve
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n" \
+                  "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                  "Sec-WebSocket-Version: 13\r\nX-Probe: $TOKEN\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([upgrade.to_slice],
+          expand_request: false, expand_bindings: false,
+          target: "http://127.0.0.1:#{origin.port}"), outbound_any)
+        plan.websocket?.should be_true
+        msg = Gori::Repeater::WsEngine::OutMsg.new(
+          Gori::Proxy::WS::OP_TEXT.to_i, "p=$TOKEN".to_slice)
+        plan.send_ws([msg], 500.milliseconds).error.should be_nil
+
+        String.new(origin.handshake).should contain("X-Probe: $TOKEN")
+        String.new(origin.handshake).should_not contain("SECRETTOKEN123")
+        origin.frames.should eq(["p=$TOKEN"])
+      end
+      origin.close
+    end
+  end
+
+  # The same seam, the other reason to stop: `send_ws` carried its OWN copy of `wire`'s two
+  # lines and that copy expanded UNCONDITIONALLY, so everything `evidence?` turns off for an
+  # HTTP send was still on for the handshake of a WS tab seeded from the same capture — while
+  # `Fuzz::Sender#send_ws`, whose comment says it "draws the line in the same place", had been
+  # widening its spans for evidence all along.
+  it "leaves a CAPTURED WebSocket handshake's $NAME alone too (evidence, not verbatim)" do
+    with_prov_store do |store|
+      origin = WsRecordingOrigin.new
+      origin.serve
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n" \
+                  "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                  "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: $TOKEN\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([upgrade.to_slice],
+          evidence: true, target: "http://127.0.0.1:#{origin.port}"), outbound_any)
+        # A CAPTURED frame carries its provenance per row, and always did.
+        msg = Gori::Repeater::WsEngine::OutMsg.new(
+          Gori::Proxy::WS::OP_TEXT.to_i, "p=$TOKEN".to_slice,
+          Gori::Proxy::WS::Shape::DEFAULT, true)
+        plan.send_ws([msg], 500.milliseconds).error.should be_nil
+
+        String.new(origin.handshake).should contain("Sec-WebSocket-Protocol: $TOKEN")
+        String.new(origin.handshake).should_not contain("SECRETTOKEN123")
+        origin.frames.should eq(["p=$TOKEN"])
+      end
+      origin.close
+    end
+  end
+
+  it "still resolves a WebSocket draft's $NAME when the operator did NOT ask for verbatim" do
+    with_prov_store do |store|
+      origin = WsRecordingOrigin.new
+      origin.serve
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n" \
+                  "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                  "Sec-WebSocket-Version: 13\r\nX-Probe: $TOKEN\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([upgrade.to_slice],
+          expand_request: false, target: "http://127.0.0.1:#{origin.port}"), outbound_any)
+        msg = Gori::Repeater::WsEngine::OutMsg.new(
+          Gori::Proxy::WS::OP_TEXT.to_i, "p=$TOKEN".to_slice)
+        plan.send_ws([msg], 500.milliseconds).error.should be_nil
+
+        String.new(origin.handshake).should contain("X-Probe: SECRETTOKEN123")
+        origin.frames.should eq(["p=SECRETTOKEN123"])
+      end
+      origin.close
+    end
+  end
+
+  it "leaves the SESSION SLOT overlay in force under verbatim — a different question" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      layer = slotted_layer(store,
+        [Gori::SessionSlot.new("admin", set_headers: [{"Authorization", "Bearer $TOKEN"}], rules: ["TOKEN"])],
+        bind: {"admin" => "ADMINTOKEN9"}, active: "admin")
+      with_layer(layer) do
+        # `--verbatim` says which BYTES; a slot says WHOSE identity. The operator asked both
+        # questions in one command, so both answers apply: the request line stays literal and
+        # the slot's own header — including the `$NAME` in the slot's value, the one `$NAME`
+        # that is always a reference — is still written over the draft's.
+        draft = "GET /api?$TOKEN=1 HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer STALE\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([draft.to_slice],
+          expand_request: false, expand_bindings: false,
+          target: "http://127.0.0.1:#{origin.port}"), outbound_any)
+        plan.send.error.should be_nil
+
+        wire = String.new(origin.requests.first)
+        wire.should contain("/api?$TOKEN=1")                     # the operator's bytes
+        wire.should contain("Authorization: Bearer ADMINTOKEN9") # the operator's identity
+        wire.should_not contain("STALE")
+      end
+      origin.close
+    end
+  end
+end

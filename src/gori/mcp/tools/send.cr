@@ -983,6 +983,14 @@ module Gori
             # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
             # a captured `ws_messages` row's payload.)
             expand_request: !verbatim,
+            # …and its send-seam half, which the head needs for the same reason the MESSAGES
+            # above needed `!verbatim`: `expand_request` stops the builder's env var pass, and
+            # a DECLARED session binding resolves one layer further down, inside
+            # `Repeater::Sender`. Without this a `verbatim` handshake carrying `$TOKEN` — a
+            # captured `Sec-WebSocket-Protocol`, an operator's own probe — went out with the
+            # live value spliced in. `expand_messages` reads the same flag off the Sender, so
+            # the handshake and the frames of one exchange answer alike.
+            expand_bindings: !verbatim,
             # The session's stored fingerprint (#844), overridable per call the way `sni` and
             # `keep_sec_websocket_key` are. WS is a real TLS dial on `wss://`, so a session
             # saved as `chrome` has to hand its handshake to `WsEngine` too — leaving it out
@@ -1288,6 +1296,13 @@ module Gori
           return {Repeater::PlanOptions.new([rec.request], default_target: rec.target,
             http2: bool_arg(h, "http2", rec.http2?), sni: send_sni(h, rec.sni),
             expand_request: !verbatim,
+            # The SEND-seam half of the promise, and the one that was missing on all three
+            # verbatim surfaces at once (#910): `expand_request` reaches the builder, while a
+            # DECLARED session binding is deliberately deferred PAST the builder and was being
+            # substituted into the stored bytes regardless — a stored `GET /api?$TOKEN=1` sent
+            # as `GET /api?SECRETTOKEN123=1`, the request nobody wrote, with a live credential
+            # in the target's access log. See `PlanOptions#expand_bindings?`.
+            expand_bindings: !verbatim,
             # The h2 half of the same promise — see the `raw` branch below and
             # `PlanOptions#preserve_field_case?`.
             preserve_field_case: verbatim,
@@ -1362,6 +1377,13 @@ module Gori
           # double-expand a `$KEY` whose value itself looks like a token).
           built = RequestBuilder.build(h)
           {Repeater::PlanOptions.new([built.bytes], expand_request: false,
+            # `expand_request` is off here whether or not the call is verbatim (the builder
+            # already expanded), so this is the ONLY field on this branch that carries the
+            # flag's "these bytes are literal" promise down to the send seam. `RequestBuilder`
+            # hands back `raw` untouched under `verbatim` — and the seam then resolved a
+            # declared `$NAME` in it anyway, which is how a hand-authored `raw` probe went out
+            # carrying the session token. See `PlanOptions#expand_bindings?`.
+            expand_bindings: !verbatim,
             auto_content_length: false, reframe_grpc: reframe_grpc,
             # The h2 half of the verbatim promise: `verbatim` means the bytes ARE the message, so
             # an uppercase field name is the RFC 9113 §8.2.1 conformance probe and not a
@@ -1489,7 +1511,7 @@ module Gori
           s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and is NOT $VAR-expanded")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no $VAR expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion, no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion — project env vars AND session bindings, so a $NAME stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
@@ -1526,7 +1548,7 @@ module Gori
           # SSTI probe — could not be expressed from MCP at all: the token was either
           # substituted or the call was refused. (Stored frames of a flow-seeded session
           # are evidence and are already sent byte-exact without this flag.)
-          s.field "verbatim", boolprop("send the bytes EXACTLY: no $VAR expansion in the handshake head or in a 'messages' payload, no bare-LF→CRLF promotion, no Content-Length resync. Use it when a literal $NAME is the payload (default false)")
+          s.field "verbatim", boolprop("send the bytes EXACTLY: no $VAR expansion — project env vars AND session bindings — in the handshake head or in any frame payload, no bare-LF→CRLF promotion, no Content-Length resync. The active session slot's header overlay still applies to the handshake. Use it when a literal $NAME is the payload (default false)")
         end
       end
     end
