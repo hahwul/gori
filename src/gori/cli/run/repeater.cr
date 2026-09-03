@@ -677,6 +677,14 @@ module Gori
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           timeout: timeout,
           expand_request: !verbatim,
+          # The SEND-seam half of the same flag. `expand_request` stops the BUILDER's project
+          # env var pass; a DECLARED session binding is deliberately deferred past the builder
+          # (`Plan.expand_requests` says so) and was substituted anyway — so `--verbatim` on a
+          # session whose stored request is `GET /api?$TOKEN=1` put `GET /api?SECRETTOKEN123=1`
+          # on the wire under a flag whose help text is "no $VAR expansion". Set here beside
+          # its twin so the two cannot drift the way `verbatim` and `evidence` already did
+          # between this file and MCP. See `PlanOptions#expand_bindings?`.
+          expand_bindings: !verbatim,
           # …and on an h2 session it used to change NOTHING the encoder does: the flag
           # promised "the stored bytes EXACTLY" while `H2Engine` still lowercased every field
           # name. Field case is the one normalization left on that path, so this is what
@@ -766,7 +774,7 @@ module Gori
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion, no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing") { verbatim = true }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no $VAR expansion (project env vars AND session bindings — a $NAME stays literal on the wire), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the $ grammar, so the $$name escape is not consumed either — write $name. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           # Opt-in, and off even under --verbatim's opposite: a stale prefix is the operator's
           # bytes by default (P7). See `Repeater::PlanOptions#reframe_grpc?`.

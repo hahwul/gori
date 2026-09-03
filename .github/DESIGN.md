@@ -2101,3 +2101,64 @@ keeps refusing.
 
 A 3xx baseline is deliberately NOT included. `302 → /login` is a denial and `302 → /dashboard` is
 a grant, and only the `Location` separates them, which is exactly what `redirect_verdict` reads.
+
+### 2026-09-03: `verbatim` is literalness, and it reaches the send seam
+
+Refines: [P4](#p4), [P7](#p7). Issue #910.
+
+`Plan.expand_requests` deliberately leaves a DECLARED session binding for the send seam, so that
+a Repeater tab carrying `Authorization: Bearer $SESSION` picks up the live identity on every send
+instead of freezing whichever value was held when the tab was built. `verbatim` is the operator
+saying, about the same kind of draft, that these bytes ARE the message. The two intentions
+genuinely collide, and the collision was being resolved silently in favour of the binding: every
+verbatim surface set the BUILDER flag (`expand_request: false`) and nothing else, so a stored
+`GET /api?$TOKEN=1` left for the origin as `GET /api?SECRETTOKEN123=1` under a flag whose help
+text reads "no `$VAR` expansion". That is a request nobody wrote, and it puts a live credential in
+the position the operator chose as a PAYLOAD and into the target's access log.
+
+The operator's word wins, on a field of its own. `PlanOptions#expand_bindings?` (default on) is
+carried into `Repeater::Sender`, which ANDs it with `evidence?` once — `resolve_bindings?` — and
+every site that reaches the `$NAME` pass asks that one predicate. NOT `evidence: verbatim`, which
+reaches the same seam and works: `evidence?` is PROVENANCE, a `--verbatim` send is the operator's
+own draft, and spending the provenance word on literalness would make every later reader of it
+wrong about who wrote the bytes. (`Fuzz::Sender` does spell this `evidence`, and that is not
+drift — there it is *defined* as the maximal verbatim span, so the two words already name one
+thing on that side of the tree.)
+
+The flag is set on all three surfaces in one change — `gori run repeater send --verbatim`, MCP
+`send_request{raw|repeater_id, verbatim}` — plus the WebSocket handshake head and its frames, and
+a spec drives each through its own glue rather than through a hand-built `PlanOptions`. This seam
+had already drifted between exactly these surfaces twice, both times because one of them was
+edited alone.
+
+The scope gate moves with the pass, and that is the half worth naming: `Sender#refusal` derives
+its URL from the bytes AFTER the binding pass, so switching the pass off in `wire` alone would ask
+the Sandbox about `/api?SECRETTOKEN123=1` and then put `/api?$TOKEN=1` on the wire — one
+path-scoped rule away from a decision taken about a URL that never existed. `send_ws` carried its
+own copy of `wire`'s two lines and that copy expanded unconditionally, so the handshake of a
+WS tab seeded from a capture was expanding where the HTTP path had stopped; it now goes through
+`wire`, and the TUI names the withheld tokens on the WS status line the way the HTTP one already
+did — [P4](#p4) is why the suppression is stated rather than merely done.
+
+Making the two agree meant making the gate read `wire`'s OUTPUT rather than deciding a second
+time. `send_wire` re-ran the binding pass over bytes already through it, asserting in its own
+comment that this was a no-op; it is not, because the pass also CONSUMES the `$$` escape, so the
+second run resolved the `$TOKEN` the first run produced from `$$TOKEN`. `refusal_wired` is now the
+single implementation of "may these bytes go out" and every send site hands it the final slice —
+which also takes a send-group from 2N full-message passes to N. Two consequences are worth
+stating rather than leaving to be discovered: under `verbatim` NOTHING interprets the `$` grammar,
+so `$$name` is no longer consumed either (write `$name` — it cannot resolve there anyway); and
+this is LAYER 2 only. Layer 1 (`request_scope_url`, `repeater_scope_verdict`) still reads the
+pre-seam draft, so a send that does expand is asked about two different targets by the two layers.
+That is older and wider than this seam — it asks whether an include list should be matched against
+a live credential at all — and `verbatim` narrows it, since with the pass off both layers read one
+URL.
+
+The SESSION SLOT overlay is deliberately NOT switched off with it, and the answer is stated rather
+than inherited. `verbatim` says which BYTES; a slot says WHOSE identity, and an operator asks both
+in one command (`--slot admin --verbatim`). Letting the byte answer veto the identity one would
+send that command as the stored identity while the operator named another — a silent substitution
+in the one direction [P4](#p4) refuses. The no-overlay answer already has a name and it is
+`as-captured`. A `$NAME` in a slot's own header value is the one `$NAME` in gori guaranteed to be
+a reference and never a payload, so resolving it takes nothing literal away from the operator's
+bytes.

@@ -73,6 +73,34 @@ module Gori::Repeater
     # token): the TUI editor's hex / gRPC / decode / §…§ modes each own their byte semantics,
     # and MCP's `RequestBuilder` expands while it builds.
     property? expand_request : Bool
+    # Resolve a DECLARED session binding (`$NAME` → the value an extract rule observed) at the
+    # SEND seam, `Repeater::Sender#wire`. Default ON, because that seam is where `Plan` says a
+    # declared binding belongs: `expand_requests` below deliberately leaves one for it so that
+    # a Repeater tab carrying `Authorization: Bearer $SESSION` picks up the LIVE identity on
+    # every send rather than freezing whichever value was held when the tab was built.
+    #
+    # A surface sets it OFF for `--verbatim` / `verbatim:true`, and that flag is the reason
+    # this field exists. `verbatim` promises "no `$VAR` expansion"; it delivered that for
+    # project env vars — `expand_request: false` above switches the BUILDER pass off — and the
+    # send seam substituted a declared binding anyway, so a stored `GET /api?$TOKEN=1` reached
+    # the origin as `GET /api?SECRETTOKEN123=1` under the flag that says it will not. The two
+    # intentions genuinely collide (a tab's `$SESSION` wants the live value; verbatim says
+    # these bytes are the message) and the collision was being resolved silently in favour of
+    # the binding, in the direction that puts a real credential in a position the operator
+    # chose as a PAYLOAD, and in the target's access log.
+    #
+    # A SEPARATE field rather than `evidence: verbatim`, which reaches the same seam and would
+    # have worked: `evidence?` is PROVENANCE, and a `--verbatim` send is the operator's own
+    # draft — using the provenance word for literalness would make every later reader of
+    # `evidence?` wrong about who wrote the bytes. `Sender` ANDs the two (`resolve_bindings?`);
+    # nothing else has to know there are two.
+    #
+    # It does NOT switch off the session-slot overlay, which answers a different question —
+    # see `Sender#wire`. It is also INERT on the field-native h2 path, which forces it false
+    # whatever a surface passes (`build_field_native` says why), the way that path already
+    # drops `preserve_field_case`, `evidence` and `reframe_grpc`: a field list is the message
+    # and nothing there expands.
+    property? expand_bindings : Bool
     # Recompute Content-Length over the (possibly expanded) body. Off keeps a deliberately
     # hand-set CL — `repeater create --no-auto-cl`, and `gori run repeater -H "Content-Length: N"`,
     # both of which exist for CL-mismatch / request-smuggling testing.
@@ -182,6 +210,7 @@ module Gori::Repeater
     def initialize(@requests : Array(Bytes) = [] of Bytes,
                    *,
                    @expand_request : Bool = true,
+                   @expand_bindings : Bool = true,
                    @auto_content_length : Bool = true,
                    @resync_cl_after_expansion : Bool = false,
                    @evidence : Bool = false,
@@ -439,11 +468,19 @@ module Gori::Repeater
       # `Env.expand_bindings` at the send seam — and that seam ran unconditionally, so
       # everything `evidence?` turns off here was turned back on one layer down for any
       # extract rule whose name collides with a token in the capture. See `Sender#evidence?`.
+      #
+      # `expand_bindings` rides down for the same reason with a different word on it: a
+      # `--verbatim` send is a DRAFT (so `evidence?` is rightly false) whose operator said the
+      # bytes are the message, and the seam substituted into it anyway. Both are `PlanOptions`
+      # fields and both are read HERE rather than at each surface, because that is the drift
+      # this builder exists to end — the layering note on `expand_requests` records the two
+      # headless surfaces disagreeing about exactly this flag once already.
       tls_preset = resolve_tls_preset(options)
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: options.http2?, sni: sni,
         timeout: options.timeout, overrides: options.overrides,
         preserve_field_case: options.preserve_field_case?, evidence: options.evidence?,
+        expand_bindings: options.expand_bindings?,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
@@ -454,6 +491,11 @@ module Gori::Repeater
     # The request wires with `$KEY` expansion applied, or the originals when the surface says
     # it already expanded (`expand_request: false` — MCP's pre-expanded `raw`, the TUI's byte
     # modes, `--verbatim`) — or when the bytes are EVIDENCE, which is never expanded at all.
+    #
+    # This is the PROJECT ENV VAR pass only. A DECLARED session binding is deliberately left
+    # for `Env.expand_bindings` at the send seam (see the sentence below), which means turning
+    # THIS off is not by itself a promise of literal bytes: `--verbatim` sets
+    # `expand_bindings: false` alongside it to make the promise reach that seam too.
     #
     # `expand_wire` is the DRAFT pass and there is no evidence pass: a stored head is full of
     # `$` nobody typed (OData `$filter`/`$top`, Mongo `$where`, `$IFS`, `$user.name`), and
@@ -487,8 +529,13 @@ module Gori::Repeater
       options.sni.try { |s| refuse_unresolved(Env.unresolved(s, deferred: nil)) }
       sni = options.sni.try { |s| Env.expand(s).presence }
       tls_preset = resolve_tls_preset(options)
+      # `expand_bindings: false` UNCONDITIONALLY, and not `options.expand_bindings?`: nothing on
+      # the field-native path expands, so the only thing the flag could still reach is the scope
+      # gate's view of the synthetic request line — which is built from the operator's `:path`
+      # and can hold a `$NAME` like any other. Expanding there would take the verdict against a
+      # URL this send cannot produce. See `Sender#send_fields`.
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
-        verify: options.verify?, http2: true, sni: sni,
+        verify: options.verify?, http2: true, sni: sni, expand_bindings: false,
         timeout: options.timeout, overrides: options.overrides, tls_preset: tls_preset)
       new(sender: sender, requests: [H2Engine.field_scope_line(fields)], scheme: scheme,
         host: host, port: port, http2: true, websocket: false, sni: sni,
