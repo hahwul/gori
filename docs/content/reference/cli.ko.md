@@ -62,7 +62,9 @@ gori run <subcommand> [verb] [options]
 | `repeater <flow-id>` · `list` · `create` · `send` | 캡처한 플로우 재전송, 또는 Repeater 세션 목록 / 생성 / 실행 (WebSocket 포함) |
 | `repeater minimize <id>` | 저장된 요청을 응답이 유지되는 최소 형태로 축약 |
 | `repeater h2` | 순서가 있는 HPACK 필드 목록으로 필드 단위 HTTP/2 요청 전송 |
+| `repeater move <id>` · `delete <id>…` | 탭 번호로 워크벤치 스트립 재정렬, 또는 저장된 세션 하나 이상 닫기 |
 | `fuzz [<flow-id>]` | Intruder 스타일 퍼저 |
+| `fuzz save` · `list` · `show` · `delete` | 스윕의 모든 결과를 영구 저장하고, 그 아카이브를 페이지 단위로 읽거나 정리 |
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
 | `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
 | `authorize [<flow-id>…]` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 (접근 제어 결함) |
@@ -80,7 +82,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Flask / Rack / Django 세션 쿠키 디코드, 검증, 브루트포스, 위조 |
 | `decoder <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
 | `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 |
-| `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
+| `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `rewriter preset list` · `add` | 응답 수정 프리셋 목록, 그리고 하나를 평범한 Match & Replace 규칙으로 설치 |
@@ -340,6 +342,15 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--record-history` | 나가는 요청 + 응답을 History에 캡처 플로우로 기록하고 flow id를 stdout에 출력(HTTP 전용; Repeater 전송은 기본적으로 플로우를 남기지 않음) |
 | `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--format` | 위와 동일 |
 
+**`repeater move <repeater-id>`**: 워크벤치 스트립의 순서를 바꿉니다. `--to N`은 `repeater list`가 출력하는 1부터 시작하는 탭 번호이고, `--up` / `--down`은 한 칸씩 옮깁니다. 셋 중 하나만 주세요 — `--to`와 방향을 함께 주면 임의로 해석하지 않고 거절하며, `1-<개수>` 범위를 벗어난 `--to`도 잘라 맞추지 않고 거절합니다. 명령이 지목하지 않은 자리에 세션이 놓이는 일이 없도록 하기 위해서입니다. `--format json`은 `from_index` / `to_index` / `moved`를 보고합니다.
+
+```bash
+gori run repeater move 5 --to 1        # 첫 번째 탭으로
+gori run repeater move 5 --down
+```
+
+**`repeater delete <repeater-id> [<repeater-id>…] --yes`**: 저장된 세션 하나 이상을 닫고 스트립의 번호를 다시 매깁니다. `--yes`는 필수이며, 첫 삭제 전에 모든 id를 검사합니다 — 하나라도 모르는 id가 있으면 호출 전체를 거절하므로, 오타 하나로 워크벤치가 절반만 비는 일은 없습니다. 각 줄은 그 세션이 *가지고 있던* 탭 번호를 말합니다(무엇이든 밀려나기 전에 한 번만 읽습니다). `--format json`은 `deleted`(`was_tui_index` 포함), `failed`, `remaining`을 반환합니다. 지우지 못한 세션이 있으면 종료 코드가 0이 아닙니다.
+
 **`repeater minimize <repeater-id>`**: 응답이 그대로 재현되는 최소 형태까지 요청을 줄입니다. `--apply`는 결과를 세션에 다시 씁니다. `--verbatim`은 저장된 바이트를 그대로 보내며, 이때 본문 파라미터는 프레이밍을 정직하게 유지할 수 없어 후보에서 빠집니다. `-k`/`--insecure`, `--allow-unscoped`, `--format`은 위와 같습니다.
 
 **`repeater h2`**: 순서가 있는 HPACK 필드 목록으로 필드 단위 HTTP/2 요청을 보냅니다. 중복되거나 순서가 뒤바뀐 의사 헤더를 스크립트로 만들 수 있습니다.
@@ -372,6 +383,24 @@ gori run repeater h2 --target https://api.example.com --fields fields.json
 | Scope | `--allow-unscoped` — 프로젝트 스코프 밖으로도 전송. 샌드박스와 명시적 제외 규칙은 매 전송을 여전히 거부합니다 |
 | Output | `--format` (`text`\|`json`\|`jsonl`), `--force`, `--fail-if-no-matches` (매칭이 없으면 종료 코드 `3`) |
 | Evidence | `--record-history=none\|matched\|all` — 전송한 각 요청 + 응답을 History에 플로우로 기록(기본 `none`; `matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한). `gori run history` / `get_flow`로 다시 읽습니다 |
+
+#### 영구 퍼즈 실행 {#permanent-fuzz-runs}
+
+`gori run fuzz …`는 여전히 일회성입니다. 같은 소스/옵션 앞에 `save` 동사를 붙이면 모든 결과를 — 완성된 렌더링 요청, 최종 와이어 요청, 응답 헤드, 응답 본문까지 — 영구 저장합니다:
+
+```bash
+gori run fuzz save 42 --auto --preset sqli
+gori run fuzz save --request request.txt --target https://api.example.com --project acme --payloads a,b
+```
+
+파일/stdin에서 저장할 때는 `--project`나 `--db`가 필요합니다. 프로젝트를 지정하지 않은 스윕을 가장 최근 프로젝트에 조용히 써넣지 않기 때문입니다. `--record-history`는 이와 별개로 남습니다 — 저장된 결과 집합이 아니라 History 플로우를 제어합니다.
+
+| 명령 | 설명 |
+|------|------|
+| `fuzz list` | 저장된 실행을 최신순으로 나열합니다. `--session=ID`는 TUI Fuzzer 세션 하나로 좁히고, `--offset`, `--limit`, `--format text\|json`이 페이지와 형식을 정합니다 |
+| `fuzz show RUN_ID` | 실행 하나의 요약과, 보관된 BLOB을 읽지 않는 스칼라 전용 결과 지표 페이지를 보여 줍니다. `--offset`, `--limit`, `--matched-only`, `--format text\|json\|jsonl`을 지원하며, 진행 중인 실행에 `--format json`을 주면 보관 행 전체를 버퍼링하지 않고 유효한 배열 하나를 스트리밍합니다 |
+| `fuzz show RUN_ID RESULT_INDEX` | 보관된 요청/와이어/응답 바이트를 포함해 결과 하나를 정확히 보여 줍니다. 텍스트 출력은 터미널 제어 시퀀스를 무력화하고, JSON은 유효하지 않은 UTF-8을 base64로 내보냅니다. 상세 보기는 `text` 또는 `json`을 지원하며, 현재 형식 이전의 불완전한 스냅숏은 실행 메타데이터에 legacy로 표시됩니다 |
+| `fuzz delete RUN_ID --yes` | 종료된 실행 하나와 저장된 결과 행 전부를 삭제합니다. 저장이 진행 중이면 거부하며, `--force-stale`은 죽은 기록자가 남긴 `running`/`saving` 행을 지웁니다 — 다른 gori가 저장 중일 때는 절대 쓰면 안 됩니다 |
 
 ### run mine {#run-mine}
 
@@ -463,6 +492,7 @@ gori run session rm admin
 | `list`(기본) | `--show-values`(`[REDACTED]` 대신 헤더 값 출력), `--format text\|json` |
 | `show <name>` | `--show-values`, `--format text\|json` |
 | `add` | `--name`, `--set 'Name: value'`(반복 가능), `--remove NAME`(반복 가능), `--rule NAME`(반복 가능), `--baseline` |
+| `from-flow <flow-id>` | `--name`(필수), `--baseline`, `--show-values`. 오버레이를 직접 타이핑하는 대신 캡처된 로그인 교환에서 만듭니다 |
 | `edit <name>` | 같은 플래그에 `--clear-set` / `--clear-remove` / `--clear-rules` 추가. 컬렉션 플래그는 그 컬렉션 **전체를 교체** 하고, 생략한 것은 그대로 둡니다 |
 | `rm`\|`delete <name>` | 그 슬롯이 주장하던 extract 규칙은 다시 전역 바인딩 테이블에 쓰게 됩니다 |
 | `baseline <name>` | Authorize 기준선 이동(정확히 한 슬롯이 갖습니다) |
@@ -470,6 +500,15 @@ gori run session rm admin
 모든 동사가 `--project=NAME` / `--db=PATH`를 받습니다.
 
 `--set` 값은 TUI 폼과 같은 헤더 파서를 지납니다. 이름은 RFC 7230 토큰이어야 하고 값에 CR이나 LF가 들어갈 수 없으며, 통과하지 못한 줄은 버려지지 않고 지목되어 거부됩니다.
+
+**`from-flow`는 캡처된 로그인에서 슬롯을 만듭니다.** 로그인한 플로우를 지목하면 gori가 그 플로우의 *응답* 을 읽어 오버레이를 채웁니다. 모든 `Set-Cookie`의 `name=value`를 `Cookie:` 헤더 하나로 접고(속성은 버리며, 응답이 *삭제* 하는 쿠키는 건너뜁니다), 이어서 응답 자신의 `Authorization`을, 없으면 JSON 본문 최상위의 `access_token` / `token` / `id_token` 문자열을 `Authorization: Bearer <value>`로, 그것도 없으면 요청 자신의 `Authorization`을 씁니다.
+
+```bash
+gori run session from-flow 4211 --name admin
+gori run repeater 900 --slot admin        # 플로우 900을 그 신원으로 재전송
+```
+
+오버레이는 **리터럴** 입니다 — 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 재인증은 하지 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
 
 **`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸칠 시간이 없고, 저장해 두면 다음 실행에서 비어 있는 바인딩 테이블로 해소되어 `$SESSION`이 리터럴인 오버레이를 보내게 됩니다. 대신 전송할 때 신원을 지목하세요 — `repeater`, `fuzz`, `mine`, `sequence`, `discover`에서 `--slot NAME`. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
 
@@ -731,6 +770,7 @@ gori run notes --all
 ```bash
 gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
+gori run issues delete 7
 ```
 
 | Option | Description |
@@ -739,6 +779,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 | `--export=PATH` | STDOUT 대신 `PATH`에 기록(바이트 그대로. STDOUT은 이스케이프를 제거) |
 | `create` | `-t`/`--title` (필수), `--cvss` (점수 또는 벡터. 미지정 시 severity 자동 산정), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+| `delete <id>` | 이슈와 그 증거 링크를 삭제합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
 `--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
 
