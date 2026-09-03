@@ -15,6 +15,12 @@ Repeater is a request workbench. Send a flow to it, edit any part of the request
 
 Once a few dozen have piled up, the chip strip scrolls and hunting along it with `←`/`→` stops being practical. Press **`f`** anywhere on the strip and every session is listed, filtered as you type by name, method, path, target host or `#tag`; `Enter` jumps to the one you picked. The same list sits behind the **`⌕`** at the strip's left edge — click it, or reach it with `←` from the first chip. Every workbench strip has both — Fuzzer, Notes, Decoder, JWT, Comparer, Miner and Sequencer alike.
 
+Sub-tabs can also be **marked** for a batch. On the strip, `t` marks the chip under you and steps right, `Shift-T` marks every chip the `/` filter shows, and `Esc` clears the marks before it leaves the strip. A marked chip wears a `▌` bar. Marks change **what the sub-tab actions act on**, not which actions exist — the rule History's list already follows:
+
+> the target is **the marks if any are set, else the active chip**
+
+So `Shift-T` → `Ctrl-W` closes every open session behind one confirm, `Ctrl-R` sends the marked ones together (each on its own connection, up to 20, after a confirm), `Space` → `d` duplicates them, and `Space` → `t` tags them all with what you type. The space menu opened from the strip reads `SPACE · 3 MARKED` and its entries rename themselves (`Close 3 sub-tabs`, `Send 3 sub-tabs`); an action that stays single-target says `(cursor)`. A mark the filter is hiding is called out in the confirm rather than closed quietly. Every workbench strip marks, closes and duplicates this way — Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner and Sequencer alike; sending is Repeater's.
+
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">
   <figcaption><strong>Repeater</strong>: an editable request on the left, the live response and timing on the right, with a diff against the previous send.</figcaption>

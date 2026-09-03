@@ -40,6 +40,18 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
         mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
+      # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
+      # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
+      # widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
+      # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
+      # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "notes.subtab-mark-all", "Mark all sub-tabs", "Mark every note the sub-tab filter shows — the actions above then act on all of them",
+        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+      r.register Verb::Definition.new(
+        "notes.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
+        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # `y` in READ, `^Y` in INS — one verb. See repeater.copy in verbs/history.cr for why
       # Copy is available while typing at all (an INS selection had no way to be copied).

@@ -57,6 +57,7 @@ require "./repeater_view/send"
 require "./repeater_view/session"
 require "./repeater_view/target_field"
 require "./repeater_view/ws"
+require "./subtab_marks"
 
 module Gori::Tui
   # The Repeater workbench (a tab). Layout: a target URL field on top, then a split
@@ -64,6 +65,7 @@ module Gori::Tui
   # and target default to READ (space cmds, select/copy); i/↵ enters INS. Tab
   # cycles focus (target → request → response); Ctrl-R resends byte-exact.
   class RepeaterView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     getter? loaded : Bool
     getter? http2 : Bool
     getter focus : Symbol  # :request | :response | :target

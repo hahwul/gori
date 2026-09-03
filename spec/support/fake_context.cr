@@ -268,6 +268,20 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:subtab_filter_open)
   end
 
+  def subtab_mark_all : Nil
+    rec(:subtab_mark_all)
+  end
+
+  def subtab_mark_clear : Nil
+    rec(:subtab_mark_clear)
+  end
+
+  property subtab_marks : Int32 = 0
+
+  def subtab_marked_count : Int32
+    @subtab_marks
+  end
+
   property subtab_search_tab_count : Int32 = 0
 
   def subtab_search_count : Int32

@@ -206,7 +206,7 @@ module Gori::Tui
       @tag_edit_open = false
       @tag_buffer = ""
       @tag_preedit = ""
-      @tag_view = nil.as(RepeaterView?)
+      @tag_views = [] of RepeaterView # the sub-tabs the prompt will tag (marks, else the active one)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -2466,6 +2466,11 @@ module Gori::Tui
             return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
           end
           rn = renameable_subtabs? ? " · r rename" : ""
+          mk = subtab_marks_shown? ? " · t mark" : ""
+          # With marks set, esc no longer leaves the strip — it drops the selection first, and
+          # the row has to say so rather than keep advertising the gesture it used to be.
+          marked = subtab_marked_count
+          tail = marked > 0 ? "#{marked} marked · esc unmark · ↑ tabs" : "↑/esc tabs"
           # `f find` takes the column `^1-9 jump` used to hold. Both keys still work; only one
           # of them works EVERYWHERE. Ctrl+digit has no control character, so on many terminals
           # the jump never arrives (docs/content/guide/hotkeys.md says so in as many words),
@@ -2474,9 +2479,9 @@ module Gori::Tui
           # Miner sessions are background-seeded (^N is a no-op) and its body is a read-only
           # table (↵ ENTERS, doesn't edit) — drop the ^N/edit tokens that fit editor strips.
           unless subtab_new_supported?
-            return "←/→ switch sub-tab · ↓/↵ enter · f find · ^W close · space cmds#{rn} · ↑/esc tabs"
+            return "←/→ switch sub-tab · ↓/↵ enter · f find#{mk} · ^W close · space cmds#{rn} · #{tail}"
           end
-          return "←/→ switch sub-tab · ↓/↵ edit · f find · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
+          return "←/→ switch sub-tab · ↓/↵ edit · f find#{mk} · ^N new · ^W close · space cmds#{rn} · #{tail}"
         end
         body_hints
       end
@@ -3347,14 +3352,22 @@ module Gori::Tui
     end
 
     # --- Repeater sub-tab TAG editor (issue #121) ---------------------------------
-    # A bottom prompt mirroring rename: space-separated flat tags for the active Repeater
-    # sub-tab. The target is held by VIEW identity (the reconcile may reorder/remove
-    # tabs while the prompt is open) — apply_tags re-finds it, never a shifted neighbour.
+    # A bottom prompt mirroring rename: space-separated flat tags for the Repeater sub-tab
+    # under the cursor — or for every MARKED one (#683), which is the same widening
+    # `sitemap.tag` already has ("the selected — or every marked — path"). Targets are held
+    # by VIEW identity (the reconcile may reorder/remove tabs while the prompt is open) —
+    # apply_tags re-finds each one, never a shifted neighbour.
+    #
+    # The typed set REPLACES each target's tags, exactly as the single-tab prompt has always
+    # done; it is not merged into them. The field is seeded from the chip the operator is
+    # standing on, so the common "give these four the same tag" starts from something real
+    # rather than from blank or from an arbitrary member's tags.
 
     private def open_tag_edit(idx : Int32) : Nil
       return unless @active_tab == :repeater
       return unless view = repeater_controller.view_at(idx)
-      @tag_view = view
+      targets = repeater_controller.target_views
+      @tag_views = targets.empty? ? [view] : targets
       @tag_buffer = view.tags.join(" ")
       @tag_preedit = ""
       @tag_edit_open = true
@@ -3363,7 +3376,7 @@ module Gori::Tui
     private def close_tag_edit : Nil
       @tag_edit_open = false
       @tag_preedit = ""
-      @tag_view = nil
+      @tag_views = [] of RepeaterView
     end
 
     private def handle_tag_edit_key(ev : Termisu::Event::Key) : Nil
@@ -3383,15 +3396,16 @@ module Gori::Tui
     end
 
     private def apply_tag_edit(raw : String) : Nil
-      if v = @tag_view
-        repeater_controller.apply_tags(v, raw)
-      end
+      @tag_views.each { |v| repeater_controller.apply_tags(v, raw) }
+      @toast = "tagged #{plural(@tag_views.size, "sub-tab")}" if @tag_views.size > 1
     end
 
     private def render_tag_prompt(screen : Screen, rect : Rect) : Nil
       return if rect.w < 6
       screen.fill(rect, Theme.panel)
-      prefix = "tags: "
+      # The count is in the LABEL, not only in a toast after the fact: this prompt replaces
+      # the tags on every target, so "×4" is the operator's notice before they press ↵.
+      prefix = @tag_views.size > 1 ? "tags ×#{@tag_views.size}: " : "tags: "
       screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
       hint = "↵ save · esc cancel · #tags space-separated"
       x = rect.x + prefix.size
@@ -4478,7 +4492,8 @@ module Gori::Tui
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
       history_mark_menu_title(verb_id) || intercept_mark_menu_title(verb_id) ||
-        sitemap_mark_menu_title(verb_id) || issues_mark_menu_title(verb_id)
+        sitemap_mark_menu_title(verb_id) || issues_mark_menu_title(verb_id) ||
+        subtab_mark_menu_title(verb_id)
     end
 
     # The card's state label — "SPACE · 3 MARKED" while a mark set is non-empty (#442), so
@@ -4488,8 +4503,70 @@ module Gori::Tui
     # nil ⇒ the section label (or nothing at all), exactly as before.
     private def space_menu_banner : String?
       n = history_mark_menu_count + intercept_mark_menu_count +
-          sitemap_mark_menu_count + issues_mark_menu_count
+          sitemap_mark_menu_count + issues_mark_menu_count + subtab_mark_menu_count
       n > 0 ? "#{n} MARKED" : nil
+    end
+
+    # How many sub-tab marks the menu should speak for (#683); 0 anywhere but the STRIP. The
+    # gate is load-bearing: the same marks are on screen while the operator works in the
+    # body, and a menu opened there is the body pane's menu — every entry in it is single-
+    # target, so a "3 MARKED" banner over it would promise a batch nothing below delivers.
+    # (Body `^W`/`^R` do honour the marks; they say so in their own confirm, not here.)
+    private def subtab_mark_menu_count : Int32
+      @focus == :subtabs ? subtab_marked_count : 0
+    end
+
+    # The sub-tab-level verbs that act on every marked chip, on any of the nine strips —
+    # one flat table, because the ids already carry their scope. Two of the nine strips put
+    # their close in `:subtab`, seven in COMMON, and this table does not care which: the
+    # strip's menu shows COMMON ∪ `:subtab`, so both sections are on screen together, which
+    # is exactly why `subtab_mark_menu_count` must gate on the strip having focus.
+    # "%s" takes the count phrase ("3 sub-tabs").
+    SUBTAB_BATCH_TITLES = {
+      "repeater.close-subtab"     => "Close %s",
+      "repeater.send"             => "Send %s",
+      "repeater.duplicate-subtab" => "Duplicate %s",
+      "repeater.tag-subtab"       => "Tag %s",
+      "fuzz.close-subtab"         => "Close %s",
+      "fuzz.duplicate-subtab"     => "Duplicate %s",
+      "mine.close-subtab"         => "Close %s",
+      "mine.duplicate-subtab"     => "Duplicate %s",
+      "sequence.close-subtab"     => "Close %s",
+      "decoder.close"             => "Close %s",
+      "decoder.duplicate-subtab"  => "Duplicate %s",
+      "jwt.close"                 => "Close %s",
+      "jwt.duplicate-subtab"      => "Duplicate %s",
+      "cookie.close"              => "Close %s",
+      "cookie.duplicate-subtab"   => "Duplicate %s",
+      "comparer.close-subtab"     => "Close %s",
+      "comparer.duplicate-subtab" => "Duplicate %s",
+      "notes.close"               => "Close %s",
+      "notes.duplicate-subtab"    => "Duplicate %s",
+    }
+
+    # Strip-menu verbs that stay SINGLE-target with marks set and say so, named explicitly
+    # (not by exclusion) for the reason HISTORY_CURSOR_ONLY gives. Rename to one name is the
+    # obvious one; the others are the COMMON entries an operator with five marks would read
+    # as plural — a run, a stop, a minimize — and which act on the active session only.
+    SUBTAB_CURSOR_ONLY = {
+      "repeater.rename-subtab", "fuzz.rename-subtab", "mine.rename-subtab",
+      "sequence.rename-subtab", "decoder.rename-subtab", "jwt.rename-subtab",
+      "cookie.rename-subtab", "comparer.rename-subtab",
+      "repeater.minimize", "repeater.open-browser", "repeater.send-group",
+      "fuzz.run", "fuzz.stop", "mine.run", "mine.stop", "sequence.run", "sequence.stop",
+    }
+
+    # Retitle the strip's menu entries while sub-tab marks are set, so the menu says what
+    # will actually happen — "Close 3 sub-tabs". MUST return nil when nothing is marked, so
+    # every existing title stays byte-identical.
+    private def subtab_mark_menu_title(verb_id : String) : String?
+      n = subtab_mark_menu_count
+      return nil if n == 0
+      if fmt = SUBTAB_BATCH_TITLES[verb_id]?
+        return fmt % plural(n, "sub-tab")
+      end
+      return "#{@session.registry[verb_id].title} (cursor)" if SUBTAB_CURSOR_ONLY.includes?(verb_id)
+      verb_id.ends_with?(".subtab-mark-clear") ? "Clear #{plural(n, "mark")}" : nil
     end
 
     # How many marks the History LIST menu should speak for; 0 whenever mark titles don't

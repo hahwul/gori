@@ -523,9 +523,20 @@ module Gori::Tui
     # " #tag" run tinted (SYN_HEADER) so the eye lands on the label. `‹` / `›` flag overflow.
     # `hidden` (Repeater's tag filter) drops those absolute chip indices from the strip —
     # they keep their absolute number, so the visible chips read with gaps (2, 5, 7).
+    # `marked` chips wear the `▌` bar below (and, when inactive, a SELECTION_DIM band).
+    # `▌` on a marked chip (#683) — the same glyph History, Issues, Intercept, the Sitemap
+    # and the project picker paint in their own left gutter, against the thinner `▎` those
+    # lists use for the cursor. It goes in the chip's LEADING PAD COLUMN, which every chip
+    # already has and no ink ever reaches (widths are `display_width + 2` and the label
+    # starts at `seg.x + 1`), so a mark costs no columns and `strip_layout` — and with it
+    # every click hit-test — is untouched. That it changes the chip's SHAPE rather than only
+    # its colour is what makes a mark catchable at the edge of vision on a wide strip.
+    MARK = '▌'
+
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
                               active : Int32, focused : Bool, prev_start : Int32 = 0,
-                              hidden : Set(Int32)? = nil) : Int32
+                              hidden : Set(Int32)? = nil, *,
+                              marked : Set(Int32)? = nil) : Int32
       return prev_start if rect.empty? || labels.empty?
       active = active.clamp(0, labels.size - 1)
       segs, start, last, vis_last = strip_layout(rect, labels, active, prev_start, hidden)
@@ -536,30 +547,52 @@ module Gori::Tui
         # neighbour silently. Binding the ink to `seg` makes render structurally unable to
         # paint outside the rect the hit-test hands back.
         ink_end = seg.right - 1 # exclusive: the trailing pad column, which ink never reaches
+        mark = marked.try(&.includes?(i)) || false
         if i == active
-          if focused
-            bg = Theme.focus_gold
-            screen.fill(seg, bg)
-            screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold, width: ink_end - (seg.x + 1))
-          else
-            # Unfocused: a calmer, receded gold (FOCUS_GOLD 70% over the canvas) — still
-            # unmistakably a gold chip, a step below the bright focus pill, never the
-            # near-invisible ACCENT_BG grey band.
-            bg = Theme.blend(Theme.focus_gold, Theme.bg, SUBTAB_DIM_GOLD)
-            screen.fill(seg, bg)
-            screen.text(seg.x + 1, seg.y, label, Theme.text_bright, bg, Attribute::Bold, width: ink_end - (seg.x + 1))
-          end
+          paint_active_chip(screen, seg, label, ink_end, focused, mark)
         else
-          num_end, tag_start = chip_zones(label)
-          x = seg.x + 1
-          x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg, width: ink_end - x) if num_end > 0
-          x = screen.text(x, seg.y, label[num_end...tag_start], Theme.text, Theme.bg, width: ink_end - x)
-          screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg, width: ink_end - x) if tag_start < label.size
+          paint_inactive_chip(screen, seg, label, ink_end, mark)
         end
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
       screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < vis_last
       start
+    end
+
+    # The active chip: a filled pill — bright FOCUS_GOLD with auto-contrast ink while the strip
+    # holds focus, else a calmer receded gold (FOCUS_GOLD 70% over the canvas) with TEXT_BRIGHT
+    # ink: still unmistakably a gold chip, a step below the focus pill, never the near-invisible
+    # ACCENT_BG grey band. ACTIVE wins the band; a mark rides it in the pill's own ink — the
+    # `Theme.accent` the inactive arm uses would be a second colour sitting in a filled gold
+    # pill, reading as a gap in it.
+    private def self.paint_active_chip(screen : Screen, seg : Rect, label : String, ink_end : Int32,
+                                       focused : Bool, mark : Bool) : Nil
+      if focused
+        bg = Theme.focus_gold
+        ink = Theme.ink_on(bg)
+      else
+        bg = Theme.blend(Theme.focus_gold, Theme.bg, SUBTAB_DIM_GOLD)
+        ink = Theme.text_bright
+      end
+      screen.fill(seg, bg)
+      screen.cell(seg.x, seg.y, MARK, ink, bg) if mark
+      screen.text(seg.x + 1, seg.y, label, ink, bg, Attribute::Bold, width: ink_end - (seg.x + 1))
+    end
+
+    # An inactive chip: unfilled, its three label zones tinted (`chip_zones`). The bg is a
+    # LOCAL rather than `Theme.bg` spelled four times: a marked chip fills the selection band
+    # first, and text painted on a hardcoded canvas colour would erase the band it was just
+    # given — the shape #442's row renderers already avoid.
+    private def self.paint_inactive_chip(screen : Screen, seg : Rect, label : String, ink_end : Int32,
+                                         mark : Bool) : Nil
+      bg = mark ? Theme.selection_dim : Theme.bg
+      screen.fill(seg, bg) if mark
+      screen.cell(seg.x, seg.y, MARK, Theme.accent, bg) if mark
+      num_end, tag_start = chip_zones(label)
+      x = seg.x + 1
+      x = screen.text(x, seg.y, label[0, num_end], Theme.muted, bg, width: ink_end - x) if num_end > 0
+      x = screen.text(x, seg.y, label[num_end...tag_start], mark ? Theme.text_bright : Theme.text, bg, width: ink_end - x)
+      screen.text(x, seg.y, label[tag_start..], Theme.syn_header, bg, width: ink_end - x) if tag_start < label.size
     end
 
     # Split a chip label into its coloured zones — {num_end, tag_start}:

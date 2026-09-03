@@ -13,6 +13,7 @@ require "../repeater/side_by_side"
 require "../repeater/message_lines"
 require "../repeater/word_diff"
 require "../repeater/subtab_filter"
+require "./subtab_marks"
 
 module Gori::Tui
   # The Comparer body: two flow "slots" (A, B) and a side-by-side line diff of
@@ -23,6 +24,7 @@ module Gori::Tui
   # Multiple views are held as session sub-tabs by ComparerController (in-memory;
   # no project DB) so History handoffs don't clobber prior pairs.
   class ComparerView
+    include SubtabRef       # a sub-tab strip may hold a mark on this view (#683)
     getter pane : Symbol    # :request | :response — which half of the two flows we diff
     property name : String? # custom sub-tab chip label (nil = auto from slots)
 

@@ -61,6 +61,38 @@ describe "Chrome sub-tab strip — chip geometry in display columns" do
     end
   end
 
+  # --- multi-select marks (#683) -----------------------------------------------------
+  # A mark rides the chip's LEADING PAD column, which every chip has and no ink reaches, so
+  # a marked strip must lay out and hit-test exactly like an unmarked one. That is the whole
+  # bargain: a glyph that cost a column would move every click on the strip.
+  it "paints the mark in the pad column and moves nothing" do
+    labels = ["1:alpha", "2:beta", "3:gamma"]
+    rect = Rect.new(0, 0, 60, 1)
+    plain = Chrome.strip_segments(rect, labels, 0)
+    backend = MemoryBackend.new(rect.w, 1)
+    Chrome.render_tab_strip(Screen.new(backend), rect, labels, 0, focused: true, marked: Set{0, 2})
+    # Geometry is computed without ever seeing the marks, and the renderer shares it.
+    Chrome.strip_segments(rect, labels, 0).should eq(plain)
+    row = backend.row(0)
+    active, second, third = plain.map(&.[1])
+    row[active.x].should eq(Chrome::MARK) # marked AND active: the bar rides the gold pill
+    backend.bg_at(active.x, 0).should eq(Theme.focus_gold)
+    row[active.x + 1].should eq('1')     # the label still starts one column in
+    row[second.x].should eq(' ')         # unmarked: the pad stays a pad
+    row[third.x].should eq(Chrome::MARK) # marked, inactive: the bar plus a selection band
+    backend.bg_at(third.x, 0).should eq(Theme.selection_dim)
+    backend.bg_at(third.x + 1, 0).should eq(Theme.selection_dim)  # the band survives the label paint
+    (second.right...third.x).each { |cx| row[cx].should eq(' ') } # the gap is still empty
+  end
+
+  it "reads a CJK chip's mark at the same column its click resolves to" do
+    backend = MemoryBackend.new(CJK_RECT.w, 1)
+    Chrome.render_tab_strip(Screen.new(backend), CJK_RECT, cjk_labels, 1, focused: false, marked: Set{0})
+    seg = Chrome.strip_segments(CJK_RECT, cjk_labels, 1)[0][1]
+    backend.row(0)[seg.x].should eq(Chrome::MARK)
+    backend.row(0)[seg.x + 1].should eq(CJK_LABEL[0])
+  end
+
   it "keeps the ASCII strip byte-for-byte where it was" do
     # display_width takes its printable-ASCII fast path here, so the common strip must not
     # have moved a single column.

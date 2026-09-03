@@ -9,7 +9,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def cookie_close : Nil
     cookie_controller.cookie_close
-    resolve_subtab_focus_after_close # don't strand on a now-hidden strip
+    resolve_subtab_focus # don't strand on a now-hidden strip
   end
 
   def cookie_rename_subtab : Nil

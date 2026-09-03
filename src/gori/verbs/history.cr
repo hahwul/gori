@@ -291,6 +291,18 @@ module Gori
         Verb::Scope::Repeater,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 2 },
         mnemonic: '/', section: :tab) { |ctx| ctx.repeater_filter_subtabs; nil }
+
+      # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
+      # closes every marked one, ^R sends them, `space ▸ d` duplicates them — the existing
+      # verbs widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
+      # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
+      # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "repeater.subtab-mark-all", "Mark all sub-tabs", "Mark every repeater session the sub-tab filter shows — the actions above then act on all of them",
+        Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+      r.register Verb::Definition.new(
+        "repeater.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
+        Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
       r.register Verb::Definition.new(
         "repeater.close-subtab", "Close subtab", "Close the active repeater sub-tab",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'w', section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
@@ -631,6 +643,18 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
         mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
+      # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
+      # closes every marked one, ^R sends them, `space ▸ d` duplicates them — the existing
+      # verbs widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
+      # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
+      # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "fuzz.subtab-mark-all", "Mark all sub-tabs", "Mark every fuzz session the sub-tab filter shows — the actions above then act on all of them",
+        Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+      r.register Verb::Definition.new(
+        "fuzz.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
+        Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+
       # Sub-tab rename/close — mirrors repeater.rename-subtab/repeater.close-subtab above:
       # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).
@@ -782,6 +806,18 @@ module Gori
         Verb::Scope::Miner,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 },
         mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+
+      # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
+      # closes every marked one, ^R sends them, `space ▸ d` duplicates them — the existing
+      # verbs widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
+      # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
+      # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "mine.subtab-mark-all", "Mark all sub-tabs", "Mark every mining session the sub-tab filter shows — the actions above then act on all of them",
+        Verb::Scope::Miner, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+      r.register Verb::Definition.new(
+        "mine.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
+        Verb::Scope::Miner, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
 
       # Repeater's/Fuzzer's "Link…" (Round 5 — relocated OUT of register_links, which
       # registers before register_fuzz/register_miner in Verbs.registry: leaving it

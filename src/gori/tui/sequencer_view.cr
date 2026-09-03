@@ -11,6 +11,7 @@ require "../sequencer"
 require "../fuzz"
 require "../repeater/flow_request"
 require "./viewport"
+require "./subtab_marks"
 
 module Gori::Tui
   # The view for ONE token-randomness session (a sub-tab under the Sequencer tab). The
@@ -20,6 +21,7 @@ module Gori::Tui
   # (entropy figures + per-test verdicts + charts); :detail overlays a single token.
   # Mirrors MinerView's session shape; collected tokens stay in-memory (never persisted).
   class SequencerView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     PANE_ORDER      = [:config, :samples, :analysis]
     REPORT_THROTTLE = 25 # recompute the report every N new samples while running
 

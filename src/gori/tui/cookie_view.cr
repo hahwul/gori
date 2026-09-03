@@ -6,6 +6,7 @@ require "./input_mode"
 require "./text_read_state"
 require "./viewport"
 require "../cookie"
+require "./subtab_marks"
 
 module Gori::Tui
   # The Cookie tab's renderer — the JWT tab's sibling for framework signed SESSION cookies
@@ -18,6 +19,7 @@ module Gori::Tui
   # buffers and the cached decode / verify / forge results (recomputed on edit, never on the
   # render hot path). Modelled column-for-column on JwtView.
   class CookieView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     # Custom sub-tab chip label (nil = derive from the detected format); set by rename.
     property name : String? = nil
 

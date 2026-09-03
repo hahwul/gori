@@ -81,6 +81,18 @@ module Gori
         "cookie.filter-subtabs", "Filter sub-tabs", "Filter the Cookie sub-tab strip by name / cookie",
         Verb::Scope::Cookie, available: has_many, mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
+      # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
+      # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
+      # widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
+      # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
+      # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "cookie.subtab-mark-all", "Mark all sub-tabs", "Mark every session the sub-tab filter shows — the actions above then act on all of them",
+        Verb::Scope::Cookie, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :cookie && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+      r.register Verb::Definition.new(
+        "cookie.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
+        Verb::Scope::Cookie, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :cookie && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+
       # Read-pane selection verbs (INPUT-read, DECODED, OUTPUT). Tagged :input for select-line
       # (the cookie pane is the one with a fine selection); send-to stays COMMON.
       r.register Verb::Definition.new(

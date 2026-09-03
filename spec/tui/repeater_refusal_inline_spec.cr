@@ -67,6 +67,9 @@ private class FakeHost
   def focus_body : Nil
   end
 
+  def resolve_subtab_focus : Nil
+  end
+
   def switch_tab(tab : Symbol) : Nil
   end
 

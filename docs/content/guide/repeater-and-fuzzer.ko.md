@@ -15,6 +15,12 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 세션이 수십 개 쌓이면 칩 스트립이 스크롤되기 시작하고, `←`/`→`로 훑어 찾는 건 더 이상 현실적이지 않습니다. 스트립 위 어느 칩에서든 **`f`**를 누르면 전체 세션 목록이 뜹니다. 타이핑하면 이름·메서드·경로·대상 호스트·`#태그`로 걸러지고, `Enter`로 고른 세션으로 점프합니다. 같은 목록이 스트립 왼쪽 끝의 **`⌕`** 뒤에도 있습니다 — 클릭하거나, 첫 칩에서 `←`로 이동하면 됩니다. Fuzzer, Notes, Decoder, JWT, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립에 동일하게 있습니다.
 
+서브탭은 일괄 처리를 위해 **마크**할 수도 있습니다. 스트립에서 `t`는 서 있는 칩을 마크하고 오른쪽으로 한 칸 이동하며, `Shift-T`는 `/` 필터가 보여주는 칩을 전부 마크하고, `Esc`는 스트립을 떠나기 전에 먼저 마크를 지웁니다. 마크된 칩에는 `▌` 막대가 붙습니다. 마크는 **서브탭 동작이 무엇에 작용하는지**를 바꾸는 것이지 동작 자체를 늘리는 게 아닙니다 — History 목록이 이미 따르는 규칙과 같습니다.
+
+> 대상은 **마크가 있으면 마크 전부, 없으면 활성 칩**
+
+그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `t`는 입력한 태그를 전부에 붙입니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
+
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 1152ms 만에 재전송된 200 상태 줄을 갖춘 gori Repeater 탭">
   <figcaption><strong>Repeater</strong>: 왼쪽에 편집 가능한 요청, 오른쪽에 실시간 응답과 소요 시간, 이전 전송과의 diff.</figcaption>
