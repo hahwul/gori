@@ -575,16 +575,16 @@ module Gori::Tui
         if @popup.open?
           return @popup_engaged ? "↑/↓ pick · ↹/↵ complete · esc close · type to filter" : "↓ browse · type to filter · ⇥ output · esc sub-tabs"
         end
-        "chain (> | ,) · exec:CMD runs a command · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc"
+        keys("chain (> | ,) · exec:CMD runs a command · ↑ input · ↓ output · ^Y copy · {decoder.mode} mode · {decoder.save} save · {decoder.load} load · esc")
       when :output
         # `^Y` is the same Copy verb as `y` now (it exists so the key survives INS on INPUT),
         # so it is not re-listed here as a second, different action.
-        "↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · ^X mode · esc sub-tabs"
+        keys("↑/↓ move · ⇧arrows select · #{y} copy · ^F find · ↑-top chain · space cmds · {decoder.mode} mode · esc sub-tabs")
       when :input
         if s.input_mode == InputMode::Insert
-          "type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+          keys("type to edit · ⇧arrows select · ^Y copy · ^F find · esc read · ↓ chain · {decoder.clear} clear · {decoder.mode} mode · ^N new · ^W close · ↑ sub-tabs")
         else
-          "i/↵ edit · ⇧arrows select · #{y} copy · ^F find · space cmds · ↓/↹ chain · ^X mode · ^N new · esc sub-tabs"
+          keys("i/↵ edit · ⇧arrows select · #{y} copy · ^F find · space cmds · ↓/↹ chain · {decoder.mode} mode · ^N new · esc sub-tabs")
         end
       else
         ""

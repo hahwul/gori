@@ -52,33 +52,28 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+        keys("↑/↓ select · {scope.add-rule} add · ↵/{scope.edit-rule} edit · {scope.delete-rule} delete · space cmds · esc sub-tabs")
       when :overrides
-        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : keys("↑/↓ select · {hostoverride.add-entry} add · ↵/{hostoverride.edit-entry} edit · {hostoverride.delete-entry} delete · space cmds · esc sub-tabs")
       when :env
         if @project_view.env_prefix_editing?
           "type prefix · ↵ save · esc cancel"
         elsif @project_view.env_adding?
           "type \"KEY VALUE\" · ↵ save · esc cancel"
         else
-          "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc sub-tabs"
+          keys("↑/↓ select · {env.add-var} add · ↵/{env.edit-var} edit · {env.delete-var} delete · space cmds · esc sub-tabs")
         end
       when :activity
         if @project_view.activity_querying?
           "type to filter · ↵ keep · esc clear"
         else
-          # The one pane on this tab with a destructive key, and the only hint here that names
-          # one. Resolved through the keymap (the rest of this method is literal, because no
-          # other pane key is rebindable-and-dangerous) so a rebind reaches the line that
-          # advertises it.
-          clear = Hotkeys.binding_label(@host.session.registry, "activity.clear", "⇧X")
-          "↑/↓ select · ↵ open · s source · l level · a actor · / filter · #{clear} clear · space cmds · esc sub-tabs"
+          keys("↑/↓ select · ↵ open · {activity.filter-source} source · {activity.filter-level} level · {activity.filter-actor} actor · {activity.find} filter · {activity.clear} clear · space cmds · esc sub-tabs")
         end
       when :settings
         settings_hint
       else
         if @project_view.desc_insert_mode?
-          "type to edit · ⇧arrows select · ^Y copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR"
+          keys("type to edit · ⇧arrows select · {project.copy} copy · esc read · ↑/↓/↔ move · ^G goto · ^F find · ^E $EDITOR")
         else
           "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ^G goto · ^F find · esc sub-tabs"
         end

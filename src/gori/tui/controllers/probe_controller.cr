@@ -116,13 +116,13 @@ module Gori::Tui
         #
         # `esc sub-tabs`, not `esc tabs`: escape goes to the strip (handle_body_key), and the
         # strip is always shown here, so `focus_pane` never downgrades it to the tab bar.
-        edits = rules_custom_selected? ? " · ↵/e edit · d delete" : ""
-        return "↑/↓ select · x on/off · a add#{edits} · space cmds · ↑ sub-tabs · esc sub-tabs"
+        edits = rules_custom_selected? ? " · ↵/e edit · {probe-rules.delete} delete" : ""
+        return keys("↑/↓ select · {probe-rules.toggle} on/off · {probe-rules.add} add#{edits} · space cmds · ↑ sub-tabs · esc sub-tabs")
       elsif @probe.detail_open?
         # `↵ open` and `o flow` are two different destinations and both belong here — the
         # caret's own affected URL, and the issue's sample evidence. The Issues detail names
         # the same pair for the same reason (`↵ open` over its related links, `o flow`).
-        "↑/↓ URL · ↵ open · ⇧arrows select · y copy · o flow · r repeater · p promote · space cmds · ←/esc back"
+        keys("↑/↓ URL · ↵ open · ⇧arrows select · {probe.copy} copy · {probe.open-flow} flow · {probe.repeater-flow} repeater · {probe.promote} promote · space cmds · ←/esc back")
       elsif @probe.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @probe.mode.off?
@@ -132,7 +132,7 @@ module Gori::Tui
       elsif @probe.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
       else
-        "↑/↓ move · ↵ open · o flow · r repeater · p promote · c dismiss · d delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds"
+        keys("↑/↓ move · ↵ open · {probe.open-evidence} flow · {probe.repeater-evidence} repeater · {probe.promote-selected} promote · {probe.dismiss-selected} dismiss · {probe.delete-selected} delete · #{clear} clear · #{mode} mode · #{filt} filter · space cmds")
       end
     end
 

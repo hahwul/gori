@@ -127,7 +127,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- The **command palette** and the **Help** tab (Global / History / Repeater rows wired to verb ids) resolve chords through the effective keymap after a rebind. Other Help sections and some status chips may still use curated defaults.
+- Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family, structural keys (`esc`, `↵`, arrows, `↹`), and a pane-local letter such as `x` in an editor.
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).

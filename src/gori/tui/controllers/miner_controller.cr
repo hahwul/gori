@@ -93,9 +93,9 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
       case v.focus
-      when :results then "↑/↓ select · ↵ detail · ^X stop · space cmds · ↹ pane · esc tabs"
+      when :results then keys("↑/↓ select · ↵ detail · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
       when :detail  then "↑/↓ scroll · esc back"
-      else               "↓ findings · ^X stop · space cmds · ↹ pane · esc tabs"
+      else               keys("↓ findings · {mine.stop} stop · space cmds · ↹ pane · esc tabs")
       end
     end
 

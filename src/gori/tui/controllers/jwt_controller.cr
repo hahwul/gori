@@ -945,7 +945,7 @@ module Gori::Tui
           # The READ arm below advertises the band and `y`; INSERT kept the band and named
           # neither it nor the key that copies it. `y` is a literal character while typing —
           # and typing it over the band REPLACES it — so `^Y` is the copy this mode has.
-          "type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} encode · ^L clear · ^N new · ↑ sub-tabs"
+          keys("type a JWT · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} encode · {jwt.clear} clear · ^N new · ↑ sub-tabs")
         else
           "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓ decoded · #{lens} encode · ^N new · esc sub-tabs"
         end
@@ -959,14 +959,14 @@ module Gori::Tui
         # `edit_json`/`edit_secret` insert a literal space (`handle_body_key` only defers
         # ctrl/alt chords). Naming a menu that types a space instead of opening cost these
         # strips the one token that had room to say which key copies.
-        "type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A alg · #{lens} decode · esc sub-tabs"
+        keys("type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
       when :secret
         # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
         # + caret index (JwtSession#secret_cx), not a TextArea, so it has no band to grow.
         # `^Y` still copies the whole field.
-        "type secret · ^Y copy · ^A alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs"
+        keys("type secret · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs")
       when :output
-        "↑/↓ scroll · #{y} copy token · space cmds · ^A alg · #{lens} decode · esc sub-tabs"
+        keys("↑/↓ scroll · #{y} copy token · space cmds · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
       else
         ""
       end

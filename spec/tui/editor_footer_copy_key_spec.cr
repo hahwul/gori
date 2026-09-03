@@ -98,8 +98,11 @@ describe "editor key-hint strips" do
     offenders = ids.reject do |id|
       path = controller.call(id)
       next false unless File.exists?(path)
+      # Either spelling names the key: the literal, or the `{<tab>.copy}` token a strip uses
+      # to read it from the keymap (Hotkeys.expand) — Project's INS strip is the token form.
       File.read(path).lines.any? do |line|
-        !line.lstrip.starts_with?('#') && literals.call(line).any?(&.includes?("^Y copy"))
+        !line.lstrip.starts_with?('#') &&
+          literals.call(line).any? { |t| t.includes?("^Y copy") || t.includes?("{#{id}.copy} copy") }
       end
     end
     offenders.should be_empty

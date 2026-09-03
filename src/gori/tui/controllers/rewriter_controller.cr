@@ -967,7 +967,7 @@ module Gori::Tui
       when :preview_out
         "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input"
       else
-        "[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · s global/project · d delete · ⇧K/⇧J reorder · esc tabs"
+        keys("[/] sub-tab · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end
     end
   end

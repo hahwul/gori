@@ -86,10 +86,10 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · send a request here (space → Send to Sequencer) or a selection" unless v
       case v.focus
-      when :samples  then "↑/↓ select · → analysis · ↵ detail · ^X stop · c config · space cmds · ↹ pane · esc tabs"
-      when :analysis then "↑/↓ scroll · ← samples · ^R run · c config · ↹ pane · esc tabs"
+      when :samples  then keys("↑/↓ select · → analysis · ↵ detail · {sequence.stop} stop · {sequence.configure} config · space cmds · ↹ pane · esc tabs")
+      when :analysis then keys("↑/↓ scroll · ← samples · {sequence.run} run · {sequence.configure} config · ↹ pane · esc tabs")
       when :detail   then "↑/↓ scroll · esc back"
-      else                "^R run · c config · space cmds · ↹ pane · esc tabs"
+      else                keys("{sequence.run} run · {sequence.configure} config · space cmds · ↹ pane · esc tabs")
       end
     end
 

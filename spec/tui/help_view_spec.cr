@@ -45,22 +45,63 @@ describe Gori::Tui::HelpView do
   end
 
   # ⇧X is the clear-all chord in four scopes and only History has a section of its own, so the
-  # other three are named in OTHER TABS rows whose key column is the TAB NAME — no verb_id to
-  # resolve through, which makes those chord names hand-written literals that a rebind cannot
-  # follow. The pairing is what this checks: the row names the key the registry actually binds.
-  # (Authorize had no row at all until this rollout, though TAB_SECTION already pointed its
-  # Shortcuts popup at the section.)
+  # other three are named in OTHER TABS rows whose key column is the TAB NAME. Those rows spell
+  # the chord as a `{verb.id}` token now, so this reads the RENDERED row (shortcut_rows, the
+  # sheet both surfaces draw) rather than the SECTIONS literal: the check is that the row names
+  # the key the registry actually binds. (Authorize had no row at all until this rollout, though
+  # TAB_SECTION already pointed its Shortcuts popup at the section.)
   it "names the clear-all chord in every tab that has one" do
     registry = Gori::Verbs.registry
-    other = HelpView::SECTIONS.find { |(title, _)| title == "OTHER TABS" }.not_nil![1]
+    rows = HelpView.shortcut_rows(registry)
     {"Probe" => "probe.clear", "Authorize" => "authorize.clear", "  activity" => "activity.clear"}
       .each do |label, verb_id|
-        row = other.find { |item| item.key == label }
+        row = rows.find { |r| r.kind == :item && r.a == label }
         row.should_not be_nil, "OTHER TABS has no #{label} row"
         chord = Gori::Hotkeys.binding_label(registry, verb_id, "")
         chord.should eq("⇧X"), verb_id
-        row.not_nil!.desc.should contain(chord), "the #{label} row does not name #{verb_id}'s #{chord}"
+        row.not_nil!.b.should contain(chord), "the #{label} row does not name #{verb_id}'s #{chord}"
       end
+  end
+
+  # Composite rows (`^R · ^X` run/stop) and the OTHER TABS summaries name their chords as
+  # `{verb.id}` tokens now. Two things keep that honest: every token must name a verb the
+  # registry binds to SOMETHING (a typo would otherwise print as a literal `{sitemap.qeury}`),
+  # and a rebind has to reach both columns — the key column of a composite row and the
+  # description of a summary row — the way it already reached the single-verb-id rows.
+  describe "{verb.id} tokens" do
+    it "all name a registered verb that has a default chord, and none survive expansion" do
+      registry = Gori::Verbs.registry
+      seen = 0
+      HelpView::SECTIONS.each do |(title, items)|
+        items.each do |item|
+          "#{item.key} #{item.desc}".scan(Gori::Hotkeys::VERB_TOKEN_RE).each do |m|
+            id = m[1]
+            seen += 1
+            registry[id]?.should_not be_nil, "#{title}: {#{id}} is not a registered verb"
+            Gori::Hotkeys.default_for(registry, id, "auto").should_not be_nil, "#{title}: {#{id}} has no default chord to print"
+          end
+        end
+      end
+      seen.should be > 20 # the rollout put tokens on the composite rows; a sweep that drops them all is a regression
+      HelpView.shortcut_rows(registry).each do |row|
+        "#{row.a} #{row.b}".should_not match(Gori::Hotkeys::VERB_TOKEN_RE)
+      end
+    end
+
+    it "follow a rebind in the key column and in a summary row's description" do
+      registry = Gori::Verbs.registry
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"comparer.pick-a" => ["shift-a"], "sitemap.query" => ["shift-q"]}
+        rows = HelpView.shortcut_rows(registry)
+        rows.find(&.b.==("pick flow A · flow B")).not_nil!.a.should eq("⇧A · b")
+        rows.find(&.a.==("Sitemap")).not_nil!.b.should start_with("↑/↓ · ⇧Q filter")
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
+      # And back to the defaults once the override is gone — the sheet is rebuilt per call.
+      HelpView.shortcut_rows(registry).find(&.b.==("pick flow A · flow B")).not_nil!.a.should eq("a · b")
+    end
   end
 
   describe "the Query page" do

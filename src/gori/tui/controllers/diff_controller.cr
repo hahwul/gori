@@ -89,12 +89,12 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "" unless focus == :body
-      return "a pick the baseline project" unless @diff.ready?
-      base = "a/b pick · s swap · r run · v lens"
+      return keys("{diff.pick-a} pick the baseline project") unless @diff.ready?
+      base = keys("{diff.pick-a}/{diff.pick-b} pick · {diff.swap} swap · {diff.run} run · {diff.lens} lens")
       # The three ROW verbs are gated on a row under the cursor (`diff_rows_shown?`), and a
       # lens can empty the list. Naming a key that would do nothing is the hint lying about
       # what the tab can do — which it already did for `↵` before these two joined it.
-      @diff.selected_row ? "#{base} · ↵ Comparer · ⇧F issue · n note" : base
+      @diff.selected_row ? keys("#{base} · ↵ Comparer · {diff.issue} issue · {diff.note} note") : base
     end
 
     # --- verbs ---------------------------------------------------------------

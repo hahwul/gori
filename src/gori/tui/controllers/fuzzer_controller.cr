@@ -239,7 +239,7 @@ module Gori::Tui
     private def config_hint(v : FuzzerView, run : String) : String
       case v.config_row
       when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane"
-      when :add  then "↵ add a payload set · ^L quick List · ↑/↓ row · #{run} run · ↹ pane"
+      when :add  then keys("↵ add a payload set · {fuzz.list-paste} quick List · ↑/↓ row · #{run} run · ↹ pane")
       when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane"
       else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane"
       end
