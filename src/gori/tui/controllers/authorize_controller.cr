@@ -910,15 +910,14 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       passive = @passive ? " · PASSIVE on" : ""
       unless @view.any_requests?
-        return "i identities · p passive · Send to Authorize from History to begin#{passive}"
+        return keys("{authorize.identities} identities · {authorize.passive} passive · Send to Authorize from History to begin#{passive}")
       end
-      return "↑/↓ request · ⇥ identity · ^X stop#{passive} · space cmds" if running?
+      return keys("↑/↓ request · ⇥ identity · {authorize.stop} stop#{passive} · space cmds") if running?
       # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
       # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in
       # front of an operator watching one go out. Resolved through the keymap so a rebind
       # reaches the hint; the rest of this line is still literal, as its siblings are.
-      clear = Hotkeys.binding_label(@host.session.registry, "authorize.clear", "⇧X")
-      "↑/↓ request · ⇥ identity · ^R run · ⇧R all · i identities · p passive#{passive} · #{clear} clear · space cmds"
+      keys("↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.passive} passive#{passive} · {authorize.clear} clear · space cmds")
     end
   end
 end

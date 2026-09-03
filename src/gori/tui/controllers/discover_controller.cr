@@ -53,9 +53,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
       if @view.focus == :runs
-        "↑/↓ runs · ↵/tab findings · ^R run · ^X stop · p pause · d dismiss · space cmds · esc sub-tabs"
+        keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · p pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
-        "↑/↓ nav · ↵/o request+response · tab runs · ^R run · ^X stop · p pause · space cmds · esc sub-tabs"
+        keys("↑/↓ nav · ↵/o request+response · tab runs · {discover.run} run · {discover.stop} stop · p pause · space cmds · esc sub-tabs")
       end
     end
 

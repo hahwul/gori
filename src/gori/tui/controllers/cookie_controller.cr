@@ -969,24 +969,24 @@ module Gori::Tui
       case s.pane
       when :input
         if s.input_mode == InputMode::Insert
-          "type a cookie · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} forge · ^A format · ^L clear · ↑ sub-tabs"
+          keys("type a cookie · ⇧arrows select · ^Y copy · esc read · ↓ decoded · #{lens} forge · {cookie.cycle-format} format · {cookie.clear} clear · ↑ sub-tabs")
         else
-          "i/↵ edit · c crack · #{y} copy · space cmds · ↓ decoded · #{lens} forge · ^A format · ^N new · esc sub-tabs"
+          keys("i/↵ edit · {cookie.crack} crack · #{y} copy · space cmds · ↓ decoded · #{lens} forge · {cookie.cycle-format} format · ^N new · esc sub-tabs")
         end
       when :decoded
-        "↑/↓ scroll · c crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs"
+        keys("↑/↓ scroll · {cookie.crack} crack · #{y} copy · space cmds · ↑-top input · ↓ options · #{lens} forge · esc sub-tabs")
       when :opts
         if effective_format(s) == "django"
-          "type salt · salt:#{salt_preset_label(s)} (click/space) · ^A format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+          keys("type salt · salt:#{salt_preset_label(s)} (click/space) · {cookie.cycle-format} format · algo #{effective_algorithm(s)} · ↑/↓ cross · #{lens} forge · esc sub-tabs")
         else
-          "type salt · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+          keys("type salt · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · esc sub-tabs")
         end
       when :secret
-        "type secret · ^Y copy · ^A format · ↑/↓ cross · #{lens} forge · esc sub-tabs"
+        keys("type secret · ^Y copy · {cookie.cycle-format} format · ↑/↓ cross · #{lens} forge · esc sub-tabs")
       when :payload
-        "type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · ^A format · #{lens} decode · esc sub-tabs"
+        keys("type payload · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {cookie.cycle-format} format · #{lens} decode · esc sub-tabs")
       when :output
-        "↑/↓ scroll · #{y} copy cookie · space cmds · ^A format · #{lens} decode · esc sub-tabs"
+        keys("↑/↓ scroll · #{y} copy cookie · space cmds · {cookie.cycle-format} format · #{lens} decode · esc sub-tabs")
       else
         ""
       end

@@ -154,6 +154,7 @@ module Gori::Tui
       # specs can drive its diff against a double (Termisu.new needs a live /dev/tty).
       @backend = TermisuBackend.new(@term).as(Backend)
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
+      TrafficEmptyState.registry = @session.registry    # the empty-state cards' chord chips
       @scope = @session.scope
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
@@ -2454,7 +2455,7 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        return "←/→ switch tab · ↹/↵ enter · 1-9 jump · c capture · i intercept · ^P cmds · q projects · ^D quit" if @focus == :menu
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 jump · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really

@@ -144,7 +144,7 @@ module Gori::Tui
       if @focus == :colors
         "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc tabs"
       else
-        "↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · ↹ colours"
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.delete} delete · space cmds · ↹ colours")
       end
     end
 

@@ -32,6 +32,12 @@ module Gori::Tui
     # a "how to start" hint, and a dialog means the user already has.
     class_property? suppressed : Bool = false
 
+    # The registry the cards resolve their chord chips through — set once by the Runner
+    # beside `suppressed`. Nil (a registry-less render: the view specs) leaves every chip at
+    # the literal spelled at its call site, which is also what the chip falls back to for an
+    # unbound verb. See #key.
+    class_property registry : Verb::Registry? = nil
+
     # `listen` is the live bind as (host, port), NOT a pre-joined string: the card renders
     # the address at full width but the medium/minimal fallbacks inline it into a longer
     # hint, so this has to pick the verbose or terse form per branch — which needs the
@@ -247,43 +253,43 @@ module Gori::Tui
              when :sitemap
                "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · press c"}"
              when :intercept
-               catch_on ? "⏸ queue empty · i catch · / filter" : "press i to enable catch"
+               catch_on ? "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{key("/", "intercept.filter")} filter" : "press #{key("i", "intercept.toggle")} to enable catch"
              when :repeater
-               "^N new · History ^R repeater"
+               "^N new · History #{key("^R", "history.repeater")} repeater"
              when :fuzzer
-               "^N new · ⇧I from History"
+               "^N new · #{key("⇧I", "history.fuzz")} from History"
              when :fuzzer_results
-               running ? "sampling…" : "^R run · ^O sets"
+               running ? "sampling…" : "#{key("^R", "fuzz.run")} run · ^O sets"
              when :probe
-               scan_on ? "traffic ──► scan · press m" : "press m to enable scanning"
+               scan_on ? "traffic ──► scan · press #{key("m", "probe.mode")}" : "press #{key("m", "probe.mode")} to enable scanning"
              when :issues
-               "⇧F from History · n create"
+               "#{key("⇧F", "issue.create")} from History · #{key("n", "issues.new")} create"
              when :discover
-               "space → Discover here · ^R run"
+               "space → Discover here · #{key("^R", "discover.run")} run"
              when :comparer
-               "a pick A · b pick B"
+               "#{key("a", "comparer.pick-a")} pick A · #{key("b", "comparer.pick-b")} pick B"
              when :authorize
-               "space → Send to Authorize · i identities"
+               "space → Send to Authorize · #{key("i", "authorize.identities")} identities"
              when :miner
-               "space → Mine parameters · ^R run"
+               "space → Mine parameters · #{key("^R", "mine.run")} run"
              when :miner_results
-               running ? "mining…" : "^R mine this request"
+               running ? "mining…" : "#{key("^R", "mine.run")} mine this request"
              when :sequencer
-               "space → Send to Sequencer · ^R"
+               "space → Send to Sequencer · #{key("^R", "sequence.run")}"
              when :sequencer_samples
-               running ? "collecting…" : "c configure · ^R collect"
+               running ? "collecting…" : "#{key("c", "sequence.configure")} configure · #{key("^R", "sequence.run")} collect"
              when :oast
-               has_provider ? "g payload · ^R listen" : "^2 Providers — add one first"
+               has_provider ? "#{key("g", "oast.generate")} payload · #{key("^R", "oast.listen")} listen" : "^2 Providers — add one first"
              when :notes
                "^N new note · start typing"
              when :project_desc
                "i/↵ describe this engagement · ^E $EDITOR"
              when :project_scope
-               "a add rule · space menu"
+               "#{key("a", "scope.add-rule")} add rule · space menu"
              when :project_overrides
-               "a map host→IP · space menu"
+               "#{key("a", "hostoverride.add-entry")} map host→IP · space menu"
              when :project_env
-               "a add $KEY · space prefix"
+               "#{key("a", "env.add-var")} add $KEY · space prefix"
              when :project_activity
                "agent calls & job results land here"
              else
@@ -418,19 +424,19 @@ module Gori::Tui
 
       draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
-      screen.text(ix, y, "traffic ──► ⏸ hold ──► f forward · d drop", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, "traffic ──► ⏸ hold ──► #{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop", Theme.muted, Theme.bg, width: iw)
       y += 2
       unless catch_on
-        screen.text(ix, y, "catch is OFF — press i to enable", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, "catch is OFF — press #{key("i", "intercept.toggle")} to enable", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       unless capturing
         screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
-      y = draw_chord_hint(screen, ix, y, iw, " i:CATCH ", "toggle catch", bullet: "⏸ ")
-      y = draw_chord_hint(screen, ix, y, iw, " c:ALL ", "cycle REQ/RES/ALL", bullet: "▸ ")
-      screen.text(ix, y, "▸ / condition — filter what gets held", Theme.muted, Theme.bg, width: iw)
+      y = draw_chord_hint(screen, ix, y, iw, " i:CATCH ", "toggle catch", bullet: "⏸ ", verb: "intercept.toggle")
+      y = draw_chord_hint(screen, ix, y, iw, " c:ALL ", "cycle REQ/RES/ALL", bullet: "▸ ", verb: "intercept.direction")
+      screen.text(ix, y, "▸ #{key("/", "intercept.filter")} condition — filter what gets held", Theme.muted, Theme.bg, width: iw)
       y += 1
       draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
     end
@@ -447,7 +453,7 @@ module Gori::Tui
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " ^R ", "repeater from History", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " ^R ", "repeater from History", bullet: "▸ ", verb: "history.repeater")
       draw_chord_hint(screen, ix, y, iw, " ^N ", "new blank repeater tab", bullet: "▸ ")
     end
 
@@ -464,7 +470,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " ^N ", "new fuzz session", bullet: "§ ")
-      draw_chord_hint(screen, ix, y, iw, " ⇧I ", "send from History/Repeater", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ⇧I ", "send from History/Repeater", bullet: "▸ ", verb: "history.fuzz")
     end
 
     # "FUZZ RUN", not "RESULTS": this card draws INSIDE the pane the Fuzzer titles RESULTS, and a
@@ -474,13 +480,13 @@ module Gori::Tui
     # verb-shaped name for the same reason.
     private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
       inner_h = full_inner_h(:fuzzer_results, running: running)
-      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press ^R to start a fuzz run."
+      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press #{key("^R", "fuzz.run")} to start a fuzz run."
       inner, ix, iw = begin_card(screen, rect, :fuzzer_results, headline, "FUZZ RUN", inner_h, Screen.display_width(msg))
       y = inner.y
 
       draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
-      draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ") unless running
+      draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ", verb: "fuzz.run") unless running
     end
 
     private def render_probe_full(screen : Screen, rect : Rect, headline : String,
@@ -507,14 +513,14 @@ module Gori::Tui
           screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
           y += 1
         end
-        y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ")
+        y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ", verb: "probe.mode")
         draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
       else
         draw_wrapped_message(screen, ix, y, iw, desc)
         y += 2
         screen.text(ix, y, hint2, Theme.muted, Theme.bg, width: iw)
         y += 2
-        draw_chord_hint(screen, ix, y, iw, " m:MODE ", "turn scanning on", bullet: "◇ ")
+        draw_chord_hint(screen, ix, y, iw, " m:MODE ", "turn scanning on", bullet: "◇ ", verb: "probe.mode")
       end
     end
 
@@ -530,8 +536,8 @@ module Gori::Tui
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " ⇧F ", "issue from History flow", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " n ", "create an issue here", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " ⇧F ", "issue from History flow", bullet: "▸ ", verb: "issue.create")
+      draw_chord_hint(screen, ix, y, iw, " n ", "create an issue here", bullet: "▸ ", verb: "issues.new")
     end
 
     # Discover, Comparer, Miner and Sequencer all reach here from a container-level "nothing
@@ -551,7 +557,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Discover here\" on a host", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "run the selected crawl", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "run the selected crawl", bullet: "▸ ", verb: "discover.run")
     end
 
     private def render_comparer_full(screen : Screen, rect : Rect, headline : String) : Nil
@@ -565,8 +571,8 @@ module Gori::Tui
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " a ", "pick flow A", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " b ", "pick flow B", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "pick flow A", bullet: "▸ ", verb: "comparer.pick-a")
+      draw_chord_hint(screen, ix, y, iw, " b ", "pick flow B", bullet: "▸ ", verb: "comparer.pick-b")
     end
 
     # THREE chord lines, where the sibling cards take two (hence `5 + 3` in `full_inner_h`).
@@ -586,8 +592,8 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Send to Authorize\" on a flow", bullet: "▸ ")
-      y = draw_chord_hint(screen, ix, y, iw, " i ", "who to replay as", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "replay what has not run", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " i ", "who to replay as", bullet: "▸ ", verb: "authorize.identities")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "replay what has not run", bullet: "▸ ", verb: "authorize.run")
     end
 
     private def render_miner_full(screen : Screen, rect : Rect, headline : String) : Nil
@@ -602,7 +608,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Mine parameters\" on a flow", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ", verb: "mine.run")
     end
 
     private def render_sequencer_full(screen : Screen, rect : Rect, headline : String) : Nil
@@ -617,7 +623,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Send to Sequencer\" on a flow", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ", verb: "sequence.run")
     end
 
     # The three RESULTS-pane variants below (fuzz above, mine and sample here) all draw inside a
@@ -634,7 +640,7 @@ module Gori::Tui
 
       draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ") unless running
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ", verb: "mine.run") unless running
     end
 
     private def render_sequencer_samples_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
@@ -646,8 +652,8 @@ module Gori::Tui
       draw_wrapped_message(screen, ix, y, iw, msg)
       return if running
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " c ", "where the token lives", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " c ", "where the token lives", bullet: "▸ ", verb: "sequence.configure")
+      draw_chord_hint(screen, ix, y, iw, " ^R ", "collect samples", bullet: "▸ ", verb: "sequence.run")
     end
 
     # OAST is the one workbench tab that had no card at all: an empty CALLBACKS pane is the
@@ -679,11 +685,11 @@ module Gori::Tui
       end
       y += 1
       if has_provider
-        y = draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL (copied)", bullet: "▸ ")
-        draw_chord_hint(screen, ix, y, iw, " ^R ", "start listening", bullet: "▸ ")
+        y = draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL (copied)", bullet: "▸ ", verb: "oast.generate")
+        draw_chord_hint(screen, ix, y, iw, " ^R ", "start listening", bullet: "▸ ", verb: "oast.listen")
       else
         y = draw_chord_hint(screen, ix, y, iw, " ^2 ", "Providers — interactsh is prefilled", bullet: "▸ ")
-        draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL, once one is on", bullet: "▸ ")
+        draw_chord_hint(screen, ix, y, iw, " g ", "get a payload URL, once one is on", bullet: "▸ ", verb: "oast.generate")
       end
     end
 
@@ -930,14 +936,33 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^P ", "Open browser", bullet: bullet)
     end
 
+    # `literal` as written unless a registry is set and `verb` resolves — then the verb's
+    # EFFECTIVE chord, so the card advertises the key the operator rebound. Same fallback
+    # rule as Help's verb-id rows (`Hotkeys.binding_label`): unknown/unbound → the literal.
+    private def key(literal : String, verb : String) : String
+      return literal unless reg = registry
+      Hotkeys.binding_label(reg, verb, literal)
+    end
+
+    # A ` KEY ` or ` KEY:WORD ` chip; with `verb`, KEY is resolved through #key and the
+    # `:WORD` half (CATCH/ALL/MODE — a state, not a key) is kept.
+    private def chip_text(chord : String, verb : String?) : String
+      return chord unless verb
+      inner = chord.strip
+      k, sep, word = inner.partition(':')
+      " #{key(k, verb)}#{sep}#{word} "
+    end
+
     private def draw_chord_hint(screen : Screen, ix : Int32, y : Int32, iw : Int32,
-                                chord : String, label : String, *, bullet : String) : Int32
+                                chord : String, label : String, *, bullet : String,
+                                verb : String? = nil) : Int32
       bg = Theme.bg
       screen.text(ix, y, bullet, Theme.muted, bg)
       bx = ix + bullet.size
       # Claimed-family chips (^N/^W/^P) follow the configured modifier; ^R and the
-      # "i:CATCH"-style chips are untouched (retag's token set is closed).
-      x = Frame.chip(screen, bx, y, Hotkeys.retag(chord), true) + 1
+      # "i:CATCH"-style chips are untouched (retag's token set is closed) — those follow a
+      # REBIND instead, through `verb`.
+      x = Frame.chip(screen, bx, y, Hotkeys.retag(chip_text(chord, verb)), true) + 1
       screen.text(x, y, " #{label}", Theme.text, bg, width: {ix + iw - x, 0}.max)
       y + 1
     end

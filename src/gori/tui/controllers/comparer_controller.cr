@@ -288,13 +288,9 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      reg = @host.session.registry
-      a = Hotkeys.binding_label(reg, "comparer.pick-a", "a")
-      b = Hotkeys.binding_label(reg, "comparer.pick-b", "b")
-      s = Hotkeys.binding_label(reg, "comparer.swap", "s")
-      n = Hotkeys.binding_label(reg, "comparer.next-change", "n")
-      f = Hotkeys.binding_label(reg, "comparer.toggle-fold", "f")
-      "←/→ req|res · ↑/↓ row · #{n}/⇧#{n} change · #{f} fold · y copy · ⇧←/→ h-scroll · #{a}/#{b} pick · #{s} swap · space cmds"
+      # prev-change is its OWN verb (⇧N), not "shift + whatever next-change is bound to": the
+      # old `⇧#{n}` spelling followed a rebind of `n` to a key ⇧ never reached.
+      keys("←/→ req|res · ↑/↓ row · {comparer.next-change}/{comparer.prev-change} change · {comparer.toggle-fold} fold · {comparer.copy} copy · ⇧←/→ h-scroll · {comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · space cmds")
     end
   end
 end

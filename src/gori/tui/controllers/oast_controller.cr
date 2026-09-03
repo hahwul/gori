@@ -232,7 +232,7 @@ module Gori::Tui
       if callbacks_sub?
         return "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back" if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
-        "↑/↓ select · ‹/› provider · g payload · y copy · / filter · ^R listen · ^X stop · ↵ detail · space cmds"
+        keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
       else
         # `x on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
         # `t` here alone, and ↵ has always opened the editor without the hint saying so.

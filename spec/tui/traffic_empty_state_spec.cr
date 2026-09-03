@@ -204,6 +204,31 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("Discover here").should be_true
   end
 
+  # The cards' chord chips are literals until the Runner hands the module a registry; with
+  # one, a chip names the key the operator actually bound — including the `KEY:WORD` chips,
+  # whose WORD half is a state, not a key.
+  it "resolves chord chips through the registry when one is set" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"comparer.pick-a" => ["shift-a"], "probe.mode" => ["shift-m"]}
+      TrafficEmptyState.registry = Gori::Verbs.registry
+
+      backend = MemoryBackend.new(60, 12)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :comparer)
+      backend.contains?("⇧A").should be_true
+      backend.contains?("pick flow A").should be_true
+
+      backend = MemoryBackend.new(60, 12)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12),
+        variant: :probe, listen: {"127.0.0.1", 8070}, capturing: true, scan_on: true)
+      backend.contains?("⇧M:MODE").should be_true
+      backend.contains?("m:MODE").should be_false
+    ensure
+      TrafficEmptyState.registry = nil
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
   it "renders the comparer diff card" do
     backend = MemoryBackend.new(60, 12)
     TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :comparer)

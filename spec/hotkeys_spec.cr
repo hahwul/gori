@@ -52,6 +52,29 @@ describe Gori::Hotkeys do
     end
   end
 
+  describe ".expand" do
+    it "resolves every {verb.id} token to the verb's effective chord and leaves the prose alone" do
+      reg = Gori::Verbs.registry
+      Gori::Hotkeys.expand(reg, "{fuzz.run} run · {fuzz.stop} stop · esc back")
+        .should eq("^R run · ^X stop · esc back")
+      Gori::Hotkeys.expand(reg, "{comparer.pick-a}/{comparer.pick-b} pick").should eq("a/b pick")
+    end
+
+    it "follows a user override, and falls back to the default for an unbound verb" do
+      reg = Gori::Verbs.registry
+      ov = {"fuzz.run" => [Gori::Verb::Chord.new("s", ctrl: true)], "fuzz.stop" => [] of Gori::Verb::Chord}
+      Gori::Hotkeys.expand(reg, "{fuzz.run} run · {fuzz.stop} stop", ov).should eq("^S run · ^X stop")
+    end
+
+    it "leaves an unknown or keyless token as written, and never touches other braces" do
+      reg = Gori::Verbs.registry
+      # `oast.copy` is a real verb with no default chord — a token naming it is an authoring
+      # error the Help spec would catch, and here it stays visible instead of vanishing.
+      Gori::Hotkeys.expand(reg, "{no.such.verb} · {oast.copy} · {\"a\":1} · {}").should eq("{no.such.verb} · {oast.copy} · {\"a\":1} · {}")
+      Gori::Hotkeys.expand(reg, "no tokens here").should eq("no tokens here")
+    end
+  end
+
   describe ".claimed?" do
     it "covers the pre-keymap ctrl letter/digit/punct set" do
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", ctrl: true)).should be_true

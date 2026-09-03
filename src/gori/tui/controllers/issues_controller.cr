@@ -83,7 +83,7 @@ module Gori::Tui
         elsif @issues.notes_focused?
           "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · esc links"
         else
-          "↑/↓ links · ↵ open · i/↵ notes · o flow · r repeater · space cmds · ←/esc back"
+          keys("↑/↓ links · ↵ open · i/↵ notes · {issue.open-flow} flow · {issue.repeater-flow} repeater · space cmds · ←/esc back")
         end
       elsif @issues.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"

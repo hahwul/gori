@@ -1,6 +1,7 @@
 require "termisu"
 require "../verb"
 require "../session"
+require "../hotkeys"
 require "../repeater/subtab_filter"
 require "./subtab_marks"
 require "./controllers/tab_close"
@@ -1060,6 +1061,14 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       ""
+    end
+
+    # A hint with its chords spelled as `{verb.id}` tokens, resolved through the effective
+    # keymap (Hotkeys.expand) — the strip names the verb and the keymap says which key, so a
+    # rebind reaches every strip written this way. Keys that are NOT verbs (↑/↓, esc, the
+    # claimed ^P/^N/^W family, a pane-local `x`) stay literal.
+    protected def keys(template : String) : String
+      Hotkeys.expand(@host.session.registry, template)
     end
 
     # --- orthogonal ^G/^F prompts: the symbol naming the currently-focused

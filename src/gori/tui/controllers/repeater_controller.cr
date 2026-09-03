@@ -297,7 +297,7 @@ module Gori::Tui
         else
           # The way back on an overridden handshake tab: the MESSAGES pane is hidden there, so
           # `^T` — the key that would otherwise reveal it — is not drawn to point at it.
-          back = v.ws_http_only? ? " · ^V websocket" : ""
+          back = v.ws_http_only? ? keys(" · {repeater.toggle-http2} websocket") : ""
           "i/↵ edit · #{read_common} · #{marks} · ^G goto · ^F find · #{hex} hex#{back} · ↹ pane · esc tabs"
         end
       else
@@ -307,11 +307,11 @@ module Gori::Tui
 
     private def grpc_hint(v : RepeaterView) : String
       if v.grpc_fields_editing?
-        "type the value · ↵ apply · esc cancel · ^R send"
+        keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        "↑/↓ pick a field · i/↵ edit · ␣E/esc head · ^X hex · ^R send"
+        keys("↑/↓ pick a field · i/↵ edit · ␣E/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
       elsif v.request_hex?
-        "gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send"
+        keys("gRPC payload hex — overtype 0-9a-f · Ins/Del length · {repeater.toggle-hex}/esc exit · {repeater.send} send")
       elsif v.request_insert?
         # `⇧arrows select · ^Y copy` for the same reason the plain-HTTP request footer names
         # them (see #body_hint's `:request` arm): the band is buildable in INSERT and the `y` that
@@ -322,9 +322,9 @@ module Gori::Tui
         # head/metadata. The old token promised a focus move and silently corrupted a header.
         "type head/metadata · ⇧arrows select · ^Y copy · esc read · ↹ text"
       else
-        msg = v.grpc_reframable? ? "^X hex-edit payload · " : ""
+        msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
         fields = v.grpc_fields_available? ? "␣E fields · " : ""
-        "i/↵ edit head · #{msg}#{fields}⇧arrows select · y copy · space cmds · ↹ pane"
+        keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · y copy · space cmds · ↹ pane")
       end
     end
 
@@ -447,7 +447,7 @@ module Gori::Tui
               "GraphQL query/vars"
             end
       mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · #{tab_token(v)}"
+      keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · ^G goto · ^F find · esc read · #{tab_token(v)}")
     end
 
     private def ws_hint(v : RepeaterView) : String
@@ -455,7 +455,7 @@ module Gori::Tui
       mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
-      "#{mode} #{sub} · ^T switch · ^V http · ^G goto · ^F find · esc read · #{tab_token(v)}"
+      keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · {repeater.toggle-http2} http · ^G goto · ^F find · esc read · #{tab_token(v)}")
     end
 
     # What Tab actually does on the REQUEST column right now. In INSERT it types a TAB
@@ -473,7 +473,7 @@ module Gori::Tui
     # reachable and nothing said so.
     private def ws_resp_hint(v : RepeaterView, read_common : String, send : String) : String
       card = v.resp_pane == :handshake ? "handshake response" : "transcript"
-      "↑/↓ move #{card} · #{read_common} · ←/→ char · ^T switch · ^F find · #{send} send · ↹ pane · esc tabs"
+      keys("↑/↓ move #{card} · #{read_common} · ←/→ char · {repeater.toggle-decoded} switch · ^F find · #{send} send · ↹ pane · esc tabs")
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
