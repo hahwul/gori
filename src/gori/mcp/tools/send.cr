@@ -1365,7 +1365,15 @@ module Gori
           # lowercases every name. Wiring it means the argument is never accepted and dropped
           # on either stored-source path (#906); it cannot loosen an h1 replay.
           {Repeater::PlanOptions.new([flow.bytes], default_target: flow.target,
-            expand_request: false, evidence: true, preserve_field_case: verbatim,
+            # `expand_bindings: !verbatim` beside `evidence: true`, not instead of it. Today
+            # `evidence` alone already makes `resolve_bindings?` false, so this changes nothing
+            # — which is exactly why it is here. This branch was the one of the four carrying
+            # `verbatim` that reached the end state by a DIFFERENT mechanism, and the paragraph
+            # above records what that costs: if `evidence` ever becomes conditional here (the
+            # CLI flow path already merges operator `-H` overrides into a replay), `verbatim`
+            # silently stops reaching the send seam again, on this branch alone.
+            expand_request: false, evidence: true, expand_bindings: !verbatim,
+            preserve_field_case: verbatim,
             auto_content_length: false, reframe_grpc: reframe_grpc,
             http2: bool_arg(h, "http2", flow.http2), sni: send_sni(h, flow.sni), verify: verify,
             tls_preset: send_tls_preset(h),
@@ -1508,10 +1516,10 @@ module Gori
           s.field "method", strprop("HTTP method (default GET)")
           s.field "headers", objprop("header name->value map")
           s.field "body", strprop("request body, sent as-is")
-          s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and is NOT $VAR-expanded")
+          s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and is not project-$VAR-expanded. A DECLARED session binding still resolves at the send seam, in the body as well as the head (and Content-Length follows it) — pass verbatim:true if the bytes must reach the origin exactly as given")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no $VAR expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion — project env vars AND session bindings, so a $NAME stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no $VAR expansion — project env vars AND session bindings, so a $NAME stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Nothing interprets the $ grammar at all, so the `$$name` escape is NOT consumed either — write `$name` directly. The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal $NAME in the stored request ($where, $filter, $IFS) is the payload")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")

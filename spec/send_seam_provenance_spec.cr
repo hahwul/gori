@@ -1051,6 +1051,35 @@ describe "verbatim at the send seam (#910)" do
     end
   end
 
+  # …and the MCP surface that wires it, driven through the real tool. The three examples above
+  # build `PlanOptions` by hand, so `send_websocket`'s own `expand_bindings: !verbatim` was
+  # executed by nothing — deleting that line left the whole suite green, which is precisely how
+  # this seam drifted between these surfaces the two previous times.
+  it "reaches MCP send_websocket{repeater_id, verbatim:true}" do
+    with_prov_store do |store|
+      origin = WsRecordingOrigin.new
+      origin.serve
+      upgrade = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n" \
+                "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: $TOKEN\r\n\r\n"
+      id = store.insert_repeater("http://127.0.0.1:#{origin.port}", upgrade.to_slice,
+        false, true, nil, 0)
+      store.update_repeater_ws_messages(id, [Gori::Store::WsOutMessage.text("p=$TOKEN")]).should be_true
+      store.flush
+      # Constructed before the layer — see the note in the `repeater_id` example above.
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        r = tools.call("send_websocket",
+          JSON.parse(%({"repeater_id":#{id},"verbatim":true,"allow_unscoped":true,"idle_ms":500})))
+        r.is_error.should be_false
+        String.new(origin.handshake).should contain("Sec-WebSocket-Protocol: $TOKEN")
+        String.new(origin.handshake).should_not contain("SECRETTOKEN123")
+        origin.frames.should eq(["p=$TOKEN"])
+      end
+      origin.close
+    end
+  end
+
   it "still resolves a WebSocket draft's $NAME when the operator did NOT ask for verbatim" do
     with_prov_store do |store|
       origin = WsRecordingOrigin.new
@@ -1067,6 +1096,37 @@ describe "verbatim at the send seam (#910)" do
 
         String.new(origin.handshake).should contain("X-Probe: SECRETTOKEN123")
         origin.frames.should eq(["p=SECRETTOKEN123"])
+      end
+      origin.close
+    end
+  end
+
+  # NOT about verbatim: the gate on the DRAFT predicts the seam, and `send_wire` then asked it
+  # again over bytes already through it. `expand_bindings` is not idempotent — it also CONSUMES
+  # `$$` — so the second run resolved the `$TOKEN` the first run produced from `$$TOKEN`, and
+  # the Sandbox was asked about a URL the socket never got. Measured before the fix: `ONCE:
+  # /api?$TOKEN=1`, `TWICE: /api?SECRETTOKEN123=1`.
+  it "asks the scope about the bytes the socket gets, even where the pass is not idempotent" do
+    with_prov_store do |store|
+      origin = RecordingOrigin.new
+      origin.serve(1)
+      with_layer(bound_layer(store, "TOKEN", "SECRETTOKEN123")) do
+        scope = Gori::Scope.load(store)
+        # Includes exactly what goes on the wire: `$$TOKEN` with the escape consumed once.
+        scope.add("include", "string", "/api?$TOKEN=1").should be_true
+        scope.enable_sandbox
+        ob = Gori::Outbound.cli(scope, false)
+        draft = "GET /api?$$TOKEN=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        plan = Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([draft.to_slice],
+          expand_request: false, target: "http://127.0.0.1:#{origin.port}"), ob)
+
+        # The draft-side prediction and the send agree, and the send is not refused.
+        plan.refusal.should be_nil
+        wire = plan.wire_bytes
+        String.new(wire).should contain("/api?$TOKEN=1")
+        plan.send_wire(wire).error.should be_nil
+        String.new(origin.requests.first).should contain("/api?$TOKEN=1")
+        String.new(origin.requests.first).should_not contain("SECRETTOKEN123")
       end
       origin.close
     end

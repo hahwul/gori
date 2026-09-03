@@ -96,7 +96,10 @@ module Gori::Repeater
     # nothing else has to know there are two.
     #
     # It does NOT switch off the session-slot overlay, which answers a different question —
-    # see `Sender#wire`.
+    # see `Sender#wire`. It is also INERT on the field-native h2 path, which forces it false
+    # whatever a surface passes (`build_field_native` says why), the way that path already
+    # drops `preserve_field_case`, `evidence` and `reframe_grpc`: a field list is the message
+    # and nothing there expands.
     property? expand_bindings : Bool
     # Recompute Content-Length over the (possibly expanded) body. Off keeps a deliberately
     # hand-set CL — `repeater create --no-auto-cl`, and `gori run repeater -H "Content-Length: N"`,

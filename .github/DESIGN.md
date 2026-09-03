@@ -2137,7 +2137,22 @@ the Sandbox about `/api?SECRETTOKEN123=1` and then put `/api?$TOKEN=1` on the wi
 path-scoped rule away from a decision taken about a URL that never existed. `send_ws` carried its
 own copy of `wire`'s two lines and that copy expanded unconditionally, so the handshake of a
 WS tab seeded from a capture was expanding where the HTTP path had stopped; it now goes through
-`wire`.
+`wire`, and the TUI names the withheld tokens on the WS status line the way the HTTP one already
+did — [P4](#p4) is why the suppression is stated rather than merely done.
+
+Making the two agree meant making the gate read `wire`'s OUTPUT rather than deciding a second
+time. `send_wire` re-ran the binding pass over bytes already through it, asserting in its own
+comment that this was a no-op; it is not, because the pass also CONSUMES the `$$` escape, so the
+second run resolved the `$TOKEN` the first run produced from `$$TOKEN`. `refusal_wired` is now the
+single implementation of "may these bytes go out" and every send site hands it the final slice —
+which also takes a send-group from 2N full-message passes to N. Two consequences are worth
+stating rather than leaving to be discovered: under `verbatim` NOTHING interprets the `$` grammar,
+so `$$name` is no longer consumed either (write `$name` — it cannot resolve there anyway); and
+this is LAYER 2 only. Layer 1 (`request_scope_url`, `repeater_scope_verdict`) still reads the
+pre-seam draft, so a send that does expand is asked about two different targets by the two layers.
+That is older and wider than this seam — it asks whether an include list should be matched against
+a live credential at all — and `verbatim` narrows it, since with the pass off both layers read one
+URL.
 
 The SESSION SLOT overlay is deliberately NOT switched off with it, and the answer is stated rather
 than inherited. `verbatim` says which BYTES; a slot says WHOSE identity, and an operator asks both

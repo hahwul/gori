@@ -113,21 +113,49 @@ module Gori
       # token would ask the scope about `/api?SECRETTOKEN123=1` and then put `/api?$TOKEN=1` on
       # the wire — one path-scoped include or exclude rule away from a decision taken about a
       # URL that never existed. Whichever way the pass is switched, both halves move together.
+      #
+      # SCOPED TO THIS GATE, which is Layer 2 (Sandbox/exclude). LAYER 1 — MCP's
+      # `request_scope_url` and the CLI's `repeater_scope_verdict` — still builds its URL from
+      # `Plan#bytes`, the PRE-seam draft, so on a send that DOES expand the two layers are
+      # asked about different targets. That is older and wider than this seam (it is a question
+      # about whether an include list should be matched against a live credential at all), and
+      # `verbatim` narrows it rather than widening it: with the pass off, the draft and the
+      # wire are the same bytes and both layers read one URL.
+      #
+      # DRAFT bytes: predict the seam, then ask. `wire` is what will actually run, so the
+      # prediction has to be the same pass — the overlay is header-only, so it cannot move the
+      # request line this reads and does not need repeating here.
+      #
+      # (There was a `String` overload beside this one and it had no callers: `send_fields`
+      # passes `H2Engine.field_scope_line`, which returns `Bytes`. It was a second copy of the
+      # predicate this seam exists to have one of, so it is gone.)
       def refusal(bytes : Bytes) : String?
-        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(bytes), @port) unless resolve_bindings?
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(bytes)), @port)
+        return refusal_wired(bytes) unless resolve_bindings?
+        refusal_wired(Gori::Env.expand_bindings(bytes))
       end
 
-      def refusal(text : String) : String?
-        return @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(text), @port) unless resolve_bindings?
-        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(Gori::Env.expand_bindings(text)), @port)
+      # FINAL bytes: the rule itself, asked about the slice the socket gets.
+      #
+      # THE ONLY implementation of "may these bytes go out" — `refusal` above is this plus a
+      # prediction of the seam, and `send_wire` asks it directly because its argument is
+      # already through `wire`. Re-running `expand_bindings` on an already-expanded buffer is
+      # NOT a no-op, which is what `send_wire` used to assert: the pass also CONSUMES `$$`
+      # (`Env::Escape`), so a second run turns the `$TOKEN` a first run produced from `$$TOKEN`
+      # into the bound value. Measured — `GET /api?$$TOKEN=1` puts `/api?$TOKEN=1` on the wire
+      # while the gate was asked about `/api?SECRETTOKEN123=1`: one path-scoped rule away from
+      # a verdict taken on a URL the socket never gets, which is the divergence the whole seam
+      # is arranged to prevent. A binding whose own value carries a `$NAME` is the same shape.
+      private def refusal_wired(wire : Bytes) : String?
+        @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(wire), @port)
       end
 
       # Does the `$NAME` binding pass run at this seam? The two independent reasons it does not
       # — the bytes are somebody else's (`evidence?`) or the operator said they are the message
       # (`expand_bindings?`) — read as one question everywhere the pass is reached, so they are
-      # ANDed once here rather than at each of the four sites. `wire`, both `refusal`s and
-      # `send_ws` all ask this, which is what keeps the gate's URL and the socket's URL equal.
+      # ANDed once here rather than at each site. `wire` is the only pass that reads it, and
+      # every gate now reads `wire`'s OUTPUT (`refusal_wired`) rather than re-deciding — which
+      # is what keeps the gate's URL and the socket's URL equal by construction instead of by
+      # two answers agreeing.
       private def resolve_bindings? : Bool
         @expand_bindings && !@evidence
       end
@@ -199,15 +227,16 @@ module Gori
       # Send bytes that are ALREADY through `wire` — for a surface that has to hold the exact
       # slice the socket gets (to record it as a flow, or to report it back).
       #
-      # Still through `refusal`, not a hand-rolled `send_block` beside it: this is the door
-      # `gori run repeater send` and MCP `send_request` now use, and "may these bytes go out"
-      # has to keep ONE implementation — `refusal` used to carry a second rule (see its
-      # comment), and a copy here would walk past the next one added. Asking it about the
-      # final bytes is the same verdict it takes one step earlier: its own expansion is a
-      # no-op on an already-expanded buffer, and the slot overlay is header-only, so neither
-      # pass can move the request line the gate reads.
+      # Still through the shared gate, not a hand-rolled `send_block` beside it: this is the
+      # door `gori run repeater send` and MCP `send_request` now use, and "may these bytes go
+      # out" has to keep ONE implementation — `refusal` used to carry a second rule (see its
+      # comment), and a copy here would walk past the next one added.
+      #
+      # `refusal_wired` and not `refusal`: the argument is already through `wire`, and
+      # `refusal` would run the binding pass over it a SECOND time. That is not the no-op this
+      # comment used to claim — see `refusal_wired`.
       def send_wire(wire : Bytes) : Result
-        if reason = refusal(wire)
+        if reason = refusal_wired(wire)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         result =
@@ -254,12 +283,19 @@ module Gori
       end
 
       def send_group(requests : Array(Bytes)) : Array(Result)
-        if reason = group_refusal(requests)
-          return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
-        end
         # Per member, through the SAME seam `send` uses — a group is ONE connection carrying a
         # deliberate sequence, and every member of it goes out as the same identity.
+        #
+        # WIRED FIRST, then gated. The gate ran over the drafts and the seam then ran again per
+        # member, so an N-request pipeline made 2N full-message passes and the two disagreed
+        # wherever `expand_bindings` is not idempotent (`refusal_wired` names the case). One
+        # pass each, and the verdict is taken on the bytes the pipeline will write.
+        # `Plan#refusal` still predicts from the drafts, which is what lets a caller report the
+        # block before printing anything.
         requests = requests.map { |b| wire(b) }
+        if reason = requests.each.compact_map { |b| refusal_wired(b) }.first?
+          return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
+        end
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
           tls_preset: @tls_preset)
@@ -273,7 +309,11 @@ module Gori
       def send_ws(upgrade : Bytes, messages : Array(WsEngine::OutMsg),
                   idle : Time::Span = WsEngine::DEFAULT_IDLE,
                   keep_key : Bool = false) : WsEngine::Result
-        if reason = refusal(upgrade)
+        # Wired once, then gated on that slice — the HTTP path's discipline (see `send_group`).
+        # This used to gate the draft and wire separately, so the handshake was passed through
+        # the seam twice and the verdict could be taken on a URL the socket never got.
+        wired = wire(upgrade)
+        if reason = refusal_wired(wired)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
         # EXTRACTION is handshake-only — a WS frame is not an HTTP response and `TokenExtract`'s
@@ -291,8 +331,8 @@ module Gori
         # copy had already fallen behind: it expanded `$NAME` UNCONDITIONALLY, so everything
         # `evidence?` turns off for an HTTP send was still on for the handshake of a WS tab
         # seeded from the same capture, and `--verbatim` could not reach it either. The
-        # refusal above reads the same predicate, so the gate's URL and the socket's stay equal.
-        WsEngine.send(wire(upgrade), expand_messages(messages),
+        # refusal above reads the same slice, so the gate's URL and the socket's stay equal.
+        WsEngine.send(wired, expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
           idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset)
       end

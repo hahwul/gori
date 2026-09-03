@@ -1245,7 +1245,7 @@ module Gori::Tui
         end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
-          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}", :done)
+          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}#{ws_evidence_literal_note(view)}", :done)
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           probe_scan_ws_repeater(id, result, tab.flow_id, view) if id
         else
@@ -2113,6 +2113,27 @@ module Gori::Tui
     # holds for the SUBSTITUTION. It does not hold for the REPORT: `✓ sent → 200` with no
     # further word is gori claiming a clean send of bytes whose `$CTOK` the tab's OWN binding
     # hint shows a value for. So the expansion stays suppressed and the fact is stated.
+    # The WebSocket twin, and it exists because the HTTP half of this sentence was the only
+    # half wired. `Sender#send_ws` used to expand `$NAME` in the handshake UNCONDITIONALLY —
+    # it carried its own copy of `wire`'s two passes — so an evidence WS tab was substituting
+    # where the very same tab's HTTP send had stopped. Routing it through `wire` closed that,
+    # and closing it makes this pane owe the operator the same sentence: `✓ ws sent: 3
+    # received` alone is gori claiming a clean exchange over bytes whose `$CTOK` was withheld.
+    #
+    # Scans the HANDSHAKE and the out-frames together because on an evidence tab both are
+    # withheld — `ws_out_messages` stamps every frame with the tab's own `@evidence`, so one
+    # boolean is the honest answer here (the per-FRAME provenance the Sender reads matters
+    # where the two populations mix, which in this pane they do not).
+    private def ws_evidence_literal_note(view : RepeaterView) : String
+      text = String.build do |io|
+        io << view.request_text << '\n'
+        view.ws_out_messages_raw.each { |m| io.write(m.payload); io << '\n' }
+      end
+      names = RepeaterController.literal_bindings(view.evidence?, text)
+      return "" if names.empty?
+      " · #{Env.token_list(names)} sent literally (evidence tab — not substituted)"
+    end
+
     private def evidence_literal_note(view : RepeaterView) : String
       names = RepeaterController.literal_bindings(view.evidence?, view.request_text)
       return "" if names.empty?
