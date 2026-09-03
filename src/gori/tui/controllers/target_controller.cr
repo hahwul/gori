@@ -105,7 +105,7 @@ module Gori::Tui
       subtabs_focused = focus == :subtabs
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused,
         subtab_labels, @active_sub, @subtab_start,
-        find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+        find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         case @active_sub
         when 0 then @sitemap.render_content(screen, content, focus)
         when 1 then @discover.render_content(screen, content, focus)

@@ -10,6 +10,7 @@ require "../store"
 require "../notes"
 require "../settings"
 require "./subtab_clone"
+require "./subtab_marks"
 
 module Gori::Tui
   # The Notes tab (DESIGN.md §6: notes/report — the running scratchpad/report).
@@ -29,6 +30,8 @@ module Gori::Tui
     # One note document: a title is derived from its first non-blank line, so
     # there's no separate rename mode — the tab label tracks what you type.
     class Note
+      include SubtabRef # a sub-tab strip may hold a mark on this note (#683)
+
       getter id : Int64
       getter area : TextArea
 
@@ -153,6 +156,14 @@ module Gori::Tui
     # The active sub-tab index — read by the Runner's arrow-key sub-tab navigation.
     def current_index : Int32
       @current
+    end
+
+    # The `Note` behind chip `idx` — the sub-tab strip's mark set keys on this object
+    # (TabController#subtab_ref). Identity is the right handle here: `soft_merge_from`
+    # keeps the SAME Note whenever a peer's text is unchanged, so a mark survives the
+    # reconcile that reorders the strip around it.
+    def note_at(idx : Int32) : Note?
+      (0 <= idx < @notes.size) ? @notes[idx] : nil
     end
 
     # The current note's sub-tab label (first non-blank line, or "note N") — used
@@ -392,8 +403,14 @@ module Gori::Tui
 
     # Content-only clone of the active note into a new sibling (new id; no entity_links).
     def duplicate_current : Nil
-      text = current.area.text
-      @notes << Note.new(alloc_note_id, text)
+      duplicate_at(@current)
+    end
+
+    # Clone note `idx` onto the end of the strip — the index-taking form a batch duplicate
+    # (#683) walks. The clone lands last and becomes current, as the single form always has.
+    def duplicate_at(idx : Int32) : Nil
+      return unless src = @notes[idx]?
+      @notes << Note.new(alloc_note_id, src.area.text)
       @current = @notes.size - 1
       @dirty = true
     end
@@ -401,12 +418,22 @@ module Gori::Tui
     # Close the current note. Returns the closed note's id (for link cleanup), or nil
     # when nothing was removed. Always keeps at least one note open.
     def close_note : Int64?
-      closed_id = @notes[@current]?.try(&.id)
-      @notes.delete_at(@current) if @current < @notes.size
+      close_note_at(@current)
+    end
+
+    # Close note `idx` — the index-taking form, so a batch close (#683) can walk the marked
+    # chips instead of switching the active note to each one first. Always keeps ≥1 note.
+    def close_note_at(idx : Int32) : Int64?
+      return nil unless 0 <= idx < @notes.size
+      closed_id = @notes[idx].id
+      @notes.delete_at(idx)
       @deleted_ids << closed_id if closed_id # so merge-on-save doesn't resurrect it from a peer's copy
       if @notes.empty?
         @notes << Note.new(alloc_note_id)
       end
+      # Closing a note to the LEFT slides the active one down; a bare clamp would read that
+      # as "stay put" and land the operator on its neighbour.
+      @current -= 1 if idx < @current
       @current = @current.clamp(0, @notes.size - 1)
       @dirty = true
       closed_id

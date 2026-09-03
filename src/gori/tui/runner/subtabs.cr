@@ -30,6 +30,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The focusable sub-tab strip for Repeater/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
   # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
   # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
+  # `t`/`⇧T` mark chips and `^W` then closes every marked one — see the multi-select block
+  # at the foot of this file.
   #
   # One stop left of the first chip is the ⌕ affordance, where ↵ opens the sub-tab picker.
   # Its arm sits BELOW the chords and above the arrows on purpose: everything above it still
@@ -48,8 +50,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when ev.ctrl? && key.lower_n?
       subtab_new # creates + drops to :body
     when ev.ctrl? && key.lower_w?
-      subtab_close
-      resolve_subtab_focus_after_close
+      subtab_close # each controller re-resolves focus inside its own close (see resolve_subtab_focus)
     when ev.ctrl? && key.lower_p?
       subtab_commit
       open_palette
@@ -59,8 +60,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       open_rename(current_subtab_index) # rename the active sub-tab (Repeater/Fuzzer/Decoder/Miner)
     when @active_tab == :repeater && ev.ctrl? && key.lower_r?
       repeater_controller.repeater_send # send from the strip too — not just :body focus
-    when @active_tab == :repeater && !ev.ctrl? && !ev.alt? && key.lower_t?
-      open_tag_edit(current_subtab_index) # tag the active Repeater sub-tab (issue #121)
+    when mark_all_chord?(ev)
+      subtab_mark_all # ⇧T — every chip the `/` filter leaves on screen
+    when mark_chord?(ev)
+      toggle_subtab_mark # `t` — mark this chip and step right, so `t t t` marks a run
     when !ev.ctrl? && !ev.alt? && c == '/' && @tabs[@active_tab]?.try(&.subtab_filter_shown?)
       @tabs[@active_tab]?.try(&.start_subtab_filter) # open the `/` sub-tab filter bar
     when find_subtab_chord?(ev)
@@ -73,6 +76,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       move_subtab(1)
     when key.down?, key.lower_j?, key.enter?, key.tab?
       focus_pane(:body) # drop into the editor
+    when key.escape? && subtab_marked_count > 0
+      # esc unwinds one layer at a time, the way it does over History's and the Sitemap's
+      # marks: drop the selection first, leave the strip only on the second press. `↑`/`k`
+      # are navigation and keep going straight to the tab bar with the marks intact.
+      subtab_mark_clear
     when key.up?, key.lower_k?, key.escape?
       focus_pane(:menu) # pop to the tab bar
     when key.space?
@@ -207,9 +215,73 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @tabs[@active_tab]?.try(&.jump_subtab(idx))
   end
 
-  # After ^W on the strip the chip count may drop below 2 (strip gone) or to 0
-  # (Repeater only) — re-resolve focus so we never sit on an invisible strip.
-  private def resolve_subtab_focus_after_close : Nil
+  # ===== multi-select on the strip (issue #683) ==============================
+  # `t` marks, exactly as it does in History, Issues, the Intercept queue and the Sitemap —
+  # mutt's tag key, and the same many-times-per-minute gesture that earns it a bare letter
+  # there. The Repeater strip's `t` used to open the tag prompt; that moves to the space menu
+  # (`space ▸ t`), which is where `sitemap.tag` already lives for the same reason: a letter
+  # that means "mark" in four lists and "type a memo" in a fifth is the one shape
+  # "Stop keys meaning different things in sibling tabs" was about.
+  #
+  # These live in this hand-written table rather than as verb chords because a chord could
+  # not work here and WOULD work where it must not: `@focus == :subtabs` returns before the
+  # keymap (runner.cr), so a `Chord.new("t")` in Scope::Repeater would never fire on the
+  # strip — and would fire in the response pane, marking a sub-tab while the operator reads
+  # a body. The menu entries carry no chords for the same reason.
+  private def mark_chord?(ev : Termisu::Event::Key) : Bool
+    return false if ev.ctrl? || ev.alt?
+    ev.key.lower_t? && subtab_marks_shown?
+  end
+
+  # ⇧T. Read as its OWN key, not `shift? && lower_t?`: a terminal delivers a typed capital as
+  # the character itself with no shift modifier (Keybind.from_event says so in as many words),
+  # so the modifier form is dead code — and unlike a verb chord, a raw handler has no
+  # `validate_chords!` to raise on a dead capital at boot. Asked before the `t` arm.
+  private def mark_all_chord?(ev : Termisu::Event::Key) : Bool
+    return false if ev.ctrl? || ev.alt?
+    ev.key.upper_t? && subtab_marks_shown?
+  end
+
+  # Whether the ACTIVE tab's strip marks at all (fixed and self-drawn strips do not).
+  private def subtab_marks_shown? : Bool
+    @tabs[@active_tab]?.try(&.subtab_marks_enabled?) || false
+  end
+
+  # How many chips are marked on the active tab's strip — 0 for a strip that never marks.
+  # Drives the esc ladder, the strip hint, the space menu's banner and the `Clear marks`
+  # entry's availability gate.
+  def subtab_marked_count : Int32
+    @tabs[@active_tab]?.try(&.subtab_mark_count) || 0
+  end
+
+  # `t`: flip the active chip's mark, then step right — the horizontal form of History's
+  # "mark and move to the next row", so a run of chips is marked without a hand moving.
+  private def toggle_subtab_mark : Nil
+    return unless t = @tabs[@active_tab]?
+    t.toggle_subtab_mark(current_subtab_index)
+    move_subtab(1)
+  end
+
+  # The two menu-reachable halves of the gesture (the toggle stays strip-only: a menu row
+  # that marks ONE chip and then closes the menu is a gesture nobody would use twice).
+  def subtab_mark_all : Nil
+    @tabs[@active_tab]?.try(&.mark_all_subtabs)
+  end
+
+  def subtab_mark_clear : Nil
+    @tabs[@active_tab]?.try(&.clear_subtab_marks)
+  end
+
+  # After a close the chip count may drop below 2 (strip gone) or to 0 (Repeater/Fuzzer) —
+  # re-resolve focus so we never sit on an invisible strip.
+  #
+  # PUBLIC, and called from inside the close rather than beside it (Host#resolve_subtab_focus).
+  # Every workbench close is confirm-gated and `Runner#confirm` defers its action to
+  # `on_close`, so the old call site — right after `subtab_close` returned — ran against the
+  # strip as it was BEFORE the operator confirmed, and resolved nothing. Survivable while a
+  # close took one chip at a time; "close every marked" routinely empties the strip, and then
+  # focus sat on a row that was no longer drawn.
+  def resolve_subtab_focus : Nil
     case @active_tab
     when :repeater
       focus_pane(:menu) if repeater_controller.empty?

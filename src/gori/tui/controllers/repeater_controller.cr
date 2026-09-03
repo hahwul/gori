@@ -71,10 +71,20 @@ module Gori::Tui
       # `@host.status` because the recording happens on the send fiber (see `repeater_send`), and
       # a status line written from there would race the run loop's own.
       @unrecorded_notice = false
-      @repeater_results = Channel({RepeaterView, Repeater::Result, String?}).new(8)
+      # Sized to the largest batch one `^R` can start (a marked-set send, capped at
+      # `Runner::BATCH_SUBTAB_CAP`) rather than to 8. The hand-off at the foot of a send
+      # fiber is a non-blocking `select … else`, and its documented job is to DROP a result
+      # whose project the operator already left — not to absorb backpressure. At eight slots
+      # a twenty-tab send against a fast origin routinely filled it inside one `poll_event`
+      # window and threw responses away silently: the pane simply kept showing the previous
+      # one. Sizing the buffer to the gesture puts the `else` branch back to meaning only
+      # what it says it means.
+      @repeater_results = Channel({RepeaterView, Repeater::Result, String?}).new(Runner::BATCH_SUBTAB_CAP)
       # WebSocket repeater transcripts arrive on their own channel (a distinct result
       # type from HTTP) and are applied by the same drain on a later tick.
-      @ws_results = Channel({RepeaterView, Repeater::WsEngine::Result}).new(8)
+      # Same size, same reason: `repeater_send` routes a WS sub-tab here, and a marked set
+      # can be all WebSocket tabs.
+      @ws_results = Channel({RepeaterView, Repeater::WsEngine::Result}).new(Runner::BATCH_SUBTAB_CAP)
       # "Send group" pipelines several requests on one connection and delivers the
       # labelled per-request results here (distinct type again — an ordered array).
       @group_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
@@ -330,6 +340,21 @@ module Gori::Tui
       (0 <= idx < @repeaters.size) ? @repeaters[idx].view : nil
     end
 
+    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
+    # index: a reconcile can reorder or drop chips under a standing mark.
+    def subtab_ref(idx : Int32) : SubtabRef?
+      view_at(idx)
+    end
+
+    # The views a sub-tab-level action applies to: the marked ones, else the active one
+    # (`target_subtab_indices`). Views rather than indices, because callers hold them across
+    # a prompt or a confirm that a reconcile can reorder underneath.
+    def target_views : Array(RepeaterView)
+      views = [] of RepeaterView
+      target_subtab_indices.each { |i| (v = view_at(i)) && views << v }
+      views
+    end
+
     # --- rendering ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
@@ -337,7 +362,7 @@ module Gori::Tui
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_repeater_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_repeater_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           if v = current_view
             v.render(screen, body, focused: body_focused)
@@ -1622,8 +1647,41 @@ module Gori::Tui
 
     # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
     # gRPC and split-decode tabs stay session-only (db_id nil), matching open-from-History.
+    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule). Capped, but NOT confirm-gated: the
+    # confirms in this tab guard what is destructive (close) or outbound (send), and a
+    # duplicate only opens tabs the operator can close again with the key they just used.
     def repeater_duplicate : Nil
-      return @host.status("no repeater open to duplicate") unless src = current_view
+      srcs = target_views
+      if srcs.size > 1
+        if srcs.size > Runner::BATCH_SUBTAB_CAP
+          @host.status("#{srcs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          return
+        end
+        duplicate_views(srcs)
+        return
+      end
+      duplicate_one(srcs.first? || return @host.status("no repeater open to duplicate"))
+    end
+
+    private def duplicate_views(srcs : Array(RepeaterView)) : Nil
+      lost = srcs.count { |v| duplicate_view(v) }
+      msg = "duplicated #{srcs.size} sub-tab#{srcs.size == 1 ? "" : "s"} (#{@repeaters.size} open)"
+      msg += " — #{lost} without their ws frames (project busy); those tabs stay dirty so a later save retries" if lost > 0
+      @host.status(msg)
+    end
+
+    private def duplicate_one(src : RepeaterView) : Nil
+      if duplicate_view(src)
+        @host.status("duplicated repeater (#{@repeaters.size} open) — ws frames NOT saved (project busy), the tab stays dirty so a later save retries")
+      else
+        @host.status("duplicated repeater (#{@repeaters.size} open)")
+      end
+    end
+
+    # Clone one session into a new sub-tab. Toast-free (the callers own the sentence);
+    # returns whether the clone's WebSocket frames failed to persist.
+    private def duplicate_view(src : RepeaterView) : Bool
       src.flush_decoded_edits if src.decode_mode?
       view = RepeaterView.new
       view.duplicate_from(src)
@@ -1646,18 +1704,20 @@ module Gori::Tui
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
-      if frames_lost
-        @host.status("duplicated repeater (#{@repeaters.size} open) — ws frames NOT saved (project busy), the tab stays dirty so a later save retries")
-      else
-        @host.status("duplicated repeater (#{@repeaters.size} open)")
-      end
+      frames_lost
     end
 
     # Insert a freshly-opened repeater tab into the store so it has a stable row id (the
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
+      # The NEXT position in the saved order, not `@repeaters.size`: the two agree only while
+      # the position space is dense, and every close leaves a hole. A workbench at {0,1,2,5,6}
+      # handed a new tab position 5, and `reconcile`'s `{position, id}` sort then dropped it
+      # into the MIDDLE of the strip — which a batch duplicate (#683) made visible three tabs
+      # at a time. MCP and the CLI already ask the store (#904); this was the last caller
+      # passing the count.
       id = @host.session.store.insert_repeater(view.target, view.request_text.to_slice, view.http2?,
-        view.auto_content_length?, flow_id, @repeaters.size, view.sni_override,
+        view.auto_content_length?, flow_id, @host.session.store.next_repeater_position, view.sni_override,
         ws_keep_key: view.ws_keep_key?, ws_http_only: view.ws_http_only?,
         # …and the fingerprint (#844). `duplicate_from` deliberately copies it ("a send knob,
         # so the clone sends the handshake its source would"), and leaving it out of the INSERT
@@ -1670,17 +1730,51 @@ module Gori::Tui
 
     # Confirm before closing a repeater sub-tab (^W) — the edited request + last response
     # are discarded. No-op when no repeater is open.
+    #
+    # Reads `target_subtab_indices`, so ^W closes the MARKED sub-tabs when the strip carries
+    # marks and the active one otherwise — the one target rule, not a second gesture. The
+    # indices are resolved to views before the confirm opens: the dialog's action runs from
+    # `on_close`, after the overlay is restored, and a reconcile landing in that gap would
+    # make an index name a different session.
     def request_close : Nil
       return unless tab = current_repeater_tab
+      targets = target_subtab_indices
+      if targets.size > 1
+        @host.confirm("CLOSE REPEATERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach edited request and its response are discarded.",
+          confirm_label: "close", danger: true) { close_marked_repeaters(targets) }
+        return
+      end
       @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.summary}”?\nThe edited request and response are discarded.",
         confirm_label: "close", danger: true) { close_repeater_tab }
+    end
+
+    # The batch arm of ^W: the shared driver loops the same per-tab teardown high index →
+    # low, hands the marks back and says one sentence, then re-resolves focus (the strip may
+    # be gone entirely once five chips close at once).
+    private def close_marked_repeaters(idxs : Array(Int32)) : Nil
+      @host.status(close_marked_subtabs(idxs))
+      @host.resolve_subtab_focus
     end
 
     # Close the current repeater sub-tab. Clamps the active index; when the last one
     # closes the Repeater tab shows its empty hint.
     def close_repeater_tab : Nil
       return if @current_repeater_idx < 0 || @current_repeater_idx >= @repeaters.size
-      closing = @repeaters[@current_repeater_idx].view
+      orphaned = close_repeater_at(@current_repeater_idx)
+      @host.status(TabClose.message(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)", orphaned))
+    end
+
+    # The mark set's teardown hook: close sub-tab `idx` saying nothing, so a batch can loop
+    # it and own the one sentence at the end.
+    protected def close_subtab_at(idx : Int32) : Bool
+      close_repeater_at(idx)
+    end
+
+    # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free —
+    # both the single ^W and the batch build their own sentence from it.
+    private def close_repeater_at(idx : Int32) : Bool
+      return false if idx < 0 || idx >= @repeaters.size
+      closing = @repeaters[idx].view
       # Finish a running minimize job NOW: once the view leaves @repeaters the drain drops
       # its remaining events (incl. the terminal Report), so jobs.finish would never run and
       # the bottom-bar spinner would animate forever.
@@ -1697,10 +1791,14 @@ module Gori::Tui
       end
       # `delete_repeater` has always reported whether the DELETE committed (it is `exec_task_ok`)
       # and this was the last caller ignoring it; MCP's `delete_repeater` already surfaces it.
-      orphaned = (id = @repeaters[@current_repeater_idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
-      @repeaters.delete_at(@current_repeater_idx)
+      orphaned = (id = @repeaters[idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
+      @repeaters.delete_at(idx)
+      # The active chip follows the removal rather than being clamped blindly: closing a tab
+      # to the LEFT of it slides it down one, which a bare clamp would read as "stay put" and
+      # land the operator on the neighbour of the session they were editing.
+      @current_repeater_idx -= 1 if idx < @current_repeater_idx
       @current_repeater_idx = @repeaters.empty? ? -1 : @current_repeater_idx.clamp(0, @repeaters.size - 1)
-      @host.status(TabClose.message(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)", orphaned))
+      orphaned
     end
 
     # Stop the one running minimize on a project-level exit (leave project / quit), for the
@@ -1799,18 +1897,57 @@ module Gori::Tui
       " · not recorded (#{what})"
     end
 
+    # ^R sends the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule). A plural send asks first: this is the
+    # only gesture in the TUI outside the rate-limited Fuzzer/Miner engines that puts N live
+    # requests on the wire from one keypress, and the confirm is the same shape "Send to
+    # Repeater" already uses for a batch that does not even send.
     def repeater_send : Nil
-      return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
+      targets = target_subtab_indices
+      if targets.size > 1
+        # Resolved to TABS before the confirm: its action runs from `on_close`, after the
+        # overlay is restored, and a reconcile in that gap would make an index name another
+        # session (the same reason the rename prompt captures its view).
+        tabs = targets.compact_map { |i| @repeaters[i]? }
+        return if tabs.empty?
+        # Capped like every other batch that fans out per marked item. Close is uncapped —
+        # closing thirty tabs is housekeeping — but this one dials thirty origins at once.
+        if tabs.size > Runner::BATCH_SUBTAB_CAP
+          @host.status("#{tabs.size} sub-tabs marked — a batch send is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          return
+        end
+        @host.confirm("SEND REPEATERS", "Send #{marked_subtab_phrase(tabs.size)}?\nEach goes out on its own connection.",
+          confirm_label: "send", danger: false) { send_repeater_tabs(tabs) }
+        return
+      end
+      return unless tab = current_repeater_tab
+      send_repeater_tab(tab)
+    end
+
+    # The batch arm of ^R. Continue-and-report, like every other batch here: a tab already in
+    # flight or refused by scope is counted and the rest still go. The per-send status lines
+    # the drain writes then take over — this one says what was actually started.
+    private def send_repeater_tabs(tabs : Array(RepeaterTab)) : Nil
+      sent = 0
+      tabs.each { |t| sent += 1 if send_repeater_tab(t, quiet: true) }
+      @host.status(sent == tabs.size ? "sending#{sending_as} → #{sent} sub-tabs…" : "sending#{sending_as} → #{sent} of #{tabs.size} sub-tabs (the rest were in flight or refused)", :busy)
+    end
+
+    # Send ONE session. Returns whether a round-trip was actually started, so the batch can
+    # count. `quiet` suppresses the per-send "sending…" line, which in a batch would be N
+    # toasts of which only the last survives.
+    private def send_repeater_tab(tab : RepeaterTab, quiet : Bool = false) : Bool
+      return false unless (view = tab.view).loaded?
       view.commit_chain_pane                        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
       view.sync_host_to_target_once                 # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
       view.downgrade_h2_request_lines(group: false) # a request line pasted from an h2 view can't ride this h1 socket (origins answer 400)
       if view.inflight?                             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
-        @host.status("repeater already in flight…")
-        return
+        @host.status("repeater already in flight…") unless quiet
+        return false
       end
       if view.ws_mode?
         ws_repeater_send(view)
-        return
+        return true
       end
       results = @repeater_results
       # A §…§ marker's `¦chain` that can't run refuses the send here rather than putting the
@@ -1821,18 +1958,18 @@ module Gori::Tui
         wire = view.request_bytes
       rescue ex : Fuzz::ChainError
         @host.status("repeater: #{ex.message}")
-        return
+        return false
       end
-      return unless plan = repeater_plan(view, [wire], http2: view.http2?)
-      save_current_repeater # persist the request we're about to send (before it goes inflight)
+      return false unless plan = repeater_plan(view, [wire], http2: view.http2?)
+      save_repeater_tab(tab) # persist the request we're about to send (before it goes inflight)
       if reason = plan.refusal
         apply_refusal { view.apply(Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)) }
         @host.status("repeater: #{reason}")
-        return
+        return false
       end
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
-      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy)
+      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy) unless quiet
       # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` above is the
       # assembled DRAFT; this is the message, with the send seam's two passes applied (the
       # `$NAME` binding pass and the active session slot's header overlay). The History
@@ -1848,6 +1985,17 @@ module Gori::Tui
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
+      launch_send_fiber(view, plan, sent_wire, results, record_store, record_ref, sent_at)
+      true
+    end
+
+    # The flight half of a send, split from the decide half above so each reads as one
+    # thing. Every argument is a captured local: the fiber must never read a controller ivar
+    # (the same rule the minimize and ws fibers follow), and `results` in particular is
+    # passed in so a channel replaced by a project switch cannot be picked up mid-flight.
+    private def launch_send_fiber(view : RepeaterView, plan : Repeater::Plan, sent_wire : Bytes,
+                                  results : Channel({RepeaterView, Repeater::Result, String?}),
+                                  record_store : Store?, record_ref : String?, sent_at : Int64) : Nil
       started = Time.instant
       spawn(name: "gori-repeater") do
         result = begin
@@ -1869,7 +2017,9 @@ module Gori::Tui
           RepeaterController.record_send(st, plan, result, sent_at, sent_wire, record_ref)
         end
         # Non-blocking hand-off: if the user already left the project the channel is
-        # orphaned, so drop the late result instead of blocking this fiber forever.
+        # orphaned, so drop the late result instead of blocking this fiber forever. Sized to
+        # the largest batch one ^R can start (see the channel's construction), so a full
+        # buffer can only mean that, never backpressure from a marked-set send.
         select
         when results.send({view, result, record_note})
         else
@@ -2271,6 +2421,16 @@ module Gori::Tui
     # every path that leaves the editor — like Notes save-on-leave.
     def save_current_repeater : Nil
       return unless tab = current_repeater_tab
+      save_repeater_tab(tab)
+    end
+
+    # Persist ONE session's request side. Parametrized rather than reading the active tab,
+    # because a bulk `^R` sends several: `repeater_send` saves the tab it is about to put on
+    # the wire, and `drain_results` later writes that tab's response onto the same row. With
+    # a current-tab-only save the batch wrote four responses onto rows still holding their
+    # PREVIOUS request bytes — a stored pair that never happened, and one every other surface
+    # reads back as fact.
+    def save_repeater_tab(tab : RepeaterTab) : Nil
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       # `ws_content?`, NOT `ws_mode?`: this asks whether there are frames to write, and a tab

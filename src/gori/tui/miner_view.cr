@@ -11,6 +11,7 @@ require "../fuzz"
 require "../repeater/flow_request"
 require "./subtab_clone"
 require "./viewport"
+require "./subtab_marks"
 
 module Gori::Tui
   # The view for ONE mining session (a sub-tab under the Miner tab). Read-only: the
@@ -19,6 +20,7 @@ module Gori::Tui
   # Panes: :summary (target/baseline/progress) and :results (findings table); :detail
   # overlays a single finding. Mirrors FuzzerView's session shape, minus the editors.
   class MinerView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     PANE_ORDER = [:summary, :results]
 
     property name : String?

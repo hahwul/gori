@@ -108,6 +108,14 @@ module Gori
       abstract def subtab_search_open : Nil    # open the sub-tab search picker for the active tab
       abstract def subtab_search_count : Int32 # active tab's open sub-tab count (gates the search entry)
       abstract def subtab_filter_open : Nil    # open the `/` sub-tab filter bar for the active tab (issue #121)
+      # Sub-tab multi-select (#683). Generic, like the three above: the shell already routes
+      # to whichever strip is active, so nine scopes' menu entries share one intent each
+      # rather than widening this catalogue nine times over. The toggle is deliberately
+      # absent — `t` is a strip key, and a menu row that marks one chip then closes the menu
+      # would be a gesture nobody uses twice.
+      abstract def subtab_mark_all : Nil       # mark every chip the sub-tab filter shows
+      abstract def subtab_mark_clear : Nil     # drop every sub-tab mark (esc does the same)
+      abstract def subtab_marked_count : Int32 # marked chips on the active strip (gates Clear marks)
 
       # entity links (cross-tab attach + link-target ids for availability gating).
       # ONE attach intent, not one per owner kind: the picker it opens holds issues and

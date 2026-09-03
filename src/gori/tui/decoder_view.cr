@@ -9,6 +9,7 @@ require "./text_read_state"
 require "./viewport"
 require "./gutter"
 require "../decoder"
+require "./subtab_marks"
 
 module Gori::Tui
   # The Decoder tab's "Pipeline notebook": INPUT editor (top) → CHAIN spec line →
@@ -18,6 +19,7 @@ module Gori::Tui
   # state and the cached ChainResult. The recompute lives in the controller (edits
   # only) — render is a pure read, per the render-hot-path discipline.
   class DecoderView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     record Regions, input : Rect, chain : Rect, pipeline : Rect, output : Rect
 
     # The ^X display cycle: auto (text, base64 fallback for binary) → hex → base64.

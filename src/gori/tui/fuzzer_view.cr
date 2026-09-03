@@ -32,6 +32,7 @@ require "../graphql"
 require "../form_data"
 require "./subtab_clone"
 require "./fuzzer_result_window"
+require "./subtab_marks"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -42,6 +43,7 @@ module Gori::Tui
   # Config is edited in-pane with a small command line (no modal overlay): type e.g.
   # `mode clusterbomb`, `list a,b,c`, `match status:200,500`, `concurrency 50`.
   class FuzzerView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     enum ResultIoState
       Idle
       Spooling

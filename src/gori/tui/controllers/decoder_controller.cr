@@ -207,37 +207,95 @@ module Gori::Tui
     end
 
     # Content-only clone of the active conversion (input + chain + chip name).
+    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
     def decoder_duplicate : Nil
-      s = cur
-      name = SubtabClone.copy_name(s.view.name)
-      @sessions << make_session(s.input.text, s.chain, name)
-      @idx = @sessions.size - 1
+      targets = target_subtab_indices
+      msg = nil.as(String?)
+      if targets.size > 1
+        msg = duplicate_marked_subtabs(targets, "conversion") { |i| duplicate_at(i) }
+        unless msg
+          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          return
+        end
+      else
+        duplicate_at(@idx)
+      end
       @popup.close
       @chain_pre = ""
       @dirty = true
       @host.request_focus(:body)
-      @host.status("duplicated conversion (#{@sessions.size} open)")
+      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated conversion (#{@sessions.size} open)")
+    end
+
+    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arm above says it.
+    private def duplicate_at(idx : Int32) : Nil
+      return unless src = @sessions[idx]?
+      @sessions << make_session(src.input.text, src.chain, SubtabClone.copy_name(src.view.name))
+      @idx = @sessions.size - 1
     end
 
     # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just
     # resets it to a blank session (like Notes). The runner re-resolves focus after.
+    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
+    # it has always been; a plural one asks, because it discards more than the operator can
+    # see at the moment they press the key.
     def decoder_close : Nil
-      if @sessions.size <= 1
-        @sessions[0] = make_session("", "", nil)
-        @idx = 0
-      else
-        @sessions.delete_at(@idx)
-        @idx = @idx.clamp(0, @sessions.size - 1)
+      targets = target_subtab_indices
+      if targets.size > 1
+        @host.confirm("CLOSE CONVERSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach conversion’s input, chain and output are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+        return
       end
+      close_at(@idx)
       @popup.close
       @chain_pre = ""
       @dirty = true
       @host.status(@sessions.size == 1 ? "conversion closed" : "conversion closed (#{@sessions.size} open)")
     end
 
+    private def close_marked_sessions(idxs : Array(Int32)) : Nil
+      msg = close_marked_subtabs(idxs)
+      @popup.close
+      @chain_pre = ""
+      @dirty = true
+      @host.status(msg)
+      @host.resolve_subtab_focus
+    end
+
+    # Nothing here is persisted, so a close can never leave a saved session behind.
+    protected def close_subtab_at(idx : Int32) : Bool
+      close_at(idx)
+      false
+    end
+
+    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
+    # rather than removed, so the tab always has something to type into. That replacement
+    # also retires the old view object, which is what drops its mark.
+    private def close_at(idx : Int32) : Nil
+      return if idx < 0 || idx >= @sessions.size
+      if @sessions.size <= 1
+        @sessions[0] = make_session("", "", nil)
+        @idx = 0
+      else
+        @sessions.delete_at(idx)
+        # Closing a session to the LEFT slides the active one down; a bare clamp would read
+        # that as "stay put" and land the operator on its neighbour.
+        @idx -= 1 if idx < @idx
+        @idx = @idx.clamp(0, @sessions.size - 1)
+      end
+    end
+
     # The session's output view, for the rename prompt (re-found by view identity).
     def view_at(idx : Int32) : DecoderView?
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
+    end
+
+    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
+    # index: a reconcile can reorder or drop chips under a standing mark.
+    def subtab_ref(idx : Int32) : SubtabRef?
+      view_at(idx)
     end
 
     # Apply a typed name to the captured sub-tab's view (the prompt held it by identity,
@@ -255,7 +313,7 @@ module Gori::Tui
       s = cur
       shell = BodyChrome.shell_focused(focus, multi_pane: true)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           # Each section frames its own card (per-pane focus border) inside the shell frame.
           s.view.render(screen, body,

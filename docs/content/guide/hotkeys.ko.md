@@ -21,7 +21,7 @@ Ctrl-P  → settings:hotkeys
 | 등급 | 가격 | 언제 | 예시 |
 |------|-------|------|----------|
 | **L0 구조적** | `Esc` `Enter` `Tab` 화살표 `Space`(리더) | 항상 | 포커스, 열기/닫기, READ/INS, space 메뉴 |
-| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History/Issues `j/k` `/` `y` `t`(표시) `v`(뷰), Repeater 전송 |
+| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History/Issues `j/k` `/` `y` `t`(표시) `v`(뷰), 서브탭 스트립 `t`(표시), Repeater 전송 |
 | **L2 세션 호흡** | Global 맨 글자(상한: `c` `i` `s`만) | 세션당 여러 번 | capture, intercept, scope 렌즈 |
 | **L3 맥락적** | `Space` 다음 니모닉 | 가끔, 패널 로컬 | compare, mine, send-group, copy-as |
 | **L4 드문 동작 / 설정** | 팔레트(`Ctrl-P`) 또는 Preferences(`Ctrl-,`) | 드물게 | 설정, Match & Replace, 알림 |
@@ -64,7 +64,7 @@ Ctrl-P  → settings:hotkeys
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), `Ctrl-Z` (undo — 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기 — 마크가 있으면 전부), `Ctrl-Z` (undo — 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
   `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다 — 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 

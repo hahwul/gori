@@ -203,34 +203,89 @@ module Gori::Tui
       @host.status("sent selection to JWT (#{text.bytesize}b)")
     end
 
+    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
     def jwt_duplicate : Nil
-      s = cur
-      name = SubtabClone.copy_name(s.view.name)
-      dup = make_session(s.input.text, name)
-      dup.header.set_text(s.header.text)
-      dup.payload.set_text(s.payload.text)
-      dup.secret = s.secret
-      dup.alg = s.alg
+      targets = target_subtab_indices
+      msg = nil.as(String?)
+      if targets.size > 1
+        msg = duplicate_marked_subtabs(targets, "session") { |i| duplicate_at(i) }
+        unless msg
+          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          return
+        end
+      else
+        duplicate_at(@idx)
+      end
+      @host.request_focus(:body)
+      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated JWT session (#{@sessions.size} open)")
+    end
+
+    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arm above says it.
+    private def duplicate_at(idx : Int32) : Nil
+      return unless src = @sessions[idx]?
+      dup = make_session(src.input.text, SubtabClone.copy_name(src.view.name))
+      dup.header.set_text(src.header.text)
+      dup.payload.set_text(src.payload.text)
+      dup.secret = src.secret
+      dup.alg = src.alg
       recompute_encode(dup)
       @sessions << dup
       @idx = @sessions.size - 1
-      @host.request_focus(:body)
-      @host.status("duplicated JWT session (#{@sessions.size} open)")
     end
 
+    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
+    # it has always been; a plural one asks, because it discards more than the operator can
+    # see at the moment they press the key.
     def jwt_close : Nil
+      targets = target_subtab_indices
+      if targets.size > 1
+        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach token and its edits are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+        return
+      end
+      close_at(@idx)
+      @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
+    end
+
+    private def close_marked_sessions(idxs : Array(Int32)) : Nil
+      msg = close_marked_subtabs(idxs)
+      @host.status(msg)
+      @host.resolve_subtab_focus
+    end
+
+    # Nothing here is persisted, so a close can never leave a saved session behind.
+    protected def close_subtab_at(idx : Int32) : Bool
+      close_at(idx)
+      false
+    end
+
+    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
+    # rather than removed, so the tab always has something to type into. That replacement
+    # also retires the old view object, which is what drops its mark.
+    private def close_at(idx : Int32) : Nil
+      return if idx < 0 || idx >= @sessions.size
       if @sessions.size <= 1
         @sessions[0] = make_session("", nil)
         @idx = 0
       else
-        @sessions.delete_at(@idx)
+        @sessions.delete_at(idx)
+        # Closing a session to the LEFT slides the active one down; a bare clamp would read
+        # that as "stay put" and land the operator on its neighbour.
+        @idx -= 1 if idx < @idx
         @idx = @idx.clamp(0, @sessions.size - 1)
       end
-      @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
     end
 
     def view_at(idx : Int32) : JwtView?
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
+    end
+
+    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
+    # index: a reconcile can reorder or drop chips under a standing mark.
+    def subtab_ref(idx : Int32) : SubtabRef?
+      view_at(idx)
     end
 
     def apply_rename(view : JwtView, name : String) : Nil
@@ -245,7 +300,7 @@ module Gori::Tui
       s = cur
       shell = BodyChrome.shell_focused(focus, multi_pane: true)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           if s.mode == :decode
             s.view.render_decode(screen, body,

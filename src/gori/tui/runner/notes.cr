@@ -16,7 +16,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def notes_close : Nil
     notes_controller.notes_close
-    resolve_subtab_focus_after_close
+    resolve_subtab_focus
   end
 
   def notes_duplicate_subtab : Nil

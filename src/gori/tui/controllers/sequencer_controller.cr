@@ -72,6 +72,12 @@ module Gori::Tui
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
     end
 
+    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
+    # index: a reconcile can reorder or drop chips under a standing mark.
+    def subtab_ref(idx : Int32) : SubtabRef?
+      view_at(idx)
+    end
+
     def body_badge : Symbol
       :body # read-only display + navigable tables — never an editor
     end
@@ -93,7 +99,7 @@ module Gori::Tui
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           if v = current_view
             v.render(screen, body, body_focused)
@@ -815,21 +821,49 @@ module Gori::Tui
     end
 
     # --- close / persist ---
+    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
     def request_close : Nil
       return unless tab = current_tab_obj
+      targets = target_subtab_indices
+      if targets.size > 1
+        @host.confirm("CLOSE SEQUENCERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach config and its collected tokens are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+        return
+      end
       @host.confirm("CLOSE SEQUENCER", "Close sequencing session “#{tab.view.summary}”?\nIts config and collected tokens are discarded.",
         confirm_label: "close", danger: true) { close_tab }
     end
 
+    private def close_marked_sessions(idxs : Array(Int32)) : Nil
+      @host.status(close_marked_subtabs(idxs))
+      @host.resolve_subtab_focus
+    end
+
+    protected def close_subtab_at(idx : Int32) : Bool
+      close_at(idx)
+    end
+
     def close_tab : Nil
       return if @current_idx < 0 || @current_idx >= @sessions.size
-      tab = @sessions[@current_idx]
+      orphaned = close_at(@current_idx)
+      @host.status(TabClose.message(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)", orphaned))
+    end
+
+    # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free and
+    # index-taking, so the batch driver can loop it.
+    private def close_at(idx : Int32) : Bool
+      return false if idx < 0 || idx >= @sessions.size
+      tab = @sessions[idx]
       tab.view.request_stop
       @host.jobs.finish(tab.view.job_id, :stopped, "closed") if tab.view.running?
       orphaned = (id = tab.db_id) ? !@host.session.store.delete_sequencer_session(id) : false
-      @sessions.delete_at(@current_idx)
+      @sessions.delete_at(idx)
+      # Closing a tab to the LEFT slides the active one down; a bare clamp would read that as
+      # "stay put" and land the operator on its neighbour.
+      @current_idx -= 1 if idx < @current_idx
       @current_idx = @sessions.empty? ? -1 : @current_idx.clamp(0, @sessions.size - 1)
-      @host.status(TabClose.message(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)", orphaned))
+      orphaned
     end
 
     # Halt EVERY running collection on a project-level exit (leave project / quit) — the

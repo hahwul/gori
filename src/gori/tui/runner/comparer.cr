@@ -71,7 +71,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def comparer_close_subtab : Nil
     comparer_controller.comparer_close
-    resolve_subtab_focus_after_close
+    resolve_subtab_focus
   end
 
   def comparer_rename_subtab : Nil

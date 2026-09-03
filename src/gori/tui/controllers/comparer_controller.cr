@@ -82,27 +82,82 @@ module Gori::Tui
     end
 
     # Close active session. Last session is reset to blank (always keep ≥1).
+    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
     def comparer_close : Nil
+      targets = target_subtab_indices
+      if targets.size > 1
+        @host.confirm("CLOSE COMPARISONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach pair of slots is discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+        return
+      end
+      close_at(@idx)
+      @host.status(@sessions.size == 1 ? "comparison cleared" : "comparison closed (#{@sessions.size} open)")
+    end
+
+    private def close_marked_sessions(idxs : Array(Int32)) : Nil
+      @host.status(close_marked_subtabs(idxs))
+      @host.resolve_subtab_focus
+    end
+
+    # Nothing here is persisted, so a close can never leave a saved session behind.
+    protected def close_subtab_at(idx : Int32) : Bool
+      close_at(idx)
+      false
+    end
+
+    # Close sub-tab `idx`, keeping at least one comparison. The last one is RESET IN PLACE
+    # rather than replaced — which is exactly why the batch driver hands its marks back
+    # explicitly instead of leaning on `SubtabMarks#retain`: this view object survives the
+    # close, so "still open" and "still marked" would otherwise both stay true.
+    private def close_at(idx : Int32) : Nil
+      return if idx < 0 || idx >= @sessions.size
       if @sessions.size <= 1
         @sessions[0].reset!
         @idx = 0
-        @host.status("comparison cleared")
       else
-        @sessions.delete_at(@idx)
+        @sessions.delete_at(idx)
+        # Closing a session to the LEFT slides the active one down; a bare clamp would read
+        # that as "stay put" and land the operator on its neighbour.
+        @idx -= 1 if idx < @idx
         @idx = @idx.clamp(0, @sessions.size - 1)
-        @host.status("comparison closed (#{@sessions.size} open)")
       end
     end
 
+    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
     def comparer_duplicate : Nil
-      @sessions << view.duplicate
-      @idx = @sessions.size - 1
+      targets = target_subtab_indices
+      if targets.size > 1
+        msg = duplicate_marked_subtabs(targets, "comparison") { |i| duplicate_at(i) }
+        unless msg
+          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          return
+        end
+        @host.request_focus(:body)
+        @host.status("#{msg} (#{@sessions.size} open)")
+        return
+      end
+      duplicate_at(@idx)
       @host.request_focus(:body)
       @host.status("duplicated comparison (#{@sessions.size} open)")
     end
 
+    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arms above say it.
+    private def duplicate_at(idx : Int32) : Nil
+      return unless src = @sessions[idx]?
+      @sessions << src.duplicate
+      @idx = @sessions.size - 1
+    end
+
     def view_at(idx : Int32) : ComparerView?
       (0 <= idx < @sessions.size) ? @sessions[idx] : nil
+    end
+
+    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
+    # index: a reconcile can reorder or drop chips under a standing mark.
+    def subtab_ref(idx : Int32) : SubtabRef?
+      view_at(idx)
     end
 
     def apply_rename(v : ComparerView, name : String) : Nil
@@ -118,7 +173,7 @@ module Gori::Tui
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
       subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
         render_with_filter(screen, content, subtabs_focused) do |body|
           view.render(screen, body, focused: body_focused)
         end

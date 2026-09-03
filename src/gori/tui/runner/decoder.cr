@@ -11,7 +11,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def decoder_close : Nil
     decoder_controller.decoder_close
-    resolve_subtab_focus_after_close # don't strand on a now-hidden strip
+    resolve_subtab_focus # don't strand on a now-hidden strip
   end
 
   # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the

@@ -7,6 +7,7 @@ require "./text_read_state"
 require "./gutter"
 require "./viewport"
 require "../jwt"
+require "./subtab_marks"
 
 module Gori::Tui
   # The JWT tab's renderer. Two lenses over one session, toggled by the controller:
@@ -18,6 +19,7 @@ module Gori::Tui
   # controller owns the editable buffers and the cached decode/encode/attack results
   # (recomputed on edit, never on the render hot path).
   class JwtView
+    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
     # Custom sub-tab chip label (nil = derive from the token's alg); set by rename.
     property name : String? = nil
 
