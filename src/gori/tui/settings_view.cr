@@ -6,10 +6,10 @@ require "./viewport"
 require "../settings"
 
 module Gori::Tui
-  # The interactive settings editor — the UI that controls gori's persisted config
-  # (Gori::Settings). Sections: NETWORK (proxy bind + upstream proxy), EDITOR (the
-  # external ^E editor), THEME (the TUI colour theme). Reusable by both the Runner
-  # (a :settings overlay) and the ProjectPicker (a settings mode). Hotkeys are TODO.
+  # The interactive form editor for gori's persisted config (Gori::Settings).
+  # Reusable by both the Runner (a :settings overlay) and the ProjectPicker (a
+  # settings mode); dedicated list/swatch editors handle themes, tabs, hostnames,
+  # env and hotkeys.
   #
   # Apply semantics: the upstream proxy takes effect immediately (Upstream.dial
   # reads it live). The bind address is persisted here; in-project the Runner
@@ -33,11 +33,32 @@ module Gori::Tui
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil,
       opener : Symbol? = nil, readonly : Bool = false, choice_labels : Hash(String, String)? = nil
 
-    PROXY_PROTOCOL_CHOICES = ["none", "http", "socks5", "socks5h"]
-    PROXY_PROTOCOL_LABELS  = {"none" => "None", "http" => "HTTP", "socks5" => "SOCKS5", "socks5h" => "SOCKS5H"}
-    NETWORK_PROXY_PROTOCOL = 2
-    NETWORK_PROXY_HOST     = 3
-    NETWORK_PROXY_PORT     = 4
+    # The stored codes, in cycle order. `http+tls` sits next to `http` because it IS the same
+    # proxy protocol with a TLS hop in front of it, and an operator cycling past HTTP is exactly
+    # the one who needs to see that the encrypted form exists (the legacy `https://` spelling
+    # they may already have written means the plaintext one — see Settings::UPSTREAM_TLS_KIND).
+    PROXY_PROTOCOL_CHOICES = ["none", "http", Settings::UPSTREAM_TLS_KIND, "socks5", "socks5h"]
+    PROXY_PROTOCOL_LABELS  = {"none" => "None", "http" => "HTTP",
+                              Settings::UPSTREAM_TLS_KIND => "HTTP+TLS",
+                              "socks5" => "SOCKS5", "socks5h" => "SOCKS5H"}
+    # NETWORK row indices. Named rather than written as literals at each call site: `commit`
+    # reads eight of them positionally, and every field inserted above one used to mean
+    # renumbering a run of `@values[n]` by hand — which is how a toggle lands on the wrong row.
+    NETWORK_BIND_HOST        =  0
+    NETWORK_BIND_PORT        =  1
+    NETWORK_PROXY_PROTOCOL   =  2
+    NETWORK_PROXY_HOST       =  3
+    NETWORK_PROXY_PORT       =  4
+    NETWORK_PROXY_TLS_CA     =  5
+    NETWORK_PROXY_TLS_VERIFY =  6
+    NETWORK_VERIFY_UPSTREAM  =  7
+    NETWORK_SERVE_LANDING    =  8
+    NETWORK_CONNECT_TIMEOUT  =  9
+    NETWORK_IO_TIMEOUT       = 10
+    NETWORK_CAPTURE_MAX      = 11
+    NETWORK_HTTP2            = 12
+    NETWORK_STRIP_ALT_SVC    = 13
+    NETWORK_TLS_PASSTHROUGH  = 14
 
     NETWORK_FIELDS = [
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
@@ -46,6 +67,11 @@ module Gori::Tui
         choices: PROXY_PROTOCOL_CHOICES, choice_labels: PROXY_PROTOCOL_LABELS),
       Field.new("Proxy host", "upstream proxy hostname or IP — disabled when protocol is None"),
       Field.new("Proxy port", "upstream proxy port (1-65535) — disabled when protocol is None"),
+      Field.new("Proxy TLS CA",
+        "PEM bundle trusted for the PROXY's own certificate, in addition to the system store — for an `HTTP+TLS` proxy (and http+tls upstream rules); blank = system trust only. This is the hop to the proxy, not the origin"),
+      Field.new("Verify proxy TLS",
+        "check the upstream proxy's certificate on an `HTTP+TLS` hop — separate from `Verify upstream TLS` below, which is about the ORIGIN, and untouched by --insecure-upstream; off means the hop carrying every CONNECT authority and proxy credential is unauthenticated; ←/→/space toggles",
+        bool: true),
       Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
       Field.new("Info page and CA download", "serve a gori welcome + CA-download page to browsers that hit the listen address, or http://gori.proxy/ when already proxied — ←/→/space toggles", bool: true),
       Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
@@ -339,6 +365,8 @@ module Gori::Tui
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
                       "none", "", "",
+                      Settings::DEFAULT_UPSTREAM_PROXY_CA,
+                      Settings::DEFAULT_UPSTREAM_PROXY_INSECURE ? "off" : "on",
                       Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off",
                       Settings::DEFAULT_SERVE_LANDING ? "on" : "off",
                       Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s,
@@ -370,6 +398,11 @@ module Gori::Tui
         proxy[0],
         proxy[1],
         proxy[2],
+        Settings.upstream_proxy_ca,
+        # The ROW is "Verify proxy TLS"; the SETTING is `upstream_proxy_insecure`. Stored as the
+        # opt-OUT so an absent key means verify (a settings.json that predates this cannot mean
+        # "do not check the proxy"), displayed as the positive so the row reads like its sibling.
+        Settings.upstream_proxy_insecure? ? "off" : "on",
         Settings.verify_upstream? ? "on" : "off",
         Settings.serve_landing? ? "on" : "off",
         Settings.connect_timeout_secs.to_s,
@@ -649,12 +682,12 @@ module Gori::Tui
       @values[NETWORK_PROXY_PORT] = proxy_default_port(current)
     end
 
+    # One home for "what port does this kind default to" — `Settings.upstream_default_port`,
+    # which the rule table, the URI grammar and the save-time validator all read. A local copy
+    # is how the editor comes to pre-fill a port the dialer does not agree with.
     private def proxy_default_port(kind : String) : String
-      case kind
-      when "http"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
-      when "socks5", "socks5h" then Settings::DEFAULT_SOCKS_PORT.to_s
-      else                          ""
-      end
+      return "" unless Settings::UPSTREAM_PROTOCOLS.includes?(kind) && kind != "none"
+      Settings.upstream_default_port(kind).to_s
     end
 
     # The currently-selected theme name (for live preview as the user cycles) — only
@@ -765,14 +798,14 @@ module Gori::Tui
         @values = general_values
         return persist
       end
-      if err = Settings.bind_host_error(@values[0])
+      if err = Settings.bind_host_error(@values[NETWORK_BIND_HOST])
         @status = "invalid bind IP"
         return err
       end
-      port = @values[1].strip.to_i?
+      port = @values[NETWORK_BIND_PORT].strip.to_i?
       unless port && 0 <= port <= 65535
         @status = "invalid port"
-        return "settings: invalid bind port #{@values[1].inspect}"
+        return "settings: invalid bind port #{@values[NETWORK_BIND_PORT].inspect}"
       end
       proxy_fields_unchanged = @values[NETWORK_PROXY_PROTOCOL, 3] == @baseline[NETWORK_PROXY_PROTOCOL, 3]
       if proxy_fields_unchanged
@@ -790,23 +823,28 @@ module Gori::Tui
         @status = "invalid upstream proxy"
         return err
       end
-      ct = @values[7].strip.to_i?
+      proxy_ca = @values[NETWORK_PROXY_TLS_CA].strip
+      if err = Settings.upstream_proxy_ca_error(proxy_ca)
+        @status = "invalid proxy TLS CA"
+        return err
+      end
+      ct = @values[NETWORK_CONNECT_TIMEOUT].strip.to_i?
       unless ct && ct >= 1
         @status = "invalid connect timeout"
-        return "settings: invalid connect timeout #{@values[7].inspect} (seconds, min 1)"
+        return "settings: invalid connect timeout #{@values[NETWORK_CONNECT_TIMEOUT].inspect} (seconds, min 1)"
       end
-      it = @values[8].strip.to_i?
+      it = @values[NETWORK_IO_TIMEOUT].strip.to_i?
       unless it && it >= 1
         @status = "invalid idle timeout"
-        return "settings: invalid idle timeout #{@values[8].inspect} (seconds, min 1)"
+        return "settings: invalid idle timeout #{@values[NETWORK_IO_TIMEOUT].inspect} (seconds, min 1)"
       end
-      cap = @values[9].strip.to_i?
+      cap = @values[NETWORK_CAPTURE_MAX].strip.to_i?
       unless cap && cap >= 1
         @status = "invalid capture limit"
-        return "settings: invalid capture limit #{@values[9].inspect} (MiB, min 1)"
+        return "settings: invalid capture limit #{@values[NETWORK_CAPTURE_MAX].inspect} (MiB, min 1)"
       end
       cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
-      passthrough = passthrough_from_label(@values[12])
+      passthrough = passthrough_from_label(@values[NETWORK_TLS_PASSTHROUGH])
       if err = Settings.tls_passthrough_error(passthrough)
         @status = "invalid TLS passthrough host"
         return err
@@ -818,20 +856,22 @@ module Gori::Tui
       # in-session way to clear it. Only on an actual CHANGE: a save that left the bind alone
       # (an upstream-proxy or timeout edit) must not silently drop the override and yank the
       # proxy off the port the operator launched it on.
-      if @values[0].strip != Settings.bind_host || port != Settings.bind_port
+      if @values[NETWORK_BIND_HOST].strip != Settings.bind_host || port != Settings.bind_port
         Settings.cli_bind_host = nil
         Settings.cli_bind_port = nil
       end
-      Settings.bind_host = @values[0].strip
+      Settings.bind_host = @values[NETWORK_BIND_HOST].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
-      Settings.verify_upstream = @values[5] == "on"
-      Settings.serve_landing = @values[6] == "on"
+      Settings.upstream_proxy_ca = proxy_ca
+      Settings.upstream_proxy_insecure = @values[NETWORK_PROXY_TLS_VERIFY] != "on"
+      Settings.verify_upstream = @values[NETWORK_VERIFY_UPSTREAM] == "on"
+      Settings.serve_landing = @values[NETWORK_SERVE_LANDING] == "on"
       Settings.connect_timeout_secs = ct
       Settings.io_timeout_secs = it
       Settings.capture_max_mib = cap
-      Settings.http2 = @values[10]
-      Settings.strip_alt_svc = @values[11] == "on"
+      Settings.http2 = @values[NETWORK_HTTP2]
+      Settings.strip_alt_svc = @values[NETWORK_STRIP_ALT_SVC] == "on"
       Settings.tls_passthrough = passthrough
       @values = network_values
       persist

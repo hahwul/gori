@@ -208,3 +208,38 @@ describe "Gori::Tui::NotesController — the link preview row" do
     end
   end
 end
+
+# Bulk paste opt-in (TabController#accepts_bulk_paste?). Notes was the one multi-line editor
+# still taking a paste keystroke by keystroke — the Repeater and Fuzzer opted in when the bulk
+# path landed — and it is the tab a response body or a whole writeup gets pasted into.
+describe "Gori::Tui::NotesController — bracketed paste in bulk" do
+  it "takes a paste in bulk only while the note is in INSERT" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.exit_insert!                              # `notes_new` (the helper's setup) drops into INSERT; start from READ
+      controller.accepts_bulk_paste?.should be_false # READ: no caret, and the Runner refuses the paste
+      controller.paste_text("x").should be_false
+      view.current_text.should eq("")
+
+      view.enter_insert!
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text("line 1\nline 2").should be_true
+      view.current_text.should eq("line 1\nline 2")
+      view.dirty?.should be_true
+    end
+  end
+
+  it "says how many characters a paste replaced, like a typed character does" do
+    with_notes_controller do |controller|
+      view = controller.view
+      host = controller.@host.as(NotesFakeHost)
+      view.enter_insert!
+      "old text".each_char { |c| view.insert(c) }
+      view.home
+      8.times { view.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Right, Termisu::Input::Modifier::Shift)) }
+      controller.paste_text("new").should be_true
+      view.current_text.should eq("new")
+      host.statuses.last.should eq("replaced 8 chars — ^Z to undo")
+    end
+  end
+end

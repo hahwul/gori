@@ -64,7 +64,15 @@ describe SettingsView do
       v = SettingsView.new
       v.reload(:network)
       2.times { v.move_field(1) } # Proxy protocol: HTTP
-      v.toggle_or_move(1)         # SOCKS5, automatic 8080 → 1080
+      v.toggle_or_move(1)         # HTTP+TLS, automatic 8080 → 443
+      v.save
+      # The cycle reaches the TLS-to-proxy kind from HTTP, which is where an operator looking
+      # for it will land — and the port follows the KIND (443, not the plaintext 8080).
+      Gori::Settings.upstream_proxy.should eq("http+tls://proxy.local:443")
+
+      v.reload(:network)
+      2.times { v.move_field(1) }
+      v.toggle_or_move(1) # SOCKS5, automatic 443 → 1080
       v.save
       Gori::Settings.upstream_proxy.should eq("socks5://proxy.local:1080")
 
@@ -117,9 +125,12 @@ describe SettingsView do
       Gori::Settings.verify_upstream = true
       v = SettingsView.new
       v.reload(:network)
-      5.times { v.move_field(1) } # Bind IP → … → Verify upstream TLS (index 5)
-      v.toggle_or_move(-1)        # flip the bool off
-      v.save                      # persists the working copy back to the live Settings
+      # Located by LABEL, not a walk count: this row has already moved once (the proxy-leg TLS
+      # rows were inserted above it) and a number here re-breaks on the next insert.
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Verify upstream TLS" }
+        .times { v.move_field(1) }
+      v.toggle_or_move(-1) # flip the bool off
+      v.save               # persists the working copy back to the live Settings
       Gori::Settings.verify_upstream?.should be_false
 
       v.reset_to_defaults
@@ -142,8 +153,9 @@ describe SettingsView do
       Gori::Settings.serve_landing = true
       v = SettingsView.new
       v.reload(:network)
-      6.times { v.move_field(1) } # Bind IP → … → Info page (index 6)
-      v.toggle_or_move(-1)        # flip the Info-page bool off
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label.starts_with?("Info page") }
+        .times { v.move_field(1) }
+      v.toggle_or_move(-1) # flip the Info-page bool off
       v.save
       Gori::Settings.serve_landing?.should be_false
 
@@ -366,12 +378,14 @@ describe SettingsView do
       Gori::Settings.capture_max_mib = 2
       v = SettingsView.new
       v.reload(:network)
-      # Bind IP → … → Connect timeout (index 7, text)
-      7.times { v.move_field(1) }
+      # Bind IP → … → Connect timeout. By label: three text rows in a row, and the first of
+      # them has moved twice as fields were inserted above it.
+      SettingsView::NETWORK_FIELDS.index! { |f| f.label == "Connect timeout (s)" }
+        .times { v.move_field(1) }
       set_text(v, "5")
-      v.move_field(1) # → Idle timeout (index 8, text)
+      v.move_field(1) # → Idle timeout (text)
       set_text(v, "7")
-      v.move_field(1) # → Capture body limit (index 9, text)
+      v.move_field(1) # → Capture body limit (text)
       set_text(v, "9")
       v.save
       Gori::Settings.connect_timeout_secs.should eq(5)

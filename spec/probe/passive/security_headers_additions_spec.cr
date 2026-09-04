@@ -46,6 +46,67 @@ private def codes(dets) : Array(String)
 end
 
 describe Gori::Probe::Passive::SecurityHeaders do
+  describe "Strict-Transport-Security parsing" do
+    it "matches the exact max-age directive and its whole decimal value" do
+      with_store do |store|
+        valid = "HTTP/1.1 200 OK\r\n" \
+                "Strict-Transport-Security: x-max-age=0; max-age=31536000\r\n\r\n"
+        codes(sec(store, resp_head: valid)).should_not contain("missing_hsts")
+
+        trailing = "HTTP/1.1 200 OK\r\n" \
+                   "Strict-Transport-Security: max-age=31536000junk\r\n\r\n"
+        codes(sec(store, resp_head: trailing)).should contain("missing_hsts")
+      end
+    end
+
+    it "rejects duplicate max-age directives but accepts a wholly quoted decimal" do
+      with_store do |store|
+        duplicate = "HTTP/1.1 200 OK\r\n" \
+                    "Strict-Transport-Security: max-age=31536000; max-age=60\r\n\r\n"
+        codes(sec(store, resp_head: duplicate)).should contain("missing_hsts")
+
+        quoted = "HTTP/1.1 200 OK\r\n" \
+                 "Strict-Transport-Security: includeSubDomains; max-age=\"31536000\"\r\n\r\n"
+        codes(sec(store, resp_head: quoted)).should_not contain("missing_hsts")
+      end
+    end
+  end
+
+  describe "Referrer-Policy fallback lists" do
+    it "judges the last recognised token instead of every token in the list" do
+      with_store do |store|
+        safe = "HTTP/1.1 200 OK\r\n" \
+               "Referrer-Policy: unsafe-url, strict-origin-when-cross-origin\r\n\r\n"
+        codes(sec(store, resp_head: safe)).should_not contain("weak_referrer_policy")
+
+        weak = "HTTP/1.1 200 OK\r\n" \
+               "Referrer-Policy: strict-origin, unknown-future-policy, unsafe-url\r\n\r\n"
+        codes(sec(store, resp_head: weak)).should contain("weak_referrer_policy")
+      end
+    end
+
+    it "combines repeated fields in wire order" do
+      with_store do |store|
+        safe = "HTTP/1.1 200 OK\r\nReferrer-Policy: unsafe-url\r\n" \
+               "Referrer-Policy: no-referrer\r\n\r\n"
+        codes(sec(store, resp_head: safe)).should_not contain("weak_referrer_policy")
+
+        weak = "HTTP/1.1 200 OK\r\nReferrer-Policy: strict-origin\r\n" \
+               "Referrer-Policy: unsafe-url\r\n\r\n"
+        codes(sec(store, resp_head: weak)).should contain("weak_referrer_policy")
+      end
+    end
+
+    it "treats a present field with no recognised policy as ineffective" do
+      with_store do |store|
+        invalid = "HTTP/1.1 200 OK\r\nReferrer-Policy: unsafe-url-ish, future-policy\r\n\r\n"
+        found = codes(sec(store, resp_head: invalid))
+        found.should contain("missing_referrer_policy")
+        found.should_not contain("weak_referrer_policy")
+      end
+    end
+  end
+
   describe "missing_coop" do
     it "flags an HTML 200 with no Cross-Origin-Opener-Policy" do
       with_store do |store|

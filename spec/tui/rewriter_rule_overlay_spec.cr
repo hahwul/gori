@@ -35,18 +35,61 @@ describe Gori::Tui::RewriterRuleOverlay do
     ov.header_op?.should be_true
   end
 
-  it "forces a header op onto the HEAD even if part is cycled to body" do
+  # Part is cycled to body FIRST: once the op is a header op the part row is skipped (below),
+  # so the only way a header rule can carry `part: body` is to have chosen the part before
+  # the op — and the shape is still normalized on the way out.
+  it "forces a header op onto the HEAD even if part was cycled to body" do
     ov = RewriterRuleOverlay.adding
-    down(ov, 3)                                     # op row
-    ov.handle_key(skey(Termisu::Input::Key::Right)) # replace → add_header
-    down(ov, 2)                                     # op → match → part
+    down(ov, 5)                                     # name → scope → target → op → match → part
     ov.handle_key(skey(Termisu::Input::Key::Right)) # part → body
-    down(ov, 2)                                     # part → host → header(find)
+    ov.part.should eq(Gori::Store::RulePart::Body)
+    2.times { ov.handle_key(skey(Termisu::Input::Key::Up)) } # back to the op row
+    ov.handle_key(skey(Termisu::Input::Key::Right))          # replace → add_header
+    down(ov, 2)                                              # op → host → header(find), match/part skipped
     stype(ov, "X-Trace")
     rule = ov.candidate_rule
     rule.op.should eq(Gori::Store::RuleOp::AddHeader)
     rule.part.should eq(Gori::Store::RulePart::Head) # normalized, not body
     rule.pattern.should eq("X-Trace")
+  end
+
+  # `skip_row?` said its purpose was that the caret never parks on a field that does nothing,
+  # and then skipped only the body-file row: for a header op the match and part rows were
+  # drawn `n/a` and still landed on, so ←/→ there cycled a value the op never reads and each
+  # notch re-ran the flow scan. `remove header` additionally has nothing to set, so its
+  # value row is skipped too and ↵ on the header name — its last text row — saves.
+  it "walks past the rows a header op ignores" do
+    ov = RewriterRuleOverlay.adding
+    down(ov, 3)                                     # op row
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # replace → add_header
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_HOST) # match and part skipped
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_FIND)
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_VALUE) # add header HAS a value
+    ov.set_selected(RewriterRuleOverlay::ROW_MATCH)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_VALUE) # a click on an n/a row is refused
+    ov.handle_key(skey(Termisu::Input::Key::Up))
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_FIND)
+    ov.handle_key(skey(Termisu::Input::Key::Up))
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_HOST)
+    ov.handle_key(skey(Termisu::Input::Key::Up))
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_OP)
+  end
+
+  it "skips the value row for remove header, and ↵ on the header name saves" do
+    ov = RewriterRuleOverlay.adding
+    down(ov, 3)                                                 # op row
+    3.times { ov.handle_key(skey(Termisu::Input::Key::Right)) } # → remove_header
+    ov.op.should eq(Gori::Store::RuleOp::RemoveHeader)
+    down(ov, 2) # host → header name
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_FIND)
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_SAVE) # value and body file skipped
+    ov.handle_key(skey(Termisu::Input::Key::Up))
+    stype(ov, "X-Powered-By")
+    ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 
   it "requires a pattern, and validates a regex replace" do

@@ -118,6 +118,6 @@ gori run history -q 'host:api.example.com status:200' --format har > evidence.ha
 
 ## 다음 단계 {#next-steps}
 
-- [AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/): 같은 프로젝트에 에이전트를 붙이고 그 모든 동작을 지켜봅니다
+- [AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/): 같은 프로젝트에 에이전트를 붙이고 중요한 동작을 드러낸 채 사용합니다
 - [Scanning & Issues](/ko/guide/scanning/): Probe, Issues, Notes, Comparer 전체 레퍼런스
 - [CLI Reference](/ko/reference/cli/): `run issues`, `run compare`, `run history --format har` 전문

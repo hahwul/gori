@@ -263,14 +263,26 @@ module Gori::Tui
       @dirty = true
     end
 
+    # ⌫, ⌦ and ⌃Z dirty the note only on a REAL buffer change. Each is a no-op somewhere — ⌫
+    # at the buffer start, ⌦ at its end, ⌃Z on an empty undo stack — and marking the note
+    # dirty there was not harmless: `dirty?` is the lock that keeps a peer's commit from
+    # reloading this note (`locked?`), and it is what makes the next esc / sub-tab switch
+    # rewrite the whole document. An idle ⌃Z in a clean note held off every peer refresh until
+    # something else saved. The Repeater's request pane and the Fuzzer's template already gate
+    # the same three keys on `TextArea#edits`.
     def backspace : Nil
-      current.area.backspace
-      @dirty = true
+      edit_if_changed(&.backspace)
     end
 
     def undo : Nil
-      current.area.undo
-      @dirty = true
+      edit_if_changed(&.undo)
+    end
+
+    private def edit_if_changed(& : TextArea -> Nil) : Nil
+      ed = current.area
+      before = ed.edits
+      yield ed
+      @dirty = true if ed.edits != before
     end
 
     def move(dr : Int32, dc : Int32) : Nil
@@ -327,10 +339,23 @@ module Gori::Tui
       current.area.end_of_line
     end
 
-    # Forward-delete the char under the caret — a content edit.
+    # Forward-delete the char under the caret — a content edit (see `backspace` for the gate).
     def delete : Nil
-      current.area.delete
+      edit_if_changed(&.delete)
+    end
+
+    # Splice a whole bracketed paste in as ONE edit — one undo step, one `edits` bump — instead
+    # of the N keystrokes it used to arrive as (see `TextArea#insert_text`, and the Repeater's
+    # `edit_paste`, whose measurements this shares: per-keystroke delivery is quadratic in the
+    # paste). A note is where a captured response, a tool's output or a whole writeup gets
+    # pasted, so this was the tab most often paying that cost. INSERT only: READ has no caret
+    # to paste at, and the Runner already refuses a paste there rather than running it as
+    # commands. Returns false when refused, so the Runner replays it keystroke by keystroke.
+    def paste(text : String) : Bool
+      return false unless insert_mode?
+      current.area.insert_text(text)
       @dirty = true
+      true
     end
 
     # Mouse: place the cursor at a click. `rect` is the framed interior the runner

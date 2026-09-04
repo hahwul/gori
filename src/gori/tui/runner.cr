@@ -4227,12 +4227,14 @@ module Gori::Tui
       open_overlay(ov)
     end
 
-    # Shared Start gate for both Sequencer open-sites: reject an unset token location
-    # (keep the form up), else run the site-specific apply and close. Returns whether to
-    # close, matching the Overlay#commit contract.
+    # Shared Start gate for both Sequencer open-sites: reject a descriptor the overlay
+    # cannot turn into a working extraction (keep the form up), else run the site-specific
+    # apply and close. Returns whether to close, matching the Overlay#commit contract. The
+    # refusal is the overlay's own sentence — a Position range typo is not a missing token
+    # location, and saying it is sends the operator to the wrong row.
     private def commit_sequence(ov : SequenceConfigOverlay, & : -> Nil) : Bool
       unless ov.valid?
-        @toast = "set a token location first"
+        @toast = ov.invalid_hint
         return false
       end
       yield
@@ -5104,7 +5106,10 @@ module Gori::Tui
         # the modal to re-pull afterwards when there is one (nil from the palette).
         confirm_factory_reset(back)
       else
-        @toast = "#{section} settings — coming soon (TODO)"
+        # SettingsCatalog names every reachable section and its seam spec pins that list to
+        # the branches above. Reaching this arm is therefore a stale internal caller, not a
+        # promised section that has yet to ship.
+        @toast = "unknown settings section: #{section}"
       end
     end
 

@@ -4,8 +4,8 @@ include Gori::Tui
 
 # The full set of symbols Runner#open_settings knows how to dispatch (form sections, the four
 # dedicated overlays, and :reset_all, which raises the factory-reset confirm rather than
-# opening anything). If a catalog entry named a symbol outside this set, the palette verb and
-# the tab opener would both land on the "coming soon (TODO)" toast.
+# opening anything). If a catalog entry named a symbol outside this set, both the palette verb
+# and the tab opener would hit Runner's internal "unknown settings section" guard.
 KNOWN_SETTINGS_SECTIONS = [
   :network, :editor, :mouse, :keys, :theme, :layout, :statusline, :display, :companion, :notifications,
   :general, :tabs, :hosts, :env, :hotkeys, :reset_all,

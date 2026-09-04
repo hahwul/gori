@@ -1355,7 +1355,30 @@ describe "Gori::Probe::Passive (new patterns)" do
         head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
                "Cache-Control: no-store, no-cache, private, max-age=0\r\n\r\n"
         codes_of(analyze(store, resp_head: head, content_type: "application/json",
-          body: %({"ok":true}))).should_not contain("cacheable_json")
+          body: %({"ok":true}), req_headers: authed)).should_not contain("cacheable_json")
+      end
+    end
+
+    it "combines repeated Cache-Control fields instead of trusting the last one" do
+      with_store do |store|
+        vetoed = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+                 "Cache-Control: no-store\r\nCache-Control: public\r\n\r\n"
+        codes_of(analyze(store, resp_head: vetoed, content_type: "application/json",
+          body: %({"me":1}), req_headers: authed)).should_not contain("cacheable_json")
+
+        cacheable = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+                    "Cache-Control: public\r\nCache-Control: extension=value\r\n\r\n"
+        codes_of(analyze(store, resp_head: cacheable, content_type: "application/json",
+          body: %({"me":1}), req_headers: authed)).should contain("cacheable_json")
+      end
+    end
+
+    it "does not read no-store from quoted extension data" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+               "Cache-Control: note=\"safe, no-store\", public\r\n\r\n"
+        codes_of(analyze(store, resp_head: head, content_type: "application/json",
+          body: %({"me":1}), req_headers: authed)).should contain("cacheable_json")
       end
     end
 
@@ -1375,6 +1398,16 @@ describe "Gori::Probe::Passive (new patterns)" do
         head = "HTTP/1.1 200 OK\r\nContent-Type: application/problem+json\r\n\r\n"
         codes_of(analyze(store, resp_head: head, content_type: "application/problem+json",
           body: %({"title":"err"}), req_headers: authed)).should contain("cacheable_json")
+      end
+    end
+
+    it "does not treat an arbitrary media type containing json as JSON" do
+      with_store do |store|
+        ["application/notjson", "text/jsonp", "image/json-icon"].each do |content_type|
+          head = "HTTP/1.1 200 OK\r\nContent-Type: #{content_type}\r\n\r\n"
+          codes_of(analyze(store, resp_head: head, content_type: content_type,
+            body: %({"me":1}), req_headers: authed)).should_not contain("cacheable_json")
+        end
       end
     end
   end

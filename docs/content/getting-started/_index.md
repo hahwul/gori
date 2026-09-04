@@ -20,7 +20,7 @@ Welcome to gori. This section takes you from a clean machine to a live proxy ses
 
 gori (고리, Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS **intercepting proxy** and web-hacking toolkit that runs entirely in your terminal. It sits *in the loop* between your client and the target, records every request/response as a *flow*, and gives you a pentest workbench to inspect, replay, fuzz, and scan that traffic without leaving the shell.
 
-It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, and decodes common formats inline — JWT, SAML, GraphQL, protobuf, MessagePack and CBOR. Everything you can do in the TUI is also reachable non-interactively through `gori run` and the built-in [MCP server](/guide/mcp/), so agents and scripts can drive the same project.
+It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, and decodes common formats inline — JWT, SAML, GraphQL, protobuf, MessagePack and CBOR. The core project and testing workflows use the same engines in the TUI, `gori run`, and the built-in [MCP server](/guide/mcp/), so agents and scripts can drive the same project without pretending that UI navigation is an API. See the [capability matrix](/reference/capabilities/) for the exact boundaries.
 
 ## Next Steps
 

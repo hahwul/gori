@@ -34,7 +34,7 @@ These are not reference pages. The [Guide](/guide/) documents each tab in depth,
 **Wrap up** — turn findings into a report, or hand the project to an agent:
 
 - **[Triage and report](/playbooks/triage-and-report/)**: file issues, prove a fix with the Comparer, and export a report a teammate can read.
-- **[Run an AI co-pilot session](/playbooks/run-an-ai-co-pilot/)**: put an agent on the same project over MCP and watch every move it makes.
+- **[Run an AI co-pilot session](/playbooks/run-an-ai-co-pilot/)**: put an agent on the same project over MCP and keep its consequential actions visible.
 
 ## Next Steps
 

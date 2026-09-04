@@ -1,11 +1,13 @@
-# Probe Tech-rule GraphQL-detection micro-benchmark. The Tech rule parses every JSON
-# request body (≤256 KB) to test for a GraphQL shape; a cheap `"query"` substring pre-gate
-# lets non-GraphQL JSON POSTs skip the full JSON.parse (a tree build). This isolates that.
+# Probe-rule micro-benchmarks. The first isolates Tech's GraphQL pre-gate; the second measures
+# CacheableApi's shared Cache-Control parse + six directive queries, including the old allocation-
+# heavy predicates for a direct comparison.
 #
 # Build: crystal build bench/probe_bench.cr -o bin/probe_bench --release
 # Run:   bin/probe_bench
 require "benchmark"
 require "json"
+require "../src/gori/proxy/codec/message"
+require "../src/gori/probe/passive/cache_control"
 
 # A realistic non-GraphQL JSON POST body (an ordinary API request payload — the common shape
 # that used to pay a full JSON.parse just to be classified "not GraphQL").
@@ -38,10 +40,54 @@ puts "body = #{NON_GQL.bytesize} bytes; gate says query? #{has_query_gate?(NON_G
 Benchmark.ips do |x|
   x.report("OLD: JSON.parse every JSON body") { parse_for_query(NON_GQL) }
   x.report("NEW: substring pre-gate then skip") do
-    if has_query_gate?(NON_GQL)
-      parse_for_query(NON_GQL)
-    else
-      nil
+    parse_for_query(NON_GQL) if has_query_gate?(NON_GQL)
+  end
+end
+
+# Before CacheControl centralised exact, quote-aware, repeated-field semantics, callers split one
+# value and each predicate split every directive again. Keep that old shape here so the allocation
+# and throughput difference stays reproducible rather than living only in a commit message.
+def old_cache_parts(value : String) : Array(String)
+  value.strip.downcase.split(',').map!(&.strip).reject!(&.empty?)
+end
+
+def old_cache_directive?(parts : Array(String), name : String) : Bool
+  parts.any? { |part| part.split('=').first?.try(&.strip) == name }
+end
+
+def old_cache_int(parts : Array(String), name : String) : Int64?
+  parts.each do |part|
+    next unless part.starts_with?("#{name}=") || part.starts_with?("#{name} =")
+    eq = part.index('=') || next
+    if n = part[(eq + 1)..].strip.lstrip('"').rstrip('"').to_i64?
+      return n
     end
+  end
+  nil
+end
+
+CACHE_CONTROL = "private, max-age=60, stale-while-revalidate=30, public"
+
+puts
+puts "Cache-Control parse + CacheableApi query bench:"
+
+Benchmark.ips do |x|
+  x.report("OLD: split inside every query") do
+    parts = old_cache_parts(CACHE_CONTROL)
+    old_cache_directive?(parts, "no-store")
+    old_cache_directive?(parts, "public")
+    old_cache_int(parts, "s-maxage")
+    old_cache_int(parts, "max-age")
+    old_cache_directive?(parts, "private")
+    old_cache_directive?(parts, "no-cache")
+  end
+  x.report("NEW: allocation-free exact queries") do
+    parts = Gori::Probe::Passive::CacheControl.parse(CACHE_CONTROL)
+    Gori::Probe::Passive::CacheControl.directive?(parts, "no-store")
+    Gori::Probe::Passive::CacheControl.directive?(parts, "public")
+    Gori::Probe::Passive::CacheControl.int(parts, "s-maxage")
+    Gori::Probe::Passive::CacheControl.int(parts, "max-age")
+    Gori::Probe::Passive::CacheControl.directive?(parts, "private")
+    Gori::Probe::Passive::CacheControl.directive?(parts, "no-cache")
   end
 end

@@ -43,7 +43,9 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | 전역 기본 리스닝 주소 (프로젝트에 `net.bind_host`가 없을 때 사용) |
 | `bind_port` | integer | `8070` | 전역 기본 리스닝 포트 (프로젝트에 `net.bind_port`가 없을 때 사용) |
-| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…` 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선 |
+| `upstream_proxy` | string | `""` | 전역 기본 업스트림: 기존 `host:port`/`http://…`, `http+tls://…`(프록시까지 TLS), 또는 `socks5://…`/`socks5h://…`; 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선. `https://…`는 **평문 형식의 기존 표기**입니다 — [upstream_rules](#upstream_rules) 참고 |
+| `upstream_proxy_ca` | string | `""` | `http+tls` 홉에서 **업스트림 프록시 자신의** 인증서를 검증할 PEM 번들. 시스템 스토어에 더해서 신뢰합니다. 비우면 시스템 스토어만 사용. 비밀이 아니라 경로이므로 프로필로 공유해도 안전합니다 |
+| `upstream_proxy_insecure` | bool | `false` | **업스트림 프록시** 인증서 검증을 건너뜁니다. **origin**을 다루는 `verify_upstream`이나 `--insecure-upstream`과는 무관하며 그 플래그에 영향받지 않습니다. 기본이 꺼짐인 이유: 이 홉은 모든 `CONNECT` authority와 모든 `Proxy-Authorization` 자격증명을 실어 나릅니다 |
 | `verify_upstream` | bool | `true` | 시스템 CA 트러스트 스토어로 업스트림 TLS 인증서 검증(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR` 존중; 스토어를 못 찾으면 HTTPS 검증 실패 — `SSL_CERT_FILE` 지정 또는 끄기). 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. `--insecure-upstream`은 해당 세션에만 끈 상태로 시작 |
 | `serve_landing` | bool | `true` | 내장 안내 / CA 다운로드 페이지 제공. 리슨 주소로 직접 접속한 경우와, 이미 프록시를 설정한 클라이언트가 예약 호스트 `http://gori.proxy/`(또는 `http://gori/`)로 접속한 경우 모두 해당 |
 | `connect_timeout_secs` | integer | `30` | 업스트림 연결 타임아웃(초, 최소 `1`) |
@@ -63,7 +65,7 @@ CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 �
 
 이 설정이 생기기 전에는 구현 세부사항이 유일한 수단이었습니다. gori는 Match & Replace 규칙이 활성일 때 HTTP/1.1로 내려가므로, h1을 강제하려면 아무 동작도 하지 않는 규칙을 켜야 했습니다. 그러면 헤드 재작성도 함께 켜지고, 켜둔 것을 잊기도 쉽습니다.
 
-`off`는 다음 터널 연결부터 적용되며, 원 서버 ALPN 프로브를 아예 생략합니다(원 서버당 연결 1개 절약). 다만 gori가 **정확성을 위해** 여전히 수행하는 다운그레이드는 덮어쓰지 않습니다. 활성 Match & Replace **body** 규칙과 **short circuit** 규칙은 이 설정과 무관하게 HTTP/1.1을 강제합니다. HTTP/2에서 Match & Replace는 헤드에 적용되고, 바디 재작성은 구현되어 있지 않으며 앞으로도 만들지 않습니다(HTTP/2 흐름 제어 때문에 바디 길이를 바꾸는 재작성은 그대로 실패하거나 스트림을 교착시킵니다). 그리고 h2 릴레이는 요청에 로컬에서 응답할 방법이 없습니다. 인터셉트, 헤드 규칙, Sandbox는 이제 아무것도 다운그레이드하지 않습니다. `CONNECT` 안의 평문 HTTP/2(`h2c`) 터널은 `off`일 때 중계하지 않고 거부합니다 — 클라이언트가 preface를 보내며 이미 h2를 확정했으므로 내릴 것이 없습니다.
+`off`는 다음 터널 연결부터 적용되며, 원 서버 ALPN 프로브를 아예 생략합니다(원 서버당 연결 1개 절약). 다만 gori가 **정확성을 위해** 여전히 수행하는 다운그레이드는 덮어쓰지 않습니다. 활성 Match & Replace **body** 규칙, body 범위 **extract** 규칙, **short circuit** 규칙은 이 설정과 무관하게 HTTP/1.1을 강제합니다. HTTP/2에서 Match & Replace는 헤드에 적용되고, 바디 재작성은 구현되어 있지 않으며 앞으로도 만들지 않습니다(HTTP/2 흐름 제어 때문에 바디 길이를 바꾸는 재작성은 그대로 실패하거나 스트림을 교착시킵니다). Body extract는 해당 seam에서 릴레이가 조립하지 않는 엔티티가 필요하고, h2 릴레이는 요청에 로컬에서 응답할 방법도 없습니다. 인터셉트, 헤드 규칙, Sandbox는 이제 아무것도 다운그레이드하지 않습니다. `CONNECT` 안의 평문 HTTP/2(`h2c`) 터널은 `off`일 때 중계하지 않고 거부합니다 — 클라이언트가 preface를 보내며 이미 h2를 확정했으므로 내릴 것이 없습니다.
 
 모든 다운그레이드는 `gori.log`에 호스트당 한 번, 호스트 이름과 어떤 이유가 원인인지를 적습니다. 다운그레이드가 적용되는 동안 HTTP/2 전용 클라이언트(모든 gRPC 클라이언트)는 그 호스트에 연결할 수 없고, 그 이유가 적히는 곳은 이 로그 줄뿐입니다.
 
@@ -228,7 +230,23 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 ### upstream_rules
 
-`network.upstream_proxy`는 catch-all 경로입니다. `host:port`, `http://…`(기존 `https://…` 표기 포함)는 HTTP CONNECT 프록시를 사용합니다. `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 둘 다 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
+`network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
+
+#### `https://`는 TLS가 아니라 평문 프록시입니다
+
+`https://proxy:3128`은 gori가 프록시에 TLS로 말할 수 있게 되기 전부터 *평문 HTTP CONNECT 프록시*를 의미했고, 지금도 그렇습니다. 이 스킴을 되찾지 않았습니다. 이미 `https://`가 적힌 모든 `settings.json`은 평문 형식을 뜻하고, 스킴의 의미를 바꾸면 업그레이드만으로, 아무 편집 없이, 프록시가 제공하지도 않을 핸드셰이크로 그 egress를 옮기게 됩니다. 그래서 이 표기는 **그대로 받아들이고 알려주기만** 하며, 재해석하지 않습니다.
+
+- 설정된 `https://` 업스트림마다 시작 시 경고 한 줄을 출력하고, 두 가지 수정 방법을 모두 알려줍니다.
+- 동작을 그대로 두면서 모호함만 제거하려면 `http://`로, 프록시까지의 홉을 실제로 암호화하려면 `http+tls://`로 쓰세요.
+- **settings:network**(또는 **Project settings** 카드)에서 프록시 필드를 편집해 저장하면 값이 `http://…`로 정규화되어 기록됩니다. 건드리지 않은 값은 적힌 그대로 바이트 단위로 보존됩니다.
+
+#### 프록시까지 TLS (`http+tls`)
+
+도달하려는 origin을 이름으로 적는 `CONNECT` 요청 라인과 `Proxy-Authorization` 헤더는 TLS 세션 **안에서만** 전송되며, 그 앞에서는 절대 나가지 않습니다. 핸드셰이크가 끝나기 전에는 요청의 어떤 부분도 전송되지 않습니다.
+
+프록시 leg는 **프록시 자신의** 호스트 이름으로 검증됩니다. SNI와 인증서 이름 검증 대상은 설정한 프록시 주소이며, origin의 이름도 [호스트 오버라이드](#hostname_overrides)도 아닙니다(오버라이드는 origin leg에만 적용됩니다). 이 정책은 `network.upstream_proxy_ca`와 `network.upstream_proxy_insecure`가 결정하며, origin을 설명하는 `verify_upstream` / `--insecure-upstream`이 **아닙니다**. 인증서가 깨진 대상 하나 때문에 origin 정책을 느슨하게 했다고 해서 세션 전체를 실어 나르는 프록시 인증을 멈추지는 않고, 프록시 인증서가 거부되면 `--insecure-upstream`을 해법으로 제시하는 대신 프록시 쪽 용어로 설명합니다.
+
+`http+tls` 프록시를 거쳐 도달하는 `https://` origin은 TLS 안의 TLS입니다. origin 핸드셰이크가 터널 위에서 수행되므로 origin 인증서는 여전히 자신의 정책 아래 end-to-end로 검증됩니다.
 
 캡처·재전송·스캔 엔진, 업데이트 확인, OAST 제공자 통신을 포함해 gori가 소유한 모든 네트워크 연결은 이 라우팅 결정을 사용합니다. 설정된 프록시가 잘못되었거나 연결할 수 없거나 터널을 거부하면 직결로 재시도하지 않고 실패합니다. 빈 프로젝트 고정값과 일치하는 `direct` 규칙은 명시적인 운영자 예외로 유지됩니다.
 
@@ -247,6 +265,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
       "username": "alice",
       "password_env": "CORP_PROXY_PASS"
     },
+    { "host": "*.partner.example", "kind": "http+tls", "addr": "proxy.partner.example:443" },
     { "host": "*.onion", "kind": "socks5h", "addr": "127.0.0.1:9050" }
   ]
 }
@@ -255,9 +274,9 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | 호스트 패턴. 스코프 `host` 룰과 같은 문법 — `corp.internal`은 해당 호스트와 서브도메인, `*.corp.internal`은 글롭, `*`는 catch-all. 대소문자 무관 |
-| `kind` | string | `direct`, `http`, `socks5`(로컬 DNS), `socks5h`(프록시 DNS). 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
-| `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, 두 SOCKS kind가 `1080`. `direct`에는 없어야 합니다 |
-| `username` | string | 선택. `http`는 HTTP Basic(RFC 7617), 두 SOCKS kind는 RFC 1929 교환으로 전송 |
+| `kind` | string | `direct`, `http`, `http+tls`(TLS 위의 HTTP CONNECT), `socks5`(로컬 DNS), `socks5h`(프록시 DNS). 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
+| `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, `http+tls`가 `443`, 두 SOCKS kind가 `1080`. `direct`에는 없어야 합니다 |
+| `username` | string | 선택. `http`와 `http+tls`는 HTTP Basic(RFC 7617), 두 SOCKS kind는 RFC 1929 교환으로 전송 |
 | `password_env` | string | 선택. 비밀번호를 담은 **OS 환경변수의 이름** |
 
 **전역 규칙 비밀번호는 `settings.json`에 저장되지 않습니다.** 사용자명과 환경변수 *이름*만 기록되고, 비밀번호는 dial 시점에 OS 환경에서 읽습니다. 따라서 `export CORP_PROXY_PASS=…`가 재시작 없이 반영됩니다. gori 자체의 `env` 섹션은 의도적으로 쓰지 않습니다 — 그 변수들은 `settings.json`에 평문으로 저장되므로, 결국 다른 경로로 비밀을 파일에 넣는 셈이고 설정 공유·내보내기([#439](https://github.com/hahwul/gori/issues/439))를 무의미하게 만듭니다. `$`가 포함된 `password_env`는 거부됩니다 — 값이 아니라 변수 이름을 담는 필드입니다. Project settings에서 직접 입력한 자격증명의 저장 방식은 [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.

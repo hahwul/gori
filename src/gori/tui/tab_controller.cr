@@ -2,6 +2,7 @@ require "termisu"
 require "../verb"
 require "../session"
 require "../hotkeys"
+require "./keybind"
 require "../repeater/subtab_filter"
 require "./subtab_marks"
 require "./controllers/tab_close"
@@ -1107,6 +1108,29 @@ module Gori::Tui
     # claimed ^P/^N/^W family, a pane-local `x`) stay literal.
     protected def keys(template : String) : String
       Hotkeys.expand(@host.session.registry, template)
+    end
+
+    # Whether `ev` is a chord the effective keymap binds to verb `id` — for a pane that
+    # dispatches a key ITSELF, with no verb of its own, while its hint strip names another
+    # verb's chord for it. The Rewriter's extract sub-tab says `{rewriter.add} add` and the
+    # Colormarker's colours pane says `{colormarker.add} add`: both strips followed a rebind
+    # the moment `keys` did, and both handlers kept matching the literal `'a'`, so after
+    # binding "Add rule" to `n` the strip said `n add` and `n` did nothing there while `a`,
+    # which the strip no longer named, still did.
+    #
+    # Resolved the way `Hotkeys.expand` resolves the token the strip prints: the user's
+    # override, else the OS profile, else the verb's declared chords — and, for an id the
+    # operator has UNBOUND, the declared default, because that is what the strip falls back
+    # to naming. The event goes through `Keybind.from_event`, the same encoding the keymap
+    # dispatch uses, so a typed uppercase letter and ⇧+letter agree here as they do there.
+    protected def chord_of?(ev : Termisu::Event::Key, id : String) : Bool
+      return false unless chord = Keybind.from_event(ev)
+      registry = @host.session.registry
+      return false unless verb = registry[id]?
+      os = Verb::OsProfile.resolve(Settings.keymap_os)
+      chords = Verb::Keymap.effective_chords(verb, os, Hotkeys.rebindable_overrides(registry))
+      chords = Verb::Keymap.effective_chords(verb, os) if chords.empty?
+      chords.includes?(chord)
     end
 
     # --- orthogonal ^G/^F prompts: the symbol naming the currently-focused

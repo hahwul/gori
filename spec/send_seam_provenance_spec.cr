@@ -37,9 +37,11 @@ end
 private def with_prov_store(&)
   path = File.tempname("gori-send-seam", ".db")
   store = Gori::Store.open(path)
+  previous_layer = Gori::Env.layer
   begin
     with_clean_env { yield store }
   ensure
+    Gori::Env.layer = previous_layer
     store.close
     File.delete?(path)
     File.delete?("#{path}-wal")

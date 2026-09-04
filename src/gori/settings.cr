@@ -25,9 +25,10 @@ require "./settings/fuzzer"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
-  # process (the `settings:*` command-palette entries control this). Currently the
-  # NETWORK section (proxy bind + upstream proxy), the EDITOR (external ^E editor),
-  # and the TUI THEME. Hotkeys are TODO. Persisted as JSON at <config_dir>/settings.json.
+  # process (the `settings:*` command-palette entries control this). Split into the
+  # section files required above: network, editor/display, keymap/hotkeys, tabs,
+  # tool defaults, rules and integrations. Persisted as JSON at
+  # <config_dir>/settings.json.
   #
   # Loaded once at startup (CLI flags then override the bind in memory); the
   # Settings UI edits these class properties and calls `save`. `upstream_proxy` is
@@ -224,6 +225,10 @@ module Gori
         self.bind_port = int_field(net, "bind_port") || bind_port
         apply_upstream_proxy(net["upstream_proxy"]?)
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
+        # The PROXY leg's own trust policy, kept next to (never folded into) verify_upstream —
+        # see DEFAULT_UPSTREAM_PROXY_CA for why the two legs do not share a switch.
+        self.upstream_proxy_ca = net["upstream_proxy_ca"]?.try(&.as_s?).try(&.strip) || upstream_proxy_ca
+        self.upstream_proxy_insecure = load_bool(net, "upstream_proxy_insecure", upstream_proxy_insecure?)
         self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
         int_field(net, "connect_timeout_secs").try { |v| self.connect_timeout_secs = {v, 1}.max }
         int_field(net, "io_timeout_secs").try { |v| self.io_timeout_secs = {v, 1}.max }

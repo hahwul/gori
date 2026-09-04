@@ -361,6 +361,11 @@ module Gori
         # per-flow error explains each failure, this explains WHY up front — and this table is
         # hand-edited JSON, so there was no save for its validator to run at.
         Settings.outbound_tls_warnings.each { |w| runner.notifications.push(:warn, w) }
+        # Upstream ROUTING that is accepted but probably not what was meant: the legacy
+        # `https://` spelling (which means a plaintext CONNECT proxy), an unreadable proxy CA,
+        # proxy certificate verification switched off. None of them refuses a dial, so without
+        # this they are invisible until traffic goes somewhere the operator did not intend.
+        Settings.upstream_proxy_warnings.each { |w| runner.notifications.push(:warn, w) }
         {runner.run, nil}
       ensure
         session.close
@@ -568,6 +573,8 @@ module Gori
       # See the sibling emission in `open_and_run`: an outbound-TLS rule gori cannot apply
       # is otherwise invisible until every dial to that one destination fails.
       Settings.outbound_tls_warnings.each { |w| STDERR.puts "  ⚠ #{w}" }
+      # See the sibling emission in `open_and_run`.
+      Settings.upstream_proxy_warnings.each { |w| STDERR.puts "  ⚠ #{w}" }
       STDERR.puts "  press Ctrl-C to stop"
     end
 

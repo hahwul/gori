@@ -34,7 +34,7 @@ weight = 15
 **마무리** — 발견을 리포트로, 또는 프로젝트를 에이전트에게:
 
 - **[트리아지와 리포트](/ko/playbooks/triage-and-report/)**: 이슈를 파일링하고, Comparer로 수정을 증명하고, 동료가 읽을 리포트를 내보냅니다.
-- **[AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/)**: MCP로 같은 프로젝트에 에이전트를 붙이고, 그 모든 동작을 지켜봅니다.
+- **[AI 코파일럿 세션 실행](/ko/playbooks/run-an-ai-co-pilot/)**: MCP로 같은 프로젝트에 에이전트를 붙이고 중요한 동작을 드러낸 채 사용합니다.
 
 ## 다음 단계 {#next-steps}
 
