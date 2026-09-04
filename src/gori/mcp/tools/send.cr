@@ -902,17 +902,22 @@ module Gori
         Serialize.sensitive_header?(name)
       end
 
-      # Execute a stored WebSocket repeater from MCP. Unlike send_request, this uses
-      # WsEngine's fresh Sec-WebSocket-Key + framed message exchange and therefore
-      # returns the inbound transcript instead of stopping at the 101 response.
+      # Execute a stored WebSocket repeater from MCP. Unlike send_request, this runs
+      # `WsEngine`'s framed message exchange and therefore returns the inbound transcript
+      # instead of stopping at the handshake's own response — the 101 of an RFC 6455 upgrade,
+      # or the 2xx of an RFC 8441 extended CONNECT (#733).
       private def send_websocket(h) : Result
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
         repeater = store.get_repeater(repeater_id)
         return not_found("no repeater with id #{repeater_id}") unless repeater
         repeater_request_text = String.new(repeater.request)
-        unless Repeater::WsEngine.upgrade_request?(repeater_request_text)
-          return Result.new("repeater #{repeater_id} is not a WebSocket upgrade request", is_error: true)
+        # `replayable?`: both handshakes qualify — an RFC 6455 `Upgrade:` head and an RFC 8441
+        # extended CONNECT over h2 (#733). `WsEngine` reads the transport off these same bytes.
+        unless Repeater::WsEngine.replayable?(repeater_request_text)
+          return Result.new("repeater #{repeater_id} is not a WebSocket handshake (neither an " \
+                            "RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)",
+            is_error: true)
         end
 
         issue_id = int(h, "issue_id")
@@ -1281,8 +1286,8 @@ module Gori
           raise Gori::Error.new(id_error(h, "repeater_id")) unless id
           rec = store.get_repeater(id)
           raise Gori::Error.new("no repeater with id #{id}") unless rec
-          if Repeater::WsEngine.upgrade_request?(String.new(rec.request))
-            raise Gori::Error.new("repeater #{id} is a WebSocket upgrade — use send_websocket")
+          if Repeater::WsEngine.replayable?(String.new(rec.request))
+            raise Gori::Error.new("repeater #{id} is a WebSocket handshake — use send_websocket")
           end
           # Respect the repeater's auto-Content-Length setting (the TUI Repeater does):
           # only recompute CL when it's on, so a deliberately hand-set CL is preserved.
@@ -1539,13 +1544,15 @@ module Gori
         end
 
         tool j, "send_websocket",
-          "Execute a persisted WebSocket repeater: perform a fresh RFC 6455 handshake, send the " \
-          "repeater's outbound messages (or a supplied override), and return inbound frames. " \
-          "ACTIVE: makes a real outbound connection. The handshake response is persisted on " \
-          "the repeater, while the outbound message template is left unchanged." do |s|
+          "Execute a persisted WebSocket repeater: re-open the socket with the handshake the " \
+          "session holds — an RFC 6455 `Upgrade:` request over HTTP/1.1, or an RFC 8441 " \
+          "extended CONNECT over HTTP/2 — send the repeater's outbound messages (or a supplied " \
+          "override), and return inbound frames. ACTIVE: makes a real outbound connection. The " \
+          "handshake response is persisted on the repeater, while the outbound message " \
+          "template is left unchanged." do |s|
           s.field "repeater_id", intprop("WebSocket repeater database id"), required: true
           s.field "messages", ws_out_messages_prop("optional outbound message override; stored repeater messages are used when absent")
-          s.field "keep_sec_websocket_key", boolprop("send the repeater request's OWN Sec-WebSocket-Key instead of a fresh one, so an absent/short/duplicate/non-base64 key can be tested (default: the repeater's stored setting, itself false)")
+          s.field "keep_sec_websocket_key", boolprop("send the repeater request's OWN Sec-WebSocket-Key instead of a fresh one, so an absent/short/duplicate/non-base64 key can be tested (default: the repeater's stored setting, itself false). HTTP/1.1 handshakes only — RFC 8441 §5.1 carries no Sec-WebSocket-Key, and the result says so rather than ignoring the flag")
           s.field "tls_preset", strprop("TLS fingerprint for this handshake: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table (default: the repeater's stored setting). The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match. wss:// targets only")
           s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")

@@ -95,7 +95,11 @@ module Gori
       # body-size probes are the ordinary work of this tool, so the old note that "repeater
       # bodies are typically small" was never true: no gori surface could send a >64 KiB h2
       # request body against any conformant origin.
-      private class SendFlow
+      # PUBLIC, like `exchange` below and for the same reason: `H2WsStream` runs the SAME
+      # send-side accounting over an RFC 8441 extended CONNECT stream (#733), and a second copy
+      # of a flow-control window is how the two halves of one connection start disagreeing.
+      # Nothing outside this file's own siblings constructs one.
+      class SendFlow
         # The stream this exchange owns. 1 for a one-shot connection, and 3, 5, 7 … for the
         # later requests of a POOLED one (`Conn#take_stream`): RFC 9113 §5.1.1 makes a client
         # stream id odd, strictly increasing, and — this is the part that made every `1_u32`
@@ -721,7 +725,8 @@ module Gori
       # stream window. §6.9.2: the new value is a DELTA against the previous initial size
       # applied to every open stream, not an assignment — space already consumed stays
       # consumed, and the window may end up negative.
-      private def self.apply_settings(frame : Frame::Header, flow : SendFlow) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` applies the peer's SETTINGS on the same stream).
+      def self.apply_settings(frame : Frame::Header, flow : SendFlow) : Nil
         payload = frame.payload
         i = 0
         while i + 6 <= payload.size
@@ -744,7 +749,8 @@ module Gori
       # stall loop reporting a flat timeout for a violation gori had watched the origin commit
       # 1200 times. Neither half REJECTS the frame — gori is the tester here, and a window that
       # overflows into an Int64 is harmless — but the operator gets told what was on the wire.
-      private def self.credit(frame : Frame::Header, flow : SendFlow) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` credits the same windows).
+      def self.credit(frame : Frame::Header, flow : SendFlow) : Nil
         return if frame.payload.size < 4
         inc = (IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[0, 4]) & 0x7fffffff_u32).to_i64
         if inc == 0
@@ -786,8 +792,9 @@ module Gori
       # the initial value at 2^14 and forbids a smaller one, so 16384 is legal against every
       # peer, and gori writes the block before the peer's SETTINGS has even arrived. END_STREAM
       # belongs on the HEADERS frame, END_HEADERS on the last CONTINUATION (§6.10).
-      private def self.write_header_block(io : IO, block : Bytes, end_stream : Bool,
-                                          stream_id : UInt32) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` writes the extended CONNECT block with it).
+      def self.write_header_block(io : IO, block : Bytes, end_stream : Bool,
+                                  stream_id : UInt32) : Nil
         head = Math.min(MAX_FRAME, block.size)
         flags = (head >= block.size ? Frame::END_HEADERS : 0_u8) | (end_stream ? Frame::END_STREAM : 0_u8)
         io.write(Frame::Header.new(Frame::Type::Headers.value, flags, stream_id, block[0, head]).to_bytes)
@@ -1186,7 +1193,8 @@ module Gori
       # The code was previously read only as "stop looping", so an origin that told gori
       # exactly what it disliked about gori's own frames — FRAME_SIZE_ERROR, COMPRESSION_ERROR,
       # ENHANCE_YOUR_CALM — was reported as "no h2 response", pointing at the network.
-      private def self.goaway_reason(frame : Frame::Header) : String
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
+      def self.goaway_reason(frame : Frame::Header) : String
         payload = frame.payload
         return "h2 GOAWAY (no error code)" if payload.size < 8
         code = IO::ByteFormat::BigEndian.decode(UInt32, payload[4, 4]).to_i
@@ -1199,7 +1207,8 @@ module Gori
       # of `goaway_reason`, one `case` arm away and written for the same reason: the code
       # names WHY the stream died, and REFUSED_STREAM (§8.7) is not a failure at all but an
       # instruction to retry on a new connection.
-      private def self.rst_reason(frame : Frame::Header) : String
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` reports the peer's own reason with it).
+      def self.rst_reason(frame : Frame::Header) : String
         payload = frame.payload
         return "h2 RST_STREAM on stream #{frame.stream_id} (no error code)" if payload.size < 4
         code = IO::ByteFormat::BigEndian.decode(UInt32, payload[0, 4]).to_i
@@ -1231,14 +1240,16 @@ module Gori
         100 <= status < 200
       end
 
-      private def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` answers SETTINGS/PING with it).
+      def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil
         io.write(Frame::Header.new(type.value, Frame::ACK, 0_u32, payload).to_bytes)
         io.flush
       end
 
       # WINDOW_UPDATE crediting `increment` bytes back to `stream_id` (0 = connection-
       # level). The reserved high bit stays clear (increment is a small frame size).
-      private def self.window_update(io : IO, stream_id : UInt32, increment : Int32) : Nil
+      # PUBLIC for `H2WsStream` — see `SendFlow` (`H2WsStream` replenishes the receive window with it).
+      def self.window_update(io : IO, stream_id : UInt32, increment : Int32) : Nil
         return if increment <= 0
         payload = Bytes.new(4)
         IO::ByteFormat::BigEndian.encode(increment.to_u32, payload)
@@ -1310,12 +1321,28 @@ module Gori
         # (it is the very shape `HeadCodec.resolve_authority` preserves in the other
         # direction) — and it is what a host-confusion probe wants on the wire.
         authority_override = nil
+        protocol = nil
         regular = [] of {String, String}
         lines[1..]?.try &.each do |field_line|
           next if field_line.empty?
           pair = HeadCodec.header_field(field_line)
           raise Gori::Error.new(unencodable_line(field_line)) unless pair
           raw_name, value = pair
+          # `X-Gori-Protocol` back to `:protocol` — the inverse of `HeadCodec.synth_request`,
+          # which writes that marker because the pseudo-header has nowhere else to go in an h1
+          # head. Without the fold a captured RFC 8441 extended CONNECT replayed as an ordinary
+          # h2 request carrying gori's own diagnostic line as a REGULAR field, while the one
+          # pseudo-header that makes the stream a WebSocket never reached the wire — so the
+          # socket could not be re-opened and the marker leaked into the target's logs.
+          #
+          # ONE occurrence, like `Host:`/`:authority` beside it: the synthesizer writes at most
+          # one, so a second is an operator's own field and stays a regular one, where they can
+          # see it. `reserved_marker?` renames a PEER field of this name on the way in, so the
+          # line being folded here is gori's own by construction.
+          if raw_name.compare(HeadCodec::PROTOCOL_MARKER, case_insensitive: true) == 0 && protocol.nil?
+            protocol = value
+            next
+          end
           if raw_name.compare("host", case_insensitive: true) == 0 && authority_override.nil?
             # An EMPTY `Host:` maps to an empty `:authority`, not to the dial target: the
             # operator asked for a request with no authority (the missing-authority probe),
@@ -1329,6 +1356,9 @@ module Gori
 
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
                    {":authority", authority_override || authority(host, port, scheme)}]
+        # RFC 8441 §4: `:protocol` is a pseudo-header, so it belongs in this block and never
+        # among the regular fields (§8.3 requires every pseudo to precede them).
+        protocol.try { |p| headers << {":protocol", p} }
         headers.concat(regular)
         headers.each { |(n, v)| reject_uncarriable(n, v) }
         body = reframed_grpc(regular, body) if reframe_grpc && body
@@ -1391,7 +1421,11 @@ module Gori
                                preserve_field_case : Bool = false,
                                reframe_grpc : Bool = false) : Bytes
         fields, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
-        head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "")
+        # `protocol:` so the RFC 8441 marker line the parse just consumed comes back — this is
+        # the projection of the fields that WILL be encoded, and a `:protocol` dropped here
+        # would report an ordinary CONNECT tunnel for a request opening a WebSocket.
+        head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "",
+          protocol: HeadCodec.pseudo(fields, ":protocol"))
         return head unless body && !body.empty?
         joined = Bytes.new(head.size + body.size)
         head.copy_to(joined)
@@ -1499,7 +1533,10 @@ module Gori
         {bytes, nil}
       end
 
-      private def self.header_block(frame : Frame::Header) : Bytes
+      # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same
+      # padding/priority prefix whichever loop reads it, and two strippers is one
+      # off-by-one away from a desynced HPACK table).
+      def self.header_block(frame : Frame::Header) : Bytes
         payload = frame.payload
         offset = 0
         pad = 0
@@ -1513,7 +1550,10 @@ module Gori
         finish <= offset ? Bytes.empty : payload[offset...finish]
       end
 
-      private def self.data_block(frame : Frame::Header) : Bytes
+      # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same
+      # padding/priority prefix whichever loop reads it, and two strippers is one
+      # off-by-one away from a desynced HPACK table).
+      def self.data_block(frame : Frame::Header) : Bytes
         return frame.payload unless frame.padded?
         return Bytes.empty if frame.payload.empty?
         pad = frame.payload[0].to_i

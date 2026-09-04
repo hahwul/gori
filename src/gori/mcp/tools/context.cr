@@ -343,7 +343,7 @@ module Gori
             end
           end
 
-          if Repeater::WsEngine.upgrade_request?(r_request_text)
+          if Repeater::WsEngine.replayable?(r_request_text)
             ws_msgs = store.ws_messages_for_repeater(r.id)
             j.field "ws_mode", true
             j.field "ws_message_count", ws_msgs.size

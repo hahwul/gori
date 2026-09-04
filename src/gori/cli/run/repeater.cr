@@ -462,7 +462,7 @@ module Gori
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}. Stored on the session, so `repeater send` and a reopened TUI tab present it too") { |v| tls_preset = v }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
-          p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the upgrade handshake is sent as an ordinary request and the 101 read as a response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
+          p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
@@ -515,13 +515,13 @@ module Gori
               http2 = built.http2
             end
 
-            # `WsEngine.upgrade_request?`, not `row.status == 101` (#742). What this session
-            # has to be able to do is `repeater send` — and that runs `WsEngine`, which opens
-            # a socket only with an HTTP/1.1 `Upgrade:` handshake. The status was that
-            # handshake's, standing in for the handshake, so a WebSocket captured over RFC
-            # 8441 extended CONNECT (#733: `CONNECT`, answered `200`) fell into the plain-HTTP
-            # branch and its frames were never mentioned again. See the `websocket?` branch.
-            if Proxy::WS.upgrade_request?(String.new(detail.request_head))
+            # `WsEngine.replayable?`, not `row.status == 101` (#742). What this session has to
+            # be able to do is `repeater send` — and that runs `WsEngine`, which re-opens a
+            # socket from either handshake: an HTTP/1.1 `Upgrade:` head, or an RFC 8441
+            # extended CONNECT over h2 (#733: `CONNECT`, answered `200`). The status was the h1
+            # handshake's, standing in for the handshake, so the h2 shape fell into the
+            # plain-HTTP branch and its frames were never mentioned again.
+            if Repeater::WsEngine.replayable?(String.new(detail.request_head))
               is_ws = true
               # Opcode AND bytes, straight across. This used to be
               # `select(&.text?).map { String.new(m.payload).scrub }`: a binary outbound frame
@@ -535,26 +535,6 @@ module Gori
               STDERR.puts "gori run repeater create: #{Run.ws_notice_dropped_note(dropped)}" if dropped > 0
               ws_messages = seed_rows
                 .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, Run.seed_shape(m.shape)) }
-            elsif detail.websocket?
-              # A WebSocket gori captured over HTTP/2 (RFC 8441 extended CONNECT). The session
-              # is still created — the CONNECT request is a real h2 request — but it is an
-              # ORDINARY one, because there is no h2 WebSocket send path to replay frames
-              # over: `WsEngine` writes an h1 upgrade, and `--ws-http-only` / `--http` move a
-              # session between the WS engine and a plain send of the same handshake bytes,
-              # never onto a second WebSocket transport. Fabricating an h1 handshake so the
-              # seed could dial would store a request the client never sent under this flow's
-              # provenance.
-              #
-              # Said on STDERR rather than left to be discovered: a `repeater create --flow`
-              # that silently holds none of the socket's frames is the same shape of lie as a
-              # seed that silently holds fewer (`ws_notice_dropped_note`, right above).
-              frames = store.count_ws_messages(fid)
-              STDERR.puts "gori run repeater create: flow ##{fid} is a WebSocket over HTTP/2 " \
-                          "(RFC 8441 extended CONNECT) — its #{frames} captured " \
-                          "frame#{frames == 1 ? " was" : "s were"} NOT seeded into this session. gori re-establishes " \
-                          "a socket only from an HTTP/1.1 Upgrade handshake and this capture has none, so " \
-                          "`repeater send` will send the CONNECT request rather than a framed exchange. " \
-                          "Read the transcript with `gori run show #{fid}`."
             end
           end
 
@@ -783,7 +763,7 @@ module Gori
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_messages << parse_message_frame(v) }
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (overrides the session's stored setting for this send)") { ws_keep_key = true }
           p.on("--idle-ms=N", "WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| idle_ms = parse_count(v, "--idle-ms").to_i64 }
-          p.on("--http", "WebSocket: send the upgrade handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
+          p.on("--http", "WebSocket: send the handshake as an ordinary HTTP request and print the response, instead of performing the framed exchange (overrides the session's stored setting for this send). The bytes are unchanged — this selects the engine, not a rewrite") { http_only = true }
           p.on("--record-history", "Also write the outbound request + response to History as a captured flow, and print its flow id (default: off — a Repeater send leaves no flow). HTTP only") { record_history = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the session's stored one for this send") { |v| tls_preset = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -1600,7 +1580,7 @@ module Gori
         # handing it to the plain h1/h2 engines, which don't do the RFC 6455 framed exchange.
         #
         # The test is `Store::FlowDetail#websocket?` — "did this flow OPEN a socket" — and not
-        # the `status == 101 && upgrade_request?` pair it replaces (#742). That pair asked the
+        # the `status == 101 && upgrade_request?` pair it replaced (#742). That pair asked the
         # right question with only the HTTP/1.1 vocabulary for it: an RFC 8441 extended CONNECT
         # has no `Upgrade:` header to find and is answered `200`, so a WebSocket captured over
         # h2 (#733) fell through both halves and got exactly the handshake-only replay this
@@ -1609,14 +1589,14 @@ module Gori
         # be refused: a handshake the origin rejected, and a non-WebSocket 101 (#736) whose
         # transcript holds only gori's own `[gori] …` notice about the opaque upgrade.
         if detail.websocket?
-          # The advice differs by transport, because for h2 the session route does not lead
-          # anywhere either — `repeater create --flow` will say so and seed no frames.
-          fix = if Repeater::WsEngine.upgrade_request?(String.new(detail.request_head))
-                  "Create a repeater from it (`gori run repeater create --flow=#{id}`) and replay it with `gori run repeater send <id>` for a real framed exchange."
-                else
-                  "This socket was opened by an RFC 8441 extended CONNECT over HTTP/2, and gori re-establishes a socket only from an HTTP/1.1 Upgrade handshake — there is nothing to replay it with. Read the captured transcript with `gori run show #{id}`."
-                end
-          abort "gori run repeater: flow ##{id} is a WebSocket session — `gori run repeater` only re-sends the handshake and captures the answer to it, not the framed messages. #{fix}"
+          # ONE piece of advice for both transports now: `WsEngine` re-opens an RFC 8441
+          # extended CONNECT as readily as an RFC 6455 upgrade (#733), so the session route
+          # leads somewhere for either. It used to fork here and tell an h2 operator there was
+          # nothing to replay their socket with.
+          abort "gori run repeater: flow ##{id} is a WebSocket session — `gori run repeater` only " \
+                "re-sends the handshake and captures the answer to it, not the framed messages. " \
+                "Create a repeater from it (`gori run repeater create --flow=#{id}`) and replay it " \
+                "with `gori run repeater send <id>` for a real framed exchange."
         end
 
         # The captured request body was capped at CAPTURE_MAX; FlowRequest.build re-syncs the

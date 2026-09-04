@@ -284,8 +284,8 @@ module Gori
       private def self.minimize_target_or_abort(id : Int64, rec : Store::RepeaterRecord,
                                                 text : String,
                                                 outbound : Gori::Outbound) : {String, String, Int32}
-        if Repeater::WsEngine.upgrade_request?(text)
-          abort "gori run repeater minimize: session ##{id} is a WebSocket upgrade — minimize works on plain HTTP requests"
+        if Repeater::WsEngine.replayable?(text)
+          abort "gori run repeater minimize: session ##{id} is a WebSocket handshake — minimize works on plain HTTP requests"
         end
         # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding
         # §fuzz§ markers is a TEMPLATE, not a request: minimizing it would send 250 requests

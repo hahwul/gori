@@ -4,6 +4,7 @@ require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/ws/frame"
 require "./flow_request"
+require "./h2_ws_stream"
 
 module Gori
   module Repeater
@@ -68,15 +69,39 @@ module Gori
       # can ask the same question without requiring this file (→ `flow_request.cr` →
       # `store.cr`, a cycle). Same bytes, same answer; this is where the REPEATER asks it.
       #
-      # And note what it therefore means: `WsEngine` dials with an HTTP/1.1 `Upgrade:`
-      # handshake and accepts nothing but a 101 (see `send`). So this predicate is not only
-      # "is this a WebSocket" — it is "is this a WebSocket gori can re-establish". An RFC 8441
-      # extended CONNECT captured over h2 (#733) is a real WebSocket and answers FALSE, which
-      # is the correct answer for every seed that asks: there is no h2 WebSocket send path.
+      # And note what it therefore means: this predicate is the HTTP/1.1 half ONLY — a head
+      # that opens a socket with an `Upgrade:` handshake answered by a 101. An RFC 8441
+      # extended CONNECT captured over h2 (#733) is a real WebSocket and still answers FALSE
+      # here, because it is opened a different way.
+      #
+      # "Is this a WebSocket gori can re-establish" is `replayable?` below, and it is that
+      # question — not this one — that every seed, every surface gate and `Repeater::Plan`'s
+      # engine choice asks. The distinction used to be moot (there was only one transport) and
+      # keeping the two spellings apart is what stops an h1-only assumption from riding along
+      # into a caller that now has two.
       UPGRADE_HEADER = Proxy::WS::UPGRADE_HEADER
 
       def self.upgrade_request?(request : String) : Bool
         Proxy::WS.upgrade_request?(request)
+      end
+
+      # The RFC 8441 half: `CONNECT` plus the `:protocol websocket` the stored head carries as
+      # its `X-Gori-Protocol` marker. Delegated to the codec for the reason `upgrade_request?`
+      # is — the predicate's home is `Proxy::WS`, and this is where the REPEATER asks it.
+      def self.extended_connect_request?(request : String) : Bool
+        Proxy::WS.extended_connect_request?(request)
+      end
+
+      # THE gate: is this a WebSocket `send` can re-open, over either transport?
+      #
+      # One predicate rather than a two-clause test spelled out at each of the dozen-odd sites
+      # that ask (the TUI's three seeds, `gori run repeater`/`fuzz`, four MCP tools, both
+      # Minimize surfaces, `Repeater::Plan` and `Fuzz::Plan`). Those sites were written when
+      # `upgrade_request?` WAS the answer, and every one of them would otherwise have had to be
+      # taught the second transport separately — which is exactly how the h1 predicate itself
+      # ended up with three copies (#390, #394, #397).
+      def self.replayable?(request : String) : Bool
+        Proxy::WS.upgrade_request?(request) || Proxy::WS.extended_connect_request?(request)
       end
 
       # An outbound message to resend. `opcode` is the RFC 6455 opcode as-is — 0 CONT,
@@ -155,6 +180,16 @@ module Gori
         end
       end
 
+      # Re-open the socket and run the script over it. WHICH transport is read off the bytes,
+      # never passed in: an RFC 8441 extended CONNECT head and an HTTP/1.1 `Upgrade:` head are
+      # two different handshakes for one protocol, the capture says which it was, and a flag
+      # beside the bytes would let a surface disagree with them. The same rule the h1 path
+      # already followed — `Repeater::Plan` picks this engine over `Engine` by reading the
+      # FINAL wire and not the stored text.
+      #
+      # Everything after the handshake is ONE implementation for both: `send_over_h1` and
+      # `send_over_h2` differ only in how they produce an `IO` and the response head, and
+      # `run_session` is the scripted exchange, the caps, the reassembly and the notes.
       def self.send(upgrade_request : Bytes, out_messages : Array(OutMsg), *,
                     scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
@@ -163,6 +198,26 @@ module Gori
                     keep_key : Bool = false,
                     deadline : Time::Span = DRAIN_DEADLINE,
                     tls_preset : String? = nil) : Result
+        if Proxy::WS.extended_connect_request?(String.new(upgrade_request))
+          return send_over_h2(upgrade_request, out_messages, scheme: scheme, host: host,
+            port: port, verify_upstream: verify_upstream, sni: sni, idle: idle,
+            overrides: overrides, keep_key: keep_key, deadline: deadline, tls_preset: tls_preset)
+        end
+        send_over_h1(upgrade_request, out_messages, scheme: scheme, host: host, port: port,
+          verify_upstream: verify_upstream, sni: sni, idle: idle, overrides: overrides,
+          keep_key: keep_key, deadline: deadline, tls_preset: tls_preset)
+      end
+
+      # The HTTP/1.1 Upgrade transport — what `send` has always been, unchanged below the
+      # handshake.
+      private def self.send_over_h1(upgrade_request : Bytes, out_messages : Array(OutMsg), *,
+                                    scheme : String, host : String, port : Int32,
+                                    verify_upstream : Bool, sni : String? = nil,
+                                    idle : Time::Span = DEFAULT_IDLE,
+                                    overrides : Gori::HostOverrides? = nil,
+                                    keep_key : Bool = false,
+                                    deadline : Time::Span = DRAIN_DEADLINE,
+                                    tls_preset : String? = nil) : Result
         started = Time.instant
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
@@ -207,65 +262,148 @@ module Gori
               error: "server did not upgrade (status #{resp.status})", upgraded: false)
           end
           note = verify_accept(resp, keys)
-
-          messages = [] of Message
-          # ONE accounting object for the whole exchange, threaded through every per-message
-          # drain: the caps (messages / bytes / frames / deadline / control rows) bound the
-          # SESSION, not each gap in it. Per-drain state would have multiplied every one of
-          # them by the number of recorded messages, so a 20-message script could have
-          # captured 20 × MAX_RECV_BYTES and run for 20 × DRAIN_DEADLINE.
-          # `deadline` and not the constant directly, for the same reason `idle` is a parameter:
-          # the two bounds are only meaningful against each other (a script of more than
-          # `deadline / idle` messages is the regression this pairing exists to catch), and a
-          # spec cannot assert that in a run it is willing to wait for. Nothing in the product
-          # passes it; every surface takes DRAIN_DEADLINE.
-          st = DrainState.new(deadline)
-          # Narrow the read bound to `idle` BEFORE the first message goes out. The handshake
-          # bound is a PER-READ timeout, and an interleaved replay reads between every pair of
-          # messages: left in place, an origin that simply does not answer message 1 would hold
-          # message 2 back for HANDSHAKE_TIMEOUT, and a ten-message script for two and a half
-          # minutes of nothing. The generous window is not lost — it is spent once, at the end,
-          # and only if the exchange produced no inbound frame at all (below).
-          set_read_timeout(upstream, idle)
-          sent, last_sent_op = exchange(upstream, out_messages, messages, idle, st)
-          # The generous first-reply window, spent ONCE and only when nothing ever arrived: a
-          # slow-but-alive origin (cold start, auth, a slow proxy in front of it) is not a dead
-          # one, which is what the handshake bound protected and what narrowing to `idle` above
-          # would otherwise have cost. It is also the ONLY drain a session with no outbound
-          # messages gets, which is exactly the single generous drain that shipped before.
-          if st.frames == 0 && st.open?
-            set_read_timeout(upstream, HANDSHAKE_TIMEOUT)
-            drain(upstream, messages, idle, st)
-          end
-          # Moment 3 (see `drain`) plus the ONE truncation marker row — at the end of the whole
-          # exchange rather than of each gap in it, so neither is emitted per message.
-          finish(messages, st)
-          # Only when the operator did not send one themselves. §5.5.1 allows exactly one
-          # CLOSE per direction, so appending gori's after theirs would put a second one on
-          # the wire that they did not ask for — and the second frame, not the first, is what
-          # the server would be answering. `last_sent_op` and not `out_messages.last?`: an
-          # interleaved run can stop early, so the last message SCRIPTED is no longer
-          # necessarily the last one SENT.
-          send_close(upstream) unless last_sent_op == Proxy::WS::OP_CLOSE.to_i
-          # The "out" rows above are appended before the flush and with no delivery evidence —
-          # WebSocket has no ack, so a transcript row means "gori wrote this", never "the peer
-          # got it". When the origin closes right after the 101 the drain breaks at EOF and
-          # `send_close` is rescued, so the run reported `upgraded: true`, `error: null` and
-          # listed messages the origin never received (verified at the origin: handshake only,
-          # no frame). Say so instead. A NOTE and not an error: a one-way protocol that never
-          # answers is legitimate, and in both cases the honest statement is the same —
-          # delivery is unconfirmed.
-          note = with_delivery_note(note, sent, messages.size, st.close_code)
-          note = with_unsent_note(note, sent, out_messages.size, st)
-          note = with_transport_note(note, sent, out_messages.size, st)
-          Result.new(head, messages, elapsed(started), note: note,
-            close_code: st.close_code, upgraded: true, truncated: st.truncated)
+          run_session(upstream, head, out_messages, idle, deadline, started, note)
         rescue ex
           # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
           err(ex.message || "ws repeater error", started)
         ensure
           upstream.close rescue nil
+        end
+      end
+
+      # THE scripted exchange, once, for both transports. Everything from the first outbound
+      # frame to the last note is here, and `send_over_h1` / `send_over_h2` differ only in how
+      # they produced `io` and `head`.
+      #
+      # That split is the whole point of #733: RFC 8441 §5.1 replaces the HANDSHAKE and nothing
+      # else, so a second copy of this method for h2 would have been a second set of caps, a
+      # second `DrainState`, a second §5.4 reassembly and a second answer to "did the peer
+      # close" — for a protocol whose frames are byte-identical on both. `H2WsStream` is an
+      # `IO`, so the transport really is a parameter.
+      #
+      # `io` is closed by the CALLER's `ensure`, which is where it has always been closed.
+      private def self.run_session(io : IO, head : Bytes, out_messages : Array(OutMsg),
+                                   idle : Time::Span, deadline : Time::Span,
+                                   started : Time::Instant, note : String?) : Result
+        messages = [] of Message
+        # ONE accounting object for the whole exchange, threaded through every per-message
+        # drain: the caps (messages / bytes / frames / deadline / control rows) bound the
+        # SESSION, not each gap in it. Per-drain state would have multiplied every one of
+        # them by the number of recorded messages, so a 20-message script could have
+        # captured 20 × MAX_RECV_BYTES and run for 20 × DRAIN_DEADLINE.
+        # `deadline` and not the constant directly, for the same reason `idle` is a parameter:
+        # the two bounds are only meaningful against each other (a script of more than
+        # `deadline / idle` messages is the regression this pairing exists to catch), and a
+        # spec cannot assert that in a run it is willing to wait for. Nothing in the product
+        # passes it; every surface takes DRAIN_DEADLINE.
+        st = DrainState.new(deadline)
+        # Narrow the read bound to `idle` BEFORE the first message goes out. The handshake
+        # bound is a PER-READ timeout, and an interleaved replay reads between every pair of
+        # messages: left in place, an origin that simply does not answer message 1 would hold
+        # message 2 back for HANDSHAKE_TIMEOUT, and a ten-message script for two and a half
+        # minutes of nothing. The generous window is not lost — it is spent once, at the end,
+        # and only if the exchange produced no inbound frame at all (below).
+        set_read_timeout(io, idle)
+        sent, last_sent_op = exchange(io, out_messages, messages, idle, st)
+        # The generous first-reply window, spent ONCE and only when nothing ever arrived: a
+        # slow-but-alive origin (cold start, auth, a slow proxy in front of it) is not a dead
+        # one, which is what the handshake bound protected and what narrowing to `idle` above
+        # would otherwise have cost. It is also the ONLY drain a session with no outbound
+        # messages gets, which is exactly the single generous drain that shipped before.
+        if st.frames == 0 && st.open?
+          set_read_timeout(io, HANDSHAKE_TIMEOUT)
+          drain(io, messages, idle, st)
+        end
+        # Moment 3 (see `drain`) plus the ONE truncation marker row — at the end of the whole
+        # exchange rather than of each gap in it, so neither is emitted per message.
+        finish(messages, st)
+        # Only when the operator did not send one themselves. §5.5.1 allows exactly one
+        # CLOSE per direction, so appending gori's after theirs would put a second one on
+        # the wire that they did not ask for — and the second frame, not the first, is what
+        # the server would be answering. `last_sent_op` and not `out_messages.last?`: an
+        # interleaved run can stop early, so the last message SCRIPTED is no longer
+        # necessarily the last one SENT.
+        send_close(io) unless last_sent_op == Proxy::WS::OP_CLOSE.to_i
+        # The "out" rows above are appended before the flush and with no delivery evidence —
+        # WebSocket has no ack, so a transcript row means "gori wrote this", never "the peer
+        # got it". When the origin closes right after the handshake the drain breaks at EOF and
+        # `send_close` is rescued, so the run reported `upgraded: true`, `error: null` and
+        # listed messages the origin never received (verified at the origin: handshake only,
+        # no frame). Say so instead. A NOTE and not an error: a one-way protocol that never
+        # answers is legitimate, and in both cases the honest statement is the same —
+        # delivery is unconfirmed.
+        note = with_delivery_note(note, sent, messages.size, st.close_code)
+        note = with_unsent_note(note, sent, out_messages.size, st)
+        note = with_transport_note(note, sent, out_messages.size, st)
+        Result.new(head, messages, elapsed(started), note: note,
+          close_code: st.close_code, upgraded: true, truncated: st.truncated)
+      end
+
+      # The RFC 8441 transport: a WebSocket opened by an extended CONNECT over HTTP/2 (#733).
+      #
+      # `H2WsStream` does the handshake and then IS the socket, so the only thing this method
+      # owns beyond `send_over_h1` is the dial and the four ways an h2 WebSocket fails to come
+      # up. Every one of them is REPORTED — a refused negotiation, a non-2xx, a reset stream, a
+      # peer that hung up — because the failure mode this exists to remove is a replay that
+      # looks like a clean run with an empty transcript.
+      private def self.send_over_h2(request : Bytes, out_messages : Array(OutMsg), *,
+                                    scheme : String, host : String, port : Int32,
+                                    verify_upstream : Bool, sni : String? = nil,
+                                    idle : Time::Span = DEFAULT_IDLE,
+                                    overrides : Gori::HostOverrides? = nil,
+                                    keep_key : Bool = false,
+                                    deadline : Time::Span = DRAIN_DEADLINE,
+                                    tls_preset : String? = nil) : Result
+        started = Time.instant
+        # `ws`/`wss` fold to the scheme the dial and the `:scheme` pseudo-header both need.
+        # `Fuzz::Origin` folds at construction and `Repeater::Plan` on its tuple path; a WS
+        # scheme reaching here unfolded would dial cleartext at a TLS port (the #-844 shape).
+        dial_scheme = case scheme
+                      when "ws"  then "http"
+                      when "wss" then "https"
+                      else            scheme
+                      end
+        # The SAME dial `H2Engine`/`H2Pool` use — TLS+ALPN "h2" for https, h2c prior knowledge
+        # for http — so an origin that has no h2, an untrusted certificate and a plaintext port
+        # addressed as https all report in the words every other h2 send reports them in.
+        conn, dial_error = H2Engine.dial(dial_scheme, host, port, verify_upstream, sni,
+          HANDSHAKE_TIMEOUT, overrides, tls_preset)
+        return err(dial_error || "h2 connect failed", started) unless conn
+        begin
+          opened = H2WsStream.open(conn, request, scheme: dial_scheme, host: host, port: port,
+            stall: idle)
+          stream = opened.stream
+          unless stream
+            # A refusal gori can name is an ERROR with the origin's own head attached when
+            # there was one — `answered?` then reports that the origin replied, exactly as a
+            # 403 to an h1 upgrade does.
+            reason = opened.error || "server did not upgrade (status #{opened.status})"
+            return Result.new(opened.head, [] of Message, elapsed(started),
+              error: reason, note: opened.note, upgraded: false)
+          end
+          # `keep_key` has no RFC 8441 form to honour: §5.1 drops `Sec-WebSocket-Key` and
+          # `Sec-WebSocket-Accept` entirely, so there is no key to keep and no accept to check.
+          # Said rather than ignored — the operator asked for a specific handshake byte. It
+          # joins whatever the handshake itself had to report (an unsendable body under the
+          # head), in the one `note` field every surface already reads.
+          note = opened.note
+          if keep_key
+            kk = "keep-key was ignored: RFC 8441 §5.1 has no Sec-WebSocket-Key — " \
+                 "an extended CONNECT carries no handshake key to preserve"
+            note = note ? "#{note}; #{kk}" : kk
+          end
+          begin
+            run_session(stream, opened.head, out_messages, idle, deadline, started, note)
+          ensure
+            stream.close rescue nil
+          end
+        rescue ex
+          # Reaching here means the handshake itself raised; once the session is running,
+          # `run_session`'s drain swallows mid-exchange IO errors and reports them as notes.
+          err(ex.message || "ws-over-h2 repeater error", started)
+        ensure
+          conn.close rescue nil
         end
       end
 

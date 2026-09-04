@@ -158,8 +158,8 @@ module Gori
       # of minimize_repeater to keep it under the cyclomatic-complexity bar.
       private def minimize_target(id : Int64, rec : Store::RepeaterRecord, text : String,
                                   ob : Outbound) : {String, String, Int32} | Result
-        if Repeater::WsEngine.upgrade_request?(text)
-          return err("repeater #{id} is a WebSocket upgrade — minimize works on plain HTTP requests",
+        if Repeater::WsEngine.replayable?(text)
+          return err("repeater #{id} is a WebSocket handshake — minimize works on plain HTTP requests",
             "INVALID_ARGUMENT", field: "repeater_id")
         end
         # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding

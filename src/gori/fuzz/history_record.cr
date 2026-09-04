@@ -48,8 +48,8 @@ module Gori
       # WebSocket with an empty transcript, and re-seeding a repeater from it yields a session
       # with no frames. `gori run repeater send` refuses the same thing for the same reason.
       #
-      # DELIBERATELY NOT a byte test on the request head. `Proxy::WS.upgrade_request?(request)`
-      # is the obvious spelling and it is WRONG here, because the bytes do not say which engine
+      # DELIBERATELY NOT a byte test on the request head. `WsEngine.replayable?(request)` is
+      # the obvious spelling and it is WRONG here, because the bytes do not say which engine
       # ran: `--ws-http-only` / `ws_http_only:true` sweeps that exact handshake as an ORDINARY
       # HTTP request, and the flow it produces is an ordinary request/response exchange with
       # nothing manufactured about it. Sniffing the bytes silently recorded nothing for that

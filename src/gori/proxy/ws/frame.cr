@@ -1,3 +1,5 @@
+require "../h2/head_codec" # PROTOCOL_MARKER — see `extended_connect_request?`
+
 module Gori::Proxy::WS
   # RFC 6455 opcodes.
   OP_CONT  = 0x0_u8
@@ -71,6 +73,49 @@ module Gori::Proxy::WS
 
   def self.protocol_token?(protocol : String) : Bool
     protocol.compare(PROTOCOL_TOKEN, case_insensitive: true) == 0
+  end
+
+  # A request head declares an RFC 8441 extended CONNECT for a WebSocket — the HTTP/2 twin of
+  # `upgrade_request?`, and the second shape `Repeater::WsEngine` can re-open (#733).
+  #
+  # It reads exactly the two facts `H2::HeadCodec.synth_request` writes for such a stream and
+  # nothing else: a `CONNECT` request line, and the `X-Gori-Protocol` marker carrying the
+  # `websocket` token. That marker line IS the `:protocol` pseudo-header — the synthesizer
+  # renames any peer field of the same name (`peer_field_name`) and the rewrite path passes no
+  # protocol at all, so it cannot be forged from the wire — which is what makes reading it back
+  # a sound inverse rather than a guess.
+  #
+  # Here, beside `upgrade_request?`, for the reason that predicate names: the readers live
+  # outside the proxy (`Repeater::WsEngine`, `Repeater::Plan`, `Fuzz::Plan`, and one gate per
+  # surface), and two spellings of "is this a WebSocket gori can re-establish" is how the h1
+  # half already drifted three times.
+  #
+  # NOT `Store::FlowDetail#websocket?`, which additionally requires that the origin ANSWERED —
+  # a 101 or a 2xx. This is a question about the REQUEST alone, because that is what a replay
+  # re-sends: a capture whose extended CONNECT drew a 403 is still a handshake gori can put
+  # back on the wire, exactly as a refused h1 upgrade is.
+  def self.extended_connect_request?(head : String) : Bool
+    scrubbed = head.scrub
+    return false unless connect_line?(scrubbed)
+    marker = Gori::Proxy::H2::HeadCodec::PROTOCOL_MARKER
+    scrubbed.each_line do |line|
+      break if line.empty? || line == "\r" # end of head; the body is not a header block
+      name, sep, value = line.partition(':')
+      next if sep.empty?
+      next unless name.compare(marker, case_insensitive: true) == 0
+      return protocol_token?(value.strip)
+    end
+    false
+  end
+
+  # The start line names the CONNECT method. Case-SENSITIVE: an h2 `:method` is a token the
+  # origin compares byte-for-byte (RFC 9113 §8.3.1), the projection writes the pseudo-header
+  # verbatim, and an operator who edits it to `connect` has written a different method — which
+  # this must report as such rather than quietly treat as the same request.
+  private def self.connect_line?(head : String) : Bool
+    line = head.each_line.first? || return false
+    method, sep, _ = line.partition(' ')
+    !sep.empty? && method == "CONNECT"
   end
 
   # The RSV1..RSV3 nibble of the first header octet (RFC 6455 §5.2), shifted down so
