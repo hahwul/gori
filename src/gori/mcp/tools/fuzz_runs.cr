@@ -8,8 +8,10 @@ module Gori
       # Permanent saved-run readers remain available in --read-only mode. Only deletion is an
       # action; live fuzz_start/status/results keep their existing action gate.
       private def list_fuzz_runs(h) : Result
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 50, 200)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 50, 200)
         session_id = optional_int_arg(h, "session_id")
         return err("session_id must be positive", "INVALID_ARGUMENT", field: "session_id") if session_id && session_id <= 0
 
@@ -27,6 +29,8 @@ module Gori
             end
             j.field "returned", runs.size
             j.field "offset", offset
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "total_available", total
             j.field "has_more", offset.to_i64 + runs.size < total
           end
@@ -59,10 +63,12 @@ module Gori
           return saved_fuzz_result_detail(run, row)
         end
 
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
         # Content rows retain multiple request/response BLOBs and are deliberately capped at
         # 25 per response. Metrics can page farther, but still use the scalar Store projection.
-        limit = clamp(optional_int_arg(h, "limit"), include_content ? 25 : 100,
+        limit = clamp(req_lim, include_content ? 25 : 100,
           include_content ? 25 : 1000)
         matched_only = bool_arg(h, "matched_only", false)
         total = store.fuzz_result_count(run_id, matched_only)
@@ -91,6 +97,8 @@ module Gori
             j.field "offset", offset
             j.field "total_available", total
             j.field "matched_only", matched_only
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "has_more", offset.to_i64 + returned < total
           end
         end)

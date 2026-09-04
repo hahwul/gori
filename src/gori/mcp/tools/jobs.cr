@@ -135,10 +135,31 @@ module Gori
             sleep 20.milliseconds
           end
         end
+        emit_stop_result(job, waited_out)
+      end
+
+      # `job.stop` plus the honest answer, for the five per-kind stop tools
+      # (fuzz_stop / mine_stop / discover_stop / sequence_stop / authorize_stop).
+      #
+      # Each of those used to hard-code `status: "stopping"` without ever reading the job
+      # back — a state a run that had already reached `done` / `budget_exhausted`, or that an
+      # earlier call stopped, is not in and will never enter. An agent reads that as "I
+      # aborted a run that was in flight" and reports a COMPLETE run as cancelled, or its
+      # results as partial. `stop_job` has always re-read the status; this is the same read,
+      # so all six stop surfaces now answer the same way.
+      private def stop_and_report(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Result
+        job.stop
+        emit_stop_result(job)
+      end
+
+      # The stop reply itself, shared by `stop_job` (which may have waited first) and the
+      # five per-kind tools. Read AFTER the stop and any wait, never assumed.
+      private def emit_stop_result(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob,
+                                   waited_out : Bool = false) : Result
         status, stopped_at = job_status_and_end(job)
         Result.new(JSON.build do |j|
           j.object do
-            j.field "job_id", id
+            j.field "job_id", job.id
             j.field "status", status
             j.field "stop_requested", true
             j.field "stopped", status != "running"

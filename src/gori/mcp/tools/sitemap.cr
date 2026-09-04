@@ -53,11 +53,15 @@ module Gori
                 j.field "last_seen_iso", Serialize.unix_micros_iso(e.last_seen)
                 # The operator's free-text memo for this endpoint, when one is pinned. The key
                 # is the tree's node path, which includes any query string.
-                # On a folded row this is the tag on the PATH, if one is pinned there: the
-                # tags on its variants are keyed by the path WITH the query, exactly as a
-                # `{uuid}` fold's children keep their own. list_sitemap_tags (or
-                # fold_query:false) is where those show.
-                if tag = tags[{e.host, sitemap_tag_path(e.target)}]?
+                # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
+                # a `grouped` node ("the tag key is the path WITH the query", fold_queries_node!),
+                # so the TUI tree and `gori run sitemap` both leave it bare — and this stamped
+                # one anyway, which made set_sitemap_tag's "will not show in list_sitemap or
+                # the TUI" warning a lie about half of itself. The tags on a fold's variants
+                # are keyed by the path WITH the query and ride `variant_tags` above, exactly
+                # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
+                # fold_query:false) is where the rest show.
+                if e.query_variants == 0 && (tag = tags[{e.host, sitemap_tag_path(e.target)}]?)
                   j.field "tag", Serialize.text(tag)
                 end
               end

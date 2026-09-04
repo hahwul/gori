@@ -259,7 +259,15 @@ describe "MCP authorize tools" do
         row["bypass_count"].as_i.should eq(0)
 
         stop = call_json(tools, "authorize_stop", %({"job_id":#{job_id.to_json}}))
-        stop["status"].as_s.should eq("stopping")
+        # No phantom "stopping". This used to assert that literal unconditionally, which the
+        # very next comment shows was unpinnable: a one-request run may already have finished
+        # before the stop landed, and the old hard-coded reply claimed "stopping" for a job
+        # that was `done`. The reply now carries the status the job is ACTUALLY in, plus the
+        # flag saying a stop was asked for — the same contract stop_job has always had.
+        stop["stop_requested"].as_bool.should be_true
+        stop["status"].as_s.should_not eq("stopping")
+        ["running", "done", "stopped"].should contain(stop["status"].as_s)
+        stop["stopped"].as_bool.should eq(stop["status"].as_s != "running")
         final = drain_job(tools, job_id)
         # A one-request run may well have finished before the stop landed; either terminal
         # state is correct, and neither may be :running.
