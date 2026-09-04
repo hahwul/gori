@@ -51,6 +51,70 @@ private def run_blocked(reason : String) : Q::DoneEvent
   done.not_nil!
 end
 
+# Extracts a token on some sends and MISSES on the rest — the shape neither
+# `CounterCookieBackend` (never misses) nor a wrong descriptor (always misses) can produce,
+# and the only one that exercises the dispatcher's projection SHRINKING again after it has
+# already reached the goal. `latency` is a real `sleep`, i.e. a fiber yield point, for the
+# reason CounterCookieBackend carries one.
+private class HalfMissBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin, @hit_every : Int32 = 2, @latency : Time::Span = 1.millisecond)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    sleep @latency
+    n = @sent
+    @sent += 1
+    head = if n % @hit_every == 0
+             "HTTP/1.1 200 OK\r\nSet-Cookie: SID=#{1000 + n}; Path=/\r\nContent-Length: 2\r\n\r\n"
+           else
+             "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+           end
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice)
+    Gori::Repeater::Result.new(head.to_slice, "ok".to_slice, resp, 500_i64)
+  end
+end
+
+# An origin that DELETES the session on every reply: `Set-Cookie: SID=` with no value is
+# what a logout / stale-session response carries, and it is a real `Set-Cookie` for the
+# named cookie — so the descriptor MATCHES and hands back "".
+private class EmptyCookieBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    head = "HTTP/1.1 200 OK\r\nSet-Cookie: SID=; Max-Age=0; Path=/\r\nContent-Length: 2\r\n\r\n"
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice)
+    Gori::Repeater::Result.new(head.to_slice, "ok".to_slice, resp, 500_i64)
+  end
+end
+
+# Fails every send with a TRANSIENT error, so `send_with_retries` runs its full chain.
+private class RefusedBackend < F::Backend
+  getter origin : F::Origin
+  getter sent : Int32 = 0
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent += 1
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connection refused")
+  end
+end
+
+private def collect_done(engine : Q::Engine) : Q::DoneEvent
+  done = nil.as(Q::DoneEvent?)
+  engine.run { |ev| done = ev if ev.is_a?(Q::DoneEvent) }
+  done.not_nil!
+end
+
 private def drain(engine : Q::Engine) : Array(Q::Sample)
   samples = [] of Q::Sample
   engine.run { |ev| samples << ev.sample if ev.is_a?(Q::SampleEvent) }
@@ -195,6 +259,69 @@ describe Gori::Sequencer::Engine do
     req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
     engine = Q::Engine.new(req, http2: false, backend: backend, config: config)
     engine.run { }
+    engine.first_error.should be_nil
+  end
+
+  # A miss LOWERS the dispatcher's optimistic projection again, and the loop used to have
+  # broken out of itself by then: the run ended below its goal with the `max_sends` budget
+  # barely touched, and the shortfall grew with concurrency (19/20 at 1, 35/40 at 5). It now
+  # HOLDS on the projection and tops up instead — landing exactly on the goal, still with no
+  # overshoot, and still bounded by `max_sends` for a descriptor that never matches.
+  it "tops up a late extraction miss instead of ending below the goal" do
+    backend = HalfMissBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 20, concurrency: 1, retries: 0)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    d = collect_done(Q::Engine.new(req, http2: false, backend: backend, config: config))
+    d.collected.should eq(20)
+    d.requests.should be <= config.max_sends
+  end
+
+  it "tops up late extraction misses at concurrency > 1 too" do
+    backend = HalfMissBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 40, concurrency: 5, retries: 0)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    d = collect_done(Q::Engine.new(req, http2: false, backend: backend, config: config))
+    d.collected.should eq(40)
+    d.requests.should be <= config.max_sends
+  end
+
+  # A retry is a NEW request, so a stop mid-chain used to keep aiming `retries` more of them
+  # at the target and hold the run open for `retries * retry_pause` per worker — up to 1000
+  # requests and ~8 minutes on MCP's ceilings, after `sequence_stop` had already answered.
+  it "ends the retry chain on stop instead of sending the rest of it" do
+    backend = RefusedBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 5, concurrency: 1,
+      retries: 20, retry_pause: 20.milliseconds)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = Q::Engine.new(req, http2: false, backend: backend, config: config)
+    at_stop = 0
+    spawn do
+      sleep 60.milliseconds
+      at_stop = backend.sent
+      engine.stop
+    end
+    d = collect_done(engine)
+    at_stop.should be > 0 # guard: the stop landed mid-chain, not before the first send
+    d.stopped.should be_true
+    # The in-flight request may still be counted; the remaining ~17 retries may not.
+    (backend.sent - at_stop).should be <= 1
+  end
+
+  # `""` is truthy in Crystal, so an empty extraction counted toward the goal and carried no
+  # error — while `Stats.analyze` drops empty tokens. A collection against an origin that
+  # DELETES the session cookie reported "5 collected" over a report reading "0 usable / 5
+  # total · CRITICAL (no usable tokens)". Manual mode has always skipped an empty token.
+  it "treats an empty extraction as a miss, not a collected token" do
+    backend = EmptyCookieBackend.new(F::Origin.new("http", "h", 80))
+    config = Q::Config.new(token_loc: Q::TokenLoc.cookie("SID"), goal: 5, concurrency: 1, retries: 0)
+    req = "GET / HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = Q::Engine.new(req, http2: false, backend: backend, config: config)
+    samples = drain(engine)
+    samples.none?(&.token).should be_true
+    samples.all? { |s| s.error == "no token matched" }.should be_true
+    # The goal is never met, so the run ends on the max-sends guard rather than reporting
+    # a full collection of unusable tokens.
+    backend.sent.should eq(config.max_sends)
     engine.first_error.should be_nil
   end
 end

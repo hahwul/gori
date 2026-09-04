@@ -156,7 +156,15 @@ module Gori
         config.timeout = fuzz_timeout(h)
         config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i
         cap = optional_int_arg(h, "max_requests")
-        config.max_requests = cap ? {cap, SEQUENCE_MAX_REQUESTS}.min : SEQUENCE_MAX_REQUESTS
+        # The caller's budget on `max_requests`, this server's ceiling on `request_ceiling` —
+        # never both on the first. Filling `max_requests` in with the ceiling made every
+        # capless MCP collection look to `Config#max_sends` like one whose operator had
+        # budgeted 100,000 requests, which is exactly how that field is read, so the
+        # goal-derived runaway guard was gone: a `cookie` name that matches nothing sent
+        # 100,000 requests for a `count: 500` collection where `gori run sequence` sends
+        # 1,000. See `Sequencer::Config#request_ceiling`.
+        config.max_requests = cap.try { |c| {c, SEQUENCE_MAX_REQUESTS}.min }
+        config.request_ceiling = SEQUENCE_MAX_REQUESTS
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         # The builder's sender carries the Outbound decision, so Sandbox / EXCLUDE hard-block
         # a collection run per send — sequence_start used to have only the job-start check.

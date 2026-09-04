@@ -269,5 +269,51 @@ describe Gori::Sequencer::Config do
       config(goal: 500, max_requests: 0_i64).max_sends.should eq(1000_i64)
       config(goal: 500, max_requests: -5_i64).max_sends.should eq(1000_i64)
     end
+
+    # A surface ceiling is NOT the operator's budget: it must not be readable as one here,
+    # which is the whole reason it lives on its own field. MCP set `max_requests` to its
+    # 100,000-request ceiling, so `max_sends` read every capless agent collection as one
+    # budgeted for 100,000 dispatches and the goal-derived runaway guard was gone — a
+    # `cookie` name matching nothing sent 100,000 requests for a `count: 500` collection.
+    it "ignores a surface request_ceiling — the runaway guard still comes from the goal" do
+      c = config(goal: 500)
+      c.request_ceiling = 100_000_i64
+      c.max_sends.should eq(1000_i64)
+    end
+  end
+
+  describe "#wire_cap" do
+    it "is nil when neither a budget nor a ceiling is set" do
+      config(goal: 500).wire_cap.should be_nil
+    end
+
+    it "is the operator budget when only that is set" do
+      config(goal: 500, max_requests: 250_i64).wire_cap.should eq(250_i64)
+    end
+
+    it "is the surface ceiling when only that is set" do
+      c = config(goal: 500)
+      c.request_ceiling = 100_000_i64
+      c.wire_cap.should eq(100_000_i64)
+    end
+
+    it "is whichever of the two binds first" do
+      c = config(goal: 500, max_requests: 250_i64)
+      c.request_ceiling = 100_000_i64
+      c.wire_cap.should eq(250_i64)
+
+      c.max_requests = 250_000_i64
+      c.wire_cap.should eq(100_000_i64)
+    end
+
+    it "ignores a non-positive value on either field" do
+      c = config(goal: 500, max_requests: 0_i64)
+      c.request_ceiling = 100_000_i64
+      c.wire_cap.should eq(100_000_i64)
+
+      c.max_requests = 250_i64
+      c.request_ceiling = -1_i64
+      c.wire_cap.should eq(250_i64)
+    end
   end
 end
