@@ -2162,3 +2162,57 @@ in the one direction [P4](#p4) refuses. The no-overlay answer already has a name
 `as-captured`. A `$NAME` in a slot's own header value is the one `$NAME` in gori guaranteed to be
 a reference and never a payload, so resolving it takes nothing literal away from the operator's
 bytes.
+
+### 2026-09-04: TLS to an upstream proxy is a new scheme, and the proxy leg has its own trust
+
+Refines: [P0](#p0), [P4](#p4), [P5](#p5). Issue #3.
+
+An upstream HTTP CONNECT proxy could only be reached in cleartext. `https://` in
+`network.upstream_proxy` was already accepted and already meant *the plaintext form* — a
+compatibility reading that predates gori speaking TLS to a proxy at all.
+
+**The scheme was not reclaimed.** Redefining `https://` would have moved every existing
+operator's egress onto a ClientHello their proxy may not answer, on upgrade, with no edit — the
+one shape [P4](#p4) refuses. So `https://` keeps its meaning byte-for-byte and
+`Settings::UPSTREAM_TLS_KIND` (`http+tls`) is the new spelling, used as BOTH the rule `kind` and
+the URI scheme because those two grammars name one transport and a second word for it is how
+they drift. The ambiguity is *reported* rather than enforced: `upstream_proxy_advisory` names
+both fixes, `upstream_proxy_warnings` emits it at the two sites `outbound_tls_warnings` already
+uses, and editing the split proxy fields in either settings editor normalizes the stored value
+to `http://` on save. An untouched value is never rewritten. A portless `http+tls` address
+defaults to 443, not 8080: falling back to the plaintext default would dial the cleartext
+listener of the same appliance.
+
+**The proxy leg's trust policy is separate from the origin's, and that separation is the
+feature.** `network.upstream_proxy_ca` and `network.upstream_proxy_insecure` govern it;
+`verify_upstream` / `--insecure-upstream` and the `outbound_tls` table do not, and cannot.
+`-k` is a statement about one broken origin, and letting it also stop authenticating the proxy
+that carries every session would disarm the one hop the operator did not choose to inspect.
+Mechanically the two are separate SSL_CTX caches — the origin's key is
+`{verify, alpn, outbound-TLS policy}`, all three of which belong to the destination, so sharing
+it would present an origin's client certificate to the proxy and offer `h2` on a leg that only
+ever speaks an HTTP/1.1 CONNECT. SNI and the verified name are the PROXY's own hostname, never
+the origin's and never a hostname override: an override is a resolver override for the
+destination an operator names in a request, and applying it to the proxy would let one table row
+redirect the hop carrying the credential. A rejected proxy certificate says so in the proxy's
+terms and explicitly declines to offer `--insecure-upstream` as the fix.
+
+**The TLS wrap happens before any request byte.** `CONNECT` names the origin and
+`Proxy-Authorization` is a reusable credential; in the plaintext form both are readable by
+anything on the path to the proxy. `dial_via_proxy` therefore wraps first and writes second, and
+the spec asserts this from the fixture's side — the proxy reports only what it read *after* the
+handshake. An `https://` origin through such a proxy is TLS inside TLS, and the origin's
+certificate is still verified end to end under its own policy.
+
+**Every dial entry point now returns `IO?`.** `Upstream.dial`/`dial_result` handed back a
+`TCPSocket?`, which cannot represent a TLS socket to a proxy. Widening it was mechanical
+everywhere except `HttpTransport.wrap_tls`, because the proxy, Repeater, Fuzzer and Miner paths
+already read and wrote an `IO` — the h1/h2/WS engines and `ConnPool` were typed that way from
+the start. Close ownership stays exact: the TLS wrapper takes `sync_close: true`, so closing the
+returned socket closes the descriptor, and `close_proxy_leg` covers the window between the
+connect and the wrap where the constructor has raised and nothing else owns the fd
+(`Socket::Client.new` frees the SSL object but does not close the io it was handed).
+
+Per-rule TLS fields were deliberately not added ([P0](#p0)): one policy covers every `http+tls`
+hop today, and a second TLS proxy with a different trust anchor is what should force the table
+column.

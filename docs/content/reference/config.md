@@ -43,7 +43,9 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 |-----|------|---------|-------------|
 | `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
-| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set |
+| `upstream_proxy` | string | `""` | Global default upstream: legacy `host:port`/`http://…`, `http+tls://…` (TLS to the proxy), or `socks5://…`/`socks5h://…`; empty = direct. Project `net.upstream_proxy` wins when set. `https://…` is the **legacy spelling of the plaintext form** — see [upstream_rules](#upstream_rules) |
+| `upstream_proxy_ca` | string | `""` | PEM bundle trusted for the **upstream proxy's own** certificate on an `http+tls` hop, in addition to the system store. Blank = system trust only. A path, never a secret — safe to share in a profile |
+| `upstream_proxy_insecure` | bool | `false` | Skip verification of the **upstream proxy's** certificate. Independent of `verify_upstream` and untouched by `--insecure-upstream`, which are about the **origin**. Off by default: that hop carries every `CONNECT` authority and every `Proxy-Authorization` credential |
 | `verify_upstream` | bool | `true` | Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`); if none is found, HTTPS verification fails — set `SSL_CERT_FILE` or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
 | `serve_landing` | bool | `true` | Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host `http://gori.proxy/` (or `http://gori/`) for a client already pointed at the proxy |
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
@@ -228,7 +230,23 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 ### upstream_rules
 
-`network.upstream_proxy` is the catch-all route. Bare `host:port`, `http://…` (and the legacy `https://…` spelling) use an HTTP CONNECT proxy. `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both default to port 1080. URI credentials are refused—configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
+`network.upstream_proxy` is the catch-all route. Bare `host:port` and `http://…` use a plaintext HTTP CONNECT proxy (default port `8080`). `http+tls://…` uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port `443`). `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both SOCKS forms default to port 1080. URI credentials are refused—configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
+
+#### `https://` means the plaintext proxy, not TLS
+
+`https://proxy:3128` has meant *a plaintext HTTP CONNECT proxy* since before gori could speak TLS to a proxy at all, and it still does. It was not reclaimed: every existing `settings.json` carrying one means the plaintext form, and redefining the scheme would have moved that egress onto a handshake the proxy may not offer — on upgrade, with no edit. So the spelling is **accepted unchanged and reported**, never reinterpreted:
+
+- gori prints one startup warning per configured `https://` upstream, naming both fixes.
+- Write `http://` for the same behaviour without the ambiguity, or `http+tls://` to actually encrypt the hop.
+- Editing the proxy fields in **settings:network** (or the **Project settings** card) rewrites the value canonically as `http://…` on save. An untouched value is left byte-for-byte as written.
+
+#### TLS to the proxy (`http+tls`)
+
+The `CONNECT` request line — which names the origin you are reaching for — and the `Proxy-Authorization` header are written **inside** the TLS session, never in front of it. Nothing about the request is sent before the handshake completes.
+
+The proxy leg is verified on its **own** hostname: SNI and the checked certificate name are the proxy address you configured, never the origin's, and never a [host override](#hostname_overrides) (overrides apply to the origin leg only). It is governed by `network.upstream_proxy_ca` and `network.upstream_proxy_insecure` — **not** by `verify_upstream` / `--insecure-upstream`, which describe the origin. A relaxed origin policy for one broken target does not stop authenticating the proxy that carries the whole session, and a rejected proxy certificate says so in those terms rather than offering `--insecure-upstream` as a fix.
+
+An `https://` origin reached through an `http+tls` proxy is TLS inside TLS: the origin handshake runs over the tunnel, so the origin's certificate is still verified end to end under its own policy.
 
 All networking owned by gori uses this routing decision, including capture/replay/scan engines, the updater, and OAST provider traffic. A configured proxy that is malformed, unreachable, or refuses a tunnel fails closed; gori does not retry the destination directly. A blank project pin and a matching `direct` rule remain explicit operator exceptions.
 
@@ -247,6 +265,7 @@ Rules are **ordered** and the **first match wins**, so specific rules go above g
       "username": "alice",
       "password_env": "CORP_PROXY_PASS"
     },
+    { "host": "*.partner.example", "kind": "http+tls", "addr": "proxy.partner.example:443" },
     { "host": "*.onion", "kind": "socks5h", "addr": "127.0.0.1:9050" }
   ]
 }
@@ -255,12 +274,14 @@ Rules are **ordered** and the **first match wins**, so specific rules go above g
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | Host pattern, same dialect as scope `host` rules: `corp.internal` covers that host and its subdomains, `*.corp.internal` is a glob, `*` is the catch-all. Case-insensitive |
-| `kind` | string | `direct`, `http`, `socks5` (local DNS), or `socks5h` (proxy DNS). An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
-| `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http` and `1080` for either SOCKS kind. Must be absent for `direct` |
-| `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http`, or via the RFC 1929 exchange for either SOCKS kind |
+| `kind` | string | `direct`, `http`, `http+tls` (HTTP CONNECT over TLS), `socks5` (local DNS), or `socks5h` (proxy DNS). An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
+| `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http`, `443` for `http+tls`, and `1080` for either SOCKS kind. Must be absent for `direct` |
+| `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http` and `http+tls`, or via the RFC 1929 exchange for either SOCKS kind |
 | `password_env` | string | Optional. The **name** of an OS environment variable holding the password |
 
 **Global-rule passwords are never stored in `settings.json`.** Only the username and the environment-variable *name* are written; the password is read from the OS environment at dial time, so `export CORP_PROXY_PASS=…` takes effect without a restart. gori's own `env` section is deliberately not used for this — those variables live in `settings.json` in plaintext, which would put the secret in the file by another route and defeat sharing or exporting a config (see [#439](https://github.com/hahwul/gori/issues/439)). A `password_env` containing `$` is rejected: it holds a variable name, not a value. Direct credentials entered in Project settings have different storage described under [Per-Project Overrides](#per-project-overrides).
+
+`network.upstream_proxy_ca` and `network.upstream_proxy_insecure` are one policy for **every** `http+tls` hop, whether it came from a rule, the scalar, or a project pin. There is no per-rule TLS field yet; add one when a second TLS proxy with a different trust anchor forces it.
 
 The scalar and rules use the same DNS distinction: `socks5` performs the destination lookup on the gori host, while `socks5h` delegates it to the proxy. Use `socks5h` for Tor, split DNS, or a jump host that can resolve names unavailable locally. A failed local lookup stops before connecting to the proxy and never falls back to a direct origin connection.
 

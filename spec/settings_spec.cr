@@ -175,6 +175,124 @@ describe Gori::Settings do
       message.should contain("Project settings proxy auth")
       message.should contain("password_env")
     end
+
+    # `http+tls://` is the TLS-to-proxy hop; `https://` is NOT, and never was. The pair is
+    # asserted together because the whole risk in adding the first is quietly redefining the
+    # second — an upgrade that did would fire a ClientHello at every plaintext CONNECT proxy an
+    # operator has configured.
+    it "routes http+tls:// over TLS and leaves https:// as the plaintext CONNECT proxy" do
+      Gori::Settings.upstream_proxy = "http+tls://proxy.local:8443"
+      route = Gori::Settings.upstream_route("example.com")
+      {route.kind, route.host, route.port}.should eq({"http+tls", "proxy.local", 8443})
+      route.tls?.should be_true
+      route.socks5?.should be_false
+
+      Gori::Settings.upstream_proxy = "https://proxy.local:3128"
+      legacy = Gori::Settings.upstream_route("example.com")
+      {legacy.kind, legacy.host, legacy.port}.should eq({"http", "proxy.local", 3128})
+      legacy.tls?.should be_false
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+
+    # 443, not 8080: a portless TLS proxy that fell back to the plaintext default would dial
+    # the cleartext listener of the same appliance and fail in the handshake.
+    it "defaults a portless http+tls:// proxy to 443" do
+      Gori::Settings.upstream_proxy = "http+tls://proxy.local"
+      Gori::Settings.upstream_route("example.com").port.should eq(443)
+      Gori::Settings.upstream_default_port("http+tls").should eq(443)
+      Gori::Settings.upstream_default_port("http").should eq(8080)
+      Gori::Settings.upstream_default_port("socks5h").should eq(1080)
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
+
+    it "names http+tls among the schemes it accepts when one is unsupported" do
+      Gori::Settings.upstream_proxy_error("httpstls://proxy.test").to_s.should contain("http+tls")
+    end
+
+    it "projects and composes the http+tls fields like every other kind" do
+      Gori::Settings.upstream_proxy_fields("http+tls://proxy.local").should eq(
+        {"http+tls", "proxy.local", "443"})
+      Gori::Settings.build_upstream_proxy("http+tls", "proxy.local", "8443").should eq(
+        {"http+tls://proxy.local:8443", nil})
+      Gori::Settings.build_upstream_proxy("http+tls", "2001:db8::1", "443").should eq(
+        {"http+tls://[2001:db8::1]:443", nil})
+    end
+
+    # An ADVISORY, not an error: `https://` has a defined meaning and a settings.json full of
+    # them has to keep dialing. Reported, never enforced.
+    it "advises on the ambiguous legacy https:// spelling without refusing it" do
+      advice = Gori::Settings.upstream_proxy_advisory("https://proxy.local:3128").to_s
+      advice.should contain("PLAINTEXT")
+      advice.should contain("http://")
+      advice.should contain("http+tls://")
+      Gori::Settings.upstream_proxy_error("https://proxy.local:3128").should be_nil
+
+      Gori::Settings.upstream_proxy_advisory("http://proxy.local:3128").should be_nil
+      Gori::Settings.upstream_proxy_advisory("http+tls://proxy.local:8443").should be_nil
+      Gori::Settings.upstream_proxy_advisory("").should be_nil
+    end
+  end
+
+  # The proxy leg's own TLS policy. Deliberately not reachable from `verify_upstream` /
+  # --insecure-upstream, which are the ORIGIN's; these pin the surfaces that say so.
+  describe "upstream proxy TLS policy" do
+    it "defaults to verifying the proxy with no extra CA" do
+      Gori::Settings.upstream_proxy_ca.should eq("")
+      Gori::Settings.upstream_proxy_insecure?.should be_false
+    end
+
+    it "refuses a CA path that cannot be read, at save time" do
+      Gori::Settings.upstream_proxy_ca_error("").should be_nil
+      Gori::Settings.upstream_proxy_ca_error("/nonexistent/gori-spec/ca.pem").to_s
+        .should contain("does not exist")
+      Gori::Settings.upstream_proxy_ca_error("/tmp").to_s.should contain("not a regular file")
+    end
+
+    it "warns about the legacy spelling and about unverified proxy TLS, and refuses neither" do
+      prev = {Gori::Settings.upstream_proxy, Gori::Settings.upstream_proxy_insecure?}
+      begin
+        Gori::Settings.upstream_proxy = "https://proxy.local:3128"
+        Gori::Settings.upstream_proxy_warnings.join("\n").should contain("PLAINTEXT")
+
+        Gori::Settings.upstream_proxy = "http+tls://proxy.local:8443"
+        Gori::Settings.upstream_proxy_insecure = true
+        joined = Gori::Settings.upstream_proxy_warnings.join("\n")
+        joined.should contain("upstream_proxy_insecure is on")
+        joined.should contain("Proxy-Authorization")
+
+        # …and nothing to say once the proxy is verified again.
+        Gori::Settings.upstream_proxy_insecure = false
+        Gori::Settings.upstream_proxy_warnings.should be_empty
+      ensure
+        Gori::Settings.upstream_proxy, Gori::Settings.upstream_proxy_insecure = prev
+      end
+    end
+
+    it "round-trips both keys through settings.json" do
+      dir = File.tempname("gori-settings-proxy-tls")
+      Dir.mkdir_p(dir)
+      prev_home = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path,
+          %({"network":{"upstream_proxy_ca":"/tmp/ca.pem","upstream_proxy_insecure":true}}))
+        Gori::Settings.load
+        Gori::Settings.upstream_proxy_ca.should eq("/tmp/ca.pem")
+        Gori::Settings.upstream_proxy_insecure?.should be_true
+
+        Gori::Settings.save
+        written = JSON.parse(File.read(Gori::Settings.path))["network"]
+        written["upstream_proxy_ca"].as_s.should eq("/tmp/ca.pem")
+        written["upstream_proxy_insecure"].as_bool.should be_true
+      ensure
+        prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.upstream_proxy_ca = ""
+        Gori::Settings.upstream_proxy_insecure = false
+      end
+    end
   end
 
   it "retains a malformed persisted upstream-rule host as a fail-closed load error" do

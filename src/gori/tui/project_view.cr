@@ -300,12 +300,8 @@ module Gori::Tui
     end
 
     private def project_proxy_protocol_label(kind : String) : String
-      case kind
-      when "http"    then "HTTP"
-      when "socks5"  then "SOCKS5"
-      when "socks5h" then "SOCKS5H"
-      else                "None"
-      end
+      label = kind.upcase
+      SETTINGS_PROTOCOL_CHOICES.includes?(label) ? label : "None"
     end
 
     private def current_set_value : String
@@ -483,7 +479,11 @@ module Gori::Tui
     SETTINGS_PASSWORD_INDEX    = SETTINGS_PASSWORD_ROW - SETTINGS_FIELD_BASE
     SETTINGS_PROTOS_FIELD      = 12
     SETTINGS_LABEL_W           = 16 # value column starts past the widest label ("Connect timeout")
-    SETTINGS_PROTOCOL_CHOICES  = ["None", "HTTP", "SOCKS5", "SOCKS5H"]
+    # LABELS, not stored codes — this card round-trips them through `downcase` (see
+    # `settings_upstream_proxy`), so each one must be the setting's own spelling in caps.
+    # `HTTP+TLS` is Settings::UPSTREAM_TLS_KIND: an HTTP CONNECT proxy reached over TLS, as
+    # opposed to the legacy `https://` scalar, which means the PLAINTEXT one.
+    SETTINGS_PROTOCOL_CHOICES = ["None", "HTTP", "HTTP+TLS", "SOCKS5", "SOCKS5H"]
     # Fields with no global counterpart to inherit — their unset marker is "· default", not
     # "· global" (see render_settings_field).
     SETTINGS_PROJECT_ONLY_INDICES = [SETTINGS_DESTINATION_INDEX, SETTINGS_USERNAME_INDEX,
@@ -780,12 +780,12 @@ module Gori::Tui
       @set_preedit = ""
     end
 
+    # Through `Settings.upstream_default_port`, the one place a kind's default port is
+    # decided — a local table here is how this card comes to pre-fill a port the dialer,
+    # the rule validator and the global editor do not agree with.
     private def project_proxy_default_port(label : String) : String
-      case label
-      when "HTTP"              then Settings::DEFAULT_HTTP_PROXY_PORT.to_s
-      when "SOCKS5", "SOCKS5H" then Settings::DEFAULT_SOCKS_PORT.to_s
-      else                          ""
-      end
+      return "" if label == "None" || label.starts_with?("Invalid ·")
+      Settings.upstream_default_port(label.downcase).to_s
     end
 
     private def settings_proxy_field_disabled? : Bool

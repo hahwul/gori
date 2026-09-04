@@ -550,8 +550,35 @@ describe "upstream rules" do
     it "accepts a well-formed rule of each kind" do
       Gori::Settings.upstream_rule_error(rule("*", "direct")).should be_nil
       Gori::Settings.upstream_rule_error(rule("a.test", "http", "p.test:3128")).should be_nil
+      Gori::Settings.upstream_rule_error(rule("a.test", "http+tls", "p.test:8443")).should be_nil
       Gori::Settings.upstream_rule_error(rule("a.test", "socks5", "127.0.0.1:1080")).should be_nil
       Gori::Settings.upstream_rule_error(rule("a.test", "socks5h", "127.0.0.1:1080")).should be_nil
+    end
+
+    # A portless address takes its kind's default, and the three kinds do not share one:
+    # `upstream_default_port` is the single home the table, the URI grammar and this validator
+    # all read, so a rule that validates here resolves to the same port at dial time.
+    it "defaults a portless http+tls rule address to 443, not the plaintext 8080" do
+      Gori::Settings.upstream_rules = [rule("a.test", "http+tls", "p.test")]
+      route = Gori::Settings.upstream_route("a.test")
+      {route.kind, route.host, route.port}.should eq({"http+tls", "p.test", 443})
+      route.tls?.should be_true
+
+      Gori::Settings.upstream_rules = [rule("a.test", "http", "p.test")]
+      Gori::Settings.upstream_route("a.test").port.should eq(8080)
+    ensure
+      reset_upstream
+    end
+
+    # HTTP Basic, not RFC 1929: the credential method follows the PROXY PROTOCOL, and adding a
+    # TLS hop in front of a CONNECT proxy does not change which protocol it is.
+    it "keeps basic auth as the method for an http+tls project pin" do
+      Gori::Settings.project_upstream_proxy = "http+tls://p.test:8443"
+      auth, err = Gori::Settings.build_project_proxy_auth("http+tls://p.test:8443", true, "u", "p")
+      err.should be_nil
+      auth.try(&.method).should eq("basic")
+    ensure
+      reset_upstream
     end
 
     it "rejects a missing host, an unknown kind, and a proxy rule with no address" do

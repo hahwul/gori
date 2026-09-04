@@ -2,6 +2,150 @@ require "../spec_helper"
 require "socket"
 require "openssl"
 require "file_utils"
+require "base64"
+
+# --- TLS CONNECT proxy fixture (`http+tls://`) ---------------------------------------------
+# A CONNECT proxy that is itself reached over TLS. Everything the fixture reports — the request
+# line, the Proxy-Authorization header — it read AFTER the handshake, which is the point: on
+# this socket nothing is legible until OpenSSL has agreed a key, so a CONNECT that shows up in
+# `seen` is proof it was written inside the encrypted session rather than in front of it.
+#
+# `mode` picks which of the five behaviours under test the proxy exhibits:
+#   :ok    — 200, the tunnel opens
+#   :auth  — 407, credentials rejected
+#   :hang  — accept the TCP connection and never speak TLS at all (handshake timeout)
+#
+# `relay_to` makes it a REAL tunnel to that local port after the 200, which is what lets an
+# https origin be reached through it — TLS inside TLS.
+private def with_tls_connect_proxy(mode : Symbol = :ok, cn : String = "localhost",
+                                   relay_to : Int32? = nil, &)
+  ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori-spec proxy CA")
+  leaf_cert, leaf_key = Gori::Proxy::Tls::CertBuilder.build_leaf(cn, ca_cert, ca_key)
+  # advertise_h2: false — gori offers NO ALPN on the proxy leg (it speaks an HTTP/1.1 CONNECT
+  # there), and a fixture that advertised h2 would be answering a question this hop never asks.
+  ctx = Gori::Proxy::Tls::ContextFactory.server_context(leaf_cert, leaf_key,
+    ca_cert: ca_cert, advertise_h2: false)
+  dir = File.tempname("gori-proxy-ca")
+  Dir.mkdir_p(dir)
+  ca_path = File.join(dir, "proxy-ca.pem")
+  ca_cert.write_pem(ca_path)
+
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  seen = Channel(Array(String)).new(4)
+  stop = Channel(Nil).new
+  spawn do
+    while raw = server.accept?
+      # Bound to a local so the spawn does not capture the loop variable (AGENTS.md / server.cr).
+      conn = raw
+      spawn { serve_tls_connect_proxy(conn, ctx, mode, seen, stop, relay_to) }
+    end
+  end
+  begin
+    yield({port, ca_path, seen})
+  ensure
+    stop.close rescue nil
+    server.close rescue nil
+    FileUtils.rm_rf(dir)
+  end
+end
+
+private def serve_tls_connect_proxy(raw : TCPSocket, ctx : OpenSSL::SSL::Context::Server,
+                                    mode : Symbol, seen : Channel(Array(String)),
+                                    stop : Channel(Nil), relay_to : Int32? = nil) : Nil
+  if mode == :hang
+    # Accept, then say nothing. `stop` (closed by the fixture) is what holds the socket open
+    # for the life of the example rather than letting the fd be finalized out from under the
+    # client, which would turn a handshake TIMEOUT into a connection reset.
+    stop.receive rescue nil
+    raw.close rescue nil
+    return
+  end
+  ssl = OpenSSL::SSL::Socket::Server.new(raw, ctx, sync_close: true)
+  # Unbuffered writes, the way gori configures its own sockets: `IO.copy` in the relay below
+  # never flushes, so with the default buffering the origin's ServerHello would sit in this
+  # socket's write buffer and the nested handshake would time out.
+  ssl.sync = true
+  head = [] of String
+  while (line = ssl.gets("\r\n", chomp: true)) && !line.empty?
+    head << line
+  end
+  seen.send(head)
+  if mode == :auth
+    ssl << "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"corp\"\r\n\r\n"
+  else
+    ssl << "HTTP/1.1 200 Connection established\r\n\r\n"
+  end
+  ssl.flush
+  if relay_to
+    origin = TCPSocket.new("127.0.0.1", relay_to)
+    done = Channel(Nil).new(2)
+    spawn { IO.copy(ssl, origin) rescue nil; done.send(nil) }
+    spawn { IO.copy(origin, ssl) rescue nil; done.send(nil) }
+    done.receive
+    ssl.close rescue nil
+    origin.close rescue nil
+    done.receive
+    return
+  end
+  stop.receive rescue nil # keep the tunnel open until the example is done with it
+  ssl.close rescue nil
+rescue
+  raw.close rescue nil
+end
+
+# A plain TLS origin that answers one HTTP/1.1 response. Signed by its own throwaway root, so
+# the example that reaches it dials `verify: false` — the ORIGIN's trust is not what is under
+# test there; that the origin handshake runs at all, nested inside the proxy's, is.
+private def start_tls_origin(&)
+  root_cert, root_key = Gori::Proxy::Tls::CertBuilder.build_root("gori-spec origin CA")
+  leaf_cert, leaf_key = Gori::Proxy::Tls::CertBuilder.build_leaf("localhost", root_cert, root_key)
+  ctx = Gori::Proxy::Tls::ContextFactory.server_context(leaf_cert, leaf_key,
+    ca_cert: root_cert, advertise_h2: false)
+  server = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while raw = server.accept?
+      conn = raw
+      spawn do
+        # A read timeout so a failing example cannot leave this fiber blocked on `gets` forever.
+        conn.read_timeout = 5.seconds
+        ssl = OpenSSL::SSL::Socket::Server.new(conn, ctx, sync_close: true)
+        ssl.sync = true
+        while (line = ssl.gets("\r\n", chomp: true)) && !line.empty?
+        end
+        ssl << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+        ssl.flush
+        # Deliberately NOT closed here. The relay in the proxy fixture cross-closes on the
+        # first EOF (as a real tunnel must), so an origin that hangs up the instant it has
+        # written can tear the tunnel down before the CLIENT has read the response out of it —
+        # which is exactly what made this example fail about half the time. Wait for the client.
+        ssl.gets
+        ssl.close rescue nil
+      rescue
+        conn.close rescue nil
+      end
+    end
+  end
+  begin
+    yield server.local_address.port
+  ensure
+    server.close rescue nil
+  end
+end
+
+# Put the proxy-leg TLS policy back after an example. These are GLOBAL class properties, so a
+# leaked `upstream_proxy_insecure = true` would silently disarm proxy verification for every
+# example that runs afterwards.
+private def with_proxy_tls_policy(ca : String = "", insecure : Bool = false, &)
+  prev = {Gori::Settings.upstream_proxy_ca, Gori::Settings.upstream_proxy_insecure?}
+  Gori::Settings.upstream_proxy_ca = ca
+  Gori::Settings.upstream_proxy_insecure = insecure
+  begin
+    yield
+  ensure
+    Gori::Settings.upstream_proxy_ca, Gori::Settings.upstream_proxy_insecure = prev
+  end
+end
 
 describe Gori::Proxy::Upstream do
   # An IPv6 literal reaches this path BRACKETED — that is how it appears in an absolute-form
@@ -199,6 +343,218 @@ describe Gori::Proxy::Upstream do
       ensure
         Gori::Settings.upstream_proxy = ""
         proxy.close rescue nil
+      end
+    end
+  end
+
+  # `http+tls://` — the CONNECT proxy reached over TLS (#3). The compatibility half is pinned
+  # first: `https://` has meant a PLAINTEXT CONNECT proxy since long before this existed, and
+  # an upgrade that quietly started sending a ClientHello to those proxies would take every one
+  # of them offline.
+  describe "TLS upstream proxy (http+tls)" do
+    it "keeps `https://` meaning a PLAINTEXT CONNECT proxy — no ClientHello is sent" do
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      first = Channel(UInt8).new(1)
+      connect_line = Channel(String).new(1)
+      spawn do
+        conn = proxy.accept
+        # The FIRST byte decides the question. 0x16 is a TLS handshake record; 'C' (0x43) is
+        # the start of `CONNECT`. Reading it before anything else is what makes this a
+        # regression test rather than a restatement of the routing table.
+        byte = conn.read_byte || 0_u8
+        first.send(byte)
+        rest = conn.gets("\r\n", chomp: true) || ""
+        connect_line.send("C#{rest}")
+        while (h = conn.gets("\r\n", chomp: true)) && !h.empty?
+        end
+        conn << "HTTP/1.1 200 Connection established\r\n\r\n"
+        conn.flush rescue nil
+        sleep 50.milliseconds
+        conn.close rescue nil
+      end
+
+      Gori::Settings.upstream_proxy = "https://127.0.0.1:#{pport}"
+      begin
+        Gori::Settings.upstream_route("example.test").kind.should eq("http")
+        sock = Gori::Proxy::Upstream.dial("example.test", 443)
+        sock.should_not be_nil
+        first.receive.should eq('C'.ord.to_u8)
+        connect_line.receive.should eq("CONNECT example.test:443 HTTP/1.1")
+        sock.try(&.close) rescue nil
+      ensure
+        Gori::Settings.upstream_proxy = ""
+        proxy.close rescue nil
+      end
+    end
+
+    it "wraps the hop in TLS and writes CONNECT + Proxy-Authorization inside it" do
+      with_tls_connect_proxy do |(port, ca_path, seen)|
+        with_proxy_tls_policy(ca: ca_path) do
+          ENV["GORI_SPEC_PROXY_PW"] = "hunter2"
+          Gori::Settings.upstream_rules = [
+            Gori::Settings::UpstreamRule.new("*", Gori::Settings::UPSTREAM_TLS_KIND,
+              "localhost:#{port}", "bob", "GORI_SPEC_PROXY_PW"),
+          ]
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 5.seconds)
+            err.should be_nil
+            sock.should_not be_nil
+            # The socket handed back is the TLS session to the proxy — the whole reason the
+            # dial entry points return `IO?` rather than `TCPSocket?`.
+            sock.should be_a(OpenSSL::SSL::Socket::Client)
+            head = seen.receive
+            head.first.should eq("CONNECT example.test:443 HTTP/1.1")
+            head.should contain("Proxy-Authorization: Basic #{Base64.strict_encode("bob:hunter2")}")
+            sock.try(&.close) rescue nil
+          ensure
+            Gori::Settings.upstream_rules = [] of Gori::Settings::UpstreamRule
+            ENV.delete("GORI_SPEC_PROXY_PW")
+          end
+        end
+      end
+    end
+
+    it "reports a 407 from the TLS proxy as a Proxy error naming the proxy and the credentials" do
+      with_tls_connect_proxy(:auth) do |(port, ca_path, _seen)|
+        with_proxy_tls_policy(ca: ca_path) do
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 5.seconds)
+            sock.should be_nil
+            err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+            detail = err.try(&.detail).to_s
+            detail.should contain("upstream HTTP+TLS proxy localhost:#{port}")
+            detail.should contain("407")
+            detail.should contain("the proxy requires authentication")
+          ensure
+            Gori::Settings.upstream_proxy = ""
+          end
+        end
+      end
+    end
+
+    it "refuses an untrusted proxy certificate and points at the PROXY's own settings, not -k" do
+      with_tls_connect_proxy do |(port, _ca_path, _seen)|
+        # No CA configured: the fixture's root is not in any system store.
+        with_proxy_tls_policy do
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 5.seconds)
+            sock.should be_nil
+            err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+            detail = err.try(&.detail).to_s
+            detail.should contain("PROXY's certificate was rejected")
+            detail.should contain("network.upstream_proxy_ca")
+            # The remedy for an untrusted ORIGIN must NOT be offered here: --insecure-upstream
+            # does not touch this leg, and naming it as a fix is the conflation this guards.
+            detail.should contain("does not apply")
+            err.try(&.cause).to_s.should contain("certificate verify failed")
+          ensure
+            Gori::Settings.upstream_proxy = ""
+          end
+        end
+      end
+    end
+
+    it "verifies the PROXY's hostname, not the origin's — a name the leaf does not cover fails" do
+      with_tls_connect_proxy(cn: "localhost") do |(port, ca_path, _seen)|
+        with_proxy_tls_policy(ca: ca_path) do
+          # The CA is trusted, so the only thing that can fail is the NAME: the leaf covers
+          # `localhost` and the route names `127.0.0.1`. If the origin's name were being
+          # checked here (or no name at all), this would connect.
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://127.0.0.1:#{port}"
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("localhost", 443, io_timeout: 5.seconds)
+            sock.should be_nil
+            err.try(&.detail).to_s.should contain("PROXY's certificate was rejected")
+          ensure
+            Gori::Settings.upstream_proxy = ""
+          end
+        end
+      end
+    end
+
+    it "does not let --insecure-upstream (an ORIGIN switch) disarm proxy verification" do
+      with_tls_connect_proxy do |(port, _ca_path, _seen)|
+        prev_verify = Gori::Settings.verify_upstream?
+        with_proxy_tls_policy do
+          Gori::Settings.verify_upstream = false # what -k / --insecure-upstream seeds
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 5.seconds)
+            sock.should be_nil
+            err.try(&.detail).to_s.should contain("PROXY's certificate was rejected")
+          ensure
+            Gori::Settings.upstream_proxy = ""
+            Gori::Settings.verify_upstream = prev_verify
+          end
+        end
+      end
+    end
+
+    it "accepts the same untrusted proxy once upstream_proxy_insecure is set" do
+      with_tls_connect_proxy do |(port, _ca_path, seen)|
+        with_proxy_tls_policy(insecure: true) do
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+          begin
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 5.seconds)
+            err.should be_nil
+            sock.should_not be_nil
+            seen.receive.first.should eq("CONNECT example.test:443 HTTP/1.1")
+            sock.try(&.close) rescue nil
+          ensure
+            Gori::Settings.upstream_proxy = ""
+          end
+        end
+      end
+    end
+
+    # TLS inside TLS. The origin handshake runs over the tunnel, so the socket the caller gets
+    # is an origin TLS session wrapping the proxy TLS session wrapping the TCP socket — and
+    # `sync_close: true` at both layers is what makes ONE close free the whole stack.
+    it "reaches an https origin through the TLS proxy, nesting the origin handshake" do
+      start_tls_origin do |oport|
+        with_tls_connect_proxy(relay_to: oport) do |(port, ca_path, seen)|
+          with_proxy_tls_policy(ca: ca_path) do
+            Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+            begin
+              sock, err = Gori::Proxy::Upstream.dial_tls_result("localhost", oport, verify: false,
+                io_timeout: 5.seconds)
+              err.should be_nil
+              sock.should_not be_nil
+              seen.receive.first.should eq("CONNECT localhost:#{oport} HTTP/1.1")
+              if s = sock
+                s << "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                s.flush
+                (s.gets("\r\n", chomp: true) || "").should eq("HTTP/1.1 200 OK")
+                s.close # one close, three layers
+                s.closed?.should be_true
+              end
+            ensure
+              Gori::Settings.upstream_proxy = ""
+            end
+          end
+        end
+      end
+    end
+
+    it "bounds a proxy that accepts the connection and never speaks TLS" do
+      with_tls_connect_proxy(:hang) do |(port, ca_path, _seen)|
+        with_proxy_tls_policy(ca: ca_path) do
+          Gori::Settings.upstream_proxy = "#{Gori::Settings::UPSTREAM_TLS_KIND}://localhost:#{port}"
+          begin
+            started = Time.instant
+            sock, err = Gori::Proxy::Upstream.dial_result("example.test", 443, io_timeout: 1.second)
+            elapsed = Time.instant - started
+            sock.should be_nil
+            err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Proxy)
+            err.try(&.detail).to_s.should contain("upstream HTTP+TLS proxy localhost:#{port}")
+            elapsed.should be < 10.seconds # the io timeout bounds it; it does not hang
+          ensure
+            Gori::Settings.upstream_proxy = ""
+          end
+        end
       end
     end
   end
