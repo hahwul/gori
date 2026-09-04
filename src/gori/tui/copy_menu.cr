@@ -59,7 +59,11 @@ module Gori::Tui
       if cookie = cookie_value(header_lines)
         opts << Option.new("Cookies", 'c', cookie)
       end
-      append_code_options(opts, wire, target) unless url.empty?
+      # `refusal` and not only `url`: a line that does not frame AND resolves to no URL at all
+      # (a hand-authored Repeater line with no target base and no Host) has nothing runnable
+      # either way, but the cURL row is where the reason is SAID — gating it on the guessed
+      # URL dropped that comment exactly when the operator had the least to go on.
+      append_code_options(opts, wire, target) unless url.empty? && refusal.nil?
       append_wscat_option(opts, derived_url, header_lines, websocket_messages)
       opts << Option.new("Raw request", 'r', wire) unless wire.strip.empty?
       opts

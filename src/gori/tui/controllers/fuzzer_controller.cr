@@ -1634,11 +1634,10 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def fuzz_duplicate : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "fuzz session") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "fuzz session") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
         @host.status("#{msg} (#{@fuzzers.size} open)")
@@ -1783,10 +1782,9 @@ module Gori::Tui
     # four the operator asked to close.
     def request_close : Nil
       return unless tab = current_tab_obj
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE FUZZERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach template/config, its private temporary spool, and every saved run are deleted.",
-          confirm_label: "close", danger: true) { close_marked_fuzzers(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE FUZZERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach template/config, its private temporary spool, and every saved run are deleted.",
+          confirm_label: "close", danger: true) { close_marked_fuzzers(refs) }
         return
       end
       if reason = close_subtab_refusal(@current_idx)
@@ -1797,8 +1795,8 @@ module Gori::Tui
         confirm_label: "close", danger: true) { close_tab }
     end
 
-    private def close_marked_fuzzers(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_fuzzers(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       auto_load_current_saved_run # once for the batch, not once per close
       @host.status(msg)
       @host.resolve_subtab_focus

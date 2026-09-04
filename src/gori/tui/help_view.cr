@@ -133,9 +133,9 @@ module Gori::Tui
         # advertising an `O` that stopped existing when they merged.
         #
         # `y · ^Y`: the template editor grows a ⇧arrow band in INSERT too, where a bare `y`
-        # types a `y` over it. No verb id — see the JWT row for why the key column would
-        # otherwise drop the `^Y` this row exists to name.
-        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y in INS too"),
+        # types a `y` over it. The READ letter resolves from the verb; `^Y` is the PINNED half
+        # (`Verb::Keymap.pinned_chords`), so it is spelled out and never moves.
+        Item.new("{fuzzer.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y in INS too"),
         Item.new("⇧arrows", "select text (line or char)"),
         Item.new("{fuzz.automark} · {fuzz.mark-word} · {fuzz.insert-marker}", "auto-mark params · mark word · mark point (manual §)"),
         # NOT `^U clear §` — that was wrong twice over: ^U is fuzz.pretty-template (the tab's
@@ -175,13 +175,12 @@ module Gori::Tui
         # The tab had no copy row at all, and it is the one tab where the ctrl form is not a
         # convenience: HEADER/PAYLOAD/SECRET always capture keys, so `^Y` is their ONLY copy.
         #
-        # NO verb id, unlike the Repeater's row and matching DECODER's `INPUT INS` below:
-        # `build_rows` REPLACES the key column with `binding_label`, which answers the PRIMARY
-        # chord — so passing `jwt.copy` would print a bare `y` next to a description whose whole
-        # point is that `y` types a `y` on three of these panes. Nothing is lost by the literal:
-        # a two-chord verb is not rebindable (`Hotkeys.rebindable?` is single-chord only), so
-        # there is no override for the column to follow.
-        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y while typing (ENCODE panes: ^Y only)"),
+        # A `{jwt.copy}` token beside a literal `^Y`, not a verb id on the row: `build_rows`
+        # would REPLACE the key column with `binding_label`, which answers the PRIMARY chord —
+        # a bare `y` next to a description whose whole point is that `y` types a `y` on three
+        # of these panes. The token resolves the READ letter (the pair is rebindable since
+        # #932: a rebind moves the letter, `^Y` stays pinned) and the pin is spelled out.
+        Item.new("{jwt.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y while typing (ENCODE panes: ^Y only)"),
         Item.new("⇧arrows", "select text in INPUT / HEADER / PAYLOAD (not SECRET — single-line field)"),
         Item.new("↑/↓ · ↵", "attacks: select · copy the selected payload"),
         Item.new("^N / ^W", "new / close a sub-tab"),
@@ -197,8 +196,8 @@ module Gori::Tui
         Item.new("↹", "cycle INPUT → DECODED → OPTIONS → SECRET (decode) / PAYLOAD → OPTIONS → SECRET → OUTPUT (forge)"),
         Item.new("c", "crack the secret over the SECRET field (a wordlist path or comma list)", "cookie.crack"),
         Item.new("l", "seed the FORGE payload from the decoded cookie (space menu)", "cookie.load-decoded"),
-        # Same literal-`y` reasoning as the JWT row above — see the note there.
-        Item.new("y · ^Y", "copy selection/pane — `y` in READ, ^Y while typing an editable pane"),
+        # Same shape as the JWT row above: the letter follows a rebind, the `^Y` pin does not.
+        Item.new("{cookie.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y while typing an editable pane"),
         Item.new("^N / ^W", "new / close a sub-tab"),
       ]},
       {"OAST", [

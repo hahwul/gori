@@ -966,7 +966,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @sub
       when :extract
-        return "[/] sub-tab · ↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc tabs"
+        return keys("[/] sub-tab · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.delete} delete · space cmds · esc tabs")
       when :bindings
         return "[/] sub-tab · ↑/↓ select · d clear · space cmds · esc tabs"
       end

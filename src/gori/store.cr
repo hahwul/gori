@@ -418,41 +418,75 @@ module Gori
     # that as NOT empty: hiding a project the census failed to measure makes it invisible,
     # and invisible is a worse failure than noisy.
     #
-    # The db file's mtime is put back afterwards. It is `Project#last_modified` — the ONE
-    # fact deciding which project every surface defaults to — and closing the LAST
-    # connection to a database whose WAL is dirty checkpoints it, which would stamp a
-    # project as "just active" for no reason but having been listed. Restoring it keeps
-    # reading a project from re-ordering the projects.
+    # The db file's mtime is put back afterwards. `Project#last_modified` — the ONE fact
+    # deciding which project every surface defaults to — is the NEWER of the db file's mtime
+    # and its WAL's, and closing the LAST connection to a database whose WAL is dirty
+    # checkpoints it: the db file is rewritten (stamped "just active" for no reason but
+    # having been listed) and the WAL is deleted. Restoring keeps a census from re-ordering
+    # the projects — and it restores to the ACTIVITY time, not the db file's own old stamp:
+    # for a project whose last session left a dirty WAL (a crash, a SIGKILL), the WAL's
+    # mtime IS the last activity, and the checkpoint just destroyed the only file carrying
+    # it. Putting the db file back to its pre-census value would then make `gori run project
+    # list` sort a project by one time and print another, and every later reader (MCP
+    # `list_projects`, the TUI picker) would see the older time for good.
     def self.captured_flows(path : String) : Int64?
       return nil unless File.exists?(path)
       # Same pre-flight `Store.open` and `Compact.measure` run, and for the first of their
       # two reasons: a non-database file leaks the driver's fd inside `DB.open`, and this
       # is a path that opens hundreds of files in one command.
       refuse_non_database(path)
-      before = File.info?(path)
+      wal = "#{path}-wal"
+      db_before, wal_before = mtime_of(path), mtime_of(wal)
+      activity = newer(db_before, wal_before)
       db = DB.open("sqlite3:#{path}?busy_timeout=2000")
       begin
         db.exec("PRAGMA query_only = ON")
         db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
       ensure
         db.close
-        restore_mtime(path, before)
+        # Both files, each to what a reader must still get. The db file goes to the ACTIVITY
+        # time, not its own old stamp, and it goes there whenever the WAL is GONE, moved or
+        # not: a checkpoint rewrites the db file and deletes the WAL that carried the time,
+        # but a journal SQLite cannot replay is dropped WITHOUT touching the db file (Linux;
+        # measured on CI), and then nothing carries the time at all. On macOS the same journal
+        # is instead RESET in place — the file stays, truncated, stamped now — and one the
+        # open created did not exist before; a WAL stamped "now" is exactly the "just active
+        # for having been listed" this whole restore exists to prevent, one file over, so the
+        # WAL is put back to what it had.
+        put_back(path, db_before, activity, force: !wal_before.nil? && mtime_of(wal).nil?)
+        put_back(wal, wal_before, wal_before || activity)
       end
     rescue
       nil
     end
 
-    # Put a file's modification time back to what it was before a read-only open touched it.
+    private def self.mtime_of(file : String) : Time?
+      File.info?(file).try(&.modification_time)
+    rescue File::Error
+      nil
+    end
+
+    # The newer of the two — the same rule `Project#last_modified` applies to the same two
+    # files, so what the census restores is what the picker reads.
+    private def self.newer(db : Time?, wal : Time?) : Time?
+      return db unless wal
+      return wal unless db
+      db > wal ? db : wal
+    end
+
+    # Put `file`'s modification time to `to` when a read-only open moved it off `before`
+    # (a file the open CREATED — `before` nil — moved too), or unconditionally under
+    # `force` (the file is still where it was, but the time it stood for lived elsewhere).
     # Best-effort in every direction: a project that vanished mid-census, or one owned by
     # another user, is left alone rather than raising into the caller.
     #
     # `utime` takes an access time too, and `File::Info` does not expose the one this file
     # had, so the mtime stands in for it. atime is not a fact gori reads anywhere; mtime is.
-    private def self.restore_mtime(path : String, before : File::Info?) : Nil
-      return unless before
-      now = File.info?(path)
-      return if now.nil? || now.modification_time == before.modification_time
-      File.utime(before.modification_time, before.modification_time, path)
+    private def self.put_back(file : String, before : Time?, to : Time?, *, force : Bool = false) : Nil
+      return unless to
+      now = mtime_of(file)
+      return if now.nil? || (now == before && !force)
+      File.utime(to, to, file)
     rescue File::Error
       # best-effort
     end

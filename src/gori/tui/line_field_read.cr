@@ -7,8 +7,17 @@ module Gori::Tui
       @anchor = nil
     end
 
-    def selection? : Bool
-      !@anchor.nil?
+    # Whether a band is live with the caret at `cx`. Takes the caret because the anchor alone
+    # cannot answer it: `move_cx(selecting: true)` plants the anchor on the FIRST step, so a
+    # ⇧→ ⇧← pair, or a drag straight down the target row (same column both ends), leaves
+    # anchor == caret — an empty span, which `selection_span` already reports as nil and the
+    # painter never draws. Reporting `!@anchor.nil?` here called that a selection, and the
+    # unified Copy (`read_selection_active? ? copy : copy_all`) then copied the WHOLE line
+    # with no band on screen — under Drag release = `select + copy`, every drag that did not
+    # move sideways put the entire URL on the clipboard. `TextArea#selection?` and
+    # `ReadCursor#selection?` both answer false for a collapsed band; this now agrees.
+    def selection?(cx : Int32) : Bool
+      !selection_span(cx).nil?
     end
 
     # Select the whole line; returns EOL column for the caller's caret.

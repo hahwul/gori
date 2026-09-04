@@ -8,9 +8,27 @@ include Gori::Tui
 # halves of a batch close's contract are visible here: what the dialog SAID, and what then went.
 private class MarksHost < FakeHost
   getter statuses = [] of String
+  # With `defer` set, `confirm` HOLDS the action the way the real shell does — `Runner#confirm`
+  # runs it from `on_close`, at least one event-loop turn later — so an example can put a peer
+  # change between the dialog opening and the operator pressing ↵.
+  property? defer = false
+  getter pending : Proc(Nil)? = nil
 
   def status(message : String) : Nil
     @statuses << message
+  end
+
+  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
+              return_to : Symbol = :none, &action : -> Nil) : Nil
+    @confirms << {title, message}
+    @defer ? (@pending = action) : action.call
+  end
+
+  def press_enter : Nil
+    if action = @pending
+      @pending = nil
+      action.call
+    end
   end
 end
 
@@ -77,6 +95,58 @@ describe "RepeaterController sub-tab marks" do
       # The active chip followed the removal: `a` closing to its LEFT slid it from 1 to 0.
       c.subtab_index.should eq(0)
       c.view_at(0).not_nil!.request_text.should contain("GET /b")
+    end
+  end
+
+  # `t` marks the chip and steps RIGHT, so after one press the mark and the cursor sit on
+  # different chips — and that single mark used to be ignored: the batch arm gated on
+  # `targets.size > 1`, so `^W` confirmed "Close repeater" for the UNMARKED chip under the
+  # cursor while the strip said `1 marked`, and `space ▸ d` (which read `target_views`)
+  # duplicated the marked one. One mark is a batch of one, on every gesture.
+  it "acts on a single mark that is not the active chip, as the strip says it will" do
+    with_repeaters(%w[a b c d]) do |c, host, _|
+      c.jump_subtab(2)
+      c.toggle_subtab_mark(2) # `t`: mark c…
+      c.jump_subtab(3)        # …and step right, onto d
+      c.request_close
+      host.confirms.last[0].should eq("CLOSE REPEATERS")
+      host.confirms.last[1].should start_with("Close 1 sub-tab?")
+      paths(c).should eq(%w[a b d]) # c went, not d
+      c.subtab_mark_count.should eq(0)
+      host.statuses.last.should eq("closed 1 sub-tab")
+
+      c.jump_subtab(0)
+      c.toggle_subtab_mark(1)
+      c.repeater_duplicate
+      paths(c).should eq(%w[a b d b]) # the mark, not the cursor
+    end
+  end
+
+  # The confirm's action runs a turn later, and the data_version poll has no modal guard: a
+  # peer can reorder or delete a session while the dialog is up, and `reconcile` re-sorts the
+  # strip. Indices captured before the dialog then name other sessions — which is why the
+  # batch carries view objects and resolves them to chips only when it closes.
+  it "resolves the marks AFTER the confirm, so a peer reorder behind the dialog cannot retarget it" do
+    with_repeaters(%w[a b c d]) do |c, host, store|
+      host.defer = true
+      c.jump_subtab(0)
+      c.toggle_subtab_mark(1) # b
+      c.toggle_subtab_mark(3) # d
+      c.request_close
+      host.confirms.last[1].should start_with("Close 2 sub-tabs?")
+      host.pending.should_not be_nil
+
+      # Behind the dialog: the peer reverses the strip, and deletes `d` outright.
+      ids = store.repeaters_meta.map(&.id)
+      store.set_repeater_positions(ids.reverse)
+      store.delete_repeater(ids[3])
+      c.reconcile
+      paths(c).should eq(%w[c b a])
+
+      host.press_enter
+      paths(c).should eq(%w[c a]) # b — the surviving mark — went; a and c were never marked
+      c.subtab_mark_count.should eq(0)
+      host.statuses.last.should eq("closed 1 sub-tab")
     end
   end
 
