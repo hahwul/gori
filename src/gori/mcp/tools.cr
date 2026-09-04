@@ -525,6 +525,8 @@ module Gori
         # before checking every candidate is not read as an exhaustive "0 matches".
         property status : Symbol = :running
         property sent = 0_i64
+        # Requests on the wire (`Fuzz::Progress#requests`): the `max_requests` unit.
+        property requests = 0_i64
         property matched = 0_i64
         property errors = 0_i64
         # Refused before the socket — see `Fuzz::Backend#blocked`. Tracked separately from
@@ -1372,8 +1374,12 @@ module Gori
         end
       end
 
+      # `0` (and below) is "no override" — the engine default — as `rate: 0` is "unlimited" on
+      # this same tool and `--timeout 0` is refused on the CLI. It used to clamp UP to 1 ms, so
+      # a caller writing the conventional zero got every send timed out and a `done` verdict
+      # about a test they never asked for.
       private def fuzz_timeout(h) : Time::Span?
-        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
+        optional_int_arg(h, "timeout_ms").try { |ms| ms <= 0 ? nil : ms.clamp(1_i64, 600_000_i64).milliseconds }
       end
 
       private def clamp_nonneg(n : Int64?) : Int32

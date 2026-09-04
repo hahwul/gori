@@ -88,6 +88,17 @@ module Gori::Fuzz
       false
     end
 
+    # Whether this backend speaks HTTP/2 to the origin. Read by `Engine#redirect_request`,
+    # which WRITES a request of its own for every hop it follows: on h1 that hop carries
+    # `Connection: close` so the keep-alive pool gives it its own socket, and on h2 that same
+    # line is a connection-specific field RFC 9113 §8.2.2 tells a server to treat as MALFORMED
+    # — so every hop of an h2 sweep was refused (or reset) by a conforming origin, for a
+    # header the operator never wrote. Delegated by the wrappers, as `evidence?` is, because
+    # the wrapper is what the engine holds.
+    def http2? : Bool
+      false
+    end
+
     # Sends this backend REFUSED before the socket — Sandbox, an explicit exclude rule, or
     # a session binding nothing has bound yet. Zero for a backend with no gate.
     #
@@ -502,6 +513,10 @@ module Gori::Fuzz
       @pool.try(&.close_all)
     end
 
+    def http2? : Bool
+      @http2
+    end
+
     def extra_requests : Int64
       (@pool.try(&.stale_retries) || 0_i64) + @race_warmups
     end
@@ -728,6 +743,10 @@ module Gori::Fuzz
       @inner.evidence?
     end
 
+    def http2? : Bool
+      @inner.http2?
+    end
+
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
     end
@@ -810,6 +829,10 @@ module Gori::Fuzz
     # Delegated, as on `CappedBackend` — see `Backend#evidence?`.
     def evidence? : Bool
       @inner.evidence?
+    end
+
+    def http2? : Bool
+      @inner.http2?
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -1161,6 +1184,12 @@ module Gori::Fuzz
         end
         record_result(@matcher.build(jobs[i], raw))
       end
+    rescue ex
+      # The same channel `dispatch_loop` and `worker_loop` use: a raise here — `baseline_request`
+      # forking an `exec:` chain that fails, a backend double that throws — used to leave the
+      # fiber to the runtime's default handler and the consumer with a `Done` carrying `0 sent`
+      # and no word about why, i.e. a race that silently did not run.
+      @events.send(ErrorEvent.new(ex.message || "fuzz race error"))
     ensure
       @backend.close rescue nil
       @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
@@ -1238,13 +1267,24 @@ module Gori::Fuzz
         # Don't burn retries/sleep on a permanent max-requests stop — further send()s
         # are also refused. Real network errors still retry as configured; each retry means the
         # previous attempt was a failed send, tallied via `resent_count` (see `worker_loop`).
-        if retryable?(raw) && attempts < @config.retries
-          attempts += 1
-          resent_count += 1
+        #
+        # And not after a STOP. `worker_loop` drains the queue without sending once the
+        # operator stops the run, and the documented promise is "in-flight requests finish" —
+        # a retry is a NEW request, so with `--retries 5 --retry-pause 1s` each busy worker kept
+        # the origin under fire for five more sends and five more seconds after the stop (P5:
+        # a stop stops). The attempt that already failed is reported as it stands.
+        if retryable?(raw) && attempts < @config.retries && @state != State::Stopped
           sleep @config.retry_pause
-          next
+          # Re-read AFTER the pause: that is where a stop lands on a run whose retries are
+          # paced. Counted only when the re-send actually happens, so `resent_count` stays
+          # "attempts that were superseded" and not "pauses that were slept".
+          unless @state == State::Stopped
+            attempts += 1
+            resent_count += 1
+            next
+          end
         end
-        raw = follow_redirects(raw) if @config.follow_redirects? && raw.error.nil?
+        raw = follow_redirects(raw, job.bytes) if @config.follow_redirects? && raw.error.nil?
         return @matcher.build(job, raw, resent_count: resent_count)
       end
     end
@@ -1268,11 +1308,15 @@ module Gori::Fuzz
           @blocked_reason ||= raw.error
           return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
         end
-        if retryable?(raw) && attempts < @config.retries
-          attempts += 1
-          resent_count += 1
+        # `@state` guard for the reason `run_one` gives: a retry is a new session, not an
+        # in-flight one, and a stop must not open five more.
+        if retryable?(raw) && attempts < @config.retries && @state != State::Stopped
           sleep @config.retry_pause
-          next
+          unless @state == State::Stopped
+            attempts += 1
+            resent_count += 1
+            next
+          end
         end
         return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
       end
@@ -1302,9 +1346,15 @@ module Gori::Fuzz
     # Follow up to max_redirects SAME-ORIGIN redirects (relative, or absolute to the
     # same scheme/host/port), re-issuing a GET. Cross-origin redirects are left as the
     # final 3xx (no implicit off-target sends).
-    private def follow_redirects(raw : Repeater::Result) : Repeater::Result
+    #
+    # `request` is the bytes the payload went out as: a `Location` is a URI-REFERENCE (RFC
+    # 7231 §7.1.2), and `next?page=2`, `?page=2` or `../login` resolve against the request
+    # that was answered — which is the one fact only the caller holds. Each followed hop then
+    # becomes the base for the next, exactly as a browser walks the chain.
+    private def follow_redirects(raw : Repeater::Result, request : Bytes) : Repeater::Result
       current = raw
       total_us = raw.duration_us
+      base = Gori::Outbound.request_target(request)
       # A keep-alive re-send ANYWHERE in the chain has to reach the row: the collapsed Result
       # below keeps the last hop's fields, so without this an original request that was
       # re-sent and then redirected would report as a single clean send.
@@ -1320,12 +1370,16 @@ module Gori::Fuzz
       hop_error : String? = nil
       hops = 0
       while hops < @config.max_redirects
+        # A hop is a NEW request, not an in-flight one — same rule as the retry loop in
+        # `run_one`: after a stop the payload's own answer (the 3xx in `current`) is the row.
+        break if @state == State::Stopped
         resp = current.response
         break unless resp && (300..399).includes?(resp.status)
         loc = resp.headers.get?("location")
         break unless loc
-        nxt = redirect_request(loc)
-        break unless nxt
+        nxt, path = redirect_request(loc, base)
+        break unless nxt && path
+        base = path
         # WHOLE-message verbatim, and not `nil` and not the job's spans. `Sender#send`'s
         # 1-argument overload means "no exclusions", i.e. substitute every `$NAME` an extract
         # rule has bound — and `nxt` is assembled below from a `Location` the ORIGIN chose. A
@@ -1356,7 +1410,7 @@ module Gori::Fuzz
         # reason rather than replacing the response with it. Prefixed so no surface reads it as
         # the PAYLOAD's own failure — it is a note about a hop gori chose to follow.
         if err = hop.error
-          hop_error = "redirect hop refused: #{err}"
+          hop_error = "#{REDIRECT_HOP_REFUSED}#{err}"
           break
         end
         current = hop
@@ -1372,9 +1426,11 @@ module Gori::Fuzz
         delivered: current.delivered?, timed_out: current.timed_out?, retried: retried) : current
     end
 
-    private def redirect_request(loc : String) : Bytes?
+    # The next hop's request bytes and its request-target, or `{nil, nil}` when the
+    # `Location` is not one this run may follow. `base` is the request-target the 3xx answered.
+    private def redirect_request(loc : String, base : String) : {Bytes?, String?}
       o = @backend.origin
-      path = resolve_redirect_path(loc, o)
+      path = resolve_redirect_path(loc, o, base)
       # The `Location` is chosen by whatever host answered, and the next line splices it
       # straight into a request line — so it gets the same rule as any other remote-chosen
       # request-line token (#397). Checked HERE rather than inside resolve_redirect_path
@@ -1393,32 +1449,60 @@ module Gori::Fuzz
       # know whether the origin meant a literal space or a broken link, and refusing leaves
       # the run reporting the 3xx it actually got. That matches the existing treatment of a
       # cross-origin Location — the chain stops, the 3xx is the result.
-      return nil unless path && Proxy::Codec::Http1.request_token_safe?(path)
-      default = o.scheme == "https" ? 443 : 80
-      host = o.port == default ? o.host : "#{o.host}:#{o.port}"
-      "GET #{path} HTTP/1.1\r\nHost: #{host}\r\nConnection: close\r\n\r\n".to_slice
+      return {nil, nil} unless path && Proxy::Codec::Http1.request_token_safe?(path)
+      # `FlowRequest.authority` is the one spelling of a `Host:` value gori writes: an IPv6
+      # literal bracketed (`Host: ::1:8080` is not a host and a port, it is a parse error), the
+      # port dropped when it is the scheme default.
+      host = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
+      # `Connection: close` is an h1 instruction — it hands the hop its own socket instead of
+      # the keep-alive pool's parked one. On h2 it is a connection-specific field a conforming
+      # server MUST reject (RFC 9113 §8.2.2), and it went out on every hop of an h2 sweep; the
+      # hop rides the h2 pool like any other request there. See `Backend#http2?`.
+      conn = @backend.http2? ? "" : "Connection: close\r\n"
+      {"GET #{path} HTTP/1.1\r\nHost: #{host}\r\n#{conn}\r\n".to_slice, path}
     end
 
-    # The same-origin path to follow a Location to, or nil for cross-origin / unparsable.
-    private def resolve_redirect_path(loc : String, o : Origin) : String?
+    # The same-origin request-target to follow a Location to, or nil for cross-origin /
+    # unparsable. `base` is the request-target the 3xx answered, which a RELATIVE reference
+    # resolves against (`next`, `?page=2`, `../login` — all legal per RFC 7231 §7.1.2, and all
+    # of them used to be dropped on the floor as "unparsable", so the sweep reported the 3xx
+    # and the operator read "followed nothing" as "nothing to follow").
+    private def resolve_redirect_path(loc : String, o : Origin, base : String) : String?
       # `//host/x` is a network-path reference (RFC 3986 §4.2) — it names ANOTHER authority, and
-      # is the canonical open-redirect answer. It starts with `/`, so the next line used to hand
-      # it back as a same-origin path and the follower asked the ORIGIN for the literal
-      # `//evil.test/x`, burning a hop and replacing the 302 the operator was hunting with that
-      # path's 404. Resolved against the origin's scheme rather than refused outright, so the
-      # absolute-form branch below decides: a cross-origin authority is dropped there like any
-      # other, while a same-origin `//host:port/next` is still followed, as this method promises.
+      # is the canonical open-redirect answer. Resolved against the origin's scheme so the
+      # same-origin check below decides: a cross-origin authority is dropped like any other,
+      # while a same-origin `//host:port/next` is still followed, as this method promises.
       loc = "#{o.scheme}:#{loc}" if loc.starts_with?("//")
       return loc if loc.starts_with?('/')
-      return nil unless loc.starts_with?("http://") || loc.starts_with?("https://")
-      uri = URI.parse(loc) rescue nil
-      return nil unless uri && uri.host == o.host
-      sc = uri.scheme || "http"
+      uri = (redirect_base(o, base).resolve(loc) rescue nil)
+      return nil unless uri
+      # Scheme and host are case-insensitive (RFC 3986 §3.1, §3.2.2); `Location: HTTP://Host/`
+      # is the same origin. `parse_target`'s bracket rule for an IPv6 literal, in reverse.
+      sc = (uri.scheme || o.scheme).downcase
+      host = (uri.host || "")
+      host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']')
+      return nil unless host.downcase == o.host.downcase
       pt = uri.port || (sc == "https" ? 443 : 80)
       return nil unless sc == o.scheme && pt == o.port
       p = uri.path
       p = "/" if p.empty?
       uri.query ? "#{p}?#{uri.query}" : p
+    end
+
+    # The absolute URI the last request went to, for `URI#resolve`. An origin-form target
+    # hangs off the dial origin; an absolute-form one already is a URI; anything else (`*`,
+    # a garbled line) resolves from the root, which is the least surprising base there is.
+    private def redirect_base(o : Origin, target : String) : URI
+      authority = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
+      root = "#{o.scheme}://#{authority}/"
+      abs = if target.starts_with?('/')
+              "#{o.scheme}://#{authority}#{target}"
+            elsif target.includes?("://")
+              target
+            else
+              root
+            end
+      (URI.parse(abs) rescue nil) || URI.parse(root)
     end
 
     # ── lifecycle (pause / wake) ─────────────────────────────────────────────────

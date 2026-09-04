@@ -17,7 +17,7 @@ private def ctrl_d : Termisu::Event::Key
 end
 
 describe Gori::Tui::FuzzSetOverlay do
-  it "List: multi-line values build a comma-joined spec (newline = a new value)" do
+  it "List: multi-line values build a newline-joined spec (newline = a new value)" do
     ov = FuzzSetOverlay.for_list
     ov.handle_key(okey(Termisu::Input::Key::Down)) # Type row → the values editor
     otype(ov, "admin")
@@ -25,7 +25,20 @@ describe Gori::Tui::FuzzSetOverlay do
     otype(ov, "root")
     spec = ov.build_spec.not_nil!
     spec.kind.should eq(:list)
-    spec.value.should eq("admin,root")
+    spec.value.should eq("admin\nroot\n")
+    Gori::Tui::SetSpec.list_values(spec.value).should eq(["admin", "root"])
+    spec.display.should eq("admin,root")
+  end
+
+  it "List: a comma inside a value is payload text, not a separator" do
+    ov = FuzzSetOverlay.for_list
+    otype(ov, %({"id":1,"role":"admin"}))
+    ov.handle_key(okey(Termisu::Input::Key::Enter))
+    otype(ov, "' OR 1=1,--")
+    spec = ov.build_spec.not_nil!
+    Gori::Tui::SetSpec.list_values(spec.value).should eq([%({"id":1,"role":"admin"}), "' OR 1=1,--"])
+    # …and reopening the set shows the same two lines, not four.
+    FuzzSetOverlay.editing(spec, 0).build_spec.not_nil!.value.should eq(spec.value)
   end
 
   it "List: typing on the Type row (before any nav) drops into the values editor" do
@@ -34,7 +47,7 @@ describe Gori::Tui::FuzzSetOverlay do
     otype(ov, "admin")
     ov.handle_key(okey(Termisu::Input::Key::Enter))
     otype(ov, "root")
-    ov.build_spec.not_nil!.value.should eq("admin,root")
+    ov.build_spec.not_nil!.value.should eq("admin\nroot\n")
   end
 
   it "Numbers: bounds above Int32::MAX survive build_spec (Int64 range)" do
@@ -46,10 +59,11 @@ describe Gori::Tui::FuzzSetOverlay do
     ov.build_spec.not_nil!.value.should eq("3000000000-100:1")
   end
 
-  it "seeds an existing List set (comma → lines) and round-trips back to commas" do
+  it "seeds a LEGACY comma-joined List set (a session saved before the newline grammar)" do
     ov = FuzzSetOverlay.editing(Gori::Tui::SetSpec.new(:list, "a,b,c"), 0)
     ov.edit_index.should eq(0)
-    ov.build_spec.not_nil!.value.should eq("a,b,c")
+    Gori::Tui::SetSpec.list_values("a,b,c").should eq(["a", "b", "c"])
+    ov.build_spec.not_nil!.value.should eq("a\nb\nc\n") # re-saved under the current grammar
   end
 
   it "esc returns :commit; a blank List yields nil so @sets stays unchanged" do
@@ -183,7 +197,7 @@ describe Gori::Tui::FuzzSetOverlay do
     h.commits.should eq(0)
     h.type("b").should eq(:open)
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
-    applied.map(&.try(&.value)).should eq(["a,b"])
+    applied.map(&.try(&.value)).should eq(["a\nb\n"])
   end
 
   it "↵ on the last FIELD row applies (Numbers: From/To/Step)" do
@@ -270,7 +284,7 @@ describe Gori::Tui::FuzzSetOverlay do
     h.type("x")                        # non-empty, so the editor renders instead of the placeholder
     h.preedit("한")
     h.rendered?("한").should be_true
-    ov.build_spec.not_nil!.value.should eq("x") # composing text is not in the buffer yet
+    ov.build_spec.not_nil!.value.should eq("x\n") # composing text is not in the buffer yet
   end
 
   # `Overlay#handle_click` places the caret in whichever listed field the press landed in —

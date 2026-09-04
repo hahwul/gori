@@ -34,11 +34,16 @@ module Gori
           effective_max_requests, Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
         fjob.websocket = !ws_frames.nil?
+        # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
+        # tell an agent its A/B happened when nothing about the handshake changed. Settled
+        # BEFORE the saved-run row below reads it, so `get_fuzz_run` cannot report the preset
+        # `fuzz_start`/`fuzz_status` withhold for the same run.
+        fjob.tls_preset = tls_preset if origin.scheme == "https"
         if save_results
           fjob.persistence = Fuzz::Persistence.new(store,
             Fuzz::SavedRunMeta.new(nil, audit.target, mode_label, total,
               created_at: audit.started_at_ms * 1000_i64, http2: http2,
-              sni: effective_sni, tls_preset: tls_preset, websocket: fjob.websocket?,
+              sni: effective_sni, tls_preset: fjob.tls_preset, websocket: fjob.websocket?,
               surface: "mcp", source_ref: id))
         end
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
@@ -46,9 +51,6 @@ module Gori
         # `fuzz_config` applies, so a second accessor on the plan would only be a second place
         # for the two to disagree.
         fjob.reframe_grpc = bool_arg(h, "reframe_grpc", false)
-        # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
-        # tell an agent its A/B happened when nothing about the handshake changed.
-        fjob.tls_preset = tls_preset if origin.scheme == "https"
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, optional_int_arg(h, "max_requests"))
@@ -281,6 +283,7 @@ module Gori
 
       private def apply_fuzz_progress(fjob : FuzzJob, p : Fuzz::Progress) : Nil
         fjob.sent = p.sent
+        fjob.requests = p.requests
         fjob.matched = p.matched
         fjob.errors = p.errors
         fjob.blocked = p.blocked
@@ -348,6 +351,12 @@ module Gori
             j.field "status", fjob.status.to_s
             j.field "total", fjob.total
             j.field "sent", fjob.sent
+            # REQUESTS on the wire — retries and redirect hops each cost one here and none in
+            # `sent` — and the unit `max_requests` is enforced against. It is what turns a
+            # `budget_exhausted` verdict on `sent: 4` under `max_requests: 10` from a riddle
+            # into arithmetic; the CLI prints it and the TUI reads it, and this was the one
+            # surface that dropped it. See `Fuzz::Progress#requests`.
+            j.field "requests", fjob.requests
             j.field "candidates_remaining", (t = fjob.total) ? {0_i64, t - fjob.sent}.max : nil
             j.field "matched", fjob.matched
             j.field "errors", fjob.errors
@@ -514,9 +523,19 @@ module Gori
           end
           use_h2 = false
         end
-        effective_sni = str(h, "sni") || src_sni
+        # `.presence`: a schema-filling client sends `""` for every declared property (see
+        # `describes?`), and a bare `str` read it as an explicit override — winning over the
+        # seed session's stored SNI AND reaching the dial as an empty name, which OpenSSL
+        # treats as "send no SNI extension, check no hostname". `send_request`/`discover`
+        # already read theirs this way.
+        effective_sni = str(h, "sni").presence || src_sni
         config = fuzz_config(h, mode, src_tls_preset)
         matcher = fuzz_matcher(h)
+        # A `match`/`filter` term that can never fire (`size: "1O00"`, `status: "2OO"`) used to
+        # run the whole sweep and report `matched: 0` — the "nothing there" an agent acts on.
+        if spec_err = matcher.spec_error
+          raise FuzzArgError.new(spec_err)
+        end
         if save_results
           config.keep_bodies = :all
           matcher.keep_bodies = :all
@@ -716,7 +735,9 @@ module Gori
       # what they mean there. Re-deriving them would reintroduce the defect that comment records
       # (a PING sent as TEXT, a CLOSE as BINARY, with `isError:false`).
       private def fuzz_ws_messages(h, text : String) : Array(Fuzz::WsMessageSource)?
-        given = h["messages"]?
+        # A JSON `null` is ABSENT, as every scalar reader on this surface already holds
+        # (`str`, `present?`, `optional_int_arg`): a `JSON::Any` wrapping nil is truthy.
+        given = h["messages"]?.try { |v| v.raw.nil? ? nil : v }
         upgrade = Gori::Proxy::WS.upgrade_request?(text)
         http_only = bool_arg(h, "ws_http_only", false)
         # An explicit `messages` that cannot be sent is REFUSED, never dropped. Returning nil
@@ -814,7 +835,7 @@ module Gori
 
       private def string_array_arg(h, key : String) : Array(String)
         raw = h[key]?
-        return [] of String unless raw
+        return [] of String unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -832,7 +853,7 @@ module Gori
       # shared `processors` pipeline — pairing them here too would build the sets twice.
       private def fuzz_sources(h) : Array(Fuzz::PayloadSource)
         raw = h["payloads"]?
-        return [] of Fuzz::PayloadSource unless raw
+        return [] of Fuzz::PayloadSource unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -856,7 +877,7 @@ module Gori
       # (LLM clients vary in whether they send a real array or a JSON string).
       private def fuzz_processors(h) : Array(Fuzz::Processor)
         raw = h["processors"]?
-        return [] of Fuzz::Processor unless raw
+        return [] of Fuzz::Processor unless raw && !raw.raw.nil?
         arr =
           if a = raw.as_a?
             a
@@ -1114,7 +1135,7 @@ module Gori
       private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, time: String?, header: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
-        return nil unless raw
+        return nil unless raw && !raw.raw.nil?
         obj =
           if h = raw.as_h?
             h
@@ -1219,6 +1240,12 @@ module Gori
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
         optional_int_arg(h, "race_count").try { |v| cfg.race_count = v.clamp(1_i64, Fuzz::Engine::MAX_RACE_SIZE.to_i64).to_i }
         cfg.race_warmup = fuzz_race_warmup(h)
+        # Read by `Engine#run_race` and by nothing else: without `race_count` the bytes were
+        # accepted, echoed nowhere and never sent. Refused, as `gori run fuzz` refuses the
+        # same pair, rather than left as a knob that silently did nothing.
+        if cfg.race_warmup && cfg.race_count.nil?
+          raise FuzzArgError.new("'race_warmup' applies to a race_count run — pass race_count, or drop the warm-up")
+        end
         cfg
       end
 

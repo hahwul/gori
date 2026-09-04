@@ -1323,7 +1323,7 @@ module Gori::Tui
       # The RAW field row, not the parsed list: this runs on the render fiber every frame and
       # `grpc_field_specs` allocates, while the string it splits is the thing that actually
       # changes. (`position_count` is memoized on the editor revision for the same reason.)
-      sig = "#{@config.mode}|#{position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
+      sig = "#{@config.mode}|#{position_count}|#{@s_grpc_fields}|#{@sets.map { |s| "#{s.kind}:#{s.display}" }.join("~")}"
       return @run_count_cache if sig == @run_count_sig
       @run_count_sig = sig
       @run_count_cache = compute_run_count
@@ -1427,6 +1427,24 @@ module Gori::Tui
       nil
     end
 
+    # The first Advanced numeric buffer that is non-blank and does not parse, named — the
+    # twin of `regex_error`. `commit_buffers` deliberately reads a blank as "default / off",
+    # and that is the ONLY silent fallback it may keep: text that is not a number is a typo,
+    # and the row kept displaying it while the run used something else.
+    private def buffer_error : String?
+      {
+        {"Concurrency", @s_conc, "a whole number"}, {"Rate", @s_rate, "requests per second"},
+        {"Timeout", @s_timeout, "whole seconds"}, {"Retries", @s_retries, "a whole number"},
+        {"Max requests", @s_max_req, "a whole number"}, {"Race", @s_race, "a whole number"},
+      }.each do |(name, buf, form)|
+        v = buf.strip
+        next if v.empty?
+        ok = name == "Rate" ? !v.to_f?.nil? : !v.to_i64?.nil?
+        return "invalid #{name}: #{v} (#{form})" unless ok
+      end
+      nil
+    end
+
     # --- engine assembly -----------------------------------------------------
     # Build an engine ready to run, or {nil, error}. `scope` becomes the interactive
     # `Gori::Outbound` decision the sender dials through: no up-front allowlist gate (the
@@ -1441,6 +1459,17 @@ module Gori::Tui
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
+      end
+      # A numeric field the commit above fell back from (`Timeout 1.5` → no timeout,
+      # `Concurrency 50x` → 20) kept SHOWING the typed text while the run used the default.
+      if err = buffer_error
+        return {nil, err}
+      end
+      # A status/size/… spec that can never fire (`2OO`, `>1O0`) ran the whole sweep as
+      # `N sent · 0 hit`, byte-identical to "nothing there" — the CLI and MCP refuse the same
+      # typo up front through this one validator. See `Fuzz::Matcher#spec_error`.
+      if err = @matcher.spec_error
+        return {nil, err}
       end
       # `wire_text`, NOT `text` — the same distinction the Repeater's send path draws
       # (`RepeaterView#expanded_editor_bytes`) and for the same reason. `text` is the LF
@@ -1660,7 +1689,7 @@ module Gori::Tui
 
     private def build_source(s : SetSpec) : Fuzz::PayloadSource
       case s.kind
-      when :list    then Fuzz::InlineList.new(s.value.split(','))
+      when :list    then Fuzz::InlineList.new(SetSpec.list_values(s.value))
       when :file    then Fuzz::WordlistFile.new(s.value)
       when :preset  then Fuzz::PresetSource.new(s.value)
       when :null    then Fuzz::NullPayloads.new(s.value.to_i? || 1)
@@ -2434,7 +2463,9 @@ module Gori::Tui
       obj["concurrency"]?.try(&.as_i?).try { |n| @config.concurrency = n }
       @config.rps = obj["rps"]?.try(&.as_f?)
       @config.throttle_ms = obj["throttle_ms"]?.try(&.as_i?)
-      obj["timeout_s"]?.try(&.as_i?).try { |s| @config.timeout = s.seconds }
+      # Assigned, not guarded: `config_json` writes the key as `null` when there is no
+      # timeout, and a guarded read kept the stale one when the peer had CLEARED it.
+      @config.timeout = obj["timeout_s"]?.try(&.as_i?).try(&.seconds)
       obj["retries"]?.try(&.as_i?).try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
       @config.race_count = obj["race_count"]?.try(&.as_i?)
@@ -2924,7 +2955,7 @@ module Gori::Tui
       bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if sel
       fg = sel ? Theme.text_bright : Theme.text
-      label = "#{i + 1} #{s.kind} #{s.value}"
+      label = "#{i + 1} #{s.kind} #{s.display}"
       unless pp
         screen.text(inner.x + 1, y, label, fg, bg, width: {inner.w - 2, 1}.max)
         return
