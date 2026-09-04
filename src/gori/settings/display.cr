@@ -10,6 +10,15 @@ module Gori::Settings
   DEFAULT_THEME           = "goridark"
   DEFAULT_MOUSE           = true
   DEFAULT_PRETTY_BODIES   = true
+  # settings:mouse — what RELEASING a drag over a text pane does. "select" leaves the band
+  # highlighted and waits for the copy key (the behaviour gori has always had); "copy" copies
+  # it there and then, the way a terminal's own primary selection does, which is what an
+  # operator dragging over a response header actually wanted. Deliberately a mode string and
+  # not a bool: the two names say what happens, where `mouse_drag_copy: false` would not, and
+  # a third mode (extend-on-second-drag, say) needs no schema change. Meaningless while
+  # `mouse` is off — nothing reports a drag then.
+  MOUSE_DRAG_MODES   = %w[select copy]
+  DEFAULT_MOUSE_DRAG = "select"
   # Layout (settings:layout): list previews off by default; Sitemap fully expanded.
   DEFAULT_HISTORY_PREVIEW      = false
   DEFAULT_PROBE_PREVIEW        = false
@@ -76,6 +85,7 @@ module Gori::Settings
   class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN     # syntax-highlight markdown in Notes/Project
   class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
   class_property mouse : Bool = DEFAULT_MOUSE                         # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+  class_property mouse_drag : String = DEFAULT_MOUSE_DRAG             # "select" | "copy" — what releasing a drag does (see MOUSE_DRAG_MODES)
   class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Repeater response (display only)
   # Layout prefs (settings:layout). *_preview: list page shows a bottom detail pane.
   # history_list_order: "newest" (top) or "oldest" (top). sitemap_expand_depth: -1 = all.
@@ -127,6 +137,18 @@ module Gori::Settings
 
   def self.normalize_history_list_order(s : String) : String
     s == "oldest" ? "oldest" : "newest"
+  end
+
+  # Clamped on READ as well as on parse, the stance every other enumerated setting takes:
+  # nothing downstream should have to reason about a mode it does not know, whatever put it
+  # in the file.
+  def self.normalize_mouse_drag(s : String) : String
+    MOUSE_DRAG_MODES.includes?(s) ? s : DEFAULT_MOUSE_DRAG
+  end
+
+  # Whether releasing a drag should copy the band it just built.
+  def self.mouse_drag_copy? : Bool
+    normalize_mouse_drag(mouse_drag) == "copy"
   end
 
   # Tolerant layout section: absent/non-object keeps current; depth/order clamped to allowed set.
@@ -228,12 +250,14 @@ module Gori::Settings
   private def self.reset_appearance : Nil
     self.theme = DEFAULT_THEME
     self.mouse = DEFAULT_MOUSE
+    self.mouse_drag = DEFAULT_MOUSE_DRAG
     self.pretty_bodies_default = DEFAULT_PRETTY_BODIES
   end
 
   private def self.serialize_appearance(j : JSON::Builder) : Nil
     j.field "theme", theme
     j.field "mouse", mouse
+    j.field "mouse_drag", mouse_drag
     j.field "pretty_bodies", pretty_bodies_default
   end
 

@@ -42,11 +42,13 @@ module Gori
         id = id_s.to_i64? || abort("gori run repeater minimize: invalid repeater id #{id_s.inspect}")
 
         # Resolved ONCE and reused by the `--apply` write below. `resolve_read_project` with no
-        # --project/--db falls through to `registry.list.first`, and that list is sorted by each
-        # project's DB-file MTIME (`Project#last_modified`) — so the "most-recently-active"
-        # project can change identity while this command runs, and a minimize is minutes long
-        # (up to SEND_CAP real sends). Re-resolving at apply time therefore let a peer's write
-        # steer the UPDATE into a DIFFERENT project's `repeaters` row #id.
+        # --project/--db falls through to `registry.list.first`, and that list is sorted by
+        # `Project#last_modified` — the newer of the db file's mtime and its write-ahead log's,
+        # so it moves WHILE a peer session is writing rather than only when one closes and
+        # checkpoints. The "most-recently-active" project can therefore change identity while
+        # this command runs, and a minimize is minutes long (up to SEND_CAP real sends).
+        # Re-resolving at apply time therefore let a peer's write steer the UPDATE into a
+        # DIFFERENT project's `repeaters` row #id.
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         # HostOverrides.load snapshots rows into memory, so it is safe to keep past the close.

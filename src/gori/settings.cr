@@ -234,6 +234,7 @@ module Gori
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
+      root["mouse_drag"]?.try(&.as_s?).try { |v| self.mouse_drag = normalize_mouse_drag(v) }
       self.pretty_bodies_default = load_bool(root, "pretty_bodies", pretty_bodies_default)
       if ed = object_section(root, "editor")
         self.editor = ed["command"]?.try(&.as_s?) || editor
@@ -918,7 +919,7 @@ module Gori
     # The `document_keys - SECTION_KEYS` guard in spec/settings/profile_spec.cr catches a
     # rename, and catches an addition as soon as any example populates the new section.
     SECTION_KEYS = %w[
-      theme mouse pretty_bodies layout statusline display companion notifications general update
+      theme mouse mouse_drag pretty_bodies layout statusline display companion notifications general update
       network upstream_rules outbound_tls retention listeners editor tabs hostname_overrides
       env scan_rules oast_providers hotkeys mine fuzzer probe discover decoder rewriter
       hooks colormarker saved_views

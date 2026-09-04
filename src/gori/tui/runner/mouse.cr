@@ -25,7 +25,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     elsif ev.motion?
       dispatch_drag(layout, mx, my) # button held + pointer moved → extend a selection
     elsif ev.button.release?
-      @dragging = false
+      finish_drag
     elsif ev.button.right?
       @quit_armed = false
       @toast = nil
@@ -54,6 +54,40 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The press just consumed was Miss Ring's. Reset at the top of every dispatch_click, so
   # it is true only for the press immediately after one she took.
   @companion_pressed = false
+
+  # Button up. Under `settings:mouse` Drag release = "select + copy" this also puts the band
+  # the drag just built on the clipboard — the primary-selection gesture a terminal gives you
+  # natively, and the one gori took away by claiming the mouse in the first place.
+  #
+  # Three guards, all load-bearing. A plain CLICK ends in a release too, and `read_copy` with
+  # nothing selected copies the WHOLE PANE (`read_selection_active? ? x_copy : x_copy_all`) —
+  # so without `@dragging` every click would dump the pane to the clipboard, and without
+  # `read_selection_active?` a press-and-jiggle that selected nothing would do the same.
+  #
+  # The third is `active_overlay`, and it is about WHOSE band this is. `dispatch_drag` resolves
+  # the migrated overlay FIRST, so a drag inside one extends that modal's own `TextField` /
+  # `TextArea` — while `read_selection_active?` / `read_copy` dispatch on `@active_tab` and
+  # cannot see it. A copy on that release would not be the band the operator just dragged: it
+  # would be whatever selection the tab UNDERNEATH still had (a Repeater REQUEST band left live
+  # before opening a modal, say), announced in a toast as though it were. Written as a guard
+  # rather than as a fix for something observed — driving the built TUI, no modal was found
+  # whose `supports_drag?` press actually armed `@dragging` — but the two dispatches disagree
+  # about who owns a drag, and only one of them is allowed to end in a clipboard write.
+  #
+  # The History detail is deliberately NOT excluded by this: it is the `@overlay.detail?` enum
+  # state, not an `active_overlay`, which is why `read_copy` has an arm for it and why a drag
+  # there copies (verified against the built binary).
+  #
+  # Otherwise routed through `read_copy`, the identical seam the `y` / `^Y` verbs use, so what
+  # "copy" means on each tab — and the wording of the toast that confirms it — cannot drift
+  # from the keyboard path.
+  private def finish_drag : Nil
+    if @dragging && Settings.mouse_drag_copy? && active_overlay.nil? && read_selection_active?
+      @quit_armed = false
+      read_copy
+    end
+    @dragging = false
+  end
 
   private def press_left(layout : Layout, mx : Int32, my : Int32) : Nil
     now = Time.instant

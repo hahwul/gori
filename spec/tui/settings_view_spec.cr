@@ -214,13 +214,55 @@ describe SettingsView do
       v.save
       Gori::Settings.editor.should eq(Gori::Settings::DEFAULT_EDITOR)
       Gori::Settings.editor_markdown.should eq(Gori::Settings::DEFAULT_EDITOR_MARKDOWN)
-      Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
       Gori::Settings.pretty_bodies_default.should eq(Gori::Settings::DEFAULT_PRETTY_BODIES)
-      # The modifier lives in the KEYS section — resetting EDITOR must not touch it.
+      # The modifier lives in the KEYS section and the pointer toggle in MOUSE — resetting
+      # EDITOR must not touch either. `mouse` is the sharper of the two: it was an EDITOR row
+      # until the MOUSE section took it, so a reset arm left behind would still clear it here.
       Gori::Settings.command_modifier.should eq("alt")
+      Gori::Settings.mouse.should be_false
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.editor, Gori::Settings.editor_markdown, Gori::Settings.mouse, Gori::Settings.pretty_bodies_default, Gori::Settings.command_modifier = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
+  # The MOUSE section: the pointer toggle plus the drag-release mode. Both halves are walked
+  # through the real view (reload → edit → save → reload) rather than poked at Settings, since
+  # the row INDEXES are what the save arm addresses and a silent shift is the failure mode.
+  it "saves and resets the MOUSE section (pointer toggle + drag release)" do
+    dir = File.tempname("gori-settings-mouse-view")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = {Gori::Settings.mouse, Gori::Settings.mouse_drag, Gori::Settings.editor}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mouse = true
+      Gori::Settings.mouse_drag = "select"
+      Gori::Settings.editor = "code --wait"
+      v = SettingsView.new
+      v.reload(:mouse)
+
+      v.section.should eq(:mouse)
+      # Row 0 is the bool, row 1 the choice — the order the save arm reads them in.
+      v.toggle_or_move(1) # Mouse on → off
+      v.move_field(1)
+      v.toggle_or_move(1) # select only → select + copy
+      v.save
+      Gori::Settings.mouse.should be_false
+      Gori::Settings.mouse_drag.should eq("copy")
+      Gori::Settings.mouse_drag_copy?.should be_true
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
+      Gori::Settings.mouse_drag.should eq(Gori::Settings::DEFAULT_MOUSE_DRAG)
+      Gori::Settings.mouse_drag_copy?.should be_false
+      # The external editor lives in EDITOR — the section that used to hold the Mouse row.
+      Gori::Settings.editor.should eq("code --wait")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.mouse, Gori::Settings.mouse_drag, Gori::Settings.editor = prev
       FileUtils.rm_rf(dir)
     end
   end

@@ -153,7 +153,10 @@ module Gori::Tui
       @flow_count = store.count
       @issues_count = store.count_issues
       @probe_tech = scoped_tech(store.probe_tech_rows)
-      @db_size = project.db_size
+      # `db_size_with_wal`, not `db_size`: in WAL mode the flows just captured are still in
+      # `<db>-wal` and the main file has not grown, so the plain size reads 4 KB for a project
+      # holding megabytes. MCP/CLI keep reporting the narrow `db_size` under that name.
+      @db_size = project.db_size_with_wal
       @total_captured = store.total_size
       @last_activity = project.last_modified
       # AT A GLANCE aggregates: traffic status mix + Issues severity (human-confirmed

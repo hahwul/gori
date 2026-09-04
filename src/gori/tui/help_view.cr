@@ -86,7 +86,7 @@ module Gori::Tui
         Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
         Item.new("⇧X", "clear all History flows (asks first)", "history.clear"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
-        Item.new("detail", "↑/↓ move · x line · ⇧arrows select · y copy · space cmds"),
+        Item.new("detail", "↑/↓ move · {detail.select-line} line · ⇧arrows select · {detail.copy} copy · space cmds"),
         Item.new("{detail.toggle-hex} · {detail.toggle-ws} · {detail.toggle-pretty}", "in detail: hex · whitespace · pretty bodies"),
       ]},
       {"REPEATER", [
@@ -238,16 +238,20 @@ module Gori::Tui
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
         # since `d` acts on the marked set and this one does not.
-        Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · x line · y copy · space cmds"),
+        Item.new("Issues", "list: {issues.mark-toggle} mark · {issues.mark-all} all · ⇧arrows range · {issues.clear} clear · notes: i/↵ edit · {issue.select-line} line · {issue.copy} copy · space cmds"),
         Item.new("Probe", "↑/↓ ↵ open · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {probe.scope-toggle} scope · {probe.clear} clear issues · space cmds"),
         # Authorize had no row at all while `TAB_SECTION` pointed its Shortcuts popup here — so
         # the one tab whose keys are `^R`/`⇧R`/`^X` and nothing an operator can guess opened on
         # a section that never named it.
         Item.new("Authorize", "↑/↓ request · ⇥ identity · {authorize.run} run · {authorize.run-all} all · {authorize.identities} identities · {authorize.clear} clear queue"),
-        Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),
+        Item.new("Notes", "i/↵ edit · {notes.select-line} line · ⇧arrows select · {notes.copy} copy · space cmds (Copy selected when highlighted)"),
         # No pane inventory: the chip strip names all six on screen, no sibling row lists sub-panes,
         # and the parenthetical was what pushed this row past `HelpPopupOverlay::MAX_W` when the
         # sixth pane arrived — it would have broken again at the seventh. Keys only, like the rest.
+        # `x line · y copy` stay LITERAL here, unlike the sibling rows above: the description
+        # pane dispatches both raw (`ProjectController#handle_desc_read`), and the matching
+        # verbs carry no bare chord to read — `project.select-line` has none at all and
+        # `project.copy` is `^Y` only — so a token would resolve to the wrong key or to none.
         Item.new("Project", "←/→ sub-tab · ↓/↵ enter · desc: i/↵ edit · x line · y copy · space cmds"),
         # ACTIVITY is a Project sub-tab, so its keys hang off the row above rather than earning
         # a section — but `⇧X` there deletes the durable audit trail, which is the one key on
@@ -257,11 +261,11 @@ module Gori::Tui
       ]},
       {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),
-        Item.new("INPUT READ", "⇧arrows select · y copy · space cmds"),
+        Item.new("INPUT READ", "⇧arrows select · {decoder.copy} copy · space cmds"),
         Item.new("INPUT INS", "⇧arrows select · ^Y copy (bare y types a `y`)"),
         Item.new("chain", "always editable — base64 > url-encode > sha256 ( > | , )"),
         Item.new("↹ / ↵", "complete the suggested converter (popup)"),
-        Item.new("OUTPUT", "↑/↓ move · ⇧arrows select · y copy"),
+        Item.new("OUTPUT", "↑/↓ move · ⇧arrows select · {decoder.copy} copy"),
         Item.new("^X", "cycle text/hex/base64", "decoder.mode"),
         Item.new("{decoder.save} · {decoder.load}", "save the chain under a name · pick from the saved chains"),
         Item.new("chain library", "shared by every project · picker: type to filter · ^X deletes an entry"),
@@ -281,7 +285,7 @@ module Gori::Tui
         # chords, and `rewriter_copy` branches on the FOCUSED PANE, not on which chord fired —
         # `^Y` on OUTPUT copies the OUTPUT. The real split is mode, not pane: the INPUT sample
         # is always typing, so there `y` is a literal character and `^Y` is the only copy.
-        Item.new("preview", "⇧arrows select · y copy (OUTPUT) · ^Y copy while typing (INPUT sample)"),
+        Item.new("preview", "⇧arrows select · {rewriter.copy} copy (OUTPUT) · ^Y copy while typing (INPUT sample)"),
       ]},
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
@@ -297,7 +301,7 @@ module Gori::Tui
       {"OVERLAYS", [
         Item.new("palette / settings", "↑/↓ · ↵ · esc"),
         Item.new("confirm", "←/→ choose · y / n · ↵"),
-        Item.new("Settings: Editor", "toggle mouse support (Mouse field)"),
+        Item.new("Settings: Mouse", "toggle mouse support, and what releasing a drag does"),
         # No row for the save/load library modal here: the DECODER section already states it,
         # and the key column truncates at ~20 cols anyway ("save / load a libra…"), so a
         # second copy would be both redundant and unreadable.

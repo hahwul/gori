@@ -77,6 +77,11 @@ module Gori::Tui
       # text-editing prefs.
       Section.new(:keys, "settings.keys", "Keys",
         "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9)", :editor, :form),
+      # Mouse sits beside Keys, not in Editor: both configure INPUT, and the Mouse toggle spent
+      # its life as a lone row under "Editor" — the one heading an operator looking for pointer
+      # behaviour would not open. It brings the drag-release mode with it.
+      Section.new(:mouse, "settings.mouse", "Mouse",
+        "Click/scroll navigation, and whether releasing a drag also copies the selection", :editor, :form),
       Section.new(:env, "settings.env", "Env",
         "Global environment variables for $KEY substitution in requests", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",

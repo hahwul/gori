@@ -87,12 +87,15 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 
 | 섹션 | 필드 |
 |------|------|
-| **Editor** | External editor, Markdown highlight, Mouse, Pretty-print bodies |
+| **Editor** | External editor, Markdown highlight, Pretty-print bodies |
+| **Mouse** | Mouse, Drag release |
 | **Keys** | Command modifier |
 | **Env** | 오프너: 아웃바운드 요청에 쓰는 전역 `$KEY` 변수 |
 | **Hotkeys** | 오프너: 단축키 재지정, OS 기본 프로파일 선택 |
 
-**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다. **Mouse**를 끄면 터미널 고유의 텍스트 선택이 돌아옵니다.
+**External editor**는 편집 가능한 필드에서 `^E`가 여는 프로그램입니다. 비워 두면 `$VISUAL` / `$EDITOR` / `vi` 순으로 넘어갑니다.
+
+**Mouse**는 포인터 전반을 다룹니다. 끄면 gori가 클릭·휠·드래그를 아예 가져가지 않으므로 터미널 고유의 텍스트 선택이 돌아옵니다. **Drag release**는 텍스트 패널 위에서 드래그를 놓았을 때 무엇을 할지 정합니다. `select only`는 선택 영역만 남기고 복사 키(READ에서는 `y`, 입력 중에는 `^Y`)를 기다립니다 — 지금까지의 동작입니다. `select + copy`는 놓는 순간 클립보드에도 넣습니다. 터미널의 기본 선택 동작과 같은 방식입니다. 그냥 클릭하면 선택되는 것이 없으므로 `select + copy`에서도 아무것도 복사되지 않습니다. 이 모드는 드래그가 실제로 만든 영역에만 작동하고, 복사 키와 완전히 같은 경로를 지나므로 토스트 문구와 탭별 "복사"의 의미가 양쪽에서 동일합니다.
 
 **Keys**와 **Hotkeys**는 한 쌍입니다. Keys는 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)를 *어떤 모디파이어로* 열지 고르고(`Option (⌥)`은 Ctrl을 포기하지 않고 `⌥` 별칭을 추가 — Ctrl 형태가 전달되지 않는 터미널에 유용), Hotkeys는 *개별 동작*을 재지정합니다. [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier), [단축키](/ko/guide/hotkeys/), [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
 

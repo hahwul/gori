@@ -763,6 +763,7 @@ Omitted until you apply or star a wordlist.
 |---------|-------------|
 | `theme` | Active theme name (default `goridark`). See the [Themes guide](/guide/themes/) |
 | `mouse` | Mouse support toggle |
+| `mouse_drag` | What releasing a drag does: `select` (default) or `copy` |
 | `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |

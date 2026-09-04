@@ -24,6 +24,58 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.rebindable?(reg["body.down"]).should be_false      # hidden nav primitive
       Gori::Hotkeys.rebindable?(reg["body.open"]).should be_false      # multi-chord nav alias
     end
+
+    # The eight Copy verbs declare `y` AND `^Y`, and a raw `chords.size <= 1` counted that as a
+    # nav alias — so every tab with a text editor had NO Copy row in the hotkey editor at all,
+    # while the single-chord Copy verbs one section away were freely rebindable. The count now
+    # ignores `Verb::Keymap.pinned_chords`, which is exactly the `^Y` half.
+    it "offers the y + ^Y Copy verbs, whose second chord is pinned rather than an alias" do
+      reg = Gori::Verbs.registry
+      %w[notes.copy issue.copy decoder.copy rewriter.copy jwt.copy repeater.copy
+        fuzzer.copy cookie.copy].each do |id|
+        reg[id].chords.size.should eq(2) # the shape this exemption is written for
+        Gori::Hotkeys.rebindable?(reg[id]).should be_true
+      end
+      # …and the single-chord siblings it must not change the answer for.
+      Gori::Hotkeys.rebindable?(reg["detail.copy"]).should be_true
+      Gori::Hotkeys.rebindable?(reg["intercept.copy"]).should be_true
+    end
+  end
+
+  # A rebind moves the READ-mode letter and LEAVES `^Y` where it is. Without the pin the
+  # override would replace both chords, and the panes where `^Y` is the only way to copy an INS
+  # selection (bare `y` types a `y` there) would silently lose it — which is the risk that kept
+  # these verbs out of the editor in the first place.
+  describe "pinned chords under a rebind" do
+    it "moves the bare letter, keeps ^Y, and advertises the new letter" do
+      reg = Gori::Verbs.registry
+      os = Gori::Verb::OsProfile.resolve("auto")
+      override = {"repeater.copy" => [Gori::Verb::Chord.new("u")]}
+      effective = Gori::Verb::Keymap.effective_chords(reg["repeater.copy"], os, override)
+      effective.should eq([Gori::Verb::Chord.new("u"), Gori::Verb::Chord.new("y", ctrl: true)])
+      # `.first?` is what every advertised label reads, so the row/palette/hint show `u`.
+      Gori::Hotkeys.binding_for(reg, "repeater.copy", override).should eq(Gori::Verb::Chord.new("u"))
+
+      km = Gori::Verb::Keymap.build(reg, os, override)
+      km.lookup(Gori::Verb::Chord.new("u"), Gori::Verb::Scope::Repeater).should eq("repeater.copy")
+      km.lookup(Gori::Verb::Chord.new("y", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.copy")
+      km.lookup(Gori::Verb::Chord.new("y"), Gori::Verb::Scope::Repeater).should be_nil
+    end
+
+    it "keeps ^Y through an explicit unbind — `y` does nothing, INS copy still works" do
+      reg = Gori::Verbs.registry
+      os = Gori::Verb::OsProfile.resolve("auto")
+      override = {"notes.copy" => [] of Gori::Verb::Chord}
+      km = Gori::Verb::Keymap.build(reg, os, override)
+      km.lookup(Gori::Verb::Chord.new("y"), Gori::Verb::Scope::Notes).should be_nil
+      km.lookup(Gori::Verb::Chord.new("y", ctrl: true), Gori::Verb::Scope::Notes).should eq("notes.copy")
+    end
+
+    it "pins nothing on a genuine nav alias, so those stay out of the editor" do
+      reg = Gori::Verbs.registry
+      Gori::Verb::Keymap.pinned_chords(reg["body.open"]).should be_empty
+      Gori::Verb::Keymap.pinned_chords(reg["detail.copy"]).should be_empty
+    end
   end
 
   describe ".binding_for / .default_for" do

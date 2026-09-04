@@ -87,12 +87,15 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 
 | Section | Fields |
 |---------|--------|
-| **Editor** | External editor, Markdown highlight, Mouse, Pretty-print bodies |
+| **Editor** | External editor, Markdown highlight, Pretty-print bodies |
+| **Mouse** | Mouse, Drag release |
 | **Keys** | Command modifier |
 | **Env** | Opener: global `$KEY` variables for outbound requests |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
 
-**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`. Turning **Mouse** off restores your terminal's native text selection.
+**External editor** is what `^E` opens in editable fields; blank falls back to `$VISUAL` / `$EDITOR` / `vi`.
+
+**Mouse** covers the pointer. Turning it off restores your terminal's own text selection — gori stops claiming click, wheel and drag entirely. **Drag release** decides what letting go of a drag over a text pane does: `select only` leaves the band highlighted and waits for the copy key (`y` in READ, `^Y` while typing), which is how gori has always behaved; `select + copy` also puts it on the clipboard there and then, the way a terminal's own primary selection does. A plain click selects nothing, so under `select + copy` it still copies nothing — the mode only ever acts on a band a drag actually built, and it copies through the same path the copy key uses, so the toast and the per-tab meaning of "copy" are identical either way.
 
 **Keys** and **Hotkeys** are the pair: Keys picks *which modifier* fronts gori's built-in chord family (`^P` `^N` `^W` `^1-9`) — `Option (⌥)` adds `⌥` aliases without giving up Ctrl, for terminals that never deliver the Ctrl form — while Hotkeys rebinds *individual actions*. See [Command modifier](/guide/hotkeys/#command-modifier), [Hotkeys](/guide/hotkeys/) and [environment variables](/guide/repeater-and-fuzzer/#environment-variables).
 

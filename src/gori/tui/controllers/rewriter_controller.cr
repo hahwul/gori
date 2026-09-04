@@ -330,10 +330,19 @@ module Gori::Tui
     # reorder), so neither offers ⇧J/⇧K.
     private def handle_sub_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      # Modified chords defer to the keymap. `ev.char` falls back to `key.to_char` and termisu
+      # decodes Ctrl+A as `(LowerA, Modifier::Ctrl)`, so every `c == 'x'` arm below (and in
+      # `handle_sub_action_key`) fired on the Ctrl form too: `^A` opened ADD EXTRACT RULE and
+      # `^E` ran extract_edit — and `^E` is a CLAIMED chord (the global "open in $EDITOR"),
+      # which `Hotkeys::CLAIMED_CTRL_LETTERS` says no controller may hardcode. `^A`/`^X` are
+      # bindable in the hotkey editor, so a binding on them was silently shadowed here.
+      # Guarded at the sub-handlers rather than at `handle_body_key`: the preview INPUT pane
+      # below is a real text editor and has to keep seeing `^Z` and `⌥⌫`.
+      return false if ev.ctrl? || ev.alt?
       c = ev.char || key.to_char
       case
-      when key.space? && !ev.ctrl? && !ev.alt? then @host.open_space_menu
-      when key.escape?                         then @host.request_focus(:menu)
+      when key.space?  then @host.open_space_menu
+      when key.escape? then @host.request_focus(:menu)
       when key.up?, c == 'k'
         @sub_sel <= 0 ? @host.request_focus(:menu) : (@sub_sel -= 1)
       when key.down?, c == 'j'
@@ -362,12 +371,15 @@ module Gori::Tui
 
     private def handle_list_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      # See `handle_sub_key` — the same Ctrl-carries-the-letter guard, for the same reason.
+      # Without it `^X` toggled the selected rule and `^J`/`^K` walked the list.
+      return false if ev.ctrl? || ev.alt?
       c = ev.char || key.to_char
       case
-      when key.space? && !ev.ctrl? && !ev.alt? then @host.open_space_menu
-      when key.up?, c == 'k'                   then move_up
-      when key.down?, c == 'j'                 then list_down
-      when key.escape?                         then @host.request_focus(:menu)
+      when key.space?          then @host.open_space_menu
+      when key.up?, c == 'k'   then move_up
+      when key.down?, c == 'j' then list_down
+      when key.escape?         then @host.request_focus(:menu)
       when c == 'x'
         # The one action still dispatched here, and not an oversight: `rewriter.select-line`
         # binds bare `x` in this same SCOPE for the preview pane, and `Keymap#lookup` is keyed
@@ -965,7 +977,7 @@ module Gori::Tui
         # `:preview_in` arm says the same). The footer named neither the band nor the key.
         "type sample HTTP · ⇧arrows select · ^Y copy · ↑ list · ↓/→ output · esc list"
       when :preview_out
-        "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ← input · esc input"
+        keys("↑/↓ move · ⇧arrows select · {rewriter.copy} copy · {rewriter.select-line} line · space cmds · ← input · esc input")
       else
         keys("[/] sub-tab · ↑/↓ select · {rewriter.add} add · ↵/e edit · x on/off · {rewriter.scope} global/project · {rewriter.delete} delete · {rewriter.move-up}/{rewriter.move-down} reorder · esc tabs")
       end

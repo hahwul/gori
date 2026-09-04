@@ -8,6 +8,7 @@ private RESET_FIXTURE = <<-JSON
   {
     "theme": "goriday",
     "mouse": false,
+    "mouse_drag": "copy",
     "pretty_bodies": false,
     "layout": { "history_preview": true, "history_list_order": "oldest" },
     "statusline": { "command": "echo hi" },
@@ -107,7 +108,7 @@ describe "Settings.reset_to_factory" do
       # `colormarker` and `saved_views`, which stay only to carry their id counters (see
       # reset_rewriter: those are what stop a project's surviving overrides — or, for views, its
       # `history_view` pointer — from latching onto a reused id).
-      left = %w[theme mouse pretty_bodies network editor probe rewriter colormarker saved_views]
+      left = %w[theme mouse mouse_drag pretty_bodies network editor probe rewriter colormarker saved_views]
       Gori::Settings.document_keys.sort.should eq(left.sort)
       JSON.parse(File.read(path)).as_h.keys.sort.should eq(left.sort)
 
@@ -115,6 +116,7 @@ describe "Settings.reset_to_factory" do
       # settings.json would leave the running session on the old theme, keymap and rules.
       Gori::Settings.theme.should eq(Gori::Settings::DEFAULT_THEME)
       Gori::Settings.mouse.should eq(Gori::Settings::DEFAULT_MOUSE)
+      Gori::Settings.mouse_drag.should eq(Gori::Settings::DEFAULT_MOUSE_DRAG)
       Gori::Settings.bind_port.should eq(Gori::Settings::DEFAULT_BIND_PORT)
       Gori::Settings.capture_max_mib.should eq(Gori::Settings::DEFAULT_CAPTURE_MAX_MIB)
       Gori::Settings.tls_passthrough.should be_empty
