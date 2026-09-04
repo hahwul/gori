@@ -499,9 +499,16 @@ module Gori::Tui
                             listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_mode_band(screen, rect)
       render_filter_bar(screen, rect, rect.y + 1)
-      screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
-      screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
-      screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      # The column header owns row 2 of the pane, so it exists only once the pane HAS one.
+      # Unguarded, a 40x9 terminal (Layout.usable?'s floor plus a row) gives this list a
+      # one-row interior and `SEV CAT TITLE` was painted on the shell's status line, over the
+      # key hints. The divider below clamps itself (see Frame.inner_divider); this row did not.
+      # Contract: `spec/tui/contract_render_bounds_spec.cr`.
+      if rect.h > 2
+        screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
+        screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
+        screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      end
       Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
       top = rect.y + 4
       list_h = {rect.bottom - top, 0}.max

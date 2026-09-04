@@ -545,9 +545,17 @@ module Gori::Tui
     # (see `overview_plan`) needs fewer of them, and every row it gives back goes to the card
     # underneath. Still a PURE function of `rect`, which is what keeps it the single source of
     # truth `strip_rect` / `active_card` / `strip_chip_at` / `pane_at` all route through.
+    #
+    # `rect.h` is in the min for the case none of the other three bound: `overview_budget`
+    # floors its inner rows at 3, deliberately (a band that folds to nothing says nothing), so
+    # on a TWO-row body every other term stayed at 3 and the band was painted a row past the
+    # bottom — `Frame.card`'s fill landed on the shell's status line. That is the whole body a
+    # 40x8 terminal has (`Layout.usable?`'s floor, and `Layout.compute` spends four rows on
+    # chrome). Inert above two rows: at `rect.h == 3` the budget term is already 3.
+    # Contract: `spec/tui/contract_render_bounds_spec.cr`.
     private def overview_h(rect : Rect) : Int32
       plan = overview_plan(rect)
-      {plan.rows + (plan.signpost ? 1 : 0) + 2, overview_budget(rect) + 2, OVERVIEW_CAP}.min
+      {plan.rows + (plan.signpost ? 1 : 0) + 2, overview_budget(rect) + 2, OVERVIEW_CAP, rect.h}.min
     end
 
     # Width carved off the RIGHT of the OVERVIEW band for the AT A GLANCE viz pane, or 0
@@ -1804,14 +1812,26 @@ module Gori::Tui
       @desc_dirty = true
     end
 
+    # ⌃Z on an empty undo stack and ⌫ at the buffer start are NO-OPS — `TextArea` returns
+    # early without bumping `#edits` — and dirtying the description there was not harmless.
+    # `@desc_dirty` is what makes `reload` refuse to re-seed the buffer from the store (see
+    # the note there), so an idle keystroke over a clean description silenced every later
+    # refresh of the pane, including a peer's write, until something else saved. The same
+    # guard `desc_motion_key` and `replace_matches` already apply, and the same one the
+    # Notes, Repeater, Fuzzer and Intercept editors carry. Contract:
+    # `spec/tui/contract_editor_noop_spec.cr`.
     def undo : Nil
-      @desc_area.undo
-      @desc_dirty = true
+      desc_edit_if_changed(&.undo)
     end
 
     def backspace : Nil
-      @desc_area.backspace
-      @desc_dirty = true
+      desc_edit_if_changed(&.backspace)
+    end
+
+    private def desc_edit_if_changed(& : TextArea -> Nil) : Nil
+      before = @desc_area.edits
+      yield @desc_area
+      @desc_dirty = true if @desc_area.edits != before
     end
 
     def move(dr : Int32, dc : Int32) : Nil

@@ -99,8 +99,8 @@ module Gori::Tui
 
     private def handle_empty_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      return false unless key.escape? || key.up? || key.lower_k?
-      @host.request_focus(:subtabs) # pop to Target's Sitemap|Discover strip (self-downgrades to :menu with no strip)
+      return false unless key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
+      @host.request_focus(:subtabs)                  # pop to Target's Sitemap|Discover strip (self-downgrades to :menu with no strip)
       true
     end
 

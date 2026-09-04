@@ -195,9 +195,22 @@ module Gori::Tui
     # `border` should match the enclosing card's outline so the seam stays one
     # colour — pass `pane_border(focused)` so a focused pane's divider lights gold
     # with its frame instead of staying a stray grey hairline.
+    #
+    # The `y` bound is the same one `tee_divider` carries, and for the same reason: the
+    # callers compute the seam row by walking down from their own top (`hdr_y + 1`, `rect.y + 3`,
+    # a detail split's `detail_y`) and none of them checks the result against the interior they
+    # were given. On a SHORT pane that arithmetic runs off the bottom, and a divider drawn at
+    # `inner.bottom` lands on the shell's status row — the operator sees `├────────┤` over
+    # their key hints. Seen at a 40x9 terminal on History, Issues and the Sitemap, whose
+    # interior is one row tall there; the empty-state cards reach the same arithmetic.
+    #
+    # Clamped here rather than in nine callers: the divider is the thing that knows which rect
+    # it belongs to, and a per-caller guard is the shape that already drifted into different
+    # magic numbers once (see `border_meta`). Contract:
+    # `spec/tui/contract_render_bounds_spec.cr`.
     def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme.bg,
                            border : Color = Theme.border) : Nil
-      return if inner.w <= 0
+      return if inner.w <= 0 || y < inner.y || y >= inner.bottom
       screen.cell(inner.x - 1, y, TEE_L, border, bg) # left frame border
       screen.hline(inner.x, y, inner.w, fg: border, bg: bg)
       screen.cell(inner.right, y, TEE_R, border, bg) # right frame border

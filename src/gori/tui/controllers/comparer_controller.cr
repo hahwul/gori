@@ -183,15 +183,15 @@ module Gori::Tui
       key = ev.key
       return true if handle_body_hscroll(ev)
       case
-      when key.up?, key.lower_k?
+      when nav_up?(ev)
         # The cursor moves and drags the viewport with it; ⇧ grows a row selection. At the top
         # the ↑ still leaves for the sub-tab strip, as it always did.
         view.at_top? ? @host.request_focus(:subtabs) : view.move_rows(-1, ev.shift?)
         true
-      when key.down?, key.lower_j?
+      when nav_down?(ev)
         view.move_rows(1, ev.shift?)
         true
-      when key.left?, key.right?, key.lower_h?, key.lower_l?
+      when nav_left?(ev), nav_right?(ev)
         view.toggle_pane
         true
       when key.escape?
