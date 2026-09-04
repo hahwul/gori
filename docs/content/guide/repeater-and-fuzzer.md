@@ -39,7 +39,7 @@ That one-at-a-time order is the point on WebSocket. A socket carries a conversat
 - **gori stops when the peer does.** If the server sends a `CLOSE`, or the connection ends, the rest of your script is *not* written into a socket nobody is reading — RFC 6455 forbids data frames after a `CLOSE` anyway. The result says how many of your messages actually went out.
 - **A `CLOSE` *you* wrote does not stop it.** Sending data after your own `CLOSE` is a protocol test, and Repeater lets you run it — as it does an unmasked frame, a lone continuation, or a length header that disagrees with its payload.
 
-gori never negotiates `permessage-deflate`, and the capture side stores frame payloads exactly as they arrived. A session captured over a compressed connection therefore holds *compressed* bytes and cannot be replayed; re-capture it with compression disabled in the browser.
+The WebSocket Repeater does not negotiate `permessage-deflate`, and the capture proxy disables it by default. A Match & Replace head rule can deliberately restore the extension offer; a session captured that way holds the extension-encoded bytes and cannot be replayed. Re-capture it without that rule (or with compression disabled in the client).
 
 Replay from the command line, optionally against a new target:
 

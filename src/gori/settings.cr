@@ -25,9 +25,10 @@ require "./settings/fuzzer"
 
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
-  # process (the `settings:*` command-palette entries control this). Currently the
-  # NETWORK section (proxy bind + upstream proxy), the EDITOR (external ^E editor),
-  # and the TUI THEME. Hotkeys are TODO. Persisted as JSON at <config_dir>/settings.json.
+  # process (the `settings:*` command-palette entries control this). Split into the
+  # section files required above: network, editor/display, keymap/hotkeys, tabs,
+  # tool defaults, rules and integrations. Persisted as JSON at
+  # <config_dir>/settings.json.
   #
   # Loaded once at startup (CLI flags then override the bind in memory); the
   # Settings UI edits these class properties and calls `save`. `upstream_proxy` is

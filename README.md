@@ -23,9 +23,11 @@
 
 **gori** (고리 — Korean for *ring, link, loop*) sits in the loop between your client and its target,
 capturing every request and response as a *flow* you can replay, fuzz, and scan across HTTP/1.1,
-HTTP/2, WebSocket, gRPC, and SSE, and intercept in flight on HTTP/1.1 and HTTP/2. Every action is
-also a `gori run` subcommand and an MCP tool, so scripts and AI agents can drive the same
-engagement.
+HTTP/2, WebSocket, gRPC, and SSE, and intercept in flight on HTTP/1.1 and HTTP/2. Core assessment
+actions that cross surfaces use the same engines, and those workflows are also
+available through `gori run` and MCP, so scripts and AI agents can drive the same engagement.
+The [capability matrix](https://gori.hahwul.com/reference/capabilities/) names the protocol and
+surface limits explicitly.
 
 ![gori TUI — the History tab listing captured HTTP flows](docs/static/images/tui/readme.svg)
 
@@ -61,8 +63,8 @@ engagement.
 - Mouse support, multi-line editing, and go-to-line navigation
 
 ### Headless & Scriptable
-- `gori run` mirrors every TUI action for non-interactive use
-- MCP server (`gori mcp`) exposes the same engagement to AI agents
+- `gori run` exposes the core project and testing workflows for non-interactive use
+- MCP server (`gori mcp`) exposes those workflows to AI agents (it does not start a capture proxy)
 
 </details>
 
@@ -151,8 +153,8 @@ running your first request.
 
 ### For scripts: `gori run` (headless CLI)
 
-`gori run` mirrors every TUI action for non-interactive use. It is built for scripting and CI, but
-works just as well by hand or from an agent's shell:
+`gori run` exposes the same core project and testing engines without the interactive UI. It is
+built for scripting and CI, but works just as well by hand or from an agent's shell:
 
 ```bash
 gori run history --format json      # dump captured flows as JSON

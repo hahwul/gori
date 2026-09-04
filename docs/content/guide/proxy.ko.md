@@ -116,21 +116,13 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
 
 ## 프로토콜 지원 {#protocol-support}
 
-gori는 지나가는 프로토콜을 인식합니다.
-
-| 프로토콜 | 지원 |
-|----------|---------|
-| **HTTP/1.1** | 전체 캡처 및 리피터 |
-| **HTTP/2** | ALPN 이후 릴레이(스트림 단위 인터셉트와 헤드 규칙 포함), 원시 프레임 로그, HPACK 디코드, stream → flow 조립 |
-| **HTTP/3** | 직접 가로채지 않음; 클라이언트가 우회할 수 있음을 알 수 있도록 `Alt-Svc` `h3`를 표시하고, `network.strip_alt_svc`로 제거해 우회 자체를 막을 수 있음 |
-| **WebSocket** over HTTP/1.1 (`Upgrade`) | 실시간 메시지 캡처, 리피터, 메시지 단위 인터셉트(`proto:ws`로 옵트인), 메시지 Match & Replace. 핸드셰이크에서 압축이 제거됩니다(아래 참고) |
-| **WebSocket** over HTTP/2 (RFC 8441) | 메시지 캡처. HTTP/1.1 쪽과 똑같이 표시되고 export됩니다. 메시지 단위 인터셉트, 메시지 Match & Replace, Repeater 재전송은 불가(아래 참고) |
-| **gRPC** | HTTP/2 위에 프레이밍되고 status 트레일러 포함; `.proto` 유무와 무관하게 와이어 포맷에서 protobuf 디코드(아래 참고) |
-| **Server-Sent Events** | 표시 시점에 개별 이벤트로 파싱 |
+캡처 / 인터셉트 / 재전송 / 퍼징의 단일 기준표는
+[기능 매트릭스](/ko/reference/capabilities/)에 있습니다. 아래 내용은 그 경계를 만든 프록시 쪽
+트레이드오프를 설명합니다.
 
 **gori는 HTTP/3을 직접 가로채지 않습니다.** QUIC은 UDP이고 gori의 리스너는 전부 TCP 소켓이므로, `Alt-Svc: h3=":443"`으로 응답하는 원 서버는 클라이언트에게 프록시 밖으로 나가는 길을 제안하는 셈입니다. 기본값에서 gori는 그 제안을 그대로 두되 그 사실을 알립니다 — 무엇이 통과했는지 밝히는 안내가 플로우에 남습니다. 클라이언트가 QUIC으로 떠나도 History에 설명 없는 구멍이 아니라 보고된 사각지대로 남습니다. [`network.strip_alt_svc`](/ko/reference/config/#strip-alt-svc)를 켜면 `h3`를 광고하는 `Alt-Svc` 필드를 클라이언트가 받는 응답에서 제거하므로(HTTP/1.1과 HTTP/2 모두), 클라이언트가 읽는 응답에는 옮겨 갈 곳이 남지 않습니다. (`Alt-Svc` 말고 다른 경로로 h3를 알아내는 클라이언트 — 예를 들어 DNS `HTTPS` 레코드 — 는 응답 쪽 제거가 닿는 범위 밖입니다.) 제거 대상은 딱 그 필드들뿐입니다. `Alt-Svc: clear`는 그대로 둡니다 — 이미 캐시한 대체 경로를 잊으라는 지시이기 때문입니다. `h2=":8443"` 같은 h3가 아닌 대체 경로도 그대로 둡니다 — 그것도 TCP 포트이고 여전히 gori를 지나가기 때문입니다.
 
-**gori를 지나는 WebSocket은 압축되지 않습니다.** gori가 중계하는 핸드셰이크에서 `Sec-WebSocket-Extensions`를 제거하므로 `permessage-deflate`는 협상되지 않고, 캡처된 프레임은 실제로 오간 메시지 그대로입니다. 이 제거가 없으면 양쪽 피어는 gori가 해독하지 않는 압축에 합의하게 되고, History와 상세 뷰, `gori run history show`, MCP 도구, export가 전부 deflate 스트림을 페이로드인 양 보여 주게 됩니다. 믿을 수 있는 캡처의 대가로, 원래라면 압축을 쓸 앱이 gori를 지나는 동안에는 압축을 쓰지 못합니다. 특정 호스트의 소켓을 있는 그대로 중계해야 한다면, 요청에 head Match & Replace 규칙을 걸어 제거된 제안을 되돌려 놓으세요. 제거는 Match & Replace보다 **먼저** 실행되며, 바로 규칙이 이를 되돌릴 수 있게 하려는 순서입니다. `Sec-WebSocket-Extensions`를 복원하면 오리진은 실제로 확장을 제안받은 것이 되므로, gori는 오리진의 수락 응답에 손대지 않고 그대로 중계하고 두 피어는 프록시가 없을 때와 똑같이 압축을 협상합니다. 이 경우에도 플로우는 그대로 캡처되며, 지금 보고 있는 프레임이 메시지가 아니라 해당 확장으로 인코딩된 바이트라는 `[gori]` 알림이 함께 남습니다. [TLS passthrough](/ko/reference/config/#tls-passthrough)도 연결에 손대지 않지만 그 호스트는 아무것도 캡처되지 않습니다. 규칙을 먼저 고려하고, 호스트를 gori에서 아예 빼고 싶을 때 passthrough를 쓰세요.
+**기본적으로 gori는 WebSocket 압축을 끕니다.** gori가 중계하는 핸드셰이크에서 `Sec-WebSocket-Extensions`를 제거하므로 `permessage-deflate`는 협상되지 않고, 캡처된 프레임은 실제로 오간 메시지 그대로입니다. 이 제거가 없으면 양쪽 피어는 gori가 해독하지 않는 압축에 합의하게 되고, History와 상세 뷰, `gori run history show`, MCP 도구, export가 전부 deflate 스트림을 페이로드인 양 보여 주게 됩니다. 믿을 수 있는 캡처의 대가로, 원래라면 압축을 쓸 앱이 gori를 지나는 동안에는 압축을 쓰지 못합니다. 특정 호스트의 소켓을 있는 그대로 중계해야 한다면, 요청에 head Match & Replace 규칙을 걸어 제거된 제안을 되돌려 놓으세요. 제거는 Match & Replace보다 **먼저** 실행되며, 바로 규칙이 이를 되돌릴 수 있게 하려는 순서입니다. `Sec-WebSocket-Extensions`를 복원하면 오리진은 실제로 확장을 제안받은 것이 되므로, gori는 오리진의 수락 응답에 손대지 않고 그대로 중계하고 두 피어는 프록시가 없을 때와 똑같이 압축을 협상합니다. 이 경우에도 플로우는 그대로 캡처되며, 지금 보고 있는 프레임이 메시지가 아니라 해당 확장으로 인코딩된 바이트라는 `[gori]` 알림이 함께 남습니다. [TLS passthrough](/ko/reference/config/#tls-passthrough)도 연결에 손대지 않지만 그 호스트는 아무것도 캡처되지 않습니다. 규칙을 먼저 고려하고, 호스트를 gori에서 아예 빼고 싶을 때 passthrough를 쓰세요.
 
 **핸드셰이크와 트랜스크립트는 별개의 패널입니다.** 캡처된 소켓을 열면 상세 뷰의 `REQUEST`·`RESPONSE` 옆에 `MESSAGES` 칩이 붙습니다(플로우가 더 갖고 있으면 그것도 함께 — RFC 8441 소켓이면 `FRAMES (h2)`, 서브스크립션이면 `GRAPHQL`). `RESPONSE`는 서버가 답한 업그레이드 — `101`(또는 RFC 8441의 `200`), 서버가 고른 서브프로토콜, 수락한 확장, 그 자리에서 내려준 `Set-Cookie` — 이고, `MESSAGES`는 프레임 로그입니다. 둘은 서로 다른 질문에 답하며 어느 쪽도 다른 쪽을 대신하지 못하므로 분리되어 있습니다. 위 규칙으로 `Sec-WebSocket-Extensions`를 되돌려 놓았다면, 원 서버가 실제로 그것을 받아들였는지는 `RESPONSE`에서 읽습니다. `^X`(hex)와 `b`(공백 표시)는 캡처된 다른 헤드와 마찬가지로 `RESPONSE`에서 동작하고, `MESSAGES`에서는 꺼집니다 — 그 바이트는 `response_body`가 아니라 메시지 로그에 있기 때문입니다.
 

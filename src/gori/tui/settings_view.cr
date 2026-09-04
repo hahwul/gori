@@ -6,10 +6,10 @@ require "./viewport"
 require "../settings"
 
 module Gori::Tui
-  # The interactive settings editor — the UI that controls gori's persisted config
-  # (Gori::Settings). Sections: NETWORK (proxy bind + upstream proxy), EDITOR (the
-  # external ^E editor), THEME (the TUI colour theme). Reusable by both the Runner
-  # (a :settings overlay) and the ProjectPicker (a settings mode). Hotkeys are TODO.
+  # The interactive form editor for gori's persisted config (Gori::Settings).
+  # Reusable by both the Runner (a :settings overlay) and the ProjectPicker (a
+  # settings mode); dedicated list/swatch editors handle themes, tabs, hostnames,
+  # env and hotkeys.
   #
   # Apply semantics: the upstream proxy takes effect immediately (Upstream.dial
   # reads it live). The bind address is persisted here; in-project the Runner
