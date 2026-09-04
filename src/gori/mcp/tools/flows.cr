@@ -316,7 +316,8 @@ module Gori
       # confirm:true is that gate. Without it we report the count and refuse, so a
       # mis-issued call cannot silently empty a capture session.
       private def clear_history(h) : Result
-        n = store.count
+        n = store.count?
+        return busy("history NOT cleared (store busy); every flow is still there") unless n
         unless bool_arg(h, "confirm", false)
           return err("refusing to delete #{n} flow#{n == 1 ? "" : "s"} without confirm:true — this cannot be undone",
             "CONFIRM_REQUIRED", field: "confirm",

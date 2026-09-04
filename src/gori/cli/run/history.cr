@@ -335,7 +335,8 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          n = store.count
+          n = store.count?
+          abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
           unless yes
             abort "gori run history clear: refusing to delete #{n} flow#{n == 1 ? "" : "s"} without --yes"
           end

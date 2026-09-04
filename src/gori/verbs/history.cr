@@ -439,8 +439,8 @@ module Gori
         available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
 
       # --- detail view ---
-      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
-      # returns to the list once past REQUEST; → walks forward (REQ→RES→FRAMES).
+      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and → forward
+      # (REQ→RES→FRAMES); both clamp at the ends, so neither ever closes the detail.
       r.register Verb::Definition.new(
         "detail.close", "Close detail", "Return to the History list", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("q")],

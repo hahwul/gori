@@ -2412,6 +2412,24 @@ describe "Gori::Tui::HistoryView marks" do
     end
   end
 
+  it "keeps the marks and the open detail when a clear rolls back" do
+    tmp_store do |store|
+      ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.mark_all
+      view.open_detail(store).should be_true
+      # A closed writer answers every checked write false, the same answer a SQLITE_BUSY
+      # rollback gives. `delete_ids` already promised "NOTHING local is touched" on that;
+      # `clear` said the same in its toast while it had dropped the marks and closed the
+      # drill-in (and reloaded the list from a store it had just been refused by).
+      store.close
+      view.clear(store).should be_false
+      view.mark_count.should eq(3)
+      view.detail_flow_id.should eq(ids.last)
+    end
+  end
+
   it "renders a marked row distinctly from the cursor row, with a live count" do
     tmp_store do |store|
       3.times { |i| add_flow(store, "GET", "/p#{i}", 200) }
@@ -2626,6 +2644,107 @@ describe "HistoryView::QL_FIELDS" do
       view.query_suggestions.should_not contain("flag:")
       view.query_complete
       view.query.should_not eq("flag:")
+    end
+  end
+end
+
+# A response whose bytes mention IHDR: as text they are a binary placeholder, as raw
+# reveal lines they would match.
+private def png_flow(store) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+    method: "GET", target: "/logo.png", http_version: "HTTP/1.1",
+    head: "GET /logo.png HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+  body = Bytes.new(64) { |i| (i * 37 % 256).to_u8 }
+  body[0, 8].copy_from(Bytes[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+  body[8, 4].copy_from(Bytes[0, 0, 0, 13]) # the IHDR length — and the NUL the binary sniff keys on
+  "IHDR".to_slice.copy_to(body + 12)
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\n".to_slice,
+    body: body, content_type: "image/png"))
+  id
+end
+
+describe "HistoryView — reveal, paging and the preview scroll" do
+  it "walks the placeholder, not the raw bytes, when reveal is on over a binary pane" do
+    tmp_store do |store|
+      png_flow(store)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+      view.reveal = true
+      # The renderer draws the "— binary body —" placeholder here (reveal_active? is false
+      # for a binary DetailView), so ^F must search those lines, not the reveal space —
+      # which is what the caret, the scroll bound and `y` walk too.
+      view.detail_search_lines("IHDR").should be_empty
+      view.detail_search_lines("binary body").should_not be_empty
+      view.scroll_detail(10_000)
+      view.detail_copy_text.should_not contain("IHDR") # the whole pane, and it is the placeholder
+    end
+  end
+
+  it "paints the ⇧-selection in reveal mode, the way the plain body does" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/t", 200, "text/plain")
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.reveal = true
+      view.set_detail_focus(:body)
+      view.detail_move(1, 0, selecting: true)
+      view.detail_selection?.should be_true
+      backend = MemoryBackend.new(80, 20)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 20), focused: true)
+      # ⇧↓ from the top selects the whole first line ("GET /t HTTP/1.1"); the caret alone
+      # also wears accent_bg, so the assertion is on the band, not on one tinted cell.
+      tinted = (0...20).sum { |y| (0...80).count { |x| backend.bg_at(x, y) == Gori::Tui::Theme.accent_bg } }
+      tinted.should be >= "GET /t HTTP/1.1".size
+    end
+  end
+
+  it "bounds the preview scroll by the projection it draws, so ↑ moves at once after an overshoot" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        add_flow(store, "GET", "/p", 200, "text/plain")
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        view.set_preview_focus(:res)
+        view.scroll_preview(500)
+        last = view.preview_scroll_res
+        last.should be < 500
+        view.scroll_preview(-1)
+        view.preview_scroll_res.should eq(last - 1)
+        view.scroll_preview(-500)
+        view.preview_scroll_res.should eq(0)
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "pages the list by the rows the last frame drew" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = false
+      tmp_store do |store|
+        add_flow(store, "GET", "/a", 200)
+        view = HistoryView.new
+        view.reload(store)
+        rect = Rect.new(0, 0, 80, 24)
+        view.render_list(Screen.new(MemoryBackend.new(80, 24)), rect)
+        # bar + header + divider come off the top; two rows of overlap like the detail's page
+        view.list_page_rows.should eq(24 - 3 - 2)
+        view.start_query
+        view.render_list(Screen.new(MemoryBackend.new(80, 24)), rect)
+        view.list_page_rows.should eq(24 - 4 - 2) # one less while the suggestion row is up
+      end
+    ensure
+      Gori::Settings.history_preview = prev
     end
   end
 end

@@ -1198,6 +1198,7 @@ module Gori::Tui
     end
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
+      @detail_pin = nil # see history_target_flow_id — the pin lives for one event only
       # Deliberate quit: ^D (or ^C) must be pressed twice in a row — the first press
       # arms and hints in the status bar; any other key disarms. (Q no longer quits;
       # `q` still returns to the project picker.) Handled before everything else so
@@ -1316,8 +1317,10 @@ module Gori::Tui
       if @active_tab == :history && @overlay.detail? && @focus == :body
         return if history_controller.handle_detail_key(ev)
         # PageUp/PageDown/Home/End page the open response/request body (the :detail
-        # overlay is outside the @overlay.none? body-nav path below, so route here).
-        if delta = page_nav_delta(ev.key)
+        # overlay is outside the @overlay.none? body-nav path below, so route here). The
+        # page is the pane's own drawn height — the same step ⇧PgDn selects by — not the
+        # body's, which is four rows taller than the text and skipped a row per press.
+        if delta = page_nav_delta(ev.key, page: history_controller.view.detail_page_rows)
           history_controller.scroll_detail(delta)
           return
         end
@@ -2593,8 +2596,8 @@ module Gori::Tui
     # in-body list dispatch (TabController#body_scroll) and the History detail overlay.
     JUMP_ROWS = 100_000
 
-    private def page_nav_delta(key : Termisu::Input::Key) : Int32?
-      page = {@body_h - 3, 3}.max
+    private def page_nav_delta(key : Termisu::Input::Key, page : Int32? = nil) : Int32?
+      page ||= {@body_h - 3, 3}.max
       case
       when key.page_down? then page
       when key.page_up?   then -page
@@ -3819,8 +3822,19 @@ module Gori::Tui
     # while the detail overlay stays on its flow, so detail.* verbs (repeater/issue/fuzz/mine/
     # comparer/copy/scope) must read the detail, not the cursor — or they act on the wrong flow.
     def history_target_flow_id : Int64?
+      return @detail_pin if @detail_pin
       @overlay.detail? ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
     end
+
+    # The flow a detail.* jump verb was READING when it closed the overlay, held for the rest
+    # of the event that closed it. Those verbs (`detail.repeater`, `.issue`, `.fuzz`, `.mine`,
+    # `.sequence`, `.probe-active`) run `close_detail` first so the overlay does not float over
+    # the destination tab — and with `@overlay` already `:none` the two resolvers above and
+    # below fell back to the marks (or to a cursor follow mode had moved to the newest capture),
+    # sending flows the operator never had on screen. `Runner#close_detail` sets it and
+    # `handle_key`/`handle_mouse` drop it before dispatching the next event, so it can neither
+    # leak into a later verb nor survive a close the operator did by hand.
+    @detail_pin : Int64?
 
     # The plural of history_target_flow_id, and the ONE resolver every batch-capable
     # History verb calls (#442): the marks if any are set, else the cursor row. An open
@@ -3832,6 +3846,9 @@ module Gori::Tui
     # trim_window, or a follow-mode reload. Ids that no longer resolve are skipped and
     # counted in the summary toast rather than aborting the batch.
     def history_target_flow_ids : Array(Int64)
+      if pin = @detail_pin
+        return [pin]
+      end
       return [history_controller.view.detail_flow_id].compact if @overlay.detail?
       history_controller.target_flow_ids
     end
