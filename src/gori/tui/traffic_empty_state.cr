@@ -740,7 +740,7 @@ module Gori::Tui
       y += 2
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " a ", "add an include or exclude rule", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "add an include or exclude rule", bullet: "▸ ", verb: "scope.add-rule")
       draw_chord_hint(screen, ix, y, iw, " space ", "rule actions", bullet: "▸ ")
     end
 
@@ -757,7 +757,7 @@ module Gori::Tui
       y += 2
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " a ", "map a host to an IP", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "map a host to an IP", bullet: "▸ ", verb: "hostoverride.add-entry")
       draw_chord_hint(screen, ix, y, iw, " space ", "override actions", bullet: "▸ ")
     end
 
@@ -774,7 +774,7 @@ module Gori::Tui
       y += 2
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " a ", "add a $KEY variable", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " a ", "add a $KEY variable", bullet: "▸ ", verb: "env.add-var")
       draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
     end
 
@@ -793,7 +793,7 @@ module Gori::Tui
       y += 2
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
-      y = draw_chord_hint(screen, ix, y, iw, " s ", "filter by source", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " s ", "filter by source", bullet: "▸ ", verb: "activity.filter-source")
       draw_chord_hint(screen, ix, y, iw, " space ", "all commands", bullet: "▸ ")
     end
 

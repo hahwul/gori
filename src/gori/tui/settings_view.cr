@@ -71,8 +71,21 @@ module Gori::Tui
     EDITOR_FIELDS = [
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
-      Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
       Field.new("Pretty-print bodies", "reflow JSON/XML/form/… in History detail + Repeater response — display only; ←/→/space toggles", bool: true),
+    ]
+    # MOUSE is its own section rather than two rows in EDITOR (where the on/off toggle used to
+    # sit alone): pointer behaviour is not text editing, and a "Mouse" heading is where an
+    # operator whose drag did not do what they expected actually looks. The persisted key is
+    # unchanged (top-level `mouse`), so no settings.json needs migrating.
+    MOUSE_DRAG_LABELS = {
+      "select" => "select only",
+      "copy"   => "select + copy",
+    }
+    MOUSE_FIELDS = [
+      Field.new("Mouse", "click + scroll-wheel navigation, and drag-to-select — off restores native text selection; ←/→/space toggles", bool: true),
+      Field.new("Drag release",
+        "what letting go of a drag does: select only leaves the band highlighted for the copy key · select + copy also puts it on the clipboard there and then (a plain click with nothing selected still copies nothing) — ←/→ cycles",
+        choices: Settings::MOUSE_DRAG_MODES, choice_labels: MOUSE_DRAG_LABELS),
     ]
     # KEYS is its own section rather than a row in EDITOR: it configures key INPUT, not text
     # editing. It sits between Editor and Hotkeys in the same group, so "which modifier" and
@@ -199,6 +212,7 @@ module Gori::Tui
     SECTIONS = {
       :network       => NETWORK_FIELDS,
       :editor        => EDITOR_FIELDS,
+      :mouse         => MOUSE_FIELDS,
       :keys          => KEYS_FIELDS,
       :theme         => THEME_FIELDS,
       :layout        => LAYOUT_FIELDS,
@@ -239,6 +253,7 @@ module Gori::Tui
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
                 when :editor        then editor_values
+                when :mouse         then mouse_values
                 when :keys          then keys_values
                 when :theme         then [Theme.canonical(Settings.theme)]
                 when :layout        then layout_values
@@ -274,8 +289,11 @@ module Gori::Tui
                 when :editor then [
                   Settings::DEFAULT_EDITOR,
                   Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off",
-                  Settings::DEFAULT_MOUSE ? "on" : "off",
                   Settings::DEFAULT_PRETTY_BODIES ? "on" : "off",
+                ]
+                when :mouse then [
+                  Settings::DEFAULT_MOUSE ? "on" : "off",
+                  Settings::DEFAULT_MOUSE_DRAG,
                 ]
                 when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER]
                 when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
@@ -381,8 +399,17 @@ module Gori::Tui
       [
         Settings.editor,
         Settings.editor_markdown ? "on" : "off",
-        Settings.mouse ? "on" : "off",
         Settings.pretty_bodies_default ? "on" : "off",
+      ]
+    end
+
+    # The MOUSE row values. `normalize_mouse_drag` on the way OUT as well as in, so a
+    # hand-edited settings.json holding an unknown mode shows the default rather than a row
+    # whose ←/→ cycle cannot find its own current value in `choices`.
+    private def mouse_values : Array(String)
+      [
+        Settings.mouse ? "on" : "off",
+        Settings.normalize_mouse_drag(Settings.mouse_drag),
       ]
     end
 
@@ -646,9 +673,14 @@ module Gori::Tui
       if @section == :editor
         Settings.editor = @values[0].strip # blank is valid → clears to $VISUAL/$EDITOR/vi
         Settings.editor_markdown = @values[1] == "on"
-        Settings.mouse = @values[2] == "on"
-        Settings.pretty_bodies_default = @values[3] == "on"
+        Settings.pretty_bodies_default = @values[2] == "on"
         @values = editor_values
+        return persist
+      end
+      if @section == :mouse
+        Settings.mouse = @values[0] == "on"
+        Settings.mouse_drag = Settings.normalize_mouse_drag(@values[1])
+        @values = mouse_values
         return persist
       end
       if @section == :keys

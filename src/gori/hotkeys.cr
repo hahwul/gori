@@ -118,8 +118,18 @@ module Gori
     # navigation aliases (e.g. body.open = enter/right/l) that a single-chord rebind
     # would silently collapse, and their structural primary (enter/arrows) isn't a
     # meaningful shortcut to remap. Keyless verbs (0 chords) stay assignable.
+    #
+    # The count is taken over the chords a rebind would actually MOVE, so a verb whose only
+    # extra chord is PINNED still qualifies. That exemption exists for one shape — the `y` +
+    # `^Y` Copy pairs (`Verb::Keymap.pinned_chords` states the rule). Counting raw `chords`
+    # swept all eight of them up as if `^Y` were a navigation alias: Repeater, Fuzzer, Notes,
+    # Decoder, JWT, Cookie, Rewriter and the Issues detail each had NO Copy row in the editor
+    # at all, while History, Miner, Sequencer, Probe and Comparer — single-chord Copy verbs,
+    # same action — were rebindable. Half the app's Copy keys movable and half not, with
+    # nothing on screen saying which.
     def self.rebindable?(verb : Verb::Definition) : Bool
-      !verb.hidden? && !FIXED_IDS.includes?(verb.id) && verb.chords.size <= 1
+      return false if verb.hidden? || FIXED_IDS.includes?(verb.id)
+      (verb.chords.size - Verb::Keymap.pinned_chords(verb).size) <= 1
     end
 
     # A human reason if `chord` is unbindable — terminal-/structurally reserved, or claimed

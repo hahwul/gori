@@ -173,6 +173,16 @@ module Gori::Tui
         @host.open_space_menu
         return true
       end
+      # Every modified chord defers to the keymap, the same gate the ten sibling controllers
+      # open with. Both pane handlers below read `ev.char || key.to_char`, and termisu decodes
+      # Ctrl+A as `(LowerA, Modifier::Ctrl)` while `Event::Key#char` falls back to
+      # `key.to_char` — so without this line `^A` arrived carrying `'a'` and the colours pane's
+      # `c == 'a'` arm opened ADD CUSTOM COLOUR. `^E` is worse than a surprise: it is in
+      # `Hotkeys::CLAIMED_CTRL_LETTERS` (the global "open in $EDITOR"), whose contract is that
+      # a controller may only hardcode Ctrl guards listed there. `^A`/`^X` are neither claimed
+      # nor reserved, so the hotkey editor binds them and the binding was shadowed here.
+      # This tab has no text editor, so nothing below needs to see a modified chord.
+      return false if ev.ctrl? || ev.alt?
       @focus == :colors ? handle_colors_key(ev, key) : handle_rules_key(ev, key)
     end
 

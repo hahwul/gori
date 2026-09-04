@@ -5035,7 +5035,7 @@ module Gori::Tui
     # to the modal) would behave differently.
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
-      when :network, :editor, :keys, :layout, :statusline, :display, :companion, :notifications, :general
+      when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general
         open_preferences(section)                       # the unified grouped modal, positioned at this section
       when :theme   then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
       when :tabs    then open_overlay(tabs_editor(back))
@@ -5329,7 +5329,7 @@ module Gori::Tui
               else                 msg
               end
       @theme_restore = Settings.theme if section == :theme # saved → don't revert this on esc
-      reconcile_mouse                                      # the EDITOR section holds the Mouse toggle — apply it live
+      reconcile_mouse                                      # the MOUSE section holds the on/off toggle — apply it live
       @pretty = Settings.pretty_bodies_default             # …and the Pretty-print-bodies toggle — apply it live too
       toast
     end

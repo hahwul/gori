@@ -404,6 +404,41 @@ describe Gori::Settings do
     end
   end
 
+  # settings:mouse "Drag release". The mode is clamped on the way IN and on the way OUT, the
+  # stance every other enumerated setting takes: a hand-edited settings.json holding an unknown
+  # word must not reach the drag path, and must not leave the settings row's ←/→ cycle looking
+  # for a value that is not in its choice list.
+  it "round-trips the mouse drag mode and clamps an unknown one to the default" do
+    dir = File.tempname("gori-settings-mousedrag")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_drag = Gori::Settings.mouse_drag
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mouse_drag = "copy"
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("mouse_drag": "copy"))
+
+      Gori::Settings.mouse_drag = "select"
+      Gori::Settings.load
+      Gori::Settings.mouse_drag.should eq("copy")
+      Gori::Settings.mouse_drag_copy?.should be_true
+
+      File.write(Gori::Settings.path, %({"mouse_drag": "yank-everything"}))
+      Gori::Settings.load
+      Gori::Settings.mouse_drag.should eq(Gori::Settings::DEFAULT_MOUSE_DRAG)
+      Gori::Settings.mouse_drag_copy?.should be_false
+      # …and a value that got past the parser some other way is still clamped on read.
+      Gori::Settings.mouse_drag = "yank-everything"
+      Gori::Settings.mouse_drag_copy?.should be_false
+      Gori::Settings.normalize_mouse_drag(Gori::Settings.mouse_drag).should eq("select")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.mouse_drag = prev_drag
+    end
+  end
+
   it "persists and reloads layout prefs; omits the layout section at factory defaults" do
     dir = File.tempname("gori-settings-layout")
     Dir.mkdir_p(dir)

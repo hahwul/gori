@@ -229,6 +229,47 @@ describe Gori::Tui::TrafficEmptyState do
     end
   end
 
+  # The four Project sub-tab cards were the ones #928 missed: their chips were written as bare
+  # literals with no `verb:`, so a rebind reached the status strip beside them (which goes
+  # through `keys()`) and not the card. An operator rebinding "Add env var" to `n` then read
+  # `a  add a $KEY variable` on the only screen that was offering to teach them the key.
+  it "resolves the four Project sub-tab chips through the registry too" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {
+        "scope.add-rule"         => ["n"],
+        "hostoverride.add-entry" => ["n"],
+        "env.add-var"            => ["n"],
+        "activity.filter-source" => ["w"],
+      }
+      TrafficEmptyState.registry = Gori::Verbs.registry
+      { {:project_scope, "add an include or exclude rule", "n"},
+       {:project_overrides, "map a host to an IP", "n"},
+       {:project_env, "add a $KEY variable", "n"},
+       {:project_activity, "filter by source", "w"},
+      }.each do |(variant, label, want)|
+        backend = MemoryBackend.new(70, 16)
+        TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 70, 16), variant: variant)
+        backend.contains?(label).should be_true # the card is on screen at all
+        backend.contains?(" #{want} ").should be_true
+      end
+    ensure
+      TrafficEmptyState.registry = nil
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
+  # Registry-less renders (every other example in this file, and the view specs) must keep the
+  # literal — the fallback is what makes the `verb:` argument safe to add everywhere.
+  it "keeps each of those four chips at its literal with no registry set" do
+    { {:project_scope, "a"}, {:project_overrides, "a"}, {:project_env, "a"},
+     {:project_activity, "s"} }.each do |(variant, want)|
+      backend = MemoryBackend.new(70, 16)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 70, 16), variant: variant)
+      backend.contains?(" #{want} ").should be_true
+    end
+  end
+
   it "renders the comparer diff card" do
     backend = MemoryBackend.new(60, 12)
     TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12), variant: :comparer)

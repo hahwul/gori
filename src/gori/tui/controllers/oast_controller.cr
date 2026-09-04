@@ -230,7 +230,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if callbacks_sub?
-        return "↑/↓ move · ⇧arrows select · y copy · x line · space cmds · ←/esc back" if @cb_detail
+        return keys("↑/↓ move · ⇧arrows select · y copy · {oast.select-line} line · space cmds · ←/esc back") if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         keys("↑/↓ select · ‹/› provider · {oast.generate} payload · y copy · {oast.filter} filter · {oast.listen} listen · {oast.stop} stop · ↵ detail · space cmds")
       else

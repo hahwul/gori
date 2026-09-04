@@ -324,7 +324,7 @@ module Gori::Tui
       else
         msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
         fields = v.grpc_fields_available? ? "␣E fields · " : ""
-        keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · y copy · space cmds · ↹ pane")
+        keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · {repeater.copy} copy · space cmds · ↹ pane")
       end
     end
 
@@ -446,13 +446,13 @@ module Gori::Tui
             else
               "GraphQL query/vars"
             end
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · {repeater.copy} copy · space cmds"
       keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · ^G goto · ^F find · esc read · #{tab_token(v)}")
     end
 
     private def ws_hint(v : RepeaterView) : String
       sub = v.req_pane == :envelope ? "handshake request" : "messages"
-      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      mode = v.request_insert? ? "type to edit · ⇧arrows select · ^Y copy" : "i/↵ edit · ⇧arrows select · {repeater.copy} copy · space cmds"
       # `^V http` is listed because this key used to REFUSE here ("transport is fixed"), so
       # nothing in the tab suggested a handshake could be sent as an ordinary request.
       keys("#{mode} #{sub} · {repeater.toggle-decoded} switch · {repeater.toggle-http2} http · ^G goto · ^F find · esc read · #{tab_token(v)}")
