@@ -401,6 +401,45 @@ module Gori::Tui
       !!c && (c == '\u{7F}' || c == '\b')
     end
 
+    # An arrow OR its vim twin — and the twin only when the press carries NO command
+    # modifier. That second half is the whole point of these living here.
+    #
+    # A `key.lower_k?` arm looks modifier-free and is not: the parser decodes 0x01..0x1A as
+    # `(LowerA..LowerZ, Modifier::Ctrl)`, so `^K` IS `Key::LowerK`, and an ⌥ event carries the
+    # letter the same way. `^K`, `^L` and every ⌥+letter are chords the hotkey editor offers
+    # (neither `Hotkeys.claimed?` nor `Verb::Reserved.reserved?`), so a pane matching the bare
+    # key alone silently ate whatever the operator had bound there — the `Event::Key#key` half
+    # of the trap `ctrl_letter_guard_spec` pins for `Event::Key#char`.
+    #
+    # Most panes are already safe because their ladder opens with a
+    # `return false if ev.ctrl? || ev.alt?` defer; these exist for the arms that run BEFORE
+    # such a defer or in a pane that has none — the four empty-state handlers and the
+    # Comparer. `h`/`j` are covered for symmetry, though only `k`/`l` were reachable in the
+    # Ctrl form: `^H`/`^I`/`^J`/`^M` arrive as Backspace/Tab/Enter and never as Ctrl+letter,
+    # which is exactly why `Verb::Reserved` refuses to bind them. The ⌥ forms of all four are
+    # reachable. Contract: `spec/tui/contract_body_key_spec.cr`.
+    def nav_up?(ev : Termisu::Event::Key) : Bool
+      ev.key.up? || (ev.key.lower_k? && bare_chord?(ev))
+    end
+
+    def nav_down?(ev : Termisu::Event::Key) : Bool
+      ev.key.down? || (ev.key.lower_j? && bare_chord?(ev))
+    end
+
+    def nav_left?(ev : Termisu::Event::Key) : Bool
+      ev.key.left? || (ev.key.lower_h? && bare_chord?(ev))
+    end
+
+    def nav_right?(ev : Termisu::Event::Key) : Bool
+      ev.key.right? || (ev.key.lower_l? && bare_chord?(ev))
+    end
+
+    # No command modifier — the shape a pane-local letter must be matched in, since anything
+    # carrying ⌃/⌥ belongs to the central keymap.
+    def bare_chord?(ev : Termisu::Event::Key) : Bool
+      !ev.ctrl? && !ev.alt?
+    end
+
     # Say so when a keystroke just destroyed a MULTI-character selection (replace-on-type:
     # `TextArea#insert` cuts the selection before splicing). The loss is one undo step, but
     # nothing told the operator that — and this is the exact keystroke people mean when they

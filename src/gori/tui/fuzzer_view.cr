@@ -2319,10 +2319,14 @@ module Gori::Tui
       @dirty = true if @editor.edits != before
     end
 
-    # Forward-delete the char under the caret — a content edit.
+    # Forward-delete the char under the caret — a content edit, gated like its ⌫ twin above:
+    # at end-of-buffer `TextArea#delete` returns early without bumping `#edits`, and dirtying
+    # the tab there re-persists a template nobody changed. The Repeater's and the Intercept
+    # pane's `edit_delete` already read `edits`; this one was the copy that did not.
     def template_delete : Nil
+      before = @editor.edits
       @editor.delete
-      @dirty = true
+      @dirty = true if @editor.edits != before
     end
 
     def template_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil

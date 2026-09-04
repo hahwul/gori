@@ -2484,8 +2484,24 @@ module Gori::Tui
             TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
             return
           end
-        screen.text(time_x, list_top, msg, Theme.muted)
-        screen.text(time_x, list_top + 2, hint, Theme.muted) if list_h > 2
+        # BOTH rows are gated on the room there actually is, on BOTH axes. The hint had the
+        # height half; neither had either the other.
+        #
+        # Vertically: `list_top` is `hdr_y + 2`, so on a pane with a one-row interior (a 40x9
+        # terminal — `Layout.usable?`'s floor plus a row) `list_h` is 0 and "no flows match the
+        # … view" was painted on the shell's status line, over the key hints.
+        #
+        # Horizontally: neither call passed a `width`, so `Screen#text` fell back to the whole
+        # SCREEN and the 41-character view-empty message ran two columns past the card's right
+        # border on a 40-column terminal — the ellipsis landed in the terminal's own margin.
+        #
+        # Same family as `short_pane_clamp_spec`: clamp one axis, forget the other. Contract:
+        # `spec/tui/contract_render_bounds_spec.cr`.
+        if list_h > 0
+          msg_w = {rect.right - time_x, 0}.max
+          screen.text(time_x, list_top, msg, Theme.muted, width: msg_w)
+          screen.text(time_x, list_top + 2, hint, Theme.muted, width: msg_w) if list_h > 2
+        end
         return
       end
 

@@ -122,7 +122,7 @@ module Gori::Tui
       if v.nil?
         key = ev.key
         # Empty placeholder: esc / ↑ pop to the tab bar (mirrors other empty multi-session tabs).
-        if key.escape? || key.up? || key.lower_k?
+        if key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
           @host.request_focus(:menu)
           return true
         end

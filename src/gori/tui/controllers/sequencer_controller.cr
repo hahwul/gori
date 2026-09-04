@@ -115,7 +115,7 @@ module Gori::Tui
       v = current_view
       if v.nil?
         key = ev.key
-        if key.escape? || key.up? || key.lower_k?
+        if key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
           @host.request_focus(:menu)
           return true
         end
