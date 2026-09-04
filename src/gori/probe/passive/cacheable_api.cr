@@ -32,11 +32,11 @@ module Gori
           # Nothing user-specific in the response ⇒ nothing for a cache to leak across users.
           return unless authenticated?(ctx, resp)
 
-          cc = resp.headers.get?("Cache-Control")
-          return if no_store?(cc)
+          parts = ctx.cache_control
+          return if CacheControl.directive?(parts, "no-store")
 
-          if reason = cacheable_reason(cc, resp.headers.get?("Expires"), resp.headers.get?("Pragma"))
-            evidence = evidence_for(cc, reason)
+          if reason = cacheable_reason(parts, resp.headers.get?("Expires"), resp.headers.get?("Pragma"))
+            evidence = evidence_for(parts, reason)
             acc << Detection.new(
               "cacheable_json",
               Category::HEADERS,
@@ -55,7 +55,7 @@ module Gori
           semi = ct.index(';')
           media = (semi ? ct[0...semi] : ct).strip
           media == "application/json" || media == "text/json" ||
-            media.ends_with?("+json") || media.includes?("json")
+            media.starts_with?("application/") && media.ends_with?("+json")
         end
 
         # The response is tied to a particular caller: the request authenticated with a Cookie or
@@ -79,24 +79,16 @@ module Gori
           b.nil? || b.empty?
         end
 
-        private def no_store?(cc : String?) : Bool
-          !!cc.try(&.downcase.includes?("no-store"))
-        end
-
         # Returns a short human reason when the response is (likely) storeable, else nil.
-        private def cacheable_reason(cc : String?, expires : String?, pragma : String?) : String?
-          if cc.nil? || cc.strip.empty?
+        private def cacheable_reason(parts : Array(String), expires : String?, pragma : String?) : String?
+          if parts.empty?
             # Expires in the past / 0 / -1 plus Pragma: no-cache is the old HTTP/1.0 stack —
             # treat that as not cacheable even without Cache-Control.
             return nil if expires_disables?(expires) && pragma_no_cache?(pragma)
             return "missing Cache-Control"
           end
-          # Split the header into stripped directive tokens ONCE. directive?/int each used to
-          # re-split the whole value, and this method calls them up to six times (max-age twice),
-          # so a cacheable JSON response re-split the same string six times over. The split and the
-          # two lookups live in `CacheControl` because `SharedCache` asks the same questions of the
-          # same header; the semantics here are unchanged.
-          parts = CacheControl.parse(cc)
+          # The header was split once across ALL physical field lines. directive?/int are then
+          # allocation-free name checks over that token list; `SharedCache` uses the same parser.
           return "Cache-Control: public" if CacheControl.directive?(parts, "public")
           if (n = CacheControl.int(parts, "s-maxage")) && n > 0
             return "s-maxage=#{n}"
@@ -129,12 +121,12 @@ module Gori
           false
         end
 
-        private def evidence_for(cc : String?, reason : String) : String
-          if cc && !cc.strip.empty?
-            v = cc.strip
-            v.size > 80 ? "#{v[0, 80]}…" : v
-          else
+        private def evidence_for(parts : Array(String), reason : String) : String
+          if parts.empty?
             reason
+          else
+            v = parts.join(", ")
+            v.size > 80 ? "#{v[0, 80]}…" : v
           end
         end
       end
