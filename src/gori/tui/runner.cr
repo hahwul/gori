@@ -3397,8 +3397,13 @@ module Gori::Tui
     end
 
     private def apply_tag_edit(raw : String) : Nil
-      @tag_views.each { |v| repeater_controller.apply_tags(v, raw) }
-      @toast = "tagged #{plural(@tag_views.size, "sub-tab")}" if @tag_views.size > 1
+      tagged = @tag_views.count { |v| repeater_controller.apply_tags(v, raw) }
+      return unless @tag_views.size > 1
+      @toast = if tagged == @tag_views.size
+                 "tagged #{plural(tagged, "sub-tab")}"
+               else
+                 "tagged #{tagged} of #{plural(@tag_views.size, "sub-tab")} (the rest were closed meanwhile)"
+               end
     end
 
     private def render_tag_prompt(screen : Screen, rect : Rect) : Nil

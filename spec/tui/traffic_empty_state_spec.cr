@@ -229,6 +229,29 @@ describe Gori::Tui::TrafficEmptyState do
     end
   end
 
+  # The MEDIUM tier — what a short pane falls back to — was written as literal strings, so
+  # shrinking the pane made the rebound key vanish from the same card that had just shown it.
+  it "resolves chord chips on the medium cards too" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"comparer.pick-a" => ["shift-a"], "capture.toggle" => ["shift-c"]}
+      TrafficEmptyState.registry = Gori::Verbs.registry
+
+      backend = MemoryBackend.new(60, 6) # below the comparer card's full height, above MED_MIN_H
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 6), variant: :comparer)
+      backend.contains?("⇧A pick flow A").should be_true
+      backend.contains?("b pick flow B").should be_true
+
+      backend = MemoryBackend.new(60, 6)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 6),
+        variant: :sitemap, listen: {"127.0.0.1", 8070}, capturing: false)
+      backend.contains?("press ⇧C to start").should be_true
+    ensure
+      TrafficEmptyState.registry = nil
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
   # The four Project sub-tab cards were the ones #928 missed: their chips were written as bare
   # literals with no `verb:`, so a rebind reached the status strip beside them (which goes
   # through `keys()`) and not the card. An operator rebinding "Add env var" to `n` then read

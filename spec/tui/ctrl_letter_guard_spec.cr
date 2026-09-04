@@ -65,6 +65,48 @@ private def with_session(name : String, &)
   end
 end
 
+# The extract strip and the custom-colours strip were the last two `body_hint`s naming a
+# rebindable letter by its default — their siblings one `when` arm over already go through
+# `keys()`, so a rebind of "Add rule" reached the rules strip and not these.
+describe "the extract and custom-colours strips read the rebound letter" do
+  it "Rewriter — extract sub-tab" do
+    with_session("rewriter-strip") do |host|
+      ctl = RewriterController.new(host)
+      ctl.render_body(Screen.new(MemoryBackend.new(100, 40)), Rect.new(0, 0, 100, 40), :body)
+      ctl.handle_body_key(key(Termisu::Input::Key::RightBracket, char: ']'))
+      ctl.@sub.should eq(:extract)
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"rewriter.add" => ["n"], "rewriter.delete" => ["shift-d"]}
+        hint = ctl.body_hint(:body)
+        hint.should contain("n add")
+        hint.should contain("⇧D delete")
+        hint.should_not contain("a add")
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
+      ctl.body_hint(:body).should contain("a add")
+    end
+  end
+
+  it "Colormarker — custom colours pane" do
+    with_session("colormarker-strip") do |host|
+      ctl = ColormarkerController.new(host)
+      ctl.render_body(Screen.new(MemoryBackend.new(100, 40)), Rect.new(0, 0, 100, 40), :body)
+      ctl.handle_body_key(key(Termisu::Input::Key::Down))
+      ctl.@focus.should eq(:colors)
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"colormarker.add" => ["n"]}
+        ctl.body_hint(:body).should contain("n add")
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
+      ctl.body_hint(:body).should contain("a add")
+    end
+  end
+end
+
 describe "Ctrl+letter must not fire a pane's bare-letter action" do
   describe "RewriterController — extract sub-tab" do
     it "takes the bare letters and defers every Ctrl form to the keymap" do

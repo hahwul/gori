@@ -1217,14 +1217,18 @@ module Gori::Tui
     # Apply the typed tags to the captured tab + persist. Re-find by VIEW identity (a
     # reconcile may have reordered/removed it) — gone → no-op. Mirrors apply_rename;
     # blank clears every tag. The raw string is normalized (ws/comma split, dedupe).
-    def apply_tags(view : RepeaterView, raw : String) : Nil
-      return unless tab = @repeaters.find(&.view.same?(view))
+    #
+    # Returns false when `view` is no longer on the strip — a peer closed it while the prompt
+    # was open — so the batch toast can count what was tagged rather than what was aimed at.
+    def apply_tags(view : RepeaterView, raw : String) : Bool
+      return false unless tab = @repeaters.find(&.view.same?(view))
       view.tags = Repeater::Tags.parse(raw)
       if id = tab.db_id
         unless @host.session.store.set_repeater_tags(id, Repeater::Tags.serialize(view.tags))
           @host.status("tags NOT saved (project busy) — the chip reads the new tags until the tab reloads")
         end
       end
+      true
     end
 
     # --- async (run loop) ---
@@ -1738,10 +1742,9 @@ module Gori::Tui
     # make an index name a different session.
     def request_close : Nil
       return unless tab = current_repeater_tab
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE REPEATERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach edited request and its response are discarded.",
-          confirm_label: "close", danger: true) { close_marked_repeaters(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE REPEATERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach edited request and its response are discarded.",
+          confirm_label: "close", danger: true) { close_marked_repeaters(refs) }
         return
       end
       @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.summary}”?\nThe edited request and response are discarded.",
@@ -1751,8 +1754,8 @@ module Gori::Tui
     # The batch arm of ^W: the shared driver loops the same per-tab teardown high index →
     # low, hands the marks back and says one sentence, then re-resolves focus (the strip may
     # be gone entirely once five chips close at once).
-    private def close_marked_repeaters(idxs : Array(Int32)) : Nil
-      @host.status(close_marked_subtabs(idxs))
+    private def close_marked_repeaters(refs : Array(SubtabRef)) : Nil
+      @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
     end
 
@@ -1903,12 +1906,11 @@ module Gori::Tui
     # requests on the wire from one keypress, and the confirm is the same shape "Send to
     # Repeater" already uses for a batch that does not even send.
     def repeater_send : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
+      if refs = batch_subtab_refs
         # Resolved to TABS before the confirm: its action runs from `on_close`, after the
         # overlay is restored, and a reconcile in that gap would make an index name another
         # session (the same reason the rename prompt captures its view).
-        tabs = targets.compact_map { |i| @repeaters[i]? }
+        tabs = refs.compact_map { |r| @repeaters.find(&.view.same?(r)) }
         return if tabs.empty?
         # Capped like every other batch that fans out per marked item. Close is uncapped —
         # closing thirty tabs is housekeeping — but this one dials thirty origins at once.

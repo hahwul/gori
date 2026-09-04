@@ -206,12 +206,11 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def jwt_duplicate : Nil
-      targets = target_subtab_indices
       msg = nil.as(String?)
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "session") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
       else
@@ -239,18 +238,17 @@ module Gori::Tui
     # it has always been; a plural one asks, because it discards more than the operator can
     # see at the moment they press the key.
     def jwt_close : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach token and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach token and its edits are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       close_at(@idx)
       @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       @host.status(msg)
       @host.resolve_subtab_focus
     end
@@ -888,10 +886,20 @@ module Gori::Tui
 
     # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
     # This pair changes together with `jwt_selection_text`'s :input arm.
+    #
+    # HEADER and PAYLOAD too: they are always-typing `TextArea`s whose band `jwt_copy_text`
+    # already copies, and a drag over them paints one (`editor_at` hands the drag to
+    # `s.header`/`s.payload`). Answering false for them made Drag release = `select + copy`
+    # silently do nothing on the two panes where `^Y` is the ONLY copy — no clipboard write,
+    # no toast — while the keyboard path copied the same band fine.
     def jwt_selection_active? : Bool
       s = cur
-      return false unless s.pane == :input
-      s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      case s.pane
+      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      when :header  then s.header.selection?
+      when :payload then s.payload.selection?
+      else               false
+      end
     end
 
     def jwt_selection_text : String

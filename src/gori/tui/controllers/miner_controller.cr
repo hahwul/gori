@@ -495,11 +495,10 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def miner_duplicate : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "miner session") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "miner session") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
         @host.goto_tab(:miner)
@@ -741,18 +740,17 @@ module Gori::Tui
     # (`target_subtab_indices` — the one target rule).
     def request_close : Nil
       return unless tab = current_tab_obj
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE MINERS", "Close #{marked_subtab_phrase(targets.size)}?\nEach config and its results are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE MINERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach config and its results are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       @host.confirm("CLOSE MINER", "Close mining session “#{tab.view.summary}”?\nIts config and results are discarded.",
         confirm_label: "close", danger: true) { close_tab }
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      @host.status(close_marked_subtabs(idxs))
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
     end
 

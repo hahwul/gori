@@ -210,12 +210,11 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def decoder_duplicate : Nil
-      targets = target_subtab_indices
       msg = nil.as(String?)
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "conversion") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "conversion") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
       else
@@ -242,10 +241,9 @@ module Gori::Tui
     # it has always been; a plural one asks, because it discards more than the operator can
     # see at the moment they press the key.
     def decoder_close : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE CONVERSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach conversion’s input, chain and output are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE CONVERSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach conversion’s input, chain and output are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       close_at(@idx)
@@ -255,8 +253,8 @@ module Gori::Tui
       @host.status(@sessions.size == 1 ? "conversion closed" : "conversion closed (#{@sessions.size} open)")
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       @popup.close
       @chain_pre = ""
       @dirty = true

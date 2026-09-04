@@ -679,7 +679,8 @@ module Gori::Tui
     # THE target rule, and the only one: the marks if any are set, else the active chip.
     # Every sub-tab-level action reads this — close, send, duplicate, tag — so marks widen
     # what the existing verbs TARGET instead of growing a second set of batch verbs beside
-    # them (the shape spec/verbs/registry_sweep_spec.cr pins).
+    # them (the shape spec/verbs/registry_sweep_spec.cr pins). A handler that opens a
+    # confirm takes `batch_subtab_refs` below instead — the same marks, as objects.
     def target_subtab_indices : Array(Int32)
       marked = marked_subtab_indices
       marked.empty? ? [subtab_index] : marked
@@ -709,11 +710,43 @@ module Gori::Tui
       @subtab_marks.unmark(refs)
     end
 
-    # The view objects a batch will act on, captured NOW. Handlers take this before opening
-    # a confirm: the dialog's action runs after the overlay is restored, and a reconcile can
-    # land in between — indices would be stale by then, these objects cannot be.
-    def target_subtab_refs : Array(SubtabRef)
-      collect_subtab_refs(target_subtab_indices)
+    # The chips a BATCH arm acts on, as view objects captured NOW — or nil when nothing is
+    # marked and the gesture takes its single-target path on the active chip. Every close /
+    # send / duplicate handler branches on this and nothing else.
+    #
+    # Refs and not indices, because a handler holds them across a confirm: `Runner#confirm`
+    # runs the action from `on_close`, one event-loop turn later at the earliest, and the
+    # data_version poll has no modal guard — a peer (MCP, `gori run`, a second TUI) can
+    # reorder or delete a session behind the dialog, and `reconcile` re-sorts the strip. An
+    # index captured before the dialog then names a different session after it; a view object
+    # cannot. `close_marked_subtabs` resolves them back to indices at the moment it closes.
+    #
+    # ONE mark is a batch too. Testing `targets.size > 1` (the old shape) fell through to the
+    # active chip whenever exactly one chip was marked, and that is the default state after a
+    # single `t`: it marks the chip and steps RIGHT, so the mark and the cursor sit on
+    # different chips. `^W` then confirmed "Close repeater 4", the unmarked one, while the
+    # strip said `1 marked` and the space menu said `Close 1 sub-tab` — and `space ▸ d`, which
+    # read `target_views`, duplicated the marked chip. Same tab, same marks, two targets.
+    def batch_subtab_refs : Array(SubtabRef)?
+      idxs = marked_subtab_indices
+      idxs.empty? ? nil : collect_subtab_refs(idxs)
+    end
+
+    # The chip `ref` sits on RIGHT NOW, or nil when a peer closed it. Identity, never `==`:
+    # the mark set keys on `object_id` for the reason `SubtabMarks` states.
+    def subtab_index_of(ref : SubtabRef) : Int32?
+      (0...subtab_count).find { |i| (r = subtab_ref(i)) && r.same?(ref) }
+    end
+
+    # The refs still on the strip, as the indices they hold now (chip order).
+    private def resolve_subtab_refs(refs : Enumerable(SubtabRef)) : Array(Int32)
+      idxs = [] of Int32
+      refs.each do |ref|
+        if i = subtab_index_of(ref)
+          idxs << i
+        end
+      end
+      idxs.sort!
     end
 
     # The count phrase a bulk sub-tab confirm uses. The filter split is not decoration: `⇧T`
@@ -733,9 +766,10 @@ module Gori::Tui
     # the clones land in the order their originals sit in.
     #
     # Returns the sentence, or nil when the batch was refused (the caller says why).
-    protected def duplicate_marked_subtabs(idxs : Array(Int32), noun : String, & : Int32 -> Nil) : String?
+    protected def duplicate_marked_subtabs(refs : Array(SubtabRef), noun : String, & : Int32 -> Nil) : String?
+      idxs = resolve_subtab_refs(refs)
       return nil if idxs.size > Tui::Runner::BATCH_SUBTAB_CAP
-      idxs.sort.each { |i| yield i }
+      idxs.each { |i| yield i }
       "duplicated #{idxs.size} #{noun}#{idxs.size == 1 ? "" : "s"}"
     end
 
@@ -762,12 +796,16 @@ module Gori::Tui
     #     do it: `ComparerController#comparer_close` resets its last session in place rather
     #     than deleting it, so that view — and its mark — outlives the close the operator
     #     just watched.
-    protected def close_marked_subtabs(idxs : Array(Int32)) : String
+    #
+    # Takes the refs the handler captured before its confirm (`batch_subtab_refs`) and maps
+    # them to indices HERE, after the dialog: a chip a peer closed in the meantime simply
+    # resolves to nothing, and a reordered one to where it is now.
+    protected def close_marked_subtabs(refs : Array(SubtabRef)) : String
       gone = [] of SubtabRef
       orphaned = 0
       refusal = nil.as(String?)
       refused = 0
-      idxs.sort.reverse_each do |i|
+      resolve_subtab_refs(refs).reverse_each do |i|
         if reason = close_subtab_refusal(i)
           refusal ||= reason
           refused += 1

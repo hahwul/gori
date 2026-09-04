@@ -2355,7 +2355,7 @@ module Gori::Tui
       # INS has its own selection model (the editor's `@sel_anchor`); reporting only the READ
       # side made a visible ⇧arrow band uncopyable — see RepeaterView#pane_selection?.
       when :template then pane_insert?(:template) ? @editor.selection? : @template_read.selection?
-      when :target   then !pane_insert?(:target) && @target_read.selection?
+      when :target   then !pane_insert?(:target) && @target_read.selection?(@target_field == :sni ? @scx : @tcx)
       when :detail   then detail_navigable? && @detail_read.selection?
       else                false
       end

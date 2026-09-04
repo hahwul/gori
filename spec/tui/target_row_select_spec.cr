@@ -98,6 +98,26 @@ describe "the TARGET row selection" do
       end
     end
 
+    # `move_cx(selecting: true)` plants the anchor on the first step, and a drag straight
+    # down the row (or a ⇧→ ⇧← pair) leaves it ON the caret: an empty span the painter never
+    # draws. `pane_selection?` reported that as a selection, and the unified Copy then took the
+    # WHOLE value with no band on screen — under Drag release = `select + copy`, every drag
+    # that did not move sideways put the entire URL on the clipboard.
+    it "a drag that ends on its own press column leaves no selection, so nothing copies whole" do
+      each_target_view do |v, name|
+        rect = Rect.new(0, 0, 120, 20)
+        px, py = url_cell(8)
+        v.target_click_to_cursor(rect, px, py)
+        v.target_drag_to_cursor(rect, px, py + 1) # straight down: same column
+        v.pane_selection?.should be_false, "#{name}: a collapsed band counted as a selection"
+        dx, dy = url_cell(12)
+        v.target_drag_to_cursor(rect, dx, dy)
+        v.pane_selection?.should be_true, "#{name}: the anchor was lost with the collapse"
+        v.target_drag_to_cursor(rect, px, py) # …and back onto the anchor
+        v.pane_selection?.should be_false, "#{name}: a band dragged back to nothing stayed live"
+      end
+    end
+
     it "a press COLLAPSES a standing selection instead of re-anchoring it" do
       each_target_view do |v, name|
         rect = Rect.new(0, 0, 120, 20)

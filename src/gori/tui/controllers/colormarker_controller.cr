@@ -142,7 +142,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @focus == :colors
-        "↑/↓ select · a add · ↵/e edit · d delete · space cmds · esc tabs"
+        keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.delete} delete · space cmds · esc tabs")
       else
         keys("↑/↓ select · {colormarker.add} add · ↵/e edit · {colormarker.toggle} on/off · {colormarker.delete} delete · space cmds · ↹ colours")
       end

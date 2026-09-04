@@ -212,12 +212,11 @@ module Gori::Tui
     # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
     # (`target_subtab_indices` — the one target rule).
     def cookie_duplicate : Nil
-      targets = target_subtab_indices
       msg = nil.as(String?)
-      if targets.size > 1
-        msg = duplicate_marked_subtabs(targets, "session") { |i| duplicate_at(i) }
+      if refs = batch_subtab_refs
+        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
         unless msg
-          @host.status("#{targets.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
+          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
           return
         end
       else
@@ -248,18 +247,17 @@ module Gori::Tui
     # it has always been; a plural one asks, because it discards more than the operator can
     # see at the moment they press the key.
     def cookie_close : Nil
-      targets = target_subtab_indices
-      if targets.size > 1
-        @host.confirm("CLOSE COOKIE SESSIONS", "Close #{marked_subtab_phrase(targets.size)}?\nEach cookie and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(targets) }
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE COOKIE SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach cookie and its edits are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
       close_at(@idx)
       @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
     end
 
-    private def close_marked_sessions(idxs : Array(Int32)) : Nil
-      msg = close_marked_subtabs(idxs)
+    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
+      msg = close_marked_subtabs(refs)
       @host.status(msg)
       @host.resolve_subtab_focus
     end
@@ -928,10 +926,15 @@ module Gori::Tui
         (s.pane == :input && s.input_mode == InputMode::Read)
     end
 
+    # The FORGE payload pane too — see `JwtController#jwt_selection_active?` for why the
+    # always-typing panes must report the band their copy already reads.
     def cookie_selection_active? : Bool
       s = cur
-      return false unless s.pane == :input
-      s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      case s.pane
+      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?
+      when :payload then s.payload.selection?
+      else               false
+      end
     end
 
     def cookie_selection_text : String

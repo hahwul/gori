@@ -249,9 +249,9 @@ module Gori::Tui
                                scan_on : Bool, has_provider : Bool) : Nil
       hint = case variant
              when :history
-               "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · press c"}"
+               "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · press #{key("c", "capture.toggle")}"}"
              when :sitemap
-               "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · press c"}"
+               "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · press #{key("c", "capture.toggle")}"}"
              when :intercept
                catch_on ? "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{key("/", "intercept.filter")} filter" : "press #{key("i", "intercept.toggle")} to enable catch"
              when :repeater
@@ -373,7 +373,7 @@ module Gori::Tui
         y += 1
       else
         y += 2
-        screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
@@ -408,7 +408,7 @@ module Gori::Tui
       screen.text(px, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: {ix + iw - px, 0}.max)
       y += 1
       unless capturing
-        screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       y = draw_palette_hint(screen, ix, y, iw, bullet: "◆ ")
@@ -431,7 +431,7 @@ module Gori::Tui
         y += 1
       end
       unless capturing
-        screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       y = draw_chord_hint(screen, ix, y, iw, " i:CATCH ", "toggle catch", bullet: "⏸ ", verb: "intercept.toggle")
@@ -510,7 +510,7 @@ module Gori::Tui
         screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
         y += 2
         unless capturing
-          screen.text(ix, y, "capture is OFF — press c to start", Theme.yellow, Theme.bg, width: iw)
+          screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
           y += 1
         end
         y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ", verb: "probe.mode")
@@ -815,7 +815,7 @@ module Gori::Tui
         lines << "HTTP/3 / QUIC bypasses proxy — use ^P"
         lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       else
-        lines << "capture is OFF — press c to start"
+        lines << "capture is OFF — press #{key("c", "capture.toggle")} to start"
         lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       end
       lines
@@ -823,7 +823,7 @@ module Gori::Tui
 
     private def medium_sitemap(headline, addr, capturing) : Array(String)
       lines = [headline, "◆ proxy #{addr} → host tree"]
-      lines << "capture is OFF — press c to start" unless capturing
+      lines << "capture is OFF — press #{key("c", "capture.toggle")} to start" unless capturing
       lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       lines
     end
@@ -831,67 +831,67 @@ module Gori::Tui
     private def medium_intercept(headline, catch_on) : Array(String)
       lines = [headline]
       lines << (catch_on ? "⏸ queue empty · matching traffic pauses here" : "press i to enable catch")
-      lines << "f forward · d drop · / condition"
+      lines << "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
       lines
     end
 
     private def medium_repeater(headline) : Array(String)
-      [headline, "flow ──► edit ──► send", "^N new tab · History ^R repeater"]
+      [headline, "flow ──► edit ──► send", "^N new tab · History #{key("^R", "history.repeater")} repeater"]
     end
 
     private def medium_fuzzer(headline) : Array(String)
-      [headline, "§ template ──► payloads ──► probe", "^N new session · ⇧I from History"]
+      [headline, "§ template ──► payloads ──► probe", "^N new session · #{key("⇧I", "history.fuzz")} from History"]
     end
 
     private def medium_fuzzer_results(headline, running) : Array(String)
-      running ? [headline, "sampling probes…"] : [headline, "^O payload sets · ^R run"]
+      running ? [headline, "sampling probes…"] : [headline, "^O payload sets · #{key("^R", "fuzz.run")} run"]
     end
 
     private def medium_probe(headline, scan_on) : Array(String)
       if scan_on
-        [headline, "traffic ──► scan ──► issues", "m:MODE · capture in-scope traffic"]
+        [headline, "traffic ──► scan ──► issues", "#{key("m", "probe.mode")}:MODE · capture in-scope traffic"]
       else
-        [headline, "press m to enable scanning", "m:MODE cycle OFF/PASSIVE/ACTIVE"]
+        [headline, "press #{key("m", "probe.mode")} to enable scanning", "#{key("m", "probe.mode")}:MODE cycle OFF/PASSIVE/ACTIVE"]
       end
     end
 
     private def medium_issues(headline) : Array(String)
-      [headline, "flow ──► issue ──► triage", "⇧F from History · n create"]
+      [headline, "flow ──► issue ──► triage", "#{key("⇧F", "issue.create")} from History · #{key("n", "issues.new")} create"]
     end
 
     private def medium_discover(headline) : Array(String)
-      [headline, "target ──► crawl ──► endpoints", "space → Discover here · ^R run"]
+      [headline, "target ──► crawl ──► endpoints", "space → Discover here · #{key("^R", "discover.run")} run"]
     end
 
     private def medium_comparer(headline) : Array(String)
-      [headline, "A ──► diff ◄── B", "a pick flow A · b pick flow B"]
+      [headline, "A ──► diff ◄── B", "#{key("a", "comparer.pick-a")} pick flow A · #{key("b", "comparer.pick-b")} pick flow B"]
     end
 
     private def medium_authorize(headline) : Array(String)
-      [headline, "one request ──► many identities", "space → Send to Authorize · i identities"]
+      [headline, "one request ──► many identities", "space → Send to Authorize · #{key("i", "authorize.identities")} identities"]
     end
 
     private def medium_miner(headline) : Array(String)
-      [headline, "wordlist ──► probe ──► params", "space → Mine parameters · ^R run"]
+      [headline, "wordlist ──► probe ──► params", "space → Mine parameters · #{key("^R", "mine.run")} run"]
     end
 
     private def medium_sequencer(headline) : Array(String)
-      [headline, "collect ──► samples ──► entropy", "space → Send to Sequencer · ^R"]
+      [headline, "collect ──► samples ──► entropy", "space → Send to Sequencer · #{key("^R", "sequence.run")}"]
     end
 
     private def medium_miner_results(headline, running) : Array(String)
-      running ? [headline, "probing the wordlist…"] : [headline, "^R mines this request"]
+      running ? [headline, "probing the wordlist…"] : [headline, "#{key("^R", "mine.run")} mines this request"]
     end
 
     private def medium_sequencer_samples(headline, running) : Array(String)
-      running ? [headline, "collecting tokens…"] : [headline, "c token location · ^R collect"]
+      running ? [headline, "collecting tokens…"] : [headline, "#{key("c", "sequence.configure")} token location · #{key("^R", "sequence.run")} collect"]
     end
 
     private def medium_oast(headline, has_provider) : Array(String)
       if has_provider
-        [headline, "payload ──► target ──► callback", "g payload URL · ^R listen"]
+        [headline, "payload ──► target ──► callback", "#{key("g", "oast.generate")} payload URL · #{key("^R", "oast.listen")} listen"]
       else
-        [headline, "no provider yet — ^2 Providers", "then g for a payload URL"]
+        [headline, "no provider yet — ^2 Providers", "then #{key("g", "oast.generate")} for a payload URL"]
       end
     end
 
@@ -904,19 +904,19 @@ module Gori::Tui
     end
 
     private def medium_project_scope(headline) : Array(String)
-      [headline, "incl / excl ──► scope lens", "a add rule · space menu"]
+      [headline, "incl / excl ──► scope lens", "#{key("a", "scope.add-rule")} add rule · space menu"]
     end
 
     private def medium_project_overrides(headline) : Array(String)
-      [headline, "host ──► your IP", "a add · e edit · d delete"]
+      [headline, "host ──► your IP", "#{key("a", "hostoverride.add-entry")} add · #{key("e", "hostoverride.edit-entry")} edit · #{key("d", "hostoverride.delete-entry")} delete"]
     end
 
     private def medium_project_env(headline) : Array(String)
-      [headline, "$KEY ──► value on send", "a add var · space prefix"]
+      [headline, "$KEY ──► value on send", "#{key("a", "env.add-var")} add var · space prefix"]
     end
 
     private def medium_project_activity(headline) : Array(String)
-      [headline, "agents & jobs ──► one log", "s source · l level · ↵ open"]
+      [headline, "agents & jobs ──► one log", "#{key("s", "activity.filter-source")} source · #{key("l", "activity.filter-level")} level · ↵ open"]
     end
 
     private def draw_medium_lines(screen : Screen, rect : Rect, lines : Array(String)) : Nil

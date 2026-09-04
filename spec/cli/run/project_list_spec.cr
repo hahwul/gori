@@ -97,6 +97,33 @@ describe Gori::Store do
       end
     end
 
+    # `Project#last_modified` is the newer of the db file and its WAL, and a dirty WAL is
+    # what a crashed or killed session leaves behind. The census's close checkpoints it — the
+    # db file is rewritten and the WAL is gone — so putting the db file back to its OWN old
+    # stamp threw the activity time away: the same listing sorted the project by the WAL's
+    # time and printed the older one, and every later reader saw the older one for good.
+    it "restores the WAL's activity time when its close checkpoints the WAL away" do
+      with_project_root do |registry|
+        project = registry.create("spec proj")
+        with_project_store(project) { |store| seed_project_flow(store) }
+        old = Time.utc(2020, 1, 2, 3, 4, 5)
+        File.utime(old, old, project.db_path)
+        # A WAL whose header SQLite will not accept reads as an empty log — so the open
+        # succeeds and the count is right — and what happens to the file on close differs by
+        # platform: macOS resets it IN PLACE (the file stays, stamped now), Linux deletes it
+        # and never touches the db file. Both have to leave the activity time where it was,
+        # and CI runs both.
+        wal = "#{project.db_path}-wal"
+        File.write(wal, "not a wal")
+        newer = old + 30.minutes
+        File.utime(newer, newer, wal)
+        project.last_modified.try(&.to_unix).should eq(newer.to_unix) # the premise
+
+        Gori::Store.captured_flows(project.db_path).should eq(1)
+        project.last_modified.try(&.to_unix).should eq(newer.to_unix)
+      end
+    end
+
     it "answers nil — not 0 — for something that is not a readable project db" do
       with_project_root do |registry|
         project = registry.create("spec proj")
