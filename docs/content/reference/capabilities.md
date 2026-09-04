@@ -20,7 +20,7 @@ surface.
 | **HTTP/1.1** | Full request and response flows | Requests and finite responses; upgrades, SSE, and close-delimited responses stream through | Yes | Yes |
 | **HTTP/2** | Per-stream flows plus raw frame log | Per stream; a declared body up to 1 MiB can be edited, otherwise the hold is head-only | Yes, over a real h2 connection | Yes |
 | **WebSocket over HTTP/1.1** | Handshake and message transcript | Messages when the filter explicitly contains `proto:ws` | Yes, message scripts | Yes, handshake and message positions |
-| **WebSocket over HTTP/2 (RFC 8441)** | Handshake, h2 frames, and message transcript | Handshake only; messages are not held | No; the captured transcript remains readable and exportable | No |
+| **WebSocket over HTTP/2 (RFC 8441)** | Handshake, h2 frames, and message transcript | Handshake only; messages are not held | Yes, message scripts; the socket is reopened with the capture's own extended `CONNECT` | Yes, handshake and message positions |
 | **gRPC over HTTP/2** | Framed messages, trailers, and protobuf projections | Unary/small declared bodies can be edited; streaming bodies are head-only | Yes; unary calls can be schema-aware | Yes; schema-known unary fields or raw request positions |
 | **Server-Sent Events** | The response is captured and projected as events | The request can be held; the streaming response cannot | As an HTTP request | As an HTTP request |
 | **HTTP/3** | No | No | No | No |
@@ -52,9 +52,13 @@ difference.
   body-scoped extract rule, or a short-circuit rule forces the next connection for that host onto
   HTTP/1.1. An HTTP/2-only client, including gRPC, cannot use that host while the downgrade
   applies. Head rules, Intercept, and the Sandbox stay on h2.
-- **RFC 8441 is capture-only at the message layer.** gori recognises and stores a WebSocket over
-  HTTP/2, but cannot reopen it in Repeater/Fuzzer or intercept its messages. HTTP/1.1 WebSockets
-  support all three.
+- **RFC 8441 messages cannot be intercepted or rewritten live.** gori captures a WebSocket over
+  HTTP/2 and reopens it in Repeater/Fuzzer, but per-message Intercept and Match & Replace on
+  messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,
+  which deadlocks against the peer's flow-control window. Replay dials h2, waits for the
+  origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and treats the `2xx` — not a `101` — as the
+  socket opening; an origin that does not advertise the setting is a refusal naming it rather
+  than an empty transcript.
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising
   h3, but cannot intercept QUIC or a route learned from DNS.
 - **An upstream `https://` spelling is legacy, not TLS to the proxy.** Bare `host:port`,

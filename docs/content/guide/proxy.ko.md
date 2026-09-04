@@ -130,11 +130,14 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
 
 오리진이 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하면 요즘 브라우저는 HTTP/1.1 `Upgrade:` 핸드셰이크 대신 RFC 8441의 확장 `CONNECT`로 WebSocket을 엽니다. gori는 그 광고를 그대로 중계하므로 클라이언트는 이 경로를 쓸 자격이 있고, 실제로 쓰면 gori가 그 소켓을 읽습니다. RFC 8441은 핸드셰이크만 대체하고 나머지는 그대로이므로 프레임은 동일한 RFC 6455 프레임이며 동일한 코덱이 읽습니다. 어떤 핸드셰이크로 열린 소켓인지에 따라 분석 결과가 달라지지 않습니다.
 
-**캡처는 같습니다. 편집은 다릅니다.** 트랜스크립트는 History의 MESSAGES 패널, `gori run history show`, MCP `get_flow` 도구, HAR export에 HTTP/1.1 소켓과 똑같이 나타납니다. 다음 세 가지는 HTTP/1.1 전용입니다.
+**캡처와 재전송은 같습니다. 실시간 편집은 다릅니다.** 트랜스크립트는 History의 MESSAGES 패널, `gori run history show`, MCP `get_flow` 도구, HAR export에 HTTP/1.1 소켓과 똑같이 나타나며, Repeater의 `^R`·`gori run repeater send`·MCP `send_websocket`·Fuzzer 스윕 모두 소켓을 다시 열고 프레임을 주고받습니다. 다음 두 가지는 HTTP/1.1 전용입니다.
 
 - **메시지 단위 인터셉트와 메시지 Match & Replace.** 둘 다 DATA 프레임을 **다른 길이로** 다시 써야 하는데, HTTP/2에서 그것은 상대 피어의 흐름 제어 윈도우와 교착을 일으킵니다. gori는 프레임이 이미 와이어에 나간 뒤 사본에서 읽으므로, 여기서는 프레임 크기를 바꾸지도 소켓에 쓰지도 않습니다. 빈 결과를 보고 짐작하게 두는 대신, 플로우에 어느 쪽 지원을 받았는지 밝히는 `[gori]` 안내가 남습니다.
-- **Repeater 재전송.** 세 표면 모두에서 시드가 거부되며, 각각 이유를 밝힙니다. 캡처가 담고 있는 것은 `:protocol` 유사 헤더가 붙은 `CONNECT /path HTTP/2`인데, gori의 WebSocket 엔진은 HTTP/1.1 `Upgrade` 핸드셰이크에서만 소켓을 재현합니다. 문제는 **프레임** 재전송이 아니라 핸드셰이크입니다. gori는 클라이언트가 보낸 적 없는 `Sec-WebSocket-Key`가 든 `GET … Upgrade: websocket`을 지어내 이 플로우의 출처로 기록하지 않습니다. 대신 평범한 HTTP 탭은 열립니다. 그 `CONNECT`는 진짜 h2 요청이고 전송도 실제로 되기 때문입니다. 상태 줄이 함께 실리지 않은 캡처 프레임 수와 그것을 읽을 위치(History)를 알려 줍니다.
 - **연결당 상한.** gori는 하나의 HTTP/2 연결에서 확장 `CONNECT` 스트림을 동시에 최대 8개까지 읽습니다. 그 이상은 트랜스크립트 없이 바이트 그대로만 중계되고, 그렇게 되었다는 사실이 해당 안내에 남습니다. 브라우저는 오리진당 소켓 몇 개를 열 뿐이므로, 이는 평소 작업에서 마주치는 한계가 아니라 비정상적인 경우를 막는 경계입니다.
+
+**재전송은 캡처와 같은 방식으로 소켓을 다시 엽니다.** RFC 8441 플로우로 Repeater를 시드하면 HTTP 탭이 아니라 WebSocket 탭이 열립니다. gori는 HTTP/2로 다이얼하고(ALPN `h2`, 평문 대상이면 h2c prior knowledge), 오리진의 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 기다린 뒤, `:protocol websocket`과 캡처 자신의 `:path`·`:authority`·헤더를 실은 `:method CONNECT`를 보내고, HTTP/2에는 존재하지 않는 `101`이 아니라 `2xx`를 소켓이 열린 신호로 판정합니다. 그 뒤부터는 HTTP/1.1 경로와 완전히 같은 엔진입니다 — 같은 메시지 스크립트, 마스킹, 프레임 모양, 상한, 트랜스크립트. 핸드셰이크는 캡처 그대로이며 지어낸 것은 없습니다. 요청 패널에 보이는 `X-Gori-Protocol: websocket` 줄이 바로 그 `:protocol` 유사 헤더이고, 다른 헤더처럼 편집할 수 있습니다.
+
+네 가지는 감추지 않고 보고합니다. `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하지 않는 오리진은 빈 트랜스크립트가 아니라 그 설정을 지목하는 거부로 끝납니다 — RFC 8441 §3이 그 광고 없이 확장 `CONNECT`를 보내는 것을 금지하기 때문입니다. `2xx`가 아닌 응답은 오리진의 헤드를 그대로 실은 거부입니다. 세션 중간의 `RST_STREAM`이나 `GOAWAY`는 이미 주고받은 프레임을 유지하고 피어가 밝힌 에러 코드를 결과 note에 덧붙입니다. 그리고 이런 탭의 `--http`/`^V` 전환은 정지점이 셋이 아니라 둘입니다 — WebSocket, 또는 그 `CONNECT`를 평범한 HTTP/2 요청으로 — 이 바이트에는 HTTP/1.1 형태가 없기 때문입니다. `keep_sec_websocket_key`는 여기서 보존할 대상이 없으며(RFC 8441에는 `Sec-WebSocket-Key`가 없습니다), 플래그를 무시하는 대신 결과가 그 사실을 알려 줍니다.
 
 **필터로 찾을 수 있습니다.** PROTO 열은 `WSS`로 표시되고, `proto:ws`는 RFC 8441 소켓을 HTTP/1.1 소켓과 함께 돌려줍니다. h2 핸드셰이크에 존재하지도 않는 `101`로 판정하는 대신, 확장 `CONNECT`의 `:protocol` 토큰을 캡처 시점에 흐름에 기록하기 때문입니다. `proto:wss`는 여전히 TLS 쪽만을 뜻합니다. 의도적으로 하지 않는 것이 둘 있습니다. `connect-udp`(RFC 9298)나 `connect-ip`(RFC 9484)를 실은 확장 `CONNECT`는 RFC 6455 프레이밍이 아니므로 잡히지 않고, 오리진이 *거절한* 핸드셰이크는 소켓이 열린 적이 없으므로 거절된 HTTP/1.1 핸드셰이크와 똑같이 평범한 실패 요청입니다. 이 변경 이전의 gori가 캡처한 흐름은 소급해서 추측하지 않고 분류되지 않은 채로 남습니다. 라벨이 필요하면 다시 캡처하세요.
 

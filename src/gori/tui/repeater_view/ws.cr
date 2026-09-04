@@ -63,6 +63,13 @@ class Gori::Tui::RepeaterView
   # label for the status line. Only a tab holding a handshake has three states; anything
   # else keeps the plain two-state h1/h2 toggle (`toggle_http2`).
   #
+  # An RFC 8441 handshake tab has TWO, not three: WS → h2 → WS. This seam moves a tab between
+  # the WebSocket engine and a plain send of THE SAME handshake bytes, and those bytes are
+  # `CONNECT … HTTP/2` plus a `:protocol` pseudo-header — a real h2 request, and not an h1
+  # one at all. Offering the h1 stop would have sent a captured extended CONNECT down an
+  # HTTP/1.1 socket, where `CONNECT /chat` means "open a tunnel to the host /chat": a request
+  # the capture does not hold, against a question nobody asked.
+  #
   # The pane geometry is mode-dependent (a WS tab splits its request column and parks a
   # second caret), so both sub-pane selections are reset to the ones the destination mode
   # draws — otherwise the request column came back on `:decoded` with no decoded card under
@@ -70,14 +77,17 @@ class Gori::Tui::RepeaterView
   def cycle_ws_transport : String
     return @http2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1" unless @ws_mode
     @dirty = true
-    if !@ws_http_only # WS → HTTP/1.1
+    # The bytes in the editor, not the load-time verdict: the handshake is editable, and an
+    # operator who rewrote it into the other shape has changed which stops this cycle has.
+    h2_handshake = Proxy::WS.extended_connect_request?(@editor.wire_text)
+    if !@ws_http_only # WS → plain request
       @ws_http_only = true
-      @http2 = false
-    elsif !@http2 # HTTP/1.1 → HTTP/2
+      @http2 = h2_handshake
+    elsif !@http2 && !h2_handshake # HTTP/1.1 → HTTP/2
       @http2 = true
-    else # HTTP/2 → WS (h2 is not a WebSocket transport here — RFC 8441 is out of scope)
+    else # back to WS
       @ws_http_only = false
-      @http2 = false
+      @http2 = h2_handshake
     end
     @req_pane = ws_mode? ? :decoded : :envelope
     @resp_pane = :transcript
@@ -85,7 +95,8 @@ class Gori::Tui::RepeaterView
     resp_wrap_reset
     reset_result_caches
     if ws_mode?
-      "transport: WebSocket — ^R dials WsEngine and pumps the MESSAGES pane"
+      wire = @http2 ? "RFC 8441 extended CONNECT over h2" : "RFC 6455 upgrade over h1"
+      "transport: WebSocket (#{wire}) — ^R dials WsEngine and pumps the MESSAGES pane"
     else
       "transport: #{@http2 ? "HTTP/2 (h2)" : "HTTP/1.1"} — the handshake is sent as a plain request (frames kept)"
     end
@@ -103,7 +114,13 @@ class Gori::Tui::RepeaterView
     @ws_mode = true
     @ws_http_only = false # a fresh capture starts on auto-detect; ^V is the operator's to press
     @ws_keep_key = false  # a fresh capture: the regenerated key is the default (see the ivar)
-    @http2 = false        # WebSocket is HTTP/1.1
+    # The TRANSPORT this capture's handshake belongs to, read off the handshake and not
+    # assumed: an RFC 6455 `Upgrade:` head is HTTP/1.1, an RFC 8441 extended CONNECT is HTTP/2
+    # (#733). `@http2` does not choose the WebSocket dial — `WsEngine` reads that off the bytes
+    # too — but it IS what `^V`'s override sends the handshake as, and what a saved session
+    # stores; a captured `CONNECT … HTTP/2` sent as a plain h1 request is not the request the
+    # capture holds.
+    @http2 = Proxy::WS.extended_connect_request?(String.new(detail.request_head))
     @ws_upgrade = detail.request_head
     @ws_result = nil
     @ws_lines_cache = nil

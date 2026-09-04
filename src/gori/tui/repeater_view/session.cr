@@ -298,7 +298,8 @@ class Gori::Tui::RepeaterView
     @scx = @sni.size
     @target_field = :url
 
-    is_ws = !ws_messages.nil? || Repeater::WsEngine.upgrade_request?(request)
+    # `replayable?`, so a stored RFC 8441 handshake restores as the WebSocket tab it is (#733).
+    is_ws = !ws_messages.nil? || Repeater::WsEngine.replayable?(request)
     # The stored override only means anything on a tab that HOLDS a handshake; a row that
     # carries it without one (a request edited out of upgrade shape by a peer) reads as the
     # plain HTTP tab it now is, rather than a tab claiming to override a mode it isn't in.

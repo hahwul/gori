@@ -2038,7 +2038,6 @@ yet is a one-line `insert_event` in its own change. This one surfaces what was a
 including the level the feed spells two ways, `"warn"` everywhere and `"warning"` from the
 Sequencer, which the filter matches as a set because rows already on disk cannot be respelled.
 
-
 **The feed had to learn WHO, and the answer already existed.** The first cut recorded what agents
 and engines did; a scope rule the operator edited in the TUI and one an agent rewrote through MCP
 were indistinguishable, on the one surface whose job is telling them apart. `flows` had answered
@@ -2216,3 +2215,68 @@ connect and the wrap where the constructor has raised and nothing else owns the 
 Per-rule TLS fields were deliberately not added ([P0](#p0)): one policy covers every `http+tls`
 hop today, and a second TLS proxy with a different trust anchor is what should force the table
 column.
+
+<a id="d-2026-09-04-ws-over-h2"></a>
+
+### 2026-09-04: RFC 8441 replaces the handshake, so the transport is an `IO` and not a second engine
+
+Refines: [P1](#p1), [P7](#p7). Issue #733.
+
+gori captured a WebSocket opened over HTTP/2 and could not re-open one. The gap was never the
+frames — RFC 8441 §5.1 replaces the WebSocket HANDSHAKE and nothing else, so an h2 socket carries
+the byte-identical RFC 6455 frames an HTTP/1.1 one carries, and `H2::WsCapture` already read them
+with the same codec the h1 relay runs. What was missing was a way to OPEN the socket, and every
+surface said so in its own words: three seeds refused, `gori run repeater <flow-id>` sent the
+operator to a session route that also refused, and the TUI handed over a plain HTTP tab plus a
+status line explaining what it was not carrying.
+
+The seam is an `IO`. `Repeater::H2WsStream` does the extended CONNECT and then presents that
+stream's DATA payloads as a byte stream, and `WsEngine`'s scripted exchange — `run_session` →
+`exchange` → `drain` → `finish` — runs over it unchanged. A second engine would have meant a
+second `DrainState`, a second set of the three §5.4 reassembly moments, a second answer to "did
+the peer close", and a second copy of five capture caps, for a protocol whose frames do not differ
+at all ([P1](#p1)). The capture side had already drawn this line for the same reason: `WsCapture`
+is a reassembler over one codec, not a second parser.
+
+The accounting is borrowed, not re-derived. `H2Engine::SendFlow`, `apply_settings`, `credit`,
+`write_header_block`, `window_update`, `ack`, `goaway_reason`, `rst_reason` and the two frame
+strippers went public for this, the way `exchange` went public for `H2Pool`. A flow-control window
+kept in two places is how the halves of one connection start disagreeing, and `H2Engine`'s own
+history has three defects of exactly that shape recorded in its comments.
+
+The BYTES pick the transport, never a flag. An extended CONNECT head and an `Upgrade:` head are
+two handshakes for one protocol, and the capture says which it was: `Proxy::WS.extended_connect_request?`
+reads the `CONNECT` line plus the `X-Gori-Protocol` marker that `HeadCodec.synth_request` writes
+for the `:protocol` pseudo-header, and `WsEngine.send` branches on it. This is the rule
+`Repeater::Plan` already followed in picking `WsEngine` over `Engine` — it reads the FINAL wire,
+not the stored text — and it is what keeps a surface from being able to disagree with the request
+it is about to send. `WsEngine.replayable?` is the one predicate every seed, gate and engine choice
+asks; `upgrade_request?` stays the h1 half alone, because it is also what selects the h1 dial.
+
+Nothing is invented ([P7](#p7)). `:protocol` comes from the head's own marker line, which
+`H2Engine.parse_request` now folds back into the pseudo-header it was projected from — the exact
+inverse of the synthesis, and the fix for a captured extended CONNECT that used to go out as an
+ordinary h2 request carrying gori's diagnostic line as a regular field. `:method` and `:path` are
+the request line's, and a header the operator kept is a header the origin sees. An h1 handshake is
+not fabricated so that the seed can dial, which was the refusal's own argument and remains right.
+
+Every way this fails is REPORTED, because the failure mode a replay path must not have is looking
+like a clean run with an empty transcript. An origin that does not advertise
+SETTINGS_ENABLE_CONNECT_PROTOCOL is a refusal naming the setting — RFC 8441 §3 forbids sending the
+stream without it, so gori does not try and see. A non-2xx is a refusal carrying the origin's own
+head, so `answered?` is true exactly as it is for a 403 to an h1 upgrade. A RST_STREAM, a GOAWAY
+or a send window that never reopens raises `IO::Error` carrying the peer's stated reason, which
+the drain already turns into `DrainState#gone_reason` and from there into the result's note, with
+the frames already exchanged kept. And `keep_key` says it has nothing to keep rather than being
+ignored: §5.1 carries no `Sec-WebSocket-Key`.
+
+One knob's meaning narrows. `--http2` + a WebSocket script was refused outright; it is now refused
+only against an `Upgrade:` handshake, since HTTP/2 has no upgrade mechanism (RFC 9113 §8.1) and an
+extended CONNECT IS the h2 form — where `http2` is true by construction from the seed. The
+`ws_http_only` / `^V` escape hatch has two stops rather than three on such a tab: WebSocket, or
+the CONNECT as a plain h2 request. There is no HTTP/1.1 form of those bytes, and offering one
+would have sent `CONNECT /chat` down an h1 socket, where it names a host and not a path.
+
+Out of scope, deliberately: HTTP/3, and Match & Replace or per-message intercept on an h2 socket.
+Those two still need a length-CHANGING DATA rewrite, which is what #492 step 5 was closed over,
+and the capture advisory keeps saying so.

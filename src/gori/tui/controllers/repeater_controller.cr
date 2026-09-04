@@ -42,7 +42,7 @@ module Gori::Tui
         view = RepeaterView.new
         ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         request_text = String.new(r.request)
-        if Repeater::WsEngine.upgrade_request?(request_text)
+        if Repeater::WsEngine.replayable?(request_text)
           # A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
           # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
           ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(r.id))[0]
@@ -1479,7 +1479,7 @@ module Gori::Tui
         # "send then response vanishes / focus jumps to Target" bug.
         ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.upgrade_request?(row_request_text)
+        if Repeater::WsEngine.replayable?(row_request_text)
           ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
             .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
         end
@@ -1495,7 +1495,7 @@ module Gori::Tui
         view = RepeaterView.new
         ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.upgrade_request?(row_request_text)
+        if Repeater::WsEngine.replayable?(row_request_text)
           ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
             .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
         end
@@ -1530,6 +1530,14 @@ module Gori::Tui
         end
     end
 
+    # Which handshake a WS tab holds, for the status line that announces the seed. The two
+    # transports need different things of the operator — an h1 upgrade has a
+    # `Sec-WebSocket-Key` (`␣K`) and an h2 one has none — so a line that named neither left
+    # `^V`'s two-vs-three stops unexplained.
+    private def transport_word(view : RepeaterView) : String
+      view.http2? ? "RFC 8441 extended CONNECT over h2" : "RFC 6455 upgrade over h1"
+    end
+
     # --- lifecycle / verbs ---
     # Open flow `id` as a new Repeater tab. Shared by History's ^R and the Issues tab's
     # "send evidence to Repeater". No-op if the flow is gone (pruned).
@@ -1538,17 +1546,17 @@ module Gori::Tui
       view = RepeaterView.new
       # A seed asks a NARROWER question than a display surface does (#742). History's MESSAGES
       # pane shows a transcript because one was captured; this has to hand the operator a tab
-      # whose `^R` actually re-opens the socket, and `Repeater::WsEngine` opens one exactly one
-      # way — an HTTP/1.1 `Upgrade:` handshake, accepting nothing but a 101 back. So the gate
-      # is "does this capture carry a handshake gori can re-send", which is
-      # `WsEngine.upgrade_request?` — the Repeater's own predicate, the one `Repeater::Plan`
-      # already derives WS-ness from. The `row.status == 101` that used to stand here was the
-      # h1 handshake's status wearing that question's clothes.
+      # whose `^R` actually re-opens the socket. So the gate is "does this capture carry a
+      # handshake gori can re-send", which is `WsEngine.replayable?` — the Repeater's own
+      # predicate, the one `Repeater::Plan` also derives WS-ness from. The `row.status == 101`
+      # that used to stand here was the h1 handshake's status wearing that question's clothes.
       #
-      # The case that forced the distinction is a WebSocket captured over RFC 8441 extended
-      # CONNECT (#733): real RFC 6455 frames, no `Upgrade:` header, and no h2 WebSocket send
-      # path anywhere in the Repeater to replay them over. See the `websocket?` branch below.
-      if Repeater::WsEngine.upgrade_request?(String.new(detail.request_head))
+      # BOTH handshakes now answer yes: an RFC 6455 `Upgrade:` head and an RFC 8441 extended
+      # CONNECT (#733). The second used to land on the plain-HTTP branch below with a status
+      # line explaining that its frames were not seeded, because there was no h2 WebSocket send
+      # path; `WsEngine` reads the transport off the handshake bytes now, so the branch that
+      # said so is gone and the seed is the same seed.
+      if Repeater::WsEngine.replayable?(String.new(detail.request_head))
         # WebSocket: seed the editor with the recorded client→server messages. The tab is
         # session-only (db_id nil) — WS transcripts aren't persisted/synced.
         # A `[gori]` advisory is a diagnostic gori wrote ABOUT the socket, never a frame the
@@ -1566,32 +1574,8 @@ module Gori::Tui
         unshown = view.ws_unshown_seed
         note = unshown.empty? ? "" : " — #{unshown.size} frame#{unshown.size == 1 ? "" : "s"} not shown (#{unshown.join(", ")}); #{unshown.size == 1 ? "it replays" : "they replay"} unless you edit the list"
         note += " · #{CLI::Run.ws_notice_dropped_note(notice_dropped)}" if notice_dropped > 0
-        @host.status("ws repeater: #{view.summary} — edit messages (one per line)#{note} · ^R send · esc back")
-      elsif detail.websocket?
-        # A WebSocket gori captured but cannot re-open: an RFC 8441 extended CONNECT over
-        # HTTP/2 (#733). The frames are real RFC 6455 frames and replaying them is not the
-        # problem — the HANDSHAKE is. This capture holds `CONNECT /path HTTP/2` and a
-        # `:protocol` pseudo-header; `WsEngine` writes an h1 upgrade and waits for a 101, so
-        # seeding a WS tab from it would hand over a `^R` that cannot connect. Making it
-        # connect would mean gori inventing a `GET … Upgrade: websocket` handshake with a
-        # `Sec-WebSocket-Key` the client never sent and presenting it as the capture's — the
-        # fabrication this repo refuses everywhere else it comes up.
-        #
-        # `^V` does not cover this either. That seam (`cycle_ws_transport`) moves a tab
-        # between the WS engine and a plain h1/h2 send of the SAME handshake bytes; it says so
-        # in its own last branch, "h2 is not a WebSocket transport here — RFC 8441 is out of
-        # scope", and `Sender#send_ws` never consults `http2` at all.
-        #
-        # So: the ordinary HTTP tab, which is honest — the CONNECT request really is an h2
-        # request and `^R` really will send it — plus a status line that names the frames it
-        # is NOT carrying and where they can be read. A silent HTTP tab was the bug.
-        view.load(detail)
-        @repeaters << RepeaterTab.new(view, id, persist_new_repeater(view, id))
-        frames = @host.session.store.count_ws_messages(id)
-        @host.status("repeater: #{view.summary} — WebSocket over HTTP/2 (RFC 8441): the #{frames} captured " \
-                     "frame#{frames == 1 ? "" : "s"} #{frames == 1 ? "is" : "are"} NOT seeded — gori replays a socket " \
-                     "only from an HTTP/1.1 Upgrade handshake, and this capture has none. Read them in History's " \
-                     "MESSAGES pane · ^R sends the CONNECT request · esc back")
+        @host.status("ws repeater: #{view.summary} (#{transport_word(view)}) — edit messages " \
+                     "(one per line)#{note} · ^R send · esc back")
       elsif grpc_flow?(detail)
         # gRPC: head editable as text; a unary call's message payload is hex-editable (^X)
         # and reframed on send. Session-only (db_id nil) — the binary body can't round-trip

@@ -6,6 +6,11 @@ private HS = "GET /ws HTTP/1.1\r\nHost: w.test\r\n" \
              "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
 
+# The RFC 8441 shape, as `H2::HeadCodec.synth_request` stores it: a `CONNECT` line plus the
+# `X-Gori-Protocol` marker standing in for the `:protocol` pseudo-header (#733).
+private CONNECT_HS = "CONNECT /ws HTTP/2\r\nHost: w.test\r\n" \
+                     "Sec-WebSocket-Version: 13\r\nX-Gori-Protocol: websocket\r\n\r\n"
+
 private PLAIN = "GET /api?q=§v§ HTTP/1.1\r\nHost: w.test\r\n\r\n"
 
 private def build(template : String, ws : Array(Fuzz::WsMessageSource)? = nil,
@@ -36,14 +41,22 @@ describe "Fuzz::Plan over a WebSocket script" do
       end
     end
 
-    it "refuses http2 on a WebSocket script" do
-      expect_raises(Fuzz::WsError, /HTTP\/1\.1 upgrade/) do
+    # …but only against an RFC 6455 `Upgrade:` handshake: HTTP/2 has no upgrade mechanism
+    # (RFC 9113 §8.1), so there is nothing for the flag to send. An RFC 8441 extended CONNECT
+    # is the h2 WebSocket and `http2` is true there by construction — see the example below.
+    it "refuses http2 on an Upgrade-handshake script" do
+      expect_raises(Fuzz::WsError, /no upgrade mechanism/) do
         build(HS, one_frame("§v§"), http2: true)
       end
     end
 
-    it "refuses frames given to a template with no upgrade handshake" do
-      expect_raises(Fuzz::WsError, /no `Upgrade: websocket` handshake/) do
+    it "accepts http2 on an RFC 8441 extended CONNECT script" do
+      plan = build(CONNECT_HS, one_frame("§v§"), http2: true)
+      plan.websocket?.should be_true
+    end
+
+    it "refuses frames given to a template with no handshake at all" do
+      expect_raises(Fuzz::WsError, /no WebSocket handshake/) do
         build(PLAIN, one_frame("§v§"))
       end
     end

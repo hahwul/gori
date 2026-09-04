@@ -111,7 +111,9 @@ module Gori::Repeater
     property target : String?
     # The origin the seeding flow or saved session implies, when there is one.
     property default_target : String?
-    # Dial over HTTP/2. Ignored on the WebSocket path (`WsEngine` is h1-only by RFC 6455).
+    # Dial over HTTP/2. Ignored on the WebSocket path: `WsEngine` reads the transport off the
+    # handshake bytes themselves (an `Upgrade:` head is h1, an extended CONNECT is h2), because
+    # a flag beside the bytes could disagree with them.
     property? http2 : Bool
     # TLS SNI override, BEFORE `Env.expand` — the builder owns the expansion so it happens
     # on every surface (MCP's flow path and the TUI both used to skip it).
@@ -256,8 +258,9 @@ module Gori::Repeater
     getter host : String
     getter port : Int32
     getter? http2 : Bool
-    # The request is an RFC 6455 upgrade, so it must go out through `send_ws` (a plain
-    # one-shot would re-issue the handshake and report the 101 having exchanged no frames).
+    # The request is a WebSocket handshake — an RFC 6455 upgrade or an RFC 8441 extended
+    # CONNECT — so it must go out through `send_ws` (a plain one-shot would re-issue the
+    # handshake and report its 101/2xx having exchanged no frames).
     getter? websocket : Bool
     # The expanded SNI host, or nil to present the dialed host.
     getter sni : String?
@@ -361,8 +364,9 @@ module Gori::Repeater
     #
     # Reusing the SAME `Sender` is the point: the scope verdict was taken against this
     # origin, and a rewrite must not be able to move the dial target out from under it.
-    # `websocket?` IS re-derived, because a rule that adds or strips `Upgrade: websocket`
-    # would otherwise leave the plan classified against bytes it no longer carries.
+    # `websocket?` IS re-derived, because a rule that adds or strips `Upgrade: websocket` (or
+    # the `X-Gori-Protocol` marker an RFC 8441 handshake carries) would otherwise leave the
+    # plan classified against bytes it no longer carries.
     #
     # EVERY OTHER FIELD IS COPIED, and that is a rule rather than a list: this is a
     # copy-with-new-bytes, so a field the copy forgets is one the SEND still applies (it
@@ -382,7 +386,7 @@ module Gori::Repeater
       raise PlanError.new(PlanError::Reason::NoRequest, "no request to send") if requests.empty?
       Plan.new(sender: @sender, requests: requests, scheme: @scheme, host: @host,
         port: @port, http2: @http2,
-        websocket: WsEngine.upgrade_request?(String.new(requests.first)), sni: @sni,
+        websocket: WsEngine.replayable?(String.new(requests.first)), sni: @sni,
         preserve_field_case: @preserve_field_case, h2_fields: @h2_fields, h2_body: @h2_body,
         reframe_grpc: @reframe_grpc, tls_preset: @tls_preset)
     end
@@ -410,10 +414,15 @@ module Gori::Repeater
       draft = !options.evidence?
       wires = expand_requests(options, draft)
 
-      # Detect the upgrade on the FINAL wire, not the stored text: the bytes that decide
+      # Detect the handshake on the FINAL wire, not the stored text: the bytes that decide
       # which engine runs must be the bytes that go out, or a `$KEY` expanding into the
       # `Upgrade: websocket` header would pick the h1 engine and silently exchange nothing.
-      websocket = WsEngine.upgrade_request?(String.new(wires.first))
+      #
+      # `replayable?` and not `upgrade_request?`: an RFC 8441 extended CONNECT (#733) is the
+      # OTHER handshake for the same protocol, and `WsEngine.send` reads the transport off
+      # these same bytes. So this stays one question — "must this go out through `send_ws`?" —
+      # and the engine, not the plan, decides how the socket is opened.
+      websocket = WsEngine.replayable?(String.new(wires.first))
       # A handshake carries no body, and all three surfaces have always sent it verbatim —
       # `resync_content_length` never touches a bodyless request either way (no ADD, and an
       # existing header still gets rewritten), but a captured upgrade that happened to carry
@@ -444,7 +453,13 @@ module Gori::Repeater
       # `raw`, and `gori run repeater send --verbatim`. Every other normalization on this path
       # is already behind it, and a version line is the operator's to get wrong when they asked
       # for verbatim.
-      wires = wires.map { |b| FlowRequest.downgrade_request_line(b) } if options.expand_request? && !options.http2?
+      # …and NOT on a WebSocket handshake, whichever transport it belongs to. `downgrade_version_line`
+      # exists to correct an `HTTP/2` line about to ride an h1 socket, and a handshake never
+      # does: an RFC 8441 extended CONNECT reads `CONNECT /chat HTTP/2` and IS sent over h2, so
+      # rewriting its version token would edit the capture's own request line on the way to a
+      # send that never looks at it. A no-op for an RFC 6455 upgrade head either way (only the
+      # h2/h3 spellings are touched), which is why the clause can be added without changing it.
+      wires = wires.map { |b| FlowRequest.downgrade_request_line(b) } if options.expand_request? && !options.http2? && !websocket
 
       unless scheme.in?("http", "https")
         raise PlanError.new(PlanError::Reason::UnsupportedScheme,

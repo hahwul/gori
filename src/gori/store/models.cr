@@ -280,8 +280,10 @@ module Gori
       # refuses a one-shot replay of a socket.
       #
       # It is also not "can the Repeater re-establish this socket" — that is
-      # `Repeater::WsEngine.upgrade_request?`, which is narrower on purpose: the engine dials
-      # an HTTP/1.1 `Upgrade:` handshake, so an h2 socket is a WebSocket that it cannot open.
+      # `Repeater::WsEngine.replayable?`, which asks about the REQUEST alone. The two differ in
+      # both directions: this one additionally requires the origin to have ANSWERED (101 / 2xx),
+      # while `replayable?` says yes to a handshake that was refused, because a refused
+      # handshake is still one gori can put back on the wire.
       #
       # ## The two shapes
       #

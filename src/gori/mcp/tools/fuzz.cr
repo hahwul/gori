@@ -511,17 +511,23 @@ module Gori
                                    "entirely and has no framed-exchange form. Pass ws_http_only:true to " \
                                    "race the handshake itself")
           end
-          if bool_arg(h, "http2", false)
-            raise FuzzArgError.new("http2 and a WebSocket sweep cannot combine — gori re-establishes a " \
-                                   "WebSocket with an HTTP/1.1 upgrade and accepts nothing but a 101 " \
-                                   "(RFC 8441 extended CONNECT has no send path). Pass ws_http_only:true " \
-                                   "to sweep the handshake as an h2 request")
+          # Only against an RFC 6455 UPGRADE handshake. An RFC 8441 extended CONNECT IS the h2
+          # WebSocket (#733), so `http2` there is not a conflict — it is what the seed already
+          # says. `Fuzz::Plan.build_ws_script` is the backstop and draws the line in the same
+          # place; `gori run fuzz` says it in the same words.
+          if bool_arg(h, "http2", false) && !Gori::Proxy::WS.extended_connect_request?(text)
+            raise FuzzArgError.new("http2 and an `Upgrade: websocket` sweep cannot combine — HTTP/2 has " \
+                                   "no upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened " \
+                                   "by an RFC 8441 extended CONNECT instead, which this template is not. " \
+                                   "Pass ws_http_only:true to sweep the handshake as an h2 request")
           end
           if fuzz_record_policy(h) != :none
             raise FuzzArgError.new("#{Fuzz::HistoryRecord::WS_UNSUPPORTED}. Pass ws_http_only:true to " \
                                    "sweep the handshake as an ordinary request, which does record")
           end
-          use_h2 = false
+          # An RFC 8441 script IS h2, so `use_h2` follows the handshake rather than being
+          # forced off: the echo/plan must not report h1 for a socket opened over h2.
+          use_h2 = Gori::Proxy::WS.extended_connect_request?(text)
         end
         # `.presence`: a schema-filling client sends `""` for every declared property (see
         # `describes?`), and a bare `str` read it as an explicit override — winning over the
@@ -738,7 +744,8 @@ module Gori
         # A JSON `null` is ABSENT, as every scalar reader on this surface already holds
         # (`str`, `present?`, `optional_int_arg`): a `JSON::Any` wrapping nil is truthy.
         given = h["messages"]?.try { |v| v.raw.nil? ? nil : v }
-        upgrade = Gori::Proxy::WS.upgrade_request?(text)
+        # Either handshake (#733): an RFC 6455 `Upgrade:` head or an RFC 8441 extended CONNECT.
+        upgrade = Repeater::WsEngine.replayable?(text)
         http_only = bool_arg(h, "ws_http_only", false)
         # An explicit `messages` that cannot be sent is REFUSED, never dropped. Returning nil
         # here — which is what this did — ran the sweep as plain HTTP with the agent's whole
@@ -749,7 +756,8 @@ module Gori
         if given
           unless upgrade
             raise FuzzArgError.new("'messages' describes a WebSocket exchange, but this template " \
-                                   "declares no `Upgrade: websocket` handshake for the frames to ride. " \
+                                   "declares no WebSocket handshake for the frames to ride — neither an " \
+                                   "`Upgrade: websocket` request nor an RFC 8441 extended CONNECT. " \
                                    "Seed from a WebSocket flow_id/repeater_id, or drop 'messages' to " \
                                    "sweep it as HTTP")
           end
@@ -1318,7 +1326,7 @@ module Gori
           s.field "messages", ws_out_messages_prop(%(WebSocket only: the outbound frame script, REPLACING the frames a flow_id/repeater_id seed carried. Each entry is a plain string (a TEXT frame), a WsFrameSpec string ("opcode=ping,text=hi"), or the object form — the same grammar send_websocket takes. Mark §…§ positions IN THESE PAYLOADS: that is what a WebSocket sweep fuzzes. One variation = one full RFC 6455 session (dial, handshake, send the script, drain, close), so concurrency N means N simultaneous sockets. A WebSocket seed with no frames and no 'messages' is swept as plain HTTP.))
           s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout after the first inbound frame (100-60000, default 3000). This is the WebSocket path's pacing knob — 'timeout' is NOT its synonym and is reported in 'ignored_args' on a WS run.")
           s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session instead of a fresh one, so an absent / short / duplicate / non-base64 key can itself be the thing under test (default false).")
-          s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the upgrade handshake goes out as an ordinary request and the 101 is read as a response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / http2 / record_history against a WebSocket seed, all three of which are refused on the framed path.")
+          s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / record_history against a WebSocket seed, and http2 against an `Upgrade:` one; all are refused on the framed path.")
         end
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \
