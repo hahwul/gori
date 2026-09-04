@@ -519,25 +519,70 @@ module Gori
           # Timed from HERE and not from the top of the loop: what gets credited back below is
           # the wait that returned no frame, never time spent reading one.
           read_started = Time.instant
-          frame = begin
-            Proxy::WS.read_frame(io)
+          # Split the frame read into HEADER then BODY, rather than the buffered
+          # `Proxy::WS.read_frame`, for two reasons `read_frame` cannot serve:
+          #   * it returns nil for an OVERSIZED (> MAX_FRAME) frame exactly as it does for
+          #     EOF, so a genuine large reply read as "the connection ended" — the fact, and
+          #     the frame, both vanished from the transcript. Reading the header first lets an
+          #     oversized frame be recorded and capped instead.
+          #   * its payload read has no wall-clock bound, so a peer trickling one byte per
+          #     sub-idle gap pinned it forever. `read_body(deadline:)` caps the whole payload.
+          header = begin
+            Proxy::WS.read_header(io)
           rescue IO::TimeoutError
             # The idle gap — this message's answer is done; the next one goes out. The gap is
             # the engine's turn, so it is credited back rather than charged to DRAIN_DEADLINE.
             st.credit_idle(Time.instant - read_started)
             break
           rescue ex : IO::Error | OpenSSL::Error
-            # RST, broken pipe, or a TLS-layer failure — end the exchange, keep what we have.
-            # BOTH hierarchies and no more: `OpenSSL::Error` is not an `IO::Error` (which is
-            # the whole gap — see `DrainState#gone_reason`), while a parse bug raising
-            # `IndexError` out of `read_frame` must stay LOUD. Swallowed here it would come
-            # back as `ok? == true` with a note blaming the peer, and (once the repeater row
-            # is written from it) overwrite the session's stored handshake with the wreckage.
             st.peer_gone = true
             st.gone_reason ||= transport_reason(ex)
             break
           end
-          if frame.nil? # EOF / truncated
+          if header.nil? # EOF / truncated header
+            st.peer_gone = true
+            break
+          end
+          if header.len > Proxy::WS::MAX_FRAME
+            # The peer ANSWERED, with a frame too large to buffer. Record that (the socket is
+            # now desynced — the payload sits unread — so end the exchange) rather than reading
+            # the un-buffered frame as EOF and reporting "the connection ended".
+            st.truncated = "a server frame declared #{header.len} bytes, over the " \
+                           "#{Proxy::WS::MAX_FRAME // (1024 * 1024)} MiB per-frame cap — it was not captured"
+            st.capped = true
+            break
+          end
+          frame = begin
+            # Bounded by the active-drain deadline (idle gaps credited back, so this is drain
+            # time, not wall clock), with `idle` the per-read cap — a trickled frame trips the
+            # deadline instead of hanging.
+            Proxy::WS.read_body(io, header, deadline: st.started + st.deadline, idle: idle)
+          rescue IO::TimeoutError
+            # A read that went idle. Mid-frame it means either the origin paused (an idle turn
+            # boundary, credited and broken like `read_header`'s gap) or the drain deadline was
+            # actually reached (a trickle `read_body` cut). `st.started` only advances on
+            # credited idle, so `now - started` IS active drain time: past the deadline is the
+            # deadline, short of it is an ordinary pause.
+            if Time.instant - st.started > st.deadline
+              st.truncated = "the #{st.deadline.total_seconds.to_i}s drain deadline was reached mid-frame; later server frames were not captured"
+              st.deadline_reached = true
+              st.capped = true
+            else
+              st.credit_idle(Time.instant - read_started)
+            end
+            break
+          rescue ex : IO::Error | OpenSSL::Error
+            # RST, broken pipe, or a TLS-layer failure — end the exchange, keep what we have.
+            # BOTH hierarchies and no more: `OpenSSL::Error` is not an `IO::Error` (which is
+            # the whole gap — see `DrainState#gone_reason`), while a parse bug raising
+            # `IndexError` out of the read must stay LOUD. Swallowed here it would come back as
+            # `ok? == true` with a note blaming the peer, and (once the repeater row is written
+            # from it) overwrite the session's stored handshake with the wreckage.
+            st.peer_gone = true
+            st.gone_reason ||= transport_reason(ex)
+            break
+          end
+          if frame.nil? # EOF mid-payload
             st.peer_gone = true
             break
           end

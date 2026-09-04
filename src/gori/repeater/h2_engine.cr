@@ -1324,7 +1324,7 @@ module Gori
             authority_override = value
             next
           end
-          regular << {preserve_field_case ? raw_name : raw_name.downcase, value}
+          regular << {preserve_field_case ? raw_name : ascii_downcase(raw_name), value}
         end
 
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
@@ -1450,6 +1450,19 @@ module Gori
       # treat as malformed, with no notice to the operator and the Fuzzer still labelling the
       # row with the payload it believed it sent. Refusing here keeps the h1/h2 divergence
       # visible instead of silent; the h1 engine is unchanged and still sends them byte-exact.
+      # Lower-case ONLY ASCII A–Z, leaving every other byte (a non-UTF-8 byte included)
+      # byte-exact. `String#downcase` on a field name carrying an invalid UTF-8 byte emits
+      # U+FFFD for it, silently altering the operator's bytes on the h2 path (P7) — while an
+      # h2 field name is an RFC 9113 §8.2.1 token h2 requires lower-cased, and only ASCII
+      # letters have a case, so a byte scan folds exactly what must fold and nothing else.
+      # `preserve_field_case` skips even this; the non-UTF-8 hazard was in the DEFAULT fold.
+      private def self.ascii_downcase(s : String) : String
+        bytes = s.to_slice
+        return s unless bytes.any? { |b| 0x41_u8 <= b <= 0x5A_u8 }
+        folded = Bytes.new(bytes.size) { |i| (0x41_u8 <= (b = bytes[i]) <= 0x5A_u8) ? b + 0x20_u8 : b }
+        String.new(folded)
+      end
+
       private def self.reject_uncarriable(name : String, value : String) : Nil
         {name, value}.each do |s|
           next unless s.each_char.any? { |c| c == '\r' || c == '\n' || c == '\0' }

@@ -134,7 +134,40 @@ private class WsRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# A socket-like IO that never EOFs and hands back one byte per `read` — the shape of a peer
+# trickling a frame's payload to keep a naive `read_fully?` alive forever.
+private class TrickleIO < IO
+  def read(slice : Bytes) : Int32
+    return 0 if slice.empty?
+    slice[0] = 0x41_u8
+    1
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
 describe Gori::Proxy::WS do
+  describe ".read_body deadline bound" do
+    it "raises rather than reading forever once the deadline has passed (anti-trickle)" do
+      # A 1000-byte frame header; the body is supplied by a peer that never stops dribbling.
+      h = Gori::Proxy::WS.read_header(IO::Memory.new(Bytes[0x81, 0x7E, 0x03, 0xE8])).not_nil!
+      h.len.should eq(1000_u64)
+      expect_raises(IO::TimeoutError) do
+        Gori::Proxy::WS.read_body(TrickleIO.new, h,
+          deadline: Time.instant - 1.second, idle: 3.seconds)
+      end
+    end
+
+    it "reads the whole payload when it arrives before the deadline" do
+      h = Gori::Proxy::WS.read_header(IO::Memory.new(Bytes[0x81, 0x7E, 0x03, 0xE8])).not_nil!
+      body = Bytes.new(1000, 0x41_u8)
+      frame = Gori::Proxy::WS.read_body(IO::Memory.new(body), h,
+        deadline: Time.instant + 5.seconds, idle: 3.seconds).not_nil!
+      frame.payload.size.should eq(1000)
+    end
+  end
+
   describe ".read_frame" do
     it "parses + unmasks a client (masked) text frame, preserving raw bytes" do
       frame = Gori::Proxy::WS.read_frame(IO::Memory.new(MASKED_HI)).not_nil!

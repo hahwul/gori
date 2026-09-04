@@ -727,8 +727,8 @@ module Gori
       # #drain_results). Reopens the store because `send` closed it before the (slow) dial.
       # Callers gate on `result.ok?`: a failed resend must not wipe a good stored response.
       private def self.persist_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?,
-                                                 duration_us : Int64, project_name : String?, db_path : String?) : Nil
-        store = open_store(resolve_read_project(project_name, db_path))
+                                                 duration_us : Int64, project : Project) : Nil
+        store = open_store(project)
         begin
           store.update_repeater_response(id, head, body, error, duration_us)
         ensure
@@ -797,9 +797,17 @@ module Gori
         abort "gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
         id = positional[0].to_i64? || abort "gori run repeater send: invalid repeater id '#{positional[0]}'"
 
+        # Resolved ONCE and reused by the response persist / History record after the send —
+        # `resolve_read_project` with no --project/--db falls through to the project sorted
+        # first by `Project#last_modified` (the newer of the db and its WAL mtime), so the
+        # "most-recently-active" project can change identity WHILE a peer captures, and a send
+        # is up to `--timeout` seconds long. Re-resolving at persist time therefore steered
+        # `update_repeater_response` (and a `--record-history` flow) into a DIFFERENT project's
+        # `repeaters` row #id. `cmd_repeater_minimize` resolves once for exactly this reason.
+        project = resolve_read_project(project_name, db_path)
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(project, read_only: true)
         rec, host_overrides = begin
           {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
         ensure
@@ -840,7 +848,7 @@ module Gori
           # flow-replay path make: only a `--flow` / MCP `flow_id` seed sets it, and only a
           # seed puts CAPTURED frames in `ws_messages`. A session built from `--request-raw`
           # or MCP `ws_out_messages` leaves it nil and its rows stay the operator's draft.
-          cmd_repeater_send_ws(id, plan, project_name, db_path, idle_ms, ws_messages, outbound, format,
+          cmd_repeater_send_ws(id, plan, project, idle_ms, ws_messages, outbound, format,
             verbatim, ws_keep_key || rec.ws_keep_key?, !rec.flow_id.nil?)
           return
         end
@@ -870,7 +878,7 @@ module Gori
         #
         # Recorded regardless of ok?: an error flow is evidence too (and matches MCP
         # send_request, which records the attempt).
-        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project_name, db_path) : nil
+        recorded_flow_id = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, id, project) : nil
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded_flow_id,
           tls_preset: sent_tls_preset(plan))
         # The session slot's `$NAME` that went out LITERALLY, after the response and before the
@@ -879,7 +887,7 @@ module Gori
         # to a header carrying the reference itself, and that reads as a session that was sent
         # and rejected. See `Run.unbound_overlay_note`.
         report_unbound_slot_overlay("gori run repeater send")
-        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project_name, db_path) if result.ok?
+        persist_repeater_response(id, result.head, result.body, result.error, result.duration_us, project) if result.ok?
         exit 1 unless result.ok?
       end
 
@@ -892,9 +900,8 @@ module Gori
       private def self.record_repeater_send_to_history(plan : Repeater::Plan, wire : Bytes,
                                                        result : Repeater::Result,
                                                        created_at : Int64, session_id : Int64,
-                                                       project_name : String?,
-                                                       db_path : String?) : Int64?
-        store = open_store(resolve_read_project(project_name, db_path))
+                                                       project : Project) : Int64?
+        store = open_store(project)
         begin
           Repeater::HistoryRecord.record(store, plan, result, created_at, wire,
             surface: Gori::FlowSource::Surface::Cli, source_ref: session_id.to_s)
@@ -910,15 +917,15 @@ module Gori
       # session's outbound messages (or `--message` overrides), and the inbound
       # transcript. Mirrors MCP send_websocket (src/gori/mcp/tools/send.cr) so a
       # script gets the same exchange whether it drives gori via CLI or MCP.
-      private def self.cmd_repeater_send_ws(id : Int64, plan : Repeater::Plan, project_name : String?,
-                                            db_path : String?, idle_ms : Int64?,
+      private def self.cmd_repeater_send_ws(id : Int64, plan : Repeater::Plan, project : Project,
+                                            idle_ms : Int64?,
                                             message_override : Array(Store::WsOutMessage),
                                             outbound : Gori::Outbound, format : Symbol,
                                             verbatim : Bool, keep_key : Bool,
                                             evidence : Bool = false) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(project, read_only: true)
         out_messages = begin
           ws_out_messages(store, id, message_override, verbatim, evidence)
         ensure
@@ -935,7 +942,7 @@ module Gori
         # (a 403/426 where the stored row holds a 101 IS the news, and it was being dropped).
         # See `WsEngine::Result#answered?`.
         if result.answered?
-          store2 = open_store(resolve_read_project(project_name, db_path))
+          store2 = open_store(project)
           begin
             store2.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
           ensure

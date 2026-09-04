@@ -153,6 +153,21 @@ describe "MCP string arguments — the wire fields of send_request" do
     end
   end
 
+  it "returns a clean INVALID for an over-long port instead of an internal overflow" do
+    with_store do |store|
+      tools = str_tools(store)
+      # `URI.parse` overflows Int32 on a port this long — an `OverflowError`, not a
+      # `URI::Error`, so it escaped the builder's rescue and reached the agent as the generic
+      # INTERNAL "tool error: Arithmetic overflow".
+      r = tools.call("send_request", JSON.parse(
+        %({"url":"http://127.0.0.1:99999999999/","allow_unscoped":true})))
+      r.is_error.should be_true
+      r.text.should contain("invalid url")
+      r.text.should contain("port is out of range")
+      r.text.should_not contain("Arithmetic overflow") # not the raw overflow, and not INTERNAL
+    end
+  end
+
   it "still sends a string body byte-for-byte, and still treats a null body as absent" do
     sink = Channel(Bytes).new(2)
     port = start_str_recording_origin(sink, 2)

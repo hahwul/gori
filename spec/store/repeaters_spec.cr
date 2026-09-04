@@ -115,6 +115,17 @@ describe "Gori::Store repeater tabs (v9)" do
     with_store { |store| store.next_repeater_position.should eq(0) }
   end
 
+  it "saturates instead of Int32-overflowing when a row holds Int32::MAX" do
+    with_store do |store|
+      # MCP `create_repeater` accepts the whole Int32 range, so a poisoned `position` of
+      # Int32::MAX can be stored. `MAX(position) + 1` then overflowed `.to_i32` and crashed the
+      # very next "new tab" on every surface (the TUI's has no rescue). Saturating parks the
+      # new row at the end rather than raising.
+      store.insert_repeater("https://a.test", "a".to_slice, false, true, nil, Int32::MAX)
+      store.next_repeater_position.should eq(Int32::MAX)
+    end
+  end
+
   it "starts a fresh tab with no persisted response (V11 columns NULL)" do
     with_store do |store|
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)

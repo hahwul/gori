@@ -352,4 +352,18 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
       String.new(sent[(sep + 4)..]).should eq(String.new(wire)) # round-trips as base64, not raw binary
     end
   end
+
+  # Space ▸ Duplicate must clone the grpc-web-text framing, not just the gRPC fields:
+  # `duplicate_from` dropped `@grpc_web_text`, so the clone sent RAW binary framing under an
+  # `application/grpc-web-text` head (and, with reframe off, read the first five base64
+  # characters as the length prefix) — bytes the source would never send.
+  it "carries grpc-web-text framing into a duplicated tab" do
+    grpc_tmp_store do |store|
+      wire = Base64.strict_encode(Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]).to_slice
+      src = def_web.call(store, "application/grpc-web-text", wire)
+      dst = RepeaterView.new
+      dst.duplicate_from(src)
+      dst.request_bytes.should eq(src.request_bytes)
+    end
+  end
 end
