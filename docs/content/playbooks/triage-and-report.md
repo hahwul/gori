@@ -118,6 +118,6 @@ gori run history -q 'host:api.example.com status:200' --format har > evidence.ha
 
 ## Next Steps
 
-- [Run an AI co-pilot session](/playbooks/run-an-ai-co-pilot/): put an agent on the same project and watch every move it makes
+- [Run an AI co-pilot session](/playbooks/run-an-ai-co-pilot/): put an agent on the same project and keep its consequential actions visible
 - [Scanning & Issues](/guide/scanning/): the full reference for Probe, Issues, Notes, and the Comparer
 - [CLI Reference](/reference/cli/): `run issues`, `run compare`, and `run history --format har` in full

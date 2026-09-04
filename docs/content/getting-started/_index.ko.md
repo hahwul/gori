@@ -20,7 +20,7 @@ gori에 오신 것을 환영합니다. 이 섹션은 아무것도 없는 상태�
 
 gori(고리, 한국어로 *ring, link, loop*)는 전적으로 터미널에서 동작하는 키보드 중심 HTTP/HTTPS **인터셉트 프록시**이자 웹 해킹 툴킷입니다. 클라이언트와 대상 사이의 *루프에 자리 잡아*, 모든 요청/응답을 *플로우*로 기록하고, 셸을 벗어나지 않고도 그 트래픽을 살펴보고, Repeater로 재전송하고, 퍼징하고, 스캔할 수 있는 펜테스트 워크벤치를 제공합니다.
 
-gori는 **HTTP/1.1, HTTP/2, WebSocket, gRPC, Server-Sent Events**를 이해하며, JWT, SAML, GraphQL, protobuf, MessagePack, CBOR 같은 일반적인 형식을 인라인으로 디코드합니다. TUI에서 할 수 있는 모든 작업은 `gori run`과 내장 [MCP 서버](/ko/guide/mcp/)를 통해 비대화식으로도 접근할 수 있어, 에이전트와 스크립트가 동일한 프로젝트를 다룹니다.
+gori는 **HTTP/1.1, HTTP/2, WebSocket, gRPC, Server-Sent Events**를 이해하며, JWT, SAML, GraphQL, protobuf, MessagePack, CBOR 같은 일반적인 형식을 인라인으로 디코드합니다. 핵심 프로젝트·테스트 워크플로는 TUI, `gori run`, 내장 [MCP 서버](/ko/guide/mcp/)에서 같은 엔진을 사용하므로 에이전트와 스크립트도 같은 프로젝트를 다룰 수 있습니다. UI 탐색까지 API라고 부르지는 않습니다. 정확한 경계는 [기능 매트릭스](/ko/reference/capabilities/)를 참고하세요.
 
 ## 다음 단계 {#next-steps}
 

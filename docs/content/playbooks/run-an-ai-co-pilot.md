@@ -1,13 +1,13 @@
 +++
 title = "Run an AI co-pilot session"
-description = "Put an agent on the same project over MCP and watch every move it makes — the intelligence lives outside the tool, by design."
+description = "Put an agent on the same project over MCP and keep its consequential actions visible — the intelligence lives outside the tool, by design."
 weight = 120
 
 [extra]
 group = "Wrap up"
 +++
 
-gori has no chat window, and that is deliberate: the intelligence lives outside the tool, reached over MCP. You bring the model and the client; gori exposes the project over a clean tool interface, so you choose what runs, your traffic isn't shipped anywhere you didn't intend, and every move the agent makes shows up in the same TUI you're already watching. This playbook connects an agent to a project you already captured and puts it to work — about ten minutes, most of it a one-time install.
+gori has no chat window, and that is deliberate: the intelligence lives outside the tool, reached over MCP. You bring the model and the client; gori exposes the project over a clean tool interface, so you choose what runs and your traffic isn't shipped anywhere you didn't intend. Sends and important state changes are tagged as agent activity in the same TUI you're already watching; read-only lookups are not presented as mutations. This playbook connects an agent to a project you already captured and puts it to work — about ten minutes, most of it a one-time install.
 
 > **Before you begin.** You need an existing project with captured traffic — ideally the one from the earlier playbooks — and an MCP-capable client (Claude Code, Claude Desktop, OpenAI Codex, Antigravity, Grok, Hermes, and others). An agent can send real requests, so keep the project scoped to a target you are authorized to test.
 

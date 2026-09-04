@@ -5104,7 +5104,10 @@ module Gori::Tui
         # the modal to re-pull afterwards when there is one (nil from the palette).
         confirm_factory_reset(back)
       else
-        @toast = "#{section} settings — coming soon (TODO)"
+        # SettingsCatalog names every reachable section and its seam spec pins that list to
+        # the branches above. Reaching this arm is therefore a stale internal caller, not a
+        # promised section that has yet to ship.
+        @toast = "unknown settings section: #{section}"
       end
     end
 
