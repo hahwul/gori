@@ -1,5 +1,7 @@
 require "../spec_helper"
 require "file_utils"
+require "../support/memory_backend"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -250,12 +252,12 @@ describe Gori::Tui::DecoderController do
     # was pressed, and a selection left in OUTPUT was thrown away by a round trip elsewhere.
     it "neither runs a held exec: step nor disturbs the OUTPUT caret" do
       with_decoder_host do |host|
-        dc = DecoderController.new(host)
-        dc.input_area.set_text("hi")
-        dc.load_chain("cat", "exec:/bin/cat") # the keystroke recompute ran it: OUTPUT "hi"
-        dc.decoder_new                        # sub-tab 1 is active now…
-        dc.library_changed                    # …so sub-tab 0's exec step is withheld: held
-        dc.jump_subtab(0)
+        seed = DecoderController.new(host)
+        seed.input_area.set_text("hi")
+        seed.load_chain("cat", "exec:/bin/cat") # the keystroke recompute ran it: OUTPUT "hi"
+        seed.decoder_new
+        seed.commit
+        dc = DecoderController.new(host) # a project open: sub-tab 0 is restored HELD
         dc.output_search_lines("held").should eq [0]
         dc.on_enter
         dc.output_search_lines("held").should eq [0] # entering the tab did not run it
@@ -342,6 +344,70 @@ describe Gori::Tui::DecoderController do
         dc.save_chain("catchain")
         dc.output_search_lines("hi").should eq [0]
         dc.output_search_lines("held").should be_empty
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    # A restored, HELD exec: conversation stays held through a library edit — the hold a
+    # project open put on it is lifted by an edit in that conversation, not by a ^S elsewhere.
+    it "does not lift a held conversation's exec: step when it becomes the active sub-tab" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("cat", "myenc > exec:/bin/cat") # myenc unknown → stops before the exec
+        dc.decoder_new                                # sub-tab 1 active
+        dc.load_chain("def", "lower")
+        dc.save_chain("myenc") # sub-tab 0 re-derived hooks-off: myenc resolves, exec held
+        dc.jump_subtab(0)
+        dc.output_search_lines("held").should eq [0]
+        # A picker ^X on an unrelated entry with sub-tab 0 ACTIVE re-derives it (it names a
+        # saved chain) — but the hold stands: still held, no fork.
+        Gori::Settings.decoder_chains = Gori::Settings.decoder_chains + [{"other", "upper"}]
+        dc.library_changed
+        dc.output_search_lines("held").should eq [0]
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    it "leaves a conversation no library edit can affect exactly as it is" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("cat", "exec:/bin/cat") # ran: OUTPUT "hi"
+        dc.decoder_new
+        dc.load_chain("def", "lower")
+        dc.save_chain("other")
+        dc.jump_subtab(0)
+        dc.output_search_lines("hi").should eq [0] # not re-derived, so not held either
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    # A recipe change that moves an INTERMEDIATE while the final answer stays the same still
+    # refreshes the PIPELINE previews (they are cached now).
+    it "refreshes the PIPELINE previews when only an intermediate moved" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("def", "upper")
+        dc.save_chain("myenc")
+        dc.load_chain("call", "myenc > zzz") # step 1 HI, step 2 unknown
+        backend = MemoryBackend.new(80, 30)
+        dc.render_body(Screen.new(backend), Rect.new(0, 0, 80, 30), :body)
+        backend.contains?("myenc › HI").should be_true
+        dc.decoder_new
+        dc.load_chain("def", "lower")
+        dc.save_chain("myenc")
+        dc.jump_subtab(0)
+        backend = MemoryBackend.new(80, 30)
+        dc.render_body(Screen.new(backend), Rect.new(0, 0, 80, 30), :body)
+        backend.contains?("myenc › hi").should be_true
       ensure
         Gori::Settings.decoder_chains = [] of {String, String}
       end

@@ -215,19 +215,24 @@ module Gori::Tui
         # Every run is width-clamped, the NAME included: an `exec:` step's name is its whole
         # argv, and unclamped it ran over the card's right border and left the trailing
         # status (the failure reason, most of all) a zero-width draw.
-        room = -> { {rect.right - x, 0}.max }
         if s.ok?
-          x = screen.text(x, y, s.name, Theme.text_bright, Theme.bg, width: room.call)
-          x = screen.text(x, y, " › ", Theme.muted, Theme.bg, width: room.call)
-          screen.text(x, y, previews[i]? || "", Theme.text, Theme.bg, width: room.call)
+          x = screen.text(x, y, s.name, Theme.text_bright, Theme.bg, width: room(rect, x))
+          x = screen.text(x, y, " › ", Theme.muted, Theme.bg, width: room(rect, x))
+          screen.text(x, y, previews[i]? || "", Theme.text, Theme.bg, width: room(rect, x))
         elsif s.state.skipped?
-          x = screen.text(x, y, s.name, Theme.muted, Theme.bg, width: room.call)
-          screen.text(x, y, " — skipped", Theme.muted, Theme.bg, width: room.call)
+          x = screen.text(x, y, s.name, Theme.muted, Theme.bg, width: room(rect, x))
+          screen.text(x, y, " — skipped", Theme.muted, Theme.bg, width: room(rect, x))
         else
-          x = screen.text(x, y, s.name, Theme.red, Theme.bg, width: room.call)
-          screen.text(x, y, " ✗ #{s.error}", Theme.red, Theme.bg, width: room.call)
+          x = screen.text(x, y, s.name, Theme.red, Theme.bg, width: room(rect, x))
+          screen.text(x, y, " ✗ #{s.error}", Theme.red, Theme.bg, width: room(rect, x))
         end
       end
+    end
+
+    # Cells left on a row from `x` to the card's edge (a method, not a closure: this is the
+    # per-frame path, and a closure over the reassigned `x` allocates per row).
+    private def room(rect : Rect, x : Int32) : Int32
+      {rect.right - x, 0}.max
     end
 
     # The cached one-line previews (see `@step_previews`). A step that produced nothing
@@ -474,6 +479,13 @@ module Gori::Tui
       @out_dirty = true
       @steps_dirty = true
       @out.reset
+    end
+
+    # The result was re-derived but its OUTPUT text did not move (`library_changed` keeps the
+    # operator's place then) — the PIPELINE rows may still differ, since a saved name's
+    # recipe changing alters an INTERMEDIATE while the final answer stays the same.
+    def invalidate_previews : Nil
+      @steps_dirty = true
     end
   end
 

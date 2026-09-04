@@ -269,6 +269,7 @@ module Gori::Tui
 
     private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
       msg = close_marked_subtabs(refs)
+      unstrand_from_filter # the clamp can land on a hidden chip here too
       @popup.close
       @chain_pre = ""
       @dirty = true
@@ -1088,30 +1089,57 @@ module Gori::Tui
       # at (#818). What a library edit changes is which NAMES resolve; that is answerable
       # without running anybody's command, and the next edit in a sub-tab runs its own.
       #
-      # The ACTIVE session is the exception: the operator pressed ^S / ^X while looking at it,
-      # so its command runs exactly as a keystroke's recompute would — one fork, asked for.
-      # Withholding it there replaced a decode they were reading with "chain held".
+      #
+      # Only a chain a library edit CAN change is re-derived: one holding a saved name or an
+      # unknown token (the name typed before it was saved, or the one just deleted). A chain
+      # of built-ins and `exec:` steps means the same thing before and after, so its result —
+      # the decode on screen, a held step, a MiB-sized intermediate — is left exactly as it is.
+      # That is also what keeps the ACTIVE session's `exec:` step from being replaced by
+      # "chain held" on a ^S that has nothing to do with it.
+      #
+      # The active session, when it IS affected, runs its command as a keystroke's recompute
+      # would — one fork the operator asked for by saving the name its chain calls — unless
+      # the step was HELD (restored, never run): a project open's hold is not lifted by a
+      # library edit any more than by entering the tab (see `on_enter`).
       #
       # "Actually moved" compares the drawn text's SOURCE, not `output` alone: a failure that
       # became a different failure (`myenc: unknown converter` → `zzz: unknown converter`, the
       # ordinary result of the very save that defined `myenc`) is nil → nil, and the OUTPUT
-      # card kept drawing the old error over a PIPELINE that showed the new one.
+      # card kept drawing the old error over a PIPELINE that showed the new one. The PIPELINE
+      # previews are dropped either way: a recipe change moves an intermediate even when the
+      # final answer is the same.
       @sessions.each_with_index do |s, i|
-        before = s.result
-        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: i == @idx)
-        s.view.reset_output_scroll unless same_output?(before, s.result)
+        next unless library_affects?(s.chain)
+        before = output_key(s.result)
+        run_hooks = i == @idx && !s.result.held?
+        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: run_hooks)
+        if output_key(s.result) == before
+          s.view.invalidate_previews
+        else
+          s.view.reset_output_scroll
+        end
       end
     end
 
-    # Whether two results draw the same OUTPUT text: same bytes, or the same failed step
-    # with the same reason.
-    private def same_output?(a : Decoder::ChainResult, b : Decoder::ChainResult) : Bool
-      return false unless a.output == b.output
-      fa = a.failed_at
-      fb = b.failed_at
-      return fa.nil? if fb.nil?
-      return false if fa.nil?
-      a.steps[fa].name == b.steps[fb].name && a.steps[fa].error == b.steps[fb].error
+    # Whether a library edit can change what `chain` means: it names a saved chain, or a
+    # token nothing resolves (which a save may have just defined). Built-ins are immutable
+    # and cannot be shadowed; an `exec:` step is not a name at all.
+    private def library_affects?(chain : String) : Bool
+      Decoder.parse_spec(chain).any? do |tok|
+        next false if Decoder.exec_step?(tok)
+        conv = registry[tok]?
+        conv.nil? || conv.category.saved?
+      end
+    end
+
+    # What the OUTPUT card draws from a result: the bytes, or the failed step's name and
+    # reason. Captured BEFORE the re-run so the old intermediates are not kept alive across it.
+    private def output_key(r : Decoder::ChainResult) : {Bytes?, String?, String?}
+      if fa = r.failed_at
+        {r.output, r.steps[fa].name, r.steps[fa].error}
+      else
+        {r.output, nil, nil}
+      end
     end
 
     # ---- save / load named chains (global settings.json; the shell owns the modals) ----

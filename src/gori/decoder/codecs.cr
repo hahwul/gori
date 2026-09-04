@@ -669,9 +669,11 @@ module Gori::Decoder
     end
 
     # Crystal's readers raise plain `Compress::Gzip::Error` / `Compress::Zlib::Error` for the
-    # CRC-32 / Adler-32 trailer check; the message is the only thing that names it.
+    # trailer checks — gzip's `CRC32 checksum mismatch` AND its `isize mismatch` (the length
+    # field, checked after the CRC), zlib's Adler-32; the message is the only thing that names
+    # them.
     private def checksum_error?(ex : Exception) : Bool
-      !!(ex.message =~ /checksum|crc|adler/i)
+      !!(ex.message =~ /checksum|crc|adler|mismatch/i)
     end
 
     # ---- byte-oriented number bases (space-separated, matches CyberChef To/From) ----
@@ -1059,8 +1061,7 @@ module Gori::Decoder
 
     # A non-empty run of digits of the reference's base, and nothing else.
     private def xml_digit_run?(digits : String, hex : Bool) : Bool
-      return false if digits.empty?
-      digits.each_byte.all? { |b| hex ? hex_digit(b) >= 0 : (0x30_u8 <= b <= 0x39_u8) }
+      !digits.empty? && digits.each_char.all?(&.ascii_number?(hex ? 16 : 10))
     end
 
     # ---- shell / powershell quoting ----

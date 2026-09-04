@@ -5336,6 +5336,12 @@ module Gori::Tui
       # and OAST minter come back to their defaults with it, and its `@analyzed.clear` re-arms
       # built-ins the reset just re-enabled over traffic already on screen.
       @session.probe.reload_rule_config
+      # The saved-chain library is gone too (`reset_decoder`), and every open Decoder
+      # conversion that CALLS a saved name holds a result derived through it. The same
+      # re-derive a ^S/^X in the picker runs; without it the tab kept showing a decode
+      # through a name that no longer resolved (entering the tab derives nothing — see
+      # `DecoderController#on_enter`).
+      decoder_controller.library_changed
       # The saved-view library is gone with them, so the active lens may name a view that no
       # longer exists. `reload` alone would leave History filtering by it silently — every
       # other path that loses a view says so, and this one has to as well. Re-resolved BEFORE

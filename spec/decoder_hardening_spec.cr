@@ -153,6 +153,10 @@ describe "Decoder engine hardening" do
       z[z.size - 1] ^= 0xff # the Adler-32 trailer
       run(z, "inflate").ok?.should be_false
 
+      isize = Gori::Decoder::Codecs.gzip_compress(body).dup
+      isize[isize.size - 1] ^= 0xff # the ISIZE field, checked after the CRC passes
+      run(isize, "gunzip").ok?.should be_false
+
       # A stream merely CUT short still keeps its readable head.
       whole = Gori::Decoder::Codecs.gzip_compress(body)
       run(whole[0, whole.size // 2], "gunzip").ok?.should be_true
