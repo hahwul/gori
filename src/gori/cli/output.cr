@@ -266,7 +266,7 @@ module Gori
         loc = term_safe(flow_location(row))
         dur = row.duration_us.try { |us| " #{human_us(us)}" } || ""
         String.build do |io|
-          io << '#' << row.id.to_s.ljust(6)
+          io << '#' << pad_cell(row.id.to_s, 6) # a 6+-digit id keeps its separator (see pad_cell)
           io << pad_cell(term_safe(row.method), 7)
           io << term_safe(row.scheme).ljust(6)
           io << loc

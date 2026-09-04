@@ -251,6 +251,7 @@ module Gori::Tui
       @detail_last_h = 0
       @detail_last_gw = 0
       @detail_last_cw = 0
+      @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
       # settings:layout History Req/Res preview (list page bottom pane) — separate from full detail.
       @preview_detail = nil.as(Store::FlowDetail?)
       @preview_id = nil.as(Int64?)
@@ -326,9 +327,15 @@ module Gori::Tui
     # four slices the preview projection is built from — NOT the row, whose mutable columns
     # (state, duration, size counters) settle after the bytes do and would keep invalidating a
     # projection that is already correct.
+    #
+    # The wire body sizes ride along because `preview_text_lines` bakes them into the binary
+    # placeholder, and the bodies here are the CAPPED preview slices: two captures of the same
+    # image that differ only past the cap would otherwise keep the first one's size line.
     private def preview_source_unchanged?(a : Store::FlowDetail, b : Store::FlowDetail) : Bool
       a.request_head == b.request_head && a.request_body == b.request_body &&
-        a.response_head == b.response_head && a.response_body == b.response_body
+        a.response_head == b.response_head && a.response_body == b.response_body &&
+        a.request_wire_body_size == b.request_wire_body_size &&
+        a.response_wire_body_size == b.response_wire_body_size
     end
 
     def clear_preview : Nil
@@ -379,11 +386,21 @@ module Gori::Tui
       @preview_focus = f if {:list, :req, :res}.includes?(f)
     end
 
+    getter preview_scroll_req : Int32
+    getter preview_scroll_res : Int32
+
+    # Bounded at both ends by the projection the pane draws from: `render_preview_side` clamps
+    # a COPY of the offset to `lines.size - 1` and never wrote it back, so a PageDown past the
+    # end left a phantom offset that ↑ then had to walk back through before anything moved.
     def scroll_preview(delta : Int32) : Nil
       case @preview_focus
-      when :req then @preview_scroll_req = {@preview_scroll_req + delta, 0}.max
-      when :res then @preview_scroll_res = {@preview_scroll_res + delta, 0}.max
+      when :req then @preview_scroll_req = preview_scroll_clamp(@preview_scroll_req + delta, @preview_req_lines)
+      when :res then @preview_scroll_res = preview_scroll_clamp(@preview_scroll_res + delta, @preview_res_lines)
       end
+    end
+
+    private def preview_scroll_clamp(at : Int32, lines : Array(String)?) : Int32
+      at.clamp(0, {(lines.try(&.size) || 1) - 1, 0}.max)
     end
 
     # `list_split` — the split geometry — comes from PreviewSplit, shared with Issues/Probe.
@@ -916,6 +933,17 @@ module Gori::Tui
       @rows[@selected]?.try(&.id)
     end
 
+    # The id at a list index, and the index an id currently sits at — the pair a caller uses
+    # to carry a row across a reload that may reorder or drop it (a click that also applies
+    # the QL query). nil when the index is off the window / the id is no longer in it.
+    def row_id_at(idx : Int32) : Int64?
+      @rows[idx]?.try(&.id)
+    end
+
+    def row_index(id : Int64) : Int32?
+      index_of(id)
+    end
+
     def empty? : Bool
       @rows.empty?
     end
@@ -1110,14 +1138,17 @@ module Gori::Tui
     # its caller branches on it; `clear` was the one History write that dropped it — and the
     # `reload` below made the contradiction visible, repopulating the list with the flows that
     # are still there while the status line said they were gone.
+    #
+    # On a rollback NOTHING local is touched, the same contract as `delete_ids`: the marks and
+    # the open detail stay, since every flow they point at is still there.
     def clear(store : Store) : Bool
-      ok = store.clear_flows
+      return false unless store.clear_flows
       close_detail
       clear_preview
       clear_marks
       forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
       reload(store)
-      ok
+      true
     end
 
     # --- QL bar editing ------------------------------------------------------
@@ -1467,6 +1498,13 @@ module Gori::Tui
     # overlap" step `ReadPane#motion_key` uses, measured from this pane's own last drawn height.
     def detail_page_rows : Int32
       {@detail_last_h - 2, 1}.max
+    end
+
+    # One screenful of the LIST, for PgUp/PgDn: the rows the last frame actually drew (the
+    # bar, header and divider, the suggestion row while querying, and the preview split all
+    # come off the body height) minus the same two rows of overlap.
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
     end
 
     # True when the detail is at its very top: caret on the FIRST VISUAL ROW of line 0
@@ -1824,7 +1862,7 @@ module Gori::Tui
     # paths (move/scroll/paint) so BodyLines stay lazy; this full array is for
     # rare full-materialise callers (e.g. selection span rebuild when selecting).
     private def detail_plain_lines : Array(String)
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         rl
       else
         dv = detail_view
@@ -1834,7 +1872,7 @@ module Gori::Tui
 
     # O(1) total + lazy line fetch for caret/scroll/copy on windowed req/resp bodies.
     private def detail_line_source
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         {rl.size, ->(i : Int32) { rl[i] }}
       else
         dv = detail_view
@@ -1978,6 +2016,9 @@ module Gori::Tui
       if @detail_wrap_w != cw
         @detail_wrap.clear
         @detail_wrap_w = cw
+        # The sub-row was counted at the old width; a wider pane may give its line fewer rows,
+        # and `ensure_detail_visible` would compare the caret against the stale one for a frame.
+        @detail_scroll_sub = 0
       end
       if hit = @detail_wrap[li]?
         return hit
@@ -2077,7 +2118,7 @@ module Gori::Tui
       # scroll bounds (detail_scroll_max). Search must scan reveal_lines so the hit indices
       # match what goto_detail_line scrolls to — mirroring the hex exclusion above (the
       # decoded/pretty detail_view has a different line count, so its indices would scroll wrong).
-      if @reveal && (rl = reveal_lines)
+      if rl = shown_reveal_lines
         rl.each_with_index { |ln, i| hits << i if ln.downcase.includes?(q) }
         return hits
       end
@@ -2089,11 +2130,26 @@ module Gori::Tui
     private def detail_scroll_max : Int32
       if @detail_hex && (bytes = detail_pane_bytes)
         {HexView.rows(bytes.size) - 1, 0}.max
-      elsif @reveal && (rl = reveal_lines)
+      elsif rl = shown_reveal_lines
         {rl.size - 1, 0}.max
       else
         {detail_view.total - 1, 0}.max
       end
+    end
+
+    # The reveal line space, but only while the body is DRAWN from it — the answer
+    # `reveal_active?` gives the renderer, so the caret, scroll bounds, ^F and copy walk the
+    # lines on screen. `@reveal && reveal_lines` was not that: `@reveal` is a global pref and
+    # `reveal_lines` has raw bytes behind any request/response pane, so on a PNG response or
+    # a gRPC tree the screen showed the placeholder / the decoded tree while ↓ walked
+    # thousands of invisible raw lines, the gutter caret vanished, ^F scrolled the tree to
+    # reveal-space indices and `y` copied bytes the operator never saw.
+    private def shown_reveal_lines : Array(String)?
+      return nil unless @reveal
+      detail = @detail
+      return nil unless detail
+      return nil unless reveal_active?(detail_hex?(detail), detail_view)
+      reveal_lines
     end
 
     # Whether the current pane supports the hex view (raw request/response bytes;
@@ -2383,6 +2439,7 @@ module Gori::Tui
 
       list_top = hdr_y + 2
       list_h = {rect.bottom - list_top, 0}.max
+      @list_last_h = list_h
       ensure_visible(list_h)
 
       if @rows.empty?
@@ -2890,6 +2947,7 @@ module Gori::Tui
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
       if hex && (bytes = detail_pane_bytes)
+        @detail_last_h = body.h # the page step (detail_page_rows) reads it in hex too
         HexView.render(screen, body, bytes, @detail_scroll)
         return
       end
@@ -2994,6 +3052,14 @@ module Gori::Tui
       # Reveal substitutes a 1-column marker for every control char (tab → '→', CR → '␍'),
       # which is exactly what `Screen.grapheme_cols` already scores them, so the wrap of the
       # RAW line and the wrap of the revealed line are the same break — no second layout.
+      # The ⇧-selection tint, exactly as render_detail_body computes it: `detail_line_source`
+      # answers these same reveal lines while they are shown, and Reveal keeps one column per
+      # control char, so the span columns line up with the glyphs. Passing nil here left the
+      # selection invisible in reveal mode while `y` still copied it.
+      sel_spans = if focused && detail_navigable? && @detail_read.selection?
+                    size, line_at = detail_line_source
+                    @detail_read.highlight_spans(size, line_at)
+                  end
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { lines[i] })
       xs = detail_xscroll
       rows.each_with_index do |vr, i|
@@ -3006,7 +3072,7 @@ module Gori::Tui
         styled = Reveal.styled(line[vr.a...vr.b], eol, cw + xs)
         styled = Highlight.slice_left(styled, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, styled, width: cw)
-        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, nil, vr.a, vr.b)
+        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b)
         Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs) unless @search_hl.empty?
       end
     end

@@ -179,6 +179,17 @@ describe "gori run history — CLI::Output rows" do
     end
   end
 
+  # The same `ljust` shape on the id: a six-digit id (any project past 100k captures) ran
+  # into the method, `#123456GET`, and `awk '{print $1}'` split it back apart wrong.
+  it "keeps a space between a 6+-digit id and the METHOD column" do
+    {100_000_i64, 1_234_567_i64}.each do |id|
+      row = Gori::Store::FlowRow.new(
+        id: id, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,
+        target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+      Gori::CLI::Output.flow_row_text(row).should start_with("##{id} GET")
+    end
+  end
+
   it "still pads a short METHOD to its column, so the rows stay aligned" do
     row = Gori::Store::FlowRow.new(
       id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,

@@ -12,6 +12,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # terminal's alternate-scroll (which used to arrive as ↑/↓ key bursts), so wheel
   # MUST be handled here or list scrolling silently dies.
   private def handle_mouse(ev : Termisu::Event::Mouse) : Nil
+    @detail_pin = nil # see Runner#history_target_flow_id — the pin lives for one event only
     return unless ev.press? || ev.wheel? || ev.motion? || ev.button.release?
     w, h = @backend.size
     return unless Layout.usable?(w, h)

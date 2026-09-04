@@ -455,13 +455,22 @@ module Gori
     end
 
     def count : Int64
-      @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
-    rescue
       # Degrade like `data_version` rather than raise: this is a POLL reader (the Project
       # tab's periodic refresh, MCP `get_context`/`list_projects`), so a transient
       # SQLITE_BUSY under a checkpoint would otherwise burn the TUI's tick-error budget and
       # void the MCP response instead of showing a stale number for one tick.
-      0_i64
+      count? || 0_i64
+    end
+
+    # The same count, nil when the read failed — for the callers that GATE a write on it.
+    # `clear_flows` on every surface prints and refuses on this number, and a 0 stood in for
+    # "busy" there: `gori run history clear` told the operator it refused to delete 0 flows
+    # (inviting the --yes that would empty the project) or reported "Deleted 0 flows" after
+    # doing exactly that, and the TUI's ⇧X read it as nothing to clear and said nothing.
+    def count? : Int64?
+      @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+    rescue
+      nil
     end
 
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,

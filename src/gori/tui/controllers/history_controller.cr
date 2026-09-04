@@ -223,6 +223,13 @@ module Gori::Tui
       end
       @host.focus_body
       return true if click_filter_bar(inner, mx, my)
+      # Hit-test against the frame the operator clicked BEFORE leaving QL edit mode: `list_top`
+      # counts the suggestion row that was painted while querying, so testing after `stop_query`
+      # lands one row below the pointer (and the header divider on row 0). The row is carried
+      # by id across `flush_query_reload`, which can swap `@rows` under an index — a click a
+      # keystroke ago meant the debounced reload was still pending.
+      gauge_row = @history.gauge_row_at(inner, mx, my)
+      clicked_id = @history.list_row_at(inner, mx, my).try { |i| @history.row_id_at(i) }
       # A click that selects a row / opens detail also exits QL edit mode (applying the query,
       # like Enter) — otherwise @querying stays set and later keys are hijacked into the filter bar.
       if @history.querying?
@@ -232,7 +239,7 @@ module Gori::Tui
       # The scroll gauge on the frame's right hairline: a click there jumps the cursor to the
       # row it points at. Before the pane test — the gauge column is inside the preview split's
       # rect too, and the gauge is what the pointer was aiming at.
-      if row = @history.gauge_row_at(inner, mx, my)
+      if row = gauge_row
         @history.set_preview_focus(:list)
         end_range_gesture
         @history.select_row(row)
@@ -243,7 +250,10 @@ module Gori::Tui
         @history.set_preview_focus(pane)
         return true
       end
-      return true unless idx = @history.list_row_at(inner, mx, my)
+      return true unless clicked_id
+      # Gone after the reload (the applied query no longer matches it): select nothing rather
+      # than whichever row now sits at that index.
+      return true unless idx = @history.row_index(clicked_id)
       @history.set_preview_focus(:list)
       # SELECT-FIRST: first click selects, a second click on the selected row opens.
       if idx == @history.selected_index
@@ -294,6 +304,11 @@ module Gori::Tui
     # never triggers move_selection's ↑-at-top focus pop mid-page.
     def body_scroll(delta : Int32) : Bool
       end_range_gesture unless preview_scroll_focused? # a page key is cursor nav, like ↑/↓
+      # The Runner's page is a screenful of the whole body; this list draws five fewer rows
+      # (bar, header, divider, frame — one more while querying, and only its share of the
+      # preview split), so a page keyed on the body height put the cursor past what had been
+      # on screen and rows were never seen while paging. The Home/End jump passes through.
+      delta = delta.sign * @history.list_page_rows if delta.abs < Runner::JUMP_ROWS && !preview_scroll_focused?
       @history.move(delta)
       true
     end
@@ -330,18 +345,20 @@ module Gori::Tui
     end
 
     # BODY level: caret move + shift-selection (all four directions, incl. horizontal
-    # ⇧←/→), y copies. ↑/k at the very top ascends to the STRIP instead of scrolling.
+    # ⇧←/→). ↑/k at the very top ascends to the STRIP instead of scrolling. Copy is NOT
+    # claimed here: `y` falls through to the keymap's `detail.copy` (the hint names that
+    # binding), so a rebound copy key works and a rebound `y` is not shadowed — the STRIP
+    # level already relies on the same fall-through.
     # detail_move self-guards on detail_navigable? (a no-op in the hex dump), so plain
     # ←/→ just do nothing there and no explicit gate is needed here.
     private def handle_detail_body_key(ev : Termisu::Event::Key) : Bool
       return true if ev.shift? && handle_detail_body_select(ev) # ⇧arrows extend the selection
       key = ev.key
       case
-      when key.left?, key.lower_h?        then @history.detail_move(0, -1) # plain horizontal caret
-      when key.right?, key.lower_l?       then @history.detail_move(0, 1)
-      when key.up?, key.lower_k?          then detail_body_up
-      when key.down?, key.lower_j?        then @history.scroll_detail(1)
-      when ev.char == 'y' || key.lower_y? then detail_copy
+      when key.left?, key.lower_h?  then @history.detail_move(0, -1) # plain horizontal caret
+      when key.right?, key.lower_l? then @history.detail_move(0, 1)
+      when key.up?, key.lower_k?    then detail_body_up
+      when key.down?, key.lower_j?  then @history.scroll_detail(1)
         # Home/End are the LINE's edges here, like every other multi-line pane. The MODIFIED
         # form is deliberately not claimed: ⌃/⌥+Home/End falls through to the shell's
         # ±JUMP_ROWS and keeps the jump-to-top/bottom this pane has always had (and which
@@ -866,13 +883,18 @@ module Gori::Tui
     # Gates on the DB count (not the filtered list window) so a no-match QL filter
     # doesn't hide the wipe when the project still has traffic.
     def history_clear : Nil
-      n = @host.session.store.count
+      # `count?`, not `count`: the degrading reader answers 0 under a transient SQLITE_BUSY,
+      # which here read as "nothing to clear" and swallowed ⇧X without a word.
+      n = @host.session.store.count?
+      return @host.status("history NOT cleared (project busy) — try again") unless n
       return if n <= 0
       @host.confirm("CLEAR HISTORY",
         "Delete ALL #{n} History flow#{n == 1 ? "" : "s"} for this project?\nThis can't be undone.",
         confirm_label: "clear", danger: true, return_to: @host.overlay == :detail ? :detail : :none) do
+        # A rolled-back wipe leaves the detail where it was: `clear` touched nothing local
+        # (the marks and the drill-in included), so the overlay must not be popped either.
         ok = @history.clear(@host.session.store)
-        @host.request_overlay(:none) if @host.overlay == :detail
+        @host.request_overlay(:none) if ok && @host.overlay == :detail
         @host.status(ok ? "history cleared" : "history NOT cleared (project busy) — every flow is still there")
       end
     end
@@ -926,11 +948,12 @@ module Gori::Tui
     end
 
     # ← / → in the detail view walk `HistoryView#detail_panes`, whose tail is conditional on
-    # what the flow carries — so this must not name a fixed chain. Right past the last pane is a
-    # no-op; left past the first (REQUEST) returns to the History list.
+    # what the flow carries — so this must not name a fixed chain. Both ends clamp, exactly as
+    # the STRIP level above does for the same keys: `handle_detail_strip_key` claims ←/h first,
+    # so this verb only fires under a rebinding, and a rebound ← must not close the detail
+    # when the stock one does not. esc/q are the way out.
     def move_detail_pane(dir : Int32) : Nil
-      moved = @history.detail_pane_advance(dir)
-      close_detail if !moved && dir < 0
+      @history.detail_pane_advance(dir)
     end
 
     def toggle_detail_hex : Nil
