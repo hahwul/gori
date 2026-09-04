@@ -74,6 +74,30 @@ describe Gori::Probe::Passive::SharedCache do
         dets(store, "cacheable_set_cookie", resp_headers: "Cache-Control: public, max-age=600\r\n").should be_empty
       end
     end
+
+    it "combines repeated fields and lets a veto win regardless of field order" do
+      with_store do |store|
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: private\r\nCache-Control: public\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: public\r\nCache-Control: no-store\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
+      end
+    end
+
+    it "does not read directive names out of quoted extension values" do
+      with_store do |store|
+        # The quoted `private` is only extension data; the real public directive still applies.
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: note=\"safe, private\", public\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").size.should eq(1)
+        # Conversely, a quoted `public` does not invite a shared cache.
+        dets(store, "cacheable_set_cookie",
+          resp_headers: "Cache-Control: note=\"safe, public\"\r\n" \
+                        "Set-Cookie: sessionid=abc\r\n").should be_empty
+      end
+    end
   end
 
   describe "cors_no_vary_origin" do

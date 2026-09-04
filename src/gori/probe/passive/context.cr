@@ -1,6 +1,7 @@
 require "../../store"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
+require "./cache_control"
 require "./js_scan"
 
 module Gori
@@ -34,6 +35,7 @@ module Gori
         @client_code : Array(String)?
         @ct_low : String?
         @ct_low_done = false
+        @cache_control : Array(String)?
         @html : Bool?
         @js : Bool?
 
@@ -85,6 +87,18 @@ module Gori
           return @ct_low if @ct_low_done
           @ct_low_done = true
           @ct_low = content_type.try(&.downcase)
+        end
+
+        # Cache-Control directives combined across every physical response field, parsed lazily
+        # and once per flow. CacheableApi and SharedCache both ask several questions of the same
+        # list; without this memo they independently tokenized the header on authenticated JSON
+        # responses. An empty list is a real cached value (no response/header), not a retry signal.
+        def cache_control : Array(String)
+          if parts = @cache_control
+            return parts
+          end
+          resp = response
+          @cache_control = resp ? CacheControl.parse(resp.headers) : [] of String
         end
 
         # Memoised: the answer cannot change for a given flow, and both getters sit on the
