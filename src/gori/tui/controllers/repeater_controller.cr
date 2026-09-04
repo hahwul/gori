@@ -1347,9 +1347,16 @@ module Gori::Tui
       # `save_current_repeater`. Minimize is gated off WS tabs, so the two WS flags are
       # normally false here; passing them keeps this call from being the one that clears a
       # flag the OTHER surfaces preserve.
-      @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-        v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
-        tls_preset: v.tls_preset)
+      # Checked before `clear_dirty`, exactly like the WS-frames write in `save_repeater_tab`:
+      # a rolled-back UPDATE (a busy store, a peer holding the writer) leaves the row on its
+      # PREVIOUS bytes, and marking the tab clean over that lets the next reconcile poll paint
+      # the stale row back over the operator's edit. Leave it dirty so a later save retries.
+      unless @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
+               v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+               tls_preset: v.tls_preset)
+        @host.status("request NOT saved (project busy) — leaving the tab dirty so the next save retries")
+        return
+      end
       v.clear_dirty
     end
 
@@ -1747,8 +1754,24 @@ module Gori::Tui
           confirm_label: "close", danger: true) { close_marked_repeaters(refs) }
         return
       end
+      # Capture the VIEW, not the index: the confirm's action runs from `on_close` a reconcile
+      # poll later, and a peer that deleted or reordered this session in that gap would leave
+      # `@current_repeater_idx` naming a DIFFERENT tab — the batch arm resolves to views before
+      # the dialog for exactly this reason, and the single arm has to as well.
+      v = tab.view
       @host.confirm("CLOSE REPEATER", "Close repeater “#{tab.view.summary}”?\nThe edited request and response are discarded.",
-        confirm_label: "close", danger: true) { close_repeater_tab }
+        confirm_label: "close", danger: true) { close_repeater_view(v) }
+    end
+
+    # Close the sub-tab holding `view` by IDENTITY, or say it is already gone. The index the
+    # single ^W confirm captured can name another session by the time the dialog resolves
+    # (a peer delete/reorder in the gap), so `close_repeater_tab`'s index path is unsafe from
+    # a deferred action — this re-finds the tab from the view every time.
+    private def close_repeater_view(view : RepeaterView) : Nil
+      idx = @repeaters.index(&.view.same?(view))
+      return @host.status("repeater already closed") unless idx
+      orphaned = close_repeater_at(idx)
+      @host.status(TabClose.message(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)", orphaned))
     end
 
     # The batch arm of ^W: the shared driver loops the same per-tab teardown high index →
@@ -1948,7 +1971,7 @@ module Gori::Tui
         return false
       end
       if view.ws_mode?
-        ws_repeater_send(view)
+        ws_repeater_send(tab)
         return true
       end
       results = @repeater_results
@@ -2146,7 +2169,8 @@ module Gori::Tui
     # WebSocket repeater: re-do the handshake and fire the editor's messages off the UI
     # fiber (a round-trip can block on the drain idle-timeout), handing the transcript
     # back through @ws_results. Mirrors repeater_send's fiber/inflight discipline.
-    private def ws_repeater_send(view : RepeaterView) : Nil
+    private def ws_repeater_send(tab : RepeaterTab) : Nil
+      view = tab.view
       results = @ws_results
       return unless plan = repeater_plan(view, [view.ws_upgrade_bytes])
       if reason = plan.refusal
@@ -2157,6 +2181,13 @@ module Gori::Tui
       end
       messages = view.ws_out_messages
       keep_key = view.ws_keep_key?
+      # Persist the edited handshake + frames BEFORE the send goes inflight, exactly as the
+      # HTTP arm does: the drain writes this send's response onto the row afterward
+      # (`update_repeater_response`), so without a save first the row keeps the OLD handshake
+      # and frames beside the NEW response — the mismatched pair `get_repeater` /
+      # `gori run repeater send <id>` then read back until some later save-on-leave, and a
+      # crash before that loses the edit.
+      save_repeater_tab(tab)
       view.inflight = true
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
@@ -2443,9 +2474,14 @@ module Gori::Tui
         # Persist the RAW handshake text (request_text = the editor's `$KEY` tokens, in the
         # line endings the editor holds), NOT ws_upgrade_bytes (env-expanded): baking the
         # expanded form in would write secrets to the DB and defeat the reconcile guard.
-        @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
-          tls_preset: v.tls_preset)
+        # Checked like the frames write below: a rolled-back request UPDATE that then marks the
+        # tab clean lets reconcile repaint the stale row over the edit.
+        unless @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
+                 v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+                 tls_preset: v.tls_preset)
+          @host.status("request NOT saved (project busy) — leaving the tab dirty so the next save retries")
+          return
+        end
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         # Checked, and BEFORE `ws_out_persisted`/`clear_dirty`: that write opens with
         # `DELETE FROM ws_messages`, so a rolled-back batch (a busy store, a live capture
@@ -2467,9 +2503,14 @@ module Gori::Tui
         # is the third column this hazard now covers. (`ws_http_only` is genuinely false on this
         # branch — the view forces it false for a non-upgrade request — so it is passed for
         # symmetry with the branch above rather than to preserve anything.)
-        @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
-          v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
-          tls_preset: v.tls_preset)
+        # Checked before the shared `clear_dirty` below, for the reason `persist_repeater_tab`
+        # states: a discarded rollback marks the tab clean and reconcile repaints the old row.
+        unless @host.session.store.update_repeater(id, v.target, v.request_text.to_slice, v.http2?, v.auto_content_length?,
+                 v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
+                 tls_preset: v.tls_preset)
+          @host.status("request NOT saved (project busy) — leaving the tab dirty so the next save retries")
+          return
+        end
       end
       v.clear_dirty
     end

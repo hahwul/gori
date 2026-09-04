@@ -326,13 +326,22 @@ module Gori::Proxy::WS
   # Reads the payload for an already-read `Header` into ONE wire buffer
   # (header + payload) reused as `raw` for byte-exact forwarding, unmasking a copy
   # for `payload`. The caller MUST have checked `h.len <= MAX_FRAME`.
-  def self.read_body(io : IO, h : Header) : Frame?
+  #
+  # `deadline` bounds the WHOLE payload read by wall clock (with `idle` as the per-read cap):
+  # without it, a peer that trickles the payload a byte at a time — each byte arriving inside
+  # the socket's per-read timeout, resetting it — pins `read_fully?` for as long as it likes,
+  # a hang a security tool must survive on a target it does not trust. Default nil keeps the
+  # exact prior behaviour, so the relay's `read_frame` path is byte-for-byte unchanged; only
+  # the WS repeater engine passes a deadline.
+  def self.read_body(io : IO, h : Header, *, deadline : Time::Instant? = nil,
+                     idle : Time::Span? = nil) : Frame?
     hlen = h.bytes.size
     n = h.len.to_i
     buf = Bytes.new(hlen + n)
     h.bytes.copy_to(buf[0, hlen])
     if n > 0
-      return nil unless io.read_fully?(buf[hlen, n])
+      ok = deadline ? fill_to_deadline?(io, buf[hlen, n], deadline, idle) : io.read_fully?(buf[hlen, n])
+      return nil unless ok
     end
 
     payload =
@@ -346,6 +355,33 @@ module Gori::Proxy::WS
 
     Frame.new(h.fin?, h.opcode, payload, buf, h.rsv, h.masked?,
       h.masked? ? h.mask_key.dup : nil)
+  end
+
+  # Fill `slice` from `io`, bounded by an absolute `deadline`. Caps each read at
+  # `min(idle, remaining)` and raises `IO::TimeoutError` once the deadline passes, so a peer
+  # trickling a frame forever (bytes inside every per-read timeout, resetting it) can no
+  # longer pin the read. Returns false on EOF / short read. The per-read timeout is restored
+  # to `idle` on the way out — the value the drain wants between frames. Reached ONLY when a
+  # `deadline` is passed; `read_frame` passes none, so the relay path never enters here.
+  private def self.fill_to_deadline?(io : IO, slice : Bytes, deadline : Time::Instant,
+                                     idle : Time::Span?) : Bool
+    return true if slice.size == 0
+    begin
+      off = 0
+      while off < slice.size
+        now = Time.instant
+        raise IO::TimeoutError.new("websocket frame did not finish before the drain deadline") if now >= deadline
+        remaining = deadline - now
+        per = idle && idle < remaining ? idle : remaining
+        io.read_timeout = per if io.responds_to?(:read_timeout=)
+        read = io.read(slice[off, slice.size - off])
+        return false if read == 0
+        off += read
+      end
+      true
+    ensure
+      io.read_timeout = idle if idle && io.responds_to?(:read_timeout=)
+    end
   end
 
   # Unmask `src` into `dst` (RFC 6455 §5.3: `dst[i] = src[i] ^ key[i % 4]`). Every

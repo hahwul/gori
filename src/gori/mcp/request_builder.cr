@@ -119,8 +119,15 @@ module Gori
         uri =
           begin
             URI.parse(url)
-          rescue ex : URI::Error
-            raise Gori::Error.new("invalid url #{url.inspect}: #{ex.message}")
+          rescue ex : URI::Error | OverflowError
+            # `OverflowError` too, not `URI::Error` alone: an over-long port
+            # (`http://h:99999999999/`) overflows `Int32` inside `URI.parse` rather than
+            # raising `URI::Error`, so it escaped this rescue and reached the agent as the
+            # generic INTERNAL "tool error: Arithmetic overflow" this clause exists to prevent.
+            # The overflow's own message ("Arithmetic overflow") names nothing an agent can
+            # act on, so say what actually broke.
+            why = ex.is_a?(OverflowError) ? "port is out of range" : ex.message
+            raise Gori::Error.new("invalid url #{url.inspect}: #{why}")
           end
         scheme = (uri.scheme || "http").downcase
         host = uri.host

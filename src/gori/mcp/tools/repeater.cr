@@ -956,7 +956,11 @@ module Gori
             position: pos
           )
           next failed << {fid, "store busy or unwritable"} if id == 0
-          pos += 1
+          # Saturating, for the same reason `next_repeater_position` saturates: a base already
+          # at `Int32::MAX` (a poisoned `create_repeater{position}`) would otherwise overflow
+          # this `Int32` on the second insert of the batch and abort mid-loop, leaving the
+          # rows already committed unreported.
+          pos = pos < Int32::MAX ? pos + 1 : Int32::MAX
 
           # Named off the bytes just stored, not off a re-read of the row: the round trip
           # would answer the same thing and cost a query, and it would have to assert the row

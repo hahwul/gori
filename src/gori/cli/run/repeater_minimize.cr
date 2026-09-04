@@ -26,7 +26,11 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--apply", "Write the minimized request back into the repeater session") { apply = true }
           p.on("--verbatim", "Send the stored bytes as-is: no $VAR expansion, no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
-          p.on("-k", "--insecure", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          # Back-compat alias: this command shipped as `--insecure` while every sibling
+          # (`repeater send`, the single-flow replay, `repeater h2`, fuzz/mine/…) spells it
+          # `--insecure-upstream`, so a script passing the family-wide flag aborted here alone.
+          p.on("--insecure", "Alias for --insecure-upstream") { insecure = true }
           p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $NAME") { |v| slot = v.strip }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }

@@ -153,4 +153,30 @@ describe Gori::Tui::TextReadState do
     text.should start_with("alpha bravo")
     text.should_not contain("foxtrot") # the drag stopped on line 1
   end
+
+  # The Repeater response document is swapped under this cursor on a re-send / diff-hex toggle /
+  # WS transport flip WITHOUT resetting the caret. A horizontal step then read a line off a
+  # `@cy` past the new end — an IndexError that, three times in 10s, takes the whole TUI down.
+  describe "a caret left past a shrunken document" do
+    it "clamps into the current document on a horizontal step instead of crashing" do
+      rc = ReadCursor.new
+      big = Array.new(10) { |i| "line #{i}" }
+      5.times { rc.move(1, 0, big) } # caret walks down to row 5
+      rc.cy.should eq(5)
+
+      short = ["only", "two"] # the response was replaced with a 2-line one
+      rc.move(0, 1, short)    # → / l : used to `line_at.call(5)` on a 2-line provider
+      rc.cy.should be < short.size
+    end
+
+    it "clamps on a vertical step into a shorter document too" do
+      rc = ReadCursor.new
+      big = Array.new(10) { |i| "line #{i}" }
+      5.times { rc.move(1, 0, big) }
+
+      short = ["a", "b", "c"]
+      rc.move(-1, 0, short) # ↑ from a stale row
+      rc.cy.should be < short.size
+    end
+  end
 end
