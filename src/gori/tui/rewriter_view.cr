@@ -65,15 +65,19 @@ module Gori::Tui
       nil
     end
 
+    # `empty_hint` is the empty list's one line. The controller hands it in already resolved
+    # through the keymap (`TabController#keys`), because the view has no registry and the
+    # line names a chord — the literal default here is for a registry-less render.
     def render(screen : Screen, rect : Rect, rules : Array(Store::MatchRule), sel : Int32,
                scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
                live : Bool, preview_input : TextArea, preview_out : ReadPane,
-               target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "") : Nil
+               target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
+               empty_hint : String = "no rules — press a to add") : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules, body_focused)
       list_r, pin_r, pout_r = layout(rect)
       render_list(screen, list_r, rules, sel, scroll, enabled_count,
-        body_focused && focus == :list, live)
+        body_focused && focus == :list, live, empty_hint)
       unless pin_r.empty?
         render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in, target)
         render_preview_output(screen, pout_r, preview_out, body_focused && focus == :preview_out, target, host)
@@ -84,7 +88,8 @@ module Gori::Tui
     # No preview pair — a rule's live answer is the `bindings` sub-tab, which shows whether
     # the selector actually hit rather than what a rewrite would look like.
     def render_extract(screen : Screen, rect : Rect, rules : Array(Store::ExtractRule),
-                       bound : Set(String), sel : Int32, scroll : Int32, body_focused : Bool) : Nil
+                       bound : Set(String), sel : Int32, scroll : Int32, body_focused : Bool,
+                       empty_hint : String = "no extract rules — press a to add one, then log in from a Repeater tab") : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :extract, body_focused)
       _, body = sub_layout(rect)
@@ -92,8 +97,7 @@ module Gori::Tui
       inner = body.inset(1, 1)
       return if inner.empty?
       if rules.empty?
-        screen.text(inner.x, inner.y, "no extract rules — press a to add one, then log in from a Repeater tab",
-          Theme.muted, Theme.bg, width: inner.w)
+        screen.text(inner.x, inner.y, empty_hint, Theme.muted, Theme.bg, width: inner.w)
         return
       end
       (0...inner.h).each do |i|
@@ -268,7 +272,7 @@ module Gori::Tui
 
     private def render_list(screen : Screen, rect : Rect, rules : Array(Store::MatchRule),
                             sel : Int32, scroll : Int32, enabled_count : Int32,
-                            focused : Bool, live : Bool) : Nil
+                            focused : Bool, live : Bool, empty_hint : String) : Nil
       return if rect.w < 6 || rect.h < 2
       Frame.card(screen, rect, "MATCH & REPLACE", bg: Theme.bg, border: Frame.pane_border(focused))
       meta = "#{enabled_count}/#{rules.size} enabled"
@@ -292,8 +296,7 @@ module Gori::Tui
       end
 
       if rules.empty?
-        screen.text(inner.x, list_top, "no rules — press a to add",
-          Theme.muted, Theme.bg, width: inner.w)
+        screen.text(inner.x, list_top, empty_hint, Theme.muted, Theme.bg, width: inner.w)
         return
       end
 

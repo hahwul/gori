@@ -193,12 +193,18 @@ module Gori::Tui
     end
 
     # Rows the CURRENT op has no meaning for, skipped by ↑/↓ so the form never parks the
-    # caret on a field that does nothing. target/match/part are already drawn "n/a" for the
-    # ops that ignore them; this stops the two body-source rows from appearing at all for the
-    # four rewrite ops, and the plain `replace:` row from appearing for a stub.
+    # caret on a field that does nothing: the body-file row for the five ops that are not a
+    # stub, target/part for a stub (drawn as what it forces them to), and for a header op
+    # the match and part rows it ignores — plus the value row for `remove header`, which
+    # has nothing to set. The header rows were drawn `n/a` but still landed on: ←/→ there
+    # cycled a value the op never reads, and every notch re-ran the 200-flow preview scan
+    # for a change that changed nothing.
     private def skip_row?(row : Int32) : Bool
       if short_circuit_op?
         row == ROW_TARGET || row == ROW_PART
+      elsif header_op?
+        row == ROW_MATCH || row == ROW_PART || row == ROW_BODY_FILE ||
+          (row == ROW_VALUE && op.remove_header?)
       else
         row == ROW_BODY_FILE
       end
@@ -385,7 +391,10 @@ module Gori::Tui
       else # text row
         field = text_field_for(@sel)
         if key.enter?
-          return :commit if @sel == ROW_VALUE || @sel == ROW_BODY_FILE
+          # ↵ on the LAST text row commits — the value, the body file, or the header name when
+          # the op has no value row (remove header).
+          return :commit if @sel == ROW_VALUE || @sel == ROW_BODY_FILE ||
+                            (@sel == ROW_FIND && skip_row?(ROW_VALUE))
           move(1)
         elsif field
           field.handle_edit_key(ev)
@@ -447,7 +456,13 @@ module Gori::Tui
       when ROW_HOST   then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
       when ROW_FIND   then draw_field(screen, box, py, bg, fg, sel, hop ? "header:" : "find:", @fields[:pattern])
       when ROW_VALUE
-        sc ? draw_stub_row(screen, x, py, bg, fg, sel) : draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
+        if sc
+          draw_stub_row(screen, x, py, bg, fg, sel)
+        elsif op.remove_header?
+          draw_na(screen, x, py, bg, "value:", "n/a (nothing to set)")
+        else
+          draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
+        end
       when ROW_BODY_FILE
         draw_field(screen, box, py, bg, fg, sel, "body file:", @fields[:body_file]) if sc
       else
@@ -471,7 +486,6 @@ module Gori::Tui
     private def value_label : String
       case op
       when .add_header?, .set_header? then "value:"
-      when .remove_header?            then "value: (n/a)"
         # Not "replace:" — the field holds a COMMAND, and a row labelled "replace" over an
         # argv is the one place this form could make an operator think the text on the right
         # is what lands on the wire.

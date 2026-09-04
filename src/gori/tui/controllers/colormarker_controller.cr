@@ -181,9 +181,26 @@ module Gori::Tui
       # `Hotkeys::CLAIMED_CTRL_LETTERS` (the global "open in $EDITOR"), whose contract is that
       # a controller may only hardcode Ctrl guards listed there. `^A`/`^X` are neither claimed
       # nor reserved, so the hotkey editor binds them and the binding was shadowed here.
-      # This tab has no text editor, so nothing below needs to see a modified chord.
+      # This tab has no text editor, so nothing below needs to see a modified chord — except
+      # the colours pane's two REBINDABLE chords, checked first because a `chord_of?` match is
+      # exact, modifiers included, so a rebind onto a Ctrl chord still reaches its action.
+      return true if @focus == :colors && handle_colors_chord(ev)
       return false if ev.ctrl? || ev.alt?
       @focus == :colors ? handle_colors_key(ev, key) : handle_rules_key(ev, key)
+    end
+
+    # The chords the colours strip names for add/delete — `{colormarker.add} add ·
+    # {colormarker.delete} delete` — not the literal letters, which stopped matching the
+    # strip the moment either verb was rebound (`TabController#chord_of?`).
+    private def handle_colors_chord(ev : Termisu::Event::Key) : Bool
+      if chord_of?(ev, "colormarker.add")
+        customcolor_add
+      elsif chord_of?(ev, "colormarker.delete")
+        customcolor_delete
+      else
+        return false
+      end
+      true
     end
 
     private def handle_rules_key(ev : Termisu::Event::Key, key) : Bool
@@ -208,8 +225,7 @@ module Gori::Tui
       when key.up?, c == 'k'    then colors_up
       when key.down?, c == 'j'  then colors_down
       when key.enter?, c == 'e' then customcolor_edit
-      when c == 'a'             then customcolor_add
-      when c == 'd'             then customcolor_delete
+        # `a`/`d` — the add/delete chords — are answered in `handle_colors_chord` above.
       else
         # Defer everything else to the keymap. A rule chord (x/s/⇧J/…) resolves to a verb whose
         # `available?` is gated on the POLICY pane being focused, so it is a no-op here rather

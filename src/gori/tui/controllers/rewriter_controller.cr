@@ -194,10 +194,17 @@ module Gori::Tui
       list = rule_list
       @sel = @sel.clamp(0, {list.size - 1, 0}.max)
       ensure_visible(inner, list.size)
+      # A preview pane that is no longer DRAWN cannot keep the focus: the pair drops out
+      # below `LIST_MIN_H + PREVIEW_MIN_H` rows, and a terminal shrunk past that while the
+      # sample was being edited left every keystroke typing into a pane the operator could
+      # not see — with the footer still describing it. `enter_preview_in` already refuses to
+      # focus a pane that is not shown; this is the same gate for one that stops being shown.
+      @focus = :list if @focus != :list && !@view.preview_shown?(inner)
       target = preview_target
       sync_preview_out(target)
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
-        @focus, body_focused, rules_engine.active?, @preview_input, @out, target, @preview_host)
+        @focus, body_focused, rules_engine.active?, @preview_input, @out, target, @preview_host,
+        empty_hint: keys("no rules — press {rewriter.add} to add"))
     end
 
     private def render_extract(screen : Screen, inner : Rect, body_focused : Bool) : Nil
@@ -206,7 +213,8 @@ module Gori::Tui
       binding_rows.each { |r| bound << r.name if r.bound? }
       @sub_sel = @sub_sel.clamp(0, {rules.size - 1, 0}.max)
       ensure_sub_visible(inner, rules.size)
-      @view.render_extract(screen, inner, rules, bound, @sub_sel, @sub_scroll, body_focused)
+      @view.render_extract(screen, inner, rules, bound, @sub_sel, @sub_scroll, body_focused,
+        empty_hint: keys("no extract rules — press {rewriter.add} to add one, then log in from a Repeater tab"))
     end
 
     private def render_bindings(screen : Screen, inner : Rect, body_focused : Bool) : Nil
@@ -338,6 +346,11 @@ module Gori::Tui
       # bindable in the hotkey editor, so a binding on them was silently shadowed here.
       # Guarded at the sub-handlers rather than at `handle_body_key`: the preview INPUT pane
       # below is a real text editor and has to keep seeing `^Z` and `⌥⌫`.
+      #
+      # The extract sub-tab's two rebindable chords come BEFORE that guard: a `chord_of?`
+      # match is exact, modifiers included, so a rebind onto a Ctrl chord reaches its action
+      # here the way it reaches the rules list through the keymap.
+      return true if @sub == :extract && handle_extract_chord(ev)
       return false if ev.ctrl? || ev.alt?
       c = ev.char || key.to_char
       case
@@ -353,6 +366,25 @@ module Gori::Tui
       true
     end
 
+    # The extract sub-tab has no verbs of its own (`rewriter.add`'s chord is claimed in this
+    # SCOPE by the rules list), so its add/delete keys are whatever `rewriter.add` and
+    # `rewriter.delete` are bound to — which is exactly what its strip names for them
+    # (`body_hint` spells `{rewriter.add} add`). They used to be the literal `a`/`d`, so a
+    # rebind reached the strip and not the key under it.
+    private def handle_extract_chord(ev : Termisu::Event::Key) : Bool
+      if chord_of?(ev, "rewriter.add")
+        extract_add
+      elsif chord_of?(ev, "rewriter.delete")
+        extract_delete
+      else
+        return false
+      end
+      true
+    end
+
+    # Edit and on/off stay literal: the strip names them literally too (`rewriter.edit` is
+    # a two-chord verb no rebind can move, and `x` is the pane-local toggle on every rule
+    # list) — and so does the bindings sub-tab's `d`, which clears a value, not a rule.
     private def handle_sub_action_key(key : Termisu::Input::Key, c : Char?) : Bool
       if @sub == :bindings
         return false unless c == 'd'
@@ -361,8 +393,6 @@ module Gori::Tui
       end
       case
       when key.enter?, c == 'e' then extract_edit
-      when c == 'a'             then extract_add
-      when c == 'd'             then extract_delete
       when c == 'x'             then extract_toggle
       else                           return false
       end
@@ -396,6 +426,21 @@ module Gori::Tui
         # their keys while the other four bound real chords.
         return false
       end
+      true
+    end
+
+    # PgUp/PgDn/Home/End on whichever LIST holds the focus — the shell routes them here
+    # only after `handle_body_key` declined, which the list handlers do for every key they
+    # do not name. The preview panes never reach this: the editor and the read pane consume
+    # the same keys through their own motion tables. Without it the four keys did nothing on
+    # a rule list that a single preset can grow past one screen.
+    def body_scroll(delta : Int32) : Bool
+      if @sub != :rules
+        @sub_sel = (@sub_sel + delta).clamp(0, {sub_count - 1, 0}.max)
+        return true
+      end
+      return false unless @focus == :list
+      move_sel(delta)
       true
     end
 
@@ -593,8 +638,29 @@ module Gori::Tui
         return false if body.empty?
         sync_preview_out
         @out.select_word(body, mx, my)
-      else false
+      else
+        double_click_row(inner, mx, my)
       end
+    end
+
+    # A double-click on a rule row opens it in the editor, as the Colormarker's list and
+    # every other rule list already did; here it read as two selects. Only when the pair
+    # landed ON a row — the first press already selected it — so a double-click in the
+    # card's empty space does not open whatever happened to be highlighted. The bindings
+    # rows have nothing to open (a value, not a rule), so they keep answering false and the
+    # shell falls through to the ordinary click.
+    private def double_click_row(inner : Rect, mx : Int32, my : Int32) : Bool
+      case @sub
+      when :rules
+        return false unless @view.row_at(inner, mx, my, @scroll, rule_list.size, rules_engine.active?)
+        rewriter_edit
+      when :extract
+        return false unless @view.sub_row_at(inner, mx, my, @sub_scroll, sub_count)
+        extract_edit
+      else
+        return false
+      end
+      true
     end
 
     # --- READ-pane delegators (the Rewriter verbs + the Runner's read_* ladders) ---
@@ -822,6 +888,12 @@ module Gori::Tui
                enabled: rule.enabled?)
         return @host.status("rule NOT duplicated (project busy or settings not writable)")
       end
+      # Land on the copy, as `apply_rewriter_rule` lands on an added rule and `install_preset`
+      # on a preset's last one. The copy is appended to the END of its scope block, which on a
+      # list longer than the card is off screen — so the highlight stayed on the original, the
+      # toast said "duplicated", and the `e` that duplicating is almost always followed by
+      # re-opened the rule the operator had just copied instead of the copy.
+      @sel = last_index_of_scope(rule.scope)
       state = rule.enabled? ? "" : " (disabled, like the original)"
       @host.status(rule.global? ? "global rule duplicated#{state}" : "rule duplicated#{state}")
     end
@@ -862,7 +934,12 @@ module Gori::Tui
         end
         if from != ov.scope
           moved = rule_list.find { |r| r.scope == from && r.id == id }
-          if moved && !rules_engine.set_scope(moved, ov.scope)
+          if moved && rules_engine.set_scope(moved, ov.scope)
+            # The rule left its block for the end of the other one, and `@sel` still named
+            # its OLD index — the row that slid into it. `rewriter_scope_toggle` follows the
+            # move for the same reason; the form's scope row is the same move, one dialog in.
+            @sel = last_index_of_scope(ov.scope)
+          elsif moved
             @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
           end
         end
