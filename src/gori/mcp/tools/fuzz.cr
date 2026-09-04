@@ -431,8 +431,10 @@ module Gori
         matched_only = bool_arg(h, "matched_only", false)
         picked = (0...rows.size).to_a
         picked.select! { |i| rows[i].matched? } if matched_only
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 100, 1000)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 100, 1000)
         last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
         Result.new(JSON.build do |j|
@@ -441,6 +443,8 @@ module Gori
             j.field "returned", returned
             j.field "offset", offset
             j.field "total_available", picked.size
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "matched_only", matched_only
             # What the filter is selecting FROM, so a caller that passed matched_only can see
             # how many non-matching rows the run kept rather than having to page twice to
@@ -463,7 +467,7 @@ module Gori
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
         fjob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", fjob.id; j.field "status", "stopping" } })
+        stop_and_report(fjob)
       end
 
       # The job for `job_id`, or an error Result the caller returns as-is.

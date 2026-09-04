@@ -198,8 +198,10 @@ module Gori
       private def authorize_results(h) : Result
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
-        offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        limit = clamp(optional_int_arg(h, "limit"), 50, 500)
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 50, 500)
         page = ajob.results[offset, limit]? || [] of Authorize::Target
         Result.new(JSON.build do |j|
           j.object do
@@ -215,6 +217,8 @@ module Gori
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", ajob.results.size
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "page_complete", offset + page.size >= ajob.results.size
             j.field "has_more", offset + page.size < ajob.results.size
             j.field "job_complete", ajob.status != :running
@@ -231,7 +235,7 @@ module Gori
         ajob = lookup_authorize_job(h)
         return ajob if ajob.is_a?(Result)
         ajob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", ajob.id; j.field "status", "stopping" } })
+        stop_and_report(ajob)
       end
 
       private def lookup_authorize_job(h) : AuthorizeJob | Result

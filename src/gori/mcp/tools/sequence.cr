@@ -134,7 +134,7 @@ module Gori
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
         sjob.stop
-        Result.new(JSON.build { |j| j.object { j.field "job_id", sjob.id; j.field "status", "stopping" } })
+        stop_and_report(sjob)
       end
 
       private def lookup_sequence_job(h) : SequenceJob | Result
