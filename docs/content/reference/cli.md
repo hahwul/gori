@@ -1383,7 +1383,7 @@ This is deliberately **orthogonal to `GORI_HOME`**: it changes only which settin
 gori wizard
 ```
 
-Runs the interactive setup (global proxy bind default, then theme, then the Miss Ring mascot). Also runs automatically on first launch. The bind step writes the shared `settings.json` defaults. Projects can still pin their own address in the Project tab; `--listen` / `--port` override for one run only.
+Runs the interactive setup (global proxy bind default, then theme, then the Miss Ring mascot). Also runs automatically on first launch. The bind step writes the shared `settings.json` defaults and warns when something already listens on the chosen port (press `Enter` again to keep it anyway). Projects can still pin their own address in the Project tab; `--listen` / `--port` override for one run only. `Esc` twice skips the wizard; the rows are also clickable.
 
 ## gori tutorial
 
@@ -1391,7 +1391,7 @@ Runs the interactive setup (global proxy bind default, then theme, then the Miss
 gori tutorial
 ```
 
-Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; a final practice step requires all four before finishing, then points you at a first real session. Offered at the end of `gori wizard`; safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
+Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; a final practice step requires all four before finishing, then points you at a first real session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`), which returns you to where you were; safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
 
 ## gori update
 

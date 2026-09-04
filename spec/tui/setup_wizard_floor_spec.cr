@@ -35,6 +35,49 @@ describe Gori::Tui::SetupWizard do
     Gori::Tui::Layout.usable?(SW::MIN_W - 1, SW::MIN_H).should be_false
   end
 
+  # The click targets are the SAME offsets the renderers draw at (one constant each), so the
+  # only thing left to pin is that every one of them lies inside the step's own interior —
+  # `box.y + 2 .. box.y + 1 + rows` — otherwise the card's bottom border, or the row past it,
+  # would take a click for the row it never drew.
+  it "keeps every clickable row inside its step's interior" do
+    {
+      {SW::BIND_FIELD_ROW + 1, SW::BIND_ROWS},
+      {SW::COMPANION_MOTION_ROW, SW::COMPANION_ROWS},
+      {SW::REVIEW_OFFER_ROW + 1, SW::REVIEW_ROWS},
+    }.each do |(last_row, rows)|
+      last_row.should be >= 2
+      last_row.should be <= rows + 1
+    end
+  end
+
+  # Only "address in use" is a warning; a host this machine cannot bind, or a sandbox that
+  # forbids binding altogether, must read as free — the app reports those itself at launch.
+  describe ".port_in_use?" do
+    it "never flags port 0" do
+      SW.port_in_use?("127.0.0.1", 0).should be_false
+    end
+
+    it "reads an unbindable host as free" do
+      SW.port_in_use?("192.0.2.1", 8070).should be_false # TEST-NET-1, never local
+    end
+
+    it "flags a port something already listens on, and only that" do
+      listener = begin
+        TCPServer.new("127.0.0.1", 0)
+      rescue Socket::Error
+        pending!("cannot bind a loopback listener in this environment")
+      end
+      begin
+        port = listener.local_address.port
+        SW.port_in_use?("127.0.0.1", port).should be_true
+        listener.close
+        SW.port_in_use?("127.0.0.1", port).should be_false
+      ensure
+        listener.close rescue nil
+      end
+    end
+  end
+
   # The COMPANION step holds Miss Ring's column band back out of its own text column, so a card too
   # narrow to seat her beside the copy doesn't shrink that copy, it shreds it: at MIN_W the
   # text column was 19 columns and all three lines — including the one sentence saying what

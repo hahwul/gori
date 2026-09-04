@@ -208,7 +208,7 @@ method:POST body:password
 gori wizard
 ```
 
-바인드 단계는 `settings.json`의 공유 기본값을 설정합니다. Preferences → **Network & Tabs** → **Network**와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.
+바인드 단계는 `settings.json`의 공유 기본값을 설정합니다. Preferences → **Network & Tabs** → **Network**와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요. 고른 포트에 이미 다른 프로세스가 열려 있으면 이 단계가 알려 주며, `Enter`를 한 번 더 누르면 그대로 유지합니다. `Esc`는 두 번 눌러야 마법사를 건너뜁니다(첫 번째는 예고만 하므로 입력 필드에서 실수로 누른 `Esc`가 설정을 끝내지 않습니다).
 
 마지막 **Review** 스텝은 선택한 값을 요약하며, 편집 가능한 행이 하나 있습니다 — **Shortcuts**입니다. `←`/`→`로 gori 내장 키 조합 패밀리(`^P` `^N` `^W` `^1-9`)의 모디파이어를 `Ctrl`과 `Option (⌥)` 사이에서 전환합니다. Option을 고르면 Ctrl을 대체하는 게 아니라 `⌥` 별칭이 *추가*됩니다 — 터미널이나 멀티플렉서가 Ctrl 형태를 전달하지 않을 때 유용합니다. macOS의 Option-as-Meta 요구사항은 [커맨드 모디파이어](/ko/guide/hotkeys/#command-modifier)를 참고하세요.
 
@@ -225,7 +225,7 @@ gori tutorial
   <figcaption>가이드 투어는 탭과 패널, 팔레트, space 메뉴, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
 </figure>
 
-이 투어는 첫 실행 마법사의 마지막에도 제안됩니다.
+이 투어는 첫 실행 마법사의 마지막에도 제안되며, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 끝나면 원래 화면으로 돌아옵니다.
 
 ## 다음 단계 {#next-steps}
 
