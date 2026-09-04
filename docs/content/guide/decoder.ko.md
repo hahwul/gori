@@ -59,7 +59,7 @@ myenc > url-encode
 |----------|----------|
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩 — WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`) |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
-| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
+| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` — 바이너리 문서를 JSON 텍스트로 렌더 |
 | **Token** | `jwt-decode` (헤더 + 페이로드; 서명은 표시되지만 검증하지 않음), 그리고 서명된 세션 쿠키 리더 `cookie-decode`(프레임워크 자동 판별), `flask-decode`(itsdangerous), `django-decode`(`django.core.signing`), `rack-decode`(Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |

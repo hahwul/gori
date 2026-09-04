@@ -41,6 +41,7 @@ module Gori
         chain = positional[0]
         (msg = decoder_empty_chain_error(chain)) && abort(msg)
 
+        (msg = decoder_input_twice_error(input_flag, positional[1]?)) && abort(msg)
         input_str = input_flag || positional[1]?
         input_str ||= STDIN.gets_to_end unless STDIN.tty?
         abort "gori run decoder: no input (pass it as an argument, --input, or via STDIN)" if input_str.nil?
@@ -81,6 +82,14 @@ module Gori
         return nil unless Decoder.parse_spec(chain).empty?
         "gori run decoder: <chain> has no converter tokens (separators are > | ,; " \
         "e.g. 'base64-decode > gunzip'; see 'gori run decoder list')"
+      end
+
+      # Both input forms at once is a mistake, not a precedence question: `--input` used to
+      # win silently and the positional went nowhere. Split from the abort like
+      # `decoder_empty_chain_error`, so the decision is spec-able.
+      def self.decoder_input_twice_error(input_flag : String?, positional : String?) : String?
+        return nil unless input_flag && positional
+        "gori run decoder: input given twice (both --input and a 2nd positional argument)"
       end
 
       # STDERR line for the first non-Ok step, so a failing chain is diagnosable in
@@ -172,11 +181,19 @@ module Gori
             end
           end)
         else
-          registry.each do |c|
-            line = "#{c.name.ljust(22)}  #{c.category.label.ljust(11)}  #{c.direction.to_s.downcase.ljust(9)}  #{c.description}"
-            (u = c.unusable) && (line += "  [unusable: #{u}]")
-            puts line
-          end
+          decoder_list_lines(registry).each { |line| puts line }
+        end
+      end
+
+      # The text listing, one row per converter. The name column is MEASURED, not fixed:
+      # `quoted-printable-encode` is 23 chars and a saved chain's name is whatever the
+      # operator typed, and a fixed 22 put those rows' columns one (or many) cells off the rest.
+      def self.decoder_list_lines(registry : Decoder::Registry) : Array(String)
+        name_w = registry.max_of(&.name.size)
+        registry.map do |c|
+          line = "#{c.name.ljust(name_w)}  #{c.category.label.ljust(11)}  #{c.direction.to_s.downcase.ljust(9)}  #{c.description}"
+          (u = c.unusable) && (line += "  [unusable: #{u}]")
+          line
         end
       end
     end

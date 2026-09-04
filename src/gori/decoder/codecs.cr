@@ -289,7 +289,9 @@ module Gori::Decoder
       seen_nonzero = false
       s.each_char do |c|
         next if c.whitespace?
-        v = alphabet.index(fold_case ? c.downcase : c) || raise DecoderError.new("invalid #{label} char: #{c}")
+        # ASCII-only fold: `Char#downcase` is full Unicode, so KELVIN SIGN (U+212A) folded
+        # to `k` and İ to `i` and both decoded as digits of an alphabet they are not in.
+        v = alphabet.index(fold_case && c.ascii_uppercase? ? c.downcase : c) || raise DecoderError.new("invalid #{label} char: #{c}")
         if seen_nonzero || v != 0
           seen_nonzero = true
         else
@@ -524,6 +526,7 @@ module Gori::Decoder
     end
 
     def gzip_decompress(data : Bytes) : Bytes
+      refuse_empty_stream(data)
       reader = begin
         Compress::Gzip::Reader.new(IO::Memory.new(data))
       rescue ex
@@ -533,6 +536,7 @@ module Gori::Decoder
     end
 
     def zlib_decompress(data : Bytes) : Bytes
+      refuse_empty_stream(data)
       reader = begin
         Compress::Zlib::Reader.new(IO::Memory.new(data))
       rescue ex
@@ -551,6 +555,7 @@ module Gori::Decoder
     end
 
     def inflate_raw(data : Bytes) : Bytes
+      refuse_empty_stream(data)
       reader = begin
         Compress::Deflate::Reader.new(IO::Memory.new(data))
       rescue ex
@@ -623,6 +628,13 @@ module Gori::Decoder
       r.json.to_slice
     end
 
+    # No bytes is not a stream. `Compress::Gzip::Reader` does not raise on an empty IO (the
+    # zlib and raw readers do), so `base64-decode > gunzip` over a blank value reported Ok
+    # with empty output — one of the three said nothing where its siblings said "failed".
+    private def refuse_empty_stream(data : Bytes) : Nil
+      raise DecoderError.new("decompress failed: empty input") if data.empty?
+    end
+
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).
     # Tolerant of a CUT stream: a mid-stream error keeps whatever was decoded; an immediate
     # failure (nothing decoded) raises a DecoderError. Mirrors content_decode.cr's read_all.
@@ -647,8 +659,19 @@ module Gori::Decoder
         raise ex # the cap, not a stream fault — never softened into a partial result
       rescue ex
         raise DecoderError.new("decompress failed: #{ex.message}") if sink.bytesize == 0
+        # A CHECKSUM mismatch is corruption, not a cut: the stream reached its trailer and
+        # the trailer disagrees with the bytes, so the output is not what was compressed.
+        # Keeping it as an Ok step (the cut-stream tolerance above) called a damaged body
+        # a clean decode with nothing on the row to say so.
+        raise DecoderError.new("decompress failed: #{ex.message} (corrupt stream)") if checksum_error?(ex)
       end
       sink.to_slice
+    end
+
+    # Crystal's readers raise plain `Compress::Gzip::Error` / `Compress::Zlib::Error` for the
+    # CRC-32 / Adler-32 trailer check; the message is the only thing that names it.
+    private def checksum_error?(ex : Exception) : Bool
+      !!(ex.message =~ /checksum|crc|adler/i)
     end
 
     # ---- byte-oriented number bases (space-separated, matches CyberChef To/From) ----
@@ -1022,10 +1045,22 @@ module Gori::Decoder
       when "apos" then "'"
       else
         return nil unless body.starts_with?('#')
-        cp = body.starts_with?("#x") || body.starts_with?("#X") ? body[2..].to_i?(16) : body[1..].to_i?(10)
+        # The digit run is checked BEFORE `to_i?`, which also accepts a sign and surrounding
+        # whitespace: `&#x+41;`, `&# 65;` and `&#65 ;` resolved to `A` — a character no XML
+        # parser would produce from them. Malformed stays literal, like every other non-entity.
+        hex = body.starts_with?("#x") || body.starts_with?("#X")
+        digits = body[(hex ? 2 : 1)..]
+        return nil unless xml_digit_run?(digits, hex)
+        cp = digits.to_i?(hex ? 16 : 10)
         return nil unless cp && puny_scalar?(cp)
         cp.unsafe_chr.to_s
       end
+    end
+
+    # A non-empty run of digits of the reference's base, and nothing else.
+    private def xml_digit_run?(digits : String, hex : Bool) : Bool
+      return false if digits.empty?
+      digits.each_byte.all? { |b| hex ? hex_digit(b) >= 0 : (0x30_u8 <= b <= 0x39_u8) }
     end
 
     # ---- shell / powershell quoting ----
@@ -1039,8 +1074,12 @@ module Gori::Decoder
 
     # PowerShell single-quoted strings do no escape processing at all; a literal quote is
     # written by doubling it. (A double-quoted PS string would also expand $var and `n.)
+    #
+    # The four Unicode single quotes (U+2018–U+201B) are delimiters to PowerShell's tokenizer
+    # exactly as the ASCII one is (`CharTraits.IsSingleQuote`), so a value carrying a curly
+    # apostrophe used to close the literal this built and hand the rest to the parser as code.
     def powershell_escape(s : String) : String
-      "'" + s.gsub("'") { "''" } + "'"
+      "'" + s.gsub(/['\x{2018}-\x{201b}]/) { |q| q + q } + "'"
     end
 
     # ---- C string literal ----

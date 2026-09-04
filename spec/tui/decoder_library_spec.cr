@@ -224,3 +224,208 @@ describe Gori::Tui::DecoderController do
     end
   end
 end
+
+# ---- defects a review of the controller found ----------------------------------------
+
+private def key(k : Termisu::Input::Key, mods : Termisu::Input::Modifier = :none,
+                char : Char? = nil) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, mods, char)
+end
+
+private def shift(k : Termisu::Input::Key) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::Shift)
+end
+
+# The body rect a click is hit-tested against (protected on the controller).
+class Gori::Tui::DecoderController
+  def body_rect_for_spec(rect : Gori::Tui::Rect) : Gori::Tui::Rect
+    body_rect_below_filter(rect)
+  end
+end
+
+describe Gori::Tui::DecoderController do
+  describe "#on_enter" do
+    # `on_enter` used to recompute with hooks ON and reset the OUTPUT pane: a persisted
+    # `exec:` conversion the project open had held then ran its command the moment the tab
+    # was pressed, and a selection left in OUTPUT was thrown away by a round trip elsewhere.
+    it "neither runs a held exec: step nor disturbs the OUTPUT caret" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("cat", "exec:/bin/cat") # the keystroke recompute ran it: OUTPUT "hi"
+        dc.decoder_new                        # sub-tab 1 is active now…
+        dc.library_changed                    # …so sub-tab 0's exec step is withheld: held
+        dc.jump_subtab(0)
+        dc.output_search_lines("held").should eq [0]
+        dc.on_enter
+        dc.output_search_lines("held").should eq [0] # entering the tab did not run it
+
+        dc.jump_subtab(1)
+        dc.input_area.set_text("l1\nl2\nl3")
+        dc.load_chain("id", "lower") # recomputes over the new text: a 3-line OUTPUT
+        dc.focus_last                # OUTPUT
+        dc.handle_body_key(key(Termisu::Input::Key::Down))
+        dc.handle_body_key(shift(Termisu::Input::Key::Down))
+        dc.decoder_selection_active?.should be_true
+        dc.on_enter
+        dc.decoder_selection_active?.should be_true
+      end
+    end
+  end
+
+  describe "INPUT ⇧↑ / ⇧↓" do
+    it "select in INS instead of moving, and never leave the pane" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("one\ntwo")
+        dc.handle_body_key(key(Termisu::Input::Key::LowerI, char: 'i')) # INS
+        dc.handle_body_key(shift(Termisu::Input::Key::Down))
+        dc.input_area.selection?.should be_true
+        dc.goto_symbol.should eq :decoder_input # ⇧↓ on the last line stayed put
+        dc.handle_body_key(shift(Termisu::Input::Key::Down))
+        dc.goto_symbol.should eq :decoder_input
+      end
+    end
+
+    it "extend a READ selection to the buffer edge rather than leaving the pane" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("one\ntwo")
+        dc.handle_body_key(shift(Termisu::Input::Key::Down))
+        dc.decoder_selection_active?.should be_true
+        dc.handle_body_key(shift(Termisu::Input::Key::Down)) # already on the last line
+        dc.goto_symbol.should eq :decoder_input
+        dc.handle_body_key(shift(Termisu::Input::Key::Up))
+        dc.handle_body_key(shift(Termisu::Input::Key::Up)) # first line: no jump to the strip
+        dc.goto_symbol.should eq :decoder_input
+      end
+    end
+  end
+
+  describe "#save_chain" do
+    it "refuses an exec:-prefixed name, which the chain grammar would run as a command" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.load_chain("seed", "upper")
+        dc.save_chain("exec:mytool")
+        Gori::Settings.decoder_chains.should be_empty
+        host.statuses.last.should contain("exec:")
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    it "refuses to save an empty chain (a step that would be the identity)" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.save_chain("blank")
+        Gori::Settings.decoder_chains.should be_empty
+        host.statuses.last.should contain("empty")
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+  end
+
+  describe "#library_changed" do
+    # The re-derive withheld hooks for EVERY session, the one on screen included — so the
+    # ^S that saved a chain replaced the decode the operator was reading with "chain held".
+    it "keeps running the ACTIVE conversion's exec: step" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("cat", "exec:/bin/cat")
+        dc.output_search_lines("hi").should eq [0]
+        dc.save_chain("catchain")
+        dc.output_search_lines("hi").should eq [0]
+        dc.output_search_lines("held").should be_empty
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
+    # nil → nil: a failure that became a DIFFERENT failure kept the OUTPUT card on the old
+    # error text while the PIPELINE beside it showed the new one.
+    it "redraws an OUTPUT whose failure changed even though its bytes (none) did not" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.load_chain("call", "myenc > zzz")
+        dc.output_search_lines("myenc: unknown").should eq [0]
+        dc.decoder_new
+        dc.load_chain("def", "base64-encode")
+        dc.save_chain("myenc")
+        dc.jump_subtab(0)
+        dc.output_search_lines("myenc: unknown").should be_empty
+        dc.output_search_lines("zzz: unknown").should eq [0]
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+  end
+
+  describe "#apply_rename" do
+    it "persists the new name at once, not at the next leave" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.apply_rename(dc.view_at(0).not_nil!, "peel")
+        raw = host.session.store.setting(Gori::Store::DECODER_SESSIONS_KEY).not_nil!
+        DecoderSessions.parse(raw).first[2].should eq "peel"
+      end
+    end
+  end
+
+  describe "sub-tab filter" do
+    it "is dropped by ^N, which would otherwise land on a chip the strip does not draw" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.apply_rename(dc.view_at(0).not_nil!, "alpha")
+        dc.decoder_new
+        dc.apply_rename(dc.view_at(1).not_nil!, "beta")
+        dc.start_subtab_filter
+        "alpha".each_char { |c| dc.handle_subtab_filter_key(key(Termisu::Input::Key::LowerA, char: c)) }
+        dc.subtab_hidden.not_nil!.should contain(1)
+        dc.decoder_new
+        dc.subtab_hidden.should be_nil
+        dc.subtab_index.should eq 2
+      end
+    end
+  end
+
+  describe "copy from the CHAIN pane" do
+    it "copies the OUTPUT, as the chain footer's ^Y has always promised" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("b", "base64-encode")
+        dc.pane_advance(1) # CHAIN
+        dc.goto_symbol.should be_nil
+        dc.decoder_copy_all
+        host.statuses.last.should contain("copied all (4b)") # "aGk=", not the 13-char spec
+      end
+    end
+  end
+
+  describe "a click into a scrolled CHAIN field" do
+    it "lands the caret on the character under the pointer, rebased by the window" do
+      with_decoder_host do |host|
+        dc = DecoderController.new(host)
+        chain = "base64-decode > url-decode > json-unescape > sha256 > hex-encode > upper > reverse > lower"
+        dc.load_chain("long", chain) # caret at the end → the field is scrolled
+        dc.pane_advance(1)
+        rect = Rect.new(0, 0, 80, 30)
+        regions = dc.view_at(0).not_nil!.layout(dc.body_rect_for_spec(rect))
+        field = regions.chain.inset(1, 1)
+        off, _ = dc.view_at(0).not_nil!.chain_window(regions.chain, chain, chain.size, "")
+        off.should be > 0
+        # Click the 5th visible column: caret = off + 5, not 5.
+        dc.handle_click(rect, field.x + 2 + 5, field.y)
+        dc.handle_body_key(key(Termisu::Input::Key::LowerA, char: '#'))
+        dc.chain_spec.should eq chain[0, off + 5] + "#" + chain[(off + 5)..]
+      end
+    end
+  end
+end

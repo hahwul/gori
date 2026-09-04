@@ -272,7 +272,7 @@ module Gori::Tui
         Item.new("chain library", "shared by every project · picker: type to filter · ^X deletes an entry"),
         Item.new("^N · ^W", "new · close conversion sub-tab"),
         Item.new("^1-9 · r", "switch sub-tab · rename (on the strip)"),
-        Item.new("space", "command menu (anywhere in the tab — Save/Load included)"),
+        Item.new("space", "command menu from the strip, tab bar, INPUT READ or OUTPUT (a literal space while typing)"),
       ]},
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),

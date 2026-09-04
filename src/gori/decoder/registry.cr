@@ -68,8 +68,12 @@ module Gori::Decoder
     end
 
     # downcase + strip; fold whitespace/underscore runs to '-' (the canonical
-    # separator) so spacing/underscore variants all resolve.
+    # separator) so spacing/underscore variants all resolve. Byte-safe for the same reason
+    # `Decoder.parse_spec` is: the fold is a regex, and a non-UTF-8 key (a hand-edited
+    # library name, a token cut from a binary Fuzzer template) must resolve to nothing, not
+    # raise out of `Registry#[]?`.
     def self.normalize(s : String) : String
+      s = s.scrub unless s.valid_encoding?
       s.strip.downcase.gsub(/[\s_]+/, "-")
     end
   end

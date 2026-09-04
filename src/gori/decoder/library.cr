@@ -13,6 +13,25 @@ module Gori::Decoder
     # as a whole rather than turned into a multi-second step nobody asked for.
     MAX_TOKENS = 256
 
+    # Why `name` can never work as a saved chain's name, or nil when it can. ONE rule, asked
+    # by every surface that admits a name — the tab's ^S prompt, the settings.json parse, and
+    # this registrar — because a saved chain is CALLABLE as a step, so a name no spec could
+    # ever spell as one token saves an entry that silently does nothing:
+    #   - blank after strip: `Registry.normalize` folds it to "", which nothing resolves;
+    #   - a chain separator (or a Fuzzer marker char) inside: `parse_spec` splits it in two;
+    #   - an `exec:` prefix: `Decoder.run`, `flatten` and the pre-send gates all test
+    #     `exec_step?` BEFORE the registry, so the token spawns argv `mytool` with the
+    #     operator's privileges instead of ever reaching the chain it named.
+    # Shadowing a built-in is refused too, but by the caller that holds a registry.
+    def self.name_error(name : String) : String?
+      name = name.scrub unless name.valid_encoding? # the separator test is a regex — see parse_spec
+      n = name.strip
+      return "chain name required" if n.empty?
+      return "chain name can't contain > | , ¦ or §" if n.matches?(/[>|,¦§]/)
+      return "chain name can't start with exec: (that prefix runs a command)" if Decoder.exec_step?(n)
+      nil
+    end
+
     # Register one converter per saved entry, in library order. NEVER raises: the caller is
     # Settings.load's parse path, whose blanket rescue would turn one hand-edited name into a
     # factory reset of every other section. A name that cannot work is skipped (a built-in
@@ -23,8 +42,8 @@ module Gori::Decoder
       specs = {} of String => {String, String} # normalized name => {name as typed, spec}
       order = [] of String
       entries.each do |(name, spec)|
+        next if name_error(name) # no token could ever reach it — see the method
         nk = Registry.normalize(name)
-        next if nk.empty?
         next if r[nk]?             # a built-in (name OR alias) owns this key
         next if specs.has_key?(nk) # first wins; save_chain already replaces by normalized name
         specs[nk] = {name, spec}
