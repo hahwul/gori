@@ -39,6 +39,7 @@ require "./repeater_view"
 require "./sitemap_view"
 require "./help_view"
 require "./help_popup_overlay"
+require "./tutorial"
 require "./issues_view"
 require "./notes_view"
 require "./project_view"
@@ -3062,6 +3063,33 @@ module Gori::Tui
       # and via leave_overlay so no pop-back lands on top of it.
       ov.on_palette = -> { jump_to_palette }
       open_overlay(ov)
+    end
+
+    # The guided tour (the help.tour palette entry), on THIS terminal, in place of the session
+    # until it returns. Tutorial owns its own run loop and paints full frames, so nothing of
+    # the session is on screen meanwhile; the proxy keeps serving underneath, because its
+    # fibers run whenever the tour's poll waits, exactly as they do under ours.
+    #
+    # Mouse is borrowed the way SetupWizard#launch_tour borrows it: the tour's Prev/Next
+    # buttons and mock clicks are mouse-driven and `gori tutorial` enables it unconditionally,
+    # while a session honours Settings.mouse. Handed back as it arrived, so a user who keeps
+    # the mouse off does not get a session that suddenly eats clicks.
+    #
+    # Re-fit the backend off the LIVE size afterwards: the tour consumed every Resize event
+    # while it ran, so our grids may be a terminal size behind. Then a full repaint — the
+    # tour's frames are the last thing in the terminal, and a diff against our stale buffer
+    # would leave them there.
+    def open_tutorial : Nil
+      borrowed = !Settings.mouse
+      @term.enable_mouse if borrowed
+      begin
+        Tutorial.new(@term).run
+      ensure
+        @term.disable_mouse if borrowed
+      end
+      w, h = @term.size
+      @backend.resize(w, h)
+      @resized = true
     end
 
     # The QL reference as a popup (the help.query palette entry, and `?` on an empty filter

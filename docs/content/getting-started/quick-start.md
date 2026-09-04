@@ -210,7 +210,7 @@ Re-run the guided setup (global proxy bind default, then theme, then Miss Ring) 
 gori wizard
 ```
 
-The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.
+The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed. If something already listens on the port you pick, the step says so; `Enter` again keeps it. `Esc` twice skips the wizard (the first press only arms it, so a stray `Esc` in a field cannot end setup).
 
 The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl — useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
@@ -227,7 +227,7 @@ gori tutorial
   <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
 </figure>
 
-It is also offered at the end of the first-run wizard.
+It is also offered at the end of the first-run wizard, and from inside a session as the palette command **Guided tour** (`Ctrl-P`), which brings you back to where you were when it ends.
 
 ## Next Steps
 

@@ -72,6 +72,10 @@ module Gori
       abstract def open_help_shortcuts : Nil
       # `surface` picks the field vocabulary: :ql (the palette entry), :sitemap, :intercept.
       abstract def open_help_query(surface : Symbol) : Nil
+      # The guided tour (`gori tutorial`) on this same terminal, returning to the session
+      # after. Until this existed the tour was reachable only from a shell and from the
+      # first-run wizard — nothing inside the app named it.
+      abstract def open_tutorial : Nil
       abstract def close_overlay : Nil
 
       # Emergency full repaint: redraw every cell (a full sync, not a diff). Recovers from

@@ -46,7 +46,9 @@ module Gori::Tui
         # the literal `^P` here for want of a chord, and follows one if either ever gains it.
         Item.new("^P", "this page as a popup — 'Keyboard shortcuts'", "help.hotkeys"),
         Item.new("^P", "the Query page as a popup — also `?` on an empty filter bar", "help.query"),
+        Item.new("^P", "the guided tour on a mock UI, then back here — also `gori tutorial`", "help.tour"),
         Item.new("Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"),
+        Item.new("gori wizard", "re-run the first-run setup (bind · theme · Miss Ring) from a shell"),
       ]},
       {"TABS & FOCUS", [
         Item.new("←/→", "switch tab (on the tab bar)"),

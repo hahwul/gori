@@ -352,6 +352,12 @@ module Gori
       r.register Verb::Definition.new(
         "help.query", "Query language reference", "Show the filter/query language reference in a popup (Help's Query page)",
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_help_query(:ql); nil }
+      # `help.tour` carries "tour"; the title carries "guided" and "tutorial" reaches it
+      # through the description — the three words a user who saw the wizard's offer, the
+      # docs, or the `gori tutorial` verb might type.
+      r.register Verb::Definition.new(
+        "help.tour", "Guided tour", "Run the interactive tutorial (gori tutorial) here, then return to this session",
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_tutorial; nil }
 
       # Discover is a sub-tab under Target, so it gets its own "Go to" (Target's own jump
       # lands on the last-active sub-tab).
