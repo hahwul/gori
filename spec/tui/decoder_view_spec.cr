@@ -287,3 +287,84 @@ describe "DecoderView OUTPUT control bytes" do
     end_row.should be > start_row
   end
 end
+
+# ---- defects a review of the view found ----------------------------------------------
+
+private def render_view(view : DecoderView, result : Gori::Decoder::ChainResult, *, pane : Symbol,
+                        chain : String = "", chain_cx : Int32 = 0, w : Int32 = 80, h : Int32 = 30) : MemoryBackend
+  backend = MemoryBackend.new(w, h)
+  view.render(Screen.new(backend), Rect.new(0, 0, w, h),
+    input: TextArea.new("x"), chain: chain, chain_cx: chain_cx, chain_pre: "",
+    result: result, pane: pane, focused: true, popup: ChainComplete.new)
+  backend
+end
+
+describe Gori::Tui::DecoderView do
+  # HEX/B64 is ONE line where the text mode had many. The caret and any ⇧-selection were
+  # carried over verbatim, so after `^X` no caret was drawn, `y` copied "" (or a hex fragment
+  # at the old offsets) and ↑ needed two presses to reach CHAIN.
+  it "resets the OUTPUT caret and selection when ^X changes the text it addresses" do
+    view = DecoderView.new
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.sig"
+    result = Gori::Decoder.run(REG, jwt.to_slice, "jwt-decode")
+    render_view(view, result, pane: :output)
+    3.times { view.output_move(1, 0, result) }
+    view.output_move(1, 0, result, selecting: true)
+    view.output_selection?.should be_true
+    view.cycle_out_mode # → HEX
+    render_view(view, result, pane: :output)
+    view.output_selection?.should be_false
+    view.output_at_top?.should be_true
+    view.output_copy_text(result).should eq String.new(result.output.not_nil!).to_slice.hexstring
+  end
+
+  # A spec wider than the field was clipped at the card border with the caret off-screen,
+  # so every further keystroke was blind. The field scrolls with the caret now.
+  it "windows the CHAIN field around the caret so a long spec stays editable" do
+    view = DecoderView.new
+    chain = "base64-decode > url-decode > json-unescape > sha256 > hex-encode > upper > reverse > lower"
+    chain.size.should be > 76
+    result = Gori::Decoder.run(REG, "x".to_slice, chain)
+    b = render_view(view, result, pane: :chain, chain: chain, chain_cx: chain.size)
+    field = (0...30).map { |y| b.row(y) }.find!(&.starts_with?("│› ")) # the CHAIN row alone
+    field.should contain("> lower")                                    # the tail, where the caret is, is on screen
+    field.should_not contain("base64-decode")                          # scrolled off the left
+    off, vw = view.chain_window(Rect.new(0, 0, 80, 3), chain, chain.size, "")
+    vw.should eq 76
+    (chain.size - off).should be < vw
+    view.chain_window(Rect.new(0, 0, 80, 3), chain, 0, "")[0].should eq 0 # caret at the head: no window
+  end
+
+  # The step NAME was drawn with no width clamp: an `exec:` step's name is its whole argv,
+  # which ran over the card's right border and left the trailing status a zero-width draw.
+  it "clamps a PIPELINE row's step name inside the card" do
+    view = DecoderView.new
+    argv = "exec:/nonexistent/tool " + ("--flag=value " * 10)
+    result = Gori::Decoder.run(REG, "x".to_slice, argv, run_hooks: false)
+    b = render_view(view, result, pane: :input)
+    y = (0...30).find { |row| b.row(row).includes?("1 exec:") }.not_nil!
+    b.row(y)[79].should eq '│'
+  end
+
+  it "answers the same text for 'copy all' and the selection copy on a failed chain" do
+    view = DecoderView.new
+    result = Gori::Decoder.run(REG, "!!!".to_slice, "base64-decode")
+    render_view(view, result, pane: :output)
+    view.output_copy(result).should eq view.output_copy_text(result)
+    view.output_copy(result).should contain("✗ base64-decode")
+  end
+
+  # A preview is one row; deriving it from the WHOLE intermediate (a base64 pass over
+  # megabytes) on every frame stalled the UI fiber for anything that redrew.
+  it "previews a large intermediate from a bounded prefix, once per recompute" do
+    view = DecoderView.new
+    big = Bytes.new(4 * 1024 * 1024) { |i| (i % 251).to_u8 }
+    result = Gori::Decoder.run(REG, big, "hex-encode > base64-encode")
+    render_view(view, result, pane: :input)
+    t = Time.monotonic
+    20.times { render_view(view, result, pane: :input) }
+    (Time.monotonic - t).should be < 2.seconds # was ~0.5 s per frame for two 8-16 MiB steps
+    b = render_view(view, result, pane: :input)
+    b.contains?("1 hex-encode › " + big[0, 8].hexstring).should be_true
+  end
+end

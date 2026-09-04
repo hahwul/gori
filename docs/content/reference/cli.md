@@ -746,7 +746,7 @@ step's output. It is exec'd with no shell, so the three separators cannot appear
 
 ```bash
 gori run decoder 'base64-decode | jwt-decode' "$TOKEN"
-echo -n secret | gori run decoder 'sha256 | hex-encode'
+echo -n secret | gori run decoder 'sha256 | base64'
 gori run decoder 'base64-decode > exec:./parse-envelope --json' "$BLOB"
 gori run decoder list                           # every converter (name, category, direction)
 ```
@@ -1299,7 +1299,7 @@ Import goes through the same writer the TUI uses, so it keeps the atomic write a
 
 If gori cannot load your `settings.json` — unparseable, unreadable, or a `--config` pointing at something it cannot open — both `export` and `import` refuse rather than proceeding. Every section is at its factory default at that point, so an import would persist those defaults over every section the profile does not name, and an export would write them out as if they were yours. Fix or remove the file first; an unparseable one is kept alongside it as `settings.json.corrupt`. `--dry-run` is the exception: it writes nothing, so it still runs, and says on stderr that the comparison is against defaults.
 
-`env` and `decoder` are excluded from an export by default: `env` holds token values and `decoder` holds your last input and saved sessions. Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share — it stores a username and an environment-variable *name*, never a password.
+`env` and `decoder` are excluded from an export by default: `env` holds token values and `decoder` holds your saved chain library (open sub-tabs live in the project store, not here). Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share — it stores a username and an environment-variable *name*, never a password.
 
 `-o` pointing at your live `settings.json` is refused. An export is not a snapshot — it omits every section at its factory default, and omits `env` and `decoder` unless you name them — so writing one back over the real file would delete those sections rather than update it.
 

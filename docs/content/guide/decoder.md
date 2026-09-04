@@ -59,7 +59,7 @@ Saved chains can call each other. A recursive definition fails that step with a 
 |----------|----------|
 | **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all` (every byte, WAF-bypass style), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` (aliased `idn-encode` / `idn-decode`) |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
-| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `deflate-raw` / `inflate-raw` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
+| **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` — a binary document rendered as JSON text |
 | **Token** | `jwt-decode` (header + payload; signature shown, not verified), and the signed-session-cookie readers `cookie-decode` (auto-detects the framework), `flask-decode` (itsdangerous), `django-decode` (`django.core.signing`), `rack-decode` (Ruby) |
 | **Hash** | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `crc32` |

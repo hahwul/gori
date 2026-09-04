@@ -67,7 +67,16 @@ module Gori::Decoder
   # Chain separators: '>', '|', ',' — all equivalent, left-to-right.
   SEPARATORS = /[>|,]/
 
+  # NEVER raises, whatever bytes `spec` holds. The split is a PCRE2 regex, and PCRE2 refuses
+  # an invalid-UTF-8 subject with a raw `ArgumentError` — which reached every caller that
+  # documents itself as raise-free: `Decoder.run`, `Library.register_all` (and so
+  # `Settings.load`, whose blanket rescue then factory-reset every section after `decoder`
+  # over one hand-edited chain), `chain_runs_commands?` and the Fuzzer's pre-send gate, which
+  # `Template.parse` feeds from raw bytes (a `§…¦chain§` marker over a binary region). Such a
+  # spec is scrubbed first: its tokens were never going to resolve, and "unknown converter"
+  # is the answer they deserve, not a backtrace.
   def self.parse_spec(spec : String) : Array(String)
+    spec = spec.scrub unless spec.valid_encoding?
     spec.split(SEPARATORS).map(&.strip).reject(&.empty?)
   end
 

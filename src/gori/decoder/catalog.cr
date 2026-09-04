@@ -221,7 +221,7 @@ module Gori::Decoder
       description: "POSIX shell single-quote (wraps; one-way)") { |s| Codecs.shell_escape(s) }
     r.register text("powershell-escape", "ps-escape", "pwsh-escape", "powershell-quote",
       category: Category::Escape, direction: Direction::Encode,
-      description: "PowerShell single-quote (doubles ', wraps; one-way)") { |s| Codecs.powershell_escape(s) }
+      description: "PowerShell single-quote (doubles ' and ‘’‚‛, wraps; one-way)") { |s| Codecs.powershell_escape(s) }
 
     r.register encode("c-string-escape", "c-escape", "cstring-escape",
       category: Category::Escape,

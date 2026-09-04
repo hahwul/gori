@@ -49,13 +49,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     decoder_controller.cycle_output_mode
   end
 
+  # `focus_pane(:body)` only when focus is NOT already there: it lands on the FIRST pane
+  # (`view_focus_first` → INPUT), so an unconditional call sent a ^S pressed in CHAIN or
+  # OUTPUT back to INPUT once the modal closed — a leftover from when the prompt lived
+  # inside the OUTPUT card and the body had to hold it.
   def decoder_save : Nil
-    focus_pane(:body)
+    focus_pane(:body) unless @focus == :body
     open_chain_save
   end
 
   def decoder_load : Nil
-    focus_pane(:body)
+    focus_pane(:body) unless @focus == :body
     open_chain_load
   end
 
@@ -94,16 +98,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       true
     }
     # ^X drops the entry and refreshes the card in place. Re-reading `Settings` rather than
-    # trusting the local reject keeps `chains` in step with what actually reached disk, so a
-    # failed write leaves the row on screen instead of silently vanishing it.
+    # trusting the local reject keeps `chains` in step with what actually reached disk:
+    # `delete_decoder_chain` puts the entry back when the write fails, so the row stays.
     lp.on_delete = ->(i : Int32) {
       if entry = chains[i]?
         name = entry[0]
         ok = Settings.delete_decoder_chain(name)
         chains = Settings.decoder_chains
         # The deleted name stops resolving as a step for every open conversion, not just the
-        # active one — see DecoderController#library_changed.
-        decoder_controller.library_changed
+        # active one — see DecoderController#library_changed. A refused write changed nothing
+        # (`delete_decoder_chain` put the entry back), so nothing is re-derived either.
+        decoder_controller.library_changed if ok
         lp.set_rows(chain_rows(chains))
         @toast = ok ? "deleted chain \"#{name}\"" : "could not delete chain \"#{name}\""
       end

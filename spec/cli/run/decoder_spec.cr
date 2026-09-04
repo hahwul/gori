@@ -121,3 +121,21 @@ describe "gori run decoder --format json with --output text" do
     json["output"].as_s.valid_encoding?.should be_true
   end
 end
+
+describe "gori run decoder list" do
+  # `quoted-printable-encode` is 23 chars; a fixed `ljust(22)` put its row's columns one cell
+  # off the rest (and a long saved-chain name many more).
+  it "aligns the category column for every converter, measured rather than fixed" do
+    lines = Gori::CLI::Run.decoder_list_lines(Gori::Decoder.shared_registry)
+    cols = lines.map { |l| l.index(/  (encoding|compression|serialization|hash|token|escape|text|saved)  /).not_nil! }
+    cols.uniq.size.should eq 1
+  end
+end
+
+describe "gori run decoder input" do
+  it "refuses --input together with a 2nd positional rather than silently preferring one" do
+    Gori::CLI::Run.decoder_input_twice_error("a", "b").not_nil!.should contain("twice")
+    Gori::CLI::Run.decoder_input_twice_error("a", nil).should be_nil
+    Gori::CLI::Run.decoder_input_twice_error(nil, "b").should be_nil
+  end
+end

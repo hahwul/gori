@@ -181,7 +181,12 @@ module Gori::Tui
     end
 
     # Open a fresh blank conversion (^N / space menu) and drop into its editor.
+    # A blank session can never match a standing sub-tab filter, so the filter is dropped
+    # first — `jump_subtab` already escapes it for a hidden target, and landing the active
+    # session on a chip the strip does not draw (no pill, ←/→ snapping to an edge) is the
+    # same strand it exists to prevent.
     def decoder_new : Nil
+      clear_subtab_filter
       @sessions << make_session("", "", nil)
       @idx = @sessions.size - 1
       @popup.close
@@ -197,6 +202,7 @@ module Gori::Tui
     # (like RepeaterController#repeater_from_request) rather than request_focus.
     # make_session already runs the chain, so the output lands populated.
     def decoder_from_text(text : String, name : String? = nil) : Nil
+      clear_subtab_filter # see decoder_new
       @sessions << make_session(text, "", name)
       @idx = @sessions.size - 1
       @popup.close
@@ -220,6 +226,7 @@ module Gori::Tui
       else
         duplicate_at(@idx)
       end
+      unstrand_from_filter
       @popup.close
       @chain_pre = ""
       @dirty = true
@@ -247,14 +254,22 @@ module Gori::Tui
         return
       end
       close_at(@idx)
+      unstrand_from_filter
       @popup.close
       @chain_pre = ""
       @dirty = true
       @host.status(@sessions.size == 1 ? "conversion closed" : "conversion closed (#{@sessions.size} open)")
     end
 
+    # Drop the sub-tab filter when the ACTIVE session is one it hides — a close lands the
+    # neighbour, a duplicate lands the clone, and neither is guaranteed to match the query.
+    private def unstrand_from_filter : Nil
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(@idx)
+    end
+
     private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
       msg = close_marked_subtabs(refs)
+      unstrand_from_filter # the clamp can land on a hidden chip here too
       @popup.close
       @chain_pre = ""
       @dirty = true
@@ -299,10 +314,15 @@ module Gori::Tui
     # Apply a typed name to the captured sub-tab's view (the prompt held it by identity,
     # so mutating it is inherently the right session). Blank clears it (chip reverts to
     # the auto label).
+    #
+    # Persisted at once, not at the next leave: the prompt runs from the strip, where no
+    # path reaches `commit` before a tab switch or quit, so a rename was the one edit an
+    # abnormal exit lost. `commit` stays dirty when the store is busy, as everywhere.
     def apply_rename(view : DecoderView, name : String) : Nil
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       @dirty = true
+      commit
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -343,8 +363,7 @@ module Gori::Tui
         return route_pane_keys(ev, c)
       elsif ev.ctrl? || ev.alt?
         # Every OTHER modified chord defers to the central keymap, so it is rebindable — the
-        # rule the Repeater and Fuzzer already follow. Without it the pane handlers below can
-        # swallow it, which is why ^L/^X/^S/^O had to be hardcoded above.
+        # rule the Repeater and Fuzzer already follow (^L/^X/^S/^O/^Y all arrive as verbs).
         return false
       elsif key.escape?
         @popup.close
@@ -440,6 +459,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      body_was_focused = @host.focus == :body # read BEFORE the focus moves — see the CHAIN arm
       @host.focus_body
       body = body_rect_below_filter(rect)
       s = cur
@@ -465,9 +485,13 @@ module Gori::Tui
           s.input_read.click(s.input, regions.input.inset(1, 1), mx, my)
         end
       elsif regions.chain.contains?(mx, my)
+        was_active = body_was_focused && s.pane == :chain
         s.pane = :chain
         field = regions.chain.inset(1, 1)
-        s.chain_cx = Screen.column_for_click(s.chain, mx - (field.x + 2))
+        # Rebase by the window the FRAME drew — the field scrolls with the caret, and only
+        # the ACTIVE field is drawn windowed (an unfocused one shows its head).
+        off = was_active ? s.view.chain_window(regions.chain, s.chain, s.chain_cx, @chain_pre)[0] : 0
+        s.chain_cx = off + Screen.column_for_click(s.chain[off..], mx - (field.x + 2))
         refilter_popup
       elsif regions.output.contains?(mx, my)
         s.pane = :output
@@ -589,8 +613,14 @@ module Gori::Tui
       end
     end
 
+    # Entering the tab derives NOTHING. The recompute that used to sit here ran the chain with
+    # hooks ON and reset the OUTPUT pane on every visit: a persisted `exec:` conversion the
+    # project open had deliberately held (`make_session`) then ran its command the moment the
+    # operator pressed the tab, before any edit; and a caret, selection or scroll left in
+    # OUTPUT was thrown away by a round trip through History. Every result on screen is
+    # already current — edits recompute as they happen, and a library change re-derives
+    # every session through `library_changed` — so there is nothing for this hook to do.
     def on_enter : Nil
-      recompute
     end
 
     # Stays dirty when the write did not commit (store busy/locked/closing) so the next
@@ -673,12 +703,7 @@ module Gori::Tui
       text = case s.pane
              when :output then s.view.output_copy_text(s.result)
              when :input  then input_copy_text(s)
-               # The CHAIN pane has no selection of its own, and `^Y` USED to be a hardcoded
-               # copy-OUTPUT chord reachable from here (the chain footer advertised it). Now
-               # that `^Y` is the unified Copy verb, routing :chain to the output keeps that
-               # working instead of answering "nothing to copy" on a pane that used to copy.
-             when :chain then s.view.output_copy_text(s.result)
-             else             ""
+             else              "" # CHAIN has no selection (`decoder_selection_active?`); see decoder_copy_all
              end
       if text.empty?
         @host.status("nothing to copy")
@@ -697,7 +722,11 @@ module Gori::Tui
       text = case s.pane
              when :output then s.view.output_copy(s.result)
              when :input  then s.input_read.copy_all(s.input)
-             else              s.chain
+               # The CHAIN pane has no selection of its own, so the Copy verb always lands HERE
+               # from it — and `^Y` there has always meant "copy the OUTPUT" (the chain footer
+               # advertises it as such): the spec is one short line the operator just typed,
+               # the decode under it is what they came for. The arm used to return `s.chain`.
+             else s.view.output_copy(s.result)
              end
       if text.empty?
         @host.status("nothing to copy")
@@ -774,6 +803,12 @@ module Gori::Tui
         input_motion_key(ev, s) # before plain ⌫, which would swallow the modified form
       when key.backspace?
         s.input.backspace; touch
+        # ⇧↑/⇧↓ SELECT, through the same editor keymap ⇧←/→ already reach, and never cross
+        # a pane: these arms used to run first, dropping the shift and — on the first/last
+        # line — leaving for the strip or CHAIN mid-selection, while the footer promised
+        # "⇧arrows select".
+      when ev.shift? && (key.up? || key.down?)
+        input_motion_key(ev, s)
       when key.up?
         if s.input.at_top?
           commit
@@ -798,13 +833,16 @@ module Gori::Tui
       when key.enter? then s.input_mode = InputMode::Insert
       when c == 'i'   then s.input_mode = InputMode::Insert
       when key.up?
-        if s.input.at_top?
+        # A ⇧↑ on the first line extends the selection to its start rather than leaving the
+        # pane (same for ⇧↓ below): a selection in progress is never a focus gesture.
+        if s.input.at_top? && !selecting
           commit
           @host.request_focus(:subtabs)
         else
           s.input_read.move(s.input, -1, 0, selecting: selecting)
         end
-      when key.down?  then s.input.at_bottom? ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
+      when key.down?
+        s.input.at_bottom? && !selecting ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
         # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
@@ -1044,16 +1082,67 @@ module Gori::Tui
     # The pane is only reset for the sub-tabs whose output actually moved: a scroll position
     # is the operator's place in the text, and a library edit that means nothing to this
     # conversion must not throw it away.
-    def library_changed : Nil
+    #
+    # `run_active_hooks: false` is for a caller whose gesture was NOT made looking at this tab
+    # — the factory reset, taken from Preferences on whatever tab is up — so no conversation
+    # runs a command the operator cannot see run.
+    def library_changed(run_active_hooks : Bool = true) : Nil
       # `run_hooks: false`, and it is the whole reason this loop is bounded work: it re-derives
       # EVERY open conversation, so one `^S`/`^X` in the library would otherwise fork the
       # `exec:` command of each of them at once — for sub-tabs the operator is not even looking
       # at (#818). What a library edit changes is which NAMES resolve; that is answerable
       # without running anybody's command, and the next edit in a sub-tab runs its own.
-      @sessions.each do |s|
-        before = s.result.output
-        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: false)
-        s.view.reset_output_scroll unless before == s.result.output
+      #
+      #
+      # Only a chain a library edit CAN change is re-derived: one holding a saved name or an
+      # unknown token (the name typed before it was saved, or the one just deleted). A chain
+      # of built-ins and `exec:` steps means the same thing before and after, so its result —
+      # the decode on screen, a held step, a MiB-sized intermediate — is left exactly as it is.
+      # That is also what keeps the ACTIVE session's `exec:` step from being replaced by
+      # "chain held" on a ^S that has nothing to do with it.
+      #
+      # The active session, when it IS affected, runs its command as a keystroke's recompute
+      # would — one fork the operator asked for by saving the name its chain calls — unless
+      # the step was HELD (restored, never run): a project open's hold is not lifted by a
+      # library edit any more than by entering the tab (see `on_enter`).
+      #
+      # "Actually moved" compares the drawn text's SOURCE, not `output` alone: a failure that
+      # became a different failure (`myenc: unknown converter` → `zzz: unknown converter`, the
+      # ordinary result of the very save that defined `myenc`) is nil → nil, and the OUTPUT
+      # card kept drawing the old error over a PIPELINE that showed the new one. The PIPELINE
+      # previews are dropped either way: a recipe change moves an intermediate even when the
+      # final answer is the same.
+      @sessions.each_with_index do |s, i|
+        next unless library_affects?(s.chain)
+        before = output_key(s.result)
+        run_hooks = run_active_hooks && i == @idx && !s.result.held?
+        s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: run_hooks)
+        if output_key(s.result) == before
+          s.view.invalidate_previews
+        else
+          s.view.reset_output_scroll
+        end
+      end
+    end
+
+    # Whether a library edit can change what `chain` means: it names a saved chain, or a
+    # token nothing resolves (which a save may have just defined). Built-ins are immutable
+    # and cannot be shadowed; an `exec:` step is not a name at all.
+    private def library_affects?(chain : String) : Bool
+      Decoder.parse_spec(chain).any? do |tok|
+        next false if Decoder.exec_step?(tok)
+        conv = registry[tok]?
+        conv.nil? || conv.category.saved?
+      end
+    end
+
+    # What the OUTPUT card draws from a result: the bytes, or the failed step's name and
+    # reason. Captured BEFORE the re-run so the old intermediates are not kept alive across it.
+    private def output_key(r : Decoder::ChainResult) : {Bytes?, String?, String?}
+      if fa = r.failed_at
+        {r.output, r.steps[fa].name, r.steps[fa].error}
+      else
+        {r.output, nil, nil}
       end
     end
 
@@ -1086,14 +1175,18 @@ module Gori::Tui
       # before it folds, so "  my enc  " already resolved as `my-enc` while the library row,
       # the ^O picker and `delete_decoder_chain`'s exact-name match all carried the padding —
       # and a name of pure whitespace normalized to "", which `Library.register_all` skips:
-      # the save reported success and left an entry no spec could ever reach.
+      # the save reported success and left an entry no spec could ever reach. The rest of
+      # the name rule (separators, an `exec:` prefix) is `Library.name_error`'s, shared with
+      # the settings.json parse so the two surfaces admit the same names.
       name = name.strip
-      if name.empty?
-        @host.status("chain name required")
+      if err = Decoder::Library.name_error(name)
+        @host.status(err)
         return
       end
-      if name.matches?(/[>|,¦§]/)
-        @host.status("chain name can't contain > | , ¦ or §")
+      # An empty spec saves a step that is the identity — a silent pass-through in every
+      # chain that names it, and a blank detail column in the picker. Nothing to save.
+      if cur.chain.strip.empty?
+        @host.status("nothing to save — the chain is empty")
         return
       end
       if (c = registry[name]?) && !c.category.saved?
@@ -1104,8 +1197,9 @@ module Gori::Tui
       # "my-chain" is in the library would otherwise append a second entry that register_all
       # then drops as a duplicate, so the save would report success and change nothing.
       nk = Decoder::Registry.normalize(name)
-      chains = Settings.decoder_chains.reject { |(n, _)| Decoder::Registry.normalize(n) == nk }
-      existing = chains.size != Settings.decoder_chains.size
+      before = Settings.decoder_chains
+      chains = before.reject { |(n, _)| Decoder::Registry.normalize(n) == nk }
+      existing = chains.size != before.size
       chains << {name, cur.chain}
       Settings.decoder_chains = chains
       # ^S is a save gesture, so flush the live sessions at the same moment — otherwise an
@@ -1113,10 +1207,13 @@ module Gori::Tui
       # destinations now: the named chain goes to settings.json (global), the sessions to
       # this project's store, and each reports its own success.
       @dirty = false if @dirty && persist_sessions
-      library_changed # the new name is a callable step now — see the method
       if Settings.save
+        library_changed # the new name is a callable step now — see the method
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
       else
+        # Memory follows disk: a name that resolves in this process alone, and is gone at
+        # the next start, is a library that lies. Mirrors `Settings.delete_decoder_chain`.
+        Settings.decoder_chains = before
         @host.status("could not save chain")
       end
     end

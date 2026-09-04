@@ -24,9 +24,13 @@ module Gori::Settings
   # Publishing to the Decoder engine rides the SETTER, not the load path. Every write goes
   # through here — the startup parse, ^S save, ^X delete, a spec fixture — so "a saved chain
   # is callable as a step" cannot come true in one surface and stay false in another.
+  #
+  # Published BEFORE the field is assigned: `Decoder.library=` rebuilds the registry, and if
+  # that ever raises the two must not be left disagreeing (the ^O picker listing a chain the
+  # engine never registered).
   def self.decoder_chains=(entries : Array({String, String})) : Array({String, String})
-    @@decoder_chains = entries
     Decoder.library = entries
+    @@decoder_chains = entries
     entries
   end
 
@@ -37,9 +41,17 @@ module Gori::Settings
   #
   # Unlike drop_legacy_decoder_sessions this CAN go through `save`: `chains` is still
   # serialized, so the 3-way merge sees the section change and this process wins it.
+  #
+  # A write that did not reach disk puts the entry BACK. The setter also republishes the
+  # engine's library, so without this a refused save left the picker without the row and
+  # the name unresolvable in every open conversion — while the toast said "could not delete"
+  # and the next start brought it back. Memory follows disk here, not the other way round.
   def self.delete_decoder_chain(name : String) : Bool
-    self.decoder_chains = decoder_chains.reject { |(n, _)| n == name }
-    save
+    before = decoder_chains
+    self.decoder_chains = before.reject { |(n, _)| n == name }
+    return true if save
+    self.decoder_chains = before
+    false
   end
 
   # Erase a pre-upgrade `decoder.sessions` block from settings.json, keeping every other
@@ -96,6 +108,12 @@ module Gori::Settings
 
   # Tolerant named-chain parse: a non-array (or absent) node keeps the current
   # value; entries missing/blank "name" or "spec" are dropped. Mirrors parse_tab_prefs.
+  #
+  # A name the tab's own ^S would refuse (`Library.name_error`: a separator inside, an
+  # `exec:` prefix) is KEPT here, on purpose: dropping it at load would erase the operator's
+  # hand-edited or imported entry from disk at the next ^S (the 3-way merge's base is what
+  # this parse produced). It stays a picker row, loadable by hand; `Library.register_all`
+  # is what refuses to make it a callable step.
   private def self.parse_decoder_chains(node : JSON::Any?) : Array({String, String})
     arr = node.try(&.as_a?)
     return decoder_chains unless arr
