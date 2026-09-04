@@ -42,7 +42,6 @@ module Gori::Tui
     # Registry sidecar facts, nil off the canonical registry db (see `overview_groups`).
     @proj_id : String?
     @workspace : String?
-    @last_activity : Time?
     @probe_count : Int32
     # Live capture state. NOT snapshotted by `reload`: capture starts and stops while this tab
     # sits open, so the controller re-supplies it on every render instead.
@@ -65,7 +64,6 @@ module Gori::Tui
       @sev_tally = StaticArray(Int64, 5).new(0_i64)
       @proj_id = nil
       @workspace = nil
-      @last_activity = nil
       @probe_count = 0
       @capturing = false
       @desc_area = TextArea.new
@@ -158,7 +156,6 @@ module Gori::Tui
       # holding megabytes. MCP/CLI keep reporting the narrow `db_size` under that name.
       @db_size = project.db_size_with_wal
       @total_captured = store.total_size
-      @last_activity = project.last_modified
       # AT A GLANCE aggregates: traffic status mix + Issues severity (human-confirmed
       # `issues` table only — Probe hits stay on the Probe tab, not here). That still holds for
       # the CHART; the OVERVIEW band beside it does carry a Probe *count* — see `issues_value`.
@@ -2012,10 +2009,7 @@ module Gori::Tui
           OvRow.new("Issues", issues_value),
           OvRow.new("DB Size", human_size(@db_size)),
         ], fold_volume),
-        OvGroup.new([
-          OvRow.new("Created", created_value),
-          OvRow.new("Activity", activity_value),
-        ], fold_provenance),
+        OvGroup.new([OvRow.new("Created", created_value)], fold_provenance),
         OvGroup.new([OvRow.new("Technologies", tech_value)], "tech #{tech_value}"),
       ]
     end
@@ -2036,8 +2030,7 @@ module Gori::Tui
     end
 
     private def fold_provenance : String
-      c = (t = @created) ? "created #{Fmt.ago(t)} ago" : "created —"
-      (a = @last_activity) ? "#{c} · active #{Fmt.ago(a)} ago" : c
+      (t = @created) ? "created #{Fmt.ago(t)} ago" : "created —"
     end
 
     # The address an operator points a client at, plus whether the proxy is actually on it.
@@ -2057,10 +2050,6 @@ module Gori::Tui
     # the project's own home page should answer. The chart beside it is still `issues` only.
     private def issues_value : String
       @probe_count > 0 ? "#{@issues_count} · probe #{@probe_count}" : @issues_count.to_s
-    end
-
-    private def activity_value : String
-      (t = @last_activity) ? "#{Fmt.ago(t)} ago" : "—"
     end
 
     private def created_value : String

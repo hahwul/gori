@@ -7,7 +7,8 @@ require "file_utils"
 # moment the project was CREATED for the whole time it was open:
 #
 #   * the Project tab drew `Activity: 16m ago` above `Created: 7m ago` — activity older than
-#     creation, which cannot be true;
+#     creation, which cannot be true (that row is gone from the tab now, but the reader is not:
+#     `project list` below still prints it);
 #   * `gori run project list` (and MCP `list_projects`) printed the creation time for a project
 #     a peer process was capturing into right then.
 #
