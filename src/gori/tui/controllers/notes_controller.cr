@@ -213,6 +213,24 @@ module Gori::Tui
       true
     end
 
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The note editor in INSERT mode — the one state with a caret to paste at. Notes was the
+    # one multi-line editor still taking a paste as N keystrokes (Repeater and Fuzzer opted in
+    # when the bulk path landed), and it is the tab a whole response body or writeup gets
+    # pasted INTO, so a 200-line paste cost 200 undo snapshots, 200 highlight rebuilds and
+    # 200 frames, and `⌃Z` then took it back one character at a time. No content-level
+    # refusal here, unlike those two: a note has no `§` marker to guard, so whatever the
+    # clipboard holds is legal text.
+    def accepts_bulk_paste? : Bool
+      @notes.insert_mode?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless @notes.paste(text)
+      report_replaced(@notes.last_replaced) # a paste over a selection REPLACES it, like a typed char
+      true
+    end
+
     def set_preedit(text : String) : Bool
       return false unless @notes.insert_mode?
       @notes.set_preedit(text)

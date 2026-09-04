@@ -413,4 +413,69 @@ describe Gori::Tui::NotesView do
       saved_notes(store).should eq(["kept"])
     end
   end
+
+  # `dirty?` is the lock that keeps a peer's commit from reloading this note (`locked?`), and
+  # it is what makes the next esc / sub-tab switch rewrite the whole document — so a key that
+  # changed nothing must not raise it. The Repeater and Fuzzer editors gate the same three keys.
+  it "does not dirty a clean note on a ⌃Z, ⌫ or ⌦ that changed nothing" do
+    tmp_store do |store|
+      store.set_setting("notes.docs", %({"cur":0,"notes":["kept"]}))
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      view.undo # empty undo stack
+      view.dirty?.should be_false
+      view.home
+      view.backspace # buffer start
+      view.dirty?.should be_false
+      view.goto_line(1)
+      view.end_of_line
+      view.delete # buffer end
+      view.dirty?.should be_false
+      view.current_text.should eq("kept")
+      # …and the same keys still dirty it when they do change the buffer.
+      view.backspace
+      view.current_text.should eq("kep")
+      view.dirty?.should be_true
+    end
+  end
+
+  # A paste is one edit, not N keystrokes: it lands in one splice and one ⌃Z takes all of it
+  # back (per-keystroke delivery cost a snapshot per character and undid one at a time).
+  it "splices a bulk paste in as one undo step, in INSERT only" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "head")
+      view.save(store)
+      view.dirty?.should be_false
+
+      view.paste("nope").should be_false # READ has no caret to paste at — the Runner replays it
+      view.current_text.should eq("head")
+      view.dirty?.should be_false
+
+      view.enter_insert!
+      view.paste("\nGET /a HTTP/1.1\nHost: x\n").should be_true
+      view.current_text.should eq("head\nGET /a HTTP/1.1\nHost: x\n")
+      view.dirty?.should be_true
+      view.undo
+      view.current_text.should eq("head")
+    end
+  end
+
+  it "a paste over a selection replaces it and reports how much" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      type(view, "alpha beta")
+      view.home
+      # ⇧→ ×5 selects "alpha" in the editor's own selection model.
+      5.times { view.motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Right, Termisu::Input::Modifier::Shift)) }
+      view.selection?.should be_true
+      view.paste("omega").should be_true
+      view.current_text.should eq("omega beta")
+      view.last_replaced.should eq(5)
+    end
+  end
 end
