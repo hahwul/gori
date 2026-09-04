@@ -241,7 +241,15 @@ module Gori::Tui
         x = screen.text(body.x, y, sel ? "▎" : " ", Theme.accent, bg)
         x = screen.text(x, y, a.name, sel ? Theme.text_bright : Theme.text, bg, width: {body.w // 3, 8}.max)
         x = screen.text(x, y, "  ", Theme.muted, bg)
-        screen.text(x, y, a.note, Theme.muted, bg, width: {body.right - x, 0}.max)
+        # A `verified` row is a FINDING, not a payload to go try: its key reproduces the input
+        # token's own signature (`Jwt::Attack#verified`). `Theme.red` — the colour
+        # `severity_color` gives Critical, which a recovered signing key is — and not
+        # `Theme.muted`, which every other row's prose already wears in a pane that is scanned
+        # rather than read.
+        if a.verified
+          x = screen.text(x, y, "✓ ", Theme.red, bg)
+        end
+        screen.text(x, y, a.note, a.verified ? Theme.red : Theme.muted, bg, width: {body.right - x, 0}.max)
       end
       Frame.scroll_gauge(screen, body, attacks.size, @atk_scroll, focused)
     end

@@ -772,6 +772,15 @@ module Gori
                when :csrf   then Export::CsrfPoc.text(wire, target)
                end
         unless code
+          # `from_wire` refuses for TWO reasons and this used to name only one of them, so a
+          # flow whose request line gori cannot frame was reported as having an EMPTY head —
+          # a diagnosis that sends the operator after the wrong thing. Ask the same predicate
+          # the serializers did, so the sentence matches the refusal.
+          request_line = Export::Curl.split_lines(
+            Export::Curl.split_message(wire)[0]).first? || ""
+          if refusal = Export::Curl.request_line_refusal(request_line)
+            abort "gori run show: flow ##{row.id} has no runnable #{format} snippet: #{refusal}"
+          end
           abort "gori run show: flow ##{row.id} has no request line to build a URL from — " \
                 "its captured head is empty (use --format raw to see the bytes)"
         end
