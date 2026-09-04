@@ -499,8 +499,16 @@ module Gori::Fuzz
     # no status and an empty body, so a `--mc`/`--ms`/`--mr` alongside `--mt` fails it on its
     # own terms — "slow AND 200" cannot be satisfied by a response that never came, and it
     # should not be.
+    #
+    # And a row whose `error` is a REDIRECT HOP's failure. `Engine#follow_redirects` keeps the
+    # payload's own 3xx as the response and notes the hop it could not follow on `error` —
+    # the status, head and body are all real, so `--mc 302` / `--mr` must see them. Until
+    # this branch the note made the row ineligible, and an open-redirect finding whose hop
+    # the scope gate refused was reported `302 · error` and NOT matched: the same finding the
+    # collapse fix went to the trouble of preserving, thrown away one seam later.
     private def eligible?(raw : Repeater::Result) : Bool
       return true if raw.error.nil?
+      return true if raw.response && raw.error.try(&.starts_with?(REDIRECT_HOP_REFUSED))
       raw.timed_out? && !@match_time_c.nil?
     end
 
@@ -540,6 +548,34 @@ module Gori::Fuzz
 
     private def near?(value : Int64, sampled : Int64, tolerance : Int64) : Bool
       (value - sampled).abs <= tolerance
+    end
+
+    # The first match/filter spec this matcher holds that can NEVER fire, named — or nil when
+    # every set spec parses. A surface asks this ONCE, after its own parse and before the
+    # first dial, and refuses the run with it.
+    #
+    # The compiled forms are deliberately lenient: `classify_num` turns `1O00` (a letter O)
+    # into `NumKind::Never` and `compile_status` delegates `2OO` to `status_match?`, which
+    # answers false for it — so a typo did not raise, it ran the whole sweep and reported
+    # `0 matched`, byte-identical to "nothing there". A predicate that cannot be satisfied is
+    # not a strict predicate, it is a silent one, and the surfaces own the refusal because
+    # only they know the flag (`--ms`) or key (`match.size`) to name.
+    def spec_error : String?
+      {
+        {"status", @match_status, "match"}, {"status", @filter_status, "filter"},
+        {"grpc", @match_grpc, "match"}, {"grpc", @filter_grpc, "filter"},
+        {"size", @match_size, "match"}, {"size", @filter_size, "filter"},
+        {"words", @match_words, "match"}, {"words", @filter_words, "filter"},
+        {"lines", @match_lines, "match"}, {"lines", @filter_lines, "filter"},
+        {"time", @match_time, "match"}, {"time", @filter_time, "filter"},
+      }.each do |(dim, spec, which)|
+        next if spec.nil? || spec.blank?
+        bad = dim == "status" ? Predicate.invalid_status_term(spec) : Predicate.invalid_num_term(spec)
+        next unless bad
+        forms = dim == "status" ? "a status, a class (2xx), a range (200-299) or a comparator (>=400)" : "a number, a range (100-200) or a comparator (>=100)"
+        return "#{which} #{dim} spec #{spec.inspect}: #{bad.inspect} is not #{forms}"
+      end
+      nil
     end
 
     # Whether a TIMED-OUT send is a result this matcher can report rather than a failure —
@@ -780,6 +816,30 @@ module Gori::Fuzz
         else
           StatusTerm.delegate(t)
         end
+      end
+    end
+
+    # The first term of a numeric spec that can never match, or nil. The complement of
+    # `compile_num`'s leniency — see `Matcher#spec_error`.
+    def self.invalid_num_term(spec : String) : String?
+      terms(spec).find { |t| classify_num(t).kind.never? }
+    end
+
+    # The first term of a status spec that can never match, or nil: a range parses, a class
+    # is `Nxx`, and anything else must be an integer after an optional comparator — the exact
+    # grammar `InterceptFilter.status_match?` evaluates.
+    def self.invalid_status_term(spec : String) : String?
+      terms(spec).find do |t|
+        next false if parse_range(t)
+        rest = t
+        {">=", "<=", ">", "<", "="}.each do |op|
+          if t.starts_with?(op)
+            rest = t[op.size..]
+            break
+          end
+        end
+        # `[1-5]xx` — a class no HTTP status can belong to (`6xx`) is as unsatisfiable as a typo.
+        !(rest.matches?(/\A[1-5]xx\z/) || rest.to_i?)
       end
     end
 

@@ -1137,7 +1137,11 @@ module Gori::Tui
         spool_run = @spool_runs[v]?
         archive_ready = !!spool_run && !spool_run.failed? && spool_run.finished?
         v.finish_run(terminal, archive_ready: archive_ready)
-        finish_job(v, ev, terminal)
+        # A view being CLOSED (`close_at`, `stop_all`) drains its own Done while it is still
+        # in `@fuzzers`; its job was already finished `:stopped` by the close, and a "Fuzzer:
+        # N hits (stopped)" toast with a jump to a session that no longer exists is not a
+        # completion — it is the close, reported a second time as a result.
+        finish_job(v, ev, terminal) unless @cancelled_views.includes?(v)
       when Fuzz::ErrorEvent
         # Generation/worker errors can be followed by many queued Result events and then Done.
         # Keep the view running (and therefore unsaveable) until that terminal event drains.
@@ -1272,7 +1276,7 @@ module Gori::Tui
     # Focus a fuzz sub-tab by persisted id (notification "jump to result").
     def reveal_session(id : Int64) : Nil
       if idx = @fuzzers.index { |t| t.db_id == id }
-        select_subtab(idx, save: false)
+        select_subtab(idx) # saving the tab it leaves, as every other switch does
         @host.focus_body
       end
     end
@@ -1760,6 +1764,10 @@ module Gori::Tui
     end
 
     private def open_session(view : FuzzerView, flow_id : Int64?) : Nil
+      # The OUTGOING tab first. `goto_tab` below flushes "the current fuzz tab", and by then
+      # that is the new one — so a dirty session the operator left with ^N / Duplicate / a
+      # notification jump was never written and vanished at quit.
+      save_current
       tab = FuzzerTab.new(view, flow_id, persist_new(view, flow_id))
       @fuzzers << tab
       # A session created in this controller lifetime has no prior saved run to restore.
@@ -1892,7 +1900,16 @@ module Gori::Tui
 
     # --- persistence ---
     def save_current : Nil
-      return unless tab = current_tab_obj
+      current_tab_obj.try { |tab| save_tab(tab) }
+    end
+
+    # EVERY dirty tab, for the exits that close the whole Runner (quit, leave project): only
+    # the current tab used to be flushed there, so an edit left on any other sub-tab was lost.
+    def save_all : Nil
+      @fuzzers.each { |tab| save_tab(tab) }
+    end
+
+    private def save_tab(tab : FuzzerTab) : Nil
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       cfg = v.config_json

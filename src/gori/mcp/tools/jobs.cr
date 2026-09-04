@@ -17,6 +17,7 @@ module Gori
                     j.field "kind", "fuzz"
                     j.field "status", f.status.to_s
                     j.field "sent", f.sent
+                    j.field "requests", f.requests
                     j.field "total", f.total
                     j.field "matched", f.matched
                     j.field "target", Serialize.text(f.audit.target)

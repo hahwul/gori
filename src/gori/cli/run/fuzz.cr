@@ -267,6 +267,19 @@ module Gori
 
         # Every refusal below fires BEFORE anything dials. A refusal that arrives after the
         # traffic is not a refusal — the argument `fuzz_preflight`'s own comment makes.
+        #
+        # `--race-warmup` is read by `Engine#run_race` and by nothing else. Without `--race` the
+        # file was validated, read, handed to `Config#race_warmup` and never sent — the "knob
+        # that silently did nothing" shape every other refusal here exists to close.
+        if race_warmup_file && !race
+          abort "gori run fuzz: --race-warmup applies to a --race run (add --race N, or drop the warm-up)"
+        end
+        # A match/filter spec that can never fire (`--ms 1O00`, `--mc 2OO`) used to run the
+        # whole sweep and report `0 matched` — indistinguishable from "nothing there". See
+        # `Fuzz::Matcher#spec_error`.
+        if spec_err = matcher.spec_error
+          abort "gori run fuzz: #{spec_err}"
+        end
         unless websocket
           if !ws_overrides.empty?
             abort "gori run fuzz: --message / --message-frame describe a WebSocket exchange, but " \
@@ -858,7 +871,13 @@ module Gori
         # failure) is a failure, not a clean "no matches" — so a scripted caller can tell the two
         # apart even without --fail-if-no-matches. The errored rows are now shown too (below),
         # matching the TUI which renders every result. (#410)
-        exit 1 if matched == 0 && errored > 0
+        #
+        # EVERY send, and the comment above has always said so — the test was `errored > 0`, so
+        # one reset connection in a 500-payload sweep of clean 404s exited 1 and a scripted
+        # `gori run fuzz … || die` failed a healthy run. `errored` counts the rows with an error
+        # and no match; with `matched == 0` that is every error row, so "every send errored" is
+        # `errored >= sent` (the Done progress is the run's own count of completed payloads).
+        exit 1 if matched == 0 && errored > 0 && (p = last_progress) && p.sent > 0 && errored.to_i64 >= p.sent
       end
 
       private def self.fuzz_saved_mode(mode : Fuzz::Mode, requested_race : Int32?,

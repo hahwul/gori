@@ -14,7 +14,29 @@ module Gori::Tui
   # brute="charset:min-max"). Shared by FuzzerView (@sets, persistence, engine
   # assembly) and FuzzSetOverlay (the editor that produces one). Hoisted to module
   # scope so the overlay can build one without depending on FuzzerView.
-  record SetSpec, kind : Symbol, value : String
+  record SetSpec, kind : Symbol, value : String do
+    # A `:list` value is NEWLINE-separated with a trailing newline — the overlay's own grammar
+    # ("one value per line") — because a comma is ordinary payload text: `{"id":1,"role":"x"}`
+    # or `' OR 1=1,--` stored comma-joined came back as two payloads, and the run count said
+    # so while the operator read it as one. The trailing newline is the format marker: a value
+    # with no newline at all is a session saved under the old comma grammar and is still
+    # split on `,`, so nothing already on disk changes meaning.
+    LIST_SEP = '\n'
+
+    def self.list(values : Array(String)) : SetSpec
+      new(:list, values.join(LIST_SEP) + LIST_SEP)
+    end
+
+    def self.list_values(value : String) : Array(String)
+      return value.split(',') unless value.includes?(LIST_SEP)
+      value.chomp(LIST_SEP).split(LIST_SEP)
+    end
+
+    # ONE line, for a set row and a signature. The stored form of a list carries newlines.
+    def display : String
+      kind == :list ? SetSpec.list_values(value).join(',') : value
+    end
+  end
 
   # The full-area popup for adding or editing ONE payload set. Replaces the cramped
   # in-pane draft fields: every payload type gets its own vertically-stacked, labeled
@@ -71,7 +93,7 @@ module Gori::Tui
       case spec.kind
       when :list
         @ptype = :list
-        @values.set_text(spec.value.split(',').map(&.strip).reject(&.empty?).join('\n'))
+        @values.set_text(SetSpec.list_values(spec.value).map(&.strip).reject(&.empty?).join('\n'))
       when :numbers
         @ptype = :numbers
         range, _, step = spec.value.partition(':')
@@ -328,7 +350,7 @@ module Gori::Tui
       case @ptype
       when :list
         vals = list_values
-        vals.empty? ? nil : SetSpec.new(:list, vals.join(","))
+        vals.empty? ? nil : SetSpec.list(vals)
       when :numbers
         SetSpec.new(:numbers, "#{num64(:from)}-#{num64(:to)}:#{num64(:step, 1_i64)}")
       when :wordlist

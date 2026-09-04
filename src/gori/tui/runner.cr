@@ -2864,7 +2864,7 @@ module Gori::Tui
       notes_controller.save_notes
       project_controller.commit
       repeater_controller.save_current_repeater
-      fuzzer_controller.save_current
+      fuzzer_controller.save_all # every dirty sub-tab, not only the one in front
       miner_controller.save_current
       sequencer_controller.save_current
       issues_controller.commit
@@ -4283,6 +4283,12 @@ module Gori::Tui
 
     def open_fuzz_advanced_editor : Nil
       return unless v = fuzzer_controller.current_view
+      # `Config` is shared by reference with the live engine (`Fuzz::PlanOptions#config`),
+      # which reads `retries`, `follow_redirects?`, `max_requests` and the Content-Length knobs
+      # PER REQUEST — so a mid-run edit changed the rest of the sweep while the reconstruction
+      # of its rows kept the policy the run started with. The Sets editor is different: sets
+      # are read once at build time.
+      return status("fuzz running — ^X to stop before editing Advanced", :busy) if v.running?
       ov = FuzzAdvancedOverlay.new(v.advanced_snapshot)
       ov.on_commit = -> {
         fuzzer_controller.apply_fuzz_advanced(ov.snapshot)

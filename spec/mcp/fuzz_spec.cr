@@ -929,10 +929,74 @@ describe "MCP fuzz tools" do
         status["incomplete_reason"].as_s.should eq("budget_exhausted")
         status["sent"].as_i.should be < 5
         status["candidates_remaining"].as_i.should be > 0
+        # The unit the verdict was decided on, so `budget_exhausted` under `sent < cap` is
+        # arithmetic an agent can do rather than a riddle: requests ≥ the cap, always.
+        status["requests"].as_i.should eq(2)
         done = true
         break
       end
       done.should be_true
+    end
+  end
+
+  it "refuses a match/filter term that can never fire, before any send" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+              "url" => "http://127.0.0.1:9", "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
+      text, err = call_raw(tools, "fuzz_start", base.merge({"match" => {"size" => "1O00"}}).to_json)
+      err.should be_true
+      text.should contain("1O00")
+      text, err = call_raw(tools, "fuzz_start", base.merge({"filter" => {"status" => "2OO"}}).to_json)
+      err.should be_true
+      text.should contain("2OO")
+      # …and the lenient-but-valid forms still pass the parse (the origin is dead, so the
+      # refusal — if any — would come from the send, not the spec).
+      start = call_json(tools, "fuzz_start", base.merge({"match" => {"status" => "2xx,>=500,301-302", "size" => ">100,1-5"}}).to_json)
+      start["job_id"].as_s.should start_with("fz_")
+    end
+  end
+
+  it "reads a JSON null container argument as absent, and refuses race_warmup without race_count" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+              "url" => "http://127.0.0.1:9", "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
+      start = call_json(tools, "fuzz_start",
+        base.merge({"messages" => nil, "match" => nil, "filter" => nil, "marks" => nil, "processors" => nil}).to_json)
+      start["job_id"].as_s.should start_with("fz_")
+      text, err = call_raw(tools, "fuzz_start", base.merge({"race_warmup" => "GET / HTTP/1.1\r\n\r\n"}).to_json)
+      err.should be_true
+      text.should contain("race_count")
+    end
+  end
+
+  it "treats sni:\"\" and timeout_ms:0 as absent rather than as an empty name and a 1 ms deadline" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}", "payloads" => %([{"list":["a","b"]}]),
+         "sni" => "", "timeout_ms" => 0, "save_results" => true, "allow_unscoped" => true}.to_json)
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("done")
+      status["errors"].as_i.should eq(0) # a 1 ms deadline would have timed both out
+      store.get_fuzz_run(start["run_id"].as_i64).not_nil!.sni.should be_nil
+    end
+  end
+
+  it "records no tls_preset on a plaintext run's saved row, matching what fuzz_start reports" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}", "payloads" => %([{"list":["a"]}]),
+         "tls_preset" => "chrome", "save_results" => true, "allow_unscoped" => true}.to_json)
+      start["tls_preset"]?.try(&.raw).should be_nil
+      wait_fuzz_done(tools, start["job_id"].as_s)
+      store.get_fuzz_run(start["run_id"].as_i64).not_nil!.tls_preset.should be_nil
     end
   end
 
