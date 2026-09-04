@@ -193,9 +193,41 @@ module Gori::Tui
       end
     end
 
+    # The Position kind's `A:B` byte range, or nil when the field does not spell one.
+    #
+    # `a.to_i? || 0` silently turned every unparseable entry into the range `0:0`, and
+    # `TokenExtract.position` answers nil whenever `hi <= lo` — so a forgotten `:B` (`100`),
+    # a reversed pair, or a typo started a REAL collection in which every one of the samples
+    # missed, and the report read "0 usable · CRITICAL (no usable tokens)": a verdict about
+    # the origin's entropy, produced by a descriptor that never looked at a byte of it.
+    # `gori run sequence --position` and MCP's `position` both refuse the same string; the
+    # Sequencer tab was the surface that ran it.
+    private def position_range : {Int32, Int32}?
+      a, sep, b = @selector.value.strip.partition(':')
+      return nil if sep.empty?
+      lo = a.strip.to_i?
+      hi = b.strip.to_i?
+      return nil unless lo && hi && hi > lo
+      {lo, hi}
+    end
+
     def valid? : Bool
-      return true if kind.position? && !@selector.blank?
+      return !position_range.nil? if kind.position?
       !@selector.blank?
+    end
+
+    # What Start refuses on, in the current kind's own words — a Position range typo is not a
+    # missing token location, and being told it is sends the operator to the wrong row.
+    # `commit_sequence` toasts this; the Start row draws the short form (`start_label`).
+    def invalid_hint : String
+      kind.position? ? "set a byte range as A:B (B greater than A)" : "set a token location first"
+    end
+
+    # The Start row's own text. Short on purpose: this card is as narrow as 34 columns
+    # (`overlay_box`), and the row is drawn from `box.x + 3`.
+    private def start_label : String
+      return "[ Start collecting ]" if valid?
+      kind.position? ? "[ set a byte range A:B ]" : "[ set a token location ]"
     end
 
     def build_config : Sequencer::Config
@@ -203,8 +235,10 @@ module Gori::Tui
       c.mode = @seed.mode
       sel = @selector.value.strip
       c.token_loc = if kind.position?
-                      a, _, b = sel.partition(':')
-                      Sequencer::TokenLoc.new(kind, "", a.to_i? || 0, b.to_i? || 0)
+                      # `commit_sequence` gates on `valid?`, so the fallback is unreachable
+                      # from Start; it keeps this method total for any other caller.
+                      lo, hi = position_range || {0, 0}
+                      Sequencer::TokenLoc.new(kind, "", lo, hi)
                     else
                       Sequencer::TokenLoc.new(kind, sel)
                     end
@@ -264,8 +298,11 @@ module Gori::Tui
         screen.text(x, py, selector_label, Theme.muted, bg)
         @selector.render(screen, vx, py, vw, sel, sel ? Theme.text_bright : Theme.text, bg)
       when START_ROW
-        label = valid? ? "[ Start collecting ]" : "[ set a token location ]"
-        screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+        # `width:` because a label drawn past `box.right` paints over the frame's hairline
+        # and nothing repaints it — the floor-without-a-ceiling shape #912 closed in three
+        # lists. Every other row on this card already measures the room it has.
+        screen.text(x, py, start_label, valid? ? Theme.accent : Theme.muted, bg,
+          Attribute::Bold, width: box.right - 2 - x)
       else
         draw_cycler(screen, x, vx, py, box.right - 2, bg, sel, i)
       end
