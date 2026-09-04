@@ -351,14 +351,47 @@ module Gori::Tui
         return unless a <= 0 && b >= line.size
         lo, hi = 0, dl.size
       end
+      # The scan is BYTE-linear, and every index the draw needs rides along on it. It used
+      # to call `dl.index(q, pos)` with a CHARACTER offset, and `String#index` converts one
+      # by walking that many characters from byte 0 on EVERY call — so a token-dense line
+      # (a minified body is one long line with a match every other column) re-walked its
+      # whole prefix per match. `row_col` re-walked from the row start per match on top of
+      # that, and a char-index slice of a non-ASCII string re-walked from byte 0 a third
+      # time, which is why CJK cost 150x what ASCII did at the same match count. All three
+      # were O(line²); `bench/mark_search_bench.cr` is the harness that charts the growth.
+      #
+      # `byte_index` resumes where the last match ended; the three cursors below each walk
+      # their string once and answer a NON-DECREASING sequence of questions, which is the
+      # order the matches arrive in.
+      #
+      # Each is built on FIRST USE rather than up front, and that is measured, not tidiness:
+      # while a query is live every drawn row calls this, and most of them are rows whose
+      # logical line holds no match at all, where the whole body is one `byte_index` scan.
+      # Three cursors held alive across that scan cost it ~75% (1.3 ms → 2.3 ms over an
+      # 800k-char line) — the scan is inlined and register-bound, and a multi-MB body is ONE
+      # line, so it is the frame's cost.
+      chars = nil.as(Offsets?) # `dl` byte offset → the char index the row bounds speak
+      bytes = nil.as(Offsets?) # char index → the byte offset the drawn slice is cut at
+      cols = nil.as(ColRun?)   # char index → display column, i.e. `row_col` carried forward
+      qn = q.size
+      qb = q.bytesize
       pos = 0
-      while i = dl.index(q, pos)
-        pos = i + q.size
+      while nb = dl.byte_index(q, pos)
+        pos = nb + qb
+        i = (chars ||= Offsets.new(dl)).char_at(nb)
+        break if i >= hi # matches only move right, so nothing after this one touches the row
         ma = {i, lo}.max
-        mb = {pos, hi}.min
+        mb = {i + qn, hi}.min
         next if ma >= mb # this match doesn't touch the row
-        col = x + row_col(src, conceal, lo, ma) - xoff
-        seg = src[ma...mb]
+        col = x + (cols ||= ColRun.new(src, conceal, lo)).col_at(ma) - xoff
+        # `row_col` is monotone in `ma` and `x`/`xoff` are fixed, so `col` only grows: once
+        # the band starts at or past the clip, every later match is clipped too. Without
+        # this the loop still walked a match-dense line to its end to paint nothing.
+        break if {col, x}.max >= max_x
+        # One cursor, both ends, in order — it only moves forward.
+        seek = (bytes ||= Offsets.new(src))
+        ma_b = seek.byte_at(ma)
+        seg = src.byte_slice(ma_b, seek.byte_at(mb) - ma_b)
         # Concealed chars inside the match aren't on screen; drop them so the overdraw
         # reproduces exactly the cells the base draw painted.
         seg = strip_hidden(seg, conceal, ma) if conceal && !conceal.empty?
@@ -368,7 +401,195 @@ module Gori::Tui
           seg = Highlight.slice_left_text(seg, x - col)
           col = x
         end
-        screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) if col < max_x && !seg.empty?
+        # `col < max_x` is not re-tested: the break above is that predicate, taken one match
+        # earlier, and the drawn column is `{col, x}.max` either way.
+        screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) unless seg.empty?
+      end
+    end
+
+    # A forward-only UTF-8 offset cursor: ONE walk of a string answers a non-decreasing
+    # sequence of character↔byte index questions. Both stdlib inverses walk from byte 0 per
+    # call (`String#index`'s character offset, `String#byte_index_to_char_index`, and every
+    # char-index slice or `[]` on a non-ASCII string), which is a whole-prefix re-walk per
+    # question — the shape `mark_search` asks in, once per match, is exactly the shape that
+    # turns into O(line²).
+    #
+    # The two directions share one cursor and stay consistent because both only ever move
+    # it forward; what a caller must not do is ask about a position it has already passed.
+    #
+    # A CLASS, not a struct: the cursor is reached through a nilable local (`chars ||= …`),
+    # and a mutating call on a struct read out of a union would mutate the copy the union
+    # hands back — the walk would silently restart from byte 0 per match, which is the very
+    # cost this removes.
+    private class Offsets
+      @bytes : Bytes
+      @ascii : Bool
+      @ci : Int32
+      @bi : Int32
+
+      def initialize(s : String)
+        @bytes = s.to_slice
+        @ascii = s.ascii_only? # 1 byte == 1 char, so both directions are the identity
+        @ci = 0
+        @bi = 0
+      end
+
+      # Character index of byte offset `at`, which must be a character boundary (a valid
+      # UTF-8 needle can only match at one — UTF-8 is self-synchronising).
+      def char_at(at : Int32) : Int32
+        return at if @ascii
+        while @bi < at && @bi < @bytes.size
+          step
+        end
+        @ci
+      end
+
+      # Byte offset of character index `at`.
+      def byte_at(at : Int32) : Int32
+        return at if @ascii
+        while @ci < at && @bi < @bytes.size
+          step
+        end
+        @bi
+      end
+
+      # One character forward: the lead byte plus the continuation bytes after it (a
+      # continuation byte can never be a lead byte, which is what makes this a walk and not
+      # a decode).
+      private def step : Nil
+        @bi += 1
+        while @bi < @bytes.size && (@bytes[@bi] & 0xC0_u8) == 0x80_u8
+          @bi += 1
+        end
+        @ci += 1
+      end
+    end
+
+    # Forward-only `row_col`: the display column of char index `cx` within the visual row
+    # that starts at `lo`, for a non-decreasing sequence of `cx`, in ONE walk of the row
+    # rather than one walk per question. `row_col` measures FROM the row start every time
+    # it is called, which is fine for the one-shot callers (a caret, a selection edge) and
+    # quadratic for `mark_search`, which asks once per match.
+    #
+    # It is the same measure, not a second one — this module's standing hazard (see the
+    # header) — and it reproduces `row_col`'s two answers that are not a plain cluster sum:
+    # a `cx` inside a grapheme cluster scores the partial prefix as a cluster of its own,
+    # the way `draw_width` of a slice ending there does, and a `cx` inside a concealed run
+    # reports the run's own start column. `spec/tui/mark_search_spec.cr` asserts the two
+    # agree over a corpus rather than trusting the claim.
+    #
+    # `lo` is assumed to be a cluster boundary, which is what `layout` hands every caller
+    # (a break can never fall inside a cluster). A misaligned `lo` measures from the next
+    # boundary instead of splitting the glyph — off by that glyph, never mid-cell.
+    private class ColRun
+      @len : Int32
+      @lo : Int32
+      @pos : Int32
+      @col : Int32
+      # Concealed runs already passed; they arrive sorted (`TextArea#line_conceal`).
+      @ri : Int32
+      @ascii : Bool
+      @clusters : Iterator(String::Grapheme)?
+      @pending : String::Grapheme?
+
+      def initialize(@src : String, @conceal : Array({Int32, Int32})?, lo : Int32)
+        @len = @src.size
+        @lo = lo.clamp(0, @len)
+        @pos = @lo
+        @col = 0
+        @ri = 0
+        @ascii = @src.ascii_only?
+        @clusters = nil
+        @pending = nil
+      end
+
+      # Display column of char index `cx`, measured from the row start. `cx` must be ≥ every
+      # `cx` asked before — the cursor only moves forward, and asking backwards subtracts.
+      def col_at(cx : Int32) : Int32
+        cx = cx.clamp(@lo, @len)
+        runs = @conceal
+        if runs && !runs.empty?
+          # `row_col`'s loop, with the run index and the running column carried instead of
+          # restarted: the visible spans between the runs are what gets measured.
+          while @ri < runs.size
+            ra, rb = runs[@ri]
+            if rb <= @lo
+              @ri += 1
+              next
+            end
+            break if ra >= cx
+            s = {ra, @lo}.max
+            w = s > @pos ? width_to(s) : @col
+            return w if rb >= cx # cx lands inside the run → the run's own start column
+            skip_to(rb) if rb > @pos
+            @ri += 1
+          end
+        end
+        width_to(cx)
+      end
+
+      # Advance the head to `t`, adding the columns crossed, and return `t`'s column. A `t`
+      # INSIDE a cluster leaves the head on the boundary before it, so the partial prefix
+      # it measures cannot leak into the next answer.
+      private def width_to(t : Int32) : Int32
+        if @ascii
+          # 1 char == 1 cluster == 1 column: `Screen.draw_width`'s ASCII fast path is exact
+          # (the only multi-char ASCII cluster is CRLF, which no rendered line holds), so
+          # the whole answer is arithmetic and no grapheme walk is built at all.
+          @col += t - @pos
+          @pos = t
+          return @col
+        end
+        it = clusters
+        while @pos < t
+          g = @pending || it.next
+          break if g.is_a?(Iterator::Stop)
+          e = @pos + g.size
+          if e > t
+            @pending = g
+            return @col + Screen.draw_width(g.to_s[0, t - @pos])
+          end
+          @pending = nil
+          @col += Screen.grapheme_cols(g.to_s)
+          @pos = e
+        end
+        @col
+      end
+
+      # As `width_to` over a CONCEALED span: it occupies no cells, so it adds no columns.
+      # A run's edges are `¦`/`§`, both Grapheme_Cluster_Break=Other, so a run never
+      # straddles a cluster and the head lands back on a boundary (`layout` relies on the
+      # same property).
+      private def skip_to(t : Int32) : Nil
+        if @ascii
+          @pos = t
+          return
+        end
+        it = clusters
+        while @pos < t
+          g = @pending || it.next
+          break if g.is_a?(Iterator::Stop)
+          @pending = nil
+          @pos += g.size
+        end
+      end
+
+      # The cluster walk, built on first use and only off the ASCII path. It starts at the
+      # head of the string, so the clusters before the row are consumed once, contributing
+      # no columns to this row.
+      private def clusters : Iterator(String::Grapheme)
+        it = @clusters
+        return it if it
+        it = @src.each_grapheme
+        @clusters = it
+        p = 0
+        while p < @lo
+          g = it.next
+          break if g.is_a?(Iterator::Stop)
+          p += g.size
+        end
+        @pos = {p, @lo}.max
+        it
       end
     end
 
