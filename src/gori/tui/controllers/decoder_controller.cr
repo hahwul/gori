@@ -1082,7 +1082,11 @@ module Gori::Tui
     # The pane is only reset for the sub-tabs whose output actually moved: a scroll position
     # is the operator's place in the text, and a library edit that means nothing to this
     # conversion must not throw it away.
-    def library_changed : Nil
+    #
+    # `run_active_hooks: false` is for a caller whose gesture was NOT made looking at this tab
+    # — the factory reset, taken from Preferences on whatever tab is up — so no conversation
+    # runs a command the operator cannot see run.
+    def library_changed(run_active_hooks : Bool = true) : Nil
       # `run_hooks: false`, and it is the whole reason this loop is bounded work: it re-derives
       # EVERY open conversation, so one `^S`/`^X` in the library would otherwise fork the
       # `exec:` command of each of them at once — for sub-tabs the operator is not even looking
@@ -1111,7 +1115,7 @@ module Gori::Tui
       @sessions.each_with_index do |s, i|
         next unless library_affects?(s.chain)
         before = output_key(s.result)
-        run_hooks = i == @idx && !s.result.held?
+        run_hooks = run_active_hooks && i == @idx && !s.result.held?
         s.result = Decoder.run(registry, s.input.text.to_slice, s.chain, run_hooks: run_hooks)
         if output_key(s.result) == before
           s.view.invalidate_previews

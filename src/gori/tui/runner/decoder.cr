@@ -106,8 +106,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         ok = Settings.delete_decoder_chain(name)
         chains = Settings.decoder_chains
         # The deleted name stops resolving as a step for every open conversion, not just the
-        # active one — see DecoderController#library_changed.
-        decoder_controller.library_changed
+        # active one — see DecoderController#library_changed. A refused write changed nothing
+        # (`delete_decoder_chain` put the entry back), so nothing is re-derived either.
+        decoder_controller.library_changed if ok
         lp.set_rows(chain_rows(chains))
         @toast = ok ? "deleted chain \"#{name}\"" : "could not delete chain \"#{name}\""
       end

@@ -92,10 +92,15 @@ describe "Decoder engine hardening" do
       r.names.should contain("ok")
     end
 
-    it "is applied by the settings.json parse, so an imported name the tab refuses is dropped" do
+    # The settings parse KEEPS such an entry (dropping it would erase it from disk at the next
+    # save); it is the registrar that refuses to make it a step.
+    it "leaves an imported name the tab refuses in the library but out of the registry" do
       with_settings_file(%({"decoder":{"chains":[
           {"name":"a>b","spec":"upper"},{"name":"exec:x","spec":"upper"},{"name":"fine","spec":"upper"}]}})) do
-        Gori::Settings.decoder_chains.map(&.[0]).should eq ["fine"]
+        Gori::Settings.decoder_chains.map(&.[0]).should eq ["a>b", "exec:x", "fine"]
+        Gori::Decoder.shared_registry["fine"]?.should_not be_nil
+        Gori::Decoder.shared_registry["exec:x"]?.should be_nil
+        Gori::Decoder.shared_registry["a>b"]?.should be_nil
       end
     end
   end

@@ -5346,7 +5346,7 @@ module Gori::Tui
       # re-derive a ^S/^X in the picker runs; without it the tab kept showing a decode
       # through a name that no longer resolved (entering the tab derives nothing — see
       # `DecoderController#on_enter`).
-      decoder_controller.library_changed
+      decoder_controller.library_changed(run_active_hooks: false)
       # The saved-view library is gone with them, so the active lens may name a view that no
       # longer exists. `reload` alone would leave History filtering by it silently — every
       # other path that loses a view says so, and this one has to as well. Re-resolved BEFORE

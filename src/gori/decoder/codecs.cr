@@ -668,12 +668,12 @@ module Gori::Decoder
       sink.to_slice
     end
 
-    # Crystal's readers raise plain `Compress::Gzip::Error` / `Compress::Zlib::Error` for the
-    # trailer checks — gzip's `CRC32 checksum mismatch` AND its `isize mismatch` (the length
-    # field, checked after the CRC), zlib's Adler-32; the message is the only thing that names
-    # them.
+    # Once a reader is constructed, `Compress::Gzip::Error` / `Compress::Zlib::Error` are raised
+    # ONLY by the trailer checks (gzip's CRC-32 and ISIZE, zlib's Adler-32) and by garbage where
+    # a further gzip member's header should be — all corruption. A genuine cut surfaces as
+    # `IO::EOFError` or `Compress::Deflate::Error`, so the type is the signal, not the message.
     private def checksum_error?(ex : Exception) : Bool
-      !!(ex.message =~ /checksum|crc|adler|mismatch/i)
+      ex.is_a?(Compress::Gzip::Error) || ex.is_a?(Compress::Zlib::Error)
     end
 
     # ---- byte-oriented number bases (space-separated, matches CyberChef To/From) ----

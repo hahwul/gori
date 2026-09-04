@@ -110,9 +110,10 @@ module Gori::Settings
   # value; entries missing/blank "name" or "spec" are dropped. Mirrors parse_tab_prefs.
   #
   # A name the tab's own ^S would refuse (`Library.name_error`: a separator inside, an
-  # `exec:` prefix) is dropped here too. Only the TUI path validated, so a hand-edited or
-  # imported `a>b` entry was registered, listed by `gori run decoder list` as callable, and
-  # then split into two unknown steps by the first spec that typed it.
+  # `exec:` prefix) is KEPT here, on purpose: dropping it at load would erase the operator's
+  # hand-edited or imported entry from disk at the next ^S (the 3-way merge's base is what
+  # this parse produced). It stays a picker row, loadable by hand; `Library.register_all`
+  # is what refuses to make it a callable step.
   private def self.parse_decoder_chains(node : JSON::Any?) : Array({String, String})
     arr = node.try(&.as_a?)
     return decoder_chains unless arr
@@ -121,7 +122,7 @@ module Gori::Settings
       next unless o = e.as_h?
       name = o["name"]?.try(&.as_s?)
       spec = o["spec"]?.try(&.as_s?)
-      next if name.nil? || spec.nil? || Decoder::Library.name_error(name)
+      next if name.nil? || name.empty? || spec.nil?
       out << {name, spec}
     end
     out

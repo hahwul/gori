@@ -372,6 +372,23 @@ describe Gori::Tui::DecoderController do
       end
     end
 
+    it "does not run the active conversation's exec: step for a gesture made elsewhere" do
+      with_decoder_host do |host|
+        Gori::Settings.decoder_chains = [] of {String, String}
+        dc = DecoderController.new(host)
+        dc.input_area.set_text("hi")
+        dc.load_chain("def", "upper")
+        dc.save_chain("myenc")
+        dc.load_chain("call", "myenc > exec:/bin/cat") # ran: OUTPUT "HI"
+        dc.output_search_lines("HI").should eq [0]
+        Gori::Settings.decoder_chains = [] of {String, String} # a factory reset empties the library…
+        dc.library_changed(run_active_hooks: false)            # …from another tab: no fork
+        dc.output_search_lines("unknown converter").should eq [0]
+      ensure
+        Gori::Settings.decoder_chains = [] of {String, String}
+      end
+    end
+
     it "leaves a conversation no library edit can affect exactly as it is" do
       with_decoder_host do |host|
         Gori::Settings.decoder_chains = [] of {String, String}
