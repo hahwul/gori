@@ -143,13 +143,7 @@ module Gori
         # from BOTH baselines. One grouped Detection per host, listing the affected params + the
         # signature each leaked.
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
-          base1 = results[0]?
-          base2 = results[1]?
-          # Both baselines must have come back ok — without a stable reference we decline rather
-          # than risk a false positive (mirrors BackslashPowered#stable_baseline). The combined
-          # text means a signature present in EITHER baseline suppresses the finding.
-          return [] of Detection unless base1 && base1.ok? && base2 && base2.ok?
-          base_body = "#{decoded_text(base1)}\n#{decoded_text(base2)}"
+          base_body = baseline_text(results) || return [] of Detection
           base_low = base_body.downcase
           hits = [] of String
           plan.params.each_with_index do |param, i|
@@ -173,6 +167,22 @@ module Gori
         # The analyzer always calls detections_all with the full set.
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
           detections_all(plan, [result], detail)
+        end
+
+        # The combined baseline body text (`base1\nbase2`), or nil to DECLINE the whole flow.
+        # Both baselines must have come back ok — without a stable reference we would risk a false
+        # positive (mirrors BackslashPowered#stable_baseline) — AND both must be COMPLETE: a
+        # truncated baseline (ok? but cut short by an early close or the capture ceiling) may end
+        # BEFORE a DB-error signature that is in fact always present on this endpoint, so `base_low`
+        # would lack it and every probe carrying that same permanent error would read as an INDUCED
+        # one. The differential only means something against a baseline gori read in full. The
+        # combined text also means a signature present in EITHER baseline suppresses the finding.
+        private def baseline_text(results : Array(Repeater::Result)) : String?
+          base1 = results[0]?
+          base2 = results[1]?
+          return nil unless base1 && base1.ok? && base2 && base2.ok?
+          return nil if base1.incomplete? || base2.incomplete?
+          "#{decoded_text(base1)}\n#{decoded_text(base2)}"
         end
 
         # The first DB-error signature present in `probe_body` but ABSENT from the baseline
