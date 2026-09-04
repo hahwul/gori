@@ -423,6 +423,11 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.select_setting(ProjectView::SETTINGS_PROTOCOL_ROW)
       view.cycle_settings_protocol
       values = view.settings_values
+      # HTTP+TLS sits next to HTTP in the cycle, and its default port is its own (443).
+      {values[2], values[3], values[4]}.should eq({"HTTP+TLS", "proxy.test", "443"})
+      view.settings_upstream_proxy.should eq({"http+tls://proxy.test:443", nil})
+      view.cycle_settings_protocol
+      values = view.settings_values
       {values[2], values[3], values[4]}.should eq({"SOCKS5", "proxy.test", "1080"})
       view.settings_upstream_proxy.should eq({"socks5://proxy.test:1080", nil})
 
