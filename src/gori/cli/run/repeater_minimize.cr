@@ -184,6 +184,12 @@ module Gori
         # source form (that is what the session row holds, and re-resolving it on every send
         # is the point of storing it).
         report_repeater_minimize(id, report, format, applied, resolve, interrupted_run)
+        # LAST, after the report: `--slot NAME` whose overlay resolved to nothing means the
+        # calibration AND every candidate probe carried `$SESSION` itself instead of a session,
+        # so the whole search judged "same response" against an ANONYMOUS baseline — under which
+        # a header the session-bearing request needs looks removable, and `--apply` writes that
+        # trimmed request back over the operator's. Same drain, same sentence, as fuzz/discover.
+        report_unbound_slot_overlay("gori run repeater minimize")
         # Before the `report.aborted` check below, for the reason `Run.report_interrupted`
         # records: a run cut short has not demonstrated that calibration failed, so falling
         # through would print a diagnosis of the wrong cause. A refused `--apply` has already

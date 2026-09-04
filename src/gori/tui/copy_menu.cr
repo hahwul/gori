@@ -35,39 +35,69 @@ module Gori::Tui
       lines = split_lines(head)
       request_line = lines.first? || ""
       header_lines = lines.size > 1 ? lines[1..] : [] of String
-      method, req_target, version = Export::Curl.parse_request_line(request_line)
+      # Only the request-target: the cURL row now goes through `Curl.text`, which parses the
+      # method and version off the same `wire` itself.
+      _, req_target, _ = Export::Curl.parse_request_line(request_line)
       url = Export::Curl.resolve_url(req_target, target, header_lines)
+      # A request line gori cannot FRAME makes `req_target` some token other than the
+      # request-target, so `url` is a guess — see `Export::Curl.request_line_refusal`. Every row
+      # DERIVED from it drops out here (the clipboard is the one place a wrong-but-runnable
+      # command is most expensive: nothing on the way to the shell says it was a guess). The
+      # byte-exact rows — Headers, Body, Cookies, Raw request — are unaffected, and the cURL row
+      # below still appears, carrying the refusal as a `#` comment the way a NUL-bearing URL
+      # already does.
+      refusal = Export::Curl.request_line_refusal(request_line)
+
+      # The URL and the wscat command are BUILT from `url`, so a guessed one takes both with it.
+      derived_url = refusal ? "" : url
 
       opts = [] of Option
-      opts << Option.new("URL", 'u', url) unless url.empty?
+      opts << Option.new("URL", 'u', derived_url) unless derived_url.empty?
       headers_text = header_lines.reject(&.strip.empty?).join("\n")
       opts << Option.new("Headers", 'h', headers_text) unless headers_text.empty?
       opts << Option.new("Body", 'b', body) unless body.empty?
       if cookie = cookie_value(header_lines)
         opts << Option.new("Cookies", 'c', cookie)
       end
-      unless url.empty?
-        opts << Option.new("cURL", 'l', Export::Curl.command(method, url, header_lines, body, version))
-        # "Copy as <language>" — the same request, serialized for the four common HTTP clients,
-        # each a surface-neutral `Export::*` module (`gori run show --format python|fetch|go|httpie`
-        # emits byte-identical text). Keys avoid 'p'/'s': the detail and single-flow list menus
-        # append a "Req + Res pair" ('p') and a "Raw response" ('s') AFTER this list, and the
-        # CopyPicker dispatches on the FIRST row whose key matches. `parts` re-parses `wire` the
-        # one way the serializers do, so the menu cannot disagree with the CLI about the bytes.
-        if parts = Export::RequestParts.from_wire(wire, target)
-          opts << Option.new("Python", 'y', Export::PythonRequests.script(parts))
-          opts << Option.new("fetch", 'f', Export::JsFetch.code(parts))
-          opts << Option.new("Go", 'g', Export::GoHttp.program(parts))
-          opts << Option.new("httpie", 'i', Export::Httpie.command(parts))
-          opts << Option.new("CSRF PoC", 'x', Export::CsrfPoc.document(parts))
-        end
-      end
-      if messages = websocket_messages
-        ws_url = websocket_url(url)
-        opts << Option.new("wscat", 'w', wscat_command(ws_url, header_lines, messages)) unless ws_url.empty?
-      end
+      append_code_options(opts, wire, target) unless url.empty?
+      append_wscat_option(opts, derived_url, header_lines, websocket_messages)
       opts << Option.new("Raw request", 'r', wire) unless wire.strip.empty?
       opts
+    end
+
+    # The wscat row, for a WebSocket Repeater whose outbound frames the caller passes. Split out
+    # for the reason `append_code_options` is: `request_options` is a row LIST, and each derived
+    # family's "can this be built at all" rule belongs with the family.
+    private def self.append_wscat_option(opts : Array(Option), url : String,
+                                         header_lines : Array(String),
+                                         websocket_messages : Array(String)?) : Nil
+      return unless messages = websocket_messages
+      ws_url = websocket_url(url)
+      return if ws_url.empty?
+      opts << Option.new("wscat", 'w', wscat_command(ws_url, header_lines, messages))
+    end
+
+    # The "Copy as <tool>" rows — the same request serialized for the five clients, each a
+    # surface-neutral `Export::*` module (`gori run show --format curl|python|fetch|go|httpie|csrf`
+    # emits byte-identical text). Keys avoid 'p'/'s': the detail and single-flow list menus append
+    # a "Req + Res pair" ('p') and a "Raw response" ('s') AFTER this list, and the CopyPicker
+    # dispatches on the FIRST row whose key matches.
+    #
+    # `Curl.text` and not `Curl.command`, and `RequestParts.from_wire` for the rest: both re-parse
+    # `wire` the one way the serializers do AND own the two refusals (a NUL-bearing URL, a request
+    # line that does not frame), so the clipboard cannot disagree with the CLI about when there is
+    # nothing runnable to hand over. curl says so in a `#` comment; the four that cannot carry one
+    # in every language drop their row.
+    private def self.append_code_options(opts : Array(Option), wire : String, target : String) : Nil
+      if curl = Export::Curl.text(wire, target)
+        opts << Option.new("cURL", 'l', curl)
+      end
+      return unless parts = Export::RequestParts.from_wire(wire, target)
+      opts << Option.new("Python", 'y', Export::PythonRequests.script(parts))
+      opts << Option.new("fetch", 'f', Export::JsFetch.code(parts))
+      opts << Option.new("Go", 'g', Export::GoHttp.program(parts))
+      opts << Option.new("httpie", 'i', Export::Httpie.command(parts))
+      opts << Option.new("CSRF PoC", 'x', Export::CsrfPoc.document(parts))
     end
 
     # Just the cURL line for one request — what History's multi-flow "Copy as… cURL" needs

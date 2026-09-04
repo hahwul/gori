@@ -44,6 +44,11 @@ module Gori
         # a request nobody ever made, offered as if it were the capture. The one case with
         # nothing runnable to hand over now includes the case with nothing captured.
         return nil if request_line.strip.empty?
+        # BEFORE `resolve_url`: a line `parse_request_line` cannot frame gives it a target that
+        # is some OTHER token, and a URL built from that is a guess. See `request_line_refusal`.
+        if refusal = request_line_refusal(request_line)
+          return "# no command: #{refusal}"
+        end
         header_lines = lines.size > 1 ? lines[1..] : [] of String
         method, req_target, version = parse_request_line(request_line)
         url = resolve_url(req_target, target, header_lines)
@@ -385,9 +390,72 @@ module Gori
 
       # {method, request-target, version} from a request line, best-effort (missing
       # tokens come back empty rather than raising on a hand-typed partial request).
+      #
+      # BEST-EFFORT MEANS IT CAN MIS-SLICE, and callers must ask `request_line_refusal` first.
+      # `split(' ')` takes `parts[1]` as the target, so a line whose SP framing is not
+      # "METHOD SP target SP version" hands back a token that is not the target at all.
       def self.parse_request_line(line : String) : {String, String, String}
         parts = line.strip.split(' ')
         {parts[0]? || "", parts[1]? || "", parts[2]? || ""}
+      end
+
+      # WHY this request line cannot be framed as "METHOD SP request-target SP HTTP-version",
+      # or nil when it can — the guard every "copy as <tool>" serializer owes the operator
+      # before it builds a URL out of `parse_request_line`'s `parts[1]`.
+      #
+      # `Gori::FlowMapper` already refuses to STORE a derived target for these lines ("History
+      # would render a deceptively-plausible-but-wrong URL") and keeps the verbatim request line
+      # instead. The export surface re-parsed the raw head and produced exactly that URL, and
+      # unlike History's honestly-broken row it produced a RUNNABLE one. Measured against a raw
+      # listener, one `gori run show --format curl` each:
+      #
+      #   GET http://h/echo?a=b c&d=e HTTP/1.1   curl 'http://h/echo?a=b'      — query truncated
+      #   GET  http://h/admin HTTP/1.1 (2 SP)    curl 'http://h'               — /admin gone
+      #   GET<TAB>http://h/admin HTTP/1.1        curl 'http://h/HTTP/1.1'      — never requested
+      #
+      # python / fetch / Go / httpie / CSRF agreed with curl, `--format json|har|raw` kept the
+      # bytes, and the runnable half was the wrong one. Doubled-space and tab request lines are
+      # the shapes `Proxy::Codec::Http1` names as scope-gate bypass probes — the requests most
+      # worth handing to a colleague, and the ones where a wrong URL is most expensive.
+      #
+      # A REFUSAL, not a lenient re-parse. `Proxy::Codec::Http1.gate_target` litigated the
+      # lenient form for the forwarding path and rejected it: recovering a doubled-space
+      # `GET  http://x/y HTTP/1.1` as method+target+version rebuilds it as `GET /y http://x/y`,
+      # which is gori corrupting the operator's bytes (P7). There is no runnable equivalent of a
+      # request line gori cannot frame, so — like `nul_url_note` — a paste does nothing instead
+      # of doing the wrong thing.
+      #
+      # TOKEN COUNT is the discriminator, and the tab check is scoped to where a tab IMPLIES a
+      # hidden delimiter, because a tab is not one:
+      #
+      #   > 3 tokens            unframable — an unencoded SP in the target, or a doubled SP
+      #   <= 2 tokens + a HTAB  unframable — the tab stood where the delimiter belongs, so
+      #                         `parts[1]` is the VERSION (or nothing) rather than the target
+      #   exactly 3 tokens      framable, tab or no tab — `GET /a<TAB>b HTTP/1.1` frames
+      #                         cleanly and that tab is the operator's payload (DESIGN.md §7),
+      #                         which this must not refuse to export
+      #   2 clean tokens        framable — `GET /p`, the hand-authored Repeater line
+      #                         `parse_request_line`'s own doc reserves the tolerance for
+      #
+      # A ONE-token line (`GET` alone) resolves to the target base and is left alone here: it is
+      # pre-existing, it is not a MIS-slice, and widening this guard to cover it would refuse
+      # every keystroke of a request line being typed in a Repeater tab.
+      def self.request_line_refusal(line : String) : String?
+        trimmed = line.strip
+        return nil if trimmed.empty?
+        tokens = trimmed.split(' ')
+        why = if tokens.size > 3
+                "it splits into #{tokens.size} space-separated tokens, not the 3 that framing " \
+                "needs (an unencoded space in the request-target, or a doubled one)"
+              elsif tokens.size <= 2 && tokens.any?(&.includes?('\t'))
+                "a TAB stands where a space delimiter belongs, and a tab does not delimit a " \
+                "request line"
+              end
+        return nil unless why
+        "the captured request line does not frame as \"METHOD SP request-target SP " \
+        "HTTP-version\" — #{why}. Which of its tokens is the request-target is a guess, and a " \
+        "wrong guess asks the origin for a different resource than the capture did. Read the " \
+        "request line with --format raw"
       end
 
       # The full URL for the request: an absolute-form request target as-is, else the

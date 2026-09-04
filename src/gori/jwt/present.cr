@@ -29,11 +29,15 @@ module Gori
       JSON.build { |j| j.array { list.each { |a| attack_fields(j, a) } } }
     end
 
+    # `verified` rides on EVERY row and not only the true one, so a consumer can select on it
+    # (`.[] | select(.verified)`) rather than pattern-matching the note prose. It is the one
+    # field here that is a FINDING and not a payload to go try — see `Jwt::Attack`.
     def attack_fields(j : JSON::Builder, a : Attack) : Nil
       j.object do
         j.field "name", a.name
         j.field "category", a.category
         j.field "note", a.note
+        j.field "verified", a.verified
         j.field "token", a.token
       end
     end

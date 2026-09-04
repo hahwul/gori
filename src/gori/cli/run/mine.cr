@@ -256,6 +256,12 @@ module Gori
           end
         end
         puts CLI::Output.mine_array_json(findings) if format == :json
+        # LAST, after every count the summary prints: `--slot NAME` whose overlay resolved to
+        # nothing means every probe carried `$SESSION` itself instead of a session, so the whole
+        # mine ran UNAUTHENTICATED while announcing "slot: sending as NAME" — and a miner reports
+        # ABSENCE ("0 found"), which is exactly the answer an anonymous run gives for the
+        # parameters only a session can reach. Same drain, same sentence, as fuzz/discover.
+        report_unbound_slot_overlay("gori run mine")
         # Before `mine_all_refused?` — see `Run.report_interrupted` for why the order matters.
         Run.report_interrupted(findings.size, "finding", "emitted") if interrupted.call
         exit 1 if had_error

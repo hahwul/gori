@@ -150,15 +150,34 @@ describe "R1 · the unbound-overlay drain has a consumer" do
   # it — so "who calls it" is a property of the tree, not of any one function, and the whole
   # defect this file closes was that the answer used to be NOBODY.
   describe "every run-summary surface drains it" do
-    it "is wired on the three `gori run` surfaces" do
-      {
-        "src/gori/cli/run/authorize.cr" => "authorize",
-        "src/gori/cli/run/fuzz.cr"      => "gori run fuzz",
-        "src/gori/cli/run/repeater.cr"  => "gori run repeater send",
-      }.each do |path, prefix|
-        src = File.read(File.join(__DIR__, "../../..", path))
-        src.should contain("report_unbound_slot_overlay(#{prefix.inspect})")
+    # DERIVED, not listed. This used to name three files by hand, and a hand-written inventory
+    # is how the drift it guards against happened anyway: `mine`, `sequence` and `repeater
+    # minimize` all grew `--slot`, all print a run summary, and none of them drained — so all
+    # three sent `$SESSION` literally under a slot and said so only in a `Log.warn` written
+    # BEFORE the results, which is the exact "log line the operator is not tailing" the drain
+    # exists to replace. `discover` DID drain and was missing from the list too, so the list was
+    # already stale in both directions.
+    #
+    # The population is "every `gori run` verb that accepts `--slot`", because accepting one is
+    # what makes an unresolved `$NAME` possible. Deriving it means a verb that grows `--slot`
+    # tomorrow fails here instead of drifting silently.
+    it "is wired on every `gori run` verb that accepts --slot" do
+      dir = File.join(__DIR__, "../../..", "src/gori/cli/run")
+      offenders = [] of String
+      Dir.glob(File.join(dir, "*.cr")).sort.each do |path|
+        src = File.read(path)
+        next unless src.includes?("\"--slot")
+        offenders << File.basename(path) unless src.includes?("report_unbound_slot_overlay(")
       end
+      offenders.should be_empty
+    end
+
+    it "keeps the population non-trivial, so an empty glob cannot pass it vacuously" do
+      dir = File.join(__DIR__, "../../..", "src/gori/cli/run")
+      with_slot = Dir.glob(File.join(dir, "*.cr")).count { |p| File.read(p).includes?("\"--slot") }
+      # fuzz, mine, sequence, discover, repeater, repeater_minimize — six today, and the
+      # assertion is a floor, not the count, so adding a seventh is not a spec edit.
+      with_slot.should be >= 6
     end
 
     it "is wired on both MCP surfaces, which have no STDERR an agent reads" do
