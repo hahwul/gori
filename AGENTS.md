@@ -114,6 +114,7 @@ bottleneck every time.
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
 | Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, then ameba) |
+| Lint diff gate | `just lint-gate` (`scripts/ameba_gate.sh`, fails when a changed file gained ameba findings) |
 | Format + autofix | `just fix` |
 | Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
 | Proxy benchmark | `just benchmark` |
@@ -127,10 +128,12 @@ What CI gates, and what it does not:
   `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (nix/shards.nix against shard.lock).
   Format, bench and the shards gate are real gates — `just test` touches none of them, so a green
   suite is not a green CI.
-- **Not gated:** ameba. It carries a large pre-existing backlog, mostly
-  `Metrics/CyclomaticComplexity` in the TUI (the reasoning is in `.ameba.yml` and in the
-  `# Still no ameba job` comment in `ci.yml`), so judge `just check` output on the files
-  *you* touched.
+- **Gated as a diff, on pull requests:** ameba. The full run is not a gate — it carries a
+  large pre-existing backlog, mostly `Metrics/CyclomaticComplexity` in the TUI (the
+  reasoning is in `.ameba.yml` and above the `lint-gate` job in `ci.yml`) — but
+  `scripts/ameba_gate.sh` fails when any file you changed has MORE findings than it had on
+  `main`, and a new file starts from zero. `just lint-gate` runs it locally; judge the full
+  `just check` output on the files *you* touched.
 - CI tests your branch, **not the merge result** — the `merge_group` trigger is inert until a
   merge queue is enabled. Re-run the build and the suite after every rebase.
 - ameba runs as the source file in `lib/ameba/bin/ameba.cr`, not a `bin/ameba` binary.

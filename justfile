@@ -146,6 +146,12 @@ check:
     crystal run scripts/nix_shards_check.cr
     lib/ameba/bin/ameba.cr
 
+# ameba as a diff gate: fail if any Crystal file changed against BASE gained findings.
+# The same script the CI `lint-gate` job runs on pull requests.
+[group('development')]
+lint-gate base="origin/main":
+    scripts/ameba_gate.sh {{base}}
+
 # Auto-format code and fix lint issues.
 [group('development')]
 fix:
