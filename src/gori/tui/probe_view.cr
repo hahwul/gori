@@ -9,6 +9,7 @@ require "../scope"
 require "../probe"
 require "../probe_query"
 require "./preview_split"
+require "./line_edit"
 require "./issue_presentation"
 require "./viewport"
 
@@ -19,6 +20,7 @@ module Gori::Tui
   # IssuesView structurally; the issues ARE the groups (the DB upserts one row per
   # (code, host)), so there's no in-view folding.
   class ProbeView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit

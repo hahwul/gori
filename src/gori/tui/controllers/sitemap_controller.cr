@@ -168,7 +168,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       store = @host.session.store
-      return true if query_nav(key)
+      return true if query_nav(ev)
       case
       when key.enter?  then query_enter
       when key.escape? then query_escape(store)
@@ -193,8 +193,12 @@ module Gori::Tui
     # gate CI runs, and "move something" is a different question from "what does this key do".
     # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
     # move a caret to — which is why they could be claimed without displacing anything.
-    private def query_nav(key) : Bool
+    private def query_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
       case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @sitemap.query_edit(act)
+        schedule_query_reload if LineEdit.mutating?(act)
       when key.down?  then @sitemap.popup_down
       when key.up?    then @sitemap.popup_up
       when key.left?  then @sitemap.query_move(-1)

@@ -7,6 +7,7 @@ require "../repeater/subtab_filter"
 require "./subtab_marks"
 require "./controllers/tab_close"
 require "./screen"
+require "./line_edit"
 require "./geometry"
 require "./frame"
 require "./chrome"
@@ -961,6 +962,9 @@ module Gori::Tui
           @subtab_filter = @subtab_filter[0, @filter_cx - 1] + @subtab_filter[@filter_cx..]
           @filter_cx -= 1
         end
+        @filter_preedit = ""
+      elsif act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        @subtab_filter, @filter_cx = LineEdit.apply(act, @subtab_filter, @filter_cx)
         @filter_preedit = ""
       elsif key.left?
         @filter_cx = {@filter_cx - 1, 0}.max

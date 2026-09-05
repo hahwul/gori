@@ -17,6 +17,7 @@ require "./wrap"
 require "./viewport"
 require "./copy_menu"
 require "./preview_split"
+require "./line_edit"
 require "../store"
 require "../display_columns"
 require "../repeater/flow_request"
@@ -33,6 +34,13 @@ module Gori::Tui
   # (no queue/ranking, P8). A QL bar (`/`) filters the list; analysis is by query
   # (pull), with field/value suggestions while typing. Also owns the detail view.
   class HistoryView
+    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+
+    # After a `LineEdit` edit: the dropdown follows the token now under the caret.
+    def query_edited : Nil
+      sync_popup
+    end
+
     # `list_split` only — the focus half (PreviewPane) is two-way and this preview is not.
     include PreviewSplit
 
