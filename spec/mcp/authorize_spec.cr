@@ -6,19 +6,6 @@ require "socket"
 # (with sleeps that yield to the job fiber) against a local origin. The IO::Memory server
 # harness never yields between scripted lines, so a polled async job cannot progress there.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpauthz", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # An origin that either serves the same page to everyone (`enforce: false` — a broken
 # access-control target) or refuses a request carrying no Cookie (`enforce: true`). One
 # connection per request, because `Authorize::Engine.live` deliberately does not keep-alive.

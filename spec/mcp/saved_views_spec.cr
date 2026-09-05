@@ -8,19 +8,6 @@ require "json"
 # spec/mcp/session_slots_spec.cr uses. Helpers are file-local (Crystal's top-level `private def`
 # is file-scoped).
 
-private def with_store(&)
-  path = File.tempname("gori-mcpviews", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The global library is process-wide (Settings) and is re-read from settings.json by every
 # global CRUD, so an example that writes it needs both halves restored — see
 # spec/saved_views_spec.cr's `with_globals` for the full reasoning.
@@ -41,10 +28,6 @@ private def with_globals(&)
     Gori::Settings.saved_views_next_id = counter
     FileUtils.rm_rf(dir)
   end
-end
-
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 end
 
 private def call_raw(tools, name, args : String) : {String, Bool}

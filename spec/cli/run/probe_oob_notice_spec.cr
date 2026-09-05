@@ -20,19 +20,6 @@ module Gori::CLI::Run
   end
 end
 
-private def with_store(&)
-  path = File.tempname("gori-probe-oob", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def cfg(disabled : Array(String) = [] of String, degraded = false) : Gori::Probe::Scan::RuleConfig
   Gori::Probe::Scan::RuleConfig.new(disabled.to_set, [] of Gori::Probe::CustomRule, degraded: degraded)
 end

@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-rules", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The global rule library is process-wide state (Settings), so every example that writes it
 # restores what it found — `Rules.load` merges it into EVERY project's rule list.
 #

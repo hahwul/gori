@@ -10,19 +10,6 @@ private def history_gzip(text : String) : Bytes
   io.to_slice
 end
 
-private def tmp_store(&)
-  path = File.tempname("gori-hv", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def add_flow(store, method, target, status = nil, content_type = nil, host = "h.test")
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: host, port: 80,
@@ -95,7 +82,7 @@ describe Gori::Tui::HistoryView do
   # reads "no flows match" as "this traffic doesn't exist", which on a security proxy is how a
   # finding gets missed.
   it "notes a lagging body-search index instead of silently under-reporting" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/submit", http_version: "HTTP/1.1",
@@ -127,7 +114,7 @@ describe Gori::Tui::HistoryView do
   # scope TERM is that same predicate asked as a question — including with the lens OFF, which is
   # the state that makes the term worth having at all.
   it "filters by scope: with the ⇧S lens off, and says when there is no scope to ask about" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200, host: "acme.test")
       add_flow(store, "GET", "/b", 200, host: "evil.test")
       scope = Gori::Scope.load(store)
@@ -162,7 +149,7 @@ describe Gori::Tui::HistoryView do
   # list on its own — a scope note returning ahead of it made it unreachable for every query
   # naming `scope:`, sending an operator to the lens for a list that was merely still indexing.
   it "lets the index-backlog note win over a scope note" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
@@ -222,7 +209,7 @@ describe Gori::Tui::HistoryView do
   # A filter that never touches flows_fts must not pay for (or display) the backlog probe:
   # its answer is complete the moment the row commits.
   it "does not note the index backlog for a filter that doesn't read it" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       view = HistoryView.new
       view.start_query
@@ -257,7 +244,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store, "GET", "/preview-me", 200, "text/plain")
         view = HistoryView.new
         view.reload(store)
@@ -281,7 +268,7 @@ describe Gori::Tui::HistoryView do
     begin
       Gori::Settings.history_preview = true
       Theme.apply("goridark")
-      tmp_store do |store|
+      with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "POST", target: "/preview", http_version: "HTTP/1.1",
@@ -331,7 +318,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         plain = %({"decoded_response":true})
         wire = history_gzip(plain)
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -366,7 +353,7 @@ describe Gori::Tui::HistoryView do
     begin
       Gori::Settings.history_preview = true
       Gori::Settings.preview_body_kib = 1
-      tmp_store do |store|
+      with_store do |store|
         plain = "BEGIN-#{"A" * 3000}-END"
         wire = history_gzip(plain)
         wire.size.should be < Gori::Settings.preview_body_cap # compressed input fits; entity does not
@@ -398,7 +385,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         # A PNG signature, a NUL, then bytes that happen to be VALID UTF-8 for a wide
         # grapheme. `scrub` cannot remove those — it only rewrites INVALID sequences — so
         # without the placeholder they reach the terminal and desync its cursor tracking.
@@ -435,7 +422,7 @@ describe Gori::Tui::HistoryView do
     begin
       Gori::Settings.history_preview = true
       Gori::Settings.preview_body_kib = 1
-      tmp_store do |store|
+      with_store do |store|
         cap = Gori::Settings.preview_body_cap
         binary = Bytes.new(cap * 8) { |i| i.zero? ? 0_u8 : (i % 251).to_u8 }
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -467,7 +454,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         plain = %({"query":"{ me { id } }"})
         wire = history_gzip(plain)
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -499,7 +486,7 @@ describe Gori::Tui::HistoryView do
     begin
       Gori::Settings.history_preview = true
       Gori::Settings.preview_body_kib = 1
-      tmp_store do |store|
+      with_store do |store|
         cap = Gori::Settings.preview_body_cap
         # 1-byte chunks: 6 wire bytes ("1\r\nX\r\n") per byte of entity, so the wire form runs
         # past the cap while the de-chunked entity lands nowhere near it.
@@ -545,7 +532,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         plain = %({"query":"{ me { id } }"})
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
@@ -588,7 +575,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         id = add_flow(store, "GET", "/pending") # no response yet → Pending
         view = HistoryView.new
         view.reload(store)
@@ -616,7 +603,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "loads flows newest-first with the newest selected (follow)" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       last = add_flow(store, "POST", "/b", 500)
       view = HistoryView.new
@@ -630,7 +617,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_list_order
     begin
       Gori::Settings.history_list_order = "oldest"
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store, "GET", "/a", 200)
         last = add_flow(store, "POST", "/b", 500)
         view = HistoryView.new
@@ -644,7 +631,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "prepends on :inserted (newest on top) and fills status on :updated" do
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.reload(store)
       id = add_flow(store, "GET", "/live") # pending
@@ -660,7 +647,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "reports at_top? (drives the ↑-at-top → tab-bar focus flow)" do
-    tmp_store do |store|
+    with_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -673,7 +660,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "moves the selection and disengages follow" do
-    tmp_store do |store|
+    with_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -685,7 +672,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "renders the traffic list with method/path/status columns" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/search", 200, "application/json; charset=utf-8")
       add_flow(store, "POST", "/orders", 500)
       view = HistoryView.new
@@ -704,7 +691,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "normalizes absolute-form targets to origin-form and shows host + proto columns" do
-    tmp_store do |store|
+    with_store do |store|
       # plaintext forward-proxy requests are captured absolute-form (the truth)
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "www.hahwul.com", port: 80,
@@ -724,7 +711,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "drops trailing columns on a narrow pane without clobbering PATH or overflowing" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/search", 200, "application/json")
       view = HistoryView.new
       view.reload(store)
@@ -742,7 +729,7 @@ describe Gori::Tui::HistoryView do
 
   describe "the SRC column" do
     it "prints the tool tag, and PROXY for traffic a client sent" do
-      tmp_store do |store|
+      with_store do |store|
         add_sourced_flow(store, "/captured", Gori::FlowSource::Kind::Proxy)
         add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater,
           Gori::FlowSource::Surface::Tui, "7")
@@ -789,7 +776,7 @@ describe Gori::Tui::HistoryView do
       # SRC is granted FIRST in the right cluster, so it is the LAST to drop: a marker that
       # falls off a narrow terminal is a marker that lets someone screenshot a Repeater send
       # as if it were captured traffic. DUR goes first, then SIZE, then TYPE.
-      tmp_store do |store|
+      with_store do |store|
         add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater)
         view = HistoryView.new
         view.reload(store)
@@ -818,7 +805,7 @@ describe Gori::Tui::HistoryView do
     end
 
     it "spells the source out in the detail pane, where five cells are not the budget" do
-      tmp_store do |store|
+      with_store do |store|
         add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater,
           Gori::FlowSource::Surface::Tui, "7")
         view = HistoryView.new
@@ -832,7 +819,7 @@ describe Gori::Tui::HistoryView do
     end
 
     it "says nothing about a proxy capture, which is the norm" do
-      tmp_store do |store|
+      with_store do |store|
         add_sourced_flow(store, "/captured", Gori::FlowSource::Kind::Proxy)
         view = HistoryView.new
         view.reload(store)
@@ -845,7 +832,7 @@ describe Gori::Tui::HistoryView do
     end
 
     it "names an import by its FILE, not as an id it is not" do
-      tmp_store do |store|
+      with_store do |store|
         add_sourced_flow(store, "/webhook", Gori::FlowSource::Kind::Import, nil, "acme.har")
         view = HistoryView.new
         view.reload(store)
@@ -860,7 +847,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "shows captured WebSocket messages in the detail view" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       store.insert_ws_message(id, "out", 1, "hello".to_slice)
       store.insert_ws_message(id, "in", 1, "world".to_slice)
@@ -885,7 +872,7 @@ describe Gori::Tui::HistoryView do
   # heading the whole time, which is the parity break: the headless surface carried evidence
   # the interactive one had deleted.
   it "keeps the WebSocket handshake RESPONSE reachable beside the MESSAGES transcript" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
@@ -929,7 +916,7 @@ describe Gori::Tui::HistoryView do
   # because every other WebSocket spec toggles straight past RESPONSE to MESSAGES — reinstating
   # the old `:response`-is-a-log-pane behaviour would leave the whole suite green.
   it "gives the WebSocket handshake RESPONSE the controls any captured head has" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       store.insert_ws_message(id, "out", 1, "hello".to_slice)
 
@@ -965,7 +952,7 @@ describe Gori::Tui::HistoryView do
   # `b` used to relabel the strip RAW and light ` b:raw ` on the MESSAGES pane while
   # `reveal_lines` handed back nil — the chip row claiming a mode the body was not in.
   it "does not claim reveal-whitespace on a pane that has no raw bytes" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       store.insert_ws_message(id, "out", 1, "hello".to_slice)
 
@@ -987,7 +974,7 @@ describe Gori::Tui::HistoryView do
   # pins the property rather than the mechanism: raw invalid bytes must reach neither the
   # width/search math nor the clipboard, wherever the scrub ends up living.
   it "scrubs a text frame whose captured payload is not valid UTF-8" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       store.insert_ws_message(id, "in", 1, Bytes[0x68, 0x69, 0xff, 0xfe, 0x21]) # "hi", two bad bytes, "!"
 
@@ -1009,7 +996,7 @@ describe Gori::Tui::HistoryView do
   # `shape_label`, and this pane printed `«binary 2b»` for both. What an operator reads while
   # working a socket was the surface that could not tell a heartbeat from a teardown.
   it "names a control frame, a fragmented message and a masking violation in MESSAGES" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       # §5.1 says a client frame MUST be masked, so `masked: false` outbound is the violation
       # worth a word — and the same flag inbound is the norm, which is why it is not one.
@@ -1040,7 +1027,7 @@ describe Gori::Tui::HistoryView do
   # exactly when it SUCCEEDED. A still-Pending one, and one answered by a proxy's `text/html`
   # 502, both printed HTTPS, and those are the rows an operator is scanning for.
   it "prints GRPCS for a gRPC call the response never confirmed" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/2",
@@ -1060,7 +1047,7 @@ describe Gori::Tui::HistoryView do
   # GraphQL subscription runs, showed up as raw JSON in MESSAGES with no GRAPHQL pane offered
   # at all: the same "gori did not notice this is GraphQL" the HTTP side had, one transport over.
   it "offers the GRAPHQL pane for a subscription carried in WebSocket frames" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/graphql", 101)
       store.insert_ws_message(id, "out", 1, %({"type":"connection_init","payload":{}}).to_slice)
       store.insert_ws_message(id, "out", 1,
@@ -1084,7 +1071,7 @@ describe Gori::Tui::HistoryView do
   # would otherwise re-parse its whole frame log on every refresh poll). The cache must still
   # pick up a NEW subscription frame — proving it invalidates on growth, not that it goes stale.
   it "picks up a new subscription frame on refresh (count-keyed cache invalidates)" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/graphql", 101)
       store.insert_ws_message(id, "out", 1,
         %({"id":"1","type":"subscribe","payload":{"query":"subscription A { a }"}}).to_slice)
@@ -1112,7 +1099,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "does not offer a GRAPHQL pane for a socket carrying ordinary JSON" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101)
       store.insert_ws_message(id, "out", 1, %({"type":"search","payload":{"query":"shoes"}}).to_slice)
 
@@ -1131,7 +1118,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/api", 200)
       view = HistoryView.new
       view.reload(store)
@@ -1149,7 +1136,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "detail_at_top? tracks the caret so ↑ escapes to the tab bar only at the very top" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/api", 200) # multi-line request head → caret can move
       view = HistoryView.new
       view.reload(store)
@@ -1169,7 +1156,7 @@ describe Gori::Tui::HistoryView do
   # the same requirement the h-scroll spec encoded: BOTH ends of an over-wide line must be
   # reachable, and now they are visible at once.
   it "wraps a long response body line so both ends are on screen without scrolling" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
@@ -1197,7 +1184,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "^G go-to-line in the detail view also moves the caret (not just the scroll)" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
@@ -1221,7 +1208,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "copies the WHOLE detail pane when nothing is selected (not just the caret's line)" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
@@ -1251,7 +1238,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "opens on the strip, flips to the body level, and resets to the strip on re-open" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/api", 200)
       view = HistoryView.new
       view.reload(store)
@@ -1270,7 +1257,7 @@ describe Gori::Tui::HistoryView do
   # its end lands the caret on a continuation row that is already drawn. What is still under
   # test is that the walk REACHES the end of the line and the pane keeps showing it.
   it "walks the caret to the end of a wrapped line without scrolling the pane sideways" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
@@ -1308,7 +1295,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "pretty-prints a JSON response body when enabled, and restores raw when off" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/api", http_version: "HTTP/1.1",
@@ -1341,7 +1328,7 @@ describe Gori::Tui::HistoryView do
     # Both msgpack and CBOR encode the integer 0 as a NUL byte, so essentially every real body
     # of either trips the NUL sniff — without the exemption the pretty branch below it is dead
     # code for exactly the two formats it was added for.
-    tmp_store do |store|
+    with_store do |store|
       # {"a": 0, "b": <2 raw bytes>} — the integer 0 IS a NUL byte in both formats, which is
       # exactly why the placeholder would otherwise swallow the body.
       body = Bytes[0x82, 0xa1, 0x61, 0x00, 0xa1, 0x62, 0xc4, 0x02, 0xff, 0xfe]
@@ -1383,7 +1370,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "shows a placeholder for a binary response body instead of rendering it as text" do
-    tmp_store do |store|
+    with_store do |store|
       # A webp-ish body: RIFF header + a NUL byte (the binary marker) + bytes that,
       # decoded as UTF-8, would be terminal-corrupting garbage.
       binary = Bytes[0x52, 0x49, 0x46, 0x46, 0x00, 0x1b, 0x5b, 0x32, 0x4a, 0xff, 0xfe]
@@ -1432,7 +1419,7 @@ describe Gori::Tui::HistoryView do
   # on `Screen.grapheme_cols`, so a 100-tab line has to occupy several drawn rows rather than
   # the single 14-column one the raw measure would predict.
   it "wraps a tab-filled response line onto continuation rows in reveal mode" do
-    tmp_store do |store|
+    with_store do |store|
       line = "STARTTOK#{"\t" * 100}ENDTOK"
       Screen.display_width(line).should eq(14) # the raw measure the clamp used to trust
       Screen.draw_width(line).should eq(114)   # what reveal actually paints (tab → '→')
@@ -1466,7 +1453,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "refresh_detail picks up a Pending flow's response but skips a stable Complete one" do
-    tmp_store do |store|
+    with_store do |store|
       pid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
         method: "GET", target: "/p", http_version: "HTTP/1.1",
@@ -1488,7 +1475,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "shows the raw h2 frame log in the detail FRAMES pane" do
-    tmp_store do |store|
+    with_store do |store|
       conn = store.insert_h2_connection("h.test", 443, "h2")
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -1517,7 +1504,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "walks detail panes REQ→RES→FRAMES with ←/→, stopping at the ends" do
-    tmp_store do |store|
+    with_store do |store|
       conn = store.insert_h2_connection("h.test", 443, "h2")
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -1549,7 +1536,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "has only REQ↔RES panes when there are no h2 frames" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/x", status: 200)
       view = HistoryView.new
       view.reload(store)
@@ -1561,7 +1548,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "shows ALL pane chips in the detail header (not just the active one)" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/x", status: 200)
       view = HistoryView.new
       view.reload(store)
@@ -1575,7 +1562,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "renders a gRPC response body as framed messages" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
@@ -1606,7 +1593,7 @@ describe Gori::Tui::HistoryView do
   # count: indistinguishable from a body that simply is not gRPC, while `gori run show
   # --format json` reported the whole thing.
   it "reports gRPC bytes that are not a complete frame instead of showing nothing" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
@@ -1632,7 +1619,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "opens detail and renders the raw request bytes" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/secret", 200)
       view = HistoryView.new
       view.reload(store)
@@ -1646,7 +1633,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "renders truncation banner with N of M bytes and settings hint when request or response body is capped" do
-    tmp_store do |store|
+    with_store do |store|
       req_body = "captured-req-body".to_slice
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
@@ -1684,7 +1671,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "does not render truncation banner for intact bodies" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "POST", "/intact", 200)
       view = HistoryView.new
       view.reload(store)
@@ -1702,7 +1689,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "bounds the in-memory window during long live capture (drops oldest, keeps newest)" do
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new(max_rows: 10, trim_slack: 4)
       view.reload(store)
       last_id = 0_i64
@@ -1720,7 +1707,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "reload is page-capped and list rows never carry body BLOBs" do
-    tmp_store do |store|
+    with_store do |store|
       1_200.times { |i| add_flow(store, "GET", "/p/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -1733,7 +1720,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "opens a large multi-line response detail and paints a scroll window without hang" do
-    tmp_store do |store|
+    with_store do |store|
       # ~0.75 MiB of short lines — representative near-cap text body for open+scroll.
       line = ("y" * 30) + "\n"
       n = 25_000
@@ -1778,7 +1765,7 @@ describe Gori::Tui::HistoryView do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         big = Bytes.new(300_000) { 65_u8 }
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
@@ -1807,7 +1794,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "syntax-highlights the request line and headers in the detail view" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/secret", 200)
       view = HistoryView.new
       view.reload(store)
@@ -1826,7 +1813,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "renders an empty-state when no flows are captured" do
-    tmp_store do |store|
+    with_store do |store|
       view = HistoryView.new
       view.reload(store)
       backend = MemoryBackend.new(80, 14)
@@ -1840,7 +1827,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "does not fall back to the 101 handshake bytes for hex/reveal on the WS MESSAGES pane" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/ws", 101) # response head = the 101 handshake
       store.insert_ws_message(id, "out", 1, "hello".to_slice)
       store.insert_ws_message(id, "in", 1, "world".to_slice)
@@ -1869,7 +1856,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "gates reveal-whitespace on a gRPC body (keeps the framed view, avoids raw-protobuf desync)" do
-    tmp_store do |store|
+    with_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
         method: "POST", target: "/svc/Method", http_version: "HTTP/2",
@@ -1894,7 +1881,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "keeps the newest capture visible after a live insert while not following" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/A", 200)
       add_flow(store, "GET", "/B", 200)
       view = HistoryView.new
@@ -1946,7 +1933,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "Tab-completes method/scheme/status statically and host from the store" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.example.com", port: 443,
         method: "GET", target: "/", http_version: "HTTP/1.1",
@@ -1999,7 +1986,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "rejects an all-invalid QL query instead of matching every flow" do
-    tmp_store do |store|
+    with_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2018,7 +2005,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "flags an invalid regex filter term in the empty-state (not a bare no-match)" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       view = HistoryView.new
       view.reload(store)
@@ -2035,7 +2022,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "shows the scope-lens empty hint (not the filter hint) when querying with a blank query" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200) # captured on host h.test
       scope = Gori::Scope.load(store)
       scope.add("include", "host", "other.test") # excludes the h.test flow → in-scope set empty
@@ -2056,7 +2043,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "delete_by_id removes one flow and reloads the list" do
-    tmp_store do |store|
+    with_store do |store|
       keep = add_flow(store, "GET", "/keep", 200)
       gone = add_flow(store, "GET", "/gone", 200)
       view = HistoryView.new
@@ -2072,7 +2059,7 @@ describe Gori::Tui::HistoryView do
   end
 
   it "clear wipes every flow and empties the list" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       add_flow(store, "POST", "/b", 201)
       view = HistoryView.new
@@ -2092,7 +2079,7 @@ end
 # assert that a mark survives exactly that.
 describe "Gori::Tui::HistoryView marks" do
   it "starts with no marks, so verbs target the cursor row" do
-    tmp_store do |store|
+    with_store do |store|
       id = add_flow(store, "GET", "/a", 200)
       view = HistoryView.new
       view.reload(store)
@@ -2103,7 +2090,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "toggles the cursor row's mark and advances, so a run of `t` marks consecutive rows" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store) # newest-first: the cursor starts on the newest row
@@ -2127,7 +2114,7 @@ describe "Gori::Tui::HistoryView marks" do
     prev = Gori::Settings.history_list_order
     begin
       Gori::Settings.history_list_order = "oldest"
-      tmp_store do |store|
+      with_store do |store|
         ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
         view = HistoryView.new
         view.reload(store)
@@ -2146,7 +2133,7 @@ describe "Gori::Tui::HistoryView marks" do
   # The privileged single target must not follow a DISPLAY preference: it decides which flow
   # names an issue, donates Discover's cookies, and seeds the Miner's checkboxes.
   it "picks the same primary target under either list order" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       %w[newest oldest].each do |order|
         prev = Gori::Settings.history_list_order
@@ -2176,7 +2163,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "saturates the cursor at the last row instead of wrapping" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...2).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2189,7 +2176,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "keeps a mark across a reload, a re-sort and a filter change" do
-    tmp_store do |store|
+    with_store do |store|
       keep = add_flow(store, "GET", "/keep", 200)
       add_flow(store, "GET", "/other", 500)
       view = HistoryView.new
@@ -2223,7 +2210,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "marks every row the CURRENT filter shows, unioned with what is already marked" do
-    tmp_store do |store|
+    with_store do |store|
       ok = add_flow(store, "GET", "/ok", 200)
       err1 = add_flow(store, "GET", "/e1", 500)
       err2 = add_flow(store, "GET", "/e2", 500)
@@ -2242,7 +2229,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "extends a contiguous range from the anchor, re-seeding it after a plain move" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...5).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2265,7 +2252,7 @@ describe "Gori::Tui::HistoryView marks" do
   # A GUI shift+click SHRINKS the selection when you come back; a plain union would only ever
   # grow, leaving a row marked that the gesture no longer covers and no way to un-mark a range.
   it "gives back what the range gesture added when the range shrinks" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2279,7 +2266,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "never hands back a mark the range gesture did not make" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2297,7 +2284,7 @@ describe "Gori::Tui::HistoryView marks" do
   # Releasing ⇧ mid-selection and pressing a plain arrow collapses the highlight in every GUI
   # list. Leaving the range marked behind the cursor is the surprising half.
   it "hands the whole range back when a plain cursor move ends the gesture" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2320,7 +2307,7 @@ describe "Gori::Tui::HistoryView marks" do
   # and with no ctrl+arrow to step past them, dropping them here would put a discontiguous set
   # out of reach ("mark this one, skip three, mark that one").
   it "keeps `t` marks when a plain cursor move ends the range gesture" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2337,7 +2324,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "reports nothing handed back when no range gesture is in flight" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2352,7 +2339,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "re-seeds the range anchor on a click, like a plain keyboard move" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...4).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2367,7 +2354,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "does not pop focus or scroll a focused preview when extending" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2393,7 +2380,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "prunes the marks it deletes, and drops every mark on a clear" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2413,7 +2400,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "keeps the marks and the open detail when a clear rolls back" do
-    tmp_store do |store|
+    with_store do |store|
       ids = (0...3).map { |i| add_flow(store, "GET", "/#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2431,7 +2418,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "renders a marked row distinctly from the cursor row, with a live count" do
-    tmp_store do |store|
+    with_store do |store|
       3.times { |i| add_flow(store, "GET", "/p#{i}", 200) }
       view = HistoryView.new
       view.reload(store)
@@ -2453,7 +2440,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "reports the hidden split on the count chip, so the count never outruns the screen" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/ok", 200)
       add_flow(store, "GET", "/err", 500)
       view = HistoryView.new
@@ -2471,7 +2458,7 @@ describe "Gori::Tui::HistoryView marks" do
   # "Copy as…" over the target SET. One flow keeps the familiar single-message format list;
   # N flows get the set-shaped formats, because concatenating N raw dumps is never the ask.
   it "offers single-message formats for one flow and set formats for many" do
-    tmp_store do |store|
+    with_store do |store|
       a = add_flow(store, "GET", "/a", 200, host: "one.test")
       b = add_flow(store, "POST", "/b", 200, host: "two.test")
       view = HistoryView.new
@@ -2499,7 +2486,7 @@ describe "Gori::Tui::HistoryView marks" do
 
   # The exchange, which neither raw variant carries alone: request then response, both verbatim.
   it "offers the req+res pair for one flow and per-flow pairs for a set" do
-    tmp_store do |store|
+    with_store do |store|
       a = add_flow(store, "GET", "/a", 200, host: "one.test")
       b = add_flow(store, "POST", "/b", 500, host: "two.test")
       view = HistoryView.new
@@ -2522,7 +2509,7 @@ describe "Gori::Tui::HistoryView marks" do
   # The drill-in offers the pair from BOTH panes. The pane-local format list says what that
   # pane shows; it is not a rule that the exchange must be reassembled by hand.
   it "offers the req+res pair from both detail panes" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       view = HistoryView.new
       view.reload(store)
@@ -2542,7 +2529,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "offers no pair for a flow with no response yet" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/pending", nil)
       view = HistoryView.new
       view.reload(store)
@@ -2555,7 +2542,7 @@ describe "Gori::Tui::HistoryView marks" do
 
   # A flow still in flight has no response — it contributes its request rather than dropping out.
   it "keeps a response-less flow in the pair set, request only" do
-    tmp_store do |store|
+    with_store do |store|
       a = add_flow(store, "GET", "/pending", nil)
       b = add_flow(store, "GET", "/done", 200)
       view = HistoryView.new
@@ -2609,7 +2596,7 @@ describe "Gori::Tui::HistoryView marks" do
   end
 
   it "resolves marks through the store, so a mark for a vanished flow is skipped" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/a", 200)
       b = add_flow(store, "GET", "/b", 200)
       view = HistoryView.new
@@ -2635,7 +2622,7 @@ describe "HistoryView::QL_FIELDS" do
   end
 
   it "suggests a working field for `f`, and never completes to `flag:`" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/x", 200)
       view = HistoryView.new
       view.reload(store)
@@ -2668,7 +2655,7 @@ end
 
 describe "HistoryView — reveal, paging and the preview scroll" do
   it "walks the placeholder, not the raw bytes, when reveal is on over a binary pane" do
-    tmp_store do |store|
+    with_store do |store|
       png_flow(store)
       view = HistoryView.new
       view.reload(store)
@@ -2686,7 +2673,7 @@ describe "HistoryView — reveal, paging and the preview scroll" do
   end
 
   it "paints the ⇧-selection in reveal mode, the way the plain body does" do
-    tmp_store do |store|
+    with_store do |store|
       add_flow(store, "GET", "/t", 200, "text/plain")
       view = HistoryView.new
       view.reload(store)
@@ -2708,7 +2695,7 @@ describe "HistoryView — reveal, paging and the preview scroll" do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = true
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store, "GET", "/p", 200, "text/plain")
         view = HistoryView.new
         view.reload(store)
@@ -2731,7 +2718,7 @@ describe "HistoryView — reveal, paging and the preview scroll" do
     prev = Gori::Settings.history_preview
     begin
       Gori::Settings.history_preview = false
-      tmp_store do |store|
+      with_store do |store|
         add_flow(store, "GET", "/a", 200)
         view = HistoryView.new
         view.reload(store)

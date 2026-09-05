@@ -8,19 +8,6 @@ require "compress/gzip"
 # against a local origin — the IO::Memory server harness never yields between
 # scripted lines, so a polled async job can't progress there.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpfuzz", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def start_origin : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port

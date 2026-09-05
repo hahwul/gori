@@ -11,19 +11,6 @@ require "socket"
 # `Tools#clamp` and `mine_bucket` were already written in the right order; preview_color_rule,
 # compare_flows and the extract-rule offsets inverted it.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-ints", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def int_tools(store) : Gori::MCP::Tools
   Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 end

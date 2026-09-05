@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-oast-test", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe "OAST persistence (V39)" do
   it "migrates to the current schema version with the OAST tables" do
     with_store do |store|

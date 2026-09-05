@@ -46,19 +46,6 @@ private def flow_detail(scheme : String, host : String, port : Int32, request_he
     request_body_truncated: request_body_truncated)
 end
 
-private def with_store(&)
-  path = File.tempname("gori-clirun", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Repeater::FlowRequest do
   it "rewrites an absolute-form request line to origin-form, keeping the rest exact" do
     head = "GET http://example.com/a?b=1 HTTP/1.1\r\nHost: example.com\r\nX-T: 1\r\n\r\n"

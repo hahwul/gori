@@ -12,19 +12,6 @@ private def detail_body_rect(rect : Gori::Tui::Rect) : Gori::Tui::Rect
     {rect.bottom - (rect.y + 2), 0}.max)
 end
 
-private def tmp_store(&)
-  path = File.tempname("gori-hw", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A flow whose RESPONSE carries `body`, opened on the response pane with the body level
 # focused. The response's line space is: status line, Content-Type, blank, then the body.
 private def response_view(store, body : String, ct : String = "text/plain") : Gori::Tui::HistoryView
@@ -52,7 +39,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # onto continuation rows, and the line number is printed once, on the first of them.
   it "wraps a long response line and numbers only its first visual row" do
     Gori::Settings.show_gutter = true
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "HEAD#{"." * 100}TAIL")
       rect = Rect.new(0, 0, 80, 20)
       b = MemoryBackend.new(80, 20)
@@ -72,7 +59,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # @detail_scroll + N, so a click on a continuation row selected a line that isn't even
   # drawn there — and the old path went through ReadCursor, which does exactly that sum.
   it "round-trips a click on a continuation row of the detail body" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "0123456789" * 15) # 150 chars, one body line
       rect = Rect.new(0, 0, 80, 20)
       b = MemoryBackend.new(80, 20)
@@ -91,7 +78,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # 400-char body line straight to SENTINEL, skipping the rows in between. Those rows are
   # drawn; nothing but this arrow could reach them.
   it "moves the detail caret down one visual row at a time, then onto the next line" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "#{"z" * 400}\nSENTINEL")
       rect = Rect.new(0, 0, 80, 14)
       view.render_detail(Screen.new(MemoryBackend.new(80, 14)), rect)
@@ -119,7 +106,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
 
   # ↑ is the exact inverse: a run of ↓ then the same number of ↑ lands back where it began.
   it "moves the detail caret back up through the wrapped rows it came down" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "#{"z" * 400}\nSENTINEL")
       rect = Rect.new(0, 0, 80, 14)
       view.render_detail(Screen.new(MemoryBackend.new(80, 14)), rect)
@@ -135,7 +122,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # Gated on the logical line alone, a caret parked three rows into a wrapped line 0 would
   # pop instead of stepping up — skipping the very rows the arrow was asked to walk.
   it "is not 'at top' while the caret sits on a continuation row of line 0" do
-    tmp_store do |store|
+    with_store do |store|
       # A single over-wide status line, so line 0 itself wraps.
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -164,7 +151,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # The wheel steps DRAWN rows. With a line-indexed offset one notch jumped the whole
   # wrapped line, so most of a minified body was unreachable by scrolling.
   it "scrolls the detail by one visual row per notch" do
-    tmp_store do |store|
+    with_store do |store|
       # Four wrapped body lines: more drawn rows than the pane has, or the anchor clamp
       # (max_anchor) correctly refuses to scroll content that already fits.
       view = response_view(store, (1..4).map { |i| "#{('a' + i - 1)}" * 300 }.join('\n'))
@@ -187,7 +174,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # continue on the next one. Clipping the span per row is the whole of it, and it is exactly
   # the arithmetic that looks right until you count cells.
   it "tints a selection across a wrap break to the end of the row and onto the next" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "0123456789" * 15)
       rect = Rect.new(0, 0, 80, 20)
       b = MemoryBackend.new(80, 20)
@@ -214,7 +201,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # through `ReadCursor#select_word_at`, whose own hit test resolves `scroll + row` — so on
   # any wrapped pane it grabbed a word from a line that wasn't even drawn there.
   it "double-click selects the word under a continuation row of the detail body" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "#{"x" * 120}NEEDLE#{"y" * 20}")
       rect = Rect.new(0, 0, 80, 20)
       b = MemoryBackend.new(80, 20)
@@ -237,7 +224,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # agree char-for-char on those lines or the colours land a column off the glyphs and every
   # click on the pane resolves to the wrong column. EVENTS stands in for the family.
   it "wraps a pre-styled decoded pane (EVENTS) on the same grid it draws" do
-    tmp_store do |store|
+    with_store do |store|
       long = "z" * 300
       view = response_view(store, "data: #{long}\n\n", "text/event-stream")
       view.set_detail_pane_public(:events)
@@ -262,7 +249,7 @@ describe "Gori::Tui::HistoryView detail soft wrap" do
   # straddling a break lights up on BOTH rows. Marking per-row would light it on NEITHER: the
   # head and the tail are each an incomplete match.
   it "highlights a search match that straddles a wrap break on both rows" do
-    tmp_store do |store|
+    with_store do |store|
       rect = Rect.new(0, 0, 80, 20)
       body = detail_body_rect(rect)
       gw = Gori::Settings.show_gutter ? Gutter.width(4) : 0

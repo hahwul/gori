@@ -25,15 +25,11 @@ private def with_library(entries : Array({String, String}), &)
   end
 end
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 private def plan_for(template : String, payload : String = "ff00") : F::Plan
   F::Plan.build(F::PlanOptions.new(template,
     target: "http://t.test",
     sources: [F::InlineList.new([payload])] of F::PayloadSource,
-    config: F::Config.new(mode: F::Mode::BatteringRam)), ungated)
+    config: F::Config.new(mode: F::Mode::BatteringRam)), ungated_outbound)
 end
 
 private def first_request(plan : F::Plan) : String

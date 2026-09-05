@@ -213,7 +213,10 @@ written.
   rewrites 100+ unrelated files due to Crystal version drift.
 - Add or update specs mirroring the source you touched. `spec/spec_helper.cr` points
   `GORI_HOME` at a tempdir before requiring gori; engine specs that are not exercising the
-  scope gate use the `ungated_outbound` helper rather than inventing a decision.
+  scope gate use the `ungated_outbound` helper rather than inventing a decision. A
+  store-backed example uses its `with_store` (and MCP examples `tools_for`) rather than
+  pasting a copy — a file that genuinely needs a different shape keeps a file-private one,
+  which shadows the shared helper inside that file only.
 - A user-visible change gets its CHANGELOG line, in the shape above.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.

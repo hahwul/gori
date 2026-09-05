@@ -12,19 +12,6 @@ require "socket"
 # ran a passive scan and reported a clean active one, and `create_repeater{auto_content_length:1}`
 # stored the OPPOSITE of the absent-default. See `Tools#bool_value`.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-bools", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def bool_tools(store) : Gori::MCP::Tools
   Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 end

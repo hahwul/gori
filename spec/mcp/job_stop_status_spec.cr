@@ -14,19 +14,6 @@ require "socket"
 #    contract; six object-returning paginated tools skipped it and did not even echo `limit`,
 #    so an agent that computed `limit` down to 0 got one row back and no signal.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-jobstop", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def start_origin : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port

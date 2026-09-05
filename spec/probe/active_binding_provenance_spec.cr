@@ -115,19 +115,6 @@ private def local_captured(body : String, port : Int32) : S::FlowDetail
     resp.to_slice, "{\"ok\":true}".to_slice)
 end
 
-private def with_store(&)
-  path = File.tempname("gori-probe-prov", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The exact body H1 captured: a GraphQL operation carrying `$id`, plus a Mongo `$ne`.
 private GQL_BODY = %({"query":"query GetUser($id: ID!) { user(id: $id) { name } }",) +
                    %("variables":{"id":"42"},"filter":{"age":{"$ne":null}}})

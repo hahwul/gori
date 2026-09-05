@@ -20,19 +20,6 @@ private ONE_IDENT_JSON = <<-JSON
   [{"name": "anonymous", "set": [], "remove": ["Cookie"]}]
   JSON
 
-private def with_store(&)
-  path = File.tempname("gori-authorize-plan", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # One captured flow. `complete: false` leaves it Pending (`:incomplete`); `short_circuited`
 # marks it as answered by gori.
 private def seed(store : Gori::Store, method : String = "GET", target : String = "/admin",

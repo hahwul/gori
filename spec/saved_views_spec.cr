@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-saved-views", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # The global view library is process-wide state (Settings), so every example that writes it
 # restores what it found — `SavedViews.merged` folds it into EVERY project's list. And it is a
 # FILE as much as it is memory: every global CRUD re-reads its own section before it mutates

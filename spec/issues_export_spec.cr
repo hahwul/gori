@@ -9,19 +9,6 @@ private def gzip(data : String) : Bytes
   io.to_slice
 end
 
-private def with_store(&)
-  path = File.tempname("gori-fexport", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Returns the markdown with every fenced code block removed, so anything left is
 # "live" Markdown that a renderer would interpret structurally.
 private def strip_fences(md : String) : String

@@ -18,19 +18,6 @@ require "../spec_helper"
 # hash is the operator's mistake, and `Tools#call` promises to code that INVALID_ARGUMENT
 # (or a tool-specific NOT_FOUND), never as a server crash.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpreg", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def advertised(tools : Gori::MCP::Tools) : Array(String)
   JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s)
 end

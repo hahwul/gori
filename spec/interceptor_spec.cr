@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-ic", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def req(ic, raw)
   Gori::Interceptor::Decision
   ic.hold_request(raw.to_slice, method: "GET", target: "/", host: "acme.test", port: 80, scheme: "http")

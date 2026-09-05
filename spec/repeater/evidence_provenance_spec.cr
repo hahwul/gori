@@ -2,10 +2,6 @@ require "../spec_helper"
 
 private alias R = Gori::Repeater
 
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # `Settings` env vars are a process-wide singleton — set, yield, always restore.
 private def with_env_vars(pairs : Array({String, String}), &)
   saved_global = Gori::Settings.env_vars
@@ -22,7 +18,7 @@ ensure
 end
 
 private def wire_of(options : R::PlanOptions) : String
-  String.new(R::Plan.build(options, ungated).bytes)
+  String.new(R::Plan.build(options, ungated_outbound).bytes)
 end
 
 # PROVENANCE — `PlanOptions#evidence?`.

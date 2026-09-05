@@ -8,19 +8,6 @@ require "openssl/hmac"
 # Drives Gori::MCP end-to-end with scripted JSON-RPC lines over IO::Memory, plus
 # unit tests for the body serializer and the send_request byte builder.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Runs the server over the given request lines and returns each emitted line as a
 # parsed JSON::Any (also proves STDOUT purity — a non-JSON line would raise here).
 private def drive(store, *lines, allow_actions = true, verify_upstream = true,
@@ -4001,10 +3988,6 @@ end
 
 # Small CRUD gaps that used to be TUI-only: issue delete, scope-rule edit-in-place,
 # sitemap tags, and repeater tags.
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def ok_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error

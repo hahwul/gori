@@ -26,19 +26,6 @@ private def resp_body_rect(rect : Gori::Tui::Rect) : Gori::Tui::Rect
   Gori::Tui::Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h).inset(1, 1)
 end
 
-private def tmp_store(&)
-  path = File.tempname("gori-wt", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def response_view(store, body : String) : Gori::Tui::HistoryView
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
@@ -84,7 +71,7 @@ describe "wrap_lines off" do
   # is the NEXT line, so it carries a number of its own.
   it "draws one row per logical line in the History detail, and clips the tail" do
     without_wrap do
-      tmp_store do |store|
+      with_store do |store|
         view = response_view(store, "HEAD#{"." * 100}TAIL")
         rect = Rect.new(0, 0, 80, 20)
         b = MemoryBackend.new(80, 20)
@@ -105,7 +92,7 @@ describe "wrap_lines off" do
   # read selection, so the caret is what pans the view (`ensure_detail_visible_x`).
   it "pans the History detail sideways as the caret walks into the clipped tail" do
     without_wrap do
-      tmp_store do |store|
+      with_store do |store|
         view = response_view(store, "HEAD#{"." * 100}TAIL")
         rect = Rect.new(0, 0, 80, 20)
         view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
@@ -124,7 +111,7 @@ describe "wrap_lines off" do
   # `xscroll` columns early — the caret sits on a character the operator did not point at.
   it "round-trips a click on a sideways-panned History detail row" do
     without_wrap do
-      tmp_store do |store|
+      with_store do |store|
         view = response_view(store, "0123456789" * 15) # 150 chars, one body line
         rect = Rect.new(0, 0, 80, 20)
         view.render_detail(Screen.new(MemoryBackend.new(80, 20)), rect)
@@ -146,7 +133,7 @@ describe "wrap_lines off" do
   # press must move a whole line — not stall on a continuation row that is no longer drawn.
   it "steps the History detail caret by logical lines" do
     without_wrap do
-      tmp_store do |store|
+      with_store do |store|
         view = response_view(store, "#{"z" * 400}\nSENTINEL")
         rect = Rect.new(0, 0, 80, 14)
         view.render_detail(Screen.new(MemoryBackend.new(80, 14)), rect)
@@ -226,7 +213,7 @@ describe "wrap_lines off" do
   # on screen scrolled the caret off the pane and painted nothing. `ensure_*_visible_x` is the
   # only writer of the offset now, for exactly that reason.
   it "keeps the block caret on screen at end-of-line in both modes" do
-    tmp_store do |store|
+    with_store do |store|
       view = response_view(store, "HEAD#{"." * 100}TAIL")
       rect = Rect.new(0, 0, 80, 20)
       {true, false}.each do |wrap|

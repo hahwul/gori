@@ -53,6 +53,33 @@ def ungated_outbound : Gori::Outbound
   Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
 end
 
+# A throwaway on-disk Store for one example: opened on a fresh temp path, closed and
+# deleted (with its WAL/SHM sidecars) on the way out, whether or not the block raised. This
+# is the harness behind most store-backed examples in the tree; it used to be pasted into
+# ~120 spec files. A file that needs something this shape cannot give (a Project alongside
+# the store, an event channel, a retention knob, an Env layer restored on exit) keeps a
+# file-private `with_store` of its own — a top-level `private def` shadows this one inside
+# that file only, so the two never collide.
+def with_store(&)
+  path = File.tempname("gori-spec", ".db")
+  store = Gori::Store.open(path)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+# The MCP tool facade over a store, built the way `gori mcp` builds it for a bound project:
+# actions allowed, upstream verification off. `allow_actions: false` is the --read-only
+# surface. Typed to a Store so a file that builds its Tools from a Project keeps its own.
+def tools_for(store : Gori::Store, allow_actions = true, verify_upstream = false) : Gori::MCP::Tools
+  Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
+end
+
 # NEVER a bare `Channel#receive` in a spec driven by real sockets — use this instead.
 #
 # PR #555 hung CI for 24 minutes on exactly that. The suite was green on macOS; on Linux a

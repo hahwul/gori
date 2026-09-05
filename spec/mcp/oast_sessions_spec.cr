@@ -6,23 +6,6 @@ require "http/server"
 # RESUME LISTENER picker shows — so an agent can pick up a payload planted yesterday.
 #
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped).
-private def with_store(&)
-  path = File.tempname("gori-mcp-oast-sessions", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store, allow_actions = true, verify_upstream = false) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
-end
-
 private def ok_json(tools, name, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error

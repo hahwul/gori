@@ -22,19 +22,6 @@ require "socket"
 # than vanish"), `ws_out_messages_arg` (`compact_map` used to store 2 of 4 frames) — and
 # the string readers were what was left.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-strs", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def str_tools(store) : Gori::MCP::Tools
   Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 end

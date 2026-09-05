@@ -3,19 +3,6 @@ require "socket"
 
 private alias D = Gori::Discover
 
-private def with_store(&)
-  path = File.tempname("gori-discover-plan", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def with_wordlist(names : Array(String), &)
   path = File.tempname("gori-discover-words", ".txt")
   File.write(path, names.join('\n'))

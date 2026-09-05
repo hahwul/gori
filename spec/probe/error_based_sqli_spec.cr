@@ -7,19 +7,6 @@ private alias P = Gori::Probe
 
 # ── store + flow helpers (copied from probe_spec.cr — this codebase duplicates these per file) ──
 
-private def with_store(&)
-  path = File.tempname("gori-probe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Insert a flow + response and return its full FlowDetail (what the analyzer feeds an active rule).
 private def capture_flow(store, resp_head : String, *, scheme = "https", host = "acme.test",
                          target = "/", status = 200, content_type : String? = "text/html",

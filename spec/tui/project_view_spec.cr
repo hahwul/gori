@@ -8,19 +8,6 @@ include Gori::Tui
 # the wheel must hit the pane UNDER the pointer (ProjectView#pane_at, as the controller
 # routes it). The core viewport-scroll mechanism is tested on TextArea directly.
 
-private def tmp_store(&)
-  path = File.tempname("gori-projview", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Reset the global + per-project network layer to a known baseline (specs share Gori::Settings).
 private def reset_projnet
   Gori::Settings.project_bind_host = nil
@@ -129,7 +116,7 @@ end
 
 describe "ProjectView DESCRIPTION scrolling" do
   it "scrolls a long description into view inside its card, staying on the page" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.replace_desc((1..40).map { |i| "desc%02d" % i }.join("\n"))
       view.focus_pane(:desc)
@@ -156,7 +143,7 @@ describe "ProjectView DESCRIPTION insert mode" do
   # promotion fixed — selecting the chip used to route through desc_click_to_cursor and drop
   # straight into INS, where ←/→ became caret movement with no way back out to the strip.
   it "only enters INS from a click inside its own card" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.replace_desc("one\ntwo")
       rect = Rect.new(0, 0, 120, 30)
@@ -205,7 +192,7 @@ end
 
 describe "ProjectView SCOPE list" do
   it "shows the onboarding card (art + TARGETS card) when empty" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       project = Gori::Project.new("t", File.tempname("gori-scope-empty"))
       view.reload(project, store)
@@ -223,7 +210,7 @@ end
 
 describe "ProjectView AT A GLANCE Technologies" do
   it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
-    tmp_store do |store|
+    with_store do |store|
       store.upsert_probe_issue(
         Gori::Probe::Detection.new("tech_grpc", "tech", "a.test", "https://a.test/", "gRPC detected", Gori::Store::Severity::Info))
       store.upsert_probe_issue(
@@ -255,7 +242,7 @@ describe "ProjectView AT A GLANCE severity" do
   # Severity bars draw from the human-confirmed `issues` table only — Probe hits
   # must not inflate the glance pane (they belong on the Probe tab).
   it "shows Issues severity and ignores Probe-only findings" do
-    tmp_store do |store|
+    with_store do |store|
       store.insert_issue("XSS on /search", Gori::Store::Severity::Critical, "acme.test", nil)
       store.insert_issue("Verbose error", Gori::Store::Severity::Low, "acme.test", nil)
       store.upsert_probe_issue(Gori::Probe::Detection.new(
@@ -285,7 +272,7 @@ describe "ProjectView#pane_at" do
   # The body is now ONE card under a chip strip, not five tiles. The pane the strip selects is
   # the pane the body belongs to — that mapping is what these pin.
   it "gives the whole body to the active sub-tab" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
@@ -308,7 +295,7 @@ describe "ProjectView#pane_at" do
   # simply unreachable. Panes no longer share the body, so the ring is now height-independent —
   # that is the behaviour worth pinning, not a pixel offset. DESCRIPTION leads the order.
   it "walks every sub-tab from the first chip, regardless of height" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 14) # short enough that the old layout hid ENV
       view.render(Screen.new(MemoryBackend.new(120, 14)), rect, focused: false)
@@ -325,7 +312,7 @@ describe "ProjectView#pane_at" do
 
   # The strip is how the mouse reaches a pane that is not currently drawn.
   it "selects a sub-tab from a click on the chip strip" do
-    tmp_store do |store|
+    with_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 160, 30)
       view.render(Screen.new(MemoryBackend.new(160, 30)), rect, focused: true)
@@ -359,7 +346,7 @@ end
 
 describe "ProjectView PROJECT SETTINGS pane" do
   it "renders proxy authentication, protobuf, and inherited network fields" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -396,7 +383,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "marks a field · project when a per-project override is active" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       Gori::Settings.project_bind_port = 9100
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -412,7 +399,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "splits the effective proxy and applies smart ports while cycling protocols" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       Gori::Settings.upstream_proxy = "http://proxy.test:8080"
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -451,7 +438,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "defaults Destination host to all traffic and edits one project pattern" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -471,7 +458,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   # settings.json has no proxy username/password to inherit — so "· global" there would name a
   # source that cannot exist and send the operator to the wrong editor looking for it.
   it "marks the project-only credential rows · default rather than · global" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       Gori::Settings.upstream_proxy = "http://proxy.test:8080"
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -496,7 +483,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "hit-tests a settings row and edits a text field (dirty-tracked)" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -527,7 +514,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   # marks the network half dirty (which would re-apply and re-BIND unchanged values on the
   # next tab-leave) nor is marked dirty by a network edit.
   it "keeps the proto-schema field on a baseline of its own" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -551,7 +538,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "shows the password while editing and masks it after focus leaves" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       Gori::Settings.project_upstream_proxy = "http://proxy.test:8080"
       Gori::Settings.project_upstream_auth =
@@ -579,7 +566,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "enables credential rows only when proxy authentication is on" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -602,7 +589,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   # either one silently discarded the edit the other commit had not looked at yet — and, in the
   # network direction, cleared `protos_dirty?` so the proto commit then returned early.
   it "refreshes each half of the settings pane without clobbering the other's pending edit" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings
@@ -629,7 +616,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   end
 
   it "windows the expanded card and hit-tests the selected credential row on a short terminal" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       Gori::Settings.project_upstream_proxy = "socks5://proxy.test:1080"
       Gori::Settings.project_upstream_auth =
@@ -655,7 +642,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
   # untouched pane; if that read as "dirty", the next tab-leave `commit` would persist the
   # stale snapshot as a phantom per-project override, silently reverting the global edit.
   it "an untouched pane stays clean after a global edit moves effective (no phantom override)" do
-    tmp_store do |store|
+    with_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.refresh_settings # baseline = inherited global (8070)
@@ -675,7 +662,7 @@ end
 # was drawn off-screen — nothing on screen said the write had landed.
 describe "ProjectView SCOPE pane" do
   it "selects the rule an add just wrote" do
-    tmp_store do |store|
+    with_store do |store|
       scope = Gori::Scope.load(store)
       view = ProjectView.new(scope, Gori::HostOverrides.load(store))
       %w[a.test b.test c.test].each { |h| scope.add("include", "host", h) }
@@ -688,7 +675,7 @@ describe "ProjectView SCOPE pane" do
   end
 
   it "leaves the highlight on the rule an EDIT changed" do
-    tmp_store do |store|
+    with_store do |store|
       scope = Gori::Scope.load(store)
       view = ProjectView.new(scope, Gori::HostOverrides.load(store))
       %w[a.test b.test].each { |h| scope.add("include", "host", h) }

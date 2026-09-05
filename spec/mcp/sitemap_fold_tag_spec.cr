@@ -11,19 +11,6 @@ require "../spec_helper"
 # each other, and `set_sitemap_tag`'s own schema ("that folded row is synthetic … it holds no
 # tag of its own").
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-smtag", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def call_json(tools : Gori::MCP::Tools, name : String, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error

@@ -1,18 +1,5 @@
 require "../spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-probe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # --- a store whose custom-rule UPDATE answers false --------------------------------------
 #
 # `store.close` is the lever spec/commit_confirmation_spec.cr uses, and it cannot reach this

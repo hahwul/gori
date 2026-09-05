@@ -26,19 +26,6 @@ private def links_for(store, owner_id : Int64) : LinksOverlay
   lo
 end
 
-private def with_store(&)
-  path = File.tempname("gori-links", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::Tui::LinksOverlay do
   it "names itself after its owner and carries both mode hints" do
     lo = LinksOverlay.new(Gori::Store::LinkOwnerKind::Issue, 7_i64)

@@ -14,19 +14,6 @@ require "digest/sha1"
 # Helpers are file-local (Crystal's top-level `private def` is file-scoped) so this file does
 # not depend on spec/mcp_spec.cr's.
 
-private def with_store(&)
-  path = File.tempname("gori-mcp-agent", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def drive(store, *lines, allow_actions = true, verify_upstream = true) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new

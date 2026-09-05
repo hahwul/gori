@@ -1,19 +1,6 @@
 require "./spec_helper"
 require "file_utils"
 
-private def with_store(&)
-  path = File.tempname("gori-hostov", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 describe Gori::HostOverrides do
   it "starts empty and resolves nothing" do
     with_store do |store|

@@ -13,10 +13,6 @@ require "../spec_helper"
 #   Import::Builder.request_head  (the serializer HAR/OAS/--urls all call)
 #     → Store::FlowDetail          (the captured flow, reconstructed DB-free like replay_reconstruct_spec)
 #       → Repeater::FlowRequest.build → Repeater::Plan → Repeater::Sender → upstream.write
-private def ungated : Gori::Outbound
-  Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
-end
-
 # Reconstruct a captured flow exactly as `gori run repeater send --flow` does, from a head the
 # IMPORT serializer produced, then read what actually reaches the origin socket.
 private def wire_of(head : Bytes, port : Int32, seen : Channel(Bytes)) : Nil
@@ -30,7 +26,7 @@ private def wire_of(head : Bytes, port : Int32, seen : Channel(Bytes)) : Nil
     Gori::Repeater::PlanOptions.new([built.bytes],
       target: "127.0.0.1:#{port}", auto_content_length: false, verify: false,
       timeout: 3.seconds),
-    ungated)
+    ungated_outbound)
   plan.send
 end
 

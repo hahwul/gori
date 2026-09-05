@@ -71,19 +71,6 @@ end
 # halves so secret-scanning push protection lets the fixture through.
 private AWS_KEY_ID = "AKIA" + "3ZQF7XKPL2WVNB6D"
 
-private def with_store(&)
-  path = File.tempname("gori-probe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # Insert a flow + response and return its full FlowDetail (what the analyzer feeds Passive).
 # `req_headers` is raw extra request-header lines (each ending \r\n); `req_body` the request body.
 private def capture_flow(store, resp_head : String, *, scheme = "https", host = "acme.test",

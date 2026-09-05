@@ -12,23 +12,6 @@ require "socket"
 # gaps. The origin denies (grpc-status 7) every query unless it carries `secret=`, which it
 # grants (grpc-status 0) AND grows the body — the metric signal Miner's bisection isolates.
 
-private def with_store(&)
-  path = File.tempname("gori-mcpmine-grpc", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
-private def tools_for(store) : Gori::MCP::Tools
-  Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
-end
-
 private def call_json(tools, name, args : String) : JSON::Any
   r = tools.call(name, JSON.parse(args))
   fail "tool #{name} errored: #{r.text}" if r.is_error

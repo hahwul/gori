@@ -5,19 +5,6 @@ require "../spec_helper"
 # differently by the operator's `/` and an agent's `filter`, so the projections are pinned
 # against each other here rather than only against literals.
 
-private def with_store(&)
-  path = File.tempname("gori-repfilter", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def tools(store)
   Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
 end

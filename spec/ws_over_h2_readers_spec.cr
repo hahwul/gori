@@ -17,19 +17,6 @@ require "./support/memory_backend"
 
 private alias HeadCodec = Gori::Proxy::H2::HeadCodec
 
-private def with_store(&)
-  path = File.tempname("gori-wsh2", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 # A WebSocket captured over HTTP/2, projected the way `H2::Assembler#emit_request` /
 # `#emit_response` do it: `:method CONNECT`, the `:protocol` pseudo-header re-added by
 # `HeadCodec` as its `X-Gori-Protocol` marker line, and the origin's `200`. The head comes out

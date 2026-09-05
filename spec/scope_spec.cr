@@ -1,18 +1,5 @@
 require "./spec_helper"
 
-private def with_store(&)
-  path = File.tempname("gori-scope", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture(store, host, target = "/", scheme = "http")
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: scheme, host: host, port: scheme == "https" ? 443 : 80,

@@ -11,19 +11,6 @@ private alias Loc = Gori::Miner::Location
 
 # ── store + flow helpers (copied from probe_spec.cr — this codebase duplicates these per file) ──
 
-private def with_store(&)
-  path = File.tempname("gori-probe", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, resp_head : String, *, scheme = "https", host = "acme.test",
                          target = "/", status = 200, content_type : String? = "text/html",
                          body : String? = nil, method = "GET", req_headers = "",

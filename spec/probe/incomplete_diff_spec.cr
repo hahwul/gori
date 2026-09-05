@@ -8,19 +8,6 @@ require "../spec_helper"
 # NextjsActionNoAuth already guards this; its siblings (backslash_powered,
 # url_rewrite_bypass, error_based_sqli) must too.
 
-private def with_store(&)
-  path = File.tempname("gori-probe-incomplete", ".db")
-  store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
-end
-
 private def capture_flow(store, resp_head : String, *, target = "/", status = 200,
                          content_type : String? = "text/html", method = "GET") : Gori::Store::FlowDetail
   head = "#{method} #{target} HTTP/1.1\r\nHost: acme.test\r\n\r\n"
