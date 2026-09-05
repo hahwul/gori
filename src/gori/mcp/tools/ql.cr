@@ -17,6 +17,12 @@ module Gori
         # scope rule between two list_history calls, and a cached lens would answer the first
         # rule set forever. `strict:` reads the same lens, or it would report a term the query
         # in fact applied.
+        # Before the lens, which is a store read: a call that is going to be refused for the way
+        # it is SPELLED must not go to the database on its way to the refusal (the same rule the
+        # FTS drain in `list_history` states for its own write).
+        if unknown = ql_unknown_field_error(h, query)
+          return unknown
+        end
         lens = Scope.ql_lens(store)
         filter = QL.parse(query, scope: lens)
         return ql_error(query) if QL.reject_empty?(query, filter)
@@ -27,6 +33,42 @@ module Gori
           return ql_strict_error(analysis) unless analysis.clean?
         end
         filter
+      end
+
+      # Refuse a query naming a `field:`/`field~` QL does not implement, instead of running the
+      # free-text search `ql.cr`'s `field_cond` else-branch turns it into. `methd:GET` compiles to
+      # a literal substring search over method/host/target, so it came back `[]` with no error on
+      # it — "this project has no such traffic" and "you spelled `method` wrong" were the same
+      # answer, and this transport's caller is a model that has no screen to notice on.
+      #
+      # `gori run history/sitemap/probe` has refused this since #884 (`--lenient` opts out), and
+      # so do the two MCP tools that SAVE a query — `create_view` (SavedViews.unknown_fields) and
+      # `create_color_rule` (Colormarker.unknown_fields). MCP's READ tools were the hole, and
+      # `run.cr`'s comment exempted them on the grounds that `strict:` already offered this. It
+      # did not, and could not: an unknown field free-texts, so it COMPILES, so `QL.analyze` puts
+      # it in `applied` and `strict:` (which reports `ignored` + `invalid_regex`) never sees it.
+      #
+      # Refusal is the DEFAULT, and the escape hatch is `lenient`, for the reason `gori run`
+      # spells out: an opt-in leaves the silent answer as what a caller who has not read this
+      # gets. `QL.field_shaped?` keeps a pasted URL (`http://acme.test/x`) and an authority
+      # (`acme.test:8443`) out of it — they name no field and are searched as text as before.
+      private def ql_unknown_field_error(h, query : String) : Result?
+        return nil if bool_arg(h, "lenient", false)
+        use = QL.fields_used(query).find { |f| !QL.known_field?(f.name) }
+        return nil unless use
+        # Echoed with the operator it was WRITTEN with, so `body~` does not come back as `body:`.
+        op = use.regex ? '~' : ':'
+        near = QL.suggest_field(use.name)
+        tail = "pass lenient:true to search it as literal text instead"
+        msg =
+          if near
+            "unknown query field `#{use.name}#{op}` — did you mean `#{near}#{op}`? (#{tail})"
+          else
+            "unknown query field `#{use.name}#{op}` — QL has no such field. " \
+            "Fields: #{QL::FIELDS.join(' ')} (call ql_reference; #{tail})"
+          end
+        err(msg, "QUERY_SYNTAX", field: "query",
+          details: JSON.parse({"unknown_field" => use.name, "suggestion" => near}.to_json))
       end
 
       # A `~` term with an uncompilable regex degrades to a never-match clause —
@@ -77,16 +119,31 @@ module Gori
         # `saved_views` and `colormarker` have always worded this condition correctly ("matches
         # every flow — it would narrow nothing"); this is the same fact, named the same way.
         matches_all = QL.reject_empty?(query, filter)
-        # …and both conditions are what `ql_filter_or_error` turns into a QUERY_SYNTAX refusal,
-        # which is the one prediction this tool exists to make and never stated: a caller that
-        # explained first was told the query would run.
-        refused = matches_all || !a.invalid_regex.empty?
+        # A field QL does not implement free-texts its WHOLE token, so it compiles to a real
+        # clause and `QL.analyze` files it under `applied` — this tool affirmed `methd:GET` as an
+        # applied term while the query it described could only ever return nothing. Reported by
+        # name, and counted into `refused_by_query_tools` now that the read tools refuse it.
+        unknown = QL.fields_used(query).map(&.name).uniq!.reject! { |n| QL.known_field?(n) }
+        # …and all three conditions are what `ql_filter_or_error` turns into a QUERY_SYNTAX
+        # refusal, which is the one prediction this tool exists to make and never stated: a
+        # caller that explained first was told the query would run.
+        refused = matches_all || !a.invalid_regex.empty? || !unknown.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "query", query
             j.field("applied_terms") { j.array { a.applied.each { |t| j.string t } } }
             j.field("ignored_terms") { j.array { a.ignored.each { |t| j.string t } } }
             j.field("invalid_regex_terms") { j.array { a.invalid_regex.each { |t| j.string t } } }
+            j.field("unknown_fields") do
+              j.array do
+                unknown.each do |n|
+                  j.object do
+                    j.field "name", n
+                    j.field "did_you_mean", QL.suggest_field(n)
+                  end
+                end
+              end
+            end
             j.field "matches_everything", matches_all
             j.field "refused_by_query_tools", refused
             j.field "sql", filter.sql
@@ -107,6 +164,13 @@ module Gori
                            "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) rather " \
                            "than return the whole capture — fix or drop the term(s), or pass an " \
                            "empty query to get the most recent rows"
+                end
+                unless unknown.empty?
+                  named = unknown.map { |n| (near = QL.suggest_field(n)) ? "`#{n}:` (did you mean `#{near}:`?)" : "`#{n}:`" }
+                  j.string "QL has no such field: #{named.join(", ")} — the whole token is " \
+                           "searched as literal TEXT, which is why it matches nothing; " \
+                           "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) " \
+                           "unless you pass lenient:true"
                 end
                 j.string "dropped (broadens results): #{a.ignored.join(", ")}" unless a.ignored.empty?
                 unless a.invalid_regex.empty?
@@ -156,7 +220,9 @@ module Gori
           "were silently dropped (broadening results), which regex terms are invalid " \
           "(match nothing), the compiled SQL, and warnings. Use to debug a query that " \
           "returns too many or zero rows. `matches_everything` means every term was dropped " \
-          "and the query narrows nothing; `refused_by_query_tools` means list_history / " \
+          "and the query narrows nothing; `unknown_fields` names a `field:` QL does not " \
+          "implement (its whole token is searched as text, so it matches nothing); " \
+          "`refused_by_query_tools` means list_history / " \
           "list_sitemap / probe_scan will answer QUERY_SYNTAX rather than run it." do |s|
           s.field "query", strprop("the gori QL query to analyze"), required: true
         end

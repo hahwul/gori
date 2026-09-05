@@ -498,6 +498,8 @@ module Gori
           "`cwe`/`cwe_name` are OMITTED for a code with no meaningful CWE — a technology " \
           "fingerprint, an informational jwt_in_* note, or a custom rule. Writes nothing." do |s|
           s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
+          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
+          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — the same escape hatch `gori run probe --lenient` spells")
           s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
           s.field "severity", enumprop("only return issues at/above this level", SEVERITIES)
           s.field "category", enumprop("only return issues in this category", Probe::FILTER_CATEGORIES)

@@ -351,6 +351,50 @@ describe Gori::InterceptFilter do
     end
   end
 
+  # `UNSUPPORTED_FIELDS` said "and the whole of that list" while holding `scope` alone, so the
+  # other eleven QL fields a live message cannot answer — the ones `FIELDS`' own comment already
+  # names — fell through `field_symbol`'s else to FREE TEXT: `dur:>500` searched method/host/target
+  # for the literal string, held nothing, and read as intercept being broken. Deriving the list
+  # from `QL::FIELDS - FIELDS` is what keeps the two from disagreeing again.
+  describe "every QL field a live message cannot answer" do
+    it "is refused by name rather than degraded to free text" do
+      %w[size reqsize respsize dur stub src scope req.header resp.header req.body resp.body].each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should contain(f)
+      end
+      # An alias resolves before the check, so `res.body:` cannot free-text past it.
+      %w[res.body res.header req.size resp.size res.size source].each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should contain(f)
+      end
+    end
+
+    it "refuses nothing this backend actually implements" do
+      Gori::InterceptFilter::FIELDS.each do |f|
+        Gori::InterceptFilter::UNSUPPORTED_FIELDS.should_not contain(f)
+      end
+    end
+
+    it "holds nothing rather than everything the token happens to appear in" do
+      Gori::InterceptFilter.new("dur:>500").matches?(req(target: "/x?q=dur:>500")).should be_false
+      # Same caveat the `scope:` case carries: negated, a never-match holds EVERYTHING, which is
+      # why the doors that submit a complete condition refuse the term instead of compiling it.
+      Gori::InterceptFilter.new("-dur:>500").matches?(req).should be_true
+    end
+
+    it "says WHY, per field, in the one sentence the five refusing surfaces share" do
+      Gori::InterceptFilter.unsupported_field_reason("dur:>500")
+        .not_nil!.should contain("has no size or duration yet")
+      Gori::InterceptFilter.unsupported_field_reason("stub:yes")
+        .not_nil!.should contain("CAPTURE decision")
+      Gori::InterceptFilter.unsupported_field_reason("src:proxy")
+        .not_nil!.should contain("recorded when it is captured")
+      Gori::InterceptFilter.unsupported_field_reason("resp.body:x")
+        .not_nil!.should contain("`body:` already means the message in hand")
+      Gori::InterceptFilter.unsupported_field_reason("scope:in")
+        .not_nil!.should contain("scope rules are not part of a message")
+      Gori::InterceptFilter.unsupported_field_reason("host:acme method:POST").should be_nil
+    end
+  end
+
   describe "completion" do
     it "offers the two new fields and the proto: value pool" do
       Gori::InterceptFilter.suggestions("pro", 3).should eq(["proto:"])
