@@ -20,6 +20,7 @@ module Gori
     class Tools
       # --- action / write tools (gated) ---------------------------------------
 
+      @[Tool("send_request", gated: true, agent_action: true, env_refresh: true)]
       private def send_request(h) : Result
         # FIRST, ahead of every other read: the one refusal whose entire value is its
         # position in this method. See `send_source_conflict`.
@@ -906,6 +907,7 @@ module Gori
       # `WsEngine`'s framed message exchange and therefore returns the inbound transcript
       # instead of stopping at the handshake's own response — the 101 of an RFC 6455 upgrade,
       # or the 2xx of an RFC 8441 extended CONNECT (#733).
+      @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true)]
       private def send_websocket(h) : Result
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id

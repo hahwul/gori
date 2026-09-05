@@ -32,6 +32,7 @@ module Gori
           "are gated writes the operator can see.", is_error: true)
       end
 
+      @[Tool("decode", unbound: true)]
       private def decoder(h) : Result
         spec = str(h, "spec")
         return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
@@ -109,6 +110,7 @@ module Gori
       # Shapes come from Jwt.decode_json / Jwt.attacks_json (jwt/present.cr) so they match
       # `gori run jwt --format json` byte-for-byte.
 
+      @[Tool("jwt_decode", unbound: true)]
       private def jwt_decode_tool(h) : Result
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
@@ -119,6 +121,7 @@ module Gori
         Result.new(Jwt.decode_json(t))
       end
 
+      @[Tool("jwt_encode", unbound: true)]
       private def jwt_encode_tool(h) : Result
         token = str(h, "token")
         raw_header = str(h, "header").try(&.presence)
@@ -152,6 +155,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "token", signed; j.field "alg", alg } })
       end
 
+      @[Tool("jwt_attacks", unbound: true)]
       private def jwt_attacks_tool(h) : Result
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?

@@ -7,6 +7,7 @@ module Gori
     class Tools
       # Permanent saved-run readers remain available in --read-only mode. Only deletion is an
       # action; live fuzz_start/status/results keep their existing action gate.
+      @[Tool("list_fuzz_runs")]
       private def list_fuzz_runs(h) : Result
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
@@ -37,6 +38,7 @@ module Gori
         end)
       end
 
+      @[Tool("get_fuzz_run")]
       private def get_fuzz_run(h) : Result
         run_id = optional_int_arg(h, "run_id")
         return err("missing required 'run_id'", "INVALID_ARGUMENT", field: "run_id") unless run_id
@@ -128,6 +130,7 @@ module Gori
         end)
       end
 
+      @[Tool("delete_fuzz_run", gated: true, agent_action: true)]
       private def delete_fuzz_run(h) : Result
         run_id = optional_int_arg(h, "run_id")
         return err("missing required 'run_id'", "INVALID_ARGUMENT", field: "run_id") unless run_id

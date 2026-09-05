@@ -10,6 +10,7 @@ module Gori
     class Tools
       # --- mine tools (gated, async job model) --------------------------------
 
+      @[Tool("mine_start", gated: true, agent_action: true, env_refresh: true)]
       private def mine_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         engine, origin, total = build_mine_job(h, ob)
@@ -80,6 +81,7 @@ module Gori
         end
       end
 
+      @[Tool("mine_status", gated: true)]
       private def mine_status(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)
@@ -148,6 +150,7 @@ module Gori
         end
       end
 
+      @[Tool("mine_results", gated: true)]
       private def mine_results(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)
@@ -173,6 +176,7 @@ module Gori
         end)
       end
 
+      @[Tool("mine_stop", gated: true, agent_action: true)]
       private def mine_stop(h) : Result
         mjob = lookup_mine_job(h)
         return mjob if mjob.is_a?(Result)

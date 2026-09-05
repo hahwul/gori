@@ -6,6 +6,7 @@ require "../serialize"
 module Gori
   module MCP
     class Tools
+      @[Tool("list_sitemap")]
       private def list_sitemap(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), 200, 5000)
         query = str(h, "query")
@@ -71,6 +72,7 @@ module Gori
       end
 
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
+      @[Tool("set_sitemap_tag", gated: true, agent_action: true)]
       private def set_sitemap_tag(h) : Result
         host = str(h, "host").try(&.strip).presence
         return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") unless host
@@ -102,6 +104,7 @@ module Gori
         end)
       end
 
+      @[Tool("list_sitemap_tags")]
       private def list_sitemap_tags(h) : Result
         host = str(h, "host").try(&.strip).presence
         tags = store.sitemap_tags

@@ -5,6 +5,7 @@ require "../../host_overrides"
 module Gori
   module MCP
     class Tools
+      @[Tool("list_host_overrides")]
       private def list_host_overrides : Result
         Result.new(JSON.build do |j|
           j.array do
@@ -19,6 +20,7 @@ module Gori
         end)
       end
 
+      @[Tool("add_host_override", gated: true, agent_action: true)]
       private def add_host_override(h) : Result
         host = str(h, "host").try(&.strip)
         return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") if host.nil? || host.empty?
@@ -57,6 +59,7 @@ module Gori
         end)
       end
 
+      @[Tool("update_host_override", gated: true, agent_action: true)]
       private def update_host_override(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -80,6 +83,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", normalized; j.field "ip", ip } })
       end
 
+      @[Tool("delete_host_override", gated: true, agent_action: true)]
       private def delete_host_override(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id

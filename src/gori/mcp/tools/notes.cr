@@ -5,6 +5,7 @@ require "../../issues_export" # Issues::Export.one_line / .scrub_only
 module Gori
   module MCP
     class Tools
+      @[Tool("list_notes")]
       private def list_notes : Result
         doc = Notes.load(store)
         Result.new(JSON.build do |j|
@@ -34,6 +35,7 @@ module Gori
         end)
       end
 
+      @[Tool("get_note")]
       private def get_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -66,6 +68,7 @@ module Gori
       # `Notes.create` runs the read and the write inside one `BEGIN IMMEDIATE` (see
       # `Store#mutate_setting`), and mints the id from the set the transaction read — so two
       # concurrent creates get two ids and both notes survive.
+      @[Tool("create_note", gated: true, agent_action: true)]
       private def create_note(h) : Result
         text = str(h, "text") || ""
         new_id = Notes.create(store, text)
@@ -79,6 +82,7 @@ module Gori
         end)
       end
 
+      @[Tool("update_note", gated: true, agent_action: true)]
       private def update_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -103,6 +107,7 @@ module Gori
         end)
       end
 
+      @[Tool("delete_note", gated: true, agent_action: true)]
       private def delete_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

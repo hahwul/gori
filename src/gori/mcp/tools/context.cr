@@ -7,6 +7,7 @@ require "../../proxy/codec/http1"
 module Gori
   module MCP
     class Tools
+      @[Tool("list_scope")]
       private def list_scope : Result
         scope = Scope.load(store)
         Result.new(JSON.build do |j|
@@ -35,6 +36,7 @@ module Gori
         end)
       end
 
+      @[Tool("project_info", unbound: true)]
       private def project_info : Result
         Result.new(JSON.build do |j|
           j.object do
@@ -75,6 +77,7 @@ module Gori
       # THIS project's db, so it always describes this project — freshness is reported via
       # age_seconds (there is no live-TUI heartbeat), not a name comparison that would skew on
       # display-name-vs-slug.
+      @[Tool("get_current_context")]
       private def get_current_context : Result
         raw = store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
@@ -165,6 +168,7 @@ module Gori
           "QUERY_SYNTAX", field: "filter")
       end
 
+      @[Tool("get_repeater_context")]
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
         repeater_id = int(h, "id")

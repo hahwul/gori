@@ -19,6 +19,7 @@ module Gori
 
       # Every view available in this project: the built-ins, then the global library, then the
       # project's own.
+      @[Tool("list_views")]
       private def list_views(h) : Result
         want = view_scope_filter(h)
         return want if want.is_a?(Result)
@@ -101,6 +102,7 @@ module Gori
         not_found("no view named #{name.inspect}")
       end
 
+      @[Tool("create_view", gated: true, agent_action: true)]
       private def create_view(h) : Result
         name = str(h, "name")
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
@@ -123,6 +125,7 @@ module Gori
 
       # Rename, re-query, or both. Omitted fields are left unchanged, the same contract
       # `update_color_rule` has.
+      @[Tool("update_view", gated: true, agent_action: true)]
       private def update_view(h) : Result
         name = str(h, "name")
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
@@ -149,6 +152,7 @@ module Gori
         view_result(SavedViews::View.new(found.id, new_name, new_query, scope), "updated")
       end
 
+      @[Tool("delete_view", gated: true, agent_action: true)]
       private def delete_view(h) : Result
         name = str(h, "name")
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?

@@ -20,6 +20,7 @@ module Gori
         "wsdl"     => :wsdl,
       }
 
+      @[Tool("import_flows", gated: true, agent_action: true)]
       private def import_flows(h) : Result
         kind_s = str(h, "kind").try(&.strip.downcase)
         kind = kind_s.try { |k| KINDS[k]? }
