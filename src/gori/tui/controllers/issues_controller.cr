@@ -643,6 +643,11 @@ module Gori::Tui
     end
 
     def issues_copy_all : Nil
+      # With no issue open, `y` is the LIST's copy: every marked row, or the cursor row.
+      unless @issues.detail_open?
+        n = @issues.mark_count
+        return copy_text(@issues.copy_rows_text, n > 1 ? "#{n} issues" : nil)
+      end
       text = @issues.notes_copy_all
       if text.empty?
         @host.status("nothing to copy")

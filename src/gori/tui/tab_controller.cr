@@ -1227,6 +1227,20 @@ module Gori::Tui
       false
     end
 
+    # Put `text` on the clipboard and say so — the one toast shape every copy verb uses
+    # (`copied Nb to clipboard`, plus `Clipboard.note`'s caveat when the write was clipped or
+    # the clipboard is off). `what` names the thing for a list row, where "Nb" alone tells
+    # the operator nothing about WHICH row went. An empty text is refused with a toast.
+    protected def copy_text(text : String, what : String? = nil) : Nil
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      label = what ? "copied #{what} (#{written}b)" : "copied #{written}b to clipboard"
+      @host.status("#{label}#{Clipboard.note(written, text)}")
+    end
+
     # --- focus ring (Tab/Shift-Tab across panes); false = no further pane ---
     def pane_advance(dir : Int32) : Bool
       false

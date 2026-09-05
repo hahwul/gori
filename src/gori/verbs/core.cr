@@ -176,6 +176,9 @@ module Gori
         "scope.add-rule", "Add scope rule", "Open the popup to add an include/exclude rule",
         Verb::Scope::Project, [Verb::Chord.new("a")]) { |ctx| ctx.scope_add_rule; nil }
       r.register Verb::Definition.new(
+        "scope.copy-rule", "Copy", "Copy the selected scope rule as `kind match-type pattern`",
+        Verb::Scope::Project, [Verb::Chord.new("y")], available: scope_rule) { |ctx| ctx.read_copy; nil }
+      r.register Verb::Definition.new(
         "scope.edit-rule", "Edit scope rule", "Open the popup to edit the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
       r.register Verb::Definition.new(

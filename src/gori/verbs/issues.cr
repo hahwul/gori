@@ -41,6 +41,12 @@ module Gori
       # it only adds the case where every mark has scrolled out from under the cursor.
       issues_targets = ->(ctx : Verb::ExecContext) { !ctx.selected_issue_ids.empty? }
 
+      # `y` on the LIST (the detail's `issue.copy` copies the notes): the cursor row, or every
+      # marked row, as `[severity] title (host)` lines.
+      r.register Verb::Definition.new(
+        "issues.copy-row", "Copy", "Copy the cursor row — or every marked row — as `[severity] title (host)` lines",
+        Verb::Scope::Issues, [Verb::Chord.new("y")], available: issues_targets, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+
       r.register Verb::Definition.new(
         "issues.delete", "Delete issue", "Delete the selected issue (or every marked one)",
         Verb::Scope::Issues, [Verb::Chord.new("d")],

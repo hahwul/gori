@@ -15,6 +15,10 @@ module Gori
         Verb::Scope::HostOverrides, [Verb::Chord.new("a")]) { |ctx| ctx.hostov_add_entry; nil }
 
       r.register Verb::Definition.new(
+        "hostoverride.copy-entry", "Copy", "Copy the selected override as a hosts-file line (`ip host`)",
+        Verb::Scope::HostOverrides, [Verb::Chord.new("y")], available: have_entry) { |ctx| ctx.read_copy; nil }
+
+      r.register Verb::Definition.new(
         "hostoverride.edit-entry", "Edit host override", "Edit the selected host override in place",
         Verb::Scope::HostOverrides, [Verb::Chord.new("e")], available: have_entry) { |ctx| ctx.hostov_edit_entry; nil }
 

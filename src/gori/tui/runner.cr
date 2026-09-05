@@ -4993,6 +4993,11 @@ module Gori::Tui
       when :probe     then probe_controller.probe_detail_copy
       when :sequencer then sequencer_controller.sequencer_copy
       when :miner     then miner_controller.miner_copy
+        # List-row copies (#C12): the row under the cursor — or every marked row — as text.
+        # No selection/all pair, because these panes hold no text selection.
+      when :target      then target_controller.copy_row
+      when :colormarker then colormarker_controller.colormarker_copy
+      when :authorize   then authorize_controller.authorize_copy
       when :history
         # One delegator, like the group above: HistoryController#detail_copy makes the
         # selection-vs-whole-pane choice itself (it also words its own toast).

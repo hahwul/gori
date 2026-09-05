@@ -27,6 +27,9 @@ module Gori
         "colormarker.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Colormarker, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: on_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.colormarker_edit; nil }
       r.register Verb::Definition.new(
+        "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
+        Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }
+      r.register Verb::Definition.new(
         "colormarker.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
         Verb::Scope::Colormarker, [Verb::Chord.new("x")], available: on_rule, mnemonic: 'x', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(

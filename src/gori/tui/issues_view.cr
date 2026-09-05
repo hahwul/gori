@@ -437,6 +437,13 @@ module Gori::Tui
     # store list is still in display order AND still places marks the active filter hides.
     # An id missing from @all was deleted by a peer session; dropping it here is the same
     # "a stale mark simply fails to resolve" rule the batch handlers follow.
+    # The rows `y` copies from the LIST: the marks if any, else the cursor row — each as
+    # `[severity] title (host)`, one per line.
+    def copy_rows_text : String
+      rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.includes?(f.id) }
+      rows.map { |f| "[#{f.severity.label}] #{f.title}#{f.host ? " (#{f.host})" : ""}" }.join("\n")
+    end
+
     def marked_ids : Array(Int64)
       return [] of Int64 if @marks.empty?
       @all.compact_map { |f| f.id if @marks.includes?(f.id) }

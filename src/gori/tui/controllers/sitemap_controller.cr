@@ -76,6 +76,19 @@ module Gori::Tui
       handle_double_click_content(rect.inset(1, 1), mx, my)
     end
 
+    # `y`: every marked row as `host/path`, one per line — or the cursor row's seed, which is
+    # the host for a host row and `host/path` below it (the string `a` would scope). The tree
+    # carries no scheme, so this is the URL minus its scheme, the way the rows read.
+    def copy_row : Nil
+      keys = @sitemap.marked_keys
+      text = if keys.empty?
+               @sitemap.selected_scope_seed.try(&.[:pattern]) || ""
+             else
+               keys.map { |(host, path)| "#{host}#{path}" }.join("\n")
+             end
+      copy_text(text, keys.size > 1 ? "#{keys.size} paths" : nil)
+    end
+
     # The universal tree gesture: a double-click on a row's LABEL folds or unfolds a folder
     # and opens a leaf's flow (what `o` does). Expand/collapse used to answer only on the
     # one-column ▾/▸ marker, and a double-click there was a net no-op — the first press of
@@ -151,10 +164,10 @@ module Gori::Tui
       # Marks survive a filter change, so the `/` affordance stays up while they're set.
       # `space tag`, not `⇧T`: tagging is menu-only now — ⇧T meant "mark all" in every other
       # marked list, so a hand that learnt `t`/⇧T there opened a text prompt here.
-      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · space cmds (tag)  · esc clears marks") if @sitemap.mark_count > 0
+      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.copy} copy · space cmds (tag) · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
-      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · space cmds · esc sub-tabs")
+      keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · {sitemap.copy} copy · space cmds · esc sub-tabs")
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or

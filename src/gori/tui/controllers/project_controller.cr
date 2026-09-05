@@ -52,16 +52,16 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        keys("↑/↓ select · {scope.add-rule} add · ↵/{scope.edit-rule} edit · {scope.delete-rule} delete · space cmds · esc sub-tabs")
+        keys("↑/↓ select · {scope.add-rule} add · ↵/{scope.edit-rule} edit · {scope.copy-rule} copy · {scope.delete-rule} delete · space cmds · esc sub-tabs")
       when :overrides
-        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : keys("↑/↓ select · {hostoverride.add-entry} add · ↵/{hostoverride.edit-entry} edit · {hostoverride.delete-entry} delete · space cmds · esc sub-tabs")
+        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : keys("↑/↓ select · {hostoverride.add-entry} add · ↵/{hostoverride.edit-entry} edit · {hostoverride.copy-entry} copy · {hostoverride.delete-entry} delete · space cmds · esc sub-tabs")
       when :env
         if @project_view.env_prefix_editing?
           "type prefix · ↵ save · esc cancel"
         elsif @project_view.env_adding?
           "type \"KEY VALUE\" · ↵ save · esc cancel"
         else
-          keys("↑/↓ select · {env.add-var} add · ↵/{env.edit-var} edit · {env.delete-var} delete · space cmds · esc sub-tabs")
+          keys("↑/↓ select · {env.add-var} add · ↵/{env.edit-var} edit · {env.copy-var} copy · {env.delete-var} delete · space cmds · esc sub-tabs")
         end
       when :activity
         if @project_view.activity_querying?
@@ -548,6 +548,14 @@ module Gori::Tui
     end
 
     def project_copy_all : Nil
+      # Outside the description, `y` copies the LIST row the pane holds.
+      case @project_view.pane
+      when :env       then return copy_text(@project_view.selected_env_line || "")
+      when :overrides then return copy_text(@project_view.selected_override_line || "")
+      when :scope
+        rule = @project_view.selected_rule
+        return copy_text(rule ? "#{rule.kind} #{rule.match_type} #{rule.pattern}" : "")
+      end
       text = @project_view.desc_copy_all
       if text.empty?
         @host.status("nothing to copy")
