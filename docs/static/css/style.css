@@ -2425,21 +2425,44 @@ kbd {
   transition: opacity var(--transition);
 }
 
-/* h3 rows branch off their h2 with box-drawing tees: `├` between, `└` last. */
+/* h3 rows branch off their h2 on a drawn tree — a continuous rail down the
+   group and a tick into each row — rather than per-row `├`/`└` glyphs,
+   which broke between rows and hung off the first line of a wrapped
+   heading. The rail runs the whole li (wrapped lines included) and stops at
+   the last row's tick, so the group closes like a `└`. The tick sits on the
+   first line's centre: row padding plus half the line box. */
+.docs-toc-rail ul ul li {
+  position: relative;
+}
+
 .docs-toc-rail ul ul a {
   padding-left: 2.35rem;
 }
 
-.docs-toc-rail ul ul a::after {
-  content: "├";
+.docs-toc-rail ul ul li::before,
+.docs-toc-rail ul ul li::after {
+  content: "";
   position: absolute;
-  top: 0.28rem;
-  left: 1.4rem;
-  color: var(--quiet);
+  z-index: 1;
+  left: 1.5rem;
+  pointer-events: none;
 }
 
-.docs-toc-rail ul ul li:last-child a::after {
-  content: "└";
+.docs-toc-rail ul ul li::before {
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--line-strong);
+}
+
+.docs-toc-rail ul ul li:last-child::before {
+  bottom: auto;
+  height: calc(0.28rem + 0.7em);
+}
+
+.docs-toc-rail ul ul li::after {
+  top: calc(0.28rem + 0.7em);
+  width: 0.5rem;
+  border-top: 1px solid var(--line-strong);
 }
 
 .docs-toc-rail a:hover {
