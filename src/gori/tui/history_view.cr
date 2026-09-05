@@ -100,7 +100,13 @@ module Gori::Tui
     getter query : String
     property reload_handler : Proc(Store, Nil)? = nil
     property host_suggest_handler : Proc(String, Nil)? = nil
-    property? searching : Bool = false
+    getter? searching : Bool = false
+    # `searching?` is the controller's truth (it guards the capture flush and the deferred
+    # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
+    # finishes inside SEARCHING_GRACE — every coalesced capture reload on a small project —
+    # never reaches the screen, so the chips do not blink on each 250 ms refresh.
+    getter? searching_shown : Bool = false
+    @searching_since : Time::Instant? = nil
     getter search_error : String? = nil
     @host_suggest_dirty = false
     @host_suggest_refresh_at = Time.instant
@@ -684,7 +690,7 @@ module Gori::Tui
         @filter_dirty = false
         @selected = 0
         @scroll = 0
-        @searching = false
+        self.searching = false
         return nil
       end
       combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
@@ -706,7 +712,7 @@ module Gori::Tui
     end
 
     def apply_search(result : SearchResult) : Nil
-      @searching = false
+      self.searching = false
       @last_filter_flush = Time.instant
       @search_error = result.error
       if result.error
@@ -843,6 +849,30 @@ module Gori::Tui
     # correctness loss (@filter_dirty just accumulates until the window elapses). The
     # FIRST dirtying still reloads immediately (last-flush is nil), so the view stays live.
     FILTER_FLUSH_INTERVAL = 250.milliseconds
+
+    # How long a search runs before the bar says so. Longer than a tick (50 ms), shorter
+    # than the typing debounce plus a quick query, so a fast search never shows and a slow
+    # one is labelled well before an operator wonders whether the keystroke landed.
+    SEARCHING_GRACE = 150.milliseconds
+
+    def searching=(flag : Bool) : Nil
+      if flag
+        @searching_since ||= Time.instant
+      else
+        @searching_since = nil
+        @searching_shown = false
+      end
+      @searching = flag
+    end
+
+    # Called each tick with the loop's clock. Returns true the tick the label appears
+    # (the frame is dirty); false while nothing is pending or the label is already up.
+    def reveal_searching(now : Time::Instant) : Bool
+      return false if @searching_shown
+      since = @searching_since
+      return false unless since && now - since >= SEARCHING_GRACE
+      @searching_shown = true
+    end
 
     # Apply any filtered-view staleness accumulated during a drain cycle in ONE
     # reload (vs reloading per flow event — a search+reverse of up to PAGE rows),
@@ -2558,7 +2588,7 @@ module Gori::Tui
         # naming the filter that excluded nothing is useless when there was nothing to exclude.
         # A typed query is the one exception: the operator just wrote it and is owed the answer
         # that it matched nothing.
-        if @no_flows && @query.blank? && !@searching && !@search_error
+        if @no_flows && @query.blank? && !@searching_shown && !@search_error
           list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
           TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
           return
@@ -2570,7 +2600,7 @@ module Gori::Tui
         # set is caused by the Scope lens or no traffic, where "esc clears the filter"
         # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
-          if @searching
+          if @searching_shown
             {"searching", "esc clears the filter"}
           elsif error = @search_error
             {error, "/ to edit the filter"}
@@ -3381,7 +3411,7 @@ module Gori::Tui
     end
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
-      state = @searching ? "searching — showing previous results" : @search_error
+      state = @searching_shown ? "searching — showing previous results" : @search_error
       state_width = state ? {Screen.draw_width(state) + 2, rect.w // 2}.min : 0
       if @querying
         screen.text(rect.right - state_width, rect.y, state, Theme.muted, width: state_width) if state
@@ -3453,7 +3483,7 @@ module Gori::Tui
     # those cells hold the query being typed and a click on them must not toggle a lens the
     # operator cannot see.
     def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil if @querying || @searching || @search_error
+      return nil if @querying || @searching_shown || @search_error
       list_rect, _ = list_split(rect)
       return nil if list_rect.empty?
       Frame.right_text_chain_hit(mx, my, list_rect.y, list_rect.right - 1, list_rect.x + 2,

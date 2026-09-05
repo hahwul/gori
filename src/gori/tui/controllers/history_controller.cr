@@ -602,6 +602,7 @@ module Gori::Tui
       dirty = drain_search
       dirty = drain_host_search || dirty
       dirty = @history.refresh_host_suggestions(now) || dirty
+      dirty = @history.reveal_searching(now) || dirty
       if (deadline = @query_reload_at) && now >= deadline
         flush_query_reload
         return true

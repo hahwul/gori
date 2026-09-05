@@ -337,6 +337,7 @@ describe "History cooperative searches" do
       view.rows.should be_empty
       view.set_query("host:missing")
       view.reload(session.store)
+      view.reveal_searching(Time.instant + 1.second)
       backend = MemoryBackend.new(100, 20)
       rect = Gori::Tui::Rect.new(0, 0, 100, 20)
       view.render_list(Gori::Tui::Screen.new(backend), rect)
@@ -352,12 +353,47 @@ describe "History cooperative searches" do
       view.set_query("path:/")
       view.reload(session.store)
       receive_within(view.started)
+      view.reveal_searching(Time.instant + 1.second)
       backend = MemoryBackend.new(32, 20)
       view.render_list(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 32, 20))
       backend.contains?("searching").should be_true
       view.pause = false
       view.resume.send(nil)
       settle_history(controller)
+    end
+  end
+  it "paints the chips, not the searching label, until a search outlives the grace" do
+    with_search_controller do |controller, view, session|
+      view.pause = true
+      view.set_query("path:/")
+      view.reload(session.store)
+      receive_within(view.started)
+      view.searching?.should be_true
+      rect = Gori::Tui::Rect.new(0, 0, 120, 20)
+      render = -> do
+        backend = MemoryBackend.new(120, 20)
+        view.render_list(Gori::Tui::Screen.new(backend), rect)
+        (0...20).map { |y| backend.row(y) }.join
+      end
+      started = Time.instant
+      # A refresh that finishes inside the grace (every coalesced capture reload on a small
+      # project) must not blink the bar: the chips stay up and stay clickable.
+      controller.flush_query_reload_if_due(started).should be_false
+      screen = render.call
+      screen.should_not contain("searching")
+      screen.should contain("scope:")
+      (0...120).any? { |x| view.ql_chip_at(rect, x, 0) }.should be_true
+      # Past the grace the tick reports a dirty frame once, and the label replaces the chips.
+      controller.flush_query_reload_if_due(started + Gori::Tui::HistoryView::SEARCHING_GRACE).should be_true
+      controller.flush_query_reload_if_due(started + 1.second).should be_false
+      screen = render.call
+      screen.should contain("searching")
+      screen.should_not contain("scope:")
+      view.pause = false
+      view.resume.send(nil)
+      settle_history(controller)
+      view.searching_shown?.should be_false
+      render.call.should contain("scope:")
     end
   end
 end
