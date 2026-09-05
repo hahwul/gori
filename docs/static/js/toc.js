@@ -93,10 +93,18 @@
     byId[a.getAttribute('data-target')] = a;
   });
 
+  /* The active line is the heading's own scroll-margin-top, so a click that
+     lands a heading exactly there counts it (a fixed header + 16px sat a few
+     pixels above the landing spot, and the row before it lit up instead).
+     A couple of pixels of slack absorb sub-pixel scroll positions. */
   var offset = 0;
   function measure() {
-    var hdr = document.querySelector('.docs-header');
-    offset = (hdr ? hdr.offsetHeight : 64) + 16;
+    var margin = parseFloat(window.getComputedStyle(heads[0]).scrollMarginTop);
+    if (!(margin > 0)) {
+      var hdr = document.querySelector('.docs-header');
+      margin = (hdr ? hdr.offsetHeight : 64) + 20;
+    }
+    offset = margin + 2;
   }
   measure();
 
