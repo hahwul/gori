@@ -165,7 +165,21 @@ module Gori
     # list. That is why the surfaces where such a condition can be TYPED or SAVED name it —
     # `ExtractRuleOverlay#invalid_reason` refuses it outright (an extract rule persists), and the
     # intercept bar paints the field muted (`GATE_KNOWN`) and notes it beside the condition.
-    UNSUPPORTED_FIELDS = %w[scope]
+    # DERIVED, not typed out, because it was typed out and drifted: `scope` was the only member
+    # while ELEVEN more QL fields fell through `field_symbol`'s else to free text — the exact
+    # degradation the paragraph above refuses for `scope`. `FIELDS`' own comment already names
+    # them ("`size:`/`respsize:`/`dur:` need an exchange that has FINISHED, and `stub:` needs a
+    # capture decision that has not been made"), so the list QL implements minus the list this
+    # backend implements IS the answer, and the two can no longer disagree: adding a field to
+    # `FIELDS` retires its refusal in the same edit. Aliases resolve first, so `res.body:` is
+    # refused for the reason `resp.body:` is rather than free-texting past the check.
+    UNSUPPORTED_FIELDS = begin
+      names = QL::FIELDS.reject { |f| FIELDS.includes?(f) }
+      QL::FIELD_ALIASES.each do |from, to|
+        names << from unless FIELDS.includes?(to)
+      end
+      names
+    end
 
     # Does `source` name a field this backend refuses? For a surface that has to SAY so; reads
     # `QL.fields_used`, the tokenizer both backends compile through, so it reports exactly the
@@ -185,8 +199,34 @@ module Gori
       bad = unsupported_fields(source).first?
       return nil unless bad
       "`#{bad}:` is not available in a live-message condition (an intercept catch condition or " \
-      "an extract rule's when:) — the project's scope rules are not part of a message. " \
+      "an extract rule's when:) — #{unanswerable_because(bad)}. " \
       "History, colour rules and MCP `query` answer it."
+    end
+
+    # WHY the field in hand cannot be answered here, as the middle clause of that one sentence.
+    # Each arm reads off the same "what is in hand" table the class header lays out: a gate holds
+    # ONE message, mid-flight, before any capture decision — so what it lacks is the finished
+    # exchange, the stored row, and the project around it, in that order.
+    private def self.unanswerable_because(field : String) : String
+      case QL::FIELD_ALIASES[field]? || field
+      when "scope"
+        "the project's scope rules are not part of a message"
+      when "size", "reqsize", "respsize", "dur"
+        "an exchange that has not finished has no size or duration yet"
+      when "stub"
+        "whether a body was stored is a CAPTURE decision, made after this gate"
+      when "src"
+        "a flow's source is recorded when it is captured, not while it is in flight"
+      when .includes?('.')
+        # The `req.`/`resp.` half. A gate stands on one leg and already knows which, so the
+        # side prefix is not narrowing anything — it is naming bytes that are not in hand.
+        "a gate holds ONE leg, so `#{field.split('.').last}:` already means the message in hand"
+      else
+        # A field QL grows that this backend has not implemented. Generic on purpose: a wrong
+        # reason reads worse than no reason, and the arms above are what a new field earns once
+        # somebody decides which of them it belongs to.
+        "a message in flight carries no such value"
+      end
     end
 
     # Static value pools for the low-cardinality fields (mirrors History's). `host:`

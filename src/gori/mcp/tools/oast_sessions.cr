@@ -78,7 +78,10 @@ module Gori
         rescue ex
           # `Provider#resume` raises deliberately (unlike `deregister`): a resume that failed
           # quietly would leave a handle polling a correlation id the server never heard of.
-          return Result.new("OAST resume failed: #{ex.message}", is_error: true)
+          # Same contract as `oast_start`/`oast_poll`: the registration call reached the
+          # provider and failed there, so it is a NETWORK_ERROR the caller may retry — not the
+          # INVALID_ARGUMENT an uncoded error is filed as.
+          return err("OAST resume failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
         end
         sid = "oast_#{Random::Secure.hex(8)}"
         s = OastMcpSession.new(bound.provider, bound.session, http, bound.session.kind.label, row)

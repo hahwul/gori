@@ -453,6 +453,13 @@ module Gori
       # refusals carry DIFFERENT machine codes (a bad query is not a missing argument, and an
       # out-of-scope selection is a SCOPE_BLOCKED an agent's policy acts on).
       private def build_authorize_plan(h, ob : Outbound) : Authorize::Plan | Result
+        # Before the builder, because the failure it produces is `NoFlows` — "no captured flows
+        # matched query \"methd:GET\" — widen it", which sends the caller to loosen a query whose
+        # only problem is a misspelled field name. Same refusal `list_history` gives (see
+        # `ql_unknown_field_error`), so the two doors into the same history agree.
+        if (q = str(h, "query")) && (unknown = ql_unknown_field_error(h, q))
+          return unknown
+        end
         options = Authorize::PlanOptions.new(store,
           flow_ids: authorize_flow_ids(h),
           query: str(h, "query"),
@@ -655,6 +662,7 @@ module Gori
           s.field "flow_ids", authorize_flow_ids_prop
           s.field "query", strprop("QL query over history whose rows are replayed too (same grammar as " \
                                    "list_history — call ql_reference). Appended after flow_ids")
+          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token, selects no rows, and reads as \"nothing matched, widen it\"")
           s.field "limit", intprop("max rows the query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT}, " \
                                    "max #{AUTHORIZE_MAX_FLOWS}) — every row becomes one request PER identity")
           s.field "identities", authorize_identities_prop

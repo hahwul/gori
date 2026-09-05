@@ -954,7 +954,12 @@ module Gori
         payload = prov.generate_payload(session)
         Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
       rescue ex
-        Result.new("OAST register failed: #{ex.message}", is_error: true)
+        # A remote call that failed, not an argument that was wrong. Uncoded, `classify` files
+        # every plain-message error under INVALID_ARGUMENT with `retryable:false` — so a DNS
+        # blip on the interactsh host told the caller's error policy "your arguments are wrong,
+        # do not retry". `send_request` has always answered a transport failure with
+        # NETWORK_ERROR + retryable (see `Tools.send_error_code`); this is the same fact.
+        err("OAST register failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
       @[Tool("oast_payload", unbound: true)]
@@ -982,7 +987,9 @@ module Gori
         callbacks = fresh.map { |i| Oast::Present.interaction(i, s.kind_label) }
         Result.new({session_id: sid, count: fresh.size, callbacks: callbacks}.to_json)
       rescue ex
-        Result.new("OAST poll failed: #{ex.message}", is_error: true)
+        # Transient by construction: a poll is a read the caller is expected to repeat, and the
+        # session it names is still live here. See `oast_start`'s rescue for the contract.
+        err("OAST poll failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
       end
 
       @[Tool("oast_stop", gated: true, agent_action: true, unbound: true)]

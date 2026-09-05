@@ -249,3 +249,22 @@ describe "MCP OAST sessions" do
     end
   end
 end
+
+# A remote call that failed is not an argument that was wrong. Every uncoded error Result is
+# filed by `Tools#classify` under INVALID_ARGUMENT with `retryable:false`, so a refused
+# connection to the OAST provider told the caller's error policy to fix its arguments and stop —
+# for the one failure class that is transient by construction. `send_request` has always answered
+# a transport failure with NETWORK_ERROR + retryable (`Tools.send_error_code`).
+describe "MCP OAST transport failures" do
+  it "codes a provider that cannot be reached as a retryable NETWORK_ERROR" do
+    with_store do |store|
+      tools = tools_for(store)
+      # Port 1 on loopback: refused immediately, so this needs no DNS and no fixture server.
+      r = tools.call("oast_start", JSON.parse(%({"provider":"interactsh","server":"127.0.0.1:1"})))
+      r.is_error.should be_true
+      r.error_code.should eq("NETWORK_ERROR")
+      r.retryable.should be_true
+      r.text.should contain("OAST register failed")
+    end
+  end
+end

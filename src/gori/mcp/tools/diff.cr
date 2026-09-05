@@ -69,7 +69,7 @@ module Gori
         in_scope : Bool
 
       private def diff_options(h) : DiffOptions | Result
-        filter = diff_filter(str(h, "query"))
+        filter = diff_filter(h, str(h, "query"))
         return filter if filter.is_a?(Result)
         verdicts = diff_verdicts(h)
         return verdicts if verdicts.is_a?(Result)
@@ -90,9 +90,14 @@ module Gori
       #     as an unconfigured project on both sides instead — deterministic, and the same
       #     lens `gori run diff` compiles with. Scoping a retest is `in_scope`, which asks
       #     each side its OWN rules.
-      private def diff_filter(query : String?) : QL::Filter | Result
+      private def diff_filter(h, query : String?) : QL::Filter | Result
         q = query.try(&.strip)
         return QL::EMPTY if q.nil? || q.empty?
+        # The one check this helper can share with `ql_filter_or_error` verbatim: naming a field
+        # QL does not implement is wrong against ANY store, so it needs no lens (see there).
+        if unknown = ql_unknown_field_error(h, q)
+          return unknown
+        end
         filter = QL.parse(q, scope: QL::SCOPE_SHAPE_ONLY)
         return ql_error(q) if QL.reject_empty?(q, filter)
         bad = QL.invalid_regex_terms(q)
@@ -188,6 +193,7 @@ module Gori
           s.field "verdicts", strarrprop("only return endpoints with these verdicts: added, gone, changed, unchanged, removed (default: all)")
           s.field "issues", boolprop("include the issue retest — which endpoint each of the baseline's open issues sits on, and whether it still answers the same way (default true)")
           s.field "limit", intprop("max endpoint groups to read per side (default 20000, max #{Store::ENDPOINT_OBSERVATION_MAX})")
+          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token and matches nothing on both sides")
         end
       end
     end

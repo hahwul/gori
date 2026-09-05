@@ -1132,9 +1132,15 @@ module Gori
       # one shouts about a term QL DROPS, which broadens the result and leaves something to look
       # at. This one has nothing to look at.
       #
-      # Deliberately NOT applied to the TUI filter bar (an operator types `meth` on the way to
-      # `method:`, and a live filter re-evaluates every keystroke) nor to MCP, whose `strict`
-      # argument already offers this and defaults false for its own compatibility reasons.
+      # Deliberately NOT applied to the TUI filter bar: an operator types `meth` on the way to
+      # `method:`, and a live filter re-evaluates every keystroke.
+      #
+      # MCP was exempted here on the grounds that its `strict:` argument already offered this.
+      # It did not, and could not: an unknown field free-texts, so it COMPILES, so `QL.analyze`
+      # files it under `applied` and `strict:` — which reports `ignored` + `invalid_regex` —
+      # never saw it. `list_history{query:"methd:GET", strict:true}` returned `[]` with no error
+      # on it. MCP now refuses the same way, from `Tools#ql_unknown_field_error`, with `lenient`
+      # spelling the escape hatch this flag does.
       def self.refuse_unknown_query_fields(cmd : String, q : String?, lenient : Bool) : Nil
         return if lenient
         (msg = unknown_query_field_error(cmd, q)) && abort(msg)
