@@ -1,7 +1,6 @@
-require "uri"
 require "./types"
 require "../out_of_band"
-require "../../miner/inject"
+require "./insertion_points"
 require "../../fuzz/content_length"
 require "../../proxy/codec/http1"
 
@@ -61,7 +60,7 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("ssrf_oast", "Blind SSRF (out-of-band)",
-            "Points a URL parameter at an OAST payload and flags the finding when the server calls back.",
+            "Points one query, form, or JSON URL parameter at an OAST payload and flags the finding when the server calls back.",
             Category::ACTIVE)
         end
 
@@ -70,26 +69,26 @@ module Gori
           # check is a nil test on a already-resolved field — it never mints, so the cheap
           # pre-check stays cheap.
           return nil unless opts.oob
-          g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1], g[4])
+          surface, slot = gate(detail, opts) || return nil
+          key_string(detail, surface, slot)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           minter = opts.oob || return nil
-          g = gate(detail, opts) || return nil
-          method_up, path, pairs, idx, name = g
-          minted = minter.mint || return nil # listener went away between dedup_key and here
-          payload, token, session_id = minted
-          value = inject_url(payload)
-          request = rebuild_query(detail.request_head, detail.request_body, path,
-            with_replaced(pairs, idx, encode_value(value)))
+          surface, slot = gate(detail, opts) || return nil
+          payload, token, session_id = minter.mint || return nil
+          change = InsertionPoints::Change.new(replace: inject_url(payload))
+          request = InsertionPoints.build(detail, [{slot, change}])
+          # A body-bearing HTTP/2 capture may have no Content-Length. The generated body
+          # still needs framing when replayed over HTTP/1.1; query-only probes keep theirs.
+          request = Fuzz::ContentLength.sync(request, true) unless slot.loc.query?
           candidate = OutOfBand::Candidate.new(
             token: token, payload: payload, session_id: session_id,
             code: "ssrf_oast", title: "Blind SSRF (server fetched an attacker-controlled URL)",
             severity: Store::Severity::High,
-            evidence: "param `#{name}` pointed at an OAST payload"[0, 120])
-          Plan.new(request, [Param.new("query", name, token)],
-            key_string(detail, method_up, path, name), oob: [candidate])
+            evidence: "#{slot.loc.label} param `#{slot.name}` pointed at an OAST payload"[0, 120])
+          Plan.new(request, [Param.new(slot.loc.label, slot.name, token)],
+            key_string(detail, surface, slot), oob: [candidate])
         end
 
         # Blind by construction: nothing on the sending socket confirms it. The empty return is
@@ -107,43 +106,34 @@ module Gori
           payload.includes?("://") ? payload : "http://#{payload}"
         end
 
-        # Percent-encode the injected URL so `://`, `/` and `&` in the payload cannot break out
-        # of the parameter value and corrupt the query. `URI.encode_www_form` is what the
-        # capture would have carried for a URL-valued parameter.
-        private def encode_value(url : String) : String
-          URI.encode_www_form(url)
+        # Pick ONE existing value across query/form/JSON, in that order. Adding body coverage
+        # must not turn one probe into one probe per location or parameter. Only complete,
+        # bounded, unencoded bodies are offered: this rule does not decode or reframe chunks.
+        private def gate(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, InsertionPoints::Slot}?
+          method, _, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
+          return nil if malformed || !method_allowed?(method.upcase, opts)
+          locations = body_eligible?(detail) ? InsertionPoints::DEFAULT_LOCATIONS : [Miner::Location::Query]
+          surface = InsertionPoints.enumerate(detail, opts, locations) || return nil
+          slot = surface.slots.first(opts.max_params).find { |s| ssrf_shaped?(s.name.scrub, s.value.scrub) }
+          slot ? {surface, slot} : nil
         end
 
-        # Shared gate for plan + dedup_key. Returns {METHOD, path, query pairs, index of the
-        # first SSRF-shaped param, its DECODED name}, or nil. Both paths funnel here.
-        private def gate(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Int32, String}?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          return nil if query.empty?
-          pairs = query.split('&')
-          found = first_ssrf_param(pairs) || return nil
-          {method_up, path, pairs, found[0], found[1]}
+        private def body_eligible?(detail : Store::FlowDetail) : Bool
+          body = detail.request_body || return false
+          return false if body.empty? || body.size > BODY_CAP || detail.request_body_truncated?
+          return false if Proxy::Codec::Http1.obfuscated_header?(detail.request_head)
+          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+          return false if req.malformed? || req.headers.get?("Transfer-Encoding")
+          return false unless req.headers.get_all("Content-Encoding").all? { |v| v.strip.downcase == "identity" }
+          types = req.headers.get_all("Content-Type")
+          return false unless types.size == 1
+          injectable_type?(types.first)
         end
 
-        # {index, decoded name} of the first query pair whose value is URL-shaped (or whose name
-        # is a conventional SSRF param carrying a host-shaped value), else nil.
-        private def first_ssrf_param(pairs : Array(String)) : {Int32, String}?
-          pairs.each_with_index do |pair, i|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            raw_name = pair[0...eq]
-            next if raw_name.empty?
-            raw_value = pair[(eq + 1)..]
-            next if raw_value.empty?
-            dname = decode(raw_name)
-            dvalue = decode(raw_value)
-            return {i, dname} if ssrf_shaped?(dname, dvalue)
-          end
-          nil
+        private def injectable_type?(value : String) : Bool
+          media = value.split(';', 2).first.strip.downcase
+          media == "application/x-www-form-urlencoded" || media == "application/json" ||
+            (media.starts_with?("application/") && media.ends_with?("+json"))
         end
 
         # URL-shaped: the value is itself an absolute/scheme-relative URL (strongest signal, any
@@ -159,52 +149,9 @@ module Gori
           BARE_HOST.matches?(value) || BARE_IPV4.matches?(value) || INTERNAL_HOSTS.includes?(value.downcase)
         end
 
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String
-          "ssrf_oast|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
-        end
-
-        # A copy of the query pairs with pair `idx`'s value replaced (name kept verbatim).
-        private def with_replaced(pairs : Array(String), idx : Int32, value : String) : String
-          dup = pairs.dup
-          pair = dup[idx]
-          if eq = pair.index('=')
-            dup[idx] = "#{pair[0...eq]}=#{value}"
-          end
-          dup.join('&')
-        end
-
-        # Percent-decoded AND scrubbed: `ssrf_shaped?` runs PCRE (`BARE_HOST`) over the value and
-        # `Active.url_authority` scans chars, both of which raise on invalid UTF-8 that `%FF`
-        # decodes to. Mirrors lfi_param_traversal#decode (same reasoning, stated there in full).
-        private def decode(s : String) : String
-          URI.decode_www_form(s).scrub
-        rescue
-          s.scrub
-        end
-
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
-        end
-
-        # Reassemble the request with a new query on the request line, preserving the body and
-        # re-syncing Content-Length (mirrors OpenRedirect#rebuild_query / LfiParamTraversal).
-        private def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
+        private def key_string(detail : Store::FlowDetail, surface : InsertionPoints::Surface,
+                               slot : InsertionPoints::Slot) : String
+          InsertionPoints.dedup_key("ssrf_oast", detail, surface.method, surface.path, [slot])
         end
       end
     end
