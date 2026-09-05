@@ -518,6 +518,12 @@ module Gori::Tui
       set_focus(:results)
     end
 
+    # Re-entry from the tab bar / strip: the pane stays, the SNI sub-field does not (the
+    # rule above — going away and coming back must not route URL keystrokes into @sni).
+    def focus_resume : Nil
+      @target_field = :url
+    end
+
     def focus_pane(pane : Symbol) : Nil
       return unless PANE_ORDER.includes?(pane)
       commit_chain_pane if @chain_focused
@@ -2349,6 +2355,11 @@ module Gori::Tui
     def template_scroll_view(step : Int32) : Nil
       return if chain_pane_active?
       @editor.scroll_view(step)
+    end
+
+    # The template editor's viewport offset — what a wheel notch over the TEMPLATE moves.
+    def template_scroll : Int32
+      @editor.scroll
     end
 
     # One selection model per mode — see RepeaterView#request_copy_text, which this mirrors.

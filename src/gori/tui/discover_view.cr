@@ -342,6 +342,14 @@ module Gori::Tui
       {inner.y + hdr, {list_h - hdr, 1}.max, detail_h > 0 ? inner.y + list_h : -1}
     end
 
+    @runs_last_h = 0     # rows the RUNS card drew last frame — the PgUp/PgDn step
+    @findings_last_h = 0 # same for FINDINGS
+
+    # The PgUp/PgDn step for the focused card: last drawn rows minus two of overlap.
+    def page_rows : Int32
+      {(@focus == :runs ? @runs_last_h : @findings_last_h) - 2, 1}.max
+    end
+
     private def render_runs(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, RUNS_TITLE, border: Frame.pane_border(focused), bg: Theme.bg)
       inner = rect.inset(1, 1)
@@ -363,6 +371,7 @@ module Gori::Tui
       Frame.border_meta(screen, rect, RUNS_TITLE, @runs.size.to_s, right_edge: badge_x - 1)
 
       rows_y, rows_cap, detail_y = run_bands(rect)
+      @runs_last_h = rows_cap
       runs_header_row(screen, inner) if rows_y > inner.y
       ensure_run_visible(rows_cap)
       rows_cap.times do |i|
@@ -506,6 +515,7 @@ module Gori::Tui
       end
       header_row(screen, inner)
       cap = inner.h - 1
+      @findings_last_h = cap
       clamp_findings(r) # before ensure_visible: the scroll anchor is derived from @fsel
       ensure_visible(cap, r)
       cap.times do |i|

@@ -922,6 +922,13 @@ module Gori::Tui
     # the body below returns early on several paths (no endpoints, the empty-state card), and a
     # dropdown that vanished exactly when the filter matched nothing would be missing from the
     # one moment an operator is most likely to be fixing a query. Mirrors HistoryView.
+    @list_last_h = 0 # rows the last tree frame drew — the PgUp/PgDn step (list_page_rows)
+
+    # One screenful of the tree, for PgUp/PgDn: last drawn rows minus two of overlap.
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
@@ -980,6 +987,7 @@ module Gori::Tui
       rows = visible_rows
       # Reserve the bottom row for the tag prompt while editing (the tree scrolls above it).
       list_h = @tagging ? {rect.h - 1, 0}.max : rect.h
+      @list_last_h = list_h
       ensure_visible(rows.size, list_h)
       (0...list_h).each do |i|
         ri = @scroll + i

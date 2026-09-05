@@ -225,6 +225,15 @@ module Gori::Tui
       true
     end
 
+    # Pointer-aware: only the diff BODY scrolls; a notch on the chip row / header is inert
+    # rather than scrolling a body the pointer is not over. Same rects `handle_click` uses.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      inner = body_rect_below_filter(rect)
+      body = view.body_rect(inner)
+      view.wheel(step) if body.contains?(mx, my) || !inner.contains?(mx, my)
+      true
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
       # Carve the sub-tab strip AND the filter bar too (like Repeater), not just the

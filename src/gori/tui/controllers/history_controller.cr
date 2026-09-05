@@ -281,6 +281,19 @@ module Gori::Tui
       true
     end
 
+    # The wheel scrolls the pane UNDER THE POINTER — the preview half the cursor is over, or
+    # the list — and never moves keyboard focus to do it. Same inset `handle_click` hit-tests
+    # with. The detail overlay has one scrollable body, so it takes the focus-free path.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return handle_wheel(step) if @host.overlay == :detail
+      if pane = @history.preview_pane_at(rect.inset(1, 1), mx, my)
+        @history.wheel_preview(pane, step)
+      else
+        @history.move(step)
+      end
+      true
+    end
+
     # esc clears the marks; Tab cycles list ↔ Req/Res preview focus when the list+preview
     # layout is active. Runs BEFORE the Body keymap, so the esc branch shadows
     # body.to-menu ONLY while marks are set — with none set, esc still pops to the tab bar.
@@ -292,12 +305,16 @@ module Gori::Tui
         @history.clear_marks
         return true
       end
-      return false unless @history.preview_enabled?
-      if ev.key.tab?
-        @history.cycle_preview_focus
-        return true
-      end
       false
+    end
+
+    # ⇥ / ⇧⇥ walk list → request preview → response preview and back; off either end the
+    # ring returns to the tab bar. This is the focus-ring hook: a `key.tab?` arm in
+    # `handle_body_key` never ran, because the Runner claims ⇥ for the ring BEFORE the body
+    # sees a key — so the `↹ preview` the hint promised was reachable by mouse only.
+    def pane_advance(dir : Int32) : Bool
+      return false unless @history.preview_enabled?
+      @history.step_preview_focus(dir)
     end
 
     # History detail drill-in: shift+arrows select, space opens the action menu.
@@ -307,13 +324,15 @@ module Gori::Tui
     # never triggers move_selection's ↑-at-top focus pop mid-page.
     def body_scroll(delta : Int32) : Bool
       end_range_gesture unless preview_scroll_focused? # a page key is cursor nav, like ↑/↓
-      # The Runner's page is a screenful of the whole body; this list draws five fewer rows
-      # (bar, header, divider, frame — one more while querying, and only its share of the
-      # preview split), so a page keyed on the body height put the cursor past what had been
-      # on screen and rows were never seen while paging. The Home/End jump passes through.
-      delta = delta.sign * @history.list_page_rows if delta.abs < Runner::JUMP_ROWS && !preview_scroll_focused?
       @history.move(delta)
       true
+    end
+
+    # The list draws fewer rows than the body (bar, header, divider, frame — one more while
+    # querying, and only its share of the preview split), so the page is the list's own
+    # measure. A focused preview pane scrolls by the Runner's body page.
+    def page_rows : Int32?
+      preview_scroll_focused? ? nil : @history.list_page_rows
     end
 
     # Two-level detail input, the direct analogue of Runner#handle_subtabs_key: the chip

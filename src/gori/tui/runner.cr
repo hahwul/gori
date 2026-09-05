@@ -1422,7 +1422,7 @@ module Gori::Tui
         # keys never reach the verb keymap (Keybind.from_event doesn't encode them), so
         # route them straight to the controller's body_scroll. A tab with no navigable
         # body returns false and the keys fall through harmlessly.
-        if (delta = page_nav_delta(ev.key)) && c.body_scroll(delta)
+        if (delta = page_nav_delta(ev.key, page: c.page_rows)) && c.body_scroll(delta)
           return
         end
       end
@@ -1434,6 +1434,16 @@ module Gori::Tui
       # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
       if id = resolve_verb_id(chord, current_scope)
         @toast = @session.registry[id].call(self) || @toast
+        return
+      end
+      # A bare printable nothing binds HERE. Say so: typed text that missed its field used to
+      # vanish letter by letter — except the letters that were Global breath keys, which
+      # fired (`s` flipped the scope lens, `c` stopped capture) with nothing on screen tying
+      # the flip to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
+      # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
+      # named key too, so the leader below is never named here).
+      if hint = Runner.unbound_key_hint(chord)
+        status(Hotkeys.expand(@session.registry, hint))
         return
       end
 
@@ -2182,6 +2192,15 @@ module Gori::Tui
       Runner.decorate_status(message, @toast_kinded, SPINNER[@spinner_frame % SPINNER.size].to_s)
     end
 
+    # The line for a printable the operator typed that nothing in the current scope (or
+    # Global) binds. Only for a BARE character: a modified chord is deliberate, and the named
+    # keys are navigation that some scopes legitimately leave unbound. `{tab.help}` resolves
+    # through `Hotkeys.expand` at the call site so a rebound `?` is what the line names.
+    def self.unbound_key_hint(chord : Verb::Chord) : String?
+      return nil if chord.ctrl || chord.alt || chord.key.size != 1
+      "‹#{Hotkeys.display_label(chord)}› — nothing bound here · space menu · {tab.help} help"
+    end
+
     # The strip line for `message`: led by `spinner` / ✓ / ✗ when `kinded` names this same
     # message, verbatim otherwise. Class-level and pure so the rule is spec-able — `Runner.new`
     # owns a terminal and appears nowhere under spec/.
@@ -2596,8 +2615,15 @@ module Gori::Tui
     # in-body list dispatch (TabController#body_scroll) and the History detail overlay.
     JUMP_ROWS = 100_000
 
+    # The page a PgUp/PgDn moves: the pane's own measure when it has one
+    # (`TabController#page_rows`), else a screenful of the body less a little overlap.
+    # Class-level and pure so the fallback is spec-able without a terminal.
+    def self.page_step(body_h : Int32, page_rows : Int32?) : Int32
+      page_rows || {body_h - 3, 3}.max
+    end
+
     private def page_nav_delta(key : Termisu::Input::Key, page : Int32? = nil) : Int32?
-      page ||= {@body_h - 3, 3}.max
+      page = Runner.page_step(@body_h, page)
       case
       when key.page_down? then page
       when key.page_up?   then -page
@@ -3584,7 +3610,7 @@ module Gori::Tui
       # `←` off the first chip.
       @subtab_find_focus = false
       @overlay = OverlayKind::None
-      view_focus_first if pane == :body
+      view_focus_resume if pane == :body
     end
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
@@ -3624,7 +3650,7 @@ module Gori::Tui
       @subtab_find_focus = false # writes @focus raw, so focus_pane's clear never runs here
       @overlay = OverlayKind::None
       on_enter_tab
-      view_focus_first
+      view_focus_resume
     end
 
     # The effective tab strip — the configured order/visibility (settings:tabs), with the
@@ -3655,8 +3681,8 @@ module Gori::Tui
       @overlay = OverlayKind::None
       on_enter_tab
       # Switching tabs on the bar (menu focus) just moves the highlight; switching
-      # while in the body drops into the new tab's first pane.
-      view_focus_first if @focus == :body
+      # while in the body lands on the pane that tab was last on.
+      view_focus_resume if @focus == :body
     end
 
     # ←/→ on the tab bar. → past the last visible tab lands on the far-right ⋯ "more"
@@ -3794,6 +3820,12 @@ module Gori::Tui
 
     private def view_focus_first : Nil
       @tabs[@active_tab]?.try(&.focus_first)
+    end
+
+    # Body re-entry from outside the Tab ring (focus_pane / focus_tab / cycle_tab): the tab
+    # keeps the pane it was last on. Only `focus_advance` — the ring — lands on an END.
+    private def view_focus_resume : Nil
+      @tabs[@active_tab]?.try(&.focus_resume)
     end
 
     private def view_focus_last : Nil

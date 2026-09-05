@@ -119,14 +119,14 @@ module Gori::Tui
       case
       when key.enter? then @notes.enter_insert!
       when c == 'i'   then @notes.enter_insert!
-      when key.up?
+      when nav_up?(ev)
         if @notes.at_top?
           save_notes
           @host.request_focus(:subtabs)
         else
           @notes.read_move(-1, 0, selecting: selecting)
         end
-      when key.down?                  then @notes.read_move(1, 0, selecting: selecting)
+      when nav_down?(ev)              then @notes.read_move(1, 0, selecting: selecting)
       when key.left?                  then @notes.read_move(0, -1, selecting: selecting)
       when key.right?                 then @notes.read_move(0, 1, selecting: selecting)
       when @notes.read_motion_key(ev) then nil # Page keys + ⇧Home/⇧End — the shared editor set

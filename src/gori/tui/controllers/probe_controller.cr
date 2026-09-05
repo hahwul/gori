@@ -89,6 +89,20 @@ module Gori::Tui
       true
     end
 
+    # ⇥ / ⇧⇥ between the findings list and its preview; off either end the ring returns to
+    # the tab bar. The focus-ring hook — a `key.tab?` arm in `handle_body_key` never ran (the
+    # Runner claims ⇥ for the ring first), so the `↹ preview` the hint promised was mouse-only.
+    def pane_advance(dir : Int32) : Bool
+      return false if rules_tab? || @probe.detail_open? || !@probe.preview_enabled?
+      @probe.step_preview_focus(dir)
+    end
+
+    def page_rows : Int32?
+      return @rules.list_page_rows if rules_tab?
+      return nil if @probe.detail_open? || (@probe.preview_enabled? && @probe.preview_focus == :preview)
+      @probe.list_page_rows
+    end
+
     def body_badge : Symbol
       :body # read-only/navigable list + detail (no inline text editor)
     end
@@ -204,6 +218,19 @@ module Gori::Tui
       true
     end
 
+    # Pointer-aware: the preview under the cursor scrolls without taking focus from the list.
+    # Same `content` rect `handle_click` hit-tests with.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      return handle_wheel(step) if rules_tab? || @probe.detail_open?
+      content = BodyChrome.content_rect(rect, strip: true)
+      if @probe.preview_enabled? && @probe.preview_at?(content, mx, my)
+        @probe.wheel_preview(step)
+      else
+        @probe.move(step)
+      end
+      true
+    end
+
     def handle_wheel(step : Int32) : Bool
       if rules_tab?
         @rules.move(step)
@@ -239,10 +266,6 @@ module Gori::Tui
         when key.down?, key.lower_j? then @probe.detail_move(1, ev.shift?)
         else                              return @probe.detail_motion_key(ev) # Home/End/PgUp/PgDn, ⇧ extending
         end
-        return true
-      end
-      if @probe.preview_enabled? && key.tab?
-        @probe.cycle_preview_focus
         return true
       end
       false

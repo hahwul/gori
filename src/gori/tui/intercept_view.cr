@@ -1104,11 +1104,18 @@ module Gori::Tui
       end
     end
 
+    @list_last_h = 0 # rows the QUEUE card drew last frame — the PgUp/PgDn step
+
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "QUEUE", bg: Theme.bg, border: Frame.pane_border(focused))
       Frame.border_meta(screen, rect, "QUEUE", @items.size.to_s)
       inner = rect.inset(1, 1)
+      @list_last_h = inner.h
       ensure_visible(inner.h)
       (0...inner.h).each do |i|
         idx = @scroll + i

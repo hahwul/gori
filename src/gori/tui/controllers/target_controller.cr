@@ -140,6 +140,10 @@ module Gori::Tui
       active_child.body_scroll(delta)
     end
 
+    def page_rows : Int32?
+      active_child.page_rows
+    end
+
     def set_preedit(text : String) : Bool
       active_child.set_preedit(text)
     end
@@ -166,6 +170,10 @@ module Gori::Tui
 
     def focus_last : Nil
       active_child.focus_last
+    end
+
+    def focus_resume : Nil
+      active_child.focus_resume
     end
 
     def on_enter : Nil

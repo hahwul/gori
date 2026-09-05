@@ -18,9 +18,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return unless Layout.usable?(w, h)
     layout = Layout.compute(w, h, statusline_active?)
     mx, my = ev.x - 1, ev.y - 1
+    # A notch scrolls a viewport; it is not "the next action", so it does not clear the
+    # toast the way a keypress or a press does — the message stays readable while the
+    # operator scrolls past what it names. (The quit arm still drops: any input disarms.)
     if ev.wheel?
       @quit_armed = false
-      @toast = nil
       return unless ev.button.wheel_up? || ev.button.wheel_down?
       handle_wheel(layout, mx, my, ev.button.wheel_up? ? -1 : 1)
     elsif ev.motion?
@@ -29,7 +31,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       finish_drag
     elsif ev.button.right?
       @quit_armed = false
-      @toast = nil
       handle_right_click(layout, mx, my)
     else
       @quit_armed = false

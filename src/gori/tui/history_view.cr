@@ -382,6 +382,17 @@ module Gori::Tui
                        end
     end
 
+    # One step along list → req → res (dir > 0) or back; false off either end, so the
+    # Runner's focus ring can leave for the tab bar there.
+    def step_preview_focus(dir : Int32) : Bool
+      order = [:list, :req, :res]
+      i = order.index(@preview_focus) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= order.size
+      @preview_focus = order[ni]
+      true
+    end
+
     def set_preview_focus(f : Symbol) : Nil
       @preview_focus = f if {:list, :req, :res}.includes?(f)
     end
@@ -393,7 +404,13 @@ module Gori::Tui
     # a COPY of the offset to `lines.size - 1` and never wrote it back, so a PageDown past the
     # end left a phantom offset that ↑ then had to walk back through before anything moved.
     def scroll_preview(delta : Int32) : Nil
-      case @preview_focus
+      wheel_preview(@preview_focus, delta)
+    end
+
+    # Scroll ONE preview pane by name — the wheel's entry, which reads the pane under the
+    # pointer without moving keyboard focus to it. `scroll_preview` is the focused-pane form.
+    def wheel_preview(pane : Symbol, delta : Int32) : Nil
+      case pane
       when :req then @preview_scroll_req = preview_scroll_clamp(@preview_scroll_req + delta, @preview_req_lines)
       when :res then @preview_scroll_res = preview_scroll_clamp(@preview_scroll_res + delta, @preview_res_lines)
       end
@@ -649,6 +666,7 @@ module Gori::Tui
       @no_flows = @rows.empty? && store.recent_flows(1).empty?
       @view_note = @rows.empty? ? empty_view_note(view, store) : nil
       @filter_dirty = false
+      prev_selected = @selected
       @selected =
         if @follow
           follow_index
@@ -657,6 +675,11 @@ module Gori::Tui
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+      # The row moved by the rows that arrived above it; move the viewport by the same amount
+      # so the highlight stays ON SCREEN WHERE IT WAS, as the unfiltered insert path does
+      # (`on_event`: `@selected += 1; @scroll += 1`). Without this a filtered list under
+      # capture crept the highlight down one row per matching flow until it hit the edge.
+      @scroll = {@scroll + (@selected - prev_selected), 0}.max unless @follow
     end
 
     # A short note explaining a filter that matches nothing because it is INVALID (vs a

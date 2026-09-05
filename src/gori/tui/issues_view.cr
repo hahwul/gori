@@ -787,6 +787,14 @@ module Gori::Tui
       end
     end
 
+    @list_last_h = 0 # rows the last list frame drew — the PgUp/PgDn step (list_page_rows)
+
+    # One screenful of the list, for PgUp/PgDn: the rows the last frame drew minus two of
+    # overlap (the History convention).
+    def list_page_rows : Int32
+      {@list_last_h - 2, 1}.max
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       render_filter_bar(screen, rect)
       screen.text(rect.x + 1, rect.y + 1, "SEV", Theme.muted)
@@ -795,6 +803,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, rect.y + 2, border: Frame.pane_border(focused))
       top = rect.y + 3
       list_h = {rect.bottom - top, 0}.max
+      @list_last_h = list_h
 
       if @issues.empty?
         render_empty_list(screen, rect, top)
@@ -902,7 +911,10 @@ module Gori::Tui
       screen.fill(body, Theme.selection_dim) if active
       bg = active ? Theme.selection_dim : Theme.bg
       lines = issues_preview_lines(f)
-      sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      # Write the clamp back (as Probe's twin does) so overscrolling a short preview can't
+      # inflate @preview_scroll and leave later scroll-up presses dead until it drains back.
+      @preview_scroll = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      sc = @preview_scroll
       w = {body.w - 2, 0}.max
       (0...body.h).each do |i|
         li = sc + i

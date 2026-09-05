@@ -880,14 +880,6 @@ module Gori::Tui
       when key.down?, key.lower_j?
         @view.move_row(1)
         true
-      when key.tab?
-        @view.move_trial(1)
-        true
-      when key.back_tab?
-        # The pair, not just ⇥: the sub-cursor wraps, so with eight identities stepping BACK one
-        # row meant seven forward presses and eight response panes redrawn on the way.
-        @view.move_trial(-1)
-        true
       when key.page_up?
         @view.scroll_detail(-10)
         true
@@ -904,6 +896,25 @@ module Gori::Tui
 
     def handle_wheel(step : Int32) : Bool
       @view.scroll_detail(step)
+      true
+    end
+
+    # ⇥ / ⇧⇥ step the identity sub-cursor — the focus-ring hook, not a `key.tab?` arm: the
+    # Runner claims ⇥ for the ring BEFORE the body sees a key, so the arms that used to sit
+    # in `handle_body_key` never ran and the `⇥ identity` the hint promised went to the tab
+    # bar instead. The pair, not just ⇥: the sub-cursor wraps, so with eight identities
+    # stepping BACK one row meant seven forward presses. Always true — the identities are a
+    # ring of their own, and esc is the way out to the tab bar.
+    def pane_advance(dir : Int32) : Bool
+      return false unless @view.any_requests?
+      @view.move_trial(dir)
+      true
+    end
+
+    # Home/End jump the response detail to its ends (PgUp/PgDn page it from the body arms).
+    def body_scroll(delta : Int32) : Bool
+      return false unless delta.abs >= Runner::JUMP_ROWS
+      @view.scroll_detail(delta)
       true
     end
 

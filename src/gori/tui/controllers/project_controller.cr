@@ -500,10 +500,10 @@ module Gori::Tui
       case
       when key.enter?, c == 'i'
         @project_view.enter_desc_insert!
-      when key.up?
+      when nav_up?(ev)
         # ⇧↑ stays in the pane: leaving mid-extend abandons a selection being built.
         (@project_view.at_top? && !selecting) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
-      when key.down?                              then @project_view.desc_read_move(1, 0, selecting: selecting)
+      when nav_down?(ev)                          then @project_view.desc_read_move(1, 0, selecting: selecting)
       when key.left?                              then @project_view.desc_read_move(0, -1, selecting: selecting)
       when key.right?                             then @project_view.desc_read_move(0, 1, selecting: selecting)
       when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set

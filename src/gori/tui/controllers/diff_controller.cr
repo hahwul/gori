@@ -74,6 +74,10 @@ module Gori::Tui
       true
     end
 
+    def page_rows : Int32?
+      @diff.list_page_rows
+    end
+
     def handle_wheel(step : Int32) : Bool
       @diff.move(step)
       true
