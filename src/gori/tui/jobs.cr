@@ -36,7 +36,7 @@ module Gori::Tui
 
     # Per-kind gerund for the activity chip when exactly one kind is active. A Hash (not
     # a case) keeps activity_label flat; unknown kinds fall back to "jobs".
-    KIND_LABELS = {:miner => "mining", :scan => "scanning", :fuzz => "fuzzing", :discover => "discovering", :minimize => "minimizing", :sequence => "sequencing", :oast => "listening"}
+    KIND_LABELS = {:miner => "mining", :scan => "scanning", :fuzz => "fuzzing", :discover => "discovering", :minimize => "minimizing", :sequence => "sequencing", :oast => "listening", :authorize => "authorizing", :fuzz_save => "saving results", :fuzz_load => "loading results"}
 
     CAP = 50 # cap finished jobs kept (running ones are never pruned)
 
