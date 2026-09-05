@@ -8,11 +8,14 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
-      # Two shell scripts the jobs below actually execute, neither of which matches
+      # Three shell scripts the jobs below actually execute, none of which matches
       # `**/*.cr`: without these lines a change to the spec partition or to the bench
       # type-check would merge without the job that runs it ever waking up.
       - scripts/spec_shard.sh
       - scripts/bench_check.sh
+      - scripts/ameba_gate.sh
+      # …and the lint gate's config: a relaxed or added rule must wake `lint-gate`.
+      - .ameba.yml
       # Generated from shard.lock, and checked against it by `build-crystal`. The
       # lock is already listed above, which covers the drift that matters (a bump
       # landing without the regeneration); this line covers the other direction —

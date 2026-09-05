@@ -70,7 +70,10 @@ docker-run tag="gori:dev" *args:
 # object cache barely helps (~35 s warm), and skipping DWARF takes ~17% off that. What it
 # costs: an UNEXPECTED exception's backtrace shows mangled names without file:line —
 # assertion failures still print `# spec/x_spec.cr:LINE`. CI keeps debug info (ci.yml).
-# For the backtrace of a crashing example, rerun that file: `just test-file spec/x_spec.cr`.
+# For the backtrace of a crashing example, rerun that file: `just test-file spec/x_spec.cr`,
+# the one spec recipe that keeps debug info. Every other one passes the flag too: the object
+# cache keys on bitcode, debug metadata is part of it, and alternating debug and no-debug
+# runs re-emits every unit both ways.
 [group('development')]
 test:
     crystal spec --no-debug
@@ -85,7 +88,7 @@ test-changed base="origin/main":
     files=$(scripts/spec_for_changes.sh {{base}})
     if [ -z "$files" ]; then echo "test-changed: no spec mirrors what changed against {{base}}"; exit 0; fi
     echo "$files" | sed 's/^/  /'
-    crystal spec $files
+    crystal spec --no-debug $files
 
 # Run the spec files CI's matrix gives one runner, e.g. `just test-shard 2` for the
 # third of four. The partition is a function of the tree (scripts/spec_shard.sh), so
@@ -94,7 +97,7 @@ test-changed base="origin/main":
 # Run one CI spec shard locally (INDEX is 0-based).
 [group('development')]
 test-shard index total="4":
-    crystal spec $(scripts/spec_shard.sh {{index}} {{total}})
+    crystal spec --no-debug $(scripts/spec_shard.sh {{index}} {{total}})
 
 # Run one spec file (or dir), e.g. `just test-file spec/store_spec.cr`.
 [group('development')]
@@ -104,51 +107,51 @@ test-file path:
 # Run every spec under one `spec/<area>` dir for fast feedback while iterating.
 [group('development')]
 test-tui:
-    crystal spec spec/tui
+    crystal spec --no-debug spec/tui
 
 [group('development')]
 test-store:
-    crystal spec spec/store
+    crystal spec --no-debug spec/store
 
 [group('development')]
 test-proxy:
-    crystal spec spec/proxy
+    crystal spec --no-debug spec/proxy
 
 [group('development')]
 test-verb:
-    crystal spec spec/verb
+    crystal spec --no-debug spec/verb
 
 [group('development')]
 test-repeater:
-    crystal spec spec/repeater
+    crystal spec --no-debug spec/repeater
 
 [group('development')]
 test-discover:
-    crystal spec spec/discover
+    crystal spec --no-debug spec/discover
 
 [group('development')]
 test-miner:
-    crystal spec spec/miner
+    crystal spec --no-debug spec/miner
 
 [group('development')]
 test-oast:
-    crystal spec spec/oast
+    crystal spec --no-debug spec/oast
 
 [group('development')]
 test-sequencer:
-    crystal spec spec/sequencer
+    crystal spec --no-debug spec/sequencer
 
 [group('development')]
 test-import:
-    crystal spec spec/import
+    crystal spec --no-debug spec/import
 
 [group('development')]
 test-mcp:
-    crystal spec spec/mcp
+    crystal spec --no-debug spec/mcp
 
 [group('development')]
 test-settings:
-    crystal spec spec/settings
+    crystal spec --no-debug spec/settings
 
 # Check code format and lint without changing files, plus the shards.nix drift gate —
 # the point of that gate is that forgetting `just nix-shards` is silent, and a
