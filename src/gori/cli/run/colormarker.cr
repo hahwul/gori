@@ -3,6 +3,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("colormarker", help: [
+        {"colormarker", "Manage History row-colour rules (list, add, rm, enable/disable, move, preview)"},
+      ])]
       private def self.cmd_colormarker(args : Array(String)) : Nil
         case sub = args.first?
         when "add"             then cmd_colormarker_add(args[1..])

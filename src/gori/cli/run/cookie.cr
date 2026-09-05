@@ -8,6 +8,9 @@ module Gori
       # + the MCP cookie_* tools (all drive the pure Gori::Cookie engine). `--type` pins the
       # format (flask/rack/django); `--format` picks the OUTPUT shape (text/json), matching
       # `gori run jwt`.
+      @[Subcommand("cookie", help: [
+        {"cookie [<cookie>]", "Decode, verify, brute-force, or forge a Flask/Rack/Django session cookie"},
+      ])]
       private def self.cmd_cookie(args : Array(String)) : Nil
         action = :decode
         type = nil.as(String?)

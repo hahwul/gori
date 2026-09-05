@@ -2,6 +2,10 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("sitemap", help: [
+        {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
+        {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
+      ])]
       private def self.cmd_sitemap(args : Array(String)) : Nil
         # `tag` is reserved as the first positional; a QL query starting with it goes
         # through --query (same convention as `gori run probe`'s subcommands).

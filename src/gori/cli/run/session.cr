@@ -15,6 +15,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("session", help: [
+        {"session", "Manage session slots — named identities a send goes out as (list, show, add, from-flow, edit, rm, baseline)"},
+      ])]
       private def self.cmd_session(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_session_add(args[1..])

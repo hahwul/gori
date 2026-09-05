@@ -26,6 +26,10 @@ module Gori
         # every result is about a ClientHello the tab never sends. `--tls-preset` overrides it.
         tls_preset : String? = nil
 
+      @[Subcommand("fuzz", help: [
+        {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
+        {"fuzz save/list/show", "Persist and inspect complete fuzz-run results (delete removes one)"},
+      ])]
       private def self.cmd_fuzz(args : Array(String)) : Nil
         case args.first?
         when "save"   then cmd_fuzz_execute(args[1..], save_results: true)

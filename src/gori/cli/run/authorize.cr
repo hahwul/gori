@@ -4,6 +4,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("authorize", help: [
+        {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},
+      ])]
       private def self.cmd_authorize(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

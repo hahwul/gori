@@ -2,6 +2,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("mine", help: [
+        {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
+      ])]
       private def self.cmd_mine(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

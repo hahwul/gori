@@ -4,6 +4,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("links", help: [
+        {"links", "List/add/delete an issue's or note's evidence links"},
+      ])]
       private def self.cmd_links(args : Array(String)) : Nil
         case sub = args.first?
         when "add"          then cmd_links_mutate(args[1..], add: true)

@@ -5,6 +5,9 @@ module Gori
       # Subcommand dispatch only — the listing/export body lives in cmd_issues_list so this
       # `case` can grow without pushing the (already large) list command over the
       # cyclomatic-complexity bar.
+      @[Subcommand("issues", help: [
+        {"issues", "List, export, create, update, or delete issues (text, json, markdown)"},
+      ])]
       private def self.cmd_issues(args : Array(String)) : Nil
         case sub = args.first?
         when "create"       then cmd_issues_create(args[1..])

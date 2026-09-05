@@ -3,6 +3,9 @@
 module Gori
   module CLI
     module Run
+      @[Subcommand("sequence", "seq", help: [
+        {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
+      ])]
       private def self.cmd_sequence(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

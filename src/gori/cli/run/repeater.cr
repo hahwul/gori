@@ -18,6 +18,12 @@ module Gori
       #
       # Matched on argv[0] only, so a subcommand name is never confused with the flow id the
       # bare form takes.
+      @[Subcommand("repeater", help: [
+        {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
+        {"repeater move", "Rearrange the sub-tab strip: move a session to a tab number (--to N) or one place (--up/--down)"},
+        {"repeater delete", "Delete saved repeater sessions by id (needs --yes)"},
+      ])]
       private def self.cmd_repeater(args : Array(String)) : Nil
         sub = args.first?
         if sub == "list"

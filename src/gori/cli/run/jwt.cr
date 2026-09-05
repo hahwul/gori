@@ -6,6 +6,9 @@ module Gori
       # not a captured flow — so no project/db resolution. Mirrors the TUI JWT tab + the
       # MCP jwt_* tools (all three drive the pure Gori::Jwt engine).
 
+      @[Subcommand("jwt", help: [
+        {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
+      ])]
       private def self.cmd_jwt(args : Array(String)) : Nil
         action = :decode
         alg = "HS256"

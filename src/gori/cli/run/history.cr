@@ -6,6 +6,11 @@ module Gori
       # `delete`/`clear`/`show` are reserved as the first positional (same convention as
       # `gori run probe`); a QL query starting with one goes through --query. `history show
       # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
+      @[Subcommand("history", "ls", help: [
+        {"history (ls)", "List / QL-query captured flows"},
+        {"history delete", "Hard-delete one captured flow by id, or every match of -q QL (needs --yes)"},
+        {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
+      ])]
       private def self.cmd_history(args : Array(String)) : Nil
         case args.first?
         when "delete", "rm" then cmd_history_delete(args[1..])
@@ -667,6 +672,9 @@ module Gori
 
       # --- show --------------------------------------------------------------
 
+      @[Subcommand("show", help: [
+        {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, curl/python/fetch/go/httpie, or a CSRF PoC)"},
+      ])]
       private def self.cmd_show(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
