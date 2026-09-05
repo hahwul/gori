@@ -1369,6 +1369,14 @@ module Gori::Tui
     end
 
     # Inverts render's marker column `rect.x + 1 + depth*2` for visible_rows[ri].
+    # Whether row `idx` is an endpoint (nothing to expand) rather than a folder. A grouped
+    # fold reads as a folder: it has children to show, even when its own path is synthetic.
+    def leaf_at?(idx : Int32) : Bool
+      row = visible_rows[idx]?
+      return false unless row
+      row.node.leaf?
+    end
+
     def marker_hit?(rect : Rect, mx : Int32, ri : Int32) : Bool
       row = visible_rows[ri]?
       return false unless row

@@ -59,6 +59,12 @@ class FakeHost
   def open_help_query(surface : Symbol) : Nil
   end
 
+  getter sitemap_opens = 0
+
+  def sitemap_open_flow : Nil
+    @sitemap_opens += 1
+  end
+
   def open_space_menu : Nil
   end
 
