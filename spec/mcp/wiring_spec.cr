@@ -29,7 +29,7 @@ private def recording_origin(conns = 1) : {Int32, Channel(Bytes)}
   spawn do
     conns.times do
       break unless conn = server.accept?
-      spawn do
+      spawn_with(conn) do |conn|
         buf = IO::Memory.new
         begin
           conn.read_timeout = 400.milliseconds
@@ -78,7 +78,7 @@ private def html_origin : Int32
   port = server.local_address.port
   spawn do
     while conn = server.accept?
-      spawn do
+      spawn_with(conn) do |conn|
         begin
           conn.read_timeout = 2.seconds
           body = "<html><body>no links here</body></html>"

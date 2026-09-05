@@ -691,7 +691,7 @@ describe Gori::Proxy::Tls::Tunnel do
         attempts.times do
           s = listener.accept
           accepted << s
-          spawn do
+          spawn_with(s) do |s|
             tunnel.intercept("acme.test", 443, s, RecordingSink.new(Channel(Nil).new(1)),
               tls_upstream: false)
           rescue

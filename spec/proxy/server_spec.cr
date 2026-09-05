@@ -595,7 +595,7 @@ describe Gori::Proxy::Server do
     origin_port = origin.local_address.port
     spawn do
       while conn = origin.accept?
-        spawn do
+        spawn_with(conn) do |conn|
           n = 0
           while head = Gori::Proxy::Codec::Http1.read_head(conn)
             n += 1
@@ -639,7 +639,7 @@ describe Gori::Proxy::Server do
     origin_port = origin.local_address.port
     spawn do
       while conn = origin.accept?
-        spawn do
+        spawn_with(conn) do |conn|
           n = 0
           while head = Gori::Proxy::Codec::Http1.read_head(conn)
             n += 1

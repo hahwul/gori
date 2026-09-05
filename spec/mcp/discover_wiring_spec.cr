@@ -41,7 +41,7 @@ private def html_origin : Int32
   port = server.local_address.port
   spawn do
     while conn = server.accept?
-      spawn do
+      spawn_with(conn) do |conn|
         begin
           conn.read_timeout = 2.seconds
           body = "<html><body>no links here</body></html>"

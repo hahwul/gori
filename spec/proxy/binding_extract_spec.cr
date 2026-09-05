@@ -61,7 +61,7 @@ private def start_origin(response : Bytes, seen : Array(String)) : Int32
   port = origin.local_address.port
   spawn do
     while conn = origin.accept?
-      spawn do
+      spawn_with(conn) do |conn|
         head = Gori::Proxy::Codec::Http1.read_head(conn)
         seen << String.new(head) if head
         conn.write(response)

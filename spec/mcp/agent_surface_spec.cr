@@ -53,7 +53,7 @@ private def recording_origin(conns = 1) : {Int32, Channel(Bytes)}
   spawn do
     conns.times do
       break unless conn = server.accept?
-      spawn do
+      spawn_with(conn) do |conn|
         buf = IO::Memory.new
         begin
           conn.read_timeout = 300.milliseconds

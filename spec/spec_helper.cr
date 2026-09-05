@@ -80,6 +80,22 @@ def tools_for(store : Gori::Store, allow_actions = true, verify_upstream = false
   Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
 end
 
+# Hand a fresh value to a new fiber. The origin loops in this tree are all
+#
+#     while conn = server.accept?
+#       spawn_with(conn) do |conn|   # NOT `spawn do`
+#
+# because a `spawn do … conn … end` block captures the LOOP VARIABLE by reference, and the
+# next `accept?` reassigns it before the fiber runs. Two clients dialling back to back then
+# both get served on the second socket while the first is never read: the engine under
+# test blocks on it until the GC finalises the orphaned socket, which is why one discover
+# example cost 30 s inside the full suite and 1 s alone. AGENTS.md lists the same trap for
+# `proxy/server.cr`. A method parameter is a fresh binding per call, so the block here
+# closes over this call's value and nothing else.
+def spawn_with(value : T, &block : T -> Nil) : Nil forall T
+  spawn { block.call(value) }
+end
+
 # NEVER a bare `Channel#receive` in a spec driven by real sockets — use this instead.
 #
 # PR #555 hung CI for 24 minutes on exactly that. The suite was green on macOS; on Linux a
