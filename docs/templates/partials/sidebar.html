@@ -29,10 +29,12 @@
     <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
   </symbol>
 </svg>
-{# The rail is a bare sticky column inside the centered docs grid — no panel
-   background of its own. The aside is its own scroller (natural height capped
-   at the viewport), carrying the fade mask and the hover-revealed scrollbar. #}
-<aside class="docs-sidebar">
+<aside class="docs-sidebar" aria-label="{{ "sidebar.title" | t }}">
+  <details class="sidebar-browser tui-panel" open>
+    <summary class="panel-title"><span>{{ "sidebar.title" | t }}</span><span class="panel-toggle" aria-hidden="true"></span></summary>
+    <div class="sidebar-body">
+    <button class="sidebar-search" type="button" onclick="openSearch()"><span>{{ "a11y.search_docs" | t }}</span><kbd>/</kbd></button>
+    <nav aria-label="{{ "sidebar.title" | t }}">
   {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name != "" and sec.language == page_language %}
   {# Icons key off the section slug, not the (translated) title, so both
      languages get the same glyph. New sections fall back to the folder. #}
@@ -45,7 +47,7 @@
     <summary class="sidebar-title">
       <svg class="sidebar-icon" aria-hidden="true"><use href="#{{ icon }}"/></svg>
       <span class="sidebar-title-text">{{ sec.title | e }}</span>
-      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      <span class="sidebar-caret" aria-hidden="true"></span>
     </summary>
     <ul class="sidebar-links">
       <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "sidebar.overview" | t }}</a></li>
@@ -59,4 +61,7 @@
     </ul>
   </details>
   {% endif %}{% endfor %}
+    </nav>
+    </div>
+  </details>
 </aside>

@@ -14,6 +14,7 @@ x = "View on X"
 
 
 [a11y]
+breadcrumb = "Breadcrumb"
 skip_to_content = "Skip to content"
 primary_nav = "Primary"
 language = "Language"
@@ -42,7 +43,13 @@ copied = "Copied"
 placeholder = "Search the docs…"
 
 [sidebar]
+title = "Documentation"
 overview = "Overview"
+
+[toc]
+title = "On this page"
+top = "Back to top"
+anchor = "Link to heading"
 
 [section]
 in_this_section = "In This Section"

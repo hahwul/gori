@@ -204,18 +204,12 @@
 {% else %}
 <div class="docs-container">
 {% include "partials/sidebar.html" %}
+{% include "partials/toc.html" %}
   <main id="main" class="docs-main">
-    {# Section kicker: the same mono-caps voice as the landing path links,
-       so a doc page opens by naming where in the IA you are standing. #}
-    {% if page.section == "getting-started" %}<p class="doc-kicker">{{ "nav.start" | t }}</p>
-    {% elif page.section == "playbooks" %}<p class="doc-kicker">{{ "nav.playbooks" | t }}</p>
-    {% elif page.section == "guide" %}<p class="doc-kicker">{{ "nav.guide" | t }}</p>
-    {% elif page.section == "reference" %}<p class="doc-kicker">{{ "nav.reference" | t }}</p>
-    {% endif %}
+    {% include "partials/doc-path.html" %}
     {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
     {{ content }}
   </main>
-  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
 </div>
 {% endif %}
 {% include "footer.html" %}

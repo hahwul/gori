@@ -14,6 +14,7 @@ x = "X에서 보기"
 
 
 [a11y]
+breadcrumb = "현재 문서 경로"
 skip_to_content = "본문으로 건너뛰기"
 primary_nav = "주요 메뉴"
 language = "언어"
@@ -42,7 +43,13 @@ copied = "복사됨"
 placeholder = "문서 검색…"
 
 [sidebar]
+title = "문서 탐색"
 overview = "개요"
+
+[toc]
+title = "이 페이지의 목차"
+top = "맨 위로"
+anchor = "제목 링크"
 
 [section]
 in_this_section = "이 섹션의 문서"

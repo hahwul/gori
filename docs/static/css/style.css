@@ -1862,17 +1862,24 @@ kbd {
   clip-path: inset(50% 0 0 0);
 }
 
-/* A centered three-track grid — rail, article, TOC — capped at the footer's
-   own width, so the footer's centered rule and the reading column share one
-   axis. The old layout ran the rail full-bleed from x:0 in a blurred panel;
-   the centered grid drops the panel chrome entirely and lets whitespace do
-   the separating. */
+/* The doc pages borrow the TUI's own furniture: two framed panes flank the
+   article — the navigator on the left, the page outline on the right — each
+   with its title cut into the top rule the way a gori pane carries its name,
+   a `[−]`/`[+]` fold at the corner, mono rows, and a solid cursor block on
+   the row you are on. The article itself stays a sans reading column; only
+   the chrome around it talks terminal.
+
+   A centered three-track grid capped at the footer's own width, so the
+   footer's centered rule and the reading column share one axis. Named areas
+   let the outline pane move above the article in the two-track range
+   instead of disappearing. */
 .docs-container {
   position: relative;
   z-index: 1;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
-  gap: 3rem;
+  grid-template-areas: "nav main toc";
+  gap: 2.6rem;
   align-items: start;
   width: min(100%, 1380px);
   margin-inline: auto;
@@ -1881,59 +1888,214 @@ kbd {
   padding-inline: clamp(1.25rem, 4vw, 2.5rem);
 }
 
-/* Sticky, not fixed: the rail stays parked under the header while the
-   article scrolls, but it still ends with the flow, so the footer spans the
-   real page width and centres on the page axis. No background, no border —
-   the link tree's own hairline is all the structure the rail needs.
+/* --- Shared pane frame (sidebar + TOC) ------------------------------------
+   The <details> draws the left/right/bottom rules; the <summary> draws the
+   top rule in segments around its title, and is pulled up by half its own
+   height so that rule lands exactly on the box's top edge. The result is a
+   `┌─ TITLE ───[−]─┐` frame with no background patch behind the title. */
+.tui-panel {
+  margin-top: 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+}
 
-   max-height, never a forced height: a sticky element gets pushed up once
-   its bottom edge hits the container's end, so a rail sized to the full
-   viewport shifted upward on EVERY page the moment the footer scrolled in.
-   At natural height the rail only moves when its content genuinely outruns
-   the space above the footer — i.e. almost never.
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 1.4rem;
+  margin-top: -0.7rem;
+  padding: 0 0.55rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
 
-   The scroller is the aside itself; the fade mask keeps a long rail's scroll
-   edge from slicing the last link mid-glyph. The fade equals the
-   padding-bottom, so at the end of the scroll the final link sits clear of
-   it and reads at full strength — the fade only ever touches content that is
-   already leaving the viewport. */
+.panel-title::-webkit-details-marker {
+  display: none;
+}
+
+/* Rule segments: a short stub before the title, the long run after it, and
+   a short stub after the fold glyph. */
+.panel-title::before,
+.panel-title::after {
+  content: "";
+  flex: none;
+  width: 0.5rem;
+  border-top: 1px solid var(--line-strong);
+}
+
+.panel-title > span:first-child {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: 0.5rem;
+  padding-left: 0.35rem;
+  white-space: nowrap;
+}
+
+.panel-title > span:first-child::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--line-strong);
+}
+
+.panel-toggle {
+  flex: none;
+  padding: 0 0.3rem;
+  color: var(--quiet);
+  font-weight: 500;
+  letter-spacing: 0;
+  transition: color var(--transition);
+}
+
+.panel-toggle::before {
+  content: "[−]";
+}
+
+.tui-panel:not([open]) .panel-toggle::before {
+  content: "[+]";
+}
+
+/* A folded pane collapses to its title rule alone — no empty box under it. */
+.tui-panel:not([open]) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.panel-title:hover .panel-toggle {
+  color: var(--heading);
+}
+
+.panel-title:focus-visible {
+  outline: none;
+}
+
+.panel-title:focus-visible .panel-toggle {
+  color: var(--accent-strong);
+}
+
+/* --- Left pane: the navigator ---------------------------------------------
+   Sticky, not fixed: the pane stays parked under the header while the
+   article scrolls, but still ends with the flow, so the footer spans the
+   real page width. The pane BODY is the scroller (natural height capped at
+   the viewport), so the frame always wraps whatever is visible. */
 .docs-sidebar {
+  grid-area: nav;
   position: sticky;
   top: var(--header-h);
-  max-height: calc(100dvh - var(--header-h));
-  padding: 3.2rem 0.85rem 2rem 0;
+  padding: 3.2rem 0 2rem;
+}
+
+.sidebar-body {
+  max-height: calc(100dvh - var(--header-h) - 6.6rem);
+  padding: 0.55rem 0 0.9rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-/* The scrollbar only surfaces while the pointer is over the rail: thin stays
+/* The scrollbar only surfaces while the pointer is over the pane: thin stays
    on either way so the gutter never shifts, only the thumb's paint toggles.
-   Same idiom on the TOC rail below. */
-.docs-sidebar:hover,
-.docs-sidebar:focus-within {
+   Same idiom on the TOC body below. */
+.sidebar-body:hover,
+.sidebar-body:focus-within,
+.toc-body:hover,
+.toc-body:focus-within {
   scrollbar-color: var(--line-strong) transparent;
 }
 
-.docs-sidebar::-webkit-scrollbar {
+.sidebar-body::-webkit-scrollbar,
+.toc-body::-webkit-scrollbar {
   width: 6px;
 }
 
-.docs-sidebar::-webkit-scrollbar-thumb {
+.sidebar-body::-webkit-scrollbar-thumb,
+.toc-body::-webkit-scrollbar-thumb {
   background: transparent;
-  border-radius: var(--radius-pill);
 }
 
-.docs-sidebar:hover::-webkit-scrollbar-thumb,
-.docs-sidebar:focus-within::-webkit-scrollbar-thumb {
+.sidebar-body:hover::-webkit-scrollbar-thumb,
+.sidebar-body:focus-within::-webkit-scrollbar-thumb,
+.toc-body:hover::-webkit-scrollbar-thumb,
+.toc-body:focus-within::-webkit-scrollbar-thumb {
   background: var(--line-strong);
 }
 
-.sidebar-section {
-  margin-bottom: 1.05rem;
+/* A prompt-shaped search row at the top of the pane: `⌕ Search docs … /`. */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% - 1.1rem);
+  margin: 0 0.55rem 0.65rem;
+  padding: 0.38rem 0.5rem 0.38rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgb(var(--ink-rgb) / 0.03);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.sidebar-search::before {
+  content: "⌕";
+  flex: none;
+  color: var(--quiet);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.sidebar-search > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-search kbd,
+.toc-top kbd {
+  flex: none;
+  min-width: 1.35rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.sidebar-search:hover,
+.sidebar-search:focus-visible {
+  border-color: var(--line-strong);
+  background: rgb(var(--ink-rgb) / 0.06);
+  color: var(--heading);
+}
+
+.sidebar-search:hover kbd {
+  color: var(--text);
+}
+
+.sidebar-section + .sidebar-section {
+  margin-top: 0.35rem;
 }
 
 /* The <symbol> sprite ships inline at the top of the sidebar partial; park it
@@ -1948,11 +2110,11 @@ kbd {
 
 /* One glyph per section, keyed to the slug in the template. Quiet by default;
    the open (being-read) section's icon takes the accent so the eye lands on
-   the right group when the rail is scanned. */
+   the right group when the pane is scanned. */
 .sidebar-icon {
   flex: none;
-  width: 1rem;
-  height: 1rem;
+  width: 0.95rem;
+  height: 0.95rem;
   color: var(--quiet);
   transition: color var(--transition);
 }
@@ -1965,19 +2127,18 @@ kbd {
   color: var(--accent-strong);
 }
 
-/* Section titles are bold sans in natural case so they read as a different
-   level from the mono-caps group labels (CORE, WORKBENCHES) inside them. */
+/* Section rows: a `▸ Guide` / `▾ Guide` fold in the mono voice of the pane. */
 .sidebar-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.34rem 0.75rem;
-  margin-bottom: 0.3rem;
-  border-radius: var(--radius-sm);
+  padding: 0.36rem 0.65rem 0.36rem 0.55rem;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.01em;
+  line-height: 1.35;
   cursor: pointer;
   list-style: none;
   transition: color var(--transition), background var(--transition);
@@ -2006,90 +2167,91 @@ kbd {
 
 .sidebar-caret {
   flex: none;
-  width: 0.9rem;
-  height: 0.9rem;
-  opacity: 0.6;
-  transition: transform var(--transition), opacity var(--transition);
+  width: 1ch;
+  color: var(--quiet);
+  font-weight: 400;
+  text-align: center;
+  transition: color var(--transition);
 }
 
-.sidebar-section[open] > .sidebar-title .sidebar-caret {
-  transform: rotate(180deg);
+.sidebar-caret::before {
+  content: "▸";
+}
+
+.sidebar-section[open] > .sidebar-title .sidebar-caret::before {
+  content: "▾";
 }
 
 .sidebar-title:hover .sidebar-caret {
-  opacity: 1;
+  color: var(--heading);
 }
 
-/* A hairline rail turns the flat link pile into a tree: pages hang off their
-   section, and the active page pins a gold marker onto the rail itself. */
+/* Page rows hang off a hairline tree under their section; the row you are
+   on is a solid cursor block with a `▸` in the gutter, edge to edge, the way
+   a list cursor paints in the TUI. */
 .sidebar-links {
   list-style: none;
-  margin-left: 1.05rem;
+  margin: 0.1rem 0 0.45rem 1.2rem;
+  padding: 0;
   border-left: 1px solid var(--line);
 }
 
 .sidebar-subhead {
-  margin: 0.75rem 0 0.2rem;
-  padding: 0 0.8rem;
+  margin: 0.8rem 0 0.15rem;
+  padding: 0 0.6rem 0 0.9rem;
   color: var(--quiet);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .sidebar-links li {
-  margin-bottom: 0.1rem;
+  margin: 0;
 }
 
 .sidebar-links a {
   position: relative;
   display: block;
-  padding: 0.38rem 0.7rem 0.38rem 0.8rem;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.3rem 0.6rem 0.3rem 1.35rem;
   color: var(--text);
-  font-size: 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
   line-height: 1.4;
   text-decoration: none;
   transition: color var(--transition), background var(--transition);
 }
 
-/* The marker sits on the rail (the ul border), not inside the link box. */
 .sidebar-links a::before {
-  content: "";
+  content: "▸";
   position: absolute;
   top: 0.3rem;
-  bottom: 0.3rem;
-  left: -1px;
-  width: 2px;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  transition: background var(--transition);
+  left: 0.45rem;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--transition);
 }
 
 .sidebar-links a:hover {
-  background: rgb(var(--ink-rgb) / 0.05);
+  background: rgb(var(--ink-rgb) / 0.06);
   color: var(--heading);
 }
 
-.sidebar-links a:hover::before {
-  background: var(--line-strong);
-}
-
 .sidebar-links a.active {
-  background: rgb(var(--accent-rgb) / 0.1);
+  background: rgb(var(--accent-rgb) / 0.16);
   color: var(--accent-strong);
   font-weight: 600;
 }
 
 .sidebar-links a.active::before {
-  background: var(--accent);
+  opacity: 1;
 }
 
 /* The grid track already sizes and gutters the column; the cap only binds in
    the two-track range (no TOC), where the track would otherwise run wide. */
 .docs-main {
+  grid-area: main;
   min-width: 0;
   max-width: var(--content-max-w);
   padding: 3.2rem 0 4rem;
@@ -2121,50 +2283,24 @@ kbd {
   color: var(--accent-strong);
 }
 
-/* Same fade as .docs-sidebar, and for the same reason — a long page's TOC
-   outruns its max-height and used to end on a sliced line. The rail carries
-   no panel of its own, so the mask goes straight on it. Keep the fade equal
-   to padding-bottom: at the end of the scroll the last heading clears it. */
+/* --- Right pane: the page outline -----------------------------------------
+   Same frame, same sticky rule. The body is the scroller; the fade equals
+   the bottom padding, so the last row reads at full strength once the
+   scroll ends. */
 .docs-toc-rail {
-  display: none;
+  grid-area: toc;
   position: sticky;
   top: var(--header-h);
-  max-height: calc(100dvh - var(--header-h));
-  padding: 3.35rem 0 2rem;
+  padding: 3.2rem 0 2rem;
+}
+
+.toc-body {
+  max-height: calc(100dvh - var(--header-h) - 6.6rem);
+  padding: 0.45rem 0 0;
   overflow-y: auto;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-}
-
-.docs-toc-rail:hover,
-.docs-toc-rail:focus-within {
-  scrollbar-color: var(--line-strong) transparent;
-}
-
-.docs-toc-rail::-webkit-scrollbar {
-  width: 6px;
-}
-
-.docs-toc-rail::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: var(--radius-pill);
-}
-
-.docs-toc-rail:hover::-webkit-scrollbar-thumb,
-.docs-toc-rail:focus-within::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-}
-
-.docs-toc-rail .toc-title {
-  margin: 0 0 0.7rem 0.7rem;
-  color: var(--quiet);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
 }
 
 .docs-toc-rail nav > ul {
@@ -2172,7 +2308,6 @@ kbd {
   margin: 0;
   padding: 0;
   list-style: none;
-  border-left: 1px solid var(--line);
 }
 
 .docs-toc-rail ul ul {
@@ -2186,44 +2321,108 @@ kbd {
 }
 
 .docs-toc-rail a {
+  position: relative;
   display: block;
-  margin-left: -1px;
-  padding: 0.3rem 0.7rem;
-  border-left: 2px solid transparent;
+  padding: 0.26rem 0.6rem 0.26rem 1.35rem;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
   line-height: 1.4;
   text-decoration: none;
-  transition: color var(--transition), border-color var(--transition);
+  transition: color var(--transition), background var(--transition);
 }
 
+/* The cursor marker shares the gutter with the h3 tree glyphs. */
+.docs-toc-rail a[data-target]::before {
+  content: "▸";
+  position: absolute;
+  top: 0.26rem;
+  left: 0.45rem;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+/* h3 rows branch off their h2 with box-drawing tees: `├` between, `└` last. */
 .docs-toc-rail ul ul a {
-  padding-left: 1.5rem;
-  font-size: 0.8rem;
+  padding-left: 2.3rem;
+}
+
+.docs-toc-rail ul ul a::after {
+  content: "├";
+  position: absolute;
+  top: 0.26rem;
+  left: 1.35rem;
+  color: var(--quiet);
+}
+
+.docs-toc-rail ul ul li:last-child a::after {
+  content: "└";
 }
 
 .docs-toc-rail a:hover {
+  background: rgb(var(--ink-rgb) / 0.06);
   color: var(--heading);
 }
 
 .docs-toc-rail a.active {
-  border-left-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.16);
   color: var(--accent-strong);
   font-weight: 600;
 }
 
-@media (min-width: 1200px) {
-  .docs-toc-rail {
-    display: block;
-  }
+.docs-toc-rail a.active::before {
+  opacity: 1;
 }
 
-/* Below the TOC's threshold the grid drops to two tracks, so the hidden rail
-   doesn't leave an empty third column gaping at the right edge. */
+/* Back-to-top is the pane's status line: a rule, then `↑ Back to top`. */
+.toc-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem 0.55rem 0.75rem;
+  border-top: 1px solid var(--line);
+  color: var(--quiet);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.toc-top::before {
+  content: "↑";
+  color: var(--accent);
+}
+
+.toc-top:hover {
+  color: var(--heading);
+}
+
+/* Below the three-track range the outline pane moves above the article
+   (folded, via toc.js) rather than vanishing. */
 @media (max-width: 1199px) {
   .docs-container {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-    gap: 2.5rem;
+    grid-template-areas:
+      "nav toc"
+      "nav main";
+    gap: 0 2.5rem;
+  }
+
+  .docs-toc-rail {
+    position: static;
+    max-width: var(--content-max-w);
+    padding: 3.2rem 0 0;
+  }
+
+  .toc-body {
+    max-height: 22rem;
+  }
+
+  .docs-toc-rail + .docs-main,
+  .docs-toc-rail ~ .docs-main {
+    padding-top: 1.6rem;
   }
 }
 
@@ -2237,16 +2436,38 @@ kbd {
   text-wrap: balance;
 }
 
-/* Section kicker above the page title: the landing path links' mono-caps
-   voice, so the page opens by naming its place in the IA. */
-.doc-kicker {
-  margin: 0 0 0.6rem;
-  color: var(--accent-strong);
+/* Path line above the page title — `GORI / GUIDE` in the panes' mono voice,
+   each crumb a link, so the page opens by naming its place in the IA the way
+   a status line names the pane you are in. */
+.doc-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.doc-path a {
+  color: var(--accent-strong);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.doc-path a:hover {
+  color: var(--heading);
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent-rgb) / 0.5);
+  text-underline-offset: 0.22em;
+}
+
+.doc-path a[aria-current="page"] {
+  color: var(--heading);
 }
 
 /* The page title closes with the same hairline every h2 opens with, so the
@@ -2254,7 +2475,7 @@ kbd {
    below, otherwise the two would stack.) The kicker, when present, sits
    above the title, so both openings are covered. */
 .docs-main > h1:first-child,
-.docs-main > .doc-kicker:first-child + h1 {
+.docs-main > .doc-path:first-child + h1 {
   /* The 13em cap above would end this rule mid-column, out of line with every
      h2 rule below it. Page titles are short enough to wrap on their own. */
   max-width: none;
@@ -2276,7 +2497,7 @@ kbd {
 }
 
 .docs-main > h1:first-child + h2,
-.docs-main > .doc-kicker:first-child + h1 + h2 {
+.docs-main > .doc-path:first-child + h1 + h2 {
   margin-top: var(--space-6);
   padding-top: 0;
   border-top: 0;
@@ -3526,18 +3747,39 @@ html.search-lock body {
     justify-self: start;
   }
 
-  .docs-sidebar {
-    display: none;
+  /* Both panes stack above the article as folded frames (toc.js folds them),
+     so a phone still reaches the whole tree and the page outline. */
+  .docs-container {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
   }
 
-  .docs-container {
-    display: block;
+  .docs-sidebar,
+  .docs-toc-rail {
+    position: static;
+    max-width: none;
+    padding: 0;
+  }
+
+  .docs-sidebar {
+    padding-top: 2.2rem;
+  }
+
+  .docs-toc-rail {
+    padding-top: 1.2rem;
+  }
+
+  .sidebar-body,
+  .toc-body {
+    max-height: 60dvh;
   }
 
   /* The container's own gutter carries the inline padding now. */
   .docs-main {
     max-width: 100%;
-    padding: 2rem 0 3rem;
+    padding: 1.8rem 0 3rem;
   }
 
   /* Wide reference tables scroll inside their own box on small screens. */

@@ -44,6 +44,16 @@
     if (e.key === 'Escape' && overlay.classList.contains('active')) {
       closeSearch();
     }
+    /* `/` opens search from anywhere on the page (the TUI's own find key),
+       unless the keystroke belongs to a text field or carries a modifier. */
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !overlay.classList.contains('active')) {
+      var t = e.target;
+      var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+      if (!typing) {
+        e.preventDefault();
+        openSearch();
+      }
+    }
   });
 
   function escapeHtml(s) {

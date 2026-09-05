@@ -1,9 +1,19 @@
 (function () {
   var rail = document.getElementById('tocRail');
   var main = document.getElementById('main');
-  if (!rail || !main) return;
+  if (!main) return;
 
+  /* Below the three-track layout the rail panels start collapsed: the
+     sidebar folds away on phones, the TOC folds away whenever it sits above
+     the article instead of beside it. Only the initial state is decided
+     here; the reader's own toggles are never overridden. */
+  var sidebar = document.querySelector('.sidebar-browser');
+  if (sidebar && window.matchMedia('(max-width: 860px)').matches) sidebar.removeAttribute('open');
+  var tocCollapsed = window.matchMedia('(max-width: 1199px)').matches;
+
+  if (!rail) return;
   var heads = Array.prototype.slice.call(main.querySelectorAll('h2[id], h3[id]'));
+  var anchorLabel = rail.getAttribute('data-anchor') || 'Link to heading';
 
   /* Hover anchors: every linkable heading gets a quiet # for copyable URLs.
      Runs after the TOC labels are read so the "#" never leaks into them. */
@@ -12,7 +22,7 @@
       var a = document.createElement('a');
       a.className = 'h-anchor';
       a.href = '#' + h.id;
-      a.setAttribute('aria-label', 'Link to "' + h.textContent + '"');
+      a.setAttribute('aria-label', anchorLabel + ': ' + h.textContent);
       a.textContent = '#';
       h.appendChild(a);
     });
@@ -24,11 +34,25 @@
     return;
   }
 
-  // Build the list: h2 = top level, h3 nested under the preceding h2.
+  /* The panel mirrors the sidebar's markup — a <details> with the title on
+     its top rule — so both rails share one set of styles. */
+  var panel = document.createElement('details');
+  panel.className = 'toc-browser tui-panel';
+  if (!tocCollapsed) panel.open = true;
+  var summary = document.createElement('summary');
+  summary.className = 'panel-title';
+  var title = document.createElement('span');
+  title.textContent = rail.getAttribute('data-title') || 'On this page';
+  var toggle = document.createElement('span');
+  toggle.className = 'panel-toggle';
+  toggle.setAttribute('aria-hidden', 'true');
+  summary.appendChild(title);
+  summary.appendChild(toggle);
+  panel.appendChild(summary);
+
+  var body = document.createElement('div');
+  body.className = 'toc-body';
   var nav = document.createElement('nav');
-  var title = document.createElement('p');
-  title.className = 'toc-title';
-  title.textContent = 'On this page';
   var ul = document.createElement('ul');
   var sub = null;
 
@@ -51,9 +75,17 @@
     }
   });
 
-  nav.appendChild(title);
   nav.appendChild(ul);
-  rail.appendChild(nav);
+  body.appendChild(nav);
+
+  var top = document.createElement('a');
+  top.className = 'toc-top';
+  top.href = '#main';
+  top.textContent = rail.getAttribute('data-top') || 'Back to top';
+  body.appendChild(top);
+
+  panel.appendChild(body);
+  rail.appendChild(panel);
   addAnchors();
 
   var byId = {};
@@ -68,12 +100,24 @@
   }
   measure();
 
+  /* Keep the cursor row inside the pane's own scroller — the pane scrolls,
+     never the page, so a long outline follows the reader without a jump. */
+  function reveal(a) {
+    var top = a.offsetTop - body.offsetTop;
+    var bottom = top + a.offsetHeight;
+    if (top < body.scrollTop) body.scrollTop = top - 8;
+    else if (bottom > body.scrollTop + body.clientHeight) body.scrollTop = bottom - body.clientHeight + 8;
+  }
+
   var activeId = null;
   function setActive(id) {
     if (id === activeId) return;
     if (activeId && byId[activeId]) byId[activeId].classList.remove('active');
     activeId = id;
-    if (id && byId[id]) byId[id].classList.add('active');
+    if (id && byId[id]) {
+      byId[id].classList.add('active');
+      reveal(byId[id]);
+    }
   }
 
   function atBottom() {

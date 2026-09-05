@@ -3,7 +3,9 @@
 {% include "partials/search.html" %}
 <div class="docs-container">
 {% include "partials/sidebar.html" %}
+{% include "partials/toc.html" %}
   <main id="main" class="docs-main">
+    {% include "partials/doc-path.html" %}
     {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
     {{ content }}
 
@@ -13,6 +15,5 @@
     </ul>
     {{ pagination }}
   </main>
-  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
 </div>
 {% include "footer.html" %}

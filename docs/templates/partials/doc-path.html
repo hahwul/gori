@@ -1,0 +1,7 @@
+<nav class="doc-path" aria-label="{{ "a11y.breadcrumb" | t }}">
+  <a href="{{ base_url }}{{ lang_prefix }}/">gori</a>
+  <span aria-hidden="true">/</span>
+  {% for sec in site.sections %}{% if sec.name == page.section and sec.language == page_language %}
+  <a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} aria-current="page"{% endif %}>{{ sec.title | e }}</a>
+  {% endif %}{% endfor %}
+</nav>
