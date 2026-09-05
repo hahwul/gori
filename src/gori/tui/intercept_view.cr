@@ -48,7 +48,7 @@ module Gori::Tui
     # The highlighter's field vocabulary. This backend's `FIELDS` really is the whole of what it
     # accepts (the comment there requires it to stay in lockstep with `field_symbol`), so unlike
     # History there is no wider accepted set to reach for.
-    GATE_KNOWN = ->(f : String) { InterceptFilter::FIELDS.includes?(f) }
+    GATE_KNOWN = ->(f : String, op : Char) { InterceptFilter.known_field?(f, regex: op == '~') }
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the condition text is indented.
     QUERY_PREFIX = "catch › "
@@ -969,7 +969,7 @@ module Gori::Tui
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD, GATE_KNOWN))
+          colors: Highlight.filter_query(@query, Theme.text_bright, known: GATE_KNOWN))
         return
       end
 
@@ -993,7 +993,7 @@ module Gori::Tui
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.
         x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, GATE_KNOWN),
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, known: GATE_KNOWN),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
     end

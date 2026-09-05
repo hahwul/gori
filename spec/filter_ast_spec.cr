@@ -17,6 +17,16 @@ private def parse(query : String) : String
   sexp(Gori::FilterAst.parse(query))
 end
 
+# How many NOT-wrapped groups a tree holds (a negated TERM carries its flag instead).
+private def not_nodes(node : Gori::FilterAst::Node?) : Int32
+  case node
+  when Gori::FilterAst::NotNode then 1 + not_nodes(node.child)
+  when Gori::FilterAst::AndNode then node.children.sum { |c| not_nodes(c) }
+  when Gori::FilterAst::OrNode  then node.children.sum { |c| not_nodes(c) }
+  else                               0
+  end
+end
+
 describe Gori::FilterAst do
   it "ANDs adjacent terms and accepts the AND keyword for the same thing" do
     parse("host:acme status:>=500").should eq(%((and host:acme status:>=500)))
@@ -38,7 +48,7 @@ describe Gori::FilterAst do
   # `host:acme`, while the backend free-texts the whole token and matches nothing real — the one
   # visible signal saying the opposite of the truth.
   describe ".spans with a known-field predicate" do
-    private_known = ->(f : String) { f == "host" }
+    private_known = ->(f : String, _op : Char) { f == "host" }
 
     it "marks a field the backend does not implement, and its value with it" do
       kinds = Gori::FilterAst.spans("hsot:acme", ":~", private_known).map { |s| {s.size, s.kind} }
@@ -69,6 +79,37 @@ describe Gori::FilterAst do
       Gori::FilterAst.spans("hsot:acme").map(&.kind)
         .should eq([Gori::FilterAst::SpanKind::Field, Gori::FilterAst::SpanKind::Value])
     end
+
+    it "asks the predicate per separator, so a field with no `~` form is unknown under `~`" do
+      # QL has `status:` and no `status~`; the term is DROPPED, and painting it as a field
+      # claimed a regex match nobody performs.
+      by_op = ->(f : String, op : Char) { f == "status" ? op == ':' : f == "host" }
+      Gori::FilterAst.spans("status:5xx", ":~", by_op).first.kind.should eq(Gori::FilterAst::SpanKind::Field)
+      Gori::FilterAst.spans("status~5..", ":~", by_op).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::UnknownField, Gori::FilterAst::SpanKind::Plain])
+      Gori::FilterAst.spans("host~^api", ":~", by_op).first.kind.should eq(Gori::FilterAst::SpanKind::Field)
+    end
+
+    it "paints a fully-quoted field token as the field the parser runs it as" do
+      # The grammar strips quotes BEFORE any backend splits a token, so `"host:a"` compiles
+      # exactly as `host:a` (QL's spec pins that quoting is not an escape). The highlighter used
+      # to read the leading quote as "this is a phrase" and paint the one token plain — the
+      # colour said free text while the parser ran a field.
+      q = %("host:a")
+      Gori::FilterAst.spans(q, ":~", private_known).map { |s| {s.kind, q[s.start, s.size]} }.should eq([
+        {Gori::FilterAst::SpanKind::Quote, "\""}, {Gori::FilterAst::SpanKind::Field, "host:"},
+        {Gori::FilterAst::SpanKind::Value, "a"}, {Gori::FilterAst::SpanKind::Quote, "\""},
+      ])
+      # ...and it is the same reading the parser gives.
+      Gori::FilterAst.terms(Gori::FilterAst.parse(q)).map(&.text).should eq(["host:a"])
+      # An unknown name inside quotes paints unknown, as it does unquoted.
+      Gori::FilterAst.spans(%("hsot:a"), ":~", private_known).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::Quote, Gori::FilterAst::SpanKind::UnknownField,
+                    Gori::FilterAst::SpanKind::Plain, Gori::FilterAst::SpanKind::Quote])
+      # A quoted phrase with no separator is still plain text.
+      Gori::FilterAst.spans(%("two words"), ":~", private_known).map(&.kind)
+        .should eq([Gori::FilterAst::SpanKind::Quote, Gori::FilterAst::SpanKind::Plain, Gori::FilterAst::SpanKind::Quote])
+    end
   end
 
   it "treats NOT on a single term as identical to the - prefix" do
@@ -77,8 +118,52 @@ describe Gori::FilterAst do
     parse("NOT NOT host:cdn").should eq("host:cdn")
   end
 
-  it "wraps NOT around a group (which - cannot express)" do
+  it "wraps NOT around a group" do
     parse("NOT (host:cdn OR host:static)").should eq("(not (or host:cdn host:static))")
+  end
+
+  it "reads a negation marker FUSED to the opening paren — `-(` and `NOT(` — as NOT (" do
+    # Both are the natural spellings for anyone who has written a boolean expression, and
+    # `-term` == `NOT term` everywhere else made `-(` look supported. It was not: the `(` was not
+    # at the start of its chunk, so `-(host:a OR host:b)` lexed as the negated free-text word
+    # `(host:a` OR'd with the field `host:b)` — plausible-looking on the list, and the opposite of
+    # what was typed.
+    parse("-(host:cdn OR host:static)").should eq("(not (or host:cdn host:static))")
+    parse("NOT(host:cdn OR host:static)").should eq("(not (or host:cdn host:static))")
+    parse("x -(a b)").should eq("(and x (not (and a b)))")
+    parse("-((a))").should eq("-a") # a lone term inside still flips its own flag
+    parse("NOT(a) b").should eq("(and -a b)")
+    parse("(NOT(a))").should eq("-a")
+    # Forgiving about the half-typed forms, like every other structure.
+    parse("-(").should eq("nil")
+    parse("-()").should eq("nil")
+    parse("NOT()").should eq("nil")
+    parse("-(ho").should eq("-ho") # a lone term inside flips its own flag
+    # The marker must be UNQUOTED, exactly like `-x` and the `NOT` keyword.
+    parse("\"-(a\"").should eq("-(a")
+    parse("-\"(a\"").should eq("-(a")
+    parse("\"NOT(a\"").should eq("NOT(a")
+    # Lowercase is not the keyword, here as anywhere.
+    parse("not(a)").should eq("not(a)")
+  end
+
+  it "paints the fused marker as an operator and its paren as a paren" do
+    kinds = Gori::FilterAst.spans("-(a OR b)").map { |s| {s.kind, "-(a OR b)"[s.start, s.size]} }
+    kinds.should eq([
+      {Gori::FilterAst::SpanKind::Operator, "-"}, {Gori::FilterAst::SpanKind::Paren, "("},
+      {Gori::FilterAst::SpanKind::Plain, "a"}, {Gori::FilterAst::SpanKind::Operator, "OR"},
+      {Gori::FilterAst::SpanKind::Plain, "b"}, {Gori::FilterAst::SpanKind::Paren, ")"},
+    ])
+    Gori::FilterAst.spans("NOT(a)").first.should eq(Gori::FilterAst::Span.new(0, 3, Gori::FilterAst::SpanKind::Operator))
+  end
+
+  it "carries the fused marker in the completion prefix, so `-(ho` completes to `-(host:`" do
+    Gori::FilterAst.token_at("-(ho", 4).should eq(Gori::FilterAst::Cursor.new("-(", "ho", 0, 4))
+    Gori::FilterAst.token_at("NOT(ho", 6).should eq(Gori::FilterAst::Cursor.new("NOT(", "ho", 0, 6))
+    Gori::FilterAst.token_at("(-(ho", 5).should eq(Gori::FilterAst::Cursor.new("(-(", "ho", 0, 5))
+    # A lone `-` is still a word, and `-x` still peels only the dash.
+    Gori::FilterAst.token_at("-", 1).should eq(Gori::FilterAst::Cursor.new("", "-", 0, 1))
+    Gori::FilterAst.token_at("-ho", 3).should eq(Gori::FilterAst::Cursor.new("-", "ho", 0, 3))
   end
 
   it "keeps parentheses inside a value literal, so URL paths still parse" do
@@ -304,16 +389,18 @@ describe Gori::FilterAst do
     # the agreement rather than a hand-written span list per query. (The `NOT` KEYWORD
     # is excluded: it is its own lexeme, painted straight off `Tok::Not`, so it has no
     # second derivation to drift from — only the `-` prefix ever did.)
-    it "paints a dash operator exactly when the parser negated that term" do
+    it "paints a dash operator exactly when the parser negated that term (or that group)" do
       [
         "-host:a", "-", %(-"), %(-""), %("-a"), %(-"a"), %(-host:"my host"),
-        "a -b", "-(a OR b)", "(-a OR -b)", "--", "a-b", "path:/a-b",
+        "a -b", "-(a OR b)", "(-a OR -b)", "--", "a-b", "path:/a-b", "-((a))", "-(a) -(b c)", "\"-(a\"",
       ].each do |query|
         dashes = Gori::FilterAst.spans(query).count do |span|
           span.kind.operator? && query[span.start, span.size] == "-"
         end
-        negated = Gori::FilterAst.terms(Gori::FilterAst.parse(query)).count(&.negate?)
-        dashes.should eq(negated), "#{query.inspect}: #{dashes} dash spans vs #{negated} negated terms"
+        tree = Gori::FilterAst.parse(query)
+        # A `-(` fused to a group becomes a NotNode (or flips the lone term inside), so count both.
+        negated = Gori::FilterAst.terms(tree).count(&.negate?) + not_nodes(tree)
+        dashes.should eq(negated), "#{query.inspect}: #{dashes} dash spans vs #{negated} negations"
       end
     end
   end

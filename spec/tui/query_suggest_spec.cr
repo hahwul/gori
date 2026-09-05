@@ -92,8 +92,8 @@ describe Gori::Tui::QuerySuggest do
     cursor = ->(query : String) { Gori::FilterAst.token_at(query, query.size) }
 
     it "offers the boolean operators a field pool cannot" do
-      # `NOT (` is the point: `-` negates a TERM and cannot negate a GROUP, so this was the one
-      # form with zero discovery — and the only way to exclude a disjunction.
+      # `NOT (` is the point: it is the spelled-out way to negate a GROUP (the grammar also reads
+      # `-(` and `NOT(` fused to the paren), and it was the one form with zero discovery.
       QuerySuggest.with_operators([] of String, cursor.call("N")).should eq(["NOT ("])
       QuerySuggest.with_operators([] of String, cursor.call("NOT")).should eq(["NOT ("])
       QuerySuggest.with_operators([] of String, cursor.call("O")).should eq(["OR"])
@@ -161,6 +161,9 @@ describe Gori::Tui::QuerySuggest do
       QuerySuggest.field_of("resp.body:").should eq("resp.body")
       QuerySuggest.field_of("-resp.body:").should eq("resp.body")
       QuerySuggest.field_of("(-host:acme").should eq("host")
+      QuerySuggest.field_of("-(host:").should eq("host")   # the fused negated-group prefixes
+      QuerySuggest.field_of("NOT(host:").should eq("host") # `token_at` carries through
+      QuerySuggest.field_of("(NOT((host:").should eq("host")
       QuerySuggest.field_of("body~re").should eq("body")
       QuerySuggest.field_of("login").should eq("login")
     end

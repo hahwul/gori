@@ -76,11 +76,30 @@ describe Gori::InterceptFilter do
       Gori::InterceptFilter.new("body~unsubscr\\w+").matches?(ws).should be_false
     end
 
-    # A `~` on a field QL does not offer it on free-texts the whole token, exactly as
-    # `QL.regex_cond` does — so the two backends never disagree about what is a regex.
-    it "free-texts a ~ on a field that has no regex form" do
-      Gori::InterceptFilter.new("method~POST").matches?(req(method: "POST")).should be_false
-      Gori::InterceptFilter.new("method~POST").matches?(req(target: "/method~post")).should be_true
+    # `method` and `scheme` take `~` too, as they do in QL — `method~^P(OST|UT)$` is the one-term
+    # spelling of "every write verb" that the exact `method:` could only say as a three-way OR.
+    it "applies to method and scheme as well" do
+      writes = Gori::InterceptFilter.new("method~^P(OST|UT)$")
+      writes.matches?(req(method: "POST")).should be_true
+      writes.matches?(req(method: "PUT")).should be_true
+      writes.matches?(req(method: "GET")).should be_false
+      Gori::InterceptFilter.new("scheme~^https$").matches?(req(scheme: "https")).should be_true
+      Gori::InterceptFilter.new("scheme~^https$").matches?(req(scheme: "http")).should be_false
+    end
+
+    # A `~` on a field this backend HAS but offers no regex on is DROPPED, exactly as
+    # `QL.regex_cond` drops it — so the two backends never disagree about what is a regex. It
+    # used to free-text the whole token, so `status~5..` searched the target for that literal
+    # text: it matched nothing real and looked like a regex that found nothing.
+    it "drops a ~ on a field that has no regex form, rather than free-texting it" do
+      f = Gori::InterceptFilter.new("status~5..")
+      f.blank?.should be_true                               # dropped → no constraint, like a half-typed `host:`
+      f.matches?(req(target: "/status~5..")).should be_true # NOT a literal search for the token
+      Gori::InterceptFilter.known_field?("status", regex: true).should be_false
+      Gori::InterceptFilter.known_field?("method", regex: true).should be_true
+      Gori::InterceptFilter.known_field?("status").should be_true
+      # An unknown field under `~` is still free text, as before.
+      Gori::InterceptFilter.new("foo~bar").matches?(req(target: "/foo~bar")).should be_true
     end
 
     # An invalid pattern must not raise onto the proxy path. It becomes a never-match term,

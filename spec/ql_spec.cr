@@ -44,6 +44,10 @@ describe Gori::QL do
     f = Gori::QL.parse("status:4xx")
     f.sql.should eq("((status >= ? AND status < ?))") # clause-wrap around the range term
     f.args.should eq([400, 500])
+    # Case-insensitively: `InterceptFilter` folds the value before its class test, so a colour
+    # rule's `status:5XX` painted rows while the History query for the same string was DROPPED.
+    Gori::QL.parse("status:5XX").should eq(Gori::QL.parse("status:5xx"))
+    Gori::QL.parse("status:>=5XX").should eq(Gori::QL.parse("status:>=5xx"))
   end
 
   it "honours a comparison operator against a status class" do
@@ -339,6 +343,16 @@ describe Gori::QL do
                        "(response_body IS NOT NULL AND CAST(response_body AS TEXT) REGEXP ?)))")
     body.args.should eq(["secret\\d+", "secret\\d+"])
 
+    # `method` and `scheme` are text columns too: `method~^P(OST|UT)$` is the one-term spelling
+    # of "every write verb", which `method:` (exact) could only say as a three-way OR.
+    Gori::QL.parse("method~^P(OST|UT)$").sql.should eq("(method REGEXP ?)")
+    Gori::QL.parse("method~^P(OST|UT)$").args.should eq(["^P(OST|UT)$"])
+    Gori::QL.parse("scheme~^https?$").sql.should eq("(scheme REGEXP ?)")
+    Gori::QL::REGEX_FIELDS.should contain("method")
+    Gori::QL::REGEX_FIELDS.should contain("scheme")
+    Gori::QL.known_field?("method", regex: true).should be_true
+    Gori::QL.known_field?("res.body", regex: true).should be_true # aliases resolve here too
+
     hdr = Gori::QL.parse("header~^Set-Cookie:") # `~` wins over a later ':' in the value
     hdr.sql.should eq("((CAST(request_head AS TEXT) REGEXP ? OR " \
                       "(response_head IS NOT NULL AND CAST(response_head AS TEXT) REGEXP ?)))")
@@ -355,13 +369,31 @@ describe Gori::QL do
     f.args.should be_empty
   end
 
-  it "free-texts a ~ token on a non-regex field instead of never-matching" do
-    # `foo` is not a regex field, so `~` is not a regex operator here: the whole token
+  it "free-texts a ~ token on an UNKNOWN field instead of never-matching" do
+    # `foo` is not a field at all, so `~` is not a regex operator here: the whole token
     # must fall back to a free-text LIKE search, NOT compile to the never-match clause
     # (the validity guard only applies to real regex fields).
     f = Gori::QL.parse("foo~[")
     f.sql.should eq("((lower(method) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\' OR lower(target) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
+  end
+
+  it "DROPS and reports a ~ on a field QL has but offers no regex on" do
+    # `status~5..` names a real field under an advertised operator, and the field has no `~`
+    # form. It used to free-text — a literal search for the text `status~5..` over
+    # method/host/target, which matches nothing and was reported CLEAN — while the bar painted
+    # `status~` as a field. Now it is dropped like `resp.status:` is: `analyze` names it,
+    # `strict:`/`ql_explain`/the CLI warning see it, and a query that was ONLY this is refused.
+    %w[status~5.. size~1 dur~\d+ proto~ws stub~true src~proxy scope~in resp.size~1].each do |q|
+      Gori::QL.parse(q, scope: Gori::QL::SCOPE_SHAPE_ONLY).should eq(Gori::QL::EMPTY), q
+      Gori::QL.analyze(q, scope: Gori::QL::SCOPE_SHAPE_ONLY).ignored.should eq([q]), q
+      Gori::QL.invalid_regex_terms(q).should be_empty, q # dropped, not "never-match"
+      Gori::QL.known_field?(q.split('~').first, regex: true).should be_false, q
+    end
+    # The drop is a leaf: the rest of an AND-chain still applies (and reports the broaden).
+    mixed = Gori::QL.parse("host:a status~5..")
+    mixed.should eq(Gori::QL.parse("host:a"))
+    Gori::QL.analyze("host:a status~5..").ignored.should eq(["status~5.."])
   end
 
   # gRPC reads BOTH sides' Content-Type: it is a type the request sends too, and a call
@@ -706,12 +738,12 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.uses_scope?("host:a scope:out").should be_true
       Gori::QL.uses_scope?("-scope:in").should be_true
       Gori::QL.uses_scope?("host:acme").should be_false
-      # `scope` is not a REGEX field, so `scope~in` free-texts the whole token (the road
-      # `size~1` takes) and names no scope predicate — every surface that WARNS about a scope
-      # term must not speak about this one, or it warns about a term that is not there.
+      # `scope` is not a REGEX field, so `scope~in` is DROPPED (the road `size~1` takes,
+      # reported under `ignored`) and names no scope predicate — every surface that WARNS about
+      # a scope term must not speak about this one, or it warns about a term that is not there.
       Gori::QL.uses_scope?("scope~in").should be_false
-      Gori::QL.parse("scope~in", scope: Gori::QL::ScopeLens.new(nil)).sql
-        .should eq(Gori::QL.parse("zzz~in", scope: Gori::QL::ScopeLens.new(nil)).sql)
+      Gori::QL.parse("scope~in", scope: Gori::QL::ScopeLens.new(nil)).should eq(Gori::QL::EMPTY)
+      Gori::QL.analyze("scope~in", scope: Gori::QL::ScopeLens.new(nil)).ignored.should eq(["scope~in"])
       # Quoting is NOT an escape: the grammar strips quotes before the field/value split, so
       # `"scope:in"` is still a scope term — the same reading `host:"x"` gets, and the reason
       # `field_shaped?` says a KNOWN field is a field use whatever its value holds.
@@ -787,6 +819,35 @@ describe "Gori::Store#search (QL)" do
     Gori::QL.analyze("time:12:00").applied.should eq(["time:12:00"])
     # A bare word that merely STARTS with a prefix is free text, not a field at all.
     Gori::QL.analyze("respond").applied.should eq(["respond"])
+  end
+
+  # `field_shaped?` decides which unknown `name:value` tokens the CLI and MCP REFUSE as a typo'd
+  # field and which they search as text; the free-text compilation is the same either way.
+  describe ".field_shaped?" do
+    it "reads host:port for a dotless host as an authority, not a field" do
+      # The commonest paste after a URL: a dev server's address. `localhost:8080` was refused as
+      # ``unknown query field `localhost:` `` — the dot rule that lets `acme.test:8443` through
+      # cannot see a host with no dot in it.
+      Gori::QL.field_shaped?("localhost", "8080").should be_false
+      Gori::QL.field_shaped?("api", "3000").should be_false
+      Gori::QL.field_shaped?("acme.test", "8443").should be_false
+      Gori::QL.fields_used("localhost:8080").should be_empty
+    end
+
+    it "still refuses a numeric field typed short of its name, with the suggestion attached" do
+      # A port-shaped value is not an escape for a typo a real field is CLOSE to.
+      Gori::QL.field_shaped?("stauts", "500").should be_true
+      Gori::QL.field_shaped?("sizee", "100").should be_true
+      Gori::QL.suggest_field("stauts").should eq("status")
+      # ...and a non-numeric value under an unknown name stays field-shaped whatever the name.
+      Gori::QL.field_shaped?("localhost", "x").should be_true
+      Gori::QL.field_shaped?("hsot", "acme").should be_true
+    end
+
+    it "treats a KNOWN field as a field use whatever its value holds" do
+      Gori::QL.field_shaped?("status", "500").should be_true
+      Gori::QL.field_shaped?("dur", "5").should be_true
+    end
   end
 
   # A substring field folds BOTH sides — needle and haystack — and folding is only a fold if it

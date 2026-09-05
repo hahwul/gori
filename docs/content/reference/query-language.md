@@ -150,13 +150,17 @@ dur:<2s             faster than 2 s (s / ms suffixes allowed)
 
 ## Regular Expressions
 
-Use `~` for a regex match on `host`, `path`, `url`, `header`, or `body`. The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
+Use `~` for a regex match on `host`, `path`, `url`, `method`, `scheme`, `header`, or `body` (and the `req.`/`resp.` sides of the last two). The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
 
 ```text
 path~/admin/
 host~^api\.
 header~set-cookie
+method~^P(OST|UT|ATCH)$                every write verb in one term
 ```
+
+A `~` on any other field (`status`, `size`, `dur`, `proto`, …) has no regex form: the term is
+dropped and reported, the same way a bad numeric value is, rather than searched as text.
 
 ## Combining Terms
 
@@ -173,6 +177,7 @@ method:POST -status:200               POST, but not 200
 host:a.com OR host:b.com              either host
 (host:a.com OR host:b.com) -path:/js  either host, no /js
 NOT (host:cdn OR host:static)         neither host
+-(host:cdn OR host:static)            the same — `-(` and `NOT(` negate the group
 login                                 free-text search
 ```
 
