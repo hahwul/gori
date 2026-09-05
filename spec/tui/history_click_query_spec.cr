@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/fake_host"
 require "../support/memory_backend"
+require "../support/history_search"
 require "file_utils"
 require "../../src/gori/tui/controllers/history_controller"
 
@@ -36,6 +37,7 @@ private def with_history(&)
     end
     session.store.flush
     ctl.view.reload(session.store)
+    settle_history(ctl)
     yield ctl
   ensure
     Gori::Settings.history_preview = prev
@@ -72,6 +74,7 @@ describe "HistoryController — a row click while the QL bar is editing" do
       before = ctl.view.row_id_at(1).not_nil!
       ctl.handle_click(rect, 10, 6).should be_true # screen row 6 = list row 1 while querying
       ctl.view.querying?.should be_false
+      settle_history(ctl)
       ctl.view.row_id_at(2).should be_nil # the applied query left two rows
       ctl.view.selected_id.should eq(before)
     end

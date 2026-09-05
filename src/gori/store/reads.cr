@@ -36,11 +36,12 @@ module Gori
     # paging into older matches (stable as new rows append, unlike OFFSET).
     # `raise_on_error` propagates a SQLite execution failure (a malformed FTS phrase,
     # or a pathological query hitting SQLite's expression-tree-depth limit) instead of
-    # degrading to no matches. The TUI keeps the default (never crash the live run
-    # loop); one-shot CLI callers pass true so a failed query is reported distinctly
-    # from a genuinely empty result rather than as a clean "no flows match".
+    # degrading to no matches. History and one-shot callers pass true so a failed
+    # query is reported distinctly from a genuinely empty result. `control` opts
+    # into cooperative execution; QueryCancelled always propagates, even when
+    # raise_on_error is false, because cancellation is never an empty result.
     def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, since_id : Int64? = nil, *,
-               raise_on_error : Bool = false) : Array(FlowRow)
+               raise_on_error : Bool = false, control : QueryControl? = nil) : Array(FlowRow)
       rows = [] of FlowRow
       args = filter.args.dup
       if since_id
@@ -55,11 +56,12 @@ module Gori
         args << limit
         sql = "#{SELECT_ROW} WHERE #{filter.sql} ORDER BY id DESC LIMIT ?"
       end
-      @db.query(sql, args: args) do |rs|
+      controlled_query(sql, args, control) do |rs|
         rs.each { rows << read_row(rs) }
       end
       rows
     rescue ex
+      raise ex if ex.is_a?(QueryCancelled)
       raise ex if raise_on_error
       # Degrade to no matches (the live TUI must never crash the render loop). Route to gori.log
       # via Log, NOT STDERR: in TUI mode STDERR is the alternate screen, so a write there prints
@@ -622,23 +624,25 @@ module Gori
     # (case-insensitive), hard-capped so a huge capture history never materialises
     # the full DISTINCT set on every keystroke. Uses idx_flows_sitemap's leading
     # host column; never raises into the TUI run loop.
-    def distinct_hosts(*, prefix : String = "", limit : Int32 = 16) : Array(String)
+    def distinct_hosts(*, prefix : String = "", limit : Int32 = 16,
+                       control : QueryControl? = nil) : Array(String)
       lim = limit.clamp(1, 64)
       hosts = [] of String
       if prefix.empty?
-        @db.query("SELECT DISTINCT host FROM flows ORDER BY host LIMIT ?", lim) do |rs|
+        controlled_query("SELECT DISTINCT host FROM flows ORDER BY host LIMIT ?", [lim] of DB::Any, control) do |rs|
           rs.each { hosts << rs.read(String) }
         end
       else
         # Prefix match only (trailing %); escape LIKE metacharacters in the typed prefix.
         pat = "#{QL.like_escape(prefix.downcase)}%"
-        @db.query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
-          pat, lim) do |rs|
+        controlled_query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
+          [pat, lim] of DB::Any, control) do |rs|
           rs.each { hosts << rs.read(String) }
         end
       end
       hosts
-    rescue
+    rescue ex
+      raise ex if ex.is_a?(QueryCancelled)
       [] of String
     end
 

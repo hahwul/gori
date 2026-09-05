@@ -722,6 +722,7 @@ module Gori::Tui
         #
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        history_controller.cancel_searches
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
         # outlives this Runner (project picker + the next session reuse it), so a stale
         # "𝓰𝓸𝓻𝓲 - acme - Notes" mustn't linger. The shell's prompt overwrites it again after
@@ -2122,6 +2123,7 @@ module Gori::Tui
           msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
           @toast = notes_lost ? "#{msg} — but its notes did not save (store busy)" : msg
         else
+          history_controller.cancel_searches if @active_tab == :history
           @active_tab = :issues
           @focus = :body
           issues_controller.view.reload(@session.store)
@@ -3704,6 +3706,7 @@ module Gori::Tui
     # tab jump/cycle/select never leaves a dirty buffer unpersisted (invisible to peers /
     # lost on an abnormal exit). Every dirty-holding tab is dirty-guarded in its own commit.
     private def flush_active_tab_edits : Nil
+      history_controller.cancel_searches if @active_tab == :history
       project_controller.commit if @active_tab == :project
       repeater_controller.save_current_repeater if @active_tab == :repeater
       fuzzer_controller.save_current if @active_tab == :fuzzer

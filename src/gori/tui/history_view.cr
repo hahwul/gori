@@ -98,6 +98,15 @@ module Gori::Tui
     getter? follow : Bool
     getter? querying : Bool
     getter query : String
+    property reload_handler : Proc(Store, Nil)? = nil
+    property host_suggest_handler : Proc(String, Nil)? = nil
+    property? searching : Bool = false
+    getter search_error : String? = nil
+    @host_suggest_dirty = false
+    @host_suggest_refresh_at = Time.instant
+    @host_suggest_pending = false
+    @suggestions_pending = false
+    @popup_requested = false
     # The detail body's read caret (mirrors RepeaterView#resp_cursor) — the pane's own
     # position, which the wrap walkers move in visual rows.
     getter detail_read : ReadCursor
@@ -106,6 +115,7 @@ module Gori::Tui
       # Display order follows Settings.history_list_order: newest-first (id DESC) or
       # oldest-first (id ASC). index_of binary-searches the matching direction.
       @rows = [] of Store::FlowRow
+      @rows_newest_first = Settings.history_newest_first?
       @selected = 0
       @scroll = 0
       @follow = true
@@ -616,9 +626,29 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      if handler = @reload_handler
+        handler.call(store)
+      elsif request = prepare_search(store)
+        apply_search(fetch_search(store, request))
+      end
+    end
+
+    record SearchRequest, filter : QL::Filter, view : SavedViews::View?, note : String?
+    record SearchResult, rows : Array(Store::FlowRow), note : String?, no_flows : Bool,
+      view_note : String?, error : String? = nil
+
+    alias SearchIdentity = Tuple(String, QL::Filter?, Bool, SavedViews::View?)
+
+    def search_identity : SearchIdentity
+      {@query, @scope.try(&.ql_lens.predicate), @scope.try(&.active?) == true, active_view}
+    end
+
+    # Compilation stays on the UI fiber. Workers receive a snapshot and never
+    # consult the mutable query, scope, selection, or saved-view state.
+    def prepare_search(store : Store) : SearchRequest?
       @suggest_store = store
-      invalidate_host_suggest_cache
-      prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
+      @search_error = nil
+      @filter_dirty = false
       # The `scope:` lens: this view already holds the Scope it applies for ⇧S, and a `scope:`
       # TERM is that same predicate asked as a question rather than switched on — `ql_lens` reads
       # the rules regardless of the flag (see there), so `scope:in` means the same thing with the
@@ -654,26 +684,42 @@ module Gori::Tui
         @filter_dirty = false
         @selected = 0
         @scroll = 0
-        return
+        @searching = false
+        return nil
       end
       combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
         query_filter)
-      @rows =
-        begin
-          store.search(combined, PAGE, raise_on_error: true)
-        rescue
-          # A VALID QL parse that SQLite still can't run (a huge OR chain past the
-          # expression-tree-depth limit, a pathological FTS phrase). Degrade to empty like
-          # before, but SAY why via the note so it doesn't read as a genuine "no flows match"
-          # (#411). The store already logged it to gori.log; the live loop must never crash.
-          @query_note = "query too complex to run — narrow the filter"
-          [] of Store::FlowRow
-        end
+      SearchRequest.new(combined, view, @query_note)
+    end
+
+    def fetch_search(store : Store, request : SearchRequest,
+                     control : Store::QueryControl? = nil) : SearchResult
+      rows = store.search(request.filter, PAGE, raise_on_error: true, control: control)
+      SearchResult.new(rows, request.note, rows.empty? && store.recent_flows(1).empty?,
+        rows.empty? ? empty_view_note(request.view, store) : nil)
+    rescue ex : Store::QueryCancelled
+      raise ex
+    rescue ex
+      ::Log.warn { "history search failed: #{ex.message}" }
+      SearchResult.new([] of Store::FlowRow, request.note, false, nil,
+        "query too complex to run — narrow the filter")
+    end
+
+    def apply_search(result : SearchResult) : Nil
+      @searching = false
+      @last_filter_flush = Time.instant
+      @search_error = result.error
+      if result.error
+        @query_note = result.error
+        return
+      end
+      prev_id = selected_id
+      @rows = result.rows
+      @rows_newest_first = Settings.history_newest_first?
+      @query_note = result.note
       @rows.reverse! unless newest_first?
-      # One indexed one-row read, and only when there is nothing to show anyway.
-      @no_flows = @rows.empty? && store.recent_flows(1).empty?
-      @view_note = @rows.empty? ? empty_view_note(view, store) : nil
-      @filter_dirty = false
+      @no_flows = result.no_flows
+      @view_note = result.view_note
       prev_selected = @selected
       @selected =
         if @follow
@@ -776,9 +822,11 @@ module Gori::Tui
       "body search is #{count} flow(s) behind — still indexing"
     end
 
-    # settings:layout History list order — newest first (default) or oldest first.
+    # The order of the rows actually on screen. A settings change only takes
+    # effect when its replacement rows arrive; binary searches and live inserts
+    # must keep using the previous order while that query is pending.
     private def newest_first? : Bool
-      Settings.history_newest_first?
+      @rows_newest_first
     end
 
     # Index of the live tail (newest flow) in the current display order.
@@ -801,7 +849,7 @@ module Gori::Tui
     # debounced to FILTER_FLUSH_INTERVAL so a busy capture can't thrash the search.
     # Returns true if it actually reloaded (so the caller can mark the frame dirty).
     def flush_filter(store : Store) : Bool
-      return false unless @filter_dirty
+      return false unless @filter_dirty && !@searching
       now = Time.instant
       if (last = @last_filter_flush) && now - last < FILTER_FLUSH_INTERVAL
         return false
@@ -811,8 +859,14 @@ module Gori::Tui
       true
     end
 
+    def stale_filter : Nil
+      @filter_dirty = true
+      @host_suggest_dirty = true
+    end
+
     def on_event(event : Store::FlowEvent, store : Store) : Nil
-      if filtering?
+      @host_suggest_dirty = true if event.kind == :inserted
+      if filtering? || @searching
         @filter_dirty = true # coalesce: the Runner reloads once after draining
         return
       end
@@ -1159,8 +1213,20 @@ module Gori::Tui
       # that collision require a shared capture microsecond; dropping the memo here removes it
       # outright for every deletion gori itself performs.
       forget_column_values
+      remove_deleted_rows(ids)
       reload(store)
       true
+    end
+
+    # A replacement query is asynchronous in the TUI. Committed deletions must
+    # disappear immediately, especially since the Store can reuse their rowids.
+    private def remove_deleted_rows(ids : Array(Int64)) : Nil
+      anchor = selected_id
+      previous = @selected
+      deleted = ids.to_set
+      @rows.reject! { |row| deleted.includes?(row.id) }
+      @selected = (anchor.try { |id| index_of(id) } || @selected).clamp(0, {@rows.size - 1, 0}.max)
+      @scroll = (@scroll + @selected - previous).clamp(0, {@rows.size - 1, 0}.max)
     end
 
     # Wipe every History flow, close detail/preview, and reload the list.
@@ -1178,6 +1244,9 @@ module Gori::Tui
       clear_preview
       clear_marks
       forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
+      @rows.clear
+      @selected = 0
+      @scroll = 0
       reload(store)
       true
     end
@@ -1197,13 +1266,13 @@ module Gori::Tui
       @query = text
       @qcx = @query.size
       @preedit = ""
-      @popup.close
+      popup_close
       @filter_dirty = true
     end
 
     def stop_query : Nil # Enter: keep the filter, leave edit mode
       @querying = false
-      @popup.close
+      popup_close
     end
 
     def cancel_query : Nil # Esc: clear the filter, leave edit mode
@@ -1211,7 +1280,7 @@ module Gori::Tui
       @query = ""
       @qcx = 0
       @preedit = ""
-      @popup.close
+      popup_close
     end
 
     def query_insert(ch : Char) : Nil
@@ -1245,8 +1314,8 @@ module Gori::Tui
     # honoured, which is worse than not offering one.
     def popup_down : Nil
       return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
+      @popup_requested = true
+      sync_popup
     end
 
     def popup_up : Nil
@@ -1254,6 +1323,7 @@ module Gori::Tui
     end
 
     def popup_close : Nil
+      @popup_requested = false
       @popup.close
     end
 
@@ -1261,7 +1331,13 @@ module Gori::Tui
     # selection onto the same candidate when it survived, and shuts itself when the edit left
     # nothing to show — an empty dropdown is a hole in the list for no content.
     private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
+      return unless @popup.open? || @popup_requested
+      suggestions = query_suggestions
+      @popup.set(suggestions)
+      # An empty asynchronous result is still loading, not "no candidates".
+      # Remember the opt-in gesture until it arrives, but never reopen after Esc.
+      @popup_requested = suggestions.empty? && @suggestions_pending
+      @popup.open!
     end
 
     # IME composing text, drawn (underlined) at the caret without touching the
@@ -1289,7 +1365,7 @@ module Gori::Tui
       # Completing consumes the choice: the token is now whole, so the old candidate set is
       # stale. Re-derive it (a field completion opens a value list) and let `set` close the
       # popup if that leaves nothing.
-      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
+      close ? popup_close : sync_popup
       true
     end
 
@@ -1297,6 +1373,7 @@ module Gori::Tui
     # FilterAst::Cursor carries the grammar's punctuation through, so `-ho` → `-host:`
     # and `(ho` → `(host:` — the same peeling every other filter bar uses.
     def query_suggestions : Array(String)
+      @suggestions_pending = false
       cur = FilterAst.token_at(@query, @qcx)
       return [] of String if cur.core.empty?
       fields =
@@ -2481,7 +2558,7 @@ module Gori::Tui
         # naming the filter that excluded nothing is useless when there was nothing to exclude.
         # A typed query is the one exception: the operator just wrote it and is owed the answer
         # that it matched nothing.
-        if @no_flows && @query.blank?
+        if @no_flows && @query.blank? && !@searching && !@search_error
           list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
           TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
           return
@@ -2493,7 +2570,11 @@ module Gori::Tui
         # set is caused by the Scope lens or no traffic, where "esc clears the filter"
         # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
-          if @view_broken
+          if @searching
+            {"searching", "esc clears the filter"}
+          elsif error = @search_error
+            {error, "/ to edit the filter"}
+          elsif @view_broken
             # FIRST, ahead of the bar: the list is empty because `reload` refused to apply the
             # view, so every other hint here would send the operator to a control that is not
             # the problem.
@@ -3300,17 +3381,20 @@ module Gori::Tui
     end
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
+      state = @searching ? "searching — showing previous results" : @search_error
+      state_width = state ? {Screen.draw_width(state) + 2, rect.w // 2}.min : 0
       if @querying
+        screen.text(rect.right - state_width, rect.y, state, Theme.muted, width: state_width) if state
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
         base = rect.x + 1 + QUERY_PREFIX.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
-          width: rect.w - QUERY_PREFIX.size - 2,
+          width: rect.w - QUERY_PREFIX.size - 2 - state_width,
           colors: Highlight.filter_query(@query, Theme.text_bright, known: QL_KNOWN))
         return
       end
 
-      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2,
-        ql_bar_chips.map { |(_, text, color)| {text, color} })
+      chips = state ? [{screen.fit(state, {rect.w - 3, 0}.max), Theme.muted}] : ql_bar_chips.map { |(_, text, color)| {text, color} }
+      lx = Frame.right_text_chain(screen, rect.right - 1, rect.y, rect.x + 2, chips)
 
       left_w = {lx - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
@@ -3369,7 +3453,7 @@ module Gori::Tui
     # those cells hold the query being typed and a click on them must not toggle a lens the
     # operator cannot see.
     def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil if @querying
+      return nil if @querying || @searching || @search_error
       list_rect, _ = list_split(rect)
       return nil if list_rect.empty?
       Frame.right_text_chain_hit(mx, my, list_rect.y, list_rect.right - 1, list_rect.x + 2,
@@ -3470,17 +3554,45 @@ module Gori::Tui
     private def host_values_for(prefix : String) : Array(String)
       key = prefix.downcase
       if @host_suggest_prefix == key
+        @suggestions_pending = @host_suggest_pending
         return @host_suggest_values
       end
       store = @suggest_store
       @host_suggest_prefix = key
+      if handler = @host_suggest_handler
+        @host_suggest_values = [] of String
+        @suggestions_pending = @host_suggest_pending = true
+        handler.call(prefix)
+        return @host_suggest_values
+      end
       @host_suggest_values = store ? store.distinct_hosts(prefix: prefix, limit: 16) : [] of String
       @host_suggest_values
     end
 
-    private def invalidate_host_suggest_cache : Nil
+    def invalidate_host_suggest_cache : Nil
       @host_suggest_prefix = nil
       @host_suggest_values = [] of String
+      @host_suggest_pending = false
+    end
+
+    def apply_host_suggestions(prefix : String, values : Array(String)) : Nil
+      return unless @host_suggest_prefix == prefix.downcase
+      @host_suggest_values = values
+      @host_suggest_pending = false
+      sync_popup
+    end
+
+    def fetch_host_suggestions(store : Store, prefix : String,
+                               control : Store::QueryControl? = nil) : Array(String)
+      store.distinct_hosts(prefix: prefix, control: control)
+    end
+
+    def refresh_host_suggestions(now : Time::Instant) : Bool
+      return false unless @host_suggest_dirty && now >= @host_suggest_refresh_at
+      @host_suggest_dirty = false
+      @host_suggest_refresh_at = now + FILTER_FLUSH_INTERVAL
+      invalidate_host_suggest_cache
+      true
     end
 
     # `@rows` is the windowed query result the draw loop walks, and it is what the tail

@@ -306,6 +306,14 @@ Rendering is a pure function of state. Views hold ephemeral display and edit sta
 `Host` (P5). Overlays are modal cards centred over the body. Theming is a `Palette` record,
 with built-in and user themes switched at runtime.
 
+History searches and host completions run in controller-owned cooperative fibers. Each
+controlled Store read holds its own pooled connection and yields through SQLite's progress
+handler; putting a synchronous SQLite call in a fiber alone does not release the scheduler.
+The controller publishes only the current query generation, retaining the previous rows
+with a searching indicator until then. Capture updates queue one subsequent refresh, while
+query, scope and view changes cancel obsolete work. Store close cancels and drains controlled
+reads before closing the pool; no progress handler is installed on the writer connection.
+
 Width is measured, never assumed: `Screen.draw_width` reports the cells a string will
 occupy, and views that draw per grapheme cluster sum the width per cluster so a wide
 character is never half-drawn.
@@ -2280,3 +2288,23 @@ would have sent `CONNECT /chat` down an h1 socket, where it names a host and not
 Out of scope, deliberately: HTTP/3, and Match & Replace or per-message intercept on an h2 socket.
 Those two still need a length-CHANGING DATA rewrite, which is what #492 step 5 was closed over,
 and the capture advisory keeps saying so.
+
+### 2026-09-05 — History reads yield and cancel without changing QL
+
+Debouncing limits how often a search starts, not how long SQLite owns the single scheduler
+thread. A result limit bounds returned rows, not the work needed to find them. History now
+uses opt-in Store query controls: an exclusively checked-out read connection installs a
+progress handler that yields periodically and interrupts cancelled work. The writer never
+gets this handler, and Store close drains controlled reads before finalizing connections.
+
+The controller owns one search worker and one host-completion worker, each with one
+replaceable pending request. Query generations prevent obsolete results from being
+published; capture updates wait for completion and queue one refresh. Previous rows stay
+navigable with an explicit searching indicator. QL predicates, full-project coverage and
+the result cap stay unchanged, including short body terms and byte-safe regex matching.
+
+`bench/history_filter_bench.cr` measures query time, scheduler gaps, allocations, cancellation
+and capture throughput on 10k/100k/500k fixtures. With 500k 1KB bodies, an absent body regex
+held the scheduler for 2.7–3.0 seconds synchronously versus 9–11 ms with query controls;
+allocations and total query time were comparable. This is cooperative scheduling, not a
+hard deadline: a single regex callback or filesystem operation cannot be preempted.
