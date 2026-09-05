@@ -44,24 +44,29 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
-      when key.escape? then :cancel
-      when key.up?     then move(-1); :stay
-      when key.down?   then move(1); :stay
-      when key.enter?  then :commit
-      else
-        if (char = ev.char) && !ev.ctrl? && !ev.alt?
-          case char
-          when 'j' then move(1)
-          when 'k' then move(-1)
-          when 'd'
-            if row = selected_row
-              @pending_action = PendingAction.new(:delete, row.id)
-              return :cancel
-            end
-          end
-        end
-        :stay
+      when key.escape?  then :cancel
+      when key.up?      then move(-1); :stay
+      when key.down?    then move(1); :stay
+      when page_key(ev) then :stay
+      when key.enter?   then :commit
+      else                   char_key(ev)
       end
+    end
+
+    # The bare letters: j/k walk, `d` deletes the selected saved run (through the shell's
+    # confirm — see PendingAction).
+    private def char_key(ev : Termisu::Event::Key) : Symbol
+      return :stay unless (char = ev.char) && !ev.ctrl? && !ev.alt?
+      case char
+      when 'j' then move(1)
+      when 'k' then move(-1)
+      when 'd'
+        if row = selected_row
+          @pending_action = PendingAction.new(:delete, row.id)
+          return :cancel
+        end
+      end
+      :stay
     end
 
     def overlay_box(area : Rect) : Rect?

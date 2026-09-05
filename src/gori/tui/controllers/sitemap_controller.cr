@@ -129,7 +129,7 @@ module Gori::Tui
       # Marks survive a filter change, so the `/` affordance stays up while they're set.
       # `space tag`, not `⇧T`: tagging is menu-only now — ⇧T meant "mark all" in every other
       # marked list, so a hand that learnt `t`/⇧T there opened a text prompt here.
-      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · space tag · space cmds · esc clears marks") if @sitemap.mark_count > 0
+      return keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · space cmds (tag)  · esc clears marks") if @sitemap.mark_count > 0
       # `space cmds` on BOTH branches. The mark-set branch above named it and this one did not,
       # so the same tab advertised the space menu only while marks happened to be set.
       keys("↑/↓ move · {sitemap.query} filter · {sitemap.mark-toggle} mark · {sitemap.toggle-grouping} fold · ↵/→ expand · space cmds · esc sub-tabs")

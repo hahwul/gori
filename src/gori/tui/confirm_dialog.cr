@@ -42,7 +42,12 @@ module Gori::Tui
     def initialize(@heading : String, @message : String, *,
                    @confirm_label : String = "confirm", @cancel_label : String = "cancel",
                    @danger : Bool = true)
-      @selected = :cancel # safe default
+      # The safe default for a DANGER card is the cancel button — ↵ under "DELETE 40 FLOWS?"
+      # must not delete. A card that asks something recoverable ("open in Repeater?", "run
+      # the fuzz?", "save the results?") lights its own verb instead: eleven such cards said
+      # `open`/`run`/`save` on the button and answered ↵ with "no", so the hand that had
+      # learnt ↵ = go had to learn `y` for these alone.
+      @selected = @danger ? :cancel : :confirm
       # "The last frame did not REFUSE to draw me" — not "a frame has run". The shell draws
       # before it reads a key, so this is never stale there; starting it false instead would
       # make every non-rendering driver (the spec harness, ProjectPicker's own ladder) unable
@@ -69,8 +74,11 @@ module Gori::Tui
       "CONFIRM"
     end
 
+    # Spelled from the buttons, so what ↵ will do is readable before it is pressed, and `y`
+    # names the verb it stands for rather than a generic "confirm" the button never says.
     def hint : String
-      "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      lit = @selected == :confirm ? @confirm_label : @cancel_label
+      "←/→ choose · ↵ #{lit} · y #{@confirm_label} · n/esc #{@cancel_label}"
     end
 
     # ←/→ or Tab move between the buttons; `y` confirms, `n`/esc cancels, ↵ acts on the

@@ -236,7 +236,7 @@ module Gori::Tui
       else
         # `x on/off` and `↵/e edit` — the vocabulary the three sibling rule lists use. Toggle was
         # `t` here alone, and ↵ has always opened the editor without the hint saying so.
-        "↑/↓ select · a add · ↵/e edit · x on/off · d delete · space cmds · esc sub-tabs"
+        keys("↑/↓ select · {oast.add-provider} add · ↵/{oast.edit-provider} edit · {oast.toggle-provider} on/off · {oast.delete-provider} delete · space cmds · esc sub-tabs")
       end
     end
 
@@ -1263,16 +1263,13 @@ module Gori::Tui
 
     private def handle_providers_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      c = ev.char || key.to_char
       case
       when key.escape?             then @host.request_focus(:subtabs)
       when key.up?, key.lower_k?   then prov_row_up
       when key.down?, key.lower_j? then @prov_sel = {@prov_sel + 1, {@providers.size - 1, 0}.max}.min
-      when key.enter?, c == 'e'    then open_edit_provider
-      when c == 'a'                then open_add_provider
-      when c == 'x'                then toggle_provider
-      when c == 'd'                then delete_provider
-      else                              return false
+      when key.enter?              then open_edit_provider
+        # `a`/`e`/`x`/`d` are chords now (`verbs/oast.cr`) — they fall through to the keymap.
+      else return false
       end
       true
     end
