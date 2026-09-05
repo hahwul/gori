@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Replay a captured request under several identities and diff the verdicts to find broken access control.">
+  <title>Authorize - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Authorize">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/authorize/">
+  <meta property="og:description" content="Replay a captured request under several identities and diff the verdicts to find broken access control.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Authorize">
+  <meta name="twitter:description" content="Replay a captured request under several identities and diff the verdicts to find broken access control.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/authorize/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Authorize","url":"https://gori.hahwul.com/guide/authorize/","description":"Replay a captured request under several identities and diff the verdicts to find broken access control."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Authorize"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/authorize/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/authorize/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/authorize/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/authorize/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+
+<svg xmlns="http://www.w3.org/2000/svg" class="sidebar-icon-defs" aria-hidden="true" focusable="false">
+  <symbol id="si-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" />
+    <path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" />
+    <path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  </symbol>
+  <symbol id="si-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M17 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" />
+  </symbol>
+  <symbol id="si-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
+    <path d="M19 16h-12a2 2 0 0 0 -2 2" />
+    <path d="M9 8h6" />
+  </symbol>
+  <symbol id="si-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 5h8" />
+    <path d="M13 9h5" />
+    <path d="M13 15h8" />
+    <path d="M13 19h5" />
+    <path d="M3 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+    <path d="M3 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+  </symbol>
+  <symbol id="si-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+  </symbol>
+</svg>
+
+<aside class="docs-sidebar">
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-rocket"/></svg>
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-route"/></svg>
+      <span class="sidebar-title-text">Playbooks</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/playbooks/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Foundations</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">Set up an engagement</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">Map the attack surface</a></li>
+      
+      
+      <li class="sidebar-subhead">The manual loop</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">Intercept and modify in flight</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">Fuzz a parameter</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/carry-a-session/">Carry a session</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/decode-and-transform/">Decode and transform data</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">Attack a JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">Crack and forge session cookies</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">Grade token randomness</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">Confirm blind vulnerabilities with OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Wrap up</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/triage-and-report/">Triage and report</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">Run an AI co-pilot session</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-book"/></svg>
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/authorize/" class="active" aria-current="page">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-list"/></svg>
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    
+    <p class="doc-kicker">Guide</p>
+    
+    <h1>Authorize</h1>
+    <p>Most access-control bugs are invisible from one session. You are logged in as an admin, <code>/admin/users</code> returns the list, and everything looks correct, because you never asked what the <em>anonymous</em> client gets, or the read-only user, or the tenant next door. <strong>Authorize</strong> asks: it takes a request you already captured, replays it under several identities, and compares each response against a baseline. An identity that is served what the baseline was served is a likely authorization bypass. It is gori's counterpart to Burp's Autorize / Auth Analyzer and to AuthMatrix.</p>
+<p>The <strong>Authorize</strong> tab is hidden by default. Reveal it from the tab-bar <code>⋯</code> menu, the command palette (<code>Ctrl-P</code> → <strong>Go to Authorize</strong>), or Preferences (<code>Ctrl-,</code>) → <strong>Network &amp; Tabs</strong> → <strong>Tabs</strong>.</p>
+<h2 id="what-an-identity-is">What an Identity Is</h2>
+<p>An identity is a <strong>session slot</strong>: a name, a static header overlay applied to the captured request before it is replayed, and the extract rules whose bound values belong to it. It is the same object everywhere in gori: the Authorize tab replays under <em>every</em> slot, and a Repeater or Fuzzer send goes out as the <em>one</em> that is active (see <a href="#session-slots-one-list-two-readers">Session slots</a> below). One list, one settings row, three surfaces.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>set</strong></td>
+<td>Upsert a header: replace the value of every header of that name (case-insensitive, original casing kept), or append it when absent</td>
+</tr>
+<tr>
+<td><strong>remove</strong></td>
+<td>Drop every header of that name</td>
+</tr>
+</tbody>
+</table>
+<p>An &quot;anonymous&quot; identity removes <code>Cookie</code> and <code>Authorization</code>. An &quot;admin&quot; or &quot;low-priv&quot; identity sets them to another session's values. An API identity sets <code>X-Api-Key</code>. The overlay touches header lines only. The request line, the body, and <code>Content-Length</code> never move, so what you are comparing really is the same request under different credentials.</p>
+<p>Press <code>i</code> on the tab to open the identities card. A fresh project starts with two: <strong>as-captured</strong> (no overlay at all) and <strong>anonymous</strong> (drops <code>Cookie</code> and <code>Authorization</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>In the identities card</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> / <code>↓</code></td>
+<td>Pick an identity</td>
+</tr>
+<tr>
+<td><code>a</code></td>
+<td>Add</td>
+</tr>
+<tr>
+<td><code>e</code> / <code>↵</code></td>
+<td>Edit</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>Delete</td>
+</tr>
+<tr>
+<td><code>b</code></td>
+<td>Make this one the baseline</td>
+</tr>
+<tr>
+<td><code>esc</code></td>
+<td>Close</td>
+</tr>
+</tbody>
+</table>
+<p>The add / edit form has three fields: a <strong>name</strong> (unique, because two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to <strong>set</strong>, one <code>Name: value</code> per line, and the headers to <strong>remove</strong>, comma-separated. <code>⇥</code> moves between fields, <code>↵</code> saves. A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.</p>
+<p>Identities are saved with the project, so <code>gori run authorize</code> and the MCP tools default to the same set you configured here. The list shows header <em>names</em> only. A session cookie is a credential, and a list that paints it on screen leaks it to anyone glancing at your terminal. The form shows values, because that is what editing means.</p>
+<p>Changing the identity set marks every result already on screen as pending again. Those verdicts were produced under the old set, and reporting them beside new ones would compare two different tests.</p>
+<h2 id="session-slots-one-list-two-readers">Session Slots: One List, Two Readers</h2>
+<p>This tab reads the list <em>across</em>: every slot, one request, compare the answers. Every other send seam reads it <em>down</em>: pick one slot, and every request from then on goes out wearing it. Same rows, same card, two questions.</p>
+<p>Picking the active one is a separate action from editing the list, because it is a different kind of state:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Pick the active slot</th>
+<th>Edit the list</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TUI</td>
+<td><code>Ctrl-P</code> → <strong>Session slot</strong>, or click the <code>session:NAME</code> chip</td>
+<td><code>i</code> on this tab</td>
+</tr>
+<tr>
+<td><code>gori run</code></td>
+<td><code>--slot NAME</code> on the sending command</td>
+<td><code>gori run session list | show | add | edit | rm | baseline</code></td>
+</tr>
+<tr>
+<td>MCP</td>
+<td><code>set_active_session_slot</code></td>
+<td><code>list_session_slots</code>, <code>create_session_slot</code>, <code>update_session_slot</code>, <code>delete_session_slot</code></td>
+</tr>
+</tbody>
+</table>
+<p>What the active slot changes, on <code>send_request</code>, a Repeater or Fuzzer send, and an intercept forward:</p>
+<ul>
+<li>its <strong>header overlay</strong> is applied to the final wire bytes, after <code>$NAME</code> substitution, header lines only, so <code>Content-Length</code> never moves and the body is byte-exact;</li>
+<li><code>$NAME</code> resolves against <strong>its</strong> binding table. An extract rule a slot claims writes that slot's table; a rule no slot claims keeps writing the one global table it always did. So <code>Authorization: Bearer $SESSION</code> means admin's token on the <code>admin</code> slot and the low-priv user's on <code>low-priv</code>, off one saved string.</li>
+</ul>
+<p>Three things the active slot deliberately does <strong>not</strong> do:</p>
+<ul>
+<li><strong>It does not apply to an Authorize run.</strong> This tab supplies the identity itself, once per send, and comparing them <em>is</em> the measurement, so a run reads the list across and wears none of it, whichever slot is active. Left to apply, the active slot would write its <code>Cookie</code> over the top of every identity, including the one whose whole job is to remove it: every response would match the baseline by construction and every queued row would report a bypass that does not exist. What <em>does</em> still apply is the second half above: each identity's own <code>$NAME</code> resolves out of <strong>that identity's</strong> binding table as its overlay goes on, so <code>Cookie: session=$SESSION</code> on both <code>admin</code> and <code>low-priv</code> is two different sessions on the wire, which is the whole point of running them side by side.</li>
+<li><strong>It is never persisted.</strong> Reopening a project, or a new <code>gori mcp</code> connection, starts as-captured. A slot's <em>values</em> are memory-only by design, so restoring &quot;admin is active&quot; into an empty admin table would hand the next send an overlay whose <code>$SESSION</code> is literal: a <code>401</code> with no visible cause. Activation is one keystroke; a stale one is a support ticket.</li>
+<li><strong><code>as-captured</code> is the baseline in both senses.</strong> With no slot active nothing changes a byte, which is what makes every project and every playbook written before slots existed behave exactly as it did.</li>
+</ul>
+<p>There is no cookie jar and no auto-login macro here. A slot carries the headers you wrote and the values gori observed; <code>--bind-from</code> replays one flow <em>you</em> named to fill them.</p>
+<h2 id="the-baseline">The Baseline</h2>
+<p>Exactly one identity in a run is the <strong>baseline</strong>, the response every other identity is judged against. Unless an identity claims it (<code>b</code> in the card, <code>&quot;baseline&quot;:true</code> in JSON), the request <strong>as captured</strong> is the baseline: it goes out with its original session, and everything else is a lens over that same request.</p>
+<p>A run needs at least one identity besides the baseline, and all three surfaces refuse one that does not have it. With a single identity, every trial would be the baseline judged against itself; the run would finish, report &quot;no identity matched the baseline&quot;, and mean nothing at all.</p>
+<h2 id="the-loop">The Loop</h2>
+<ol>
+<li>In <strong>History</strong>, select the flows worth testing and <code>Space</code> → <strong>Send to Authorize</strong>. From <strong>Sitemap</strong>, the same verb queues the selected endpoint's captured flow.</li>
+<li>On the <strong>Authorize</strong> tab, press <code>i</code> and set up the identities you want to compare.</li>
+<li><code>Ctrl-R</code> replays every queued request that has no result yet; <code>⇧R</code> re-runs everything; <code>t</code> runs just the request under the cursor.</li>
+<li>Read the table. The top pane is one row per request with an aggregate verdict; <code>⇥</code> drills into the selected request's identities in the bottom pane.</li>
+</ol>
+<p>Each identity gets its <strong>own connection</strong>. That is deliberate and costs a handshake per trial: connection-oriented authentication (NTLM, Negotiate; ordinary on internal engagements) authenticates the <em>connection</em>, not the message, so a reused socket would serve an identity that dropped <code>Cookie</code> the baseline's content anyway and manufacture a bypass that does not exist.</p>
+<p><code>Ctrl-X</code> stops. The stop is polled between requests <em>and</em> between identities, so it takes effect at the next send rather than after the five identities already queued for the request in flight. A request cut short mid-identity yields <strong>no</strong> verdict at all: a partial set of trials must never read as &quot;enforced&quot;.</p>
+<h2 id="reading-a-verdict">Reading a Verdict</h2>
+<p>Each identity's response is reduced to three facts (status, decoded body size, and a SimHash content fingerprint) and compared with the baseline's. Bodies are decoded (gzip / deflate / br / chunked) before hashing, because a fingerprint over compressed bytes is meaningless.</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>baseline</code></td>
+<td>This row <em>is</em> the baseline</td>
+</tr>
+<tr>
+<td><code>different</code></td>
+<td>A different status <strong>class</strong> (2xx vs 4xx vs 3xx), the clearest sign access control engaged. Or two redirects that point somewhere else</td>
+</tr>
+<tr>
+<td><code>same</code></td>
+<td>Same status class, and the body matches: within a SimHash distance of 3 <strong>and</strong> within 10% in size. Or two redirects to the same place</td>
+</tr>
+<tr>
+<td><code>review</code></td>
+<td>Same status class, divergent body. Or the baseline itself errored, so there was nothing to anchor against</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>This identity&#39;s send failed (TLS, DNS, timeout, refused); nothing was compared</td>
+</tr>
+</tbody>
+</table>
+<p>Two redirects are judged on their <strong><code>Location</code></strong>, before the body is looked at. A redirect's body is empty, so on the three facts above every <code>3xx</code> matched every other <code>3xx</code>, and an authenticated <code>302 → /dashboard</code> against an anonymous <code>302 → /login</code>, which is the clearest <em>enforcement</em> there is, came back <code>same</code>. Where the origin steers each identity is the only thing a redirect says, so that is what gets compared: an exact string match, because <code>/login</code> and <code>/login/</code> are a difference worth showing you rather than one worth deciding for you.</p>
+<p>The per-request row aggregates them: <strong>BYPASS</strong> when any non-baseline identity came back <code>same</code>, <strong>enforced</strong> when every one clearly differed, <strong>error</strong> when every one of their sends <em>failed</em>, <strong>review</strong> otherwise.</p>
+<p>That fourth word is not a formality. A request nothing answered has no <code>same</code> verdict and no <code>different</code> one either, so an aggregate built from those two alone calls it <strong>enforced</strong>: a clean bill of health for a host gori could not reach. &quot;The server held&quot; and &quot;we never got a reply&quot; are opposite findings, and every surface reports them apart: the tab paints the row <code>error</code>, <code>gori run authorize</code> prints <code>[x] error</code> for it, and the MCP verdict is <code>error</code> with an <code>unanswered_count</code> beside it. When <em>nothing</em> in the run was compared (every request either refused by the gate or unanswered), the CLI says so on its summary line and exits non-zero, so a script that gates on the exit code cannot read a dead host as an endpoint that held.</p>
+<p>Both halves of the <code>same</code> test matter. SimHash skips numeric and hex tokens, so two differently-sized pages can hash close; the size band catches that. The 10% tolerance exists because real pages carry per-request noise (CSRF tokens, timestamps), and an exact match would flag all of it.</p>
+<p>This is a heuristic, and the names are deliberately neutral, because the <em>security</em> meaning depends on the identity's intended privilege and only you know that. <code>same</code> on a low-privilege identity is a likely bypass. <code>same</code> on a second admin session is exactly right. <code>review</code> is where a tailored &quot;access denied&quot; page rendered at 200 and a legitimately per-user page look identical to a fingerprint. The tab states the comparison; you read the intent.</p>
+<h2 id="what-gets-skipped-and-why">What Gets Skipped, and Why</h2>
+<p>A selection can reach flows that cannot be replayed meaningfully. gori names every one of them rather than quietly sending less than you asked for.</p>
+<table>
+<thead>
+<tr>
+<th>Reason</th>
+<th>Why</th>
+<th>Override</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>no identity changes them</strong></td>
+<td>No identity would alter this request&#39;s bytes, so every trial sends the same thing, the responses match by construction, and the row would read <code>same</code>, a finding manufactured out of nothing</td>
+<td>Add an identity that sets or drops the header this endpoint authenticates with</td>
+</tr>
+<tr>
+<td><strong>not a safe method to repeat</strong></td>
+<td>Only <code>GET</code> / <code>HEAD</code> / <code>OPTIONS</code> are replayed by default. A replayed <code>POST</code> / <code>PUT</code> / <code>PATCH</code> / <code>DELETE</code> runs its side effect again, once per identity</td>
+<td><code>--unsafe-methods</code> (CLI), <code>unsafe_methods:true</code> (MCP). The TUI&#39;s manual queue takes any method, because there a human picked the request</td>
+</tr>
+<tr>
+<td><strong>never completed</strong></td>
+<td>The capture has no response to compare against</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>answered by gori</strong></td>
+<td>gori short-circuited this request itself; there is no origin behind it</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>outside project scope</strong></td>
+<td>The outbound gate refused the target before the socket</td>
+<td><code>--allow-unscoped</code> (CLI), <code>allow_unscoped:true</code> (MCP), or add a scope include rule</td>
+</tr>
+<tr>
+<td><strong>already queued</strong></td>
+<td>The same flow was named twice</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>The first row is the one worth internalizing. The skip is not a &quot;does this request carry a <code>Cookie</code>?&quot; test; that question missed APIs authenticating through <code>X-Api-Key</code>, and on a site you were not logged into it skipped everything while saying nothing. gori asks the exact question instead: <em>would any identity change these bytes?</em> If not, there is nothing to compare, and it says so.</p>
+<h2 id="passive-replay">Passive Replay</h2>
+<p><code>p</code> turns on unattended replay: as you browse through the proxy, every completed, in-scope, safe-method flow that at least one identity would change is queued and replayed automatically. It is off by default and nothing else turns it on. This is the one control in the tab that puts requests on a target with nobody pressing a key.</p>
+<p>Passive is gated harder than the manual queue: it needs a <strong>scope include rule</strong>, and with none configured nothing is replayed at all. gori says so at the keypress rather than leaving you to wonder. A browser session reaches a great deal that is not the engagement, and passive follows the browser.</p>
+<p>Two more properties worth knowing. Passive dedups by <strong>endpoint</strong> (<code>METHOD</code> + URL), not by flow id, so a session's tenth visit to <code>/orders</code> does not requeue it while <code>/orders?id=2</code> still gets its own row. And the queue is capped at 200 requests, because a long browse would otherwise replay more traffic than the browsing itself did. The cap is announced when it bites.</p>
+<p>The tab keeps a live readout of what passive has actually done (<code>N seen · M queued · K skipped (reason)</code>), because &quot;nothing happened&quot; and &quot;nothing matched&quot; otherwise look identical.</p>
+<h2 id="keys">Keys</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl-R</code></td>
+<td>Run pending: replay every queued request with no result yet (never run, or the send failed)</td>
+</tr>
+<tr>
+<td><code>⇧R</code></td>
+<td>Run all: replay everything, re-sending requests that already have a result</td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>Run this request only</td>
+</tr>
+<tr>
+<td><code>Ctrl-X</code></td>
+<td>Stop the run</td>
+</tr>
+<tr>
+<td><code>i</code></td>
+<td>Identities: edit the set every request is replayed under</td>
+</tr>
+<tr>
+<td><code>p</code></td>
+<td>Toggle passive replay</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>Remove the selected request from the queue</td>
+</tr>
+<tr>
+<td><code>↑</code> / <code>↓</code></td>
+<td>Move between requests</td>
+</tr>
+<tr>
+<td><code>⇥</code></td>
+<td>Move between the selected request&#39;s identities</td>
+</tr>
+<tr>
+<td><code>PgUp</code> / <code>PgDn</code></td>
+<td>Scroll the detail pane</td>
+</tr>
+<tr>
+<td><code>⇧X</code></td>
+<td>Clear: empty the queue and every identity&#39;s results (asks first). <code>Space</code> → <code>X</code> does the same; <code>⇧X</code> is the clear-all key in History, Probe, Issues and the Project ACTIVITY feed too</td>
+</tr>
+</tbody>
+</table>
+<p>From <strong>History</strong> or <strong>Sitemap</strong>, <code>Space</code> → <strong>Send to Authorize</strong> queues a request here.</p>
+<h2 id="headless">Headless</h2>
+<pre><code class="language-bash hljs"># Two captured flows, under the identities saved in the project
+gori run authorize 12 13
+
+# An explicit identity set, and a QL query instead of ids
+gori run authorize --query 'host:acme.test method:GET status:200' \
+  --identities identities.json --limit 20
+</code></pre>
+<p><code>identities.json</code> is the same shape the tab persists and the MCP tools take:</p>
+<pre><code class="language-json hljs">[{&quot;name&quot;: &quot;anonymous&quot;, &quot;remove&quot;: [&quot;Cookie&quot;, &quot;Authorization&quot;]},
+ {&quot;name&quot;: &quot;low-priv&quot;,  &quot;set&quot;: [{&quot;name&quot;: &quot;Cookie&quot;, &quot;value&quot;: &quot;session=…&quot;}]}]
+</code></pre>
+<p>Text output is one block per request: a headline you can scan down the left edge for <code>[!] BYPASS</code>, then one row per identity:</p>
+<pre><code>authorizing 2 requests × 2 identities (as-captured, anonymous) = 4 requests
+[!] BYPASS    #1     GET    http://127.0.0.1:8399/admin/users  · 1 of 1 identity matched the baseline
+      as-captured         baseline  200  118B     —
+      anonymous           same      200  118B     Δ status 200 · size same · time -434 µs
+
+[ ] enforced  #2     GET    http://127.0.0.1:8399/orders
+      as-captured         baseline  200  118B     —
+      anonymous           different 403  9B       Δ status 200 → 403 · size -109 B · time +272 µs
+done · 2 requests replayed · 4 sends · 1 possible bypass
+</code></pre>
+<p>Skips are stated up front, per flow, before anything is sent:</p>
+<pre><code>skipped 1 flow · 1 no identity changes them
+  #1     GET    http://acme.test/pricing  — no identity changes them
+</code></pre>
+<p>Manage the slot list (the same rows the <code>i</code> card edits) without opening the TUI:</p>
+<pre><code class="language-bash hljs">gori run session list                       # names, overlays (values [REDACTED]), claimed rules
+gori run session add --name low-priv --set 'Cookie: session=…' --rule SESSION
+gori run session edit low-priv --clear-set --set 'Cookie: session=new'
+gori run session baseline as-captured
+gori run session rm low-priv
+</code></pre>
+<p>There is no <code>gori run session activate</code>: a <code>gori run</code> process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead: <code>--slot NAME</code> works on <code>repeater</code>, <code>fuzz</code>, <code>mine</code>, <code>sequence</code> and <code>discover</code>, and applies before <code>--bind-from</code> replays its seed, so the seed fills the slot the run then sends as.</p>
+<p><code>--format jsonl</code> streams one object per request as it lands; <code>--format json</code> buffers and emits a single array at the end. Both carry the decoded body size the verdict actually compared alongside the wire size, which a gzipped response makes disagree by an order of magnitude. Full flags are in the <a href="/reference/cli/#run-authorize">CLI Reference</a>.</p>
+<h2 id="from-an-agent">From an Agent</h2>
+<p>Four MCP tools drive the same engine as a background job: <code>authorize_start</code> (returns a <code>job_id</code>, the planned send count, the identity names, the scope gate, and everything it skipped), <code>authorize_status</code>, <code>authorize_results</code>, and <code>authorize_stop</code>.</p>
+<p><code>authorize_results</code> puts the answer first. <code>access_control</code> names the outcome in one token (<code>BYPASS</code>, <code>enforced</code>, <code>review</code>, <code>error</code>, or <code>nothing_sent</code>; the last two both mean nothing was compared), <code>summary</code> says it in a sentence, and <code>bypasses</code> lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.</p>
+<p>Five more manage the slots themselves: <code>list_session_slots</code> (with the active one named, header values <code>[REDACTED]</code> unless you ask), <code>create_session_slot</code>, <code>update_session_slot</code>, <code>delete_session_slot</code>, and <code>set_active_session_slot</code>, which picks the identity every <em>other</em> tool's sends go out as, for the life of that server process.</p>
+<p>A run is capped at 2,000 sends, and the cap counts <code>flows × identities</code>: a 500-row query under four identities is refused up front, naming both factors, rather than truncated into a run that would report &quot;enforced&quot; for flows it never sent. Layer-1 scope is strict here: an out-of-scope target needs an explicit <code>allow_unscoped:true</code>, because nobody eyeballed it.</p>
+<h2 id="a-run-that-sent-nothing-is-not-evidence">A Run That Sent Nothing Is Not Evidence</h2>
+<p>This is the property the code goes out of its way to enforce, on every surface.</p>
+<p>If the sandbox or an exclude rule refused every send before the socket, if every selected flow was skipped, or if you stopped the run part-way, gori does <strong>not</strong> report &quot;no identity matched the baseline&quot;. It says nothing was sent. A clean bill of health for traffic that never left the machine is the worst way an access-control test can fail, worse than a false positive, because you would close the ticket.</p>
+<p>The same caution applies to a genuine <code>enforced</code>: it means access control held <em>for the identities you tested, on the requests you replayed</em>. A different endpoint, a different privilege boundary, or an identity you did not model is untested, not safe.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/proxy/">Proxy &amp; History</a>: capture the traffic and set the scope this tab replays inside</li>
+<li><a href="/guide/scanning/">Scanning &amp; Issues</a>: file a confirmed bypass as an Issue</li>
+<li><a href="/guide/scripting/">Scripting</a>: run the same comparison headless, in CI</li>
+<li><a href="/guide/mcp/">MCP Server</a>: hand the whole loop to an agent</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

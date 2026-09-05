@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다.">
+  <title>스크립팅 - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="스크립팅">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/guide/scripting/">
+  <meta property="og:description" content="gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="스크립팅">
+  <meta name="twitter:description" content="gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/ko/guide/scripting/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"스크립팅","url":"https://gori.hahwul.com/ko/guide/scripting/","description":"gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://gori.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"스크립팅"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/scripting/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/scripting/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/" class="active" aria-current="true">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/guide/scripting/" hreflang="en" lang="en" aria-label="English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/scripting/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+
+<svg xmlns="http://www.w3.org/2000/svg" class="sidebar-icon-defs" aria-hidden="true" focusable="false">
+  <symbol id="si-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" />
+    <path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" />
+    <path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  </symbol>
+  <symbol id="si-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M17 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" />
+  </symbol>
+  <symbol id="si-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
+    <path d="M19 16h-12a2 2 0 0 0 -2 2" />
+    <path d="M9 8h6" />
+  </symbol>
+  <symbol id="si-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 5h8" />
+    <path d="M13 9h5" />
+    <path d="M13 15h8" />
+    <path d="M13 19h5" />
+    <path d="M3 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+    <path d="M3 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+  </symbol>
+  <symbol id="si-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+  </symbol>
+</svg>
+
+<aside class="docs-sidebar">
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-rocket"/></svg>
+      <span class="sidebar-title-text">시작하기</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">AI 설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-route"/></svg>
+      <span class="sidebar-title-text">플레이북</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/playbooks/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">기초</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/">엔게이지먼트 준비</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/">공격면 매핑</a></li>
+      
+      
+      <li class="sidebar-subhead">수동 루프</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/">플로우 중 가로채기 및 수정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/">파라미터 퍼징</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/carry-a-session/">세션 유지</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/">데이터 디코드와 변환</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/">JWT 공격</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/">세션 쿠키 크랙과 위조</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/">토큰 랜덤성 평가</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/">OAST로 블라인드 취약점 확인</a></li>
+      
+      
+      <li class="sidebar-subhead">마무리</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/triage-and-report/">트리아지와 리포트</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/">AI 코파일럿 세션 실행</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-book"/></svg>
+      <span class="sidebar-title-text">가이드</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">핵심</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scanning/">스캐닝 &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">워크벤치</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/cookie/">Cookie</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/authorize/">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">자동화</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/scripting/" class="active" aria-current="page">스크립팅</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+      
+      
+      <li class="sidebar-subhead">커스터마이즈</li>
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/settings/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/themes/">테마</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">단축키</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-list"/></svg>
+      <span class="sidebar-title-text">레퍼런스</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/capabilities/">기능 매트릭스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/config/">설정</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/ko/reference/query-language/">쿼리 언어</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    
+    <p class="doc-kicker">가이드</p>
+    
+    <h1>스크립팅</h1>
+    <p>gori는 하나의 프로젝트와 하나의 엔진 위에 세 개의 진입점을 둡니다. <code>gori</code>(사람을 위한 TUI), <strong><code>gori run</code></strong>(스크립트를 위한 헤드리스 CLI), 그리고 <a href="/ko/guide/mcp/"><code>gori mcp</code></a>(AI 에이전트용)입니다. 이 페이지는 스크립팅 경로를 다룹니다.</p>
+<p><code>gori run</code>은 TUI를 얇게 감싼 래퍼가 아닙니다. 같은 Store, Repeater, 스윕 엔진에 터미널 없는 프런트엔드를 붙인 것입니다. 손으로 캡처한 것은 스크립트에서 질의할 수 있고, 스크립트가 캡처한 것은 TUI를 열면 그대로 보입니다.</p>
+<pre><code class="language-bash hljs">gori run &lt;subcommand&gt; [verb] [options]
+</code></pre>
+<p>전체 서브커맨드 목록은 <code>gori run -h</code>로, 모든 플래그는 <a href="/ko/reference/cli/">CLI 레퍼런스</a>에서 확인하세요.</p>
+<h2 id="프로젝트-선택">프로젝트 선택</h2>
+<p>각 프로젝트는 자체 SQLite 데이터베이스입니다. 읽기 서브커맨드는 다음 순서로 하나를 고릅니다.</p>
+<table>
+<thead>
+<tr>
+<th>선택자</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db=PATH</code></td>
+<td>특정 데이터베이스 파일</td>
+</tr>
+<tr>
+<td><code>--project=NAME</code></td>
+<td>짧은 id, 디렉터리 슬러그, 표시 이름, 고유 id 접두사로 매칭(대소문자 무시)</td>
+</tr>
+<tr>
+<td><em>(둘 다 없음)</em></td>
+<td>가장 최근에 사용한 프로젝트</td>
+</tr>
+</tbody>
+</table>
+<p>두 선택자는 우선순위가 아니라 택일입니다. <strong>둘 다</strong> 주면 <code>--db</code>가 조용히 이기는 게 아니라
+사용법 오류로 거절합니다. 같은 플래그 짝이 파괴적 동사(<code>history delete</code>, <code>history clear</code>,
+<code>project delete</code>)에도 그대로 닿는데, 거기서는 보이지 않는 승자가 어느 프로젝트를 비울지
+결정하기 때문입니다.</p>
+<p><code>gori run capture</code>만 한 가지가 다릅니다. 읽기는 이미 존재하는 프로젝트를 요구하지만, capture는 대상을 <strong>생성하거나 다시 엽니다</strong>.</p>
+<p>읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다. <code>body:</code> 질의는 예외입니다. 검색 인덱스를 비우므로 쓰기입니다.</p>
+<pre><code class="language-bash hljs">gori run history --project my-engagement -q 'status:5xx'
+gori run issues --db /path/to/project.db --format json
+</code></pre>
+<h2 id="스크립팅-계약">스크립팅 계약</h2>
+<p><code>gori run</code>이 뱉는 JSON은 눈으로 보라고 만든 게 아니라 파싱하라고 만든, 안정적이고 문서화된 형태입니다. 다음 네 가지 규칙이 파이프를 깔끔하게 유지합니다.</p>
+<p><strong>STDOUT은 데이터, STDERR은 진단.</strong> 경고, 개수, 안내, 내보내기 확인 메시지는 모두 STDERR로 갑니다. 그래서 <code>gori run … | jq</code>는 입력에서 잡담을 걸러낼 필요가 없습니다.</p>
+<p><strong><code>--format</code>이 형태를 정합니다.</strong> 대부분의 서브커맨드는 <code>text</code>(기본)와 <code>json</code>을 받고, 일부는 <code>jsonl</code>, <code>raw</code>, <code>har</code>, <code>paths</code>, <code>markdown</code>을 더합니다. 실행이 길게 이어지는 곳에서는 두 JSON 형태가 다르고, 그 차이를 알아둘 만합니다.</p>
+<table>
+<thead>
+<tr>
+<th>서브커맨드</th>
+<th><code>--format json</code></th>
+<th><code>--format jsonl</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>capture</code>, <code>history</code></td>
+<td>한 줄에 JSON 객체 하나</td>
+<td><code>json</code>의 별칭, 출력 동일</td>
+</tr>
+<tr>
+<td><code>fuzz</code>, <code>mine</code>, <code>discover</code></td>
+<td>버퍼링 후 마지막에 JSON 배열 하나</td>
+<td>결과가 나올 때마다 한 줄씩</td>
+</tr>
+</tbody>
+</table>
+<p>긴 스윕을 진행 중에 소비하려면 <code>jsonl</code>을, 끝에 문서 하나를 받으려면 <code>json</code>을 씁니다.</p>
+<p><strong>종료 코드에 의미가 있습니다.</strong></p>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>성공</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td><code>gori run fuzz --fail-if-no-matches</code>가 정상 완료했지만 매칭이 하나도 없음</td>
+</tr>
+</tbody>
+</table>
+<p>매칭이 없으면서 <em>동시에</em> 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 <code>3</code>이 아니라 <code>1</code>로 끝납니다. <code>--fail-if-no-matches</code> 없이도 스크립트가 &quot;결과 없음&quot;과 &quot;대상에 닿지도 못함&quot;을 구분할 수 있습니다.</p>
+<p><strong>닫힌 파이프는 오류가 아닙니다.</strong> <code>gori run history | head -5</code>는 여느 유닉스 필터처럼 조용히 <code>0</code>으로 끝납니다.</p>
+<pre><code class="language-bash hljs"># 프로젝트의 모든 5xx를 JSON Lines로 뽑아 jq로
+gori run history -q 'status:5xx' --limit 500 --format json | jq -r '.url'
+
+# 5분간 캡처해 이름 붙인 프로젝트에 쌓고, 파일로 스트리밍
+gori run capture --project ci-run --for 5m --format jsonl &gt; flows.jsonl
+
+# 퍼저가 반사된 마커를 찾으면 CI 잡을 실패시키기
+gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
+</code></pre>
+<h2 id="스코프-지키기">스코프 지키기</h2>
+<p>소켓을 여는 모든 액티브 서브커맨드는 TUI와 MCP가 쓰는 것과 같은 아웃바운드 게이트를 지납니다. 스코프 규칙이 있는 프로젝트는 그 밖의 대상을 거부하며, <code>--allow-unscoped</code>가 의도적인 예외 선언입니다. 샌드박스와 명시적 제외 규칙은 이 플래그와 무관하게 항상 적용됩니다.</p>
+<p><code>--request</code>나 STDIN으로 원시 요청을 퍼징하면서 <code>--project</code>/<code>--db</code>를 주지 않으면 참조할 스코프 자체가 없습니다. 이때 gori는 검사한 척하지 않고 STDERR에 명시적인 unscoped 경고를 출력합니다.</p>
+<h2 id="인증이-필요한-스윕">인증이 필요한 스윕</h2>
+<p>세션 바인딩(<code>$SESSION</code> 같은 것들)은 그것을 관측한 gori 프로세스의 메모리에만 존재하며, 절대 저장되지 않습니다. 복원된 토큰은 이미 낡은 것이기 때문입니다. TUI에서는 한 프로세스가 전송과 뒤이은 스윕을 모두 쥐고 있으니 문제가 없지만, <code>gori run</code>은 프로세스마다 한 번만 실행됩니다.</p>
+<p><code>--bind-from FLOW-ID</code>가 그 빈틈을 메웁니다. 캡처된 플로우 하나를 먼저 재생해서, 그 응답이 같은 프로세스 안에서 fuzz·mine·sequence·discover 템플릿이 읽을 바인딩을 채우게 합니다.</p>
+<pre><code class="language-bash hljs">gori run fuzz 42 --bind-from 41 --wordlist ids.txt
+</code></pre>
+<p>바인딩을 정의하는 추출 규칙은 <a href="/ko/guide/proxy/#session-bindings">세션 바인딩</a>을 참고하세요.</p>
+<h2 id="프로세스-훅">프로세스 훅</h2>
+<p>gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 <em>계산</em>해야 할 때(JWT 재서명, 바디
+재압축, 독자 포맷 봉투 복호화, 진짜 탐지기 실행) 이미 가지고 있는 프로그램에 바이트를 넘기면
+됩니다. stdin으로 바이트를 주고 stdout으로 교체 바이트를 받습니다. 확장 표면은 이게 전부이고,
+같은 원시 도구가 네 군데에 붙어 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>이음매</th>
+<th>위치</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rewriter <code>pipe</code> 액션</td>
+<td>Rewriter 탭, <code>gori run rewriter add --op=pipe</code>, MCP <code>create_rule</code></td>
+<td>매치된 구간을 명령에 넘기고 stdout으로 교체. 프록시에서 실시간으로</td>
+</tr>
+<tr>
+<td>Decoder <code>exec:</code> 스텝</td>
+<td>Decoder 탭 체인, <code>gori run decoder</code>, <code>§value¦chain§</code> 마커</td>
+<td>체인의 한 스텝이 컨버터가 아니라 명령</td>
+</tr>
+<tr>
+<td>Probe <code>exec</code> 룰</td>
+<td>Probe 룰, <code>gori run probe rules add --exec</code></td>
+<td>구간을 명령에 넘겨 exit 0이면 발견, stdout이 근거</td>
+</tr>
+<tr>
+<td>Miner <code>--hook</code></td>
+<td><code>gori run mine --hook</code>, MCP <code>mine_start</code>의 <code>hook</code></td>
+<td>조립된 요청 전체를 명령에 넘기고 그 stdout이 실제로 나가는 요청. 프로브 하나당 훅 하나</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash hljs"># 브라우저에서 나가는 모든 JWT를 내 서명기로 재서명한다.
+gori run rewriter add --op=pipe --match=regex --part=body \
+  --find='eyJ[A-Za-z0-9._-]+' --value='./resign.sh --key dev.pem'
+
+# base64 바디를 디코드해 내 파서에 통과시키고 예쁘게 출력한다.
+gori run decoder 'base64-decode &gt; exec:./parse-envelope --json &gt; json-pretty' &quot;$BLOB&quot;
+
+# 정규식 대신 진짜 탐지기가 판정하게 한다.
+gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
+
+# 서명이 걸린 API에서 숨은 파라미터 찾기: 나가기 전에 모든 프로브에 서명한다.
+gori run mine 42 --locations=query --hook './sign.sh'
+</code></pre>
+<p><strong>명령은 직접 exec됩니다. 셸이 없습니다.</strong> <code>argv</code>는 따옴표와 백슬래시 규칙(<code>'a b'</code>, <code>&quot;a b&quot;</code>,
+<code>a\ b</code>)으로만 토큰화되어 <code>execvp</code>에 데이터로 전달됩니다. <code>$FOO</code>, <code>*</code>, <code>`</code>, <code>;</code>, <code>&amp;&amp;</code>, <code>|</code>,
+<code>&gt;</code>는 인자 안의 평범한 문자일 뿐 연산자가 아닙니다. 훅을 통과하는 캡처 바이트가 셸에 해석될
+길은 없습니다. Decoder 체인에서는 세 구분자(<code>&gt;</code>, <code>|</code>, <code>,</code>)가 스텝을 읽기 전에 소비되므로
+<code>exec:</code> 스텝의 인자 안에는 들어갈 수 없습니다.</p>
+<p><strong>훅은 프록시를 멈추지 못합니다.</strong> 모든 실행에 하드 벽시계 타임아웃(settings.json의
+<code>hooks.timeout_secs</code>, 기본 5초, 상한 60초)과 32 MiB stdout 상한이 걸립니다. 명령이 타임아웃되거나,
+0이 아닌 코드로 종료되거나, 실행 자체에 실패하거나, stdout을 넘치게 쏟으면 <strong>원본 바이트가 그대로
+통과</strong>하고 실패는 프로젝트 이벤트 피드에 알림으로 기록됩니다. 멈춘 훅 때문에 플로우를 잃는 일은
+없습니다. Rewriter에서 타임아웃은 한 번의 재작성에 걸린 모든 pipe 룰과 모든 매치가 나눠 쓰는
+<em>예산</em>입니다. 400번 매치되는 패턴도, 한 헤드에 걸린 pipe 룰 4개도 예산 한 번만큼만 듭니다. 메시지
+하나는 헤드와 바디로 두 번 재작성되므로 메시지가 보는 한계는 그 두 배입니다.</p>
+<p><strong>Miner의 훅은 프로브마다 한 번 실행되며, 서명이 걸린 API의 값을 치릅니다.</strong> 모든 파라미터가 HMAC이나
+서명된 봉투, 요청마다 다른 nonce를 지녀야 하는 앱은 날것의 후보를 반응하기도 전에 거절하므로, 훅이
+없으면 캘 것이 없습니다. 모든 프로브가 똑같아 보입니다. <code>--hook</code>은 조립된 요청 하나하나를(후보가
+주입되고 세션 바인딩이 이미 해소된 상태로) 지정한 명령에 넘기고, 그 stdout이 실제로 나갑니다. 실행할 수
+없는 훅은 <strong>이유를 밝히며 그 프로브를 건너뜁니다.</strong> 서명 없는 요청을 보내면 앱이 거절하고 마이너는 그것을
+깨끗한 음성으로 읽을 것이기 때문입니다. 타임아웃은 같은 <code>hooks.timeout_secs</code> 예산이며 <strong>아웃바운드 요청
+단위</strong>입니다. 마인의 요청 수는 <code>--max-requests</code>와 자체 버킷/이분/확인 트리로 묶여 있으므로 훅 비용 총량도
+함께 묶입니다. 마이너는 왕복을 세는 지연 바운드 작업이라, 훅은 그 왕복마다 fork-and-wait 하나를 더합니다.</p>
+<p><strong>의도적으로 연결하지 않은 두 곳.</strong> MCP <code>decode</code> 툴은 <code>exec:</code> 스텝을 거부합니다(저장된 체인
+포함). read-only·unbound로 노출되는 툴이라 순수 계산으로 남깁니다. 훅이 필요한 에이전트는 <code>pipe</code>
+rewriter 룰이나 <code>exec</code> probe 룰을 만들면 되고, 둘 다 운영자가 볼 수 있는 게이트된 쓰기입니다. 그리고
+Probe <code>exec</code> 룰은 패시브 분석기에서 <strong>플로우당 한 번</strong> 실행되므로, 느린 탐지기는 라이브 캡처 중 룰
+셋 전체의 병목이 됩니다. 명령을 빠르게 유지하세요.</p>
+<p><strong>그리는 것은 실행하는 것이 아닙니다.</strong> 무언가를 <em>그리려고</em> 체인을 다시 돌리는 표면은 모두
+<code>exec:</code> 스텝을 보류하고 그 줄에 held로 표시합니다. Rewriter의 OUTPUT 패널, <code>^Q</code> 체인 편집기의
+미리보기, 템플릿에서 다시 만든 Fuzzer 결과 행(여기 보이는 값은 그 스텝 <em>이전</em>의 페이로드라고
+말해 줍니다). Repeater의 Content-Length 반영만은 그 자리에서 말할 곳이 없어 헤더를 아예 고쳐
+쓰지 않습니다. <code>^R</code>이 렌더된 바이트에서 진짜 길이를 계산하고, <code>^L</code>은 사용자가 그 헤더를 넘겨받는
+바로 그 순간 한 번 다시 계산합니다. <strong>복원도 실행이 아닙니다</strong>. 프로젝트를 다시 열면 저장된
+Repeater 탭과 Decoder 서브탭이 전부 복원되지만 그 명령들은 돌지 않습니다.</p>
+<p><strong>실행되는 곳은 둘이고, 둘 다 &quot;전송될 바이트&quot;를 달라는 요청입니다.</strong> <code>^R</code>은 당연하고, 덜
+당연하게는 그 바이트를 그대로 건네주는 것들(Repeater의 <code>Copy as…</code> 메뉴와 Comparer 슬롯)
+도 실행합니다. 훅을 뺀 <code>curl</code> 한 줄은 자기가 재현한다고 주장하는 그 요청을 재현하지 못하니까요.</p>
+<p><strong>Decoder 탭의 체인은 타이핑 중에도 라이브입니다.</strong> 그 탭이 <code>exec:</code>가 만들어진 워크벤치라
+편집할 때마다 파이프라인이 다시 돕니다. 그리고 타이핑 중인 명령의 각 접두사도 그 자체로 완결된
+명령입니다(<code>exec:rm -rf /tmp/x</code>를 치면 도중에 <code>rm -rf /tmp</code>가 실행됩니다). argv는 다른 데서
+작성해 붙여넣거나, 디스크에서 편집하는 래퍼 스크립트를 스텝이 가리키게 하세요.</p>
+<p><strong>훅은 내 권한으로 실행됩니다.</strong> 샌드박스도, 감옥도, 격리도 없습니다. <code>--config</code> 파일이나 다른
+Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들어내는 일은 없습니다. 전부 사람이 쓴
+설정이고, 각각은 자기가 속한 룰 목록에 그대로 보입니다. 열어둔 프로젝트에 다른 세션(에이전트,
+두 번째 TUI)이 <code>pipe</code> 룰을 추가하면, 이 세션은 지금부터 나를 대신해 로컬 명령을 실행하게
+되었다고 그대로 말해줍니다.</p>
+<p><strong>공유하는 프로필도 훅을 실어 나릅니다.</strong> <code>rewriter</code>와 <code>scan_rules</code>는 평범한 export 대상 섹션이고,
+<code>--sections</code>로 지정한 <code>decoder</code> 체인도 마찬가지입니다. 훅도 다른 룰과 똑같이
+<a href="/ko/reference/cli/#profiles">프로필</a>에 담겨 이동합니다. 그게 요점입니다. 팀이 같은 재서명 훅을
+표준으로 쓰는 것이야말로 훅이 존재하는 이유니까요. 훅 seam 바깥에도 명령을 실행하는 설정이 둘 있고
+같은 방식으로 이동합니다: <code>statusline.command</code>(<code>/bin/sh -c</code>로, 타이머마다)와 <code>editor.command</code>입니다.
+대신 양쪽 끝에서 말해줍니다. <code>gori settings export</code>는 무엇을 실었는지 stderr에 개수로 알리고,
+<code>gori settings import</code>는 명령을 담은 항목을 명령줄까지 하나씩 나열한 뒤 <strong><code>--allow-commands</code>를 주기
+전까지 쓰기를 거부합니다</strong>. 남의 프로필을 import하는 것은 남의 스크립트를 실행하는 것과 같은 신뢰
+결정이니 명령을 먼저 읽으세요. 그 플래그가 확인 절차이고, 대화형 프롬프트가 없으므로 스크립트에서도
+그대로 답할 수 있습니다.</p>
+<h2 id="무엇을-쓸까">무엇을 쓸까</h2>
+<table>
+<thead>
+<tr>
+<th>할 일</th>
+<th>서브커맨드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CI에서 헤드리스로 트래픽 캡처</td>
+<td><code>capture</code></td>
+</tr>
+<tr>
+<td>History 질의·내보내기(HAR 포함)</td>
+<td><code>history</code>, <code>show</code></td>
+</tr>
+<tr>
+<td>요청 재전송과 비교</td>
+<td><code>repeater</code>, <code>compare</code></td>
+</tr>
+<tr>
+<td>페이로드 스윕, 숨은 파라미터 탐색</td>
+<td><code>fuzz</code>, <code>mine</code></td>
+</tr>
+<tr>
+<td>엔드포인트 크롤링·브루트포스</td>
+<td><code>discover</code>, <code>sitemap</code></td>
+</tr>
+<tr>
+<td>아이덴티티별 접근 제어 시험</td>
+<td><code>authorize</code></td>
+</tr>
+<tr>
+<td>스캔과 트리아지</td>
+<td><code>probe</code>, <code>issues</code>, <code>notes</code></td>
+</tr>
+<tr>
+<td>프로젝트 없이 순수 계산</td>
+<td><code>decoder</code>, <code>jwt</code>, <code>cookie</code></td>
+</tr>
+<tr>
+<td>프로젝트·스코프·env·규칙 관리</td>
+<td><code>project</code>, <code>rewriter</code>, <code>colormarker</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li><a href="/ko/reference/cli/">CLI 레퍼런스</a>: 모든 서브커맨드와 플래그</li>
+<li><a href="/ko/reference/query-language/">쿼리 언어</a>: <code>-q</code>가 받는 필터 문법</li>
+<li><a href="/ko/guide/mcp/">MCP 서버</a>: 셸 대신 AI 에이전트가 같은 프로젝트를 구동하는 길</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

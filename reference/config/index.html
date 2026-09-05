@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <title>Configuration - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="Configuration">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/config/">
+  <meta property="og:description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Configuration">
+  <meta name="twitter:description" content="The settings.json keys and the GORI_HOME storage layout.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/reference/config/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Configuration","url":"https://gori.hahwul.com/reference/config/","description":"The settings.json keys and the GORI_HOME storage layout."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"Configuration"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/config/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/config/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/config/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/config/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+
+<svg xmlns="http://www.w3.org/2000/svg" class="sidebar-icon-defs" aria-hidden="true" focusable="false">
+  <symbol id="si-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" />
+    <path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" />
+    <path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  </symbol>
+  <symbol id="si-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M17 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" />
+  </symbol>
+  <symbol id="si-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
+    <path d="M19 16h-12a2 2 0 0 0 -2 2" />
+    <path d="M9 8h6" />
+  </symbol>
+  <symbol id="si-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 5h8" />
+    <path d="M13 9h5" />
+    <path d="M13 15h8" />
+    <path d="M13 19h5" />
+    <path d="M3 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+    <path d="M3 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+  </symbol>
+  <symbol id="si-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+  </symbol>
+</svg>
+
+<aside class="docs-sidebar">
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-rocket"/></svg>
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-route"/></svg>
+      <span class="sidebar-title-text">Playbooks</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/playbooks/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Foundations</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">Set up an engagement</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">Map the attack surface</a></li>
+      
+      
+      <li class="sidebar-subhead">The manual loop</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">Intercept and modify in flight</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">Fuzz a parameter</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/carry-a-session/">Carry a session</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/decode-and-transform/">Decode and transform data</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">Attack a JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">Crack and forge session cookies</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">Grade token randomness</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">Confirm blind vulnerabilities with OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Wrap up</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/triage-and-report/">Triage and report</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">Run an AI co-pilot session</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-book"/></svg>
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-list"/></svg>
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/" class="active" aria-current="page">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    
+    <p class="doc-kicker">Reference</p>
+    
+    <h1>Configuration</h1>
+    <p>gori stores global preferences in <code>settings.json</code> and each project as its own SQLite database. See the <a href="/getting-started/configuration/">Configuration guide</a> for a walkthrough; this page is the key-by-key reference.</p>
+<h2 id="storage-layout">Storage Layout</h2>
+<p>Everything lives under <code>GORI_HOME</code> (<code>$GORI_HOME</code> if set and non-empty, otherwise <code>~/.gori</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>settings.json</code></td>
+<td>Global preferences</td>
+</tr>
+<tr>
+<td><code>gori.db</code></td>
+<td>Default project database</td>
+</tr>
+<tr>
+<td><code>projects/</code></td>
+<td>One subdirectory per named project, each with its own DB</td>
+</tr>
+<tr>
+<td><code>ca/</code></td>
+<td>Root CA: <code>root.crt.pem</code> and <code>root.key.pem</code></td>
+</tr>
+<tr>
+<td><code>themes/</code></td>
+<td>User themes</td>
+</tr>
+<tr>
+<td><code>wordlists/</code></td>
+<td>Fuzzer / miner wordlists</td>
+</tr>
+<tr>
+<td><code>protos/</code></td>
+<td>gRPC descriptor sets (<code>protoc --descriptor_set_out</code>), loaded by any project with no path of its own</td>
+</tr>
+<tr>
+<td><code>active_project</code></td>
+<td>Marker for the most-recently-used project</td>
+</tr>
+</tbody>
+</table>
+<h2 id="settingsjson">settings.json</h2>
+<p><code>settings.json</code> is JSON. Find or edit it with <code>gori settings</code> / <code>gori settings --edit</code>.</p>
+<p>Its location resolves as <code>--config PATH</code> → <code>$GORI_CONFIG</code> → <code>$GORI_HOME/settings.json</code>, so a run can use a different configuration without relocating the CA, project databases, themes and wordlists. Sections can be moved between configs with <a href="/reference/cli/#profiles"><code>gori settings export</code> / <code>import</code></a>. Five of them (<code>rewriter</code>, <code>scan_rules</code>, <code>decoder</code>, <code>statusline</code> and <code>editor</code>) can carry a command rather than data, so a profile can carry code; both ends of a transfer <a href="/reference/cli/#profiles-that-carry-commands">say so</a>.</p>
+<h3 id="network">network</h3>
+<pre><code class="language-json hljs">{
+  &quot;network&quot;: {
+    &quot;bind_host&quot;: &quot;127.0.0.1&quot;,
+    &quot;bind_port&quot;: 8070,
+    &quot;upstream_proxy&quot;: &quot;&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bind_host</code></td>
+<td>string</td>
+<td><code>127.0.0.1</code></td>
+<td>Global default listen address (used when a project has no <code>net.bind_host</code>)</td>
+</tr>
+<tr>
+<td><code>bind_port</code></td>
+<td>integer</td>
+<td><code>8070</code></td>
+<td>Global default listen port (used when a project has no <code>net.bind_port</code>)</td>
+</tr>
+<tr>
+<td><code>upstream_proxy</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Global default upstream: legacy <code>host:port</code>/<code>http://…</code>, <code>http+tls://…</code> (TLS to the proxy), or <code>socks5://…</code>/<code>socks5h://…</code>; empty = direct. Project <code>net.upstream_proxy</code> wins when set. <code>https://…</code> is the <strong>legacy spelling of the plaintext form</strong>; see <a href="#upstream_rules">upstream_rules</a></td>
+</tr>
+<tr>
+<td><code>upstream_proxy_ca</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>PEM bundle trusted for the <strong>upstream proxy&#39;s own</strong> certificate on an <code>http+tls</code> hop, in addition to the system store. Blank = system trust only. A path, never a secret, so it is safe to share in a profile</td>
+</tr>
+<tr>
+<td><code>upstream_proxy_insecure</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Skip verification of the <strong>upstream proxy&#39;s</strong> certificate. Independent of <code>verify_upstream</code> and untouched by <code>--insecure-upstream</code>, which are about the <strong>origin</strong>. Off by default: that hop carries every <code>CONNECT</code> authority and every <code>Proxy-Authorization</code> credential</td>
+</tr>
+<tr>
+<td><code>verify_upstream</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Verify upstream TLS certificates against the system CA trust store, resolved automatically from standard locations (honouring <code>SSL_CERT_FILE</code> / <code>SSL_CERT_DIR</code>); if none is found, HTTPS verification fails; set <code>SSL_CERT_FILE</code> or turn this off. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. <code>--insecure-upstream</code> seeds it off for one session</td>
+</tr>
+<tr>
+<td><code>serve_landing</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host <code>http://gori.proxy/</code> (or <code>http://gori/</code>) for a client already pointed at the proxy</td>
+</tr>
+<tr>
+<td><code>connect_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>Upstream connect timeout in seconds (minimum <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>io_timeout_secs</code></td>
+<td>integer</td>
+<td><code>30</code></td>
+<td>Upstream read / write idle timeout in seconds (minimum <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>capture_max_mib</code></td>
+<td>integer</td>
+<td><code>2</code></td>
+<td>Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded</td>
+</tr>
+<tr>
+<td><code>http2</code></td>
+<td>string</td>
+<td><code>&quot;auto&quot;</code></td>
+<td><code>auto</code> reflects the origin&#39;s ALPN; <code>off</code> forces HTTP/1.1 on every tunnelled connection. See <a href="#http2">http2</a> below</td>
+</tr>
+<tr>
+<td><code>strip_alt_svc</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Remove the <code>Alt-Svc</code> response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See <a href="#strip-alt-svc">strip_alt_svc</a> below</td>
+</tr>
+<tr>
+<td><code>tls_passthrough</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>Hosts to relay without decrypting. See <a href="#tls_passthrough">tls_passthrough</a> below</td>
+</tr>
+</tbody>
+</table>
+<p>CLI <code>--listen</code> / <code>--port</code> override these for the current process only (not written to disk). See <a href="#per-project-overrides">Per-Project Overrides</a>.</p>
+<h4 id="http2">http2</h4>
+<p><code>auto</code> (the default) reflects the origin's ALPN: gori advertises HTTP/2 to the client only when the origin speaks it. <code>off</code> never advertises it, so every tunnelled connection takes the HTTP/1.1 path.</p>
+<p>Pinning the version matters because h1-vs-h2 differences are often the <em>subject</em> of a test (request framing, header-name handling, smuggling), and holding the protocol constant is how the difference gets isolated.</p>
+<p>Before this setting, the only lever was an implementation detail: gori downgrades to HTTP/1.1 when Match &amp; Replace rules are live, so the way to force h1 was to enable a no-op rule. That also turned on head rewriting, and was easy to leave behind.</p>
+<p><code>off</code> takes effect on the next tunnelled connection, and skips the origin ALPN probe entirely (one fewer connection per origin). It does <strong>not</strong> override the downgrades gori still performs for correctness: a live Match &amp; Replace <strong>body</strong> rule, a body-scoped <strong>extract</strong> rule, or a <strong>short-circuit</strong> rule forces HTTP/1.1 regardless. Match &amp; Replace on HTTP/2 applies to heads, body rewriting there is not implemented and is not planned (HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream), body extraction needs an entity the relay does not assemble at that seam, and the h2 relay has no way to answer a request locally. Intercept, head rules and the Sandbox no longer downgrade anything. A cleartext-HTTP/2 (<code>h2c</code>) tunnel inside <code>CONNECT</code> is refused rather than relayed when <code>off</code>: the client has already committed to h2 by sending the preface, so there is nothing to downgrade.</p>
+<p>Every downgrade is announced in <code>gori.log</code>, once per host, naming the host and which reason caused it. An HTTP/2-only client (every gRPC client) cannot connect to a host while a downgrade applies, and that log line is the only place the reason is written down.</p>
+<p>There is no <code>force</code> mode. It would need a defined fallback for an origin that turns out not to speak HTTP/2, and no need for it has come up; the string form leaves room to add it without a compatibility shim.</p>
+<h4 id="tls-passthrough">tls_passthrough</h4>
+<p>A CONNECT whose host matches is answered <code>200</code> and then relayed as an opaque byte tunnel: no certificate is minted for it, nothing is decrypted, and nothing is captured. The client validates the origin's own certificate, exactly as if gori were not in the path.</p>
+<p>This is the escape hatch for a client that pins certificates (a mobile app, an auto-updater, a desktop agent) sharing the proxy with your actual target. Without it, that traffic breaks. Scope does not help here: scope decides what is <em>recorded</em> and acted on, never whether TLS is intercepted, so an out-of-scope host is still decrypted.</p>
+<p>It is also the answer for a <strong>non-HTTP protocol</strong> on the same path: MQTT, AMQP, a database wire protocol, or anything else whose first byte is not text. gori's proxy speaks HTTP; point one of those at it and, without passthrough, gori terminates TLS and then finds bytes that are not an HTTP request. It no longer hangs silently on that: the connection is recorded as a <code>not an HTTP request</code> flow naming the observed bytes, so you can see what arrived and reach for passthrough. List the host here and gori tunnels it byte-exact instead.</p>
+<p>A protocol that opens with a <em>text</em> line (SSH's <code>SSH-2.0-…</code> banner, an SMTP greeting) is <strong>not</strong> detected, on purpose: on the first line it is indistinguishable from a deliberately malformed request line, and gori forwards those verbatim rather than second-guessing your payload. Such a connection still waits out the head timeout. Reach for passthrough there too.</p>
+<p>It also covers the two shapes with no bytes to judge. A <strong>server-speaks-first</strong> protocol (SMTP, IMAP, POP3, MySQL, where the <em>server</em> greets first) has its client connect and send nothing at all, so there is nothing to classify; the connection is now recorded as a <code>no request</code> flow naming that shape once the read times out, instead of dying in silence. On a reverse or transparent listener that flow names the origin the client was dialling (declared for the reverse one, read from the kernel's redirect for the transparent one where the platform answers), which for a redirected <code>:25</code> or <code>:143</code> is the whole diagnosis and the host to list here. On a socks5 listener it names the destination the client asked for, once the handshake got that far; before that there is nothing to name. On the forward-proxy listener there is no name to record, because nothing arrived to carry one, so there the flow's advice is to keep gori off that port instead.</p>
+<p>A <strong>non-TLS payload inside <code>CONNECT</code></strong> (<code>ssh -o ProxyCommand='nc -X connect proxy:8080 %h %p'</code>, the ordinary corporate-proxy pattern) is refused with a flow that names the byte it opened with, rather than being fed to a TLS handshake it can never complete. Listing the host makes it work: a listed host is relayed byte-exact, with no peek at what it speaks. The same peek now identifies an <code>h2c</code> tunnel by its full <code>PRI * HTTP/2.0</code> preface rather than by its first byte, so a plaintext <code>POST</code> or <code>PROPFIND</code> tunnelled to port 80 is refused like any other undecodable payload instead of being handed to the HTTP/2 relay.</p>
+<p>If gori cannot complete a TLS handshake with a client reaching a tunnelled origin (most often because the client does not trust the CA yet, and always for a client that pins a certificate), that is written to <code>gori.log</code> once per host, port and reason. The CA-download page at <code>gori.proxy</code> is excluded: a client arrives there precisely because it does not trust the CA yet, so a failure is the expected first step, not a fault to report.</p>
+<pre><code class="language-json hljs">{
+  &quot;network&quot;: {
+    &quot;tls_passthrough&quot;: [&quot;updates.example.com&quot;, &quot;*.push.apple.com&quot;]
+  }
+}
+</code></pre>
+<p>Patterns use the same dialect as scope <code>host</code> rules: <code>example.com</code> covers that host <strong>and its subdomains</strong>, <code>*.push.example.com</code> is a glob (subdomains only, not the bare host), and an IPv6 literal matches bracketed or bare. Matching is case-insensitive. Entries are bare hosts: a scheme, a path, or a <code>:port</code> is rejected when you save, because such an entry could never match.</p>
+<p>Empty (the default) means everything is intercepted, which is how gori behaved before this setting existed. Plaintext HTTP is unaffected: there is no TLS there to pass through.</p>
+<p>Because a bypassed host produces no flow, gori writes one line to its log the first time each host is relayed, so a host missing from History has a traceable reason. Edit the list from Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>TLS passthrough</strong> (comma-separated).</p>
+<h4 id="strip-alt-svc">strip_alt_svc</h4>
+<p>gori does not intercept HTTP/3: QUIC is UDP, and every gori listener is a TCP socket. So an origin answering <code>Alt-Svc: h3=&quot;:443&quot;</code> is inviting the client onto a transport gori cannot read, and what you are left with is a History that just stops. Turn this on and gori removes the <code>Alt-Svc</code> fields advertising <code>h3</code> (or an <code>h3-…</code> draft) from the response the <em>client</em> receives, on both HTTP/1.1 and HTTP/2, so the response the client reads offers it nowhere to go.</p>
+<p>It is off by default on purpose. gori edits a response you did not ask it to edit only where <em>not</em> editing it would make gori lie about what it captured. The <code>Sec-WebSocket-Extensions</code> strip is that case, because a negotiated <code>permessage-deflate</code> leaves every stored frame a deflate stream presented as the payload. An <code>Alt-Svc</code> left in place corrupts nothing gori records; it only means the client may leave. That is a call about the test in front of you, so it is a switch the human throws.</p>
+<p><strong>With it off, gori says so instead.</strong> A response that advertises h3 and reaches the client un-stripped now carries an advisory naming the evidence and the setting: <em>&quot;kept 1 Alt-Svc HTTP/3 advertisement (<code>h3=&quot;:443&quot;</code>) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy for a transport gori cannot see, and whatever it does there is missing from History rather than absent (settings network.strip_alt_svc is off).&quot;</em> It appears on both HTTP/1.1 and HTTP/2, in the same places the removal advisory appears. Nothing on the wire changes: the origin's head reaches the client byte for byte, and only the flow gains a sentence. Each host is also named once in <code>gori.log</code>, and the passive probe's existing <code>tech_http3</code> fingerprint still raises its own once-per-host <code>Alt-Svc: &lt;host&gt; advertised HTTP/3</code> event, clickable through to the Probe tab, so the session-level view of &quot;which hosts are inviting clients away&quot; is where it already was. What was missing, and is what this adds, is the per-flow record: a gap in History that nothing explains reads exactly like an origin that had nothing more to say.</p>
+<p>Removal is per <strong>field</strong>, and only for fields that advertise h3. <code>Alt-Svc: clear</code> is never removed: RFC 7838 §3 makes it the instruction to <em>forget</em> cached alternatives, which is the one spelling that helps here. A plain <code>h2=&quot;:8443&quot;</code> alternative is never removed either; that is another TCP port, still tunnelled through gori.</p>
+<p>The strip runs <em>before</em> Match &amp; Replace, so a response head rule that puts the header back wins. An operator saying so about one host outranks a switch thrown for all of them.</p>
+<p>On HTTP/2 there is a price: removing a field means gori re-encodes that response's header block, and HPACK's per-connection state makes that one-way, so from the first strip onward gori re-encodes every response head on that connection and gives up the origin's HPACK compression for it. The raw frame log for that connection then holds gori's HPACK rather than the origin's, which the advisory on the flow says out loud. A trailer block and a PUSH_PROMISE are left alone: no client acts on an <code>Alt-Svc</code> in either, and stripping one would let an origin close that latch whenever it liked.</p>
+<p>Every flow whose response was stripped carries an advisory naming what was removed and quoting the removed value, in the History detail pane, <code>gori run history --format json</code> and the MCP <code>get_flow</code> tool. The switch costs you the bypass, not the evidence. It does move where that evidence lives. The passive probe reads the <em>stored</em> response, and the stored response is the one gori delivered, so a captured flow stops raising the <code>tech_http3</code> fingerprint and its <code>Alt-Svc: &lt;host&gt; advertised HTTP/3</code> event line once the strip is on. The per-flow advisory is where that fact moves to, and the event was a warning about a bypass that can no longer happen. Only captured traffic is affected: a response gori elicited itself (a Repeater send, a Fuzz sweep, a Discover crawl, MCP <code>send_request</code>, an import) never goes through the proxy path, so it keeps the origin's <code>Alt-Svc</code> and still fingerprints. Resend the request from the Repeater and the advertisement is back in front of you.</p>
+<p>Three things it cannot cover. A host on <a href="#tls-passthrough"><code>tls_passthrough</code></a> is never decrypted, so there is no response for gori to edit. A client can learn an h3 route without any <code>Alt-Svc</code> at all; a DNS <code>HTTPS</code> record does it, and no response-side strip reaches that. And a field-name spelled with whitespace before the colon (<code>Alt-Svc : h3=…</code>) is not recognised, by this setting or by gori's own header projection; a conforming client rejects that field too (RFC 9112 §5.1). Toggle the setting from Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Strip HTTP/3 Alt-Svc</strong>.</p>
+<h3 id="listeners">listeners</h3>
+<p>Additional sockets the proxy accepts on, alongside the primary <code>network.bind_host</code> / <code>bind_port</code>.</p>
+<pre><code class="language-json hljs">{
+  &quot;listeners&quot;: [
+    { &quot;host&quot;: &quot;192.168.1.10&quot;, &quot;port&quot;: 8081, &quot;mode&quot;: &quot;proxy&quot; },
+    { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8080, &quot;mode&quot;: &quot;transparent&quot;, &quot;target_port&quot;: 80 },
+    { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8443, &quot;mode&quot;: &quot;transparent&quot;, &quot;target_port&quot;: 443 },
+    { &quot;host&quot;: &quot;0.0.0.0&quot;, &quot;port&quot;: 9000, &quot;mode&quot;: &quot;reverse&quot;, &quot;origin&quot;: &quot;https://api.example.com&quot; },
+    { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 1080, &quot;mode&quot;: &quot;socks5&quot; }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>—</td>
+<td>Listen address. Required</td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td>integer</td>
+<td>—</td>
+<td>Listen port. Required</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>&quot;proxy&quot;</code></td>
+<td><code>proxy</code>, <code>transparent</code>, <code>reverse</code> or <code>socks5</code>. An unknown mode drops the entry rather than defaulting to <code>proxy</code>, which could expose an unintended forward proxy on a LAN address</td>
+</tr>
+<tr>
+<td><code>target_port</code></td>
+<td>integer</td>
+<td><code>80</code> / <code>443</code></td>
+<td>Transparent only: the upstream port to use when the kernel cannot say which one the client dialled. Advisory; see <a href="#transparent-mode">Transparent mode</a></td>
+</tr>
+<tr>
+<td><code>origin</code></td>
+<td>string</td>
+<td>—</td>
+<td>Reverse only, required: the absolute <code>http(s)</code> URL to forward to</td>
+</tr>
+<tr>
+<td><code>rewrite_host</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Reverse only: replace the forwarded <code>Host</code> with the origin&#39;s authority</td>
+</tr>
+</tbody>
+</table>
+<p>A field used in the wrong mode is <strong>rejected</strong>, not ignored: <code>target_port</code> outside transparent, <code>origin</code> or <code>rewrite_host</code> outside reverse. Silently dropping it would leave a config that reads as if it does something it does not. A <code>socks5</code> entry therefore carries <code>host</code>, <code>port</code> and <code>mode</code> and nothing else: all three of those fields belong to the other two modes.</p>
+<p>The primary bind stays a scalar on purpose. It is not &quot;an address gori listens on&quot;; it is <em>the forward-proxy endpoint you configure a client against</em>, and that is singular by construction. It stays what the status bar, the statusline JSON, the capture-status sidecar and the live rebind all report. Additional listeners are an <strong>inventory</strong> instead: a <code>listeners:N</code> chip appears beside the listen chip whenever any are configured, and opens a read-only list of every one with its mode, address, origin and status. The chip turns red as <code>listeners:N/M</code> when one of them is not up.</p>
+<p>The asymmetry is deliberate. gori can move the primary bind under you (a taken port falls back), so it has to be announced. Every address in <code>listeners</code> was typed there by you, so it only has to be confirmed.</p>
+<p>An extra listener that fails to bind (privileged port, address in use) does <strong>not</strong> stop capture on the primary, and the failure is recorded rather than swallowed; it shows in the <code>listeners:N/M</code> chip and names its reason in the list. An entry that is unusable for any other reason (a missing <code>origin</code>, a field in the wrong mode) is dropped from the running set and listed there too, rather than vanishing. An entry duplicating the primary address is skipped.</p>
+<p>The section is read at startup and is <strong>not</strong> applied live: editing it and saving raises a notification telling you a restart is needed.</p>
+<h4 id="transparent-mode">Transparent mode</h4>
+<p>A transparent listener serves clients that believe they are talking to the origin. There is no <code>CONNECT</code> and no absolute-form request target, so gori has to recover the destination per connection, and it has two sources that answer different halves of the question.</p>
+<p><strong>The kernel</strong> still remembers what the client dialled before the redirect rule rewrote it, and gori asks it once per connection:</p>
+<ul>
+<li><strong>Linux</strong>: <code>getsockopt(SOL_IP, SO_ORIGINAL_DST)</code>, or the <code>SOL_IPV6</code> form for a v6 connection. Always available; it just returns nothing when no redirect put the connection there.</li>
+<li><strong>macOS</strong>: a <code>DIOCNATLOOK</code> on <code>/dev/pf</code>. That device is root-only, so this works only when gori itself runs as root.</li>
+</ul>
+<p>That answer is an <strong>address and a port</strong>. The port is authoritative: it is the port the client actually connected to, so it outranks both <code>target_port</code> and any port in the client's <code>Host</code> header. The address is where gori <strong>dials</strong>, whatever the client called the destination.</p>
+<p><strong>The client's own bytes</strong> supply the name: the <code>Host</code> header for cleartext, the TLS <strong>SNI</strong> for HTTPS, read out of the ClientHello <em>before</em> the handshake. gori keeps using the name whenever there is one, because a name is what everything downstream needs: which leaf certificate to mint, the sandbox gate, the <a href="#tls_passthrough">passthrough list</a>, the origin ALPN probe, scope matching, and what History shows. The kernel's address fills in as the name only when there is no name at all.</p>
+<p>So the two never compete. The name identifies the destination and travels upstream byte-exact; the address decides which machine the connection reaches. A client that lies in <code>Host</code> still gets a certificate for the name it asked for and still shows up in History under it, but it cannot move gori's upstream connection anywhere.</p>
+<p>A <a href="#hostname_overrides">hostname override</a> still wins over the kernel address, because it is a mapping you wrote by name. That is the one way a transparent destination can be redirected, and it takes an entry in your own table to do it.</p>
+<p>Which source decided a destination is written to the log, once per listener and once again if it ever changes, so a destination that looks wrong can be traced instead of guessed at.</p>
+<p>Route traffic to it with your firewall. On Linux:</p>
+<pre><code class="language-bash hljs">iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
+</code></pre>
+<p>On macOS, an equivalent <code>pf</code> <code>rdr</code> rule.</p>
+<p><strong>Why <code>target_port</code> is still here.</strong> The kernel lookup does not always answer: there is no mechanism outside Linux and macOS, macOS needs root, and a connection made straight to the listener with no redirect in front of it has nothing earlier to recover. <code>target_port</code> is the declared fallback for those: the redirect rule's intent, written down, so the listener taking redirected <code>:443</code> traffic sets <code>target_port: 443</code>. When the kernel does answer, <code>target_port</code> is not consulted.</p>
+<p><strong>When the kernel does not answer.</strong> Everything above degrades to what gori did before the lookup existed: the name is resolved through DNS, so a client that lies in <code>Host</code> (or offers a misleading SNI) steers the upstream dial to a host of its choosing, and <code>target_port</code> decides the port. That is the case on any platform without a mechanism, on macOS without root, and for a connection that reached the listener without a redirect in front of it. The log line says which source decided, so you can tell which of the two you are in. If a destination that cannot be influenced by the client matters for your deployment, use <a href="#reverse-mode">reverse mode</a>. It declares the destination and consults nothing the client sent, on every platform and without root.</p>
+<p>Everything else behaves exactly as on the proxy path: flows are captured into the same project, scope and the Sandbox apply, and the passthrough list is honoured. A TLS connection with <strong>no SNI</strong> is now served when the kernel supplies an address (gori mints a leaf for that IP), and dropped, logged once, only when there is no address either. A host the Sandbox rules out is still dropped outright, because there is no way to answer a TLS client with a 403.</p>
+<h4 id="reverse-mode">Reverse mode</h4>
+<p>A reverse listener also serves clients that believe they are talking to the origin, but the origin is <strong>declared</strong> rather than derived. gori answers as if it were the origin and forwards to <code>origin</code>.</p>
+<pre><code class="language-json hljs">{ &quot;host&quot;: &quot;0.0.0.0&quot;, &quot;port&quot;: 9000, &quot;mode&quot;: &quot;reverse&quot;, &quot;origin&quot;: &quot;https://api.example.com&quot; }
+</code></pre>
+<p>This is the mode for a client that cannot be pointed at a proxy at all: a mobile app with no proxy setting, a CI step, an appliance. There is no <code>CONNECT</code>, no proxy configuration, and no firewall rule; the client just has to reach the socket.</p>
+<p>Because the destination is configuration rather than derivation, it has none of transparent mode's failure modes. A request with no <code>Host</code> header is served. A <code>Host</code> naming somewhere else is served, and forwarded to <code>origin</code> regardless. The header is not consulted for routing.</p>
+<p><code>origin</code> must be an absolute URL with an <code>http</code> or <code>https</code> scheme; the port defaults from the scheme. A bare <code>api.example.com:8443</code> is refused rather than assumed <code>http</code>, because the assumption would silently decide whether gori speaks TLS to your origin. An origin pointing back at gori's own primary bind or at another listener is refused when you save, since that is a forwarding loop you can create by typing.</p>
+<p><strong>TLS.</strong> The listener terminates TLS when the client opens with one, using a leaf minted for the <strong>configured</strong> origin host, never for the client's SNI, because reading the SNI would reintroduce exactly the derivation this mode removes. In practice the client must reach the socket under the origin's name, which is the ordinary reverse-proxy arrangement: a hosts entry or a DNS record. The origin leg follows the origin's own scheme, so <code>&quot;origin&quot;: &quot;http://127.0.0.1:3000&quot;</code> gives you TLS in front of a cleartext backend.</p>
+<p><strong><code>rewrite_host</code>.</strong> A conventional reverse proxy rewrites <code>Host</code> to the upstream's name. gori does not do that implicitly: rewriting is a mutation of your client's bytes on the live path, so it is opt-in. With <code>rewrite_host: false</code> (the default) the client's <code>Host</code> reaches the origin byte for byte. With it on, the <code>Host</code> is replaced with the origin's authority: one field, with the rest of the head untouched, and a duplicated <code>Host</code> collapsed to one.</p>
+<p>Scope works as everywhere else: the Sandbox and <code>exclude</code> rules apply unchanged, gated per request and before the TLS handshake. The <code>include</code> list stays a lens over captured traffic rather than a gate here, because a reverse listener forwards what a client sent and never originates a request of its own.</p>
+<h4 id="socks5-mode">SOCKS5 mode</h4>
+<p>A SOCKS5 listener (RFC 1928) takes its destination from the client in a handshake, then intercepts everything that follows (TLS, HTTP/2 prior knowledge, or plain HTTP), routed on its first bytes the way the other listeners route theirs. (One difference, deliberate: the TLS test here reads two bytes rather than one, because a SOCKS listener is where a non-HTTP protocol is most likely to arrive (<code>ssh -D</code> is what most people point at one), and a payload whose first octet happens to be <code>0x16</code> should not be fed to a TLS handshake it cannot finish.)</p>
+<pre><code class="language-json hljs">{ &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 1080, &quot;mode&quot;: &quot;socks5&quot; }
+</code></pre>
+<p>This is the mode for a client that <em>can</em> be pointed at a proxy, just not at an HTTP one: <code>ALL_PROXY=socks5://127.0.0.1:1080</code>, a runtime whose only proxy setting is SOCKS, a tool that speaks SOCKS and nothing else. gori already speaks the other end of the same protocol (an <a href="#upstream_rules"><code>upstream_rules</code></a> entry with <code>&quot;kind&quot;: &quot;socks5&quot;</code> reaches an origin <em>through</em> somebody else's SOCKS proxy), so the word appears twice in this file, pointing opposite ways. This one is inbound.</p>
+<p>The destination arrives <strong>declared</strong>, which is what it has over transparent mode: no kernel redirect rule, and nothing has to recover the destination from an SNI or a <code>Host</code> header. On a cleartext connection a request whose <code>Host</code> names somewhere else is still sent where the handshake said, and the handshake's authority is what History records, while the client's own header is forwarded byte for byte. On a TLS connection the SNI supplies the <em>name</em> instead (the leaf is minted for it, the passthrough list and the Sandbox match on it, and it is what History shows), while the connection is dialled at the destination the handshake declared: the same split <a href="#transparent-mode">transparent mode</a> has between the name and the address. A ClientHello carrying no SNI falls back to the declared destination for both.</p>
+<p><strong>NO-AUTH only.</strong> A client that offers no method gori serves is told so with RFC 1928's <code>0xFF</code> and closed. The forward-proxy listener beside it has no authentication either, and a SOCKS listener asking for a password would be claiming an access control the rest of the process does not have.</p>
+<p><strong>CONNECT only.</strong> <code>BIND</code> and <code>UDP ASSOCIATE</code> are refused with reply code <code>0x07</code> rather than by hanging up, so the client reports the real cause. BIND needs a socket opened on the client's behalf and UDP ASSOCIATE is a datagram relay, and every gori listener is a TCP socket, the same reason <a href="#strip-alt-svc">HTTP/3 is out of reach</a>.</p>
+<p>Two things are checked before gori answers <code>succeeded</code>, and each is refused with reply code <code>0x02</code> (&quot;not allowed by ruleset&quot;) rather than a dropped connection: a destination naming any socket gori is serving (this listener, a sibling, or the primary bind), which would dial this proxy through itself, and a host the Sandbox excludes. Both gates exist on the forward proxy's <code>CONNECT</code> path for the same reason: on those two listeners the <em>client</em> names the destination outright, where a transparent listener is steered by the kernel first and only falls back to what the client said.</p>
+<p>Every refusal is recorded in the project as a flow carrying its reason, too. A client pointed at the wrong port, one asking for UDP, one that opened with something that is not SOCKS at all. Each shows up in History instead of being a connection that closed without saying why.</p>
+<h3 id="upstream-rules">upstream_rules</h3>
+<p><code>network.upstream_proxy</code> is the catch-all route. Bare <code>host:port</code> and <code>http://…</code> use a plaintext HTTP CONNECT proxy (default port <code>8080</code>). <code>http+tls://…</code> uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port <code>443</code>). <code>socks5://…</code> resolves destination names <strong>locally</strong> and sends an address literal; <code>socks5h://…</code> sends hostname targets as <code>ATYP DOMAIN</code> so the <strong>proxy</strong> resolves them. Both SOCKS forms default to port 1080. URI credentials are refused; configure direct credentials in the Project tab, or use an <code>upstream_rules</code> entry with <code>username</code> and <code>password_env</code>.</p>
+<h4 id="https-means-the-plaintext-proxy-not-tls"><code>https://</code> means the plaintext proxy, not TLS</h4>
+<p><code>https://proxy:3128</code> has meant <em>a plaintext HTTP CONNECT proxy</em> since before gori could speak TLS to a proxy at all, and it still does. It was not reclaimed: every existing <code>settings.json</code> carrying one means the plaintext form, and redefining the scheme would have moved that egress onto a handshake the proxy may not offer, on upgrade, with no edit. So the spelling is <strong>accepted unchanged and reported</strong>, never reinterpreted:</p>
+<ul>
+<li>gori prints one startup warning per configured <code>https://</code> upstream, naming both fixes.</li>
+<li>Write <code>http://</code> for the same behaviour without the ambiguity, or <code>http+tls://</code> to actually encrypt the hop.</li>
+<li>Editing the proxy fields in <strong>settings:network</strong> (or the <strong>Project settings</strong> card) rewrites the value canonically as <code>http://…</code> on save. An untouched value is left byte-for-byte as written.</li>
+</ul>
+<h4 id="tls-to-the-proxy-httptls">TLS to the proxy (<code>http+tls</code>)</h4>
+<p>The <code>CONNECT</code> request line (which names the origin you are reaching for) and the <code>Proxy-Authorization</code> header are written <strong>inside</strong> the TLS session, never in front of it. Nothing about the request is sent before the handshake completes.</p>
+<p>The proxy leg is verified on its <strong>own</strong> hostname: SNI and the checked certificate name are the proxy address you configured, never the origin's, and never a <a href="#hostname_overrides">host override</a> (overrides apply to the origin leg only). It is governed by <code>network.upstream_proxy_ca</code> and <code>network.upstream_proxy_insecure</code>, <strong>not</strong> by <code>verify_upstream</code> / <code>--insecure-upstream</code>, which describe the origin. A relaxed origin policy for one broken target does not stop authenticating the proxy that carries the whole session, and a rejected proxy certificate says so in those terms rather than offering <code>--insecure-upstream</code> as a fix.</p>
+<p>An <code>https://</code> origin reached through an <code>http+tls</code> proxy is TLS inside TLS: the origin handshake runs over the tunnel, so the origin's certificate is still verified end to end under its own policy.</p>
+<p>All networking owned by gori uses this routing decision, including capture/replay/scan engines, the updater, and OAST provider traffic. A configured proxy that is malformed, unreachable, or refuses a tunnel fails closed; gori does not retry the destination directly. A blank project pin and a matching <code>direct</code> rule remain explicit operator exceptions.</p>
+<p>Per-destination upstream routing can say &quot;route <code>*.corp.internal</code> through the internal proxy, everything else direct&quot;, carry credentials, and choose different proxies.</p>
+<p>Rules are <strong>ordered</strong> and the <strong>first match wins</strong>, so specific rules go above general ones. Edit them with <code>gori settings --edit</code>.</p>
+<pre><code class="language-json hljs">{
+  &quot;upstream_rules&quot;: [
+    { &quot;host&quot;: &quot;intranet.corp.internal&quot;, &quot;kind&quot;: &quot;direct&quot; },
+    {
+      &quot;host&quot;: &quot;*.corp.internal&quot;,
+      &quot;kind&quot;: &quot;http&quot;,
+      &quot;addr&quot;: &quot;proxy.corp.internal:3128&quot;,
+      &quot;username&quot;: &quot;alice&quot;,
+      &quot;password_env&quot;: &quot;CORP_PROXY_PASS&quot;
+    },
+    { &quot;host&quot;: &quot;*.partner.example&quot;, &quot;kind&quot;: &quot;http+tls&quot;, &quot;addr&quot;: &quot;proxy.partner.example:443&quot; },
+    { &quot;host&quot;: &quot;*.onion&quot;, &quot;kind&quot;: &quot;socks5h&quot;, &quot;addr&quot;: &quot;127.0.0.1:9050&quot; }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>Host pattern, same dialect as scope <code>host</code> rules: <code>corp.internal</code> covers that host and its subdomains, <code>*.corp.internal</code> is a glob, <code>*</code> is the catch-all. Case-insensitive</td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td><code>direct</code>, <code>http</code>, <code>http+tls</code> (HTTP CONNECT over TLS), <code>socks5</code> (local DNS), or <code>socks5h</code> (proxy DNS). An unknown kind drops the rule rather than being treated as <code>direct</code>, which would quietly disable an intended proxy</td>
+</tr>
+<tr>
+<td><code>addr</code></td>
+<td>string</td>
+<td>Proxy <code>host:port</code>. Port defaults to <code>8080</code> for <code>http</code>, <code>443</code> for <code>http+tls</code>, and <code>1080</code> for either SOCKS kind. Must be absent for <code>direct</code></td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>string</td>
+<td>Optional. Sent as HTTP Basic (RFC 7617) for <code>http</code> and <code>http+tls</code>, or via the RFC 1929 exchange for either SOCKS kind</td>
+</tr>
+<tr>
+<td><code>password_env</code></td>
+<td>string</td>
+<td>Optional. The <strong>name</strong> of an OS environment variable holding the password</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Global-rule passwords are never stored in <code>settings.json</code>.</strong> Only the username and the environment-variable <em>name</em> are written; the password is read from the OS environment at dial time, so <code>export CORP_PROXY_PASS=…</code> takes effect without a restart. gori's own <code>env</code> section is deliberately not used for this, because those variables live in <code>settings.json</code> in plaintext, which would put the secret in the file by another route and defeat sharing or exporting a config (see <a href="https://github.com/hahwul/gori/issues/439">#439</a>). A <code>password_env</code> containing <code>$</code> is rejected: it holds a variable name, not a value. Direct credentials entered in Project settings have different storage described under <a href="#per-project-overrides">Per-Project Overrides</a>.</p>
+<p><code>network.upstream_proxy_ca</code> and <code>network.upstream_proxy_insecure</code> are one policy for <strong>every</strong> <code>http+tls</code> hop, whether it came from a rule, the scalar, or a project pin. There is no per-rule TLS field yet; add one when a second TLS proxy with a different trust anchor forces it.</p>
+<p>The scalar and rules use the same DNS distinction: <code>socks5</code> performs the destination lookup on the gori host, while <code>socks5h</code> delegates it to the proxy. Use <code>socks5h</code> for Tor, split DNS, or a jump host that can resolve names unavailable locally. A failed local lookup stops before connecting to the proxy and never falls back to a direct origin connection.</p>
+<p>Precedence, highest first:</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (highest)</td>
+<td>Project <code>net.upstream_proxy</code>: an explicit per-project pin, which bypasses the table wholesale</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>upstream_rules</code>, first host match</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>network.upstream_proxy</code>: the implicit catch-all</td>
+</tr>
+<tr>
+<td>4 (lowest)</td>
+<td>Direct</td>
+</tr>
+</tbody>
+</table>
+<p>For an open project, <strong>Destination host</strong> is evaluated before this table. <code>*</code> (the default)
+leaves the precedence above unchanged; a non-matching destination goes direct without falling
+through to a global rule or scalar proxy.</p>
+<p>A rule is matched against the <strong>original</strong> hostname, before any <a href="#hostname_overrides">host override</a> is applied; an override only changes which IP is dialled.</p>
+<h3 id="outbound-tls">outbound_tls</h3>
+<p>Per-destination TLS policy for the connections gori <strong>makes</strong>: a client certificate to present, the protocol range / cipher list to negotiate with, and the shape of the ClientHello gori sends (its <a href="#tls-fingerprint">TLS fingerprint</a>). Ordered, first match wins, same host-pattern dialect. Edit with <code>gori settings --edit</code>.</p>
+<p>This is a separate table from <a href="#upstream_rules"><code>upstream_rules</code></a> on purpose. Both are keyed by destination host, but they answer different questions, and folding them together would make the common shape inexpressible: &quot;everything through the corporate proxy, plus a client certificate for one host&quot; would need the proxy address duplicated onto that host's row, because one first-match table can only apply a single row per host.</p>
+<pre><code class="language-json hljs">{
+  &quot;outbound_tls&quot;: [
+    {
+      &quot;host&quot;: &quot;mtls.example.com&quot;,
+      &quot;client_cert&quot;: &quot;/home/you/certs/client.crt.pem&quot;,
+      &quot;client_key&quot;: &quot;/home/you/certs/client.key.pem&quot;
+    },
+    {
+      &quot;host&quot;: &quot;legacy-appliance.internal&quot;,
+      &quot;min_version&quot;: &quot;tls1.0&quot;,
+      &quot;ciphers&quot;: &quot;ALL:@SECLEVEL=0&quot;,
+      &quot;permissive&quot;: true
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>Host pattern, as in <code>upstream_rules</code>. <code>*</code> is the catch-all</td>
+</tr>
+<tr>
+<td><code>client_cert</code></td>
+<td>string</td>
+<td>Path to a PEM certificate chain to present (mutual TLS)</td>
+</tr>
+<tr>
+<td><code>client_key</code></td>
+<td>string</td>
+<td>Path to the matching PEM private key. Both halves are required, or neither</td>
+</tr>
+<tr>
+<td><code>min_version</code></td>
+<td>string</td>
+<td>Lowest protocol to negotiate: <code>tls1.0</code>, <code>tls1.1</code>, <code>tls1.2</code>, <code>tls1.3</code>. Empty leaves the default</td>
+</tr>
+<tr>
+<td><code>max_version</code></td>
+<td>string</td>
+<td>Highest protocol to negotiate, same values. Empty leaves the default</td>
+</tr>
+<tr>
+<td><code>ciphers</code></td>
+<td>string</td>
+<td>OpenSSL cipher list for TLS 1.2 and below. Empty leaves the default</td>
+</tr>
+<tr>
+<td><code>permissive</code></td>
+<td>bool</td>
+<td>Talk to broken/legacy servers: drops the OpenSSL security level to 0 and allows renegotiation</td>
+</tr>
+<tr>
+<td><code>preset</code></td>
+<td>string</td>
+<td>A named browser approximation: <code>chrome</code>, <code>firefox</code>, <code>safari</code>, <code>curl</code>. See <a href="#tls-fingerprint">TLS fingerprint</a></td>
+</tr>
+<tr>
+<td><code>groups</code></td>
+<td>string</td>
+<td>Named groups / curves and their order, e.g. <code>X25519:P-256:P-384</code>. Empty leaves the default</td>
+</tr>
+<tr>
+<td><code>sigalgs</code></td>
+<td>string</td>
+<td>Signature algorithms and their order, e.g. <code>ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256</code></td>
+</tr>
+<tr>
+<td><code>ciphersuites</code></td>
+<td>string</td>
+<td>The <strong>TLS 1.3</strong> suites, which <code>ciphers</code> cannot reach</td>
+</tr>
+<tr>
+<td><code>alpn</code></td>
+<td>array</td>
+<td>Ordered ALPN list, e.g. <code>[&quot;h2&quot;, &quot;http/1.1&quot;]</code>. Only <code>h2</code> and <code>http/1.1</code> are allowed, because gori has to be able to speak whatever the origin selects</td>
+</tr>
+<tr>
+<td><code>session_tickets</code></td>
+<td>bool</td>
+<td><code>false</code> drops the <code>session_ticket</code> extension from the hello. Omitted = OpenSSL&#39;s default (on)</td>
+</tr>
+<tr>
+<td><code>ocsp_stapling</code></td>
+<td>bool</td>
+<td><code>true</code> adds the <code>status_request</code> extension, which browsers send and stock OpenSSL does not. Omitted = off</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why <code>min_version</code> exists.</strong> gori cannot reach a TLS 1.0/1.1-only appliance out of the box, and <code>verify_upstream: false</code> does not help; that turns off certificate <em>verification</em>, not protocol negotiation. Crystal's TLS client context disables TLS 1.0 and 1.1 in its constructor, so lowering the floor here is the only way. A legacy appliance usually needs <code>permissive: true</code> as well, because distributions build OpenSSL at a security level that rejects the old cipher suites outright.</p>
+<p><strong>Why <code>max_version</code> exists.</strong> A floor alone cannot choose a version. Against any origin that also speaks TLS 1.3 (which is every modern one) the handshake lands on 1.3 however low the floor is, so <code>min_version: &quot;tls1.0&quot;</code> never answered <em>&quot;does this target still accept TLS 1.0?&quot;</em>, and <code>ciphers</code> never applied either, because OpenSSL's cipher list governs TLS 1.2 and below only. Setting both bounds is what makes &quot;negotiate TLS 1.2 with <code>AES128-SHA</code>&quot; expressible:</p>
+<pre><code class="language-json hljs">{ &quot;host&quot;: &quot;legacy.internal&quot;, &quot;min_version&quot;: &quot;tls1.2&quot;, &quot;max_version&quot;: &quot;tls1.2&quot;, &quot;ciphers&quot;: &quot;AES128-SHA&quot;, &quot;permissive&quot;: true }
+</code></pre>
+<p>Pinning both to the same value offers exactly that one version, so a handshake failure is a real answer: the target does not accept it. A <code>min_version</code> above <code>max_version</code> is rejected at save time, because that pair offers no version at all, and OpenSSL's error would name the origin rather than the settings file.</p>
+<p><strong>Certificates are file paths, not inline material.</strong> A private key does not belong in <code>settings.json</code>, which is shareable and exportable (<a href="https://github.com/hahwul/gori/issues/439">#439</a>). A passphrase-protected key is rejected at save time: OpenSSL would prompt for the passphrase on the terminal the TUI owns, so gori would simply appear to hang. Decrypt it first with <code>openssl pkey -in key.pem -out plain.pem</code>.</p>
+<p>The policy is looked up on the <strong>dialled</strong> host, not on an SNI override: a certificate and a protocol floor belong to the machine actually being talked to, whereas the Repeater's SNI field deliberately lies about the name for domain-fronting and vhost tests.</p>
+<h4 id="tls-fingerprint">TLS fingerprint</h4>
+<p>With gori in the loop, the ClientHello an origin sees is <strong>gori's OpenSSL handshake, not the browser's</strong>. Anti-bot stacks fingerprint that handshake as a JA3 or JA4 and start serving challenges or <code>403</code>s to traffic that was fine a minute ago, the everyday <em>&quot;it works in the browser, it breaks through the proxy&quot;</em>. The fields above are the knobs for it, and</p>
+<pre><code class="language-bash hljs">gori settings tls-fingerprint
+</code></pre>
+<p>is how you check them: it prints the JA3/JA4 of the ClientHello gori really sends to each destination, built from the same TLS context a dial builds. OpenSSL only ever reports what got <em>negotiated</em>, so without that command none of these settings can be verified.</p>
+<pre><code class="language-json hljs">{
+  &quot;outbound_tls&quot;: [
+    { &quot;host&quot;: &quot;shop.example.com&quot;, &quot;preset&quot;: &quot;chrome&quot; },
+    {
+      &quot;host&quot;: &quot;api.internal&quot;,
+      &quot;groups&quot;: &quot;X25519:P-256&quot;,
+      &quot;sigalgs&quot;: &quot;ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256&quot;,
+      &quot;ciphersuites&quot;: &quot;TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384&quot;,
+      &quot;alpn&quot;: [&quot;h2&quot;, &quot;http/1.1&quot;],
+      &quot;ocsp_stapling&quot;: true
+    }
+  ]
+}
+</code></pre>
+<p><strong>Presets are approximations, and gori will not claim otherwise.</strong> A preset fills in every <em>value-level</em> field a classifier reads: cipher list and order, TLS 1.3 suites, named groups, signature algorithms, the ALPN pair, and whether <code>session_ticket</code> / <code>status_request</code> appear at all. It does <strong>not</strong> reproduce a browser's JA3 byte for byte, and cannot:</p>
+<ul>
+<li><strong>Extension order</strong> is OpenSSL's, and OpenSSL emits its own fixed order. JA3 hashes that order.</li>
+<li><strong>GREASE</strong> (<a href="https://datatracker.ietf.org/doc/html/rfc8701">RFC 8701</a>) placement is OpenSSL's. Both fingerprints strip GREASE values, but the positions a browser reserves for them are not the ones OpenSSL picks.</li>
+<li><strong>Post-quantum key shares</strong> (<code>X25519MLKEM768</code>), which current Chrome and Firefox offer first, are deliberately left out of the presets: they exist only on OpenSSL 3.5+, and a preset that fails to apply on an older build is worse than one that is honestly incomplete. Add it to a rule's own <code>groups</code> where your build has it.</li>
+<li><strong>SHA-1 signature algorithms</strong>, which Firefox and Safari still list last as legacy fallbacks, are left out for the same reason: Debian and Ubuntu ship OpenSSL with SHA-1 signatures disabled, and listing them would make the preset refuse to apply at all there. No modern origin selects one.</li>
+</ul>
+<p>Compare the <code>JA4_r</code> lists the report prints, not the digests; that is where you see which field is still wrong. A byte-exact match needs a TLS stack with control over extension order and GREASE (BoringSSL, rustls, uTLS); that is <a href="https://github.com/hahwul/gori/issues/822">#822 phase 3</a> and is not what these fields do.</p>
+<p>A rule's own fields <strong>override</strong> the preset it names, so <code>{&quot;preset&quot;: &quot;chrome&quot;, &quot;groups&quot;: &quot;P-521&quot;}</code> is Chrome's everything with your group list.</p>
+<p><strong>ALPN and the two legs.</strong> gori dials with different ALPN offers depending on what it is going to speak on that socket: <code>h2</code> on a decrypted tunnel, nothing at all on a leg it will speak HTTP/1.1 on (the plain forward-proxy dial, the Repeater, WebSocket). A configured <code>alpn</code> list is used as written on the first, and has <code>h2</code> <strong>removed</strong> on the second, because an origin that selected <code>h2</code> there would leave gori writing HTTP/1.1 into an HTTP/2 connection. <code>gori settings tls-fingerprint</code> reports both legs for exactly this reason.</p>
+<p>An invalid <code>groups</code>, <code>sigalgs</code>, <code>ciphersuites</code> or <code>alpn</code> value is checked by handing the string to the same OpenSSL that would consume it. This table has no in-app editor (you edit the JSON), so the check runs at <strong>startup</strong> and names the rule, the setting and the consequence, rather than leaving you with a handshake failure that reads like the origin's fault:</p>
+<pre><code>⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 (the rule for api.internal); TLS dials to that destination will fail
+</code></pre>
+<p>The same line appears as a notification in the TUI. A bad rule affects only its own destination; every other rule, and the rest of gori, still work.</p>
+<p><strong>This table is per DESTINATION, and a fingerprint A/B is not.</strong> &quot;Does this endpoint answer differently as <code>chrome</code> than as <code>curl</code>?&quot; is a question about one host, and editing a rule here between two sends changes the handshake for every other tab and background capture hitting that host at the same time. A Repeater tab (<code>␣T</code>) and a fuzz run (<code>--tls-preset</code>) can each name a fingerprint for themselves instead, resolved at dial time and leaving this table alone; see <a href="/reference/cli/#per-send-tls-fingerprints">per-send TLS fingerprints</a>. Such an override replaces the ClientHello shape only: the <code>client_cert</code>/<code>client_key</code>, <code>min_version</code>/<code>max_version</code> and <code>permissive</code> configured here still apply.</p>
+<p>Inbound fingerprint <em>spoofing</em> (making the client's own handshake look like something else) is not in scope here; this section only shapes the connections gori makes.</p>
+<h3 id="layout">layout</h3>
+<p>Per-area TUI layout prefs (command palette → <strong>Settings: Layout</strong>). Omitted when both values are factory defaults.</p>
+<pre><code class="language-json hljs">{
+  &quot;layout&quot;: {
+    &quot;history_preview&quot;: false,
+    &quot;probe_preview&quot;: false,
+    &quot;issues_preview&quot;: false,
+    &quot;history_list_order&quot;: &quot;newest&quot;,
+    &quot;sitemap_expand_depth&quot;: -1,
+    &quot;tab_numbers&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>history_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>History list page shows a bottom Req|Res preview for the selected flow</td>
+</tr>
+<tr>
+<td><code>probe_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Probe list page shows a bottom summary of the selected issue</td>
+</tr>
+<tr>
+<td><code>issues_preview</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Issues list page shows a bottom summary of the selected issue</td>
+</tr>
+<tr>
+<td><code>history_list_order</code></td>
+<td>string</td>
+<td><code>&quot;newest&quot;</code></td>
+<td>List sort: <code>&quot;newest&quot;</code> (newest at top) or <code>&quot;oldest&quot;</code> (oldest at top)</td>
+</tr>
+<tr>
+<td><code>sitemap_expand_depth</code></td>
+<td>integer</td>
+<td><code>-1</code></td>
+<td>How deep the Sitemap tree opens after reload: <code>-1</code> = all expanded; <code>0</code>-<code>3</code> = expand only nodes shallower than this depth</td>
+</tr>
+<tr>
+<td><code>tab_numbers</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Paint <code>1:</code>…<code>9:</code> before the first nine tabs on the tab bar — the positions the <code>1</code>-<code>9</code> jump keys answer to</td>
+</tr>
+</tbody>
+</table>
+<h3 id="statusline">statusline</h3>
+<p>An opt-in extra row at the very bottom of the TUI (Preferences → <strong>General</strong> → <strong>Statusline</strong>). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from <code>settings.json</code> until you change it.</p>
+<pre><code class="language-json hljs">{
+  &quot;statusline&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;command&quot;: &quot;printf 'proj:%s flows:%s' \&quot;$(jq -r .project)\&quot; \&quot;$(jq -r .flows)\&quot;&quot;,
+    &quot;interval&quot;: 3,
+    &quot;timeout&quot;: 10
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Whether the statusline row is shown</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Shell command, run via <code>/bin/sh -c</code>. Its first line of stdout becomes the row. Blank means no row is reserved at all, even when <code>enabled</code></td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td>integer</td>
+<td><code>3</code></td>
+<td>Seconds between runs (minimum <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>Seconds one run may take before it is killed (minimum <code>1</code>). May exceed <code>interval</code></td>
+</tr>
+</tbody>
+</table>
+<p>The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. It never blocks the UI.</p>
+<p><code>timeout</code> is deliberately separate from <code>interval</code>. Runs never overlap (gori launches the next one only after the previous has finished), so a script slower than <code>interval</code> simply refreshes as fast as it can rather than being killed on every run. A run that does exceed <code>timeout</code> is terminated and the row reads <code>⋯ (timed out)</code>.</p>
+<p>A command that fails without printing anything reports its exit status instead of leaving the row blank: <code>⋯ (exit 127)</code> for a command that was not found, <code>⋯ (killed)</code> for one a signal ended. A command that exits cleanly having printed nothing leaves the row empty, which is a legitimate thing for a script to do. stderr is discarded either way.</p>
+<p>Edits take effect immediately: saving a new <code>command</code>, <code>interval</code> or <code>timeout</code> re-runs the command on the next frame instead of waiting out the current interval.</p>
+<p>Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:</p>
+<pre><code class="language-json hljs">{
+  &quot;version&quot;: 1,
+  &quot;project&quot;: &quot;acme&quot;,
+  &quot;capturing&quot;: true,
+  &quot;flows&quot;: 1234,
+  &quot;proxy&quot;: { &quot;host&quot;: &quot;127.0.0.1&quot;, &quot;port&quot;: 8070, &quot;addr&quot;: &quot;127.0.0.1:8070&quot; },
+  &quot;upstream&quot;: &quot;&quot;,
+  &quot;upstream_rules&quot;: 0
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>Context schema version (currently <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>Active project name</td>
+</tr>
+<tr>
+<td><code>capturing</code></td>
+<td>bool</td>
+<td>Whether the proxy is currently capturing</td>
+</tr>
+<tr>
+<td><code>flows</code></td>
+<td>integer</td>
+<td>Number of captured flows</td>
+</tr>
+<tr>
+<td><code>proxy.host</code> / <code>proxy.port</code> / <code>proxy.addr</code></td>
+<td>string / integer / string</td>
+<td>The address the proxy is actually listening on</td>
+</tr>
+<tr>
+<td><code>upstream</code></td>
+<td>string</td>
+<td>The <strong>catch-all</strong> upstream proxy address/URI, or empty when connecting directly. A destination matched by an <a href="#upstream_rules">upstream rule</a> routes elsewhere; this field does not reflect that</td>
+</tr>
+<tr>
+<td><code>upstream_rules</code></td>
+<td>integer</td>
+<td>Number of <a href="#upstream_rules">upstream rules</a> in effect. Non-zero means routing is per-destination and <code>upstream</code> alone does not describe where traffic goes</td>
+</tr>
+</tbody>
+</table>
+<h3 id="display">display</h3>
+<p>Message-body and chrome prefs (command palette → <strong>Settings: Display</strong>). Omitted when every value is a factory default.</p>
+<pre><code class="language-json hljs">{
+  &quot;display&quot;: {
+    &quot;detail_pane&quot;: &quot;request&quot;,
+    &quot;history_time_format&quot;: &quot;absolute&quot;,
+    &quot;show_gutter&quot;: true,
+    &quot;wrap_lines&quot;: true,
+    &quot;preview_body_kib&quot;: 64,
+    &quot;resource_meter&quot;: true,
+    &quot;terminal_title&quot;: &quot;project&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>detail_pane</code></td>
+<td>string</td>
+<td><code>&quot;request&quot;</code></td>
+<td>Which pane a freshly-opened History flow shows first: <code>&quot;request&quot;</code> or <code>&quot;response&quot;</code></td>
+</tr>
+<tr>
+<td><code>history_time_format</code></td>
+<td>string</td>
+<td><code>&quot;absolute&quot;</code></td>
+<td>History list time column: <code>&quot;absolute&quot;</code> (MM-DD HH:MM:SS) or <code>&quot;relative&quot;</code> (3s/5m/2h)</td>
+</tr>
+<tr>
+<td><code>show_gutter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Line-number gutter on the message body views</td>
+</tr>
+<tr>
+<td><code>wrap_lines</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Soft-wrap a line too wide for a message pane onto continuation rows (the gutter numbers the first). <code>false</code> draws one row per line and scrolls sideways instead, following the caret</td>
+</tr>
+<tr>
+<td><code>preview_body_kib</code></td>
+<td>integer</td>
+<td><code>64</code></td>
+<td>How many body bytes the History list preview reads (display only, not the capture limit)</td>
+</tr>
+<tr>
+<td><code>resource_meter</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>CPU/memory readout for gori&#39;s own process, at the far right of the bottom bar</td>
+</tr>
+<tr>
+<td><code>terminal_title</code></td>
+<td>string</td>
+<td><code>&quot;project&quot;</code></td>
+<td>Terminal window title: <code>&quot;project&quot;</code> → <code>Gori - &lt;project&gt; - &lt;tab&gt;</code>, <code>&quot;tab&quot;</code> → <code>Gori - &lt;tab&gt;</code>, <code>&quot;off&quot;</code> → gori never writes the title (leave it to your shell or tmux)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="hostname-overrides">hostname_overrides</h3>
+<p>Global dial map (project-level overrides win on collision). Same idea as <code>/etc/hosts</code>:</p>
+<pre><code class="language-json hljs">{
+  &quot;hostname_overrides&quot;: [
+    { &quot;host&quot;: &quot;api.prod.internal&quot;, &quot;ip&quot;: &quot;10.0.0.42&quot; },
+    { &quot;host&quot;: &quot;api.prod.example&quot;, &quot;ip&quot;: &quot;127.0.0.1:8443&quot; },
+    { &quot;host&quot;: &quot;v6.internal&quot;, &quot;ip&quot;: &quot;[::1]:8443&quot; }
+  ]
+}
+</code></pre>
+<p>The value is an IP literal, optionally with a <strong>port</strong>: <code>IP</code>, <code>IP:PORT</code>, or <code>[v6]:PORT</code>. A bare IP keeps the port from the request URL, which is what an entry written before ports were supported has always meant. Adding a port is the one thing this goes beyond <code>/etc/hosts</code> on, and deliberately: <code>/etc/hosts</code> is read by a resolver that has no port to change, whereas gori is the thing making the connection. Pointing <code>https://api.prod.example/</code> at a local build on <code>127.0.0.1:8443</code> is otherwise inexpressible when the traffic comes from a real browser or a mobile app, because gori is not the one writing the URL.</p>
+<p>SNI, the certificate hostname and the <code>Host</code> header still keep the <strong>original</strong> name; only the TCP connect target moves.</p>
+<p>Edit from Preferences → <strong>Network &amp; Tabs</strong> → <strong>Network</strong> → <strong>Hostname overrides</strong>, or the Project tab for per-project entries. See <a href="/guide/proxy/#host-overrides">Proxy &amp; History</a>.</p>
+<h3 id="env">env</h3>
+<p>Tokens like <code>$TOKEN</code> expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:</p>
+<pre><code class="language-json hljs">{
+  &quot;env&quot;: {
+    &quot;prefix&quot;: &quot;$&quot;,
+    &quot;vars&quot;: [
+      { &quot;key&quot;: &quot;TOKEN&quot;, &quot;value&quot;: &quot;eyJhbGciOi…&quot; }
+    ]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prefix</code></td>
+<td>string</td>
+<td><code>&quot;$&quot;</code></td>
+<td>Token prefix (<code>$KEY</code>)</td>
+</tr>
+<tr>
+<td><code>vars</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>Global key/value pairs; project vars (Project tab → ENV) override on collision</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="/guide/repeater-and-fuzzer/#environment-variables">Environment Variables</a>.</p>
+<h3 id="general">general</h3>
+<p>Preferences → <strong>General</strong> → <strong>General</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;general&quot;: {
+    &quot;clipboard_osc52&quot;: true,
+    &quot;confirm_quit&quot;: false,
+    &quot;repeater_record_history&quot;: true
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clipboard_osc52</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Copy through the OSC 52 terminal escape, so <code>y</code> reaches your local clipboard over SSH</td>
+</tr>
+<tr>
+<td><code>confirm_quit</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Ask before quitting</td>
+</tr>
+<tr>
+<td><code>repeater_record_history</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Write every <strong>TUI</strong> Repeater send into History as a flow (SRC column: <code>RPTR</code>). <code>gori run repeater send --record-history</code> and MCP <code>send_request{record_history}</code> keep their own per-call arguments</td>
+</tr>
+</tbody>
+</table>
+<h3 id="notifications">notifications</h3>
+<p>How background jobs (Miner, Fuzzer, Probe, Discover) announce their results. Preferences → <strong>General</strong> → <strong>Notifications</strong>:</p>
+<pre><code class="language-json hljs">{
+  &quot;notifications&quot;: {
+    &quot;bell&quot;: false,
+    &quot;toast&quot;: true,
+    &quot;retention&quot;: 100
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bell</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Ring the terminal bell when a background job produces a result</td>
+</tr>
+<tr>
+<td><code>toast</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Show a transient toast for the same events</td>
+</tr>
+<tr>
+<td><code>retention</code></td>
+<td>integer</td>
+<td><code>100</code></td>
+<td>How many notifications the notification center keeps</td>
+</tr>
+</tbody>
+</table>
+<h3 id="probe">probe</h3>
+<pre><code class="language-json hljs">{
+  &quot;probe&quot;: {
+    &quot;active_notify&quot;: &quot;when-found&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>active_notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td>When an active scan notifies: <code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, or <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="discover">discover</h3>
+<p>Saved defaults for a Discover run. Written only once you save the discover options, so the section is absent until then:</p>
+<pre><code class="language-json hljs">{
+  &quot;discover&quot;: {
+    &quot;containment&quot;: &quot;scope-aware&quot;,
+    &quot;max_depth&quot;: 4,
+    &quot;concurrency&quot;: 20,
+    &quot;spider&quot;: true,
+    &quot;bruteforce&quot;: true,
+    &quot;extensions&quot;: false
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>containment</code></td>
+<td>string</td>
+<td><code>&quot;scope-aware&quot;</code></td>
+<td>How far a run may wander: <code>&quot;same-origin&quot;</code>, <code>&quot;scope-aware&quot;</code>, or <code>&quot;host+subdomains&quot;</code></td>
+</tr>
+<tr>
+<td><code>max_depth</code></td>
+<td>integer</td>
+<td><code>4</code></td>
+<td>Spider depth cap</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td>Parallel requests</td>
+</tr>
+<tr>
+<td><code>spider</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Follow links found in responses</td>
+</tr>
+<tr>
+<td><code>bruteforce</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Brute-force paths from the wordlist</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Also probe extension variants of each candidate</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mine">mine</h3>
+<p>Saved Param Miner defaults, written only once you save the mine options:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>locations</code></td>
+<td>array</td>
+<td><code>[]</code></td>
+<td>Where to inject: <code>query</code>, <code>form</code>, <code>multipart</code>, <code>json</code>, <code>headers</code>, <code>cookies</code>. Empty means auto-detect per request</td>
+</tr>
+<tr>
+<td><code>concurrency</code></td>
+<td>integer</td>
+<td><code>10</code></td>
+<td>Parallel requests</td>
+</tr>
+<tr>
+<td><code>notify</code></td>
+<td>string</td>
+<td><code>&quot;when-found&quot;</code></td>
+<td><code>&quot;when-found&quot;</code>, <code>&quot;always&quot;</code>, or <code>&quot;off&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="scan-rules">scan_rules</h3>
+<p>Your own Probe match rules, global across every project. Project-scoped rules live in the project database instead. Edit them in Probe → <strong>Rules</strong> → CUSTOM:</p>
+<pre><code class="language-json hljs">{
+  &quot;scan_rules&quot;: [
+    {
+      &quot;id&quot;: &quot;a1b2c3d4&quot;,
+      &quot;title&quot;: &quot;Internal hostname leak&quot;,
+      &quot;description&quot;: &quot;Build-server hostname in a response body&quot;,
+      &quot;side&quot;: &quot;response&quot;,
+      &quot;region&quot;: &quot;body&quot;,
+      &quot;kind&quot;: &quot;regex&quot;,
+      &quot;pattern&quot;: &quot;build-\\d+\\.corp\\.internal&quot;,
+      &quot;severity&quot;: &quot;medium&quot;,
+      &quot;enabled&quot;: true
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Random hex token assigned at creation</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>Finding title</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>Shown in the finding detail</td>
+</tr>
+<tr>
+<td><code>side</code></td>
+<td>string</td>
+<td><code>request</code> or <code>response</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>string</td>
+<td><code>whole</code>, <code>header</code>, or <code>body</code></td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td><code>string</code>, <code>regex</code>, or <code>exec</code> (an argv; see <a href="/guide/scripting/#process-hooks">Process hooks</a>)</td>
+</tr>
+<tr>
+<td><code>pattern</code></td>
+<td>string</td>
+<td>Literal or regex to match, or the command to run when <code>kind</code> is <code>exec</code></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>string</td>
+<td><code>info</code>, <code>low</code>, <code>medium</code>, <code>high</code>, or <code>critical</code></td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>Whether the rule runs</td>
+</tr>
+</tbody>
+</table>
+<p>Parsing is tolerant. An entry missing <code>id</code>, <code>title</code>, or <code>pattern</code> is dropped, and an out-of-range <code>side</code> / <code>region</code> / <code>kind</code> / <code>severity</code> falls back to the safest value rather than failing the load.</p>
+<h3 id="retention">retention</h3>
+<p>How much captured history a project keeps.</p>
+<pre><code class="language-json hljs">{
+  &quot;retention&quot;: {
+    &quot;max_flows&quot;: 100000
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_flows</code></td>
+<td>integer</td>
+<td><code>100000</code></td>
+<td>Keep at most this many newest flows per project; the oldest are dropped once the cap is passed. <code>0</code> = unlimited</td>
+</tr>
+</tbody>
+</table>
+<p>Retention is <strong>not new</strong>. gori has always swept old flows so a project database plateaus instead of growing forever. What this section adds is the ability to see and change the cap, which was previously a compile-time constant. The default is the number that was already in force, so nothing changes until you edit it.</p>
+<p>The sweep runs on the capture path, amortized over every few thousand inserts, and cascades to a pruned flow's WebSocket messages and orphaned HTTP/2 frames. It writes one line to the log whenever it drops rows, so a flow that disappeared has a traceable reason rather than looking like a bug.</p>
+<p>Raising the cap takes effect on the next project open. Lowering it does not immediately reclaim disk: pruning frees pages for reuse inside the database file but does not shrink the file, so on-disk size only drops after a <strong>Compress</strong> from the project picker, which runs <code>VACUUM</code>.</p>
+<p>Surfaces that do not own capture never prune, whatever the cap says: <code>gori mcp</code>'s store, a project opened only to count its objects for a delete preview, and a freshly created project.</p>
+<h3 id="oast-providers">oast_providers</h3>
+<p>OAST providers defined once and reusable across every project. Project-scoped providers live in the project database instead; these are the global library, edited in Preferences → <strong>OAST providers</strong>.</p>
+<pre><code class="language-json hljs">{
+  &quot;oast_providers&quot;: [
+    {
+      &quot;id&quot;: &quot;3f9a2c11&quot;,
+      &quot;name&quot;: &quot;team interactsh&quot;,
+      &quot;kind&quot;: &quot;interactsh&quot;,
+      &quot;host&quot;: &quot;oast.example.com&quot;,
+      &quot;token&quot;: &quot;…&quot;,
+      &quot;enabled&quot;: true
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Random hex token assigned on creation. Do not hand-edit</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Label shown in the OAST tab</td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td>Provider type, e.g. <code>interactsh</code></td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>Provider host</td>
+</tr>
+<tr>
+<td><code>token</code></td>
+<td>string</td>
+<td>Optional auth token for the provider</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>Whether the provider is selectable (default <code>true</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The section is omitted entirely until you add a provider. Entries missing <code>id</code>, <code>name</code>, <code>kind</code>, or <code>host</code> are dropped on load.</p>
+<h3 id="update">update</h3>
+<p>The startup update check behind the project picker's one-line &quot;update available&quot; notice. This is the only automatic outbound call gori makes; <code>gori update</code> stays the explicit install path.</p>
+<pre><code class="language-json hljs">{
+  &quot;update&quot;: {
+    &quot;check_enabled&quot;: true,
+    &quot;notified_version&quot;: &quot;0.2.0&quot;,
+    &quot;latest_seen&quot;: &quot;0.2.0&quot;,
+    &quot;checked_at&quot;: 1753600000
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>check_enabled</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Set <code>false</code> to skip the probe entirely</td>
+</tr>
+<tr>
+<td><code>notified_version</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Latest version already surfaced, so the notice shows once per release</td>
+</tr>
+<tr>
+<td><code>latest_seen</code></td>
+<td>string</td>
+<td><code>&quot;&quot;</code></td>
+<td>Last version seen from the release feed</td>
+</tr>
+<tr>
+<td><code>checked_at</code></td>
+<td>integer</td>
+<td><code>0</code></td>
+<td>Unix seconds of the last successful check. Caches the result for a day</td>
+</tr>
+</tbody>
+</table>
+<p>The last three are state gori maintains; only <code>check_enabled</code> is meant to be edited. The whole section is omitted on a default install.</p>
+<h3 id="fuzzer">fuzzer</h3>
+<p>Wordlist paths remembered by the Fuzzer's Payload overlay. Scratch state, not project data.</p>
+<pre><code class="language-json hljs">{
+  &quot;fuzzer&quot;: {
+    &quot;recent_wordlists&quot;: [&quot;/usr/share/wordlists/params.txt&quot;],
+    &quot;favorite_wordlists&quot;: [&quot;/home/me/lists/api.txt&quot;]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recent_wordlists</code></td>
+<td>array</td>
+<td>Most-recently-applied wordlist paths, newest first, capped at 10</td>
+</tr>
+<tr>
+<td><code>favorite_wordlists</code></td>
+<td>array</td>
+<td>Paths starred in the Path field, offered ahead of the recents</td>
+</tr>
+</tbody>
+</table>
+<p>Omitted until you apply or star a wordlist.</p>
+<h3 id="other-sections">Other sections</h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>theme</code></td>
+<td>Active theme name (default <code>goridark</code>). See the <a href="/guide/themes/">Themes guide</a></td>
+</tr>
+<tr>
+<td><code>mouse</code></td>
+<td>Mouse support toggle</td>
+</tr>
+<tr>
+<td><code>mouse_drag</code></td>
+<td>What releasing a drag does: <code>select</code> (default) or <code>copy</code></td>
+</tr>
+<tr>
+<td><code>pretty_bodies</code></td>
+<td>Pretty-print JSON/XML/etc. bodies in the detail view</td>
+</tr>
+<tr>
+<td><code>editor</code></td>
+<td>External editor <code>command</code> and Markdown handling</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>Which TUI tabs are shown/hidden</td>
+</tr>
+<tr>
+<td><code>hostname_overrides</code></td>
+<td>Global host → IP dial map. See <a href="#hostname_overrides">hostname_overrides</a> above</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>Env-token prefix and global values. See <a href="#env">env</a> above</td>
+</tr>
+<tr>
+<td><code>hotkeys</code></td>
+<td>Keybinding overrides (<code>os</code> layer + <code>command_modifier</code> + <code>bindings</code>). See the <a href="/guide/hotkeys/">Hotkeys guide</a></td>
+</tr>
+<tr>
+<td><code>hooks</code></td>
+<td>External process hooks: <code>timeout_secs</code> (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See <a href="/guide/scripting/#process-hooks">Process hooks</a></td>
+</tr>
+<tr>
+<td><code>decoder</code></td>
+<td>Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database)</td>
+</tr>
+<tr>
+<td><code>rewriter</code></td>
+<td>GLOBAL Match &amp; Replace rules, applied in every project, each with a default on/off state a project can override. See <a href="/guide/proxy/#global-and-project-rules">Global and project rules</a></td>
+</tr>
+<tr>
+<td><code>colormarker</code></td>
+<td>GLOBAL History row-colour rules, with the same global/project split as <code>rewriter</code>. Display only: a colour rule never modifies traffic. See <a href="/reference/cli/#run-colormarker">run colormarker</a></td>
+</tr>
+<tr>
+<td><code>mine</code></td>
+<td>Saved Param Miner defaults. See <a href="#mine">mine</a> above</td>
+</tr>
+<tr>
+<td><code>saved_views</code></td>
+<td>The GLOBAL History <strong>views</strong> library: named QL queries applied as a lens, with the same global/project split <code>rewriter</code> has. See <a href="/reference/cli/#run-views">run views</a></td>
+</tr>
+<tr>
+<td><code>companion</code></td>
+<td>Miss Ring, the mascot: <code>enabled</code> (off by default), <code>placement</code> (<code>body</code> | <code>bar</code>), <code>motion</code> (<code>lively</code> | <code>calm</code> | <code>still</code>) and <code>notices</code>. See the <a href="/guide/settings/">Settings guide</a></td>
+</tr>
+<tr>
+<td><code>layout</code></td>
+<td>History / Probe / Issues previews, Sitemap expand depth, tab-bar numbers. See <a href="#layout">layout</a> above</td>
+</tr>
+<tr>
+<td><code>statusline</code></td>
+<td>Bottom status row that runs a command on an interval. See <a href="#statusline">statusline</a> above</td>
+</tr>
+<tr>
+<td><code>display</code></td>
+<td>Default detail pane, list time format, line-number gutter, <code>wrap_lines</code> (soft-wrap long lines, on by default), preview body cap, <code>resource_meter</code> (the CPU/memory readout at the far right of the bottom bar, on by default), and <code>terminal_title</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="per-project-overrides">Per-Project Overrides</h2>
+<p>A project can pin its own network settings without editing the global file. These are stored in the project database (keys <code>net.bind_host</code>, <code>net.bind_port</code>, <code>net.upstream_proxy</code>, <code>net.upstream_destination_host</code>, <code>net.upstream_auth</code>, <code>net.connect_timeout_secs</code>, <code>net.io_timeout_secs</code>, <code>net.capture_max_mib</code>) and edited from the <strong>Project</strong> tab's <strong>Project settings</strong> sub-tab.</p>
+<p><strong>Destination host</strong> limits proxy routing to one case-insensitive host pattern. <code>*</code> is the default and makes every destination eligible; <code>example.com</code> covers that host and its subdomains, while <code>*.example.com</code> covers subdomains only. Domain, IPv4, IPv6, and <code>*</code>-based IP patterns are accepted. A non-match always goes direct and does not fall through to <code>upstream_rules</code> or <code>network.upstream_proxy</code>. This gate applies to every gori-owned dial while the project is active, including capture, replay, scanners, the updater, and OAST traffic.</p>
+<p>To authenticate, choose a <strong>Proxy protocol</strong>, enter the <strong>Proxy host</strong> and <strong>Proxy port</strong>, turn <strong>Proxy auth</strong> on, then enter <strong>Username</strong> and <strong>Password</strong>. <strong>SOCKS5</strong> resolves destination names locally; <strong>SOCKS5H</strong> resolves them at the proxy. HTTP uses Basic authentication, while either SOCKS protocol uses RFC 1929 username/password authentication. NTLM is not supported. Turning authentication on always pins the displayed upstream address to the project, even when it was inherited from the global setting, so the credentials cannot later follow a changed global route or a destination rule.</p>
+<p>The password is visible while the <strong>Password</strong> row is focused for editing and masked again when focus leaves. It is stored as plaintext inside the project's owner-only (<code>0600</code>) SQLite database, alongside captured engagement data that may already contain credentials. Use a global <code>upstream_rules</code> entry with <code>password_env</code> instead when the secret must not be stored in a project. For a matching destination, a malformed or orphaned project auth value fails closed before an origin connection.</p>
+<p>The timeout and capture-limit keys are engagement properties rather than machine ones: a slow internal appliance needs its own idle timeout, and one target returning very large responses needs its own capture cap; raising either globally would tax every other project.</p>
+<p><strong>Which surfaces apply which keys.</strong> The two bind keys only mean something where gori opens a listening socket; all other keys, including proxy authentication, apply wherever gori dials out or stores a body.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th><code>bind_host</code> / <code>bind_port</code></th>
+<th>upstream / destination / auth / timeouts / capture limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TUI (<code>gori</code>)</td>
+<td>applied; the proxy listens on the pinned address</td>
+<td>applied</td>
+</tr>
+<tr>
+<td><code>gori run capture</code></td>
+<td>applied; the one headless subcommand that listens (the pin wins over <code>--listen</code>/<code>--port</code>)</td>
+<td>applied</td>
+</tr>
+<tr>
+<td>every other <code>gori run</code> subcommand</td>
+<td>not applied; nothing binds</td>
+<td>applied</td>
+</tr>
+<tr>
+<td><code>gori mcp</code></td>
+<td>not applied; the server never listens</td>
+<td>applied</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Effective bind / upstream</strong> for an open project:</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (highest)</td>
+<td>Project DB <code>net.bind_host</code> / <code>net.bind_port</code> / <code>net.upstream_proxy</code> / <code>net.upstream_destination_host</code> / <code>net.upstream_auth</code> / timeouts / capture limit when set</td>
+</tr>
+<tr>
+<td>2</td>
+<td>CLI <code>--listen</code> / <code>--port</code> (process-only override of the global layer)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>settings.json</code> <code>network.*</code></td>
+</tr>
+<tr>
+<td>4 (lowest)</td>
+<td>Factory defaults <code>127.0.0.1:8070</code> / direct</td>
+</tr>
+</tbody>
+</table>
+<p>Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate. <strong>Destination host</strong> has no global counterpart; saving its default <code>*</code> deletes its project key.</p>
+<h2 id="projects-database">Projects &amp; Database</h2>
+<p>Each project keeps at most <code>retention.max_flows</code> flows (100,000 by default; see <a href="#retention">retention</a>); older ones are pruned so the file plateaus. Each project is a SQLite database (via <code>crystal-db</code> / <code>crystal-sqlite3</code>) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with <code>--db PATH</code>, or select a named project with <code>--project NAME</code>.</p>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>

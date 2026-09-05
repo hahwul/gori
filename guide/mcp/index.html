@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Drive gori from an AI agent or script over the Model Context Protocol.">
+  <title>MCP Server - gori</title>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <meta property="og:title" content="MCP Server">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/mcp/">
+  <meta property="og:description" content="Drive gori from an AI agent or script over the Model Context Protocol.">
+  <meta property="og:image" content="https://gori.hahwul.com/images/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MCP Server">
+  <meta name="twitter:description" content="Drive gori from an AI agent or script over the Model Context Protocol.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/images/og-card.png">
+  <link rel="canonical" href="https://gori.hahwul.com/guide/mcp/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"MCP Server","url":"https://gori.hahwul.com/guide/mcp/","description":"Drive gori from an AI agent or script over the Model Context Protocol."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"MCP Server"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/mcp/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/mcp/">
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/mcp/" hreflang="en" lang="en" aria-label="English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/mcp/" hreflang="ko" lang="ko" aria-label="한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+<div class="docs-container">
+
+<svg xmlns="http://www.w3.org/2000/svg" class="sidebar-icon-defs" aria-hidden="true" focusable="false">
+  <symbol id="si-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" />
+    <path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" />
+    <path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  </symbol>
+  <symbol id="si-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M17 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" />
+  </symbol>
+  <symbol id="si-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
+    <path d="M19 16h-12a2 2 0 0 0 -2 2" />
+    <path d="M9 8h6" />
+  </symbol>
+  <symbol id="si-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 5h8" />
+    <path d="M13 9h5" />
+    <path d="M13 15h8" />
+    <path d="M13 19h5" />
+    <path d="M3 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+    <path d="M3 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+  </symbol>
+  <symbol id="si-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+  </symbol>
+</svg>
+
+<aside class="docs-sidebar">
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-rocket"/></svg>
+      <span class="sidebar-title-text">Getting Started</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/installation/">Installation</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">AI Setup</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-route"/></svg>
+      <span class="sidebar-title-text">Playbooks</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/playbooks/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Foundations</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">Set up an engagement</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">Map the attack surface</a></li>
+      
+      
+      <li class="sidebar-subhead">The manual loop</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">Intercept and modify in flight</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">Fuzz a parameter</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/carry-a-session/">Carry a session</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/decode-and-transform/">Decode and transform data</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">Attack a JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">Crack and forge session cookies</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">Grade token randomness</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">Confirm blind vulnerabilities with OAST</a></li>
+      
+      
+      <li class="sidebar-subhead">Wrap up</li>
+      
+      <li><a href="https://gori.hahwul.com/playbooks/triage-and-report/">Triage and report</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">Run an AI co-pilot session</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section" open>
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-book"/></svg>
+      <span class="sidebar-title-text">Guide</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+      
+      
+      
+      <li class="sidebar-subhead">Core</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/scanning/">Scanning &amp; Issues</a></li>
+      
+      
+      <li class="sidebar-subhead">Workbenches</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/jwt/">JWT</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/cookie/">Cookie</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/sequencer/">Sequencer</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/oast/">OAST</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/authorize/">Authorize</a></li>
+      
+      
+      <li class="sidebar-subhead">Automation</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/scripting/">Scripting</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/mcp/" class="active" aria-current="page">MCP Server</a></li>
+      
+      
+      <li class="sidebar-subhead">Customize</li>
+      
+      <li><a href="https://gori.hahwul.com/guide/settings/">Settings</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/themes/">Themes</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/guide/hotkeys/">Hotkeys</a></li>
+      
+    </ul>
+  </details>
+  
+  
+  
+  
+  <details class="sidebar-section">
+    <summary class="sidebar-title">
+      <svg class="sidebar-icon" aria-hidden="true"><use href="#si-list"/></svg>
+      <span class="sidebar-title-text">Reference</span>
+      <svg class="sidebar-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </summary>
+    <ul class="sidebar-links">
+      <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+      
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/config/">Configuration</a></li>
+      
+      
+      <li><a href="https://gori.hahwul.com/reference/query-language/">Query Language</a></li>
+      
+    </ul>
+  </details>
+  
+</aside>
+  <main id="main" class="docs-main">
+    
+    <p class="doc-kicker">Guide</p>
+    
+    <h1>MCP Server</h1>
+    <p>gori ships a built-in <strong>MCP (Model Context Protocol) server</strong>. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent (Claude, Codex, Grok, and others) can read your traffic and drive the tools.</p>
+<figure class="agent-session" aria-label="Example agent session: an agent finds an IDOR over MCP and logs an issue">
+  <div class="agent-session-bar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="agent-session-title">agent · gori over MCP</span>
+  </div>
+  <div class="agent-session-body">
+    <p class="as-user"><span class="as-who">you</span>Find an IDOR on the users API and log it.</p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">14 flows, customer and admin tokens</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer token</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"}, not the caller's row</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>create_issue</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
+    <p class="as-done"><span class="as-check">✓</span> Issue logged; the request is saved as a Repeater session for repro.</p>
+  </div>
+</figure>
+<pre><code class="language-bash hljs">gori mcp
+</code></pre>
+<p>The server speaks JSON-RPC 2.0 over stdio: STDOUT carries the protocol, STDERR carries logs. Tool results include both backward-compatible text and MCP <code>structuredContent</code> when the payload is JSON.</p>
+<h2 id="choosing-a-project">Choosing a Project</h2>
+<pre><code class="language-bash hljs">cd /path/to/my-repository &amp;&amp; gori mcp # path-binds this Git workspace to its own gori project
+gori mcp --project my-engagement   # serve a named project's database
+gori mcp --db /path/to/project.db  # serve a specific database file
+gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
+gori mcp --no-project              # force unbound even inside a Git workspace
+</code></pre>
+<p>With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database.</p>
+<p><strong>Outside a Git workspace</strong> (the common case when an AI client spawns MCP from a home or app directory), the server starts <strong>unbound</strong>: the MCP handshake and tool list succeed immediately, but traffic tools (<code>list_history</code>, <code>send_request</code>, …) return <code>NO_PROJECT</code> until the agent calls <code>list_projects</code>, <code>create_project</code> (auto-binds when unbound), or <code>switch_project</code>. Unbound mode never silently opens the active TUI or MRU project; that requires the explicit <code>--use-active-project</code> opt-in (or <code>--project</code> / <code>--db</code> / <code>GORI_MCP_PROJECT</code> / <code>GORI_MCP_DB</code>).</p>
+<p><strong>If the selected project cannot be opened</strong> (a database that is missing, corrupt, or unreadable, a project name that no longer exists), the server still completes the handshake and starts unbound rather than exiting. The reason is written to stderr, repeated in the handshake <code>instructions</code>, returned with every <code>NO_PROJECT</code> tool error, and reported as <code>bind_error</code> by <code>project_info</code>, so the agent can call <code>list_projects</code> and <code>switch_project</code> to recover without a restart.</p>
+<p>Call <code>project_info</code> before using data. It reports <code>bound</code>, the selected project, database path, workspace root, and selection source.</p>
+<h2 id="read-only-mode">Read-Only Mode</h2>
+<p>By default the server also exposes action tools that send live requests and write issues. To expose only the read tools (safe for handing a project to an untrusted agent), start it read-only:</p>
+<pre><code class="language-bash hljs">gori mcp --read-only
+</code></pre>
+<p>A read-only server also keeps no writer. It never writes the project it serves and runs no background indexing, because SQLite allows a single writer, and a second gori holding that slot for nothing but its own bookkeeping is what makes it contend with the TUI capturing into the same project. The one exception is a database written by an older gori, which is migrated on open because this build cannot read it otherwise.</p>
+<p>A default (actions-on) server still has a writer (<code>send_request</code> and <code>create_issue</code> need one), but it does not idle-index. Free-text search drains the backlog on demand; the capturing TUI is the process that keeps the index current in the background.</p>
+<p>One consequence is worth knowing: free-text search (<code>body:</code>) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with <code>FTS_BACKLOG</code> rather than answered from a partial index; open the project in gori, or drop <code>--read-only</code>, to drain it.</p>
+<h2 id="seeing-an-agent-from-the-tui">Seeing an Agent From the TUI</h2>
+<p>While an MCP server is bound to a project, gori shows it. In the project picker the project's row carries an <code>mcp</code> mark (<code>mcp×2</code> for more than one), and once the project is open a clickable <code>mcp:&lt;client&gt;</code> chip appears on the top bar. Click it, or run <code>app.agents</code> from the command palette, to open a card listing every attached agent: its name, version, pid, when it connected, and whether it is read-only. The name comes from the client's own <code>clientInfo</code> handshake; a server started with <code>--read-only</code> shows as read-only there. A row disappears on its own the moment its process exits, so the chip and card always reflect what is attached right now.</p>
+<h2 id="installing-into-an-agent">Installing Into an Agent</h2>
+<p>gori can write the MCP configuration for common clients for you:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Client</th>
+<th>Config written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-claude</code></td>
+<td>Claude Desktop</td>
+<td><code>claude_desktop_config.json</code> in the platform&#39;s app-config directory (see below)</td>
+</tr>
+<tr>
+<td><code>--install-claude-code</code></td>
+<td>Claude Code</td>
+<td><code>~/.claude.json</code> (<code>mcpServers.gori</code>)</td>
+</tr>
+<tr>
+<td><code>--install-codex</code></td>
+<td>OpenAI Codex</td>
+<td><code>~/.codex/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-agy</code></td>
+<td>Antigravity CLI</td>
+<td><code>~/.gemini/antigravity-cli/mcp_config.json</code></td>
+</tr>
+<tr>
+<td><code>--install-grok</code></td>
+<td>Grok</td>
+<td><code>~/.grok/config.toml</code> (<code>[mcp_servers.gori]</code>)</td>
+</tr>
+<tr>
+<td><code>--install-hermes</code></td>
+<td>Hermes</td>
+<td><code>~/.hermes/config.yaml</code> (<code>mcp_servers.gori</code>), or <code>$HERMES_HOME</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every client except Claude Desktop and Hermes keeps its config in the same place on macOS, Linux and Windows. Hermes reads <code>$HERMES_HOME</code> when it is set, and otherwise <code>~/.hermes</code> (<code>%LOCALAPPDATA%\hermes</code> on Windows). Claude Desktop follows Electron's app-data directory instead: <code>~/Library/Application Support/Claude/</code> on macOS, <code>%APPDATA%\Claude\</code> on Windows, and <code>$XDG_CONFIG_HOME/Claude/</code> (defaulting to <code>~/.config/Claude/</code>) on Linux. gori reads that variable, so a Nix or home-manager session that moves it is followed too.</p>
+<p>The exception is a <strong>Flatpak</strong> Claude Desktop: it reads <code>XDG_CONFIG_HOME</code> from inside its own sandbox (<code>~/.var/app/&lt;app-id&gt;/config/Claude/</code>), which the host shell running gori cannot see. There gori writes <code>~/.config/Claude/claude_desktop_config.json</code> and prints that path; copy it into the app's sandbox directory yourself. Every install command prints the file it wrote, so check that line against where your build actually reads.</p>
+<pre><code class="language-bash hljs">gori mcp --install-claude-code
+gori mcp --install-codex
+gori mcp --install-grok
+gori mcp --install-hermes
+gori mcp --install-claude-code --install-codex  # several clients in one run
+</code></pre>
+<p>Codex and Grok use TOML with an <code>[mcp_servers.gori]</code> table, and Hermes YAML with an <code>mcp_servers:</code> entry, rather than JSON. Restart the client (or re-open the session) after installing so it reloads MCP servers. Existing config files are updated in place: other servers, tables and comments are preserved, the file's permissions are kept, and the replacement is atomic so an interrupted install can never truncate it. gori edits these files as text rather than re-emitting them from a parse tree, so the documentation you keep around your own settings survives the install; a config it cannot splice safely is reported and left alone rather than rewritten.</p>
+<p>If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example <code>gori mcp --project my-engagement --install-codex</code>.</p>
+<p>Every flag you pass alongside <code>--install-*</code> is written into the installed command, so what the client spawns matches what you typed: selectors (<code>--project</code>, <code>--db</code>, <code>--no-project</code>, <code>--use-active-project</code>), <code>--read-only</code>, <code>--insecure-upstream</code>, and <code>--config</code>. Paths are made absolute, because the client spawns the server from a working directory you did not choose.</p>
+<h2 id="tools">Tools</h2>
+<p><strong>Read tools</strong> (always available):</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list_history</code></td>
+<td>List flows newest-first, with optional QL and pagination. Every row carries <code>source</code> (<code>proxy</code> for traffic a client sent, <code>repeater</code> for a <code>send_request</code> (including your own, which records by default), <code>discover</code>, <code>import</code>, …), so a flow gori made is never read back as evidence about the target. Filter with <code>src:</code>. Pass <code>columns</code> (the same <code>[LABEL=][req|res:]kind:selector</code> specs <code>gori run ls --column</code> takes) to carry an extracted value per row (a header, a JSON field, a regex capture) under a <code>columns</code> object: what QL can <em>filter</em> on, <a href="/guide/proxy/#columns">shown</a>. Opt-in, since it costs a read per row</td>
+</tr>
+<tr>
+<td><code>list_events</code></td>
+<td>Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows. Every event carries <code>actor</code>, the surface that acted (<code>tui</code> / <code>cli</code> / <code>mcp</code>), so an agent can tell its own writes from the operator&#39;s, and config changes are recorded whoever makes them. The human reads the same feed on the <strong>Project → Activity</strong> pane</td>
+</tr>
+<tr>
+<td><code>list_views</code></td>
+<td>The project&#39;s History <a href="/guide/proxy/#views">views</a>: named QL queries <code>list_history{view}</code> applies as a lens, ANDed over <code>query</code> rather than replacing it. Seven built-ins (<code>All</code>, <code>History</code>, <code>History + Repeater</code> (the default), <code>WebSocket</code>, <code>gRPC</code>, <code>SSE</code>, <code>Errors</code>), then the global library, then the project&#39;s own; <code>active</code> marks the one the TUI is showing, which does <strong>not</strong> apply to <code>list_history</code>, which filters only by the <code>view</code> you pass it</td>
+</tr>
+<tr>
+<td><code>get_flow</code></td>
+<td>Full request + response for one flow</td>
+</tr>
+<tr>
+<td><code>get_response_body_chunk</code></td>
+<td>Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap</td>
+</tr>
+<tr>
+<td><code>list_sitemap</code> / <code>list_sitemap_tags</code></td>
+<td>Distinct endpoints (host, method, path), and the tags placed on them</td>
+</tr>
+<tr>
+<td><code>list_issues</code> / <code>get_issue</code></td>
+<td>Read triaged issues</td>
+</tr>
+<tr>
+<td><code>probe_scan</code></td>
+<td>Rescan captured flows and Repeater tabs. Passive (zero requests) unless <code>active:true</code>, which needs write access and is scope-gated</td>
+</tr>
+<tr>
+<td><code>probe_issues</code></td>
+<td>The Probe tab&#39;s persisted findings, as triage state (open by default)</td>
+</tr>
+<tr>
+<td><code>list_probe_rules</code></td>
+<td>Every scan rule (passive, active, custom), which are enabled, and the project&#39;s scan mode</td>
+</tr>
+<tr>
+<td><code>list_scope</code></td>
+<td>Current scope include/exclude rules</td>
+</tr>
+<tr>
+<td><code>list_links</code></td>
+<td>Evidence pointers from an issue or note to a flow, Repeater session, or job</td>
+</tr>
+<tr>
+<td><code>compare_flows</code></td>
+<td>Line diff of two flows&#39; request or response, with each side&#39;s status/size/time and the A→B delta; <code>context:N</code> folds the unchanged runs into <code>{kind:fold,hidden}</code> markers</td>
+</tr>
+<tr>
+<td><code>diff_projects</code></td>
+<td>Retest diff: two PROJECTS at endpoint scale: what is new, gone, or answering differently since the last engagement. Endpoints are keyed by the Sitemap&#39;s folded template, and <code>removed</code> (never requested in the newer capture) is a separate verdict from <code>gone</code> (asked, got 404/410)</td>
+</tr>
+<tr>
+<td><code>intercept_list</code> / <code>intercept_get</code></td>
+<td>Inspect the live intercept queue and one held item in full</td>
+</tr>
+<tr>
+<td><code>list_projects</code></td>
+<td>Every gori project on this host</td>
+</tr>
+<tr>
+<td><code>list_notes</code> / <code>get_note</code></td>
+<td>Read project notes</td>
+</tr>
+<tr>
+<td><code>list_rule_presets</code></td>
+<td>The response-modification <a href="/guide/proxy/#rewriter-presets">presets</a>: named starting points that install ordinary Match &amp; Replace rules (unhide hidden fields, enable disabled controls, remove <code>maxlength</code>, strip client-side validation, drop CSP / security headers, disable SRI). Each row names the rules it would install</td>
+</tr>
+<tr>
+<td><code>list_extract_rules</code></td>
+<td>The project&#39;s <strong>extract</strong> rules, the read half of a <a href="/guide/proxy/#session-bindings">session binding</a>: each observes a response and binds one <code>$NAME</code> in memory for a Match &amp; Replace rule to inject</td>
+</tr>
+<tr>
+<td><code>list_color_rules</code> / <code>list_custom_colors</code></td>
+<td>The <a href="/guide/proxy/#colouring-rows-colormarker-tab">Colormarker</a> rules in precedence order, and the global custom colours a rule&#39;s <code>color</code> can name. Display only; a colour rule never modifies traffic</td>
+</tr>
+<tr>
+<td><code>preview_color_rule</code></td>
+<td>How many recent flows a colour condition would MATCH, and how many it would actually PAINT once the rules resolving ahead of it are counted</td>
+</tr>
+<tr>
+<td><code>grpc_schema</code></td>
+<td>What <code>.proto</code> schema this project renders captured gRPC through, and where each piece came from: a descriptor-set file or a reflection fetch. Sends nothing</td>
+</tr>
+<tr>
+<td><code>list_rules</code></td>
+<td>List the Match &amp; Replace rules applied to the project in apply order: global rules first, then the project&#39;s own (<code>scope</code> filters to one)</td>
+</tr>
+<tr>
+<td><code>list_env</code></td>
+<td>Project env tokens available to <code>$KEY</code> substitution (values redacted). Each row also carries <code>length</code> and, when the value already begins with one, <code>scheme</code>, enough to tell whether a header should read <code>Bearer $KEY</code> or just <code>$KEY</code>, without the value</td>
+</tr>
+<tr>
+<td><code>list_host_overrides</code></td>
+<td>The host to IP dial map in force for this project</td>
+</tr>
+<tr>
+<td><code>list_session_slots</code></td>
+<td>The project&#39;s <a href="/guide/authorize/#session-slots-one-list-two-readers">session slots</a> (named identities, each a header overlay plus the extract rules whose bound values belong to it) and which one is ACTIVE (header values redacted)</td>
+</tr>
+<tr>
+<td><code>list_oast_providers</code></td>
+<td>Configured OAST providers and which one is active</td>
+</tr>
+<tr>
+<td><code>list_oast_sessions</code></td>
+<td>The project&#39;s persisted OAST listening sessions (payload host, hits, last poll), the rows <code>oast_resume</code> re-arms</td>
+</tr>
+<tr>
+<td><code>decode</code></td>
+<td>Run an encode/decode/hash/compress chain over <code>input</code> (pure transform; no network or state)</td>
+</tr>
+<tr>
+<td><code>jwt_decode</code> / <code>jwt_encode</code> / <code>jwt_attacks</code></td>
+<td>Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under <code>--read-only</code>)</td>
+</tr>
+<tr>
+<td><code>cookie_decode</code> / <code>cookie_verify</code> / <code>cookie_crack</code> / <code>cookie_forge</code></td>
+<td>The <a href="/guide/cookie/">Cookie workbench</a> as pure offline compute: parse a Flask / Rack / Django signed session cookie, check it against a candidate secret, brute-force the secret over a wordlist, and re-sign an edited payload. No network, so all four survive <code>--read-only</code></td>
+</tr>
+<tr>
+<td><code>sequence_analyze</code></td>
+<td>Grade a pasted token list for randomness / predictability (pure)</td>
+</tr>
+<tr>
+<td><code>oast_presets</code> / <code>oast_payload</code> / <code>oast_poll</code></td>
+<td>List OAST providers, read the active payload, and poll a running listener for callbacks</td>
+</tr>
+<tr>
+<td><code>discover_status</code> / <code>discover_results</code></td>
+<td>Progress and findings of a Discover run</td>
+</tr>
+<tr>
+<td><code>project_info</code></td>
+<td>Flow / issue counts, database, workspace binding, and selection source</td>
+</tr>
+<tr>
+<td><code>get_current_context</code></td>
+<td>What the user is viewing in the TUI right now</td>
+</tr>
+<tr>
+<td><code>get_repeater_context</code></td>
+<td>Repeater workbench state and saved sessions. Every session reports <strong>both</strong> ids (<code>db_id</code>, which every repeater tool takes, and <code>tui_index</code>, the 1-based number the TUI paints on its sub-tab chip (<code>6:POST /api</code>)), so an agent and the operator name the same tab. <code>filter</code> takes the same sub-tab language the TUI&#39;s <code>/</code> does (<code>tag:</code> <code>name:</code> <code>host:</code> <code>method:</code> <code>status:</code>, <code>-</code> negates, bare words search), ANDed with <code>query</code>. <code>include_content</code> adds the request head and, per credential header, an <code>env_headers</code> shape (<code>Authorization: Bearer $AUTH</code>) that names the wiring without the secret; <code>include_response_body</code> inlines the stored last response body</td>
+</tr>
+<tr>
+<td><code>list_fuzz_runs</code> / <code>get_fuzz_run</code></td>
+<td>List and inspect permanent Fuzzer result sets. Metrics use a scalar-only projection, including <code>result_index</code>, so retained BLOBs are not loaded. <code>include_content:true</code> returns at most 25 rows from SQLite-capped prefixes: <code>max_head_bytes</code> (default 16 KiB, max 64 KiB) bounds heads and <code>max_body_bytes</code> (default 2 KiB, max 64 KiB) bounds decoded bodies/raw samples. Full source sizes plus head/source/decode truncation flags say what was omitted; <code>include_sensitive:true</code> opts into exact capped prefixes, never uncapped bytes. Run metadata labels pre-current snapshots as <code>legacy:true</code></td>
+</tr>
+<tr>
+<td><code>ql_reference</code></td>
+<td>The query-language reference</td>
+</tr>
+<tr>
+<td><code>ql_explain</code></td>
+<td>Diagnose a query without running it, to check a filter before spending requests on it</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Action tools</strong> (disabled by <code>--read-only</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>send_request</code></td>
+<td>Send / resend an HTTP request (active; records History by default, expands <code>$KEY</code> env tokens, and redacts sensitive response-header values unless explicitly requested). <code>reframe_grpc: true</code> recomputes a unary gRPC message&#39;s 5-byte length prefix over the body actually sent. Off by default, so an edited message ships with the prefix it was captured with</td>
+</tr>
+<tr>
+<td><code>send_websocket</code></td>
+<td>Execute a saved WebSocket Repeater session and collect the replies</td>
+</tr>
+<tr>
+<td><code>create_repeater</code> / <code>update_repeater</code> / <code>delete_repeater</code></td>
+<td>Manage one Repeater session. Every reply carries <code>tui_index</code> beside <code>id</code>; a delete names the tab it destroyed (<code>was_tui_index</code>) and renumbers the rest</td>
+</tr>
+<tr>
+<td><code>create_repeaters</code></td>
+<td>Seed a tab from each of several captured flows, the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session</td>
+</tr>
+<tr>
+<td><code>delete_repeaters</code> / <code>update_repeaters</code></td>
+<td>Bulk close, and bulk re-label (tags and name affixes only; <code>update_repeater</code> is the one that writes request bytes). Both take explicit ids, never a filter: narrow with <code>get_repeater_context{filter}</code> first, so the set you read is the set acted on. Delete needs <code>confirm:true</code>, and an unknown id refuses the whole call</td>
+</tr>
+<tr>
+<td><code>move_repeater</code></td>
+<td>Rearrange the sub-tab strip: <code>to_index</code> for an absolute tab number, <code>direction</code> for a one-step nudge. An open TUI picks the new order up on its own</td>
+</tr>
+<tr>
+<td><code>minimize_repeater</code></td>
+<td>Shrink a Repeater request to the smallest form that still reproduces the response</td>
+</tr>
+<tr>
+<td><code>create_issue</code> / <code>update_issue</code> / <code>delete_issue</code></td>
+<td>Record, update, and remove issues</td>
+</tr>
+<tr>
+<td><code>add_link</code> / <code>remove_link</code></td>
+<td>Attach or detach an issue&#39;s / note&#39;s evidence pointer</td>
+</tr>
+<tr>
+<td><code>create_note</code> / <code>update_note</code> / <code>delete_note</code></td>
+<td>Manage project notes</td>
+</tr>
+<tr>
+<td><code>create_rule</code> / <code>update_rule</code> / <code>set_rule_enabled</code> / <code>delete_rule</code></td>
+<td>Create, edit, toggle, and delete Match &amp; Replace rules (rewrites on in-flight request/response head or body). Each takes <code>scope</code>: <code>project</code> (default) or <code>global</code>, which applies in every project</td>
+</tr>
+<tr>
+<td><code>create_rule_from_preset</code></td>
+<td>Install a preset (see <code>list_rule_presets</code>) as ordinary Match &amp; Replace rules, the same result as calling <code>create_rule</code> once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created</td>
+</tr>
+<tr>
+<td><code>create_extract_rule</code> / <code>update_extract_rule</code> / <code>set_extract_rule_enabled</code> / <code>delete_extract_rule</code></td>
+<td>Manage the extract rules that bind <code>$NAME</code> from a response. Renaming drops the old name&#39;s bound value rather than re-labelling it, and disabling <strong>un-declares</strong> the name, so a rule injecting it goes back to refusing rather than sending a stale value</td>
+</tr>
+<tr>
+<td><code>create_color_rule</code> / <code>update_color_rule</code> / <code>set_color_rule_enabled</code> / <code>move_color_rule</code> / <code>delete_color_rule</code></td>
+<td>Manage Colormarker rules. <code>move_color_rule</code> is a semantic edit, not cosmetic: the first enabled match paints the row. Each takes <code>scope</code>: <code>project</code> (default) or <code>global</code></td>
+</tr>
+<tr>
+<td><code>create_custom_color</code> / <code>update_custom_color</code> / <code>delete_custom_color</code></td>
+<td>Define the global custom colours the picker offers on top of the six built-ins. Deleting one leaves a rule that still names it inert; its rows fall back to a visible default rather than the deletion cascading into rules</td>
+</tr>
+<tr>
+<td><code>grpc_reflect</code> / <code>grpc_forget</code></td>
+<td>Ask a target&#39;s <code>grpc.reflection.v1</code> service (falling back to <code>v1alpha</code>) for its descriptors and cache them in the project, or drop a cached target. <code>grpc_reflect</code> is an outbound send and is scope-gated like any other</td>
+</tr>
+<tr>
+<td><code>create_view</code> / <code>update_view</code> / <code>delete_view</code></td>
+<td>Create, edit, re-home and delete saved History <a href="/guide/proxy/#views">views</a>. Each takes <code>scope</code>: <code>project</code> (default) or <code>global</code>. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does</td>
+</tr>
+<tr>
+<td><code>preview_rule</code></td>
+<td>Estimate how many stored flows a rule would change, before creating it</td>
+</tr>
+<tr>
+<td><code>import_flows</code></td>
+<td>Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History</td>
+</tr>
+<tr>
+<td><code>delete_flow</code> / <code>clear_history</code></td>
+<td>Remove one flow, or wipe captured History</td>
+</tr>
+<tr>
+<td><code>set_sitemap_tag</code></td>
+<td>Pin a free-text memo onto a sitemap path</td>
+</tr>
+<tr>
+<td><code>create_project</code> / <code>switch_project</code> / <code>delete_project</code></td>
+<td>Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a <code>dry_run</code> first, then a confirmation token</td>
+</tr>
+<tr>
+<td><code>add_scope_rule</code> / <code>update_scope_rule</code> / <code>delete_scope_rule</code> / <code>set_scope_enabled</code></td>
+<td>Edit the project&#39;s include / exclude rules and toggle the scope lens</td>
+</tr>
+<tr>
+<td><code>set_sandbox</code></td>
+<td>Hard containment: when on, the proxy forwards only what scope allows and blocks the rest</td>
+</tr>
+<tr>
+<td><code>set_env_var</code> / <code>delete_env_var</code></td>
+<td>Manage the project env tokens <code>$KEY</code> substitution reads</td>
+</tr>
+<tr>
+<td><code>create_session_slot</code> / <code>update_session_slot</code> / <code>delete_session_slot</code></td>
+<td>Manage the session slots, the same list the Authorize tab&#39;s identities card edits, and the set <code>authorize_start</code> replays under</td>
+</tr>
+<tr>
+<td><code>set_active_session_slot</code></td>
+<td>Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and <code>$NAME</code> resolves against its binding table. Held by this server process only, never persisted, so a new connection starts as-captured</td>
+</tr>
+<tr>
+<td><code>add_host_override</code> / <code>update_host_override</code> / <code>delete_host_override</code></td>
+<td>Manage the host to IP dial map (changes only the connect IP, never the request)</td>
+</tr>
+<tr>
+<td><code>probe_promote</code> / <code>probe_dismiss</code> / <code>probe_delete</code></td>
+<td>Triage a Probe finding into Issues, dismiss it, or remove it</td>
+</tr>
+<tr>
+<td><code>set_probe_mode</code></td>
+<td>Set the scan mode: <code>off</code>, <code>passive</code>, <code>active</code>, or <code>aggressive</code> (authorized targets only)</td>
+</tr>
+<tr>
+<td><code>create_probe_rule</code> / <code>update_probe_rule</code> / <code>delete_probe_rule</code> / <code>set_probe_rule_enabled</code></td>
+<td>Manage custom match rules and arm or disarm any scan rule</td>
+</tr>
+<tr>
+<td><code>create_oast_provider</code> / <code>update_oast_provider</code> / <code>delete_oast_provider</code> / <code>set_oast_provider_enabled</code></td>
+<td>Manage the OAST providers <code>oast_start</code> can listen on</td>
+</tr>
+<tr>
+<td><code>fuzz_start</code> / <code>fuzz_status</code> / <code>fuzz_results</code> / <code>fuzz_stop</code></td>
+<td>Drive the fuzzer. <code>save_results:true</code> permanently stores <strong>every</strong> row through a byte-bounded asynchronous writer and returns a database <code>run_id</code>; storage backpressure marks the save failed without stopping outbound traffic. This is independent of the bounded/selective live-job cache and <code>record_history</code>. <code>fuzz_start{fields: [&quot;role&quot;]}</code> sweeps a <strong>schema-known gRPC field</strong> of a unary request: each payload goes through the field&#39;s declaration on its way to bytes, every other byte of the message is copied from the capture, and the length prefix follows. A gRPC sweep of BYTE positions reports <code>grpc_stale_prefix</code> when a payload changed a message&#39;s length; <code>fuzz_start{reframe_grpc: true}</code> recomputes the prefix instead of reporting it. <code>fuzz_results</code> keeps rows the matcher rejected when the run observed something about them, so read each row&#39;s <code>matched</code>, or pass <code>matched_only: true</code></td>
+</tr>
+<tr>
+<td><code>delete_fuzz_run</code></td>
+<td>Delete a permanent fuzz run and its results; refuses a known live writer. <code>force_stale:true</code> removes a <code>running</code>/<code>saving</code> row left by a crashed process, and must never be used while another gori is saving</td>
+</tr>
+<tr>
+<td><code>mine_start</code> / <code>mine_status</code> / <code>mine_results</code> / <code>mine_stop</code></td>
+<td>Drive the param miner</td>
+</tr>
+<tr>
+<td><code>sequence_start</code> / <code>sequence_status</code> / <code>sequence_results</code> / <code>sequence_stop</code></td>
+<td>Collect tokens by live replay and grade them (results return the report, never the tokens)</td>
+</tr>
+<tr>
+<td><code>authorize_start</code> / <code>authorize_status</code> / <code>authorize_results</code> / <code>authorize_stop</code></td>
+<td>Replay captured flows under several identities and compare each response against a baseline (broken access control). Results lead with <code>access_control</code> (<code>BYPASS</code>/<code>enforced</code>/<code>review</code>/<code>error</code>/<code>nothing_sent</code>) and a flat, never-paged <code>bypasses</code> list</td>
+</tr>
+<tr>
+<td><code>discover_start</code> / <code>discover_stop</code></td>
+<td>Spider and brute-force endpoints (poll with <code>discover_status</code> / <code>discover_results</code>)</td>
+</tr>
+<tr>
+<td><code>oast_start</code> / <code>oast_stop</code></td>
+<td>Register an ad-hoc OAST payload and poll for callbacks (read the hits with <code>oast_poll</code>); <code>oast_stop</code> on a RESUMED session stops polling but keeps it resumable</td>
+</tr>
+<tr>
+<td><code>oast_resume</code> / <code>oast_release</code></td>
+<td>Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement; its callbacks stay</td>
+</tr>
+<tr>
+<td><code>list_jobs</code> / <code>get_job</code> / <code>stop_job</code></td>
+<td>Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id</td>
+</tr>
+<tr>
+<td><code>intercept_forward</code> / <code>intercept_forward_edit</code> / <code>intercept_drop</code></td>
+<td>Release a held message byte-exact, release it with edited wire bytes, or drop it</td>
+</tr>
+<tr>
+<td><code>intercept_toggle</code> / <code>intercept_set_filter</code> / <code>intercept_set_direction</code></td>
+<td>Arm or disarm the catch, set its condition query, and choose which leg it holds</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Action tools are capped for safety: fuzz, mine, sequence, discover, and authorize jobs are limited in total requests, concurrency, and stored results. An authorize run's cap counts <code>flows × identities</code>, and a selection over it is refused up front rather than truncated into a run that would report &quot;enforced&quot; for flows it never sent. A rule created via <code>create_rule</code> is picked up by <code>gori run</code> and newly opened TUIs; an already-running TUI applies it only after its rules reload.</p>
+</blockquote>
+<h2 id="from-a-spec-to-repeater-tabs">From a Spec to Repeater Tabs</h2>
+<p><code>import_flows</code> reads OpenAPI/Swagger (JSON or YAML) and joins <code>servers[0].url</code> with each operation path, so the base-path assembly is already done. Getting from a spec to a strip of tabs is three calls:</p>
+<pre><code>import_flows{kind: &quot;oas&quot;, path: &quot;openapi.yaml&quot;}
+list_history{query: &quot;src:import&quot;}          → the flow ids
+create_repeaters{flow_ids: [...], name_prefix: &quot;oas: &quot;, tags: &quot;spec&quot;}
+</code></pre>
+<p><code>create_repeaters</code> checks every flow exists before it creates the first session, seeds each one through the same path a single <code>create_repeater{flow_id}</code> uses, and appends them in the order given. Rearrange afterwards with <code>move_repeater</code>, and prune with <code>delete_repeaters</code>.</p>
+<h2 id="live-intercept">Live Intercept</h2>
+<p>An agent can sit in the intercept loop next to you rather than reading History after the fact. The TUI session holding the capture lock mirrors held messages out to the agent and drains the commands it sends back, so <code>intercept_list</code> → <code>intercept_get</code> → <code>intercept_forward_edit</code> is the same loop you drive by hand.</p>
+<p>The mutating half (<code>intercept_forward</code>, <code>intercept_forward_edit</code>, <code>intercept_drop</code>, <code>intercept_toggle</code>, <code>intercept_set_filter</code>, <code>intercept_set_direction</code>) is disabled by <code>--read-only</code>, and every one of them refuses when no live capture session is holding the lock. There is nothing to forward without a proxy actually holding traffic.</p>
+<p>Agent actions are visible, not silent. Each one lands in the notification center tagged as coming from an agent, rendered differently from your own actions, so you can see what a co-pilot did to traffic while you were reading another tab.</p>
+<p>One safety rule is worth knowing before you leave an agent running. A held message normally waits forever for a human decision, which is what you want when you are the only one at the keyboard. Once an agent attaches to the intercept queue in that session, gori arms a 30 second auto-forward for items nobody is watching, so a client that dies mid-hold cannot wedge the connection indefinitely. A session with no agent attached never auto-forwards.</p>
+<h2 id="one-call-at-a-time">One Call at a Time</h2>
+<p>Tools run one at a time, in the order they arrive; a fuzz or a slow <code>send_request</code> does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: <code>ping</code>, so a client's liveness probe never stalls behind a long call and declares the server dead, and <code>notifications/cancelled</code>, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.</p>
+<h2 id="why-an-mcp-seam">Why an MCP Seam</h2>
+<p>gori deliberately has no in-tool AI chat. The intelligence lives outside the tool, reachable through MCP. That means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. <a href="/guide/scripting/"><code>gori run</code></a> covers the non-interactive path; MCP covers the interactive-agent path.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/getting-started/ai-setup/">AI Setup</a>: a step-by-step walkthrough to connect an agent and drive its first request</li>
+<li><a href="/guide/scripting/">Scripting</a>: the other automation path, <code>gori run</code> for pipelines and CI</li>
+<li><a href="/reference/cli/">CLI Reference</a>: full <code>gori mcp</code> flags</li>
+<li><a href="/reference/query-language/">Query Language</a>: the syntax agents use to filter</li>
+</ul>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js"></script>
+<script src="https://gori.hahwul.com/js/toc.js"></script>
+<script src="https://gori.hahwul.com/js/codecopy.js"></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js"></script>
+
+</body>
+</html>
