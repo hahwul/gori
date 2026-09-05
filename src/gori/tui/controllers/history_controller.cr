@@ -151,11 +151,9 @@ module Gori::Tui
     # pane strip + mode row. A drag that strays ONTO those rows is not clamped away here: the
     # read cursor pins it to the first text row, which is what an upward drag means.
     private def detail_text_rect(rect : Rect) : Rect?
-      inner = rect.inset(1, 1)
-      top = inner.y + 2 # pane strip + mode row
-      h = inner.bottom - top
-      return nil if h <= 0
-      Rect.new(inner.x + 1, top, {inner.w - 2, 0}.max, h)
+      # The view owns the derivation: it is the side that also draws the footer strip under
+      # the text, and the strip's height is what this rect must stop above.
+      @history.detail_text_rect(rect.inset(1, 1))
     end
 
     # A click inside the detail drill-in: the pane chips, then the mode chips (both on the
@@ -187,6 +185,11 @@ module Gori::Tui
       return unless my >= inner.y + 2
       body = detail_text_rect(rect)
       return unless body
+      # The footer strip under the text (status · sizes · latency · provenance) is a readout,
+      # not text: a click on it must not pull focus down and park the caret on the last text
+      # row, which is what `detail_click_to_cursor`'s clamp would do with a row past the
+      # rect. A DRAG that strays onto it still clamps — that is a downward selection.
+      return unless my < body.bottom
       @host.focus_body
       @history.set_detail_focus(:body) # a body click enters the caret/text level
       @history.detail_click_to_cursor(body, mx, my, focused: true)

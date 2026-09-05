@@ -815,6 +815,13 @@ describe Gori::Tui::HistoryView do
         backend = MemoryBackend.new(100, 16)
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
         backend.contains?("sent by gori — repeater (tui) #7").should be_true
+        # In the FOOTER strip under the text, not spliced after the request bytes: the pane
+        # is the wire's bytes, and a copy of the pane must not carry gori's sentence with them.
+        view.detail_copy_all.should_not contain("sent by gori")
+        rows = (0...16).map { |y| backend.row(y) }
+        note_y = rows.index!(&.includes?("sent by gori"))
+        rows[note_y - 2].should start_with("───") # the divider, above the stats row
+        rows[note_y - 1].should contain("req ")
       end
     end
 
@@ -842,6 +849,88 @@ describe Gori::Tui::HistoryView do
         view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
         # "read in by", not "sent by": gori never put this on a wire.
         backend.contains?("read in by gori — import · acme.har").should be_true
+      end
+    end
+  end
+
+  describe "detail footer strip" do
+    # The strip under the text: `200 · HTTP/1.1 · req 37B · res 22B · 1.2ms · text/plain · <time>`,
+    # then gori's own sentences (provenance, advisories) one per row. Burp's message editor
+    # keeps the same facts in a status bar under the pane; before this they were either five
+    # abbreviated cells up in the list or absent from the drill-in altogether.
+    it "spells the exchange's facts under the text of every pane" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/facts", http_version: "HTTP/1.1",
+          head: "GET /facts HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n".to_slice,
+          body: "hello".to_slice, content_type: "text/plain; charset=utf-8", duration_us: 1_234_i64))
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        rows = (0...16).map { |y| backend.row(y) }
+        stats_y = rows.index!(&.includes?("req "))
+        stats = rows[stats_y]
+        stats.should contain("200 · HTTP/1.1")
+        stats.should contain("res ")
+        stats.should contain("1.2ms")
+        stats.should contain("text/plain") # the essence, without the charset parameter
+        stats.should_not contain("charset")
+        rows[stats_y - 1].should start_with("───") # divider between the text and the strip
+        # A proxy capture has no provenance sentence: the stats row is the whole strip, and
+        # the strip sits on the pane's last row.
+        stats_y.should eq(15)
+        # Same strip under the RESPONSE pane.
+        view.detail_pane_advance(1)
+        backend2 = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend2), Rect.new(0, 0, 100, 16))
+        backend2.row(stats_y).should contain("200 · HTTP/1.1")
+        # …and none of it is in the pane's text (a copy is the bytes, not the readout).
+        view.detail_copy_all.should_not contain("req ")
+      end
+    end
+
+    it "reads — for size and latency until the response lands" do
+      with_store do |store|
+        add_flow(store, "GET", "/pending")
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        rows = (0...16).map { |y| backend.row(y) }
+        stats = rows.find!(&.includes?("req "))
+        stats.should contain("··· · HTTP/1.1")
+        stats.should contain("res — · —")
+      end
+    end
+
+    it "takes its rows out of the text rect the click hit-test walks" do
+      with_store do |store|
+        add_sourced_flow(store, "/resent", Gori::FlowSource::Kind::Repeater,
+          Gori::FlowSource::Surface::Tui, "7")
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        inner = Rect.new(0, 0, 100, 16)
+        # 16 rows − strip − mode row = 14; the strip is divider + stats + provenance = 3.
+        body = view.detail_text_rect(inner).not_nil!
+        body.y.should eq(2)
+        body.h.should eq(11)
+        # Too short to keep three text rows under the strip → the strip is dropped whole,
+        # and the hit-test rect grows back to match what is drawn.
+        short = Rect.new(0, 0, 100, 7)
+        view.detail_text_rect(short).not_nil!.h.should eq(5)
+        backend = MemoryBackend.new(100, 7)
+        view.render_detail(Screen.new(backend), short)
+        backend.contains?("req ").should be_false
+        backend.contains?("sent by gori").should be_false
       end
     end
   end

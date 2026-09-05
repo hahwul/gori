@@ -2961,7 +2961,10 @@ module Gori::Tui
       screen.text(x + 1, rect.y, "· #{nav} · space · esc", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
-      body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
+      # The text rect and the footer strip under it come from ONE derivation
+      # (`detail_text_rect`), shared with the controller's click/drag hit-test.
+      body = detail_text_rect(rect) || Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, 0)
+      render_detail_footer(screen, rect, body, focused)
       if hex && (bytes = detail_pane_bytes)
         @detail_last_h = body.h # the page step (detail_page_rows) reads it in hex too
         HexView.render(screen, body, bytes, @detail_scroll)
@@ -2973,6 +2976,95 @@ module Gori::Tui
       end
 
       render_detail_body(screen, body, focused: focused)
+    end
+
+    # The fewest text rows the body keeps when the footer strip competes for height. Below
+    # this the footer is dropped whole rather than squeezing the pane to a sliver: the bytes
+    # are what the drill-in is FOR, the strip is what gori says about them.
+    DETAIL_FOOTER_MIN_BODY = 3
+
+    # The detail drill-in's TEXT rect inside the framed interior `inner`: under the pane
+    # strip + mode row, above the footer strip. nil when the terminal is too short to leave
+    # any text rows. ONE derivation for the render and for the controller's click/drag/
+    # double-click hit-test — a body drawn against one rect and hit-tested against another
+    # is a dead row, which is exactly what a footer added on the render side alone would
+    # have made of the last lines of the pane.
+    def detail_text_rect(inner : Rect) : Rect?
+      top = inner.y + 2 # pane strip + mode row
+      h = inner.bottom - top
+      return nil if h <= 0
+      Rect.new(inner.x + 1, top, {inner.w - 2, 0}.max, h - detail_footer_height(inner))
+    end
+
+    # Rows the footer strip takes out of `inner` (divider + lines), or 0 when it does not
+    # fit — the same 0 the render reads, so a footer that is not drawn also does not shrink
+    # the hit-test rect.
+    private def detail_footer_height(inner : Rect) : Int32
+      n = detail_footer_lines.size
+      return 0 if n == 0
+      avail = inner.bottom - (inner.y + 2)
+      avail - (n + 1) >= DETAIL_FOOTER_MIN_BODY ? n + 1 : 0
+    end
+
+    # The footer strip: a divider, the exchange's facts, then gori's own sentences about
+    # the flow (provenance, advisories) one per row. Drawn under the text of EVERY pane —
+    # request, response, hex, frames, messages — because none of it is a property of the
+    # pane: status, sizes and latency describe the exchange, and the provenance note says
+    # where the request came from. It used to ride the REQUEST pane's trailer, spliced
+    # after the wire bytes as if it were part of the message (P7: the panes are the wire's
+    # bytes, and a reader copying the pane got gori's sentence with them).
+    private def render_detail_footer(screen : Screen, inner : Rect, body : Rect, focused : Bool) : Nil
+      lines = detail_footer_lines
+      return if lines.empty? || detail_footer_height(inner) == 0
+      y = body.bottom
+      Frame.inner_divider(screen, inner, y, border: Frame.pane_border(focused))
+      lines.each_with_index do |line, i|
+        Highlight.draw(screen, body.x, y + 1 + i, line, width: body.w)
+      end
+    end
+
+    # The footer's rows, top to bottom. Built per call rather than memoised: a handful of
+    # short strings, and a live flow's facts change under the pane (pending → complete) via
+    # `refresh_detail`, which does not go through the view cache.
+    private def detail_footer_lines : Array(Highlight::Line)
+      detail = @detail
+      return EMPTY_LINES unless detail
+      lines = [detail_stats_line(detail)]
+      # Where this request came from, spelled out — the SRC column has five cells and has to
+      # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
+      # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
+      # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
+      if note = source_note(detail.row)
+        lines << [Highlight::Span.new(note, Theme.muted)]
+      end
+      # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
+      detail.row.advisories.each do |a|
+        lines << [Highlight::Span.new("! #{a}", Theme.yellow)]
+      end
+      lines
+    end
+
+    # `200 · HTTP/1.1 · req 312B · res 1.4KB · 123ms · application/json · 09-05 14:02:11` —
+    # the row's cells, spelled out where the list had to abbreviate. Sizes are WIRE sizes
+    # (head + true body size, not the capture-capped blob), the same numbers the SIZE column
+    # shows; latency and size read `—` until the response lands, like the list. The status
+    # cell is `FlowStatus.cell` so ERR/ABT here can never disagree with the list.
+    private def detail_stats_line(detail : Store::FlowDetail) : Highlight::Line
+      row = detail.row
+      sep = Highlight::Span.new(" · ", Theme.muted)
+      status, scolor = FlowStatus.cell(row)
+      line = [Highlight::Span.new(status, scolor, Attribute::Bold)]
+      line << sep << Highlight::Span.new(row.short_circuited? ? "STUB" : detail.http_version,
+        row.short_circuited? ? Theme.yellow : Theme.text_bright)
+      req = detail.request_head.size.to_i64 + detail.request_wire_body_size
+      line << sep << Highlight::Span.new("req ", Theme.muted) << Highlight::Span.new(Fmt.size(req), Theme.text_bright)
+      line << sep << Highlight::Span.new("res ", Theme.muted) << Highlight::Span.new(Fmt.size(row.response_size), Theme.text_bright)
+      line << sep << Highlight::Span.new(Fmt.dur(row.duration_us), Theme.text_bright)
+      if (ct = row.content_type) && !(essence = ct.split(';', 2)[0].strip).empty?
+        line << sep << Highlight::Span.new(essence, Theme.muted)
+      end
+      line << sep << Highlight::Span.new(fmt_time(row.created_at), Theme.muted)
+      line
     end
 
     # "sent by gori — repeater (tui), session #42", or nil for a proxy capture and for a row
@@ -3517,25 +3609,10 @@ module Gori::Tui
           "— body truncated at capture cap, #{stored_bytes} of #{wire_bytes} bytes — raise in Settings → Network / capture_max_mib —",
           Theme.yellow)]
       end
-      # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
-      # In the TRAILER, beside the truncation notice, and not spliced into the head: this is
-      # gori's sentence, and the panes above it are the wire's bytes (P7). Only on the
-      # REQUEST pane — an advisory is a property of the exchange, so printing it under both
-      # would read as two different findings.
-      if request
-        detail.row.advisories.each do |a|
-          trailer << Highlight::Line.new
-          trailer << [Highlight::Span.new("! #{a}", Theme.yellow)]
-        end
-        # Where this request came from, spelled out — the SRC column has five cells and has to
-        # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
-        # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
-        # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
-        if note = source_note(detail.row)
-          trailer << Highlight::Line.new
-          trailer << [Highlight::Span.new(note, Theme.muted)]
-        end
-      end
+      # Advisories and the provenance note are NOT here: they are gori's sentences about
+      # the exchange, not about this pane's bytes, and they live in the footer strip under
+      # the text (`render_detail_footer`). The trailer keeps only what describes the body
+      # above it — the capture-cap truncation and the decode note.
 
       # gRPC: bounded framed view — style eagerly into `head`. Flagged binary so the
       # reveal-whitespace path is gated off (like any other binary body): the raw bytes
